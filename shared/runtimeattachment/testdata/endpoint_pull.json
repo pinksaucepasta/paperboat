@@ -1,0 +1,108 @@
+{
+  "delta": {
+    "schema": "paperboat.runtime-carrier/v1",
+    "complete": false,
+    "admissions": null,
+    "carriers": [
+      {
+        "carrier": {
+          "schema": "paperboat.runtime-carrier/v1",
+          "binding": {
+            "account_id": "epdelta_203812136837082_account",
+            "host_id": "epdelta_203812136837082_machine",
+            "tunnel_id": "epdelta_203812136837082_route",
+            "connector_id": "epdelta_203812136837082_machine",
+            "session_id": "session_38392b2a-b76e-46e4-839a-e93498404cef",
+            "process_generation": 1,
+            "config_generation": 1,
+            "route_id": "",
+            "route_generation": 0,
+            "installation_generation": 1,
+            "edge_node_id": "epdelta_203812136837082_edge",
+            "edge_process_epoch": "epoch_endpoint",
+            "edge_carrier_server_spki_sha256": "sha256:9601449286af72f1959b21325c386783e8fac0526c7ead49e53ad32ef262da00",
+            "edge_carrier_server_certificate_chain_pem": "-----BEGIN CERTIFICATE-----\nMIIBbDCCARKgAwIBAgIBATAKBggqhkjOPQQDAjAcMRowGAYDVQQDExFlZGdlLmV4\nYW1wbGUudGVzdDAeFw0yNjEwMjMxOTM4MTJaFw0zNjEwMjMyMDM4MTJaMBwxGjAY\nBgNVBAMTEWVkZ2UuZXhhbXBsZS50ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD\nQgAE24Lp9VR+k2bKPyF5l8zSC5cjlHEW/a8i5b7rjJfgI0XX3SbUOzpb2OX7JibY\nprqrFL3fOebEhoR/VxxUN8xgR6NFMEMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQM\nMAoGCCsGAQUFBwMBMBwGA1UdEQQVMBOCEWVkZ2UuZXhhbXBsZS50ZXN0MAoGCCqG\nSM49BAMCA0gAMEUCIE5dLtUBcwVmgGDNxR4qdsSR5VFpbAjp153IJt4tICCIAiEA\nnHnJADbd1whQsh4RNbH1O7+/Fxic9faYd8khJDxgkqU=\n-----END CERTIFICATE-----\n",
+            "machine_identity_public_key": "0mqCqF0tOcAxuFBKKe04CXbZ3tkZ1mPO4kBBYTGlUE8",
+            "machine_identity_thumbprint": "sha256:q5z11zR9ARX1Pu2RThZ3LBo5B3lCca9Y--x1zGVrTS4"
+          },
+          "attachment_generation": 0,
+          "config_content_hash": "sha256:db74b1e381568fc692811a35ee4bf319c1e886204fc3ebcffc3dad35df53a623",
+          "edge_endpoints": [
+            "h2://edge.example.test:27443",
+            "h3://edge.example.test:27444"
+          ],
+          "hostname": "",
+          "route_kind": "",
+          "route_revision": 0,
+          "expires_at": "2026-10-23T20:40:12Z"
+        },
+        "routes": [
+          {
+            "route_id": "epdelta_203812136837082_second",
+            "revision": 1,
+            "attachment_generation": 1,
+            "hostname": "epdelta-203812136837082-second.preview.example.test",
+            "endpoint_id": "epdelta_203812136837082_second",
+            "access_mode": "public"
+          }
+        ]
+      }
+    ],
+    "cursor": "2026-10-23T20:38:12.254349Z",
+    "removed_route_ids": [
+      "epdelta_203812136837082_first"
+    ],
+    "expires_at": "2026-10-23T20:40:12Z"
+  },
+  "full": {
+    "schema": "paperboat.runtime-carrier/v1",
+    "complete": true,
+    "admissions": null,
+    "carriers": [
+      {
+        "carrier": {
+          "schema": "paperboat.runtime-carrier/v1",
+          "binding": {
+            "account_id": "epdelta_203812136837082_account",
+            "host_id": "epdelta_203812136837082_machine",
+            "tunnel_id": "epdelta_203812136837082_route",
+            "connector_id": "epdelta_203812136837082_machine",
+            "session_id": "session_38392b2a-b76e-46e4-839a-e93498404cef",
+            "process_generation": 1,
+            "config_generation": 1,
+            "route_id": "",
+            "route_generation": 0,
+            "installation_generation": 1,
+            "edge_node_id": "epdelta_203812136837082_edge",
+            "edge_process_epoch": "epoch_endpoint",
+            "edge_carrier_server_spki_sha256": "sha256:9601449286af72f1959b21325c386783e8fac0526c7ead49e53ad32ef262da00",
+            "edge_carrier_server_certificate_chain_pem": "-----BEGIN CERTIFICATE-----\nMIIBbDCCARKgAwIBAgIBATAKBggqhkjOPQQDAjAcMRowGAYDVQQDExFlZGdlLmV4\nYW1wbGUudGVzdDAeFw0yNjEwMjMxOTM4MTJaFw0zNjEwMjMyMDM4MTJaMBwxGjAY\nBgNVBAMTEWVkZ2UuZXhhbXBsZS50ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD\nQgAE24Lp9VR+k2bKPyF5l8zSC5cjlHEW/a8i5b7rjJfgI0XX3SbUOzpb2OX7JibY\nprqrFL3fOebEhoR/VxxUN8xgR6NFMEMwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQM\nMAoGCCsGAQUFBwMBMBwGA1UdEQQVMBOCEWVkZ2UuZXhhbXBsZS50ZXN0MAoGCCqG\nSM49BAMCA0gAMEUCIE5dLtUBcwVmgGDNxR4qdsSR5VFpbAjp153IJt4tICCIAiEA\nnHnJADbd1whQsh4RNbH1O7+/Fxic9faYd8khJDxgkqU=\n-----END CERTIFICATE-----\n",
+            "machine_identity_public_key": "0mqCqF0tOcAxuFBKKe04CXbZ3tkZ1mPO4kBBYTGlUE8",
+            "machine_identity_thumbprint": "sha256:q5z11zR9ARX1Pu2RThZ3LBo5B3lCca9Y--x1zGVrTS4"
+          },
+          "attachment_generation": 0,
+          "config_content_hash": "sha256:db74b1e381568fc692811a35ee4bf319c1e886204fc3ebcffc3dad35df53a623",
+          "edge_endpoints": [
+            "h2://edge.example.test:27443",
+            "h3://edge.example.test:27444"
+          ],
+          "hostname": "",
+          "route_kind": "",
+          "route_revision": 0,
+          "expires_at": "2026-10-23T20:40:12Z"
+        },
+        "routes": [
+          {
+            "route_id": "epdelta_203812136837082_first",
+            "revision": 1,
+            "attachment_generation": 1,
+            "hostname": "epdelta-203812136837082-first.preview.example.test",
+            "endpoint_id": "epdelta_203812136837082_first",
+            "access_mode": "public"
+          }
+        ]
+      }
+    ],
+    "cursor": "2026-10-23T20:38:12.234141Z"
+  }
+}
