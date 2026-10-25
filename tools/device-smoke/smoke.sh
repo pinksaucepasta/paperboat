@@ -844,7 +844,7 @@ test_update_crossbuild() {
     fi
     on "$device" "umask 077; cat > /tmp/$RUN_ID/xbuild-prev; chmod 755 /tmp/$RUN_ID/xbuild-prev" < "$SMOKE_XBUILD_PREV"
     on "$device" "umask 077; cat > /tmp/$RUN_ID/xbuild-cur; chmod 755 /tmp/$RUN_ID/xbuild-cur" < "$SMOKE_XBUILD_CUR"
-    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_crossbuild.py --previous /tmp/$RUN_ID/xbuild-prev --previous-version ${SMOKE_XBUILD_PREV_VERSION:?} --current /tmp/$RUN_ID/xbuild-cur --current-version ${SMOKE_XBUILD_CUR_VERSION:?}" 2>&1); status=$?
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_crossbuild.py --previous /tmp/$RUN_ID/xbuild-prev --previous-version ${SMOKE_XBUILD_PREV_VERSION:?} --current /tmp/$RUN_ID/xbuild-cur --current-version ${SMOKE_XBUILD_CUR_VERSION:?} ${SMOKE_XBUILD_PING:+--ping-target $SMOKE_XBUILD_PING}" 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-crossbuild" and r["status"]=="PASS" and r["guard_version_matched"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "update $SMOKE_XBUILD_PREV_VERSION -> $SMOKE_XBUILD_CUR_VERSION -> $SMOKE_XBUILD_PREV_VERSION: ready both ways, guard version matched"
     else

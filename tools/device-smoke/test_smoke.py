@@ -492,6 +492,7 @@ state="$HOME/installed"
 case "$1" in
   --version) printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$state")" ;;
   update) shift; file=$2; cat "$file" > "$state"; printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$state")" ;;
+  ping) [ -f "$HOME/bad-ping" ] && exit 1; exit 0 ;;
   doctor) guard=pass; [ -f "$HOME/bad-guard" ] && [ "$(cat "$state")" = v2 ] && guard=fail
           checks="{\"code\":\"machine_guard_version\",\"status\":\"$guard\"}"
           [ "$(cat "$state")" = v1 ] && checks=""   # v1 predates the guard check
@@ -514,6 +515,15 @@ esac
             bad = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE))
             self.assertNotEqual(bad.returncode, 0, bad.stdout)
             self.assertIn('guard fail', bad.stdout + bad.stderr)
+            (home / 'bad-guard').unlink()
+            # --ping-target: the peer must answer pb ping after each switch
+            with_ping = command + ['--ping-target', 'peer']
+            self.assertEqual(subprocess.run(with_ping, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE)).returncode, 0)
+            (home / 'bad-ping').write_text('1')
+            env_fast = dict(env, PAPERBOAT_SMOKE_READY_SECONDS='6')
+            no_ping = subprocess.run(with_ping, env=env_fast, capture_output=True, text=True, timeout=200, cwd=str(HERE))
+            self.assertNotEqual(no_ping.returncode, 0)
+            self.assertIn('pb ping peer', no_ping.stdout + no_ping.stderr)
 
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
