@@ -42,17 +42,34 @@ func machineListCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		machines, err := client.ListUserMachinesFiltered(ctx.Context, inventoryFilters(command))
+		maxItems, err := listPagingMax(command)
+		if err != nil {
+			return err
+		}
+		// A tag filter is applied here, so it reads up to the --all bound and reports the matches.
+		tags, _ := command.Flags().GetStringArray("tag")
+		read := maxItems
+		if len(tags) > 0 {
+			read = maxListAll
+		}
+		machines, total, err := client.ListUserMachinesPage(ctx.Context, inventoryFilters(command), read)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		if machines, err = machineTagFilter(command, machines); err != nil {
-			return err
+		if len(tags) > 0 {
+			if machines, err = machineTagFilter(command, machines); err != nil {
+				return err
+			}
+			total = len(machines)
+			if len(machines) > maxItems {
+				machines = machines[:maxItems]
+			}
 		}
 		jsonOutput, _ := command.Flags().GetBool("json")
 		if jsonOutput {
-			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machines": machines})
+			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machines": machines, "total": total})
 		}
+		defer writeListFooter(command.ErrOrStderr(), len(machines), total, "machines")
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(writer, "NAME\tOWNERSHIP\tSTATE\tPERMISSIONS\tTAGS\tID")
 		for _, item := range machines {
@@ -82,6 +99,7 @@ func machineListCommand() *cobra.Command {
 	list.Flags().Bool("json", false, "print JSON")
 	list.Flags().StringArray("tag", nil, "only machines with this tag (repeat for several)")
 	inventoryFilterFlags(list)
+	addListPaging(list)
 	return list
 }
 

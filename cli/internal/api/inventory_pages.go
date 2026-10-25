@@ -13,11 +13,21 @@ import (
 // collectOffsetInventory keeps selectors complete while rejecting a server page
 // which repeats its position or claims more results without returning any.
 func collectOffsetInventory[T any](ctx context.Context, c *Client, path, field string, filters url.Values) ([]T, error) {
-	const limit = 200
+	items, _, err := collectOffsetInventoryPage[T](ctx, c, path, field, filters, 0)
+	return items, err
+}
+
+// collectOffsetInventoryPage reads at most maxItems items (0: every page) and the server's total, so a list
+// command shows one bounded page with its total instead of loading everything (PQ-04).
+func collectOffsetInventoryPage[T any](ctx context.Context, c *Client, path, field string, filters url.Values, maxItems int) ([]T, int, error) {
+	limit := 200
+	if maxItems > 0 && maxItems < limit {
+		limit = maxItems
+	}
 	items := []T{}
 	for offset := 0; ; {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		query := url.Values{}
 		for key, values := range filters {
@@ -37,7 +47,7 @@ func collectOffsetInventory[T any](ctx context.Context, c *Client, path, field s
 			} `json:"pagination"`
 		}
 		if err := c.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &page); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		batch := page.Items
 		if field == "requests" {
@@ -48,20 +58,23 @@ func collectOffsetInventory[T any](ctx context.Context, c *Client, path, field s
 		}
 		invalid := func() error { return &ResponseDecodeError{Err: errors.New("invalid inventory pagination")} }
 		if batch == nil || page.Pagination == nil || page.Pagination.Limit == nil || page.Pagination.Offset == nil || page.Pagination.Total == nil || len(page.Pagination.NextOffset) == 0 {
-			return nil, invalid()
+			return nil, 0, invalid()
 		}
 		p := page.Pagination
 		var next *int
-		if json.Unmarshal(p.NextOffset, &next) != nil || *p.Limit != limit || *p.Offset != offset || *p.Total < 0 || int64(*p.Total) > 2147483647 || len(*batch) > limit {
-			return nil, invalid()
+		if json.Unmarshal(p.NextOffset, &next) != nil || *p.Limit < 1 || *p.Limit > 200 || len(*batch) > *p.Limit || *p.Offset != offset || *p.Total < 0 || int64(*p.Total) > 2147483647 || len(*batch) > limit {
+			return nil, 0, invalid()
 		}
 		end := int64(offset) + int64(len(*batch))
 		if end > int64(*p.Total) || next == nil && end != int64(*p.Total) || next != nil && (len(*batch) == 0 || int64(*next) != end || end >= int64(*p.Total)) {
-			return nil, invalid()
+			return nil, 0, invalid()
 		}
 		items = append(items, (*batch)...)
-		if next == nil {
-			return items, nil
+		if next == nil || maxItems > 0 && len(items) >= maxItems {
+			if maxItems > 0 && len(items) > maxItems {
+				items = items[:maxItems]
+			}
+			return items, *p.Total, nil
 		}
 		offset = *next
 	}
