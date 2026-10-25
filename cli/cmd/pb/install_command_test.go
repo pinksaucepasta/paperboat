@@ -87,7 +87,9 @@ func TestInstallShowsWhyTheSuppliedExecutableWasRefused(t *testing.T) {
 		return "/tmp/pb", installsource.Source{Version: "custom-test", Distribution: installsource.Custom}, nil
 	}
 	refusal := &hostinstall.SuppliedExecutableError{Path: "/tmp/pb", Reason: "is writable by other users (mode 0775)", Fix: "run `chmod go-w /tmp/pb`"}
-	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) { return "", refusal }
+	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
+		return "", refusal
+	}
 	command := platformInstallCommand()
 	command.SetArgs([]string{})
 	err := command.Execute()

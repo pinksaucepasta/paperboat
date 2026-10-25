@@ -299,7 +299,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				set(commandRejected, current)
 			}
 			continue
-		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError:
+		case *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, *connectorAddStepError:
 			set(commandRejected, current)
 			continue
 		case *TunnelOperationWaitTimeoutError:
@@ -461,7 +461,7 @@ func soleCommandOwner(err error) error {
 			return commandRejection{reason: commandRejectUpdateNotReady}
 		}
 		switch err.(type) {
-		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
+		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, *connectorAddStepError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
 			return err
 		}
 		wrapper, ok := err.(interface{ Unwrap() error })

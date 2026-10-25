@@ -27,14 +27,14 @@ func runProductionTunnelConnectorAdd(command *cobra.Command, tunnelID string) er
 	}
 	stateRoot, err := previewRuntimeStateRoot()
 	if err != nil {
-		return fmt.Errorf("resolve Paperboat host state: %w", err)
+		return &connectorAddStepError{step: "finding this computer's Paperboat host state", action: "Run `pb doctor`; reinstall with `pb install` if it reports the host runtime.", cause: err}
 	}
 	if err = ensureTunnelHostRuntime(command.Context(), stateRoot); err != nil {
 		return err
 	}
 	client, err := connectorEnrollmentLocalClient(stateRoot)
 	if err != nil {
-		return err
+		return &connectorAddStepError{step: "reaching the local Paperboat host runtime", action: "Run `pb status` and `pb doctor`, then retry.", cause: err}
 	}
 	key, err := newTunnelIdempotencyKey()
 	if err != nil {
@@ -42,7 +42,7 @@ func runProductionTunnelConnectorAdd(command *cobra.Command, tunnelID string) er
 	}
 	projection, err := client.Enroll(command.Context(), tunnelID, key)
 	if err != nil {
-		return err
+		return connectorEnrollFailure(err)
 	}
 	return tunnelOutput(command, projection, fmt.Sprintf("Added connector %s to tunnel %s", projection.ConnectorID, projection.TunnelID))
 }
@@ -82,4 +82,32 @@ func productionConnectorEnrollmentLocalClient(stateRoot string) (tunnelConnector
 	}
 	endpoint := (&url.URL{Scheme: "http", Host: local.ListenAddress}).String()
 	return tunnelenrollment.NewLocalClient(endpoint, strings.TrimSpace(string(token)), &http.Client{Timeout: 30 * time.Second})
+}
+
+// connectorAddStepError names the step of `pb tunnel connector add` that failed, its cause and what to do; a
+// generic local_io hid a server refusal (carrier_unavailable) on staging (Lane B, 2026-10-26).
+type connectorAddStepError struct {
+	step, action string
+	cause        error
+}
+
+func (e *connectorAddStepError) Error() string {
+	cause := "unknown cause"
+	if e.cause != nil {
+		cause = e.cause.Error()
+	}
+	return "Adding the connector failed while " + e.step + ": " + cause + ". " + e.action
+}
+
+func (e *connectorAddStepError) Unwrap() error { return e.cause }
+
+func connectorEnrollFailure(err error) error {
+	var refused *tunnelenrollment.CarrierBootstrapError
+	if errors.As(err, &refused) {
+		return &connectorAddStepError{step: "starting the connector's carrier", action: "The Paperboat server refused it (" + refused.Code + "); for a self-hosted edge, check that the workspace's edge pool names a ready edge, then retry.", cause: err}
+	}
+	if errors.Is(err, tunnelenrollment.ErrAuthentication) || errors.Is(err, tunnelenrollment.ErrForbidden) || errors.Is(err, tunnelenrollment.ErrConflict) {
+		return err
+	}
+	return &connectorAddStepError{step: "enrolling the connector through the local host runtime", action: "Run `pb doctor` and retry; include the support reference if it continues.", cause: err}
 }

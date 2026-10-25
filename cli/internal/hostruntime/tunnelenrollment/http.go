@@ -57,7 +57,12 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	projection, err := m.Enroll(r.Context(), document.TunnelID, key)
 	if err != nil {
 		observeLocalEnrollmentFailure(r.Context(), err)
+		var refused *CarrierBootstrapError
 		switch {
+		case errors.As(err, &refused) && safeServerCode(refused.Code):
+			// The server refused the connector's carrier: pass its documented code on, so the CLI can say so
+			// instead of a generic local failure (staging, 2026-10-26: carrier_unavailable shown as local_io).
+			writeServerRefusal(w, refused.Code)
 		case enrollmentOutcomeOnly(err, context.Canceled) || enrollmentOutcomeOnly(err, context.DeadlineExceeded):
 			writeError(w, http.StatusServiceUnavailable, "runtime_unavailable")
 		case enrollmentOutcomeOnly(err, ErrAuthentication):
@@ -87,6 +92,24 @@ func observeLocalEnrollmentFailure(ctx context.Context, err error) {
 		return
 	}
 	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "tunnel_enrollment", "local_gateway", "local_gateway_failed", err)
+}
+
+func writeServerRefusal(w http.ResponseWriter, code string) {
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "carrier_bootstrap_refused", "server_code": code}})
+}
+
+// safeServerCode accepts a server error code (lowercase words and underscores), never a message.
+func safeServerCode(code string) bool {
+	if code == "" || len(code) > 64 {
+		return false
+	}
+	for _, r := range code {
+		if (r < 'a' || r > 'z') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func writeError(w http.ResponseWriter, status int, code string, diagnostic ...string) {
@@ -156,32 +179,7 @@ func (c *LocalClient) Enroll(ctx context.Context, tunnel, key string) (Projectio
 		return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is unavailable", ErrUnavailable, bodyErr)
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		var envelope struct {
-			Error struct {
-				Code       string `json:"code"`
-				Diagnostic string `json:"diagnostic"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(raw, &envelope)
-		switch resp.StatusCode {
-		case http.StatusUnauthorized:
-			return Projection{}, ErrAuthentication
-		case http.StatusForbidden:
-			return Projection{}, ErrForbidden
-		case http.StatusConflict:
-			return Projection{}, ErrConflict
-		default:
-			if envelope.Error.Code == "activation_unavailable" {
-				if code := ActivationDiagnosticCode(envelope.Error.Diagnostic); validActivationDiagnosticCode(code) {
-					return Projection{}, &ActivationDiagnostic{Code: code}
-				}
-				return Projection{}, ErrActivation
-			}
-			if envelope.Error.Code == "credential_store_unavailable" {
-				return Projection{}, ErrSecretStore
-			}
-			return Projection{}, ErrUnavailable
-		}
+		return Projection{}, decodeLocalEnrollmentRefusal(resp.StatusCode, raw)
 	}
 	if err := rejectDuplicateJSON(raw); err != nil {
 		return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is invalid", ErrUnavailable, err)
@@ -202,4 +200,38 @@ func (c *LocalClient) Enroll(ctx context.Context, tunnel, key string) (Projectio
 		return Projection{}, ErrUnavailable
 	}
 	return out, nil
+}
+
+// decodeLocalEnrollmentRefusal maps the local enrollment endpoint's refusal to the enrollment error it stands for.
+func decodeLocalEnrollmentRefusal(status int, raw []byte) error {
+	var envelope struct {
+		Error struct {
+			Code       string `json:"code"`
+			Diagnostic string `json:"diagnostic"`
+			ServerCode string `json:"server_code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	switch status {
+	case http.StatusUnauthorized:
+		return ErrAuthentication
+	case http.StatusForbidden:
+		return ErrForbidden
+	case http.StatusConflict:
+		return ErrConflict
+	default:
+		if envelope.Error.Code == "activation_unavailable" {
+			if code := ActivationDiagnosticCode(envelope.Error.Diagnostic); validActivationDiagnosticCode(code) {
+				return &ActivationDiagnostic{Code: code}
+			}
+			return ErrActivation
+		}
+		if envelope.Error.Code == "carrier_bootstrap_refused" && safeServerCode(envelope.Error.ServerCode) {
+			return &CarrierBootstrapError{StatusCode: status, Code: envelope.Error.ServerCode}
+		}
+		if envelope.Error.Code == "credential_store_unavailable" {
+			return ErrSecretStore
+		}
+		return ErrUnavailable
+	}
 }
