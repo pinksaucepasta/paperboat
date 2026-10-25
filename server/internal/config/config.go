@@ -135,6 +135,10 @@ type Database struct {
 	// across statements, LISTEN) and migrations use that direct pool, because a transaction-pooled connection can
 	// hand the next statement of a session to another backend.
 	DirectDSN string `json:"direct_dsn"`
+	// StartupParams sends search_path, jit and the timeouts as connection startup parameters. Unset means true.
+	// Set it false behind a pooler that rejects startup parameters, after `paperboat-server db-role-defaults` has
+	// stored the same values as role defaults.
+	StartupParams *bool `json:"startup_params"`
 	// MaxConns bounds the request pool (0: 20). Statement, lock and idle-in-transaction timeouts bound every
 	// connection of it (0: 30 s, 10 s, 60 s), so a stuck query or a lock queue cannot hold a connection forever;
 	// migrations run on their own pool without them.
@@ -143,6 +147,9 @@ type Database struct {
 	LockTimeout              time.Duration `json:"lock_timeout"`
 	IdleInTransactionTimeout time.Duration `json:"idle_in_transaction_timeout"`
 }
+
+// SendsStartupParams reports whether connections start with the session settings as startup parameters.
+func (d Database) SendsStartupParams() bool { return d.StartupParams == nil || *d.StartupParams }
 
 // APITokens bounds workspace API tokens (F18).
 type APITokens struct {

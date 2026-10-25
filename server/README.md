@@ -121,6 +121,7 @@ Common environment overrides:
 - `PAPERBOAT_DATABASE_DRIVER`
 - `PAPERBOAT_DATABASE_DSN`
 - `PAPERBOAT_DATABASE_DIRECT_DSN` (optional: a connection that bypasses any connection pooler, for advisory locks, LISTEN and migrations; empty uses `PAPERBOAT_DATABASE_DSN`)
+- `PAPERBOAT_DATABASE_STARTUP_PARAMS` (default `true`; `false` behind a pooler that rejects startup parameters, after `paperboat-server db-role-defaults` has run as the application role)
 - `PAPERBOAT_GITHUB_OAUTH_AUTHORIZE_URL`
 - `PAPERBOAT_GITHUB_OAUTH_TOKEN_URL`
 - `PAPERBOAT_GITHUB_OAUTH_SCOPES`

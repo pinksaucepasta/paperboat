@@ -45,6 +45,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runServe(args[2:], stdout, stderr)
 	case "migrate":
 		return runMigrate(args[2:], stdout, stderr)
+	case "db-role-defaults":
+		return runDBRoleDefaults(args[2:], stdout, stderr)
 	case "admin":
 		return runAdmin(args[2:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -134,6 +136,25 @@ func runMigrate(args []string, stdout, stderr io.Writer) error {
 	return err
 }
 
+// runDBRoleDefaults stores the session settings as defaults of the connecting role. Run it once as the application
+// role before a deployment sets database.startup_params to false; it needs no migrations.
+func runDBRoleDefaults(args []string, stdout, stderr io.Writer) error {
+	cfg, err := loadCommandConfig(args, stderr)
+	if err != nil {
+		return err
+	}
+	store, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if err := store.SetRoleDefaults(context.Background(), cfg.Database); err != nil {
+		return fmt.Errorf("set database role defaults: %w", err)
+	}
+	_, err = fmt.Fprintln(stdout, "database role defaults set for the connecting role: search_path, jit, statement_timeout, lock_timeout, idle_in_transaction_session_timeout")
+	return err
+}
+
 func loadCommandConfig(args []string, stderr io.Writer) (config.Config, error) {
 	fs := flag.NewFlagSet("command", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -218,6 +239,7 @@ func printUsage(w io.Writer) {
 Usage:
   paperboat-server serve [-config path] [-dump-config]
   paperboat-server migrate
+  paperboat-server db-role-defaults [-config path]
   paperboat-server admin usage-key provision [flags]
 `)
 }

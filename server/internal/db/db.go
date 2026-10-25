@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -98,14 +100,17 @@ func Open(cfg config.Database) (*DB, error) {
 	return &DB{observer: observer, pool: pool, direct: direct, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}, nil
 }
 
-// newPoolConfig parses dsn for a pool whose connections start with the session settings.
+// newPoolConfig parses dsn for a pool. Its connections start with the session settings unless cfg says the role
+// defaults provide them.
 func newPoolConfig(cfg config.Database, dsn string, maxConns int32, observer *queryObserver) (*pgxpool.Config, error) {
 	poolConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
-	for name, value := range sessionSettings(cfg) {
-		poolConfig.ConnConfig.RuntimeParams[name] = value
+	if cfg.SendsStartupParams() {
+		for name, value := range sessionSettings(cfg) {
+			poolConfig.ConnConfig.RuntimeParams[name] = value
+		}
 	}
 	poolConfig.MaxConnLifetime = 30 * time.Minute
 	poolConfig.MaxConns = maxConns
@@ -130,6 +135,26 @@ func sessionSettings(cfg config.Database) map[string]string {
 		settings[name] = strconv.FormatInt(value.Milliseconds(), 10)
 	}
 	return settings
+}
+
+// SetRoleDefaults stores the session settings as defaults of the connecting role, so connections through a pooler
+// that rejects startup parameters run with them too. It runs on the direct pool and needs no schema.
+func (d *DB) SetRoleDefaults(ctx context.Context, cfg config.Database) error {
+	settings := sessionSettings(cfg)
+	tx, err := d.direct.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin role defaults: %w", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(settings)) {
+		// Names are constants and values are constants or whole milliseconds, so neither needs quoting.
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER ROLE CURRENT_USER SET %s = '%s'", name, settings[name])); err != nil {
+			return errors.Join(fmt.Errorf("set role default %s: %w", name, err), tx.Rollback(ctx))
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit role defaults: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) Close() error {
