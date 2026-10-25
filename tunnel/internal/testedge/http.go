@@ -79,7 +79,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/nodes/heartbeat":
 		var request control.NodeObservation
 		if decodeHTTP(r, &request) {
-			err = h.Fake.Heartbeat(r.Context(), request)
+			_, err = h.Fake.Heartbeat(r.Context(), request)
 			if err == nil {
 				w.WriteHeader(http.StatusNoContent)
 				return

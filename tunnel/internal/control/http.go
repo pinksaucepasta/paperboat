@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
@@ -150,8 +151,15 @@ func (c *HTTPClient) RegisterNode(ctx context.Context, registration NodeRegistra
 	}
 	return c.post(ctx, "/v1/nodes/register", registration, nil)
 }
-func (c *HTTPClient) Heartbeat(ctx context.Context, observation NodeObservation) error {
-	return c.post(ctx, "/v1/nodes/heartbeat", observation, nil)
+func (c *HTTPClient) Heartbeat(ctx context.Context, observation NodeObservation) (NodeAnswer, error) {
+	var answer NodeAnswer
+	if err := c.post(ctx, "/v1/nodes/heartbeat", observation, &answer); err != nil {
+		return NodeAnswer{}, err
+	}
+	if answer.IngressLimits != nil && answer.IngressLimits.Validate() != nil {
+		return NodeAnswer{}, &RequestFailure{Path: "/v1/nodes/heartbeat", Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: edgelimits.ErrInvalid}
+	}
+	return answer, nil
 }
 
 type routeAssignmentWire struct {
@@ -416,7 +424,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		}
 		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
-	if output == nil {
+	if output == nil || response.StatusCode == http.StatusNoContent {
 		_, err = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)+1))
 		return err
 	}

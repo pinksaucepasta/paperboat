@@ -206,15 +206,15 @@ func (m *Manager) Observation(nodeID, processEpoch string, at time.Time) control
 	return control.NodeObservation{NodeID: nodeID, ProcessEpoch: processEpoch, Ready: phase == Ready, Draining: phase == Draining, ActiveStreams: snapshot.Streams, At: at}
 }
 
-func (m *Manager) RegisterAndHeartbeat(ctx context.Context, sink control.NodeSink, registration control.NodeRegistration, at time.Time) error {
+func (m *Manager) RegisterAndHeartbeat(ctx context.Context, sink control.NodeSink, registration control.NodeRegistration, at time.Time) (control.NodeAnswer, error) {
 	if sink == nil {
-		return ErrUnknown
+		return control.NodeAnswer{}, ErrUnknown
 	}
 	if err := registration.Validate(); err != nil {
-		return fmt.Errorf("node registration: %w", err)
+		return control.NodeAnswer{}, fmt.Errorf("node registration: %w", err)
 	}
 	if err := sink.RegisterNode(ctx, registration); err != nil {
-		return err
+		return control.NodeAnswer{}, err
 	}
 	return sink.Heartbeat(ctx, m.Observation(registration.NodeID, registration.ProcessEpoch, at))
 }

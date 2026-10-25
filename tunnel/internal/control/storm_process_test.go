@@ -77,7 +77,7 @@ func TestControlStormParticipant(t *testing.T) {
 				return
 			}
 			started = time.Now()
-			err = client.Heartbeat(ctx, NodeObservation{NodeID: nodeID, ProcessEpoch: registration.ProcessEpoch, Ready: true, ActiveStreams: uint32(index % 17), At: time.Now().UTC()})
+			_, err = client.Heartbeat(ctx, NodeObservation{NodeID: nodeID, ProcessEpoch: registration.ProcessEpoch, Ready: true, ActiveStreams: uint32(index % 17), At: time.Now().UTC()})
 			durations <- time.Since(started)
 			if err != nil {
 				errors <- fmt.Errorf("heartbeat node %d: %w", index, err)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
@@ -95,7 +96,7 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", Capacity: 1, CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
+	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatal(err)
 	}
 	routes, err := client.DesiredRoutes(context.Background(), "edge")
@@ -118,7 +119,7 @@ func TestHTTPClientClassifiesStaleHeartbeat(t *testing.T) {
 		}
 		return response(http.StatusConflict, `{"code":"node_observation_stale"}`), nil
 	})
-	if err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrNodeObservationStale) {
+	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrNodeObservationStale) {
 		t.Fatalf("heartbeat error = %v", err)
 	}
 }
@@ -161,14 +162,14 @@ func TestHTTPClientPropagatesOnlySentryTraceAndReportsRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrControlUnavailable) {
+	if _, err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("failure=%v", err)
 	}
 	var failure *RequestFailure
 	if !errors.As(err, &failure) || failure.SupportReference != reference || failure.Path != "/v1/nodes/heartbeat" || failure.Category != "http_status" {
 		t.Fatalf("request failure lost safe correlation: %+v", failure)
 	}
-	if err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
+	if _, err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatalf("recovery=%v", err)
 	}
 	if got := strings.Join(outcomes, ","); got != "failed:unavailable,success:ok" {
@@ -189,7 +190,7 @@ func TestHTTPClientPropagatesCorrelationWithoutTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
+	if _, err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -524,7 +525,7 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, status := range []int{503, 409} {
-		err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
+		_, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
 		var failure *RequestFailure
 		if !errors.As(err, &failure) || failure.DiagnosticStatus() != status || strings.Contains(err.Error(), "PRIVATE") {
 			t.Fatalf("unsafe or missing status: %v", err)
@@ -533,7 +534,7 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 			t.Fatal("stale fencing was lost")
 		}
 	}
-	if err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
+	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatal("control did not recover", err)
 	}
 	if len(failures) != 2 || strings.Join(outcomes, ",") != "failed:control_request_failed,rejected:control_request_failed,success:ok" {
@@ -546,7 +547,7 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 		if revocations {
 			_, err = offline.Revocations(context.Background())
 		} else {
-			err = offline.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
+			_, err = offline.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
 		}
 		var cause *net.OpError
 		if !errors.Is(err, ErrControlUnavailable) || !errors.Is(err, syscall.ECONNREFUSED) || !errors.As(err, &cause) || cause != original {
@@ -555,7 +556,38 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := client.Heartbeat(canceled, NodeObservation{NodeID: "edge"}); !errors.Is(err, context.Canceled) || !errors.Is(err, ErrControlUnavailable) {
+	if _, err := client.Heartbeat(canceled, NodeObservation{NodeID: "edge"}); !errors.Is(err, context.Canceled) || !errors.Is(err, ErrControlUnavailable) {
 		t.Fatal("cancellation cause lost")
+	}
+}
+
+// Audit T11: the heartbeat answer carries the server's edge ingress limits; a server without
+// them (204) leaves the answer empty, and an invalid set is refused, never applied.
+func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
+	answer := ""
+	client := controlClient(t, func(*http.Request) (*http.Response, error) {
+		if answer == "" {
+			return response(http.StatusNoContent, ""), nil
+		}
+		return response(http.StatusOK, answer), nil
+	})
+	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil || got.IngressLimits != nil {
+		t.Fatalf("204 heartbeat = %+v, %v", got, err)
+	}
+	set := edgelimits.Default()
+	set.Account.Connections = 500
+	raw, err := json.Marshal(map[string]any{"ingress_limits": set})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer = string(raw)
+	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil || got.IngressLimits == nil || *got.IngressLimits != set {
+		t.Fatalf("heartbeat answer = %+v, %v", got, err)
+	}
+	set.Account.Connections = 0
+	raw, _ = json.Marshal(map[string]any{"ingress_limits": set})
+	answer = string(raw)
+	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrControlUnavailable) || got.IngressLimits != nil {
+		t.Fatalf("invalid limits = %+v, %v", got, err)
 	}
 }

@@ -29,6 +29,10 @@ func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
 	if quota.Code != http.StatusTooManyRequests || quota.Header().Get("X-Paperboat-Error") != "bandwidth_quota_exhausted" || !strings.Contains(quota.Body.String(), "bandwidth allowance") {
 		t.Fatalf("quota refusal: %d %q %q", quota.Code, quota.Header().Get("X-Paperboat-Error"), quota.Body.String())
 	}
+	limited := serve(fmt.Errorf("acquire: %w", ErrIngressLimitExceeded))
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("X-Paperboat-Error") != "edge_rate_limited" || limited.Header().Get("Retry-After") != "1" || !strings.Contains(limited.Body.String(), "Wait a moment") {
+		t.Fatalf("edge limit refusal: %d %q %q", limited.Code, limited.Header().Get("X-Paperboat-Error"), limited.Body.String())
+	}
 	other := serve(errors.New("connection refused"))
 	if other.Code != http.StatusBadGateway || other.Header().Get("X-Paperboat-Error") != "upstream_unavailable" || strings.Contains(other.Body.String(), "connection refused") || !strings.Contains(other.Body.String(), "could not reach the app") {
 		t.Fatalf("ordinary upstream failure: %d %q %q", other.Code, other.Header().Get("X-Paperboat-Error"), other.Body.String())

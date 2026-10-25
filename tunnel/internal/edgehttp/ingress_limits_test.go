@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"golang.org/x/time/rate"
 )
 
@@ -347,4 +348,40 @@ func TestIngressRetainsTransferAndCleanupCauses(t *testing.T) {
 		t.Fatalf("cleanup retained capacity: %v", err)
 	}
 	next.Release()
+}
+
+// Audit T11: the server's configured set replaces the defaults on new and current keys alike,
+// and an invalid set changes nothing.
+func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	decision := publicTCPDecision(time.Now().UTC(), 4100)
+	first, err := registry.AcquireIngress(context.Background(), decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Release()
+	set := edgelimits.Default()
+	set.Publication.Connections, set.Publication.OpenBurst = 1, 1
+	if err := registry.SetIngressLimits(set); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.AcquireIngress(context.Background(), decision); !errors.Is(err, ErrIngressLimitExceeded) {
+		t.Fatalf("second connection under a 1-connection limit: %v", err)
+	}
+	bad := set
+	bad.Account.Connections = 0
+	if err := registry.SetIngressLimits(bad); err == nil {
+		t.Fatal("invalid set applied")
+	}
+	if registry.ingressLimits.Publication.Connections != 1 || registry.ingressLimits.Account.Connections != set.Account.Connections {
+		t.Fatalf("limits after an invalid set: %+v", registry.ingressLimits.Publication)
+	}
+	state := registry.ingressLimits.publications[decision.Binding.AccountID+"\x00"+decision.Binding.PublicationID]
+	if state == nil || state.opens.Burst() != 1 || state.bytes.Limit() != rate.Limit(set.Publication.BytesPerSecond) {
+		t.Fatalf("current key not reconfigured: %+v", state)
+	}
 }

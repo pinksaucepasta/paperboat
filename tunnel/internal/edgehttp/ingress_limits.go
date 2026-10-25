@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"golang.org/x/time/rate"
 )
 
@@ -50,8 +51,51 @@ type ingressLimitState struct {
 	lastUsed time.Time
 }
 
+// DefaultIngressLimits is the server's default set (edgelimits.Default), used until the first
+// heartbeat answer carries the configured one.
 func DefaultIngressLimits() *IngressLimits {
-	return &IngressLimits{Publication: IngressLimitConfig{Connections: 64, OpenRate: 10, OpenBurst: 32, ByteRate: 8 << 20, ByteBurst: 256 << 10}, Account: IngressLimitConfig{Connections: 128, OpenRate: 50, OpenBurst: 128, ByteRate: 32 << 20, ByteBurst: 1 << 20}}
+	set := edgelimits.Default()
+	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account)}
+}
+
+func ingressLimitConfig(l edgelimits.Limit) IngressLimitConfig {
+	return IngressLimitConfig{Connections: l.Connections, OpenRate: rate.Limit(l.OpensPerSecond), OpenBurst: l.OpenBurst, ByteRate: rate.Limit(l.BytesPerSecond), ByteBurst: l.ByteBurst}
+}
+
+// SetIngressLimits applies the server's configured set to new and current keys alike; open
+// connections above a lowered connection limit finish, only new ones wait for room.
+func (r *DataCarrierRouteRegistry) SetIngressLimits(set edgelimits.IngressLimits) error {
+	if r == nil || r.ingressLimits == nil || set.Validate() != nil {
+		return edgelimits.ErrInvalid
+	}
+	return r.ingressLimits.apply(ingressLimitConfig(set.Publication), ingressLimitConfig(set.Account))
+}
+
+func (l *IngressLimits) apply(publication, account IngressLimitConfig) error {
+	if !validIngressLimit(publication) || !validIngressLimit(account) {
+		return edgelimits.ErrInvalid
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.Publication == publication && l.Account == account {
+		return nil
+	}
+	l.Publication, l.Account = publication, account
+	for _, state := range l.publications {
+		state.reconfigure(publication, now)
+	}
+	for _, state := range l.accounts {
+		state.reconfigure(account, now)
+	}
+	return nil
+}
+
+func (s *ingressLimitState) reconfigure(config IngressLimitConfig, now time.Time) {
+	s.opens.SetLimitAt(now, config.OpenRate)
+	s.opens.SetBurstAt(now, config.OpenBurst)
+	s.bytes.SetLimitAt(now, config.ByteRate)
+	s.bytes.SetBurstAt(now, config.ByteBurst)
 }
 
 func newIngressLimits(config *IngressLimits) (*IngressLimits, error) {

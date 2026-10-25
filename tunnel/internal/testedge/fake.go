@@ -139,18 +139,18 @@ func (f *Fake) RegisterNode(_ context.Context, registration control.NodeRegistra
 	return nil
 }
 
-func (f *Fake) Heartbeat(_ context.Context, observation control.NodeObservation) error {
+func (f *Fake) Heartbeat(_ context.Context, observation control.NodeObservation) (control.NodeAnswer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	registration, ok := f.registrations[observation.NodeID]
 	if !ok || observation.ProcessEpoch == "" || observation.ProcessEpoch != registration.ProcessEpoch {
-		return errors.New("node is not registered")
+		return control.NodeAnswer{}, errors.New("node is not registered")
 	}
 	if observation.At.IsZero() {
 		observation.At = time.Now()
 	}
 	f.nodes[observation.NodeID] = observation
-	return nil
+	return control.NodeAnswer{}, nil
 }
 
 func (f *Fake) Node(nodeID string) (control.NodeObservation, bool) {

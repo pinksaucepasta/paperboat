@@ -240,12 +240,21 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			http.Error(writer, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.", http.StatusTooManyRequests)
 			return
 		}
+		if errors.Is(err, ErrIngressLimitExceeded) {
+			// The edge's abuse limits (edgelimits): too many connections or opens right now.
+			writer.Header().Set("X-Paperboat-Error", "edge_rate_limited")
+			writer.Header().Set("Retry-After", "1")
+			http.Error(writer, edgeRateLimitedMessage, http.StatusTooManyRequests)
+			return
+		}
 		// A visitor hitting an address whose app is not running should learn that, not just "Bad Gateway".
 		// The reason is deliberately generic: it never carries the underlying cause.
 		writer.Header().Set("X-Paperboat-Error", "upstream_unavailable")
 		http.Error(writer, upstreamUnavailableMessage, http.StatusBadGateway)
 	}
 }
+
+const edgeRateLimitedMessage = "This address is getting more requests than Paperboat allows at once. Wait a moment and retry."
 
 const upstreamUnavailableMessage = "Paperboat could not reach the app behind this address. If it is yours, start it and reload the page."
 

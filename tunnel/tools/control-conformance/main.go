@@ -78,7 +78,7 @@ func run(ctx context.Context, path string, output io.Writer) error {
 	if err := client.RegisterNode(ctx, registration); err != nil {
 		return fmt.Errorf("register node: %w", err)
 	}
-	if err := client.Heartbeat(ctx, control.NodeObservation{NodeID: value.NodeID, ProcessEpoch: value.ProcessEpoch, Ready: true, At: now}); err != nil {
+	if _, err := client.Heartbeat(ctx, control.NodeObservation{NodeID: value.NodeID, ProcessEpoch: value.ProcessEpoch, Ready: true, At: now}); err != nil {
 		return fmt.Errorf("heartbeat node: %w", err)
 	}
 	current, err := client.Current(ctx, value.EnvironmentID, value.MachineID, value.ConnectorID)

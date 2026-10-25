@@ -74,7 +74,7 @@ func TestFakeCredentialAssignmentAndNodeLifecycle(t *testing.T) {
 	if err := fake.RegisterNode(context.Background(), control.NodeRegistration{NodeID: "n", ProcessEpoch: "p", Capacity: 1, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fake.Heartbeat(context.Background(), control.NodeObservation{NodeID: "n", ProcessEpoch: "p", Ready: true, At: time.Unix(1, 0)}); err != nil {
+	if _, err := fake.Heartbeat(context.Background(), control.NodeObservation{NodeID: "n", ProcessEpoch: "p", Ready: true, At: time.Unix(1, 0)}); err != nil {
 		t.Fatal(err)
 	}
 	if node, ok := fake.Node("n"); !ok || !node.Ready {

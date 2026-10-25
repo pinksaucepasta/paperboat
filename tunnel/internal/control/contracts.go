@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
@@ -294,5 +295,12 @@ type NodeObservation struct {
 
 type NodeSink interface {
 	RegisterNode(context.Context, NodeRegistration) error
-	Heartbeat(context.Context, NodeObservation) error
+	Heartbeat(context.Context, NodeObservation) (NodeAnswer, error)
+}
+
+// NodeAnswer is what the server tells an edge in answer to its heartbeat. A server that sends
+// no body (204) leaves every field unset.
+type NodeAnswer struct {
+	// IngressLimits is the configured abuse-protection set (audit T11); nil keeps the current one.
+	IngressLimits *edgelimits.IngressLimits `json:"ingress_limits,omitempty"`
 }

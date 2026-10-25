@@ -147,6 +147,8 @@ type NodeWorker struct {
 	Interval     time.Duration
 	Pulse        <-chan time.Time
 	Now          func() time.Time
+	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
+	OnAnswer func(control.NodeAnswer) error
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -160,7 +162,11 @@ func (w *NodeWorker) Start(ctx context.Context) error {
 	if w.Manager == nil || w.Sink == nil || (w.Pulse == nil && w.Interval <= 0) || w.done != nil {
 		return ErrWorkerInvalid
 	}
-	if err := w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, w.now()); err != nil {
+	answer, err := w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, w.now())
+	if err != nil {
+		return err
+	}
+	if err := w.apply(answer); err != nil {
 		return err
 	}
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -197,11 +203,21 @@ func (w *NodeWorker) run(ctx context.Context) {
 }
 
 func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
-	err := w.Sink.Heartbeat(ctx, w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, at))
-	if !errors.Is(err, control.ErrNodeObservationStale) {
+	answer, err := w.Sink.Heartbeat(ctx, w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, at))
+	if errors.Is(err, control.ErrNodeObservationStale) {
+		answer, err = w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
+	}
+	if err != nil {
 		return err
 	}
-	return w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
+	return w.apply(answer)
+}
+
+func (w *NodeWorker) apply(answer control.NodeAnswer) error {
+	if w.OnAnswer == nil {
+		return nil
+	}
+	return w.OnAnswer(answer)
 }
 
 func (w *NodeWorker) recordError(ctx context.Context, err error) {
@@ -230,7 +246,8 @@ func (w *NodeWorker) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return w.Sink.Heartbeat(ctx, w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, w.now()))
+	_, err := w.Sink.Heartbeat(ctx, w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, w.now()))
+	return err
 }
 
 func (w *NodeWorker) now() time.Time {
