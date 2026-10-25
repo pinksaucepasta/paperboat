@@ -66,6 +66,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if failure.kind == commandRejected && errors.As(err, &sshNotReady) {
 		return sshNotReady.Error()
 	}
+	var accessStep *accessMachineStepError
+	if failure.kind == commandRejected && errors.As(err, &accessStep) {
+		return accessStep.Error()
+	}
 	var refusedExecutable *hostinstall.SuppliedExecutableError
 	if failure.kind == commandRejected && errors.As(err, &refusedExecutable) {
 		return refusedExecutable.Error()

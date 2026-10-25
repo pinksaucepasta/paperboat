@@ -101,7 +101,7 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 		if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
 			return nil, "", errors.New("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard, then retry")
 		}
-		return nil, "", fmt.Errorf("load Paperboat sign-in credentials: %w", err)
+		return nil, "", &accessMachineStepError{step: "loading this computer's Paperboat sign-in", action: "Run `pb doctor`, then sign in again with `pb login` if it reports the sign-in.", cause: err}
 	}
 	client, err := newWorkspaceAPIClient(commandContext, dependencies.cfg.ServerURL, dependencies.auth)
 	if err != nil {
@@ -114,11 +114,11 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	port, _ := command.Flags().GetInt("port")
 	accountID, err := daemoncmd.CurrentAccountID(command)
 	if err != nil {
-		return nil, "", fmt.Errorf("read this CLI's signed-in account: %w", err)
+		return nil, "", &accessMachineStepError{step: "reading the signed-in account", action: "Run `pb status`; sign in with `pb login` if no account is shown.", cause: err}
 	}
 	locator, err := newAccessMachineLocator(command.Context(), accountID)
 	if err != nil {
-		return nil, "", fmt.Errorf("reach the local Paperboat daemon: %w; run `pb service start` and retry", err)
+		return nil, "", &accessMachineStepError{step: "reaching the local Paperboat service", action: "Run `pb service start`, then retry.", cause: err}
 	}
 	if err := waitForMachineService(command.Context(), locator, machine.ID, port); err != nil {
 		err = explainTeamPrivateAccess(command.Context(), client, machine, err)
@@ -147,6 +147,23 @@ func accessMachineCobraCommandV1() *cobra.Command {
 	return command
 }
 
+// accessMachineStepError names the step of `pb access machine` that failed, its cause and what to do. A
+// generic "could not finish the command" hid the cause of the private-access P0 (Lane H repro, 2026-10-26).
+type accessMachineStepError struct {
+	step, action string
+	cause        error
+}
+
+func (e *accessMachineStepError) Error() string {
+	cause := "unknown cause"
+	if e.cause != nil {
+		cause = e.cause.Error()
+	}
+	return "Machine access failed while " + e.step + ": " + cause + ". " + e.action
+}
+
+func (e *accessMachineStepError) Unwrap() error { return e.cause }
+
 func runAccessMachine(command *cobra.Command, args []string) error {
 	port, _ := command.Flags().GetInt("port")
 	if port < 1 || port > 65535 {
@@ -168,7 +185,7 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 		},
 	})
 	if err != nil {
-		return errors.Join(fmt.Errorf("open authorized access to %s port %d: %w", args[0], port, err), runtime.Close())
+		return errors.Join(&accessMachineStepError{step: fmt.Sprintf("opening authorized access to %s port %d", args[0], port), action: "Run `pb doctor` and retry; include the support reference if it continues.", cause: err}, runtime.Close())
 	}
 	endpoint := strings.TrimPrefix(proxy.URL, "http://")
 	if parsed, parseErr := url.Parse(proxy.URL); parseErr == nil && parsed.Host != "" {
@@ -197,13 +214,13 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 		case status.Code(err) == codes.NotFound:
 			return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
 		case err != nil && ctx.Err() == nil:
-			return fmt.Errorf("read the machine from the local daemon: %w", err)
+			return &accessMachineStepError{step: "reading the machine from the local Paperboat service", action: "Run `pb status` and `pb doctor`, then retry.", cause: err}
 		case err == nil && slices.Contains(address.GetForwardedPorts(), int32(port)):
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("wait for machine service on port %d: start the service and check automatic discovery with pb doctor: %w", port, ctx.Err())
+			return &accessMachineStepError{step: fmt.Sprintf("waiting for the machine to offer port %d", port), action: "Start the service on that machine and check automatic discovery with `pb doctor`.", cause: ctx.Err()}
 		case <-ticker.C:
 		}
 	}
