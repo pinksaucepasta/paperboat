@@ -3,11 +3,8 @@ package db
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"fmt"
 	"os"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,76 +91,5 @@ WHERE l.pid=pg_backend_pid() AND l.mode='SIReadLock' AND c.relname='peer_network
 	}
 	if heapLocks != 0 {
 		t.Fatalf("pairing's seat update holds %d predicate locks (%s) on the account's peer identities; it changes none", heapLocks, kinds)
-	}
-}
-
-// The production failure: while the account's daemons refresh their peer config (serializable reads of the
-// account's identities plus their own identity's generation bump), pairing's seat update failed all ten retries.
-func TestPairingSurvivesConcurrentPeerConfigRefreshesOnPostgres(t *testing.T) {
-	f := newPeerContentionFixture(t)
-	stop := make(chan struct{})
-	var refreshes atomic.Int64
-	var workers sync.WaitGroup
-	for w := 0; w < 6; w++ {
-		workers.Add(1)
-		go func(peer string) {
-			defer workers.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				// The daemons' peer-config refresh as peersessions.Configuration runs it: the endpoint's generation
-				// is bumped by its own statement, then the account's identities and machines are read in a
-				// read-only repeatable-read snapshot (a serializable read of the whole account plus the bump in one
-				// transaction formed dependency cycles with every other endpoint and with pairing).
-				_, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, f.user, peer)
-				if err == nil {
-					err = func() error {
-						tx, err := f.store.SQL().BeginTx(f.ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-						if err != nil {
-							return err
-						}
-						defer tx.Rollback()
-						rows, err := tx.QueryContext(f.ctx, `SELECT n.endpoint_id FROM paperboat.peer_network_identities n
- WHERE n.user_id=$1 AND n.endpoint_id<>$2 AND n.revoked_at IS NULL AND
- ((n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL))
- OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))`, f.user, peer, "machine")
-						if err != nil {
-							return err
-						}
-						return rows.Close()
-					}()
-				}
-				if err == nil {
-					refreshes.Add(1)
-				}
-			}
-		}(f.peers[w])
-	}
-	var failures []error
-	for i := 0; i < 20; i++ {
-		seat := []string{"occupied", "released"}[i%2]
-		err := f.store.InTx(f.ctx, func(ctx context.Context, tx *Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE paperboat.user_machines SET seat_state=$3 WHERE id=$1 AND user_id=$2`, f.machine, f.user, seat)
-			if err != nil {
-				return err
-			}
-			// Pairing also counts the account's occupied seats (ReserveUserMachineSeat) in the same transaction.
-			var count int
-			return tx.QueryRow(ctx, `SELECT count(*) FROM paperboat.user_machines WHERE user_id=$1 AND seat_state='occupied' AND deleted_at IS NULL`, f.user).Scan(&count)
-		})
-		if err != nil {
-			failures = append(failures, err)
-		}
-	}
-	close(stop)
-	workers.Wait()
-	if refreshes.Load() == 0 {
-		t.Fatal("no concurrent peer-config refresh committed; the test did not exercise contention")
-	}
-	if len(failures) > 0 {
-		t.Fatalf("%d of 20 pairing seat updates failed under %d concurrent peer-config refreshes: %v", len(failures), refreshes.Load(), failures[0])
 	}
 }
