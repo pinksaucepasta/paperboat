@@ -73,6 +73,12 @@ type Request struct {
 	DecisionGeneration   uint64    `json:"decision_generation"`
 	ExpiresAt            time.Time `json:"expires_at"`
 	ReceiptNotification  string    `json:"receipt_notification,omitempty"`
+	// Transfer progress the sender reports (progress.go); TotalBytes is the manifest's total.
+	TransferMode   string `json:"transfer_mode,omitempty"`
+	TransferState  string `json:"transfer_state,omitempty"`
+	PauseReason    string `json:"pause_reason,omitempty"`
+	TotalBytes     int64  `json:"total_bytes"`
+	CommittedBytes int64  `json:"committed_bytes"`
 }
 
 type Page struct {
@@ -174,7 +180,7 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	if err := tx.QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 		return Page{}, 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,'')`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
 	if err != nil {
 		return Page{}, 0, err
 	}
@@ -183,12 +189,13 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	for rows.Next() {
 		var request Request
 		var manifest []byte
-		if err = rows.Scan(&request.RequestID, &request.TeamID, &request.SenderAccount, &request.RecipientAccount, &request.SourceMachineID, &request.DestinationMachineID, &request.BatchID, &request.ManifestDigest, &manifest, &request.Status, &request.DecisionGeneration, &request.ExpiresAt, &request.ReceiptNotification); err != nil {
+		if err = rows.Scan(&request.RequestID, &request.TeamID, &request.SenderAccount, &request.RecipientAccount, &request.SourceMachineID, &request.DestinationMachineID, &request.BatchID, &request.ManifestDigest, &manifest, &request.Status, &request.DecisionGeneration, &request.ExpiresAt, &request.ReceiptNotification, &request.TransferMode, &request.TransferState, &request.PauseReason, &request.CommittedBytes); err != nil {
 			return Page{}, 0, err
 		}
 		if err = json.Unmarshal(manifest, &request.Files); err != nil {
 			return Page{}, 0, err
 		}
+		request.TotalBytes = ManifestTotal(request.Files)
 		out.Requests = append(out.Requests, request)
 	}
 	return out, total, rows.Err()
@@ -203,12 +210,13 @@ func (s *Service) Get(ctx context.Context, account, requestID string) (Request, 
 	}
 	var out Request
 	var manifest []byte
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,'') FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification)
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
 	if noRows(err) {
 		return Request{}, ErrNotFound
 	}
 	if err == nil {
 		err = json.Unmarshal(manifest, &out.Files)
+		out.TotalBytes = ManifestTotal(out.Files)
 	}
 	return out, err
 }
@@ -379,12 +387,13 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 func readTx(ctx context.Context, tx *db.Tx, requestID, account string) (Request, error) {
 	var out Request
 	var manifest []byte
-	err := tx.QueryRow(ctx, `SELECT request_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,batch_id,manifest_digest,manifest,status,decision_generation,expires_at FROM team_inbox_requests WHERE request_id=$1 AND ($2='' OR sender_account=$2 OR recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt)
+	err := tx.QueryRow(ctx, `SELECT request_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,batch_id,manifest_digest,manifest,status,decision_generation,expires_at,coalesce(transfer_mode,''),coalesce(transfer_state,''),coalesce(pause_reason,''),committed_bytes FROM team_inbox_requests WHERE request_id=$1 AND ($2='' OR sender_account=$2 OR recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
 	if noRows(err) {
 		return Request{}, ErrNotFound
 	}
 	if err == nil {
 		err = json.Unmarshal(manifest, &out.Files)
+		out.TotalBytes = ManifestTotal(out.Files)
 	}
 	return out, err
 }

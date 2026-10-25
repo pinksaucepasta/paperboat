@@ -1710,7 +1710,7 @@ Paused: "Waiting for a direct connection or your relay (<reason>)" in `pb send`,
 Preference: `pb config set transfers.mode automatic|unlimited` writes the account preference on the server (one owner;
 console Settings edits the same field): GET/PATCH `/v1/me/preferences` field `file_transfer_mode`. Per account, not per
 workspace (the mode is the sender's choice of path, not a team policy).
-**Console/inbox fields (Lane C).** Transfer and inbox items: `transfer_mode`, `state` (adds `paused`), `pause_reason`
+**Console/inbox fields (Lane C).** Transfer and inbox items: `transfer_mode`, `transfer_state` (sending|paused|done|failed, beside the approval `status`), `pause_reason`
 (enum above), `total_bytes`, `committed_bytes`. Errors: `transfer_too_large` {total_bytes,max_bytes},
 `file_transfer_path_not_allowed`.
 **Tests/rows.** CHECKLIST feature row F22-01 (two modes) and command rows for `pb send --unlimited`, `pb config set

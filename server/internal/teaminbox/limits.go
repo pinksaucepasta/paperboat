@@ -16,3 +16,12 @@ func (*ManifestLimitError) Unwrap() error { return ErrInvalid }
 func newManifestLimitError(policy serverconfig.FileTransferPolicy) *ManifestLimitError {
 	return &ManifestLimitError{MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes}
 }
+
+// ManifestTotal is a batch's declared total: every file's size summed.
+func ManifestTotal(files []File) int64 {
+	var total int64
+	for _, file := range files {
+		total += file.Size
+	}
+	return total
+}

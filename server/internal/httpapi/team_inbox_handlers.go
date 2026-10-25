@@ -219,4 +219,22 @@ func registerTeamInboxRoutes(mux *http.ServeMux, service *teaminbox.Service, rea
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
 	})))
+	// The sender's transfer progress (PLAN 3b): mode, state, pause reason and committed bytes.
+	mux.Handle("POST /v1/team-inbox/requests/{request_id}/progress", write(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		account, ok := principal(w, r)
+		if !ok {
+			return
+		}
+		limitEnvironmentJSON(w, r, 1024)
+		var in teaminbox.Progress
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		out, err := service.ReportProgress(r.Context(), account, r.PathValue("request_id"), in)
+		if err != nil {
+			teamInboxError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
+	})))
 }

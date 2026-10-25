@@ -176,6 +176,7 @@ func TestPostgresExactApprovalRevocationAndReceiptDelivery(t *testing.T) {
 	if _, err = service.Consume(ctx, sender, request.RequestID, request.ManifestDigest); err != nil {
 		t.Fatalf("exact resume=%v", err)
 	}
+	checkTransferProgress(t, ctx, service, sender, recipient, request.RequestID)
 	policy, err := service.Policy(ctx, recipient)
 	if err != nil || policy.Generation != 1 || policy.Acceptance != "manual" {
 		t.Fatalf("default policy=%+v err=%v", policy, err)
@@ -316,5 +317,59 @@ func TestPostgresExactApprovalRevocationAndReceiptDelivery(t *testing.T) {
 	same, err := service.Create(ctx, RequestInput{RequestID: "tir_same_" + suffix, OperationID: "op_same_" + suffix, SenderAccount: sender, SourceMachineID: source, DestinationMachineID: ownDestination, BatchID: "fb_same_" + suffix, Files: files, ExpiresAt: time.Now().UTC().Add(time.Hour)})
 	if err != nil || same.Status != "not_required" {
 		t.Fatalf("same-account request=%+v err=%v", same, err)
+	}
+}
+
+// checkTransferProgress drives the sender's progress reports on a consumed 5-byte request.
+func checkTransferProgress(t *testing.T, ctx context.Context, service *Service, sender, recipient, requestID string) {
+	t.Helper()
+	report := func(account string, p Progress) (Request, error) {
+		return service.ReportProgress(ctx, account, requestID, p)
+	}
+	if _, err := report(recipient, Progress{TransferMode: "automatic", TransferState: "sending", CommittedBytes: 1}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recipient progress: %v", err)
+	}
+	for _, bad := range []Progress{
+		{TransferMode: "automatic", TransferState: "paused", CommittedBytes: 1},
+		{TransferMode: "automatic", TransferState: "sending", PauseReason: "no_eligible_path", CommittedBytes: 1},
+		{TransferMode: "fast", TransferState: "sending", CommittedBytes: 1},
+		{TransferMode: "automatic", TransferState: "sending", CommittedBytes: -1},
+	} {
+		if _, err := report(sender, bad); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("progress %+v: %v", bad, err)
+		}
+	}
+	got, err := report(sender, Progress{TransferMode: "unlimited", TransferState: "sending", CommittedBytes: 2})
+	if err != nil || got.TransferMode != "unlimited" || got.TransferState != "sending" || got.CommittedBytes != 2 || got.TotalBytes != 5 {
+		t.Fatalf("sending: %+v %v", got, err)
+	}
+	got, err = report(sender, Progress{TransferMode: "unlimited", TransferState: "paused", PauseReason: "no_eligible_path", CommittedBytes: 2})
+	if err != nil || got.TransferState != "paused" || got.PauseReason != "no_eligible_path" {
+		t.Fatalf("paused: %+v %v", got, err)
+	}
+	for name, bad := range map[string]Progress{
+		"bytes go back":  {TransferMode: "unlimited", TransferState: "sending", CommittedBytes: 1},
+		"mode changes":   {TransferMode: "automatic", TransferState: "sending", CommittedBytes: 3},
+		"past the total": {TransferMode: "unlimited", TransferState: "sending", CommittedBytes: 6},
+	} {
+		if _, err := report(sender, bad); !errors.Is(err, ErrConflict) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	got, err = report(sender, Progress{TransferMode: "unlimited", TransferState: "done", CommittedBytes: 5})
+	if err != nil || got.TransferState != "done" || got.PauseReason != "" || got.CommittedBytes != 5 {
+		t.Fatalf("done: %+v %v", got, err)
+	}
+	if again, err := report(sender, Progress{TransferMode: "unlimited", TransferState: "done", CommittedBytes: 5}); err != nil || again.CommittedBytes != 5 {
+		t.Fatalf("an unchanged report must answer the current state: %+v %v", again, err)
+	}
+	page, err := service.List(ctx, recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, listed := range page.Requests {
+		if listed.RequestID == requestID && (listed.TransferMode != "unlimited" || listed.TransferState != "done" || listed.CommittedBytes != 5 || listed.TotalBytes != 5) {
+			t.Fatalf("listed progress: %+v", listed)
+		}
 	}
 }

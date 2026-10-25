@@ -50102,6 +50102,95 @@
         },
         "operationId": "patch_v1_me_preferences"
       }
+    },
+    "/v1/team-inbox/requests/{request_id}/progress": {
+      "parameters": [
+        {
+          "name": "request_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "report_team_inbox_transfer_progress",
+        "summary": "Sender reports transfer progress",
+        "description": "Only the request's sender. The mode is fixed by the first report; committed_bytes never decreases and never exceeds the manifest total; transfer_state paused requires pause_reason. Report at most every 5 s; an unchanged report within 1 s is not stored.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "transfer_mode",
+                  "transfer_state",
+                  "committed_bytes"
+                ],
+                "properties": {
+                  "transfer_mode": {
+                    "type": "string",
+                    "enum": [
+                      "automatic",
+                      "unlimited"
+                    ]
+                  },
+                  "transfer_state": {
+                    "type": "string",
+                    "enum": [
+                      "sending",
+                      "paused",
+                      "done",
+                      "failed"
+                    ]
+                  },
+                  "pause_reason": {
+                    "type": "string",
+                    "enum": [
+                      "no_eligible_path",
+                      "destination_offline",
+                      "relay_quota_exhausted"
+                    ]
+                  },
+                  "committed_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request with its recorded progress (transfer_mode, transfer_state, pause_reason, total_bytes, committed_bytes)."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "description": "Selected Personal or canonical team workspace. Validated against the current authenticated account; selecting a team does not grant resource access.",
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            }
+          }
+        ]
+      }
     }
   }
 }
