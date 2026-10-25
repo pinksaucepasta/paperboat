@@ -717,14 +717,16 @@ func (f *previewCustomDomainsRepository) List(_ context.Context, accountID, prev
 	return clonePreviewCustomDomainRows(rows), nil
 }
 
-func (f *previewCustomDomainsRepository) ListProjection(_ context.Context, accountID, previewID string, limit int) ([]dbsqlc.PreviewDomain, error) {
+func (f *previewCustomDomainsRepository) ListProjections(_ context.Context, previews map[string]string) (map[string][]dbsqlc.PreviewDomain, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	rows := f.domainRowsLocked(accountID, previewID, true)
-	if len(rows) > limit {
-		rows = rows[:limit]
+	out := make(map[string][]dbsqlc.PreviewDomain, len(previews))
+	for previewID, accountID := range previews {
+		if rows := f.domainRowsLocked(accountID, previewID, true); len(rows) > 0 {
+			out[previewID] = clonePreviewCustomDomainRows(rows)
+		}
 	}
-	return clonePreviewCustomDomainRows(rows), nil
+	return out, nil
 }
 
 func (f *previewCustomDomainsRepository) Get(_ context.Context, accountID, previewID, domainID string) (dbsqlc.PreviewDomain, error) {

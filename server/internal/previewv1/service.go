@@ -120,7 +120,7 @@ type PreviewDomainReader interface {
 }
 
 type previewDomainProjectionReader interface {
-	ListProjection(context.Context, string, string, int) ([]dbsqlc.PreviewDomain, error)
+	ListProjections(context.Context, map[string]string) (map[string][]dbsqlc.PreviewDomain, error)
 }
 
 type Target struct {
@@ -666,14 +666,11 @@ func (s *Service) List(ctx context.Context, request previewtunnelapi.RequestCont
 	if err != nil {
 		return PreviewPage{}, err
 	}
-	page := PreviewPage{Items: make([]Preview, 0, len(rows)), Total: total}
-	for _, row := range rows {
-		view, viewErr := s.previewView(ctx, row)
-		if viewErr != nil {
-			return PreviewPage{}, viewErr
-		}
-		page.Items = append(page.Items, view)
+	items, err := s.previewViews(ctx, rows)
+	if err != nil {
+		return PreviewPage{}, err
 	}
+	page := PreviewPage{Items: items, Total: total}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		page.NextCursor, err = s.cursors.Encode(previewCursor{AccountID: workspaceCursorPrincipal(ctx, request.Actor.AccountID), CreatedAt: last.CreatedAt.UTC(), ID: last.ID})
@@ -830,22 +827,15 @@ func (s *Service) Reconcile(ctx context.Context, actorID, correlationID, request
 	if err != nil {
 		return ReconcileResult{}, err
 	}
-	view := ReconcileResult{Expired: make([]Preview, 0, len(result.Expired)), OwnerLost: make([]Preview, 0, len(result.OwnerLost)), HasMore: result.HasMore}
-	for _, row := range result.Expired {
-		preview, viewErr := s.previewView(ctx, row)
-		if viewErr != nil {
-			return ReconcileResult{}, viewErr
-		}
-		view.Expired = append(view.Expired, preview)
+	expired, err := s.previewViews(ctx, result.Expired)
+	if err != nil {
+		return ReconcileResult{}, err
 	}
-	for _, row := range result.OwnerLost {
-		preview, viewErr := s.previewView(ctx, row)
-		if viewErr != nil {
-			return ReconcileResult{}, viewErr
-		}
-		view.OwnerLost = append(view.OwnerLost, preview)
+	ownerLost, err := s.previewViews(ctx, result.OwnerLost)
+	if err != nil {
+		return ReconcileResult{}, err
 	}
-	return view, nil
+	return ReconcileResult{Expired: expired, OwnerLost: ownerLost, HasMore: result.HasMore}, nil
 }
 
 // ObserveReadiness applies a connector/edge observation with the same
@@ -989,46 +979,69 @@ func (s *Service) ObserveMachineReadiness(ctx context.Context, request previewtu
 }
 
 func (s *Service) previewView(ctx context.Context, row previewtunnelstore.PreviewLeaseRecord) (Preview, error) {
-	view := previewView(row)
-	if routes, ok := s.repository.(interface {
-		CurrentPreviewRoute(context.Context, string, string) (string, error)
-	}); ok {
-		route, err := routes.CurrentPreviewRoute(ctx, row.AccountID, row.ID)
-		if err != nil {
-			return Preview{}, err
-		}
-		view.RouteID = route
-	}
-	if s.previewDomains == nil {
-		return view, nil
-	}
-	var rows []dbsqlc.PreviewDomain
-	var err error
-	if projection, ok := s.previewDomains.(previewDomainProjectionReader); ok {
-		rows, err = projection.ListProjection(ctx, row.AccountID, row.ID, previewdomain.MaxDomains+1)
-	} else {
-		rows, err = s.previewDomains.List(ctx, row.AccountID, row.ID, nil, previewdomain.MaxDomains+1)
-	}
+	views, err := s.previewViews(ctx, []previewtunnelstore.PreviewLeaseRecord{row})
 	if err != nil {
 		return Preview{}, err
 	}
-	if len(rows) > previewdomain.MaxDomains {
-		return Preview{}, ErrDomainProjection
-	}
-	if len(rows) == 0 {
-		return view, nil
-	}
-	view.Domains = make([]PreviewDomainSummary, 0, len(rows))
+	return views[0], nil
+}
+
+// previewViews describes a page of previews with one query for their routes and one for their domains (a list
+// ran two queries per preview, 104 for a 50-preview page).
+func (s *Service) previewViews(ctx context.Context, rows []previewtunnelstore.PreviewLeaseRecord) ([]Preview, error) {
+	previews := make(map[string]string, len(rows))
 	for _, row := range rows {
-		domain := previewdomain.DomainViewFromRow(row)
-		view.Domains = append(view.Domains, PreviewDomainSummary{
-			ID: domain.ID, TargetKind: domain.TargetKind, PreviewID: domain.PreviewID,
-			Hostname: domain.Hostname, MatchType: domain.MatchType, WildcardLabels: domain.WildcardLabels,
-			State: domain.State, DNS: domain.DNS, Certificate: domain.Certificate,
-			Generation: domain.Generation, ETag: domain.ETag,
-		})
+		previews[row.ID] = row.AccountID
 	}
-	return view, nil
+	routes := map[string]string{}
+	if reader, ok := s.repository.(interface {
+		CurrentPreviewRoutes(context.Context, map[string]string) (map[string]string, error)
+	}); ok {
+		var err error
+		if routes, err = reader.CurrentPreviewRoutes(ctx, previews); err != nil {
+			return nil, err
+		}
+	}
+	var domains map[string][]dbsqlc.PreviewDomain
+	if projection, ok := s.previewDomains.(previewDomainProjectionReader); ok {
+		var err error
+		if domains, err = projection.ListProjections(ctx, previews); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]Preview, 0, len(rows))
+	for _, row := range rows {
+		view := previewView(row)
+		view.RouteID = routes[row.ID]
+		if s.previewDomains == nil {
+			out = append(out, view)
+			continue
+		}
+		found, projected := domains[row.ID], domains != nil
+		if !projected {
+			var err error
+			if found, err = s.previewDomains.List(ctx, row.AccountID, row.ID, nil, previewdomain.MaxDomains+1); err != nil {
+				return nil, err
+			}
+		}
+		if len(found) > previewdomain.MaxDomains {
+			return nil, ErrDomainProjection
+		}
+		if len(found) > 0 {
+			view.Domains = make([]PreviewDomainSummary, 0, len(found))
+			for _, row := range found {
+				domain := previewdomain.DomainViewFromRow(row)
+				view.Domains = append(view.Domains, PreviewDomainSummary{
+					ID: domain.ID, TargetKind: domain.TargetKind, PreviewID: domain.PreviewID,
+					Hostname: domain.Hostname, MatchType: domain.MatchType, WildcardLabels: domain.WildcardLabels,
+					State: domain.State, DNS: domain.DNS, Certificate: domain.Certificate,
+					Generation: domain.Generation, ETag: domain.ETag,
+				})
+			}
+		}
+		out = append(out, view)
+	}
+	return out, nil
 }
 
 func (s *Service) authorize(request previewtunnelapi.RequestContext, action string) error {

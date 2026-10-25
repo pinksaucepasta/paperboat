@@ -227,8 +227,12 @@ func (f previewDomainProjectionFake) List(context.Context, string, string, *prev
 	return append([]dbsqlc.PreviewDomain(nil), f.rows...), nil
 }
 
-func (f previewDomainProjectionFake) ListProjection(context.Context, string, string, int) ([]dbsqlc.PreviewDomain, error) {
-	return append([]dbsqlc.PreviewDomain(nil), f.rows...), nil
+func (f previewDomainProjectionFake) ListProjections(_ context.Context, previews map[string]string) (map[string][]dbsqlc.PreviewDomain, error) {
+	out := make(map[string][]dbsqlc.PreviewDomain, len(previews))
+	for previewID := range previews {
+		out[previewID] = append([]dbsqlc.PreviewDomain(nil), f.rows...)
+	}
+	return out, nil
 }
 
 type recordingDispatcher struct {

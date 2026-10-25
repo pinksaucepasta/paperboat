@@ -1218,14 +1218,33 @@ func ValidPreviewOwnerSessionKind(kind string) bool {
 	return kind == "local_lease" || kind == "foreground" || kind == "lazy_runtime"
 }
 
-// CurrentPreviewRoute exposes only the active carrier route owned by this preview.
-func (s *Store) CurrentPreviewRoute(ctx context.Context, account, previewID string) (string, error) {
-	var route string
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT route_id FROM paperboat.preview_routes WHERE preview_id=$1 AND account_id=$2 AND state='ready' AND expires_at>now() ORDER BY route_generation DESC,route_id LIMIT 1`, previewID, account).Scan(&route)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+// CurrentPreviewRoutes exposes only the active carrier route owned by each preview (preview id -> its account),
+// in one query for a page; previews without one are absent.
+func (s *Store) CurrentPreviewRoutes(ctx context.Context, previews map[string]string) (map[string]string, error) {
+	ids, accounts := make([]string, 0, len(previews)), make([]string, 0, len(previews))
+	for previewID, accountID := range previews {
+		ids, accounts = append(ids, previewID), append(accounts, accountID)
 	}
-	return route, err
+	out := make(map[string]string, len(previews))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT DISTINCT ON (r.preview_id) r.preview_id,r.route_id
+ FROM unnest($1::text[],$2::text[]) AS w(preview_id,account_id)
+ JOIN paperboat.preview_routes r ON r.preview_id=w.preview_id AND r.account_id=w.account_id AND r.state='ready' AND r.expires_at>now()
+ ORDER BY r.preview_id,r.route_generation DESC,r.route_id`, ids, accounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var previewID, route string
+		if err := rows.Scan(&previewID, &route); err != nil {
+			return nil, err
+		}
+		out[previewID] = route
+	}
+	return out, rows.Err()
 }
 
 // decoratePreviewEndpoints marks a managed preview's route pending until the published DNS records

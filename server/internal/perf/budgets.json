@@ -146,16 +146,16 @@
   {
    "actor": "user_perf_0002",
    "path": "/v1/previews",
-   "max_queries": 110,
+   "max_queries": 10,
    "p50_ms": 600,
-   "reason": "per-preview view decoration (batched next)"
+   "reason": "routes and domains read once per page, not per preview: measured 6"
   },
   {
    "actor": "user_perf_0003",
    "path": "/v1/previews",
-   "max_queries": 35,
+   "max_queries": 10,
    "p50_ms": 100,
-   "reason": "measured 37 ms p50 on the loaded gate host"
+   "reason": "routes and domains read once per page, not per preview: measured 6"
   },
   {
    "actor": "user_perf_0003",

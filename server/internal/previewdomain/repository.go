@@ -54,18 +54,33 @@ func (r *SQLRepository) List(ctx context.Context, accountID, previewID string, a
 	return rows, translate(err)
 }
 
-// ListProjection returns the bounded historical alias set embedded in a
-// preview resource. Unlike the mutable domain collection, it retains terminal
-// released/quarantined rows so a stopped or expired preview can explain which
-// custom hostnames were withdrawn.
-func (r *SQLRepository) ListProjection(ctx context.Context, accountID, previewID string, limit int) ([]dbsqlc.PreviewDomain, error) {
-	if !validScope(accountID, previewID) || limit < 1 || limit > MaxDomains+1 {
-		return nil, ErrInvalidInput
+// ListProjections returns, for each preview (preview id -> its account), the bounded historical alias set
+// embedded in a preview resource, in one query for the whole page. Unlike the mutable domain collection, it
+// retains terminal released/quarantined rows so a stopped or expired preview can explain which custom hostnames
+// were withdrawn. A preview with more than MaxDomains rows is ErrInvalidInput's sibling: its slice is longer than
+// MaxDomains and the caller refuses it.
+func (r *SQLRepository) ListProjections(ctx context.Context, previews map[string]string) (map[string][]dbsqlc.PreviewDomain, error) {
+	ids := make([]string, 0, len(previews))
+	for previewID, accountID := range previews {
+		if !validScope(accountID, previewID) {
+			return nil, ErrInvalidInput
+		}
+		ids = append(ids, previewID)
 	}
-	rows, err := r.db.Queries().ListPreviewDomainProjectionV1(ctx, dbsqlc.ListPreviewDomainProjectionV1Params{
-		AccountID: accountID, PreviewID: previewID, RowLimit: int32(limit),
-	})
-	return rows, translate(err)
+	out := make(map[string][]dbsqlc.PreviewDomain, len(previews))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Queries().ListPreviewDomainProjectionsV1(ctx, ids)
+	if err != nil {
+		return nil, translate(err)
+	}
+	for _, row := range rows {
+		if previews[row.PreviewID] == row.AccountID {
+			out[row.PreviewID] = append(out[row.PreviewID], row)
+		}
+	}
+	return out, nil
 }
 
 func (r *SQLRepository) Get(ctx context.Context, accountID, previewID, domainID string) (dbsqlc.PreviewDomain, error) {

@@ -14,13 +14,12 @@ WHERE account_id = sqlc.arg(account_id)
 ORDER BY created_at, id
 LIMIT sqlc.arg(row_limit);
 
--- name: ListPreviewDomainProjectionV1 :many
+-- name: ListPreviewDomainProjectionsV1 :many
+-- The domain projections of a page of previews in one query (the caller keeps each preview's own account's rows).
 SELECT *
 FROM preview_domains
-WHERE account_id = sqlc.arg(account_id)
-  AND preview_id = sqlc.arg(preview_id)
-ORDER BY created_at, id
-LIMIT sqlc.arg(row_limit);
+WHERE preview_id = ANY(sqlc.arg(preview_ids)::text[])
+ORDER BY preview_id, created_at, id;
 
 -- name: GetPreviewDomainV1 :one
 SELECT *

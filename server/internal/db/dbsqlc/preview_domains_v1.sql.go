@@ -1022,23 +1022,16 @@ func (q *Queries) ListDuePreviewDomainsV1(ctx context.Context, arg ListDuePrevie
 	return items, nil
 }
 
-const listPreviewDomainProjectionV1 = `-- name: ListPreviewDomainProjectionV1 :many
+const listPreviewDomainProjectionsV1 = `-- name: ListPreviewDomainProjectionsV1 :many
 SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until
 FROM preview_domains
-WHERE account_id = $1
-  AND preview_id = $2
-ORDER BY created_at, id
-LIMIT $3
+WHERE preview_id = ANY($1::text[])
+ORDER BY preview_id, created_at, id
 `
 
-type ListPreviewDomainProjectionV1Params struct {
-	AccountID string
-	PreviewID string
-	RowLimit  int32
-}
-
-func (q *Queries) ListPreviewDomainProjectionV1(ctx context.Context, arg ListPreviewDomainProjectionV1Params) ([]PreviewDomain, error) {
-	rows, err := q.db.Query(ctx, listPreviewDomainProjectionV1, arg.AccountID, arg.PreviewID, arg.RowLimit)
+// The domain projections of a page of previews in one query (the caller keeps each preview's own account's rows).
+func (q *Queries) ListPreviewDomainProjectionsV1(ctx context.Context, previewIds []string) ([]PreviewDomain, error) {
+	rows, err := q.db.Query(ctx, listPreviewDomainProjectionsV1, previewIds)
 	if err != nil {
 		return nil, err
 	}
