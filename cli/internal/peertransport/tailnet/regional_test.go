@@ -199,3 +199,37 @@ func TestRegionalIdentityIncludesTLSPin(t *testing.T) {
 		t.Fatal("withdrawn node retained identity")
 	}
 }
+
+// Unlimited file transfers may use only the account's own relays, so a signed candidate says who runs it.
+// The client accepts the field before the server sends it (signed documents decode strictly); a node that
+// does not say is managed, and an unknown value is refused.
+func TestRegionalCandidatesNameWhoRunsEachRelay(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	node := RegionalNode{NodeID: "relay_own", NodeGeneration: 1, ProcessEpoch: "epoch", Region: "test", FailureDomain: "rack", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 10, CapacityObservedAt: now}
+	for generation, c := range []struct {
+		hosting    string
+		selfHosted bool
+		refused    bool
+	}{{"", false, false}, {"managed", false, false}, {"self_hosted", true, false}, {"partner", false, true}} {
+		node.Hosting = c.hosting
+		candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: uint64(generation + 1), IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
+		err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates))
+		if c.refused {
+			if !errors.Is(err, ErrRegionalAuthority) {
+				t.Fatalf("hosting %q accepted: %v", c.hosting, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("hosting %q: %v", c.hosting, err)
+		}
+		nodes, err := a.RegionalNodes(time.Now())
+		if err != nil || len(nodes) != 1 || nodes[0].SelfHosted() != c.selfHosted {
+			t.Fatalf("hosting %q: nodes %+v err %v, self-hosted want %v", c.hosting, nodes, err, c.selfHosted)
+		}
+	}
+}

@@ -45,7 +45,13 @@ type RegionalNode struct {
 	CapacityUsed       uint64   `json:"capacity_used"`
 	CapacityObservedAt int64    `json:"capacity_observed_at"`
 	DrainDeadline      *int64   `json:"drain_deadline,omitempty"`
+	// Hosting says who runs the relay: "self_hosted" for the account's own (pbh), "managed" or absent for
+	// Paperboat's. Unlimited file transfers may use only self-hosted relays.
+	Hosting string `json:"hosting,omitempty"`
 }
+
+// SelfHosted reports whether the account runs this relay itself. A node that does not say is managed.
+func (n RegionalNode) SelfHosted() bool { return n.Hosting == "self_hosted" }
 type RegionalCandidates struct {
 	STUNServers             []string       `json:"stun_servers,omitempty"`
 	Schema                  string         `json:"schema"`
@@ -101,6 +107,9 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 		return ErrStaleAuthority
 	}
 	for _, node := range c.Nodes {
+		if node.Hosting != "" && node.Hosting != "managed" && node.Hosting != "self_hosted" {
+			return ErrRegionalAuthority
+		}
 		if node.TLSSPKISHA256 != "" {
 			if _, err := nodetls.ParsePin(node.TLSSPKISHA256); err != nil {
 				return ErrRegionalAuthority
