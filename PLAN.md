@@ -1620,6 +1620,44 @@ URL, each reaching their own machine; a uid without a daemon gets a refusal page
   names, so deeper names are covered. Cookies are scoped by browser profile, and each OS user has their own profile and
   own CA, so users never share cookies; within one user, cookies cross ports and sibling subdomains as on any site (stated,
   not isolated).
+**Rev 3 conditions (Lane X re-review, GPT round 2; coordinator GO 2026-10-26). These are part of the design and tested.**
+- *Attribution is the security gate, fail closed.* The guard keeps the accepted FD open, takes the CLIENT side's reversed
+  full tuple (family, addresses, ports, network namespace) and needs exactly one live match with an owner uid, retrying at
+  most 3 times within 50 ms; missing, ambiguous, inconsistent, or a uid with no registered daemon closes the connection
+  (or answers the refusal page on 80/443). Never the accepted socket's uid, never "the active/first user", a hostname or a
+  cached tuple. Linux: INET_DIAG exact 4-tuple (a hash lookup). macOS: `net.inet.tcp.pcblist_n`, field `so_uid` of the
+  xsocket record; it copies every pcb, so it ships behind a benchmark (10,000 open sockets, one lookup < 2 ms) and a
+  device churn proof before macOS multi-user is enabled; single-user macOS keeps today's path. Other namespaces, NAT or
+  container paths into 127.100.0.1 are refused. Tests: unknown uid, peer closed before lookup, close/RST/reconnect with
+  tuple reuse under churn, all refused, none misattributed.
+- *Identity contract.* The caller is the credential owning the client socket: `sudo curl` is root (no daemon: refusal
+  page), a setuid helper is its effective uid, a socket passed to another process stays its creator's, a local proxy is
+  the proxy's uid. SUDO_UID is never read. System users have no daemon and get the refusal page.
+- *TLS (Lane X 1, GPT 4).* The connection is handed off as raw TCP after attribution; TLS ends in the user's daemon.
+  Isolation guarantee: (a) CA signing keys stay in the guard's root-only state (`rootCA-key.pem`, 0600 root) and daemons
+  receive only leaves for their own routes; (b) a connection from uid A always reaches A's daemon. Per uid: own CA, own leaf
+  keys (owner-only files), certificate cache keyed by uid + name + route generation, every SAN authorized at issuance
+  against that uid's routes (`*.<machine>.<domain>` does not cover `<machine>.<domain>`; both are listed), separate TLS
+  session-resumption state per daemon, Host/:authority checked against the daemon's routes on every request. Trust: each
+  CA goes into its own user's stores (macOS login keychain user domain; Linux user NSS db and the user's browser profiles);
+  the system-wide install stays only for the CA of a host that has a single user (today's hosts), and when a second uid
+  joins, its CA is user-scoped. Since (a) and (b) hold, a CA trusted host-wide grants nothing to other users. Test: a leaf
+  issued to B for a name A also uses is never presented on a connection from A.
+- *Releasing never acts on a partial set (Lane X 3).* The complete (account, machine) set is sent only from a complete,
+  verified configuration (every page read, signature checked); never from a failed, degraded or partial read, and never as
+  an empty set while claims exist for that account (offline until revoked: the last good set stays until an explicit
+  revocation). Test: server unreachable for 10 min, then a truncated or empty list: no claim released, no listener closed.
+- *UID reuse (GPT 5).* A claim belongs to a user incarnation: uid + home directory inode + passwd entry creation (the
+  home inode where no creation time exists); a deleted-then-recreated uid starts empty.
+- *Cookies (GPT 6).* Each OS user has their own browser profile, so users never share cookies. Inside one user, an origin
+  (`<name>.<domain>`) that served an account is never reassigned to another account of that user while its claim or
+  7-day hold lasts; cookies cross ports and sibling subdomains as on any site (stated, not isolated).
+- *Proofs before enabling:* Linux now (nft deny, anti-spoof bind, attribution tests on a two-user pbvm2 container); macOS
+  after the user's macOS go.
+- *Not in scope here (Lane X robustness row):* public wildcard names need working DNS (offline, DNS-rebinding filters).
+CHECKLIST: F23-01 two OS users on one Linux host (addresses, gateway, names, isolation), F23-02 attribution fail-closed,
+F23-03 release/hold/partial-set, F23-04 macOS multi-user (after macOS go).
+
 **5. Options weighed for names.**
 (a) per-uid DNS answers (NSS module, resolved stub peer uid, macOS resolver): rejected, the asking uid is lost on macOS
 (mDNSResponder resolves as root) and Linux coverage is partial; public wildcard DNS makes it unnecessary anyway.

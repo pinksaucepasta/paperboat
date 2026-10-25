@@ -799,6 +799,21 @@ Rows for the top 10 of PLAN 3b "Robustness gaps vs reference implementations" (L
 | F21-26 | Console lists scale: machines, inbox and domains are paged by the server and refreshed by push or visible-page polling, with no per-row polling and no full list every 15 s per tab. | [ ] | [ ] | [ ] | Owner: Lane C (console/lib/api.ts:245-251, components/files/file-list.tsx:58, components/domains/domain-list.tsx:113) + Lane B/Q for cursor/aggregate endpoints. Audit C1, C2. Check: scripted browser check counting requests per minute for an account with 1,000 machines. |
 | F21-27 | Data-path cost is O(1) per I/O and per peer event: metered reads/writes do not build full peer status, and peer events do not fan out to every peer. | [ ] | [ ] | [ ] | Owner: Lane R (bandwidth/meter.go:40-66, mesh/regional_status.go:30-43, mesh/engine_backend.go:262-274). Audit P2, P5. Test to write: benchmark, per-op cost flat from 10 to 2,000 peers; one admission sends CallMeMaybe to one peer; prior art Tailscale magicsock/netlog. |
 
+## F22. File transfer modes (PLAN 3b)
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F22-01 | Two modes: Automatic (default, at most 2,000,000,000 bytes per send, P2P else any relay incl. hosted, hosted bytes counted) and Unlimited (no size bound, P2P or self-hosted relays only, pauses with "Waiting for a direct connection or your relay" and resumes; resume survives pb and daemon restarts). | [ ] | [ ] | [ ] | Owner: Lane A (CLI/daemon), Lane O (server policy, claims, preferences, progress), Lane R (PathEligibility), Lane C (console). Checks: size boundary and batch total (TestAutomaticSendBoundIsTheBatchTotal, cbe0dfbe); policy accepts automatic_max_batch_bytes (TestPolicyAcceptsTheAutomaticBatchBound, 77d8a1bc); to write: unlimited never touches a hosted relay (fake path flips to hosted_relay; test fails on any byte), pause/resume on path loss, resume after daemon restart, destination refuses unlimited on hosted relay. |
+
+## F23. Multi-account hosts (PLAN 3b)
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F23-01 | Two OS users on one Linux host, each with its own account, use machines at the same time: distinct addresses for the same slot, one gateway routed by the caller's uid, short names per user, neither can reach or receive the other's traffic. | [ ] | [ ] | [ ] | Owner: Lane A (guard, daemon), Lane Q (per-account slots). Done: one refused listener skips only that item (TestCoordinatorRefusedListenerSkipsOnlyThatItem, 5080a29b). Device: two OS users in one pbvm2 container. |
+| F23-02 | Gateway attribution fails closed: unknown uid, closed peer, ambiguous or reused tuple under churn are refused, never misrouted; root and system users get the refusal page. | [ ] | [ ] | [ ] | Owner: Lane A. Tests to write in machineguard (Linux INET_DIAG). |
+| F23-03 | Claims are released only from a complete verified set, held 7 days for their previous owner, adopted per entry from legacy state; a server outage with a truncated or empty answer releases nothing. | [ ] | [ ] | [ ] | Owner: Lane A. Tests to write: 600 machines come and go; 10-min outage then empty list. |
+| F23-04 | macOS multi-user (pcblist_n so_uid attribution under the 2 ms budget at 10,000 sockets, proven under churn on device). | [ ] | [ ] | [ ] | Owner: Lane A, after the user's macOS go. |
+
 ## P. Performance (PLAN 3b)
 
 | ID | Scenario | L | M | W | Evidence |
