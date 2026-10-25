@@ -2662,7 +2662,7 @@ Ruled out, with evidence:
 - List cursor: a real bug was found and fixed in 1fbfd9f2 (a request that finished after a later one was skipped),
   but that skips one record, not all of them.
 
-Still open: the edge answering the first requests before the new preview's route serves them (a no-cors fetch
+Edge side fixed (Lane M, 2026-10-26): a request to a preview admitted on the edge but not yet attached got a 404 (RouteState hides pending admissions); it now waits up to 3 s for the route, else 503 `preview_starting` with Retry-After 1 (TestAdmittedPreviewWaitsForItsRouteInsteadOfNotFound). Still open: the edge answering the first requests before the new preview's route serves them (a no-cors fetch
 resolves on an edge error too), or the carrier's run restarting (its exit Revokes the policy and captures). The
 check now reports unsent requests, stops when nothing arrives, and leaves capture on. ~/lanei/loop.sh logs the
 origin's hits and the daemon's own list (pb preview inspect), so the next occurrence names the side.

@@ -59,7 +59,10 @@ type Config struct {
 	Readiness                interface {
 		RouteState(string) (string, string, string, bool)
 	}
-	HelperAccess interface {
+	// PreviewPending, when set, reports a preview host the server has admitted on this edge but
+	// whose carrier route is not attached yet; its requests wait for it instead of a 404.
+	PreviewPending func(host string) bool
+	HelperAccess   interface {
 		VerifyHelperAccess(context.Context, string) (admission.Claims, error)
 	}
 	Revocations interface {
@@ -251,6 +254,32 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		// The reason is deliberately generic: it never carries the underlying cause.
 		writer.Header().Set("X-Paperboat-Error", "upstream_unavailable")
 		http.Error(writer, upstreamUnavailableMessage, http.StatusBadGateway)
+	}
+}
+
+const previewStartingMessage = "This preview is starting. Retry in a moment."
+
+// previewStartingWait bounds how long a request to an admitted preview waits for its route.
+const previewStartingWait = 3 * time.Second
+
+// awaitPreviewRoute rechecks an admitted preview's route until it attaches, the request ends or
+// previewStartingWait passes.
+func (p *Policy) awaitPreviewRoute(ctx context.Context, host string) (string, string, string, bool) {
+	deadline := time.NewTimer(previewStartingWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", "", "", false
+		case <-deadline.C:
+			return "", "", "", false
+		case <-tick.C:
+			if kind, state, reason, found := p.config.Readiness.RouteState(host); found {
+				return kind, state, reason, true
+			}
+		}
 	}
 }
 
@@ -496,6 +525,14 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			kind, state, reason, found = string(matched.Rule.Kind), matched.Rule.ObservedState, matched.Rule.Reason, true
 		} else if p.config.Readiness != nil {
 			kind, state, reason, found = p.config.Readiness.RouteState(host)
+			if !found && p.config.PreviewPending != nil && p.config.PreviewPending(host) {
+				if kind, state, reason, found = p.awaitPreviewRoute(r.Context(), host); !found {
+					w.Header().Set("X-Paperboat-Error", "preview_starting")
+					w.Header().Set("Retry-After", "1")
+					http.Error(w, previewStartingMessage, http.StatusServiceUnavailable)
+					return
+				}
+			}
 		} else if matched.Rule.ID != "" {
 			kind, state, found = string(matched.Rule.Kind), "ready", true
 		}

@@ -53,3 +53,19 @@ func TestExpectedAdmissionIndexByCarrierIdentity(t *testing.T) {
 		t.Fatal("index not rebuilt on change")
 	}
 }
+
+func TestExpectsNamesOnlyUnexpiredAdmittedHosts(t *testing.T) {
+	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	now := time.Now()
+	registry.mu.Lock()
+	registry.byKey["a"] = ExpectedAdmission{Hostname: "fresh.preview.example.test", ExpiresAt: now.Add(time.Minute)}
+	registry.byKey["b"] = ExpectedAdmission{Hostname: "old.preview.example.test", ExpiresAt: now.Add(-time.Second)}
+	registry.mu.Unlock()
+	if !registry.Expects("fresh.preview.example.test", now) || registry.Expects("old.preview.example.test", now) || registry.Expects("other.preview.example.test", now) || registry.Expects("", now) {
+		t.Fatal("Expects answered wrongly")
+	}
+}

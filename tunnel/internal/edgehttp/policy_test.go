@@ -1112,3 +1112,42 @@ func TestFormatForwardedUsesSafeAddressForms(t *testing.T) {
 		}
 	}
 }
+
+// Lane I (PLAN 3b, first-preview miss): a request to a preview the server admitted on this edge
+// waits for its carrier route instead of getting a 404; one that does not attach in time gets a
+// 503 the caller can retry, and an unknown preview still gets an immediate 404.
+func TestAdmittedPreviewWaitsForItsRouteInsteadOfNotFound(t *testing.T) {
+	var ready atomic.Bool
+	var reached atomic.Int32
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1024,
+		Readiness: readinessFunc(func(host string) (string, string, bool) {
+			if host == "fresh.preview.example.test" && ready.Load() {
+				return "ready", "", true
+			}
+			return "", "", false
+		}),
+		PreviewPending: func(host string) bool { return host != "unknown.preview.example.test" },
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached.Add(1); w.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string) (*httptest.ResponseRecorder, time.Duration) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		started := time.Now()
+		policy.ServeHTTP(recorder, request)
+		return recorder, time.Since(started)
+	}
+	time.AfterFunc(200*time.Millisecond, func() { ready.Store(true) })
+	if got, took := serve("fresh.preview.example.test"); got.Code != http.StatusNoContent || reached.Load() != 1 || took < 150*time.Millisecond {
+		t.Fatalf("admitted preview: status %d after %s, reached %d", got.Code, took, reached.Load())
+	}
+	if got, took := serve("unknown.preview.example.test"); got.Code != http.StatusNotFound || took > 100*time.Millisecond {
+		t.Fatalf("unknown preview: status %d after %s", got.Code, took)
+	}
+	got, took := serve("stuck.preview.example.test")
+	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_starting" || got.Header().Get("Retry-After") != "1" || took < previewStartingWait || reached.Load() != 1 {
+		t.Fatalf("preview that never attaches: status %d %q after %s", got.Code, got.Header().Get("X-Paperboat-Error"), took)
+	}
+}

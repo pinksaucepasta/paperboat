@@ -456,6 +456,22 @@ func (r *ExpectedAdmissionRegistry) Remove(admission ExpectedAdmission) error {
 	return nil
 }
 
+// Expects reports whether an unexpired admission names host: the server has admitted that
+// route here, whether or not its carrier has attached it yet.
+func (r *ExpectedAdmissionRegistry) Expects(host string, now time.Time) bool {
+	if r == nil || host == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, admission := range r.byKey {
+		if admission.Hostname == host && now.Before(admission.ExpiresAt) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *ExpectedAdmissionRegistry) Snapshot() []ExpectedAdmission {
 	if r == nil {
 		return nil
