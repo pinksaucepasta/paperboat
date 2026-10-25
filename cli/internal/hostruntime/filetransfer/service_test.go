@@ -1116,3 +1116,16 @@ func TestInboxChangeKeepsPublishedHistoryAndUsesNewDestination(t *testing.T) {
 		t.Fatalf("retried history duplicated content: entries=%d err=%v", len(entries), err)
 	}
 }
+
+// PLAN 3b File transfer modes: an Automatic credential signs max_bytes = the declared batch total; a batch that
+// declares more than that is refused (a sender cannot declare less to the server and send more).
+func TestCreateHonorsTheSignedMaxBytes(t *testing.T) {
+	service, _, _ := newService(t)
+	files := []File{{Basename: "a.bin", Size: 600, SHA256: digest(nil)}, {Basename: "b.bin", Size: 400, SHA256: digest(nil)}}
+	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-ok", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 1000}); err != nil {
+		t.Fatalf("batch at the signed bound refused: %v", err)
+	}
+	if _, err := service.Create(context.Background(), CreateRequest{BatchID: "signed-over", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses", Files: files, MaxBytes: 999}); !hasCode(err, BatchLimit) {
+		t.Fatalf("batch over the signed bound err=%v", err)
+	}
+}

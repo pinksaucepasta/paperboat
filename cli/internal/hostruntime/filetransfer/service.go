@@ -162,6 +162,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 	transfers := make([]store.FileTransfer, len(request.Files))
 	var total int64
 	maxFile, maxBatch := policy.Bounds()
+	if request.MaxBytes > 0 {
+		maxFile, maxBatch = min(maxFile, request.MaxBytes), min(maxBatch, request.MaxBytes)
+	}
 	for i, file := range request.Files {
 		if !validBasename(file.Basename) {
 			return nil, &Error{Code: InvalidPath}

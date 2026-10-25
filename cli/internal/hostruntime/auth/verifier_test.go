@@ -267,3 +267,26 @@ func signToken(t *testing.T, h header, c Claims, key ed25519.PrivateKey) string 
 	first := base64.RawURLEncoding.EncodeToString(hb) + "." + base64.RawURLEncoding.EncodeToString(cb)
 	return first + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(first)))
 }
+
+// PLAN 3b File transfer modes: the server may sign transfer_mode and max_bytes; the destination accepts exactly
+// automatic with 0 < max_bytes <= 2,000,000,000, unlimited without max_bytes, or neither.
+func TestVerifierAcceptsOnlyValidTransferModeClaims(t *testing.T) {
+	fixture, private, public := loadFixture(t)
+	keys := &keySource{keys: map[string]ed25519.PublicKey{"test-key-1": public}}
+	v := Verifier{Keys: keys, Clock: fixedClock{time.Unix(fixture.Claims.IssuedAt+1, 0)}, ClockSkew: time.Minute}
+	for _, test := range []struct {
+		mode string
+		max  int64
+		ok   bool
+	}{
+		{"", 0, true}, {"automatic", 1, true}, {"automatic", AutomaticTransferLimit, true}, {"unlimited", 0, true},
+		{"automatic", 0, false}, {"automatic", AutomaticTransferLimit + 1, false}, {"unlimited", 5, false}, {"", 5, false}, {"bulk", 0, false},
+	} {
+		claims := fixture.Claims
+		claims.TransferMode, claims.MaxBytes = test.mode, test.max
+		got, err := v.Verify(context.Background(), signToken(t, fixture.Header, claims, private), terminalPolicy(fixture.Claims))
+		if (err == nil) != test.ok || err == nil && (got.TransferMode != test.mode || got.MaxBytes != test.max) {
+			t.Fatalf("mode=%q max=%d: err=%v claims=%q/%d", test.mode, test.max, err, got.TransferMode, got.MaxBytes)
+		}
+	}
+}

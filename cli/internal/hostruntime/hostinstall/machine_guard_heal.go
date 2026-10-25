@@ -5,7 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
-		"time"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"

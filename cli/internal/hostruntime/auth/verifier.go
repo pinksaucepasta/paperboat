@@ -108,8 +108,12 @@ type Claims struct {
 	EdgeNodeID             string              `json:"edge_node_id,omitempty"`
 	RouteBinding           string              `json:"route_binding,omitempty"`
 	FileTransferPolicy     *FileTransferPolicy `json:"file_transfer_policy,omitempty"`
-	CounterEpoch           string              `json:"counter_epoch,omitempty"`
-	Confirmation           *struct {
+	// TransferMode and MaxBytes bind a file_transfer credential to its mode (PLAN 3b, File transfer modes):
+	// "automatic" carries MaxBytes, the declared batch total (at most AutomaticTransferLimit); "unlimited" has none.
+	TransferMode string `json:"transfer_mode,omitempty"`
+	MaxBytes     int64  `json:"max_bytes,omitempty"`
+	CounterEpoch string `json:"counter_epoch,omitempty"`
+	Confirmation *struct {
 		JKT string `json:"jkt"`
 	} `json:"cnf,omitempty"`
 }
@@ -242,6 +246,9 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	var claims Claims
 	if err := decodeSegment(parts[1], &claims); err != nil {
 		return Claims{}, &Error{Code: Malformed, Cause: err}
+	}
+	if !validTransferModeClaims(claims) {
+		return Claims{}, &Error{Code: Malformed}
 	}
 	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_inspector_operation" {
 		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
@@ -446,4 +453,18 @@ func ValidateAdmitted(claims Claims, policy Policy) error {
 		return &Error{Code: ScopeInvalid}
 	}
 	return nil
+}
+
+// validTransferModeClaims accepts a credential without a transfer mode, an automatic one bounded by
+// 0 < max_bytes <= AutomaticTransferLimit, and an unlimited one without max_bytes.
+func validTransferModeClaims(claims Claims) bool {
+	switch claims.TransferMode {
+	case "":
+		return claims.MaxBytes == 0
+	case "automatic":
+		return claims.MaxBytes > 0 && claims.MaxBytes <= AutomaticTransferLimit
+	case "unlimited":
+		return claims.MaxBytes == 0
+	}
+	return false
 }

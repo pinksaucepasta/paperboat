@@ -93,6 +93,8 @@ type CreateRequest struct {
 	SessionID            string
 	DeliveryClientID     string
 	Files                []File
+	// MaxBytes is the credential's signed bound on the batch total (Automatic), 0 when it carries none.
+	MaxBytes int64
 }
 
 type Config struct {
