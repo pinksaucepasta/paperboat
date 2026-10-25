@@ -1767,6 +1767,48 @@ lifetime.
 Owners: Lane R (relay derpquic, CLI tailnet), Lane B (server signing, topic publish). Keep MaxMergedPeers
 2,048 until design 1 lands.
 
+#### Direct paths without a relay: peer endpoints in the signed peer configuration (N5; Lane R design, Lane B server first; coordinator 2026-10-26)
+
+**Why.** Two machines on one LAN cannot connect natively while no relay is usable. The first contact resolves
+a relay region and exchanges endpoints only through the relay (meow + disco CallMeMaybe over DERP,
+`native/owner.go:249` PrepareRegional before Dial, `mesh/engine_backend.go` advertiseEndpointsTo), so with no
+relay the dial fails before any packet (staging, Lane W 2026-10-26). That breaks the P2P promise during a relay
+outage, and it makes every first contact pay a relay round trip.
+
+**Prior art.** Tailscale's client reports its endpoints in each MapRequest (`tailcfg.MapRequest.Endpoints`;
+control/controlclient/direct.go). Control hands every peer's endpoints to the others in the netmap
+(`tailcfg.Node.Endpoints`, changes as `PeersChangedPatch`). magicsock disco-pings them directly
+(wgengine/magicsock/endpoint.go updateFromNode), and DERP is only one of the paths.
+
+**Contract (server first; the client accepts the field before the server sends it, as signed documents decode
+strictly).**
+1. *Report.* The peer-network configuration request (`POST /v1/machine-peer-network/config` and
+   `/v1/peer-network/config`, and the delta `/changes` request) carries `endpoints`: the engine's own candidate
+   addresses as `ip:port` strings. These are local interface addresses, the STUN-mapped public address and a
+   port-mapped address, at most 8, sorted, deduplicated. The server stores them per peer-network identity and
+   writes only when the set changed.
+2. *Publish, bounded.* A changed set moves `peer_network` for the endpoint's audience. The publish is coalesced
+   per endpoint to at most one every 60 s; a set that flaps waits. With deltas, a change costs each peer one
+   small `update` entry.
+3. *Deliver.* Each peer entry of the signed configuration gains `endpoints` (omitempty) beside `identity` and
+   `scopes`. An entry without endpoints serializes as today, so the delta digest vectors stay valid. Only peers
+   the policy already lets the endpoint reach or be reached by receive them, as for every other field. LAN
+   addresses are visible to those peers, as in Tailscale.
+4. *Client.* An engine reports when its endpoint set changes (debounced 5 s, at most one report per 30 s) and
+   with every renewal. It puts each peer's endpoints in that peer's netmap node (`tailcfg.Node.Endpoints`), so
+   magicsock pings them at once. The first contact then no longer requires a relay: a failed PrepareRegional is
+   fatal only when the peer has no endpoints. Relay and direct are tried at the same time, and the first to
+   answer wins.
+
+**Tests.** (a) Workspace: two engines on one host, no relay candidates, each peer's endpoints in the other's
+signed configuration; a native dial succeeds over a direct path within 2 s. Without the endpoints it fails, as
+today. (b) Device: two containers on one pbvm2 bridge with every relay withheld (no regional candidates, or the
+relay UDP/TCP dropped); `pb exec` and `pb ping` work both ways and `pb ping` reports direct. (c) PG (Lane B): an
+unchanged endpoint report makes no write, and a flapping set publishes at most once per 60 s.
+
+Owners: Lane B (report storage, publish coalescing, signed field), Lane R (client report, netmap endpoints,
+first contact without a relay).
+
 #### Scale matrix, end to end per feature (Lane W, from 2026-10-23)
 
 Targets: one machine with 100 concurrent terminals; one shared terminal with 50 viewers; an account with 1,000
