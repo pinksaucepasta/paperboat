@@ -108,14 +108,23 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 	now := s.now().UTC()
 	identity, err := s.controlSigner.VerifyCredentialWithExpiryGrace(credential, s.issuer, "machine_control", now, time.Hour)
 	if err != nil {
-		return MachineControlCredential{}, ErrMachineControlInvalid
+		var verification mint.CredentialVerificationError
+		if errors.As(err, &verification) {
+			return MachineControlCredential{}, controlRejected("credential_" + string(verification.Code))
+		}
+		return MachineControlCredential{}, controlRejected("credential_invalid")
 	}
 	machine, err := s.db.Queries().GetActiveUserMachineForControl(ctx, identity.MachineID)
 	if err != nil {
 		return MachineControlCredential{}, machineControlLookupError(err)
 	}
-	if machine.UserID != identity.UserID || machine.EnvironmentID != identity.EnvironmentID || machine.InstallationGeneration != identity.InstallationGeneration || machineKeyThumbprint(machine) != identity.KeyThumbprint {
-		return MachineControlCredential{}, ErrMachineControlInvalid
+	switch {
+	case machine.InstallationGeneration != identity.InstallationGeneration:
+		return MachineControlCredential{}, controlRejected("installation_generation_moved")
+	case machineKeyThumbprint(machine) != identity.KeyThumbprint:
+		return MachineControlCredential{}, controlRejected("machine_key_changed")
+	case machine.UserID != identity.UserID || machine.EnvironmentID != identity.EnvironmentID:
+		return MachineControlCredential{}, controlRejected("binding_mismatch")
 	}
 	current, err := s.db.Queries().GetCurrentMachineControlSession(ctx, dbsqlc.GetCurrentMachineControlSessionParams{
 		MachineID: machine.ID, InstallationGeneration: machine.InstallationGeneration,
@@ -128,13 +137,44 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 		return MachineControlCredential{}, err
 	}
 	if current.SessionGeneration != identity.SessionGeneration {
-		return MachineControlCredential{}, ErrMachineControlInvalid
+		return MachineControlCredential{}, controlRejected("session_superseded")
 	}
 	claims, err := verifyMachineProof(machine, proof, method, path, body, now)
 	if err != nil {
-		return MachineControlCredential{}, err
+		return MachineControlCredential{}, controlReason("proof", err)
 	}
-	return s.mintMachineControl(ctx, machine, claims.OperationID)
+	out, err := s.mintMachineControl(ctx, machine, claims.OperationID)
+	return out, controlReason("mint", err)
+}
+
+// ControlRejection is a refused machine-control request with a fixed reason code (no credential or request
+// content), so a 401 log says which check refused it. It is ErrMachineControlInvalid for every caller.
+type ControlRejection struct{ Reason string }
+
+func (e ControlRejection) Error() string        { return "machine control rejected: " + e.Reason }
+func (e ControlRejection) Is(target error) bool { return target == ErrMachineControlInvalid }
+
+func controlRejected(reason string) error { return ControlRejection{Reason: reason} }
+
+// controlReason tags an untyped ErrMachineControlInvalid from a stage with that stage; other errors pass.
+func controlReason(stage string, err error) error {
+	var typed ControlRejection
+	if err == nil || errors.As(err, &typed) || !errors.Is(err, ErrMachineControlInvalid) {
+		return err
+	}
+	return controlRejected(stage + "_rejected")
+}
+
+// ControlRejectionReason is the reason code of a refused machine-control request, or "".
+func ControlRejectionReason(err error) string {
+	var typed ControlRejection
+	if errors.As(err, &typed) {
+		return typed.Reason
+	}
+	if errors.Is(err, ErrMachineControlInvalid) {
+		return "rejected"
+	}
+	return ""
 }
 
 // replayMachineControlRenewal answers a retry whose first attempt committed but
@@ -144,16 +184,22 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 func (s *Service) replayMachineControlRenewal(ctx context.Context, machine dbsqlc.UserMachine, presentedJTI string, proof, body []byte, method, path string, now time.Time) (MachineControlCredential, error) {
 	claims, err := verifyMachineProof(machine, proof, method, path, body, now)
 	if err != nil {
-		return MachineControlCredential{}, ErrMachineControlInvalid
+		return MachineControlCredential{}, controlRejected("replay_proof_rejected")
 	}
 	_, err = s.db.Queries().GetReplayableMachineControlRenewal(ctx, dbsqlc.GetReplayableMachineControlRenewalParams{
 		PreviousCredentialJti: presentedJTI, OperationID: claims.OperationID, MachineID: machine.ID,
 		InstallationGeneration: machine.InstallationGeneration, Now: now,
 	})
-	if err != nil {
-		return MachineControlCredential{}, machineControlLookupError(err)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The presented credential is no longer the current session's, and no renewal with this operation
+		// replaced it: a credential that was rotated away (or a different operation id).
+		return MachineControlCredential{}, controlRejected("credential_not_current")
 	}
-	return s.mintMachineControl(ctx, machine, claims.OperationID)
+	if err != nil {
+		return MachineControlCredential{}, err
+	}
+	out, err := s.mintMachineControl(ctx, machine, claims.OperationID)
+	return out, controlReason("replay_mint", err)
 }
 
 func machineControlLookupError(err error) error {

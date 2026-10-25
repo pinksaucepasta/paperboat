@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -61,7 +64,10 @@ func machineControlRenew(service *usermachines.Service) http.HandlerFunc {
 		}
 		result, err := service.RenewMachineControl(r.Context(), strings.TrimSpace(credential), proof, body, r.Method, r.URL.Path)
 		if err != nil {
-			if expectedHTTPErrorOnly(err, usermachines.ErrMachineControlInvalid) {
+			var rejection usermachines.ControlRejection
+			if errors.As(err, &rejection) || expectedHTTPErrorOnly(err, usermachines.ErrMachineControlInvalid) {
+				// A fixed reason code (no credential or request content) names the check that refused it.
+				serverdiagnostics.LoggerWithRequest(r.Context(), slog.Default()).WarnContext(r.Context(), "machine control renewal rejected", "reason", usermachines.ControlRejectionReason(err))
 				logHTTPRejection(r, http.StatusUnauthorized, "machine_control_credential_invalid", err)
 				writeError(w, r, http.StatusUnauthorized, "machine_control_credential_invalid", "Machine control credential or proof was rejected.")
 			} else {
