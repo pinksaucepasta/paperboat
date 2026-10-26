@@ -1725,6 +1725,7 @@ type NativeUsageAuthority struct {
 	ExpiresAt              time.Time
 	RetainUntil            time.Time
 	ActorAccountID         sql.NullString
+	AttachedUntil          sql.NullTime
 }
 
 type NativeUsageReportingStatus struct {

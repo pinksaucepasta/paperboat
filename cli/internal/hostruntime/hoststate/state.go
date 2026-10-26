@@ -286,7 +286,7 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 		if route.OriginScheme == "tcp" {
 			return ErrInvalidState
 		}
-	case "tcp_private":
+	case "tcp_private", "tcp", "tls":
 		if route.OriginScheme != "tcp" {
 			return ErrInvalidState
 		}

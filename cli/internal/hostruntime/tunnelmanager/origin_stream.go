@@ -56,10 +56,18 @@ type OriginStreamForwarder struct {
 	InspectorHTTP    AuthenticatedInspectorHTTP
 	Registry         *inspector.Registry
 	CaptureIdentity  *CaptureIdentity
-	// ReadinessProbes: the edge confirms this carrier's routes with connector_ready streams. Routes
-	// with an ingress authority always are; engine tunnel routes (PLAN 3a step 4) have none but are
-	// confirmed the same way.
-	ReadinessProbes bool
+	// EngineRoutes: the routes ride the agent's runtime carrier (PLAN 3a step 4). The edge
+	// confirms them with connector_ready streams; a public stream (HTTP or tcp_public) carries no
+	// ingress decision, and only an http_browser stream does, checked with IngressAuthority (4.4).
+	EngineRoutes bool
+	// Restricted: the engine tunnel is team or private, so every stream must be an http_browser
+	// stream with a decision the agent re-checks; a plain public stream is refused.
+	Restricted bool
+}
+
+// opaqueTCP reports a public TCP or TLS passthrough route: its streams are bytes to a tcp origin.
+func opaqueTCP(route hoststate.TunnelConfigRoute) bool {
+	return route.Protocol == "tcp" || route.Protocol == "tls"
 }
 
 // CaptureIdentity is the product resource identity for inspector capture and
@@ -171,7 +179,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			continue
 		}
 		route, ok := routes[open.RouteID]
-		if ok && open.Kind == "connector_ready" && (f.IngressAuthority != nil || f.ReadinessProbes) {
+		if ok && open.Kind == "connector_ready" && (f.IngressAuthority != nil || f.EngineRoutes) {
 			// Local origin probing has already passed before this generation
 			// starts accepting streams. This confirms that exact ready carrier;
 			// it cannot forward payloads or initiate an origin probe.
@@ -181,12 +189,12 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			_ = stream.Close()
 			continue
 		}
-		if !ok || !(route.Protocol == "http" && validOriginStreamKind(open.Kind) || route.Protocol == "tcp" && open.Kind == "tcp_public" && f.IngressAuthority != nil) {
+		if !ok || !(route.Protocol == "http" && validOriginStreamKind(open.Kind) || opaqueTCP(route) && open.Kind == "tcp_public" && (f.IngressAuthority != nil || f.EngineRoutes)) {
 			logOriginStreamFailure(ctx, "route_binding", ErrInvalidConfig)
 			_ = stream.Close()
 			continue
 		}
-		if open.Kind == "http_browser" && f.IngressAuthority == nil {
+		if open.Kind == "http_browser" && f.IngressAuthority == nil || f.Restricted && open.Kind != "http_browser" {
 			_ = stream.Close()
 			continue
 		}
@@ -205,7 +213,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			stopCancel := context.AfterFunc(ctx, func() { _ = stream.Close() })
 			defer stopCancel()
 			streamCtx := ctx
-			if f.IngressAuthority != nil {
+			if f.IngressAuthority != nil && (!f.EngineRoutes || open.Kind == "http_browser") {
 				authorized, release, err := f.admitIngress(ctx, stream, open, route)
 				if err != nil {
 					return
@@ -214,7 +222,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 				streamCtx = authorized
 			}
 			bounded := idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}
-			if route.Protocol == "tcp" {
+			if opaqueTCP(route) {
 				_ = f.serveTCP(streamCtx, bounded, route)
 			} else {
 				_ = f.serveHTTP(streamCtx, bounded, route, transport)

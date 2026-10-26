@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	"io"
 	"net"
 	"sync/atomic"
@@ -323,5 +324,30 @@ func TestForwardPublicTCPOnAnEngineCarrierSendsNoDecisionPreface(t *testing.T) {
 	_ = stream.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := io.ReadFull(stream, head); err != nil || string(head) != "SSH-2.0-" {
 		t.Fatalf("engine stream starts with %q (%v), not the client's bytes", head, err)
+	}
+}
+
+// PLAN 3a 4.4: on an engine carrier a restricted HTTP stream (one admitted by a viewer's browser
+// decision) opens as http_browser so the agent reads and re-checks the decision; public streams and
+// connector carriers keep their protocol's kind.
+func TestEngineRestrictedHTTPStreamsOpenAsHTTPBrowser(t *testing.T) {
+	browser := context.WithValue(context.Background(), browserDecisionKey{}, connectorprotocol.IngressDecision{})
+	engine, connectorEntry := &dataCarrierRouteEntry{}, &dataCarrierRouteEntry{}
+	engine.state.Engine = true
+	httpRule := route.RouteRule{Protocol: "http"}
+	for _, c := range []struct {
+		ctx   context.Context
+		entry *dataCarrierRouteEntry
+		rule  route.RouteRule
+		want  string
+	}{
+		{browser, engine, httpRule, "http_browser"},
+		{context.Background(), engine, httpRule, "http"},
+		{browser, connectorEntry, httpRule, "http"},
+		{browser, engine, route.RouteRule{Protocol: "tcp"}, "tcp_private"},
+	} {
+		if got := routeStreamKind(c.ctx, c.entry, c.rule); got != c.want {
+			t.Errorf("routeStreamKind(engine=%v, %s) = %s, want %s", c.entry.state.Engine, c.rule.Protocol, got, c.want)
+		}
 	}
 }

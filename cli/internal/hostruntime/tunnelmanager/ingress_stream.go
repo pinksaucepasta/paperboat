@@ -236,7 +236,7 @@ func validateIngressHTTPRequest(ctx context.Context, r *http.Request) error {
 }
 
 func (f OriginStreamForwarder) serveTCP(ctx context.Context, stream io.ReadWriteCloser, route hoststate.TunnelConfigRoute) error {
-	if f.IngressAuthority == nil || route.Protocol != "tcp" || route.OriginScheme != "tcp" {
+	if f.IngressAuthority == nil || !opaqueTCP(route) || route.OriginScheme != "tcp" {
 		return connectorprotocol.ErrIngressDenied
 	}
 	dialer := f.Transport.Dialer

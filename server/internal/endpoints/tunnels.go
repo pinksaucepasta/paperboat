@@ -17,14 +17,14 @@ AND NOT EXISTS(SELECT 1 FROM runtime_carrier_attachments a LEFT JOIN control_tun
  WHERE a.machine_id=$1 AND a.expires_at>now() AND (NOT a.agent_capabilities @> ARRAY['endpoints','tunnel_endpoints']::text[]
  OR n.tunnel_endpoints_epoch IS DISTINCT FROM a.edge_process_epoch))`
 
-// engineTunnel is the SQL predicate (over tunnels t) for a live tunnel the engine can serve now.
-// Its routes are all public HTTP: TCP, TLS and private TCP ride on agent carriers in 3a step 4.4,
-// and a private or team route needs the agent's own ingress authority for engine routes first. A
-// tunnel moves as a whole, so a tunnel with any other route keeps its connector.
+// engineTunnel is the SQL predicate (over tunnels t) for a live tunnel the engine can serve now:
+// its routes are HTTP (any access; a restricted stream carries the edge's browser decision, which
+// the agent re-checks) or public TCP or TLS passthrough. Private TCP keeps its connector until the
+// accessor path moves (3a step 4.4). A tunnel moves as a whole.
 const engineTunnel = liveTunnel + ` AND t.stable_endpoint LIKE 'https://_%' AND NOT EXISTS(SELECT 1 FROM tunnel_routes o
 LEFT JOIN current_tunnel_route_viewer_policy v ON v.route_id=o.id
 WHERE o.tunnel_id=t.id AND o.desired_state='active' AND o.deleted_at IS NULL
-AND (o.protocol<>'http' OR coalesce(v.effective_access_mode,t.access_mode)<>'public'))`
+AND o.protocol<>'http' AND (o.protocol NOT IN ('tcp','tls') OR coalesce(v.effective_access_mode,t.access_mode)<>'public'))`
 
 // SyncAgentTunnelsTx makes the machine's tunnel endpoints match its tunnels: while its agent serves
 // tunnels, every live tunnel it created is an endpoint with one endpoint route per active route;
@@ -73,7 +73,7 @@ AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID); err
 	// The route's id is the tunnel route's id, so the edge, the agent and accounting name it the same
 	// way on both paths; its revision follows the route generation.
 	if _, err := tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,revision,tunnel_route_id)
-SELECT tr.id,e.id,lower(substring(t.stable_endpoint from 9)),'http',tr.generation,tr.id
+SELECT tr.id,e.id,lower(substring(t.stable_endpoint from 9)),tr.protocol,tr.generation,tr.id
 FROM endpoints e JOIN tunnels t ON t.id=e.tunnel_id JOIN tunnel_routes tr ON tr.tunnel_id=t.id AND tr.desired_state='active' AND tr.deleted_at IS NULL
 WHERE e.kind='tunnel' AND e.agent_machine_id=$1
 ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision WHERE endpoint_routes.revision<>EXCLUDED.revision`, machineID); err != nil {

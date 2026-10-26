@@ -154,9 +154,9 @@ LIMIT 4097`
 // id names the tunnel route. Parameters: now, edge node, edge epoch, audience, route, hostname.
 const engineTunnelIngressSQL = `
 SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.generation,r.id,r.generation,ra.machine_id,m.installation_generation,
- publication.hostname,COALESCE(r.path_prefix,'/'),r.origin_scheme,r.origin_address,
+ publication.hostname,CASE WHEN r.protocol IN ('tcp','tls') THEN '' ELSE COALESCE(r.path_prefix,'/') END,r.origin_scheme,r.origin_address,
  r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),
- '',0,r.protocol,
+ COALESCE(r.public_tcp_listener_id,''),COALESCE(r.public_tcp_port,0),r.protocol,
  publication.publication_id,publication.publication_generation,
  x.edge_node_id,x.edge_process_epoch,(ra.admission->'binding'->>'connector_id'),ra.session_id,ra.worker_generation,
  (ra.admission->'binding'->>'config_generation')::bigint,x.generation,viewer_policy.viewer_policy_generation,
@@ -194,9 +194,11 @@ WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND n
  AND viewer_policy.effective_access_mode=$4
  AND ($5::text='' OR r.id=$5)
  AND ($6::text='' OR publication.hostname=$6)
- AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol='http'
+ AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol IN ('http','tcp','tls')
+ AND (r.protocol<>'tls' OR r.match_hostname=substring(t.stable_endpoint from 9))
  AND (r.match_type IN ('managed','exact') OR ($4<>'public' AND r.match_type='catch_all'))
- AND r.origin_scheme IN ('http','https','h2c') AND r.tls_verification IN ('not_applicable','system','custom_ca')
+ AND ((r.protocol='http' AND r.origin_scheme IN ('http','https','h2c')) OR (r.protocol IN ('tcp','tls') AND r.origin_scheme='tcp'))
+ AND r.tls_verification IN ('not_applicable','system','custom_ca')
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN ('pending','revoked','deleted')
  AND m.seat_state='occupied' AND m.public_identity_key=ra.public_identity_key
  AND identity.issued_at<=$1 AND identity.expires_at>$1

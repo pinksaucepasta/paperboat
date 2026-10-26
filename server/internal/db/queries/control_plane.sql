@@ -1586,7 +1586,7 @@ SELECT ('epa_' || x.route_id)::text,
        x.edge_node_id,
        x.edge_process_epoch,
        node.failure_domain::text,
-       'tunnel_http_wss',
+       (CASE tr.protocol WHEN 'tls' THEN 'tunnel_tls' WHEN 'tcp' THEN 'tunnel_tcp' ELSE 'tunnel_http_wss' END)::text,
        (CASE WHEN tr.match_type = 'one_label_wildcard' THEN '*.' || tr.wildcard_suffix
              WHEN tr.match_type = 'catch_all' THEN substring(t.stable_endpoint from 9)
              ELSE COALESCE(tr.match_hostname, '') END)::text,
@@ -1607,7 +1607,9 @@ SELECT ('epa_' || x.route_id)::text,
          SELECT jsonb_agg(jsonb_build_object('id', d.id, 'hostname', d.hostname, 'match_type', d.match_type, 'generation', d.generation) ORDER BY d.hostname, d.id)
          FROM tunnel_domains AS d
          WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND d.ownership_state = 'verified'
-           AND d.certificate_state = 'ready' AND d.conflict_state = 'clear'
+           AND ((tr.protocol = 'tls' AND d.certificate_strategy = 'none' AND d.certificate_state = 'not_applicable' AND d.match_type = 'exact')
+             OR (tr.protocol <> 'tls' AND d.certificate_state = 'ready'))
+           AND d.conflict_state = 'clear'
        ), '[]'::jsonb)::text,
        'active',
        CASE WHEN x.observed_ready THEN 'ready' ELSE 'pending' END,
@@ -1639,7 +1641,7 @@ WHERE x.edge_node_id = sqlc.arg(edge_node_id)
   AND node.tunnel_endpoints_epoch = x.edge_process_epoch
   AND t.desired_state = 'active' AND t.deleted_at IS NULL
   AND (t.expires_at IS NULL OR t.expires_at > sqlc.arg(now))
-  AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol = 'http'
+  AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol IN ('http', 'tcp', 'tls')
   AND paperboat.runtime_carrier_valid(ra.route_id, ra.edge_node_id, ra.edge_process_epoch, false)
   AND node.process_epoch = x.edge_process_epoch
   AND node.state = 'ready' AND node.ready = true

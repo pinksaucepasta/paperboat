@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -139,5 +140,88 @@ func waitFor(t *testing.T, ctx context.Context, condition func() bool) {
 			t.Fatal("condition not reached")
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+// PLAN 3a step 4.4: a public TCP route on the engine gets the edge's tcp_public stream with no
+// decision preface and reaches its tcp origin; on a private engine tunnel a plain stream (no
+// browser decision) is refused before the origin.
+func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	tcpOrigin, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcpOrigin.Close()
+	go func() {
+		for {
+			c, err := tcpOrigin.Accept()
+			if err != nil {
+				return
+			}
+			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
+		}
+	}()
+	var httpHits atomic.Int32
+	httpOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { httpHits.Add(1) }))
+	defer httpOrigin.Close()
+	route := func(id, protocol, scheme, address string) string {
+		return fmt.Sprintf(`{"id":%q,"name":%q,"protocol":%q,"match_type":"catch_all","path_prefix":null,"origin_scheme":%q,"origin_address":%q,"preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}`, id, id, protocol, scheme, address)
+	}
+	tunnel := func(id, access, routes string) runtimewire.EngineTunnel {
+		payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":1,"name":%q,"desired_state":"active","access_mode":%q,"stable_endpoint":"https://brave-blue-beacon-0421.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[%s]}`, id, id, access, routes)
+		snapshot, err := hoststate.NewConfigSnapshot(id, 1, []byte(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runtimewire.EngineTunnel{TunnelID: id, ConfigGeneration: 1, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload)}
+	}
+	list := []runtimewire.EngineTunnel{
+		tunnel("tunnel_tcp", "public", route("route_tcp", "tcp", "tcp", tcpOrigin.Addr().String())),
+		tunnel("tunnel_private", "private", route("route_private", "http", "http", strings.TrimPrefix(httpOrigin.URL, "http://"))),
+	}
+	tunnels := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		body, _ := json.Marshal(map[string]any{"data": map[string]any{"tunnels": list}})
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+	})
+	service, edge := startConnectedRuntimeCarrierWith(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK },
+		func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }, tunnels)
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}}
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(context.Background())
+	waitFor(t, ctx, func() bool { return engine.Served("tunnel_tcp") && engine.Served("tunnel_private") })
+	hubs, _ := service.Hubs()
+	identity := hubs[0].Identity()
+	open := func(routeID, kind string) io.ReadWriteCloser {
+		stream, err := edge.OpenStream(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := connector.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: routeID, RequestID: "request_" + uuid.NewString(), Kind: kind}
+		if err := connectorprotocol.WriteStreamOpen(stream, o); err != nil {
+			t.Fatal(err)
+		}
+		return stream
+	}
+	tcp := open("route_tcp", "tcp_public")
+	if _, err := io.WriteString(tcp, "ping"); err != nil {
+		t.Fatal(err)
+	}
+	echo := make([]byte, 4)
+	if _, err := io.ReadFull(tcp, echo); err != nil || string(echo) != "ping" {
+		t.Fatalf("public TCP through the engine: %q %v", echo, err)
+	}
+	_ = tcp.Close()
+	plain := open("route_private", "https")
+	_, _ = io.WriteString(plain, "GET / HTTP/1.1\r\nHost: brave-blue-beacon-0421.tunnel.example.test\r\nConnection: close\r\n\r\n")
+	if response, err := http.ReadResponse(bufio.NewReader(plain), nil); err == nil {
+		response.Body.Close()
+		t.Fatalf("a plain stream on a private engine tunnel got %d", response.StatusCode)
+	}
+	if httpHits.Load() != 0 {
+		t.Fatal("a plain stream on a private engine tunnel reached the origin")
 	}
 }

@@ -76,16 +76,18 @@ type EngineTunnels struct {
 	// Events, when set, is the machine's tunnels topic; a tunnels change refetches at once.
 	Events *machineevents.Subscription
 
-	mu      sync.Mutex
-	tunnels map[string]engineTunnel
-	routes  map[engineRouteKey]*engineRoute
-	cancel  context.CancelFunc
-	done    chan struct{}
+	mu             sync.Mutex
+	browserIngress tunnelmanager.IngressAuthorityFunc
+	tunnels        map[string]engineTunnel
+	routes         map[engineRouteKey]*engineRoute
+	cancel         context.CancelFunc
+	done           chan struct{}
 }
 
 type engineTunnel struct {
 	generation uint64
 	hash       string
+	restricted bool
 	routes     []hoststate.TunnelConfigRoute
 }
 
@@ -119,6 +121,11 @@ func (e *EngineTunnels) Start(ctx context.Context) error {
 	if e.done != nil {
 		return errors.New("engine tunnels already started")
 	}
+	browserIngress, err := tunnelmanager.NewBrowserIngressAuthority(e.Service.config.ControlURL, e.Service.auth, e.Service.config.Transport)
+	if err != nil {
+		return err
+	}
+	e.browserIngress = browserIngress
 	runCtx, cancel := context.WithCancel(ctx)
 	e.cancel, e.done = cancel, make(chan struct{})
 	go func() { defer close(e.done); e.run(runCtx) }()
@@ -211,7 +218,7 @@ func decodeEngineTunnel(item runtimewire.EngineTunnel) (engineTunnel, error) {
 	if err != nil {
 		return engineTunnel{}, err
 	}
-	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash}
+	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public"}
 	if parsed.DesiredState != "active" {
 		return tunnel, nil
 	}
@@ -266,9 +273,13 @@ func (e *EngineTunnels) serve(ctx context.Context, hub *preview.DataCarrierPrevi
 	if err != nil {
 		return nil, err
 	}
-	// The edge confirms an engine route with a connector_ready stream before it serves it.
+	// The edge confirms an engine route with a connector_ready stream before it serves it; a
+	// viewer's stream on a team or private route carries the edge's browser decision, re-checked
+	// with the server before the origin is reached (PLAN 3a 4.4).
 	forwarder := e.Forwarder
-	forwarder.ReadinessProbes = true
+	forwarder.EngineRoutes = true
+	forwarder.IngressAuthority = e.browserIngress
+	forwarder.Restricted = tunnel.restricted
 	streams, err := forwarder.StartFrom(ctx, registration, hub.Identity(), []hoststate.TunnelConfigRoute{route})
 	if err != nil {
 		_ = registration.Close()

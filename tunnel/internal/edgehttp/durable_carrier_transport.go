@@ -493,7 +493,7 @@ func (r *DataCarrierRouteRegistry) OpenRouteStream(ctx context.Context, rule rou
 		AccountID: entry.identity.AccountID, TunnelID: entry.identity.TunnelID, ConnectorID: entry.identity.ConnectorID,
 		SessionID: entry.identity.SessionID, ProcessGeneration: entry.identity.ProcessGeneration,
 		Generation: entry.identity.Generation, RouteID: carrierRouteID(rule), RequestID: requestID,
-		Kind: durableStreamKind(rule.Protocol),
+		Kind: routeStreamKind(ctx, entry, rule),
 	}
 	openContext, cancel := context.WithTimeout(ctx, defaultDataCarrierRouteOpenTimeout)
 	defer cancel()
@@ -641,6 +641,16 @@ func (r *DataCarrierRouteRegistry) ProbePrivateRoutes(ctx context.Context, rules
 		}
 	}
 	return nil
+}
+
+// routeStreamKind is the stream kind for rule on entry. On an agent's runtime carrier a stream
+// admitted by a viewer's browser decision is http_browser: it carries the decision preface the
+// agent re-checks with the server, while a public stream carries none (PLAN 3a 4.4).
+func routeStreamKind(ctx context.Context, entry *dataCarrierRouteEntry, rule route.RouteRule) string {
+	if _, browser := ctx.Value(browserDecisionKey{}).(connectorprotocol.IngressDecision); browser && entry.state.Engine && rule.Protocol == "http" {
+		return "http_browser"
+	}
+	return durableStreamKind(rule.Protocol)
 }
 
 func durableStreamKind(protocol string) string {
@@ -844,7 +854,7 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 		AccountID: entry.identity.AccountID, TunnelID: entry.identity.TunnelID, ConnectorID: entry.identity.ConnectorID,
 		SessionID: entry.identity.SessionID, ProcessGeneration: entry.identity.ProcessGeneration,
 		Generation: entry.identity.Generation, RouteID: carrierRouteID(rule), RequestID: requestID,
-		Kind: durableStreamKind(rule.Protocol),
+		Kind: routeStreamKind(openCtx, entry, rule),
 	}
 	decision, err := r.ingressDecision(openCtx, rule, open)
 	if err != nil {
