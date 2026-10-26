@@ -4970,3 +4970,6 @@ Exact output/result tunnel-private-access-8f6a24c4-20261027.json sent to Merger;
 2026-10-27 | SDK lane C126/F20-03 verification | hp dev-3468410e SHA dd950c78 installed both/preserved identities; server .114/edge .26.10: private access still refuses, public TCP create fails, TLS initial create waits then fails partial. Rows unticked; exact outputs sent to Merger.
 Same-pair tunnel-manage/preview-manage now FAIL creation (prior8f6a24c4/.112/.26.9 PASS); status tunnel_pending/logs3 captured before deletion. Results tunnel-private-access-, tunnel-public-protocols-, tunnel-preview-manage-3468410e-20261027.json under tools/device-smoke/results/.
 Test tunnels/origins/certificates/probes removed, failed preview is stopped, paired machines retained; no product edits. Waits for Merger fixes; echo/TLS handshake/M/W not reached.
+
+2026-10-27 | SDK lane settled-edge rerun | Merger-requested ONCE tunnel-manage/preview-manage on unchanged hp dev346/server .114/edges .26.10: both still FAIL creation, support_777f1d8c/support_14468e36.
+Exact outputs sent; result tools/device-smoke/results/tunnel-preview-manage-stable-3468410e-20261027.json. No further retries/product edits; pair retained, fixture cleanup ran.
