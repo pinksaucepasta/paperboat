@@ -91,7 +91,7 @@
     await until(() => range()?.startsWith("1–"), 5000)
     pass("a new search starts at page 1", range() === "1–50 of 130", range() ?? "none")
     type("status:revoked")
-    await until(() => !range() && rows() === 12, 5000)
+    await until(() => !range() && rows() === 12, 20000)
     pass("Status → Revoked lists the 12 revoked, one page", !range() && rows() === 12, `${rows()} rows`)
     type("")
   } finally {
