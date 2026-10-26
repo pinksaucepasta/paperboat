@@ -158,9 +158,10 @@ type PortProbe struct {
 }
 
 // ProbePort asks the control plane to connect to this node's public address on port and expect nonce
-// echoed back by a listener the caller has opened there.
+// echoed back by a listener the caller has opened there. dir is the installation state directory; the
+// tunnel component's runtime files live in its "tunnel" subdirectory.
 func ProbePort(ctx context.Context, dir string, port int, nonce string) (PortProbe, error) {
-	node, err := newNodeClient("tunnel", dir)
+	node, err := newNodeClient("tunnel", filepath.Join(dir, "tunnel"))
 	if err != nil {
 		return PortProbe{}, err
 	}

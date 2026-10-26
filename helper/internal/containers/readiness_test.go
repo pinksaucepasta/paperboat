@@ -74,3 +74,39 @@ func TestNodeReadinessRejectsRedirectOtherIdentityAndOversizedResponse(t *testin
 		t.Fatal("runtime credential followed a cross-origin redirect")
 	}
 }
+
+func TestProbePortReadsTheTunnelComponentDirectoryAndDecodesTheResult(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Port  int    `json:"port"`
+			Nonce string `json:"nonce"`
+		}
+		if r.Method != "POST" || r.URL.Path != "/v1/selfhost/port-probe" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("c", 48) || json.NewDecoder(r.Body).Decode(&in) != nil || in.Port != 25000 || in.Nonce != "nonce" {
+			t.Errorf("probe request lost its exact shape: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(400)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"reachable":false,"detail":"timeout","future_field":1}}`))
+	}))
+	defer server.Close()
+	stateDir := t.TempDir()
+	dir := filepath.Join(stateDir, "tunnel")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	caPath := filepath.Join(dir, "control-ca.pem")
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal([]string{"-node-id", "node_x", "-control-url", server.URL})
+	deployment, _ := json.Marshal(map[string]string{"control_url": server.URL, "control_ca_file": caPath})
+	for name, content := range map[string][]byte{"runtime.args": args, "deployment.json": deployment, "runtime.credential": []byte(strings.Repeat("c", 48))} {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ProbePort(context.Background(), stateDir, 25000, "nonce")
+	if err != nil || got.Reachable || got.Detail != "timeout" {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+}
