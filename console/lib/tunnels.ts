@@ -97,25 +97,6 @@ export const tunnelsPageQuery = (options: { workspace: string; q: string; page: 
     refetchInterval: 15_000,
   })
 
-/** The workspace's previews, live and ended. Leases count down, so the list stays fresh. */
-export const previewsQuery = (workspace: string) =>
-  queryOptions({
-    queryKey: tunnelKeys.previews(workspace),
-    queryFn: () => allPages<Preview>("previews", { workspace }),
-    refetchInterval: 10_000,
-  })
-
-/** The workspace's tunnels. Deleted ones are tombstones the server keeps; they are not shown. */
-export const tunnelsQuery = (workspace: string) =>
-  queryOptions({
-    queryKey: tunnelKeys.tunnels(workspace),
-    queryFn: async () => {
-      const page = await allPages<Tunnel>("tunnels", { workspace })
-      return { ...page, items: page.items.filter((tunnel) => tunnel.desired_state !== "deleted") }
-    },
-    refetchInterval: 15_000,
-  })
-
 export const tunnelQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.tunnel(id),

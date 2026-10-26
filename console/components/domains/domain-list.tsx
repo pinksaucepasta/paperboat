@@ -9,7 +9,6 @@ import {
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
-import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, useWorkspace } from "@/lib/api"
@@ -24,17 +23,9 @@ import {
   setPrimaryDomain,
   useMachineDomains,
 } from "@/lib/machine-domains"
-import {
-  domainsQuery,
-  hostOf,
-  previewsQuery,
-  tunnelsQuery,
-  type Preview,
-  type Tunnel,
-  type TunnelDomain,
-} from "@/lib/tunnels"
+import { domainsPageQuery, domainUsesQuery } from "@/lib/domain-list"
 import { cn } from "@/lib/utils"
-import { domainStates } from "@/components/tunnels/tunnel-hostnames"
+import { HostnameList, HostnameOwner } from "@/components/domains/hostname-list"
 import { CopyText } from "@/components/copy-button"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
@@ -75,17 +66,14 @@ function State({ tone, label, busy }: { tone: Tone; label: string; busy?: boolea
   )
 }
 
-/** One domain with everything that uses it. */
+/** One domain name, and how many tunnel and preview hostnames use it (server totals). */
 type Entryish = {
   name: string
-  /** A hostname published by a tunnel (verified there), as opposed to a machine domain. */
-  tunnelDomain?: TunnelDomain
   /** Paperboat's own machine domain, which can't be removed. */
   managed: boolean
   machines: boolean
   primary: boolean
-  hostnames: { domain: TunnelDomain; tunnel: Tunnel }[]
-  previews: { hostname: string; preview: Preview }[]
+  uses?: { tunnels: number; previews: number }
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -93,15 +81,14 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 function usedFor(entry: Entryish) {
   const uses = [
     entry.machines && "Machine addresses",
-    entry.hostnames.length > 0 && plural(entry.hostnames.length, "tunnel hostname", "tunnel hostnames"),
-    entry.previews.length > 0 && plural(entry.previews.length, "preview", "previews"),
+    entry.uses && entry.uses.tunnels > 0 && plural(entry.uses.tunnels, "tunnel hostname", "tunnel hostnames"),
+    entry.uses && entry.uses.previews > 0 && plural(entry.uses.previews, "preview", "previews"),
   ].filter(Boolean)
   return uses.length ? uses.join(", ") : "Not used yet"
 }
 
 function ownership(entry: Entryish): { tone: Tone; label: string } {
   if (entry.managed) return { tone: "ok", label: "Paperboat’s" }
-  if (entry.tunnelDomain) return domainStates[entry.tunnelDomain.state]
   return { tone: "ok", label: "Yours" }
 }
 
@@ -109,37 +96,26 @@ export function DomainList() {
   const workspace = useWorkspace()
   const ws = workspace?.id ?? ""
   const machineDomains = useMachineDomains()
-  const tunnels = useApiQuery({ ...tunnelsQuery(ws), enabled: Boolean(workspace) })
-  const bindings = useQueries({ queries: (tunnels.data?.items ?? []).map((tunnel) => domainsQuery(tunnel.id)) })
-  const previews = useApiQuery({ ...previewsQuery(ws), enabled: Boolean(workspace) })
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string>()
 
-  const hostnames = (tunnels.data?.items ?? []).flatMap((tunnel, index) =>
-    (bindings[index]?.data ?? []).map((domain) => ({ domain, tunnel })),
-  )
-  const previewNames = (previews.data?.items ?? [])
-    .filter((preview) => preview.state !== "expired" && preview.state !== "stopped")
-    .flatMap((preview) => preview.domains.map((domain) => ({ hostname: domain.hostname, preview })))
-
-  // Machine domains (kept in this browser until the server stores them), then tunnel hostnames
-  // that no machine domain covers.
-  const machineNames = [
-    ...machineDomains.domains.filter((domain) => domain.managed).map((domain) => domain.name),
-    ...machineDomains.domains.filter((domain) => !domain.managed).map((domain) => domain.name),
+  // Machine domains (kept in this browser until the server stores them), Paperboat's first; each
+  // shows how many tunnel and preview hostnames use it. Every hostname is paged below.
+  const domains = [
+    ...machineDomains.domains.filter((domain) => domain.managed),
+    ...machineDomains.domains.filter((domain) => !domain.managed),
   ]
-  const loose = hostnames.filter(({ domain }) => !machineNames.some((name) => isUnder(domain.hostname, name)))
-  const names = [...machineNames, ...new Set(loose.map(({ domain }) => domain.hostname))]
-  const entries: Entryish[] = names.map((name) => ({
-    name,
-    tunnelDomain: loose.find(({ domain }) => domain.hostname === name)?.domain,
-    managed: machineDomains.domains.some((domain) => domain.name === name && domain.managed),
-    machines: machineDomains.domains.some((domain) => domain.name === name),
-    primary: machineDomains.primary === name,
-    hostnames: hostnames.filter(({ domain }) => domain.hostname === name || isUnder(domain.hostname, name)),
-    previews: previewNames.filter(({ hostname }) => isUnder(hostname, name)),
+  const uses = useQueries({
+    queries: domains.map((domain) => ({ ...domainUsesQuery(ws, domain.name), enabled: Boolean(workspace) })),
+  })
+  const entries: Entryish[] = domains.map((domain, index) => ({
+    name: domain.name,
+    managed: domain.managed,
+    machines: true,
+    primary: machineDomains.primary === domain.name,
+    uses: uses[index]?.data,
   }))
   const shown = entries.filter((entry) => !text || entry.name.includes(text))
   const selected = entries.find((entry) => entry.name === open)
@@ -180,26 +156,13 @@ export function DomainList() {
       {text && !shown.length && (
         <p className="py-12 text-center text-sm text-muted-foreground">No domains match “{search.trim()}”</p>
       )}
-      {(tunnels.isError || previews.isError) && (
-        <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-          Couldn’t load everything that uses your domains.
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (tunnels.isError) void tunnels.refetch()
-              if (previews.isError) void previews.refetch()
-            }}
-          >
-            Retry
-          </Button>
-        </div>
-      )}
-      {!text && !entries.length && tunnels.isSuccess && previews.isSuccess && (
+      {!text && !entries.length && (
         <p className="py-12 text-center text-sm text-muted-foreground">
           No domains yet. Add one to give your previews and tunnels an address on your own name.
         </p>
       )}
+
+      <HostnameList />
 
       {adding && (
         <AddDomainDialog
@@ -322,61 +285,10 @@ function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => v
         <State tone={state.tone} label={state.label} />
       </SheetHeader>
       <div className="flex flex-col gap-8 overflow-y-auto p-6">
-        {entry.tunnelDomain && (
-          <PanelSection title="Tunnel hostname">
-            <p className="text-sm text-muted-foreground">
-              Its DNS record and verification are on the tunnel that publishes it.
-            </p>
-          </PanelSection>
-        )}
-
         {entry.machines && <MachineAddresses entry={entry} />}
 
-        <PanelSection title="Tunnels">
-          {entry.hostnames.length ? (
-            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-              {entry.hostnames.map(({ domain, tunnel }) => (
-                <li key={domain.id} className="flex min-h-11 items-center gap-3 text-sm">
-                  <span className="min-w-0 flex-1 truncate font-mono text-code">{domain.hostname}</span>
-                  <Link
-                    href={`/tunnels/${encodeURIComponent(tunnel.id)}`}
-                    className="shrink-0 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                  >
-                    {tunnel.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Use names like app.{entry.name} or *.{entry.name} from a tunnel’s Public hostnames.
-            </p>
-          )}
-        </PanelSection>
-
-        <PanelSection title="Previews">
-          {entry.previews.length ? (
-            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-              {entry.previews.map(({ hostname, preview }) => (
-                <li key={hostname} className="flex min-h-11 items-center gap-3 text-sm">
-                  <a
-                    href={`https://${hostname}`}
-                    target="_blank"
-                    rel="noopener"
-                    className="min-w-0 flex-1 truncate font-mono text-code underline-offset-4 hover:underline"
-                  >
-                    {hostname}
-                  </a>
-                  <span className="shrink-0 font-mono text-code text-muted-foreground">
-                    {hostOf(preview.endpoint).split(".")[0]}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">New previews can use addresses like demo.{entry.name}.</p>
-          )}
-        </PanelSection>
+        <DomainUses name={entry.name} kind="tunnel" />
+        <DomainUses name={entry.name} kind="preview" />
 
         {entry.machines && !entry.managed && (
           <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
@@ -396,6 +308,38 @@ function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => v
       </div>
       <RemoveDomain entry={entry} open={removing} onOpenChange={setRemoving} onRemoved={onRemoved} />
     </>
+  )
+}
+
+/** The tunnel or preview hostnames under a domain name: the server's first page, and how many in all. */
+function DomainUses({ name, kind }: { name: string; kind: "tunnel" | "preview" }) {
+  const workspace = useWorkspace()
+  const list = useApiQuery({
+    ...domainsPageQuery({ workspace: workspace?.id ?? "", q: name, page: 1, kind }),
+    enabled: Boolean(workspace),
+  })
+  const items = (list.data?.items ?? []).filter((item) => item.domain.hostname === name || isUnder(item.domain.hostname, name))
+  const more = (list.data?.total ?? 0) - (list.data?.items.length ?? 0)
+  return (
+    <PanelSection title={kind === "tunnel" ? "Tunnels" : "Previews"}>
+      {items.length ? (
+        <ul className="flex flex-col divide-y divide-divider border-y border-divider">
+          {items.map((item) => (
+            <li key={item.domain.id} className="flex min-h-11 items-center gap-3 text-sm">
+              <span className="min-w-0 flex-1 truncate font-mono text-code">{item.domain.hostname}</span>
+              <HostnameOwner item={item} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {kind === "tunnel"
+            ? `Use names like app.${name} or *.${name} from a tunnel’s Public hostnames.`
+            : `New previews can use addresses like demo.${name}.`}
+        </p>
+      )}
+      {more > 0 && <p className="text-xs text-muted-foreground">And {more} more under Tunnel and preview hostnames.</p>}
+    </PanelSection>
   )
 }
 
