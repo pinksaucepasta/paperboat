@@ -163,23 +163,19 @@ func setViewerPolicyServingState(ctx context.Context, tx *db.Tx, policy *ViewerP
 	var readyAssignments, oldPublicWithinGrantLifetime int64
 	err := tx.QueryRow(ctx, `
 SELECT current.effective_access_mode,current.viewer_policy_generation,
-       count(a.assignment_id) FILTER (
-         WHERE a.state='active' AND a.observed_state='ready'
-           AND a.access_mode=current.effective_access_mode
-           AND a.viewer_policy_generation=current.viewer_policy_generation
-       ),
-       count(a.assignment_id) FILTER (
-         WHERE current.effective_access_mode IN ('private','team')
-           AND a.access_mode='public' AND a.state<>'detached'
-           AND COALESCE(viewer.updated_at,t.updated_at)+interval '10 seconds' > $4
-       )
+       count(x.route_id) FILTER (WHERE x.desired='active' AND x.observed_ready),
+       -- Tunnels ride the endpoint engine (PLAN 3a): an edge's public decision lives at most 10 s,
+       -- so a served route made private or team is fenced for 10 s after the change.
+       count(x.route_id) FILTER (WHERE x.desired='active' AND current.effective_access_mode IN ('private','team')
+         AND COALESCE(viewer.updated_at,t.updated_at)+interval '10 seconds' > $4)
 FROM tunnels t
 JOIN tunnel_routes r ON r.tunnel_id=t.id
 JOIN current_tunnel_route_viewer_policy current ON current.route_id=r.id
 LEFT JOIN browser_viewer_policies viewer
   ON viewer.resource_kind='tunnel' AND viewer.resource_id=t.id AND viewer.route_id=r.id
  AND viewer.owner_account_id=t.account_id
-LEFT JOIN tunnel_edge_route_assignments a ON a.route_id=r.id
+LEFT JOIN endpoint_routes er ON er.tunnel_route_id=r.id
+LEFT JOIN endpoint_edge_assignments x ON x.route_id=er.id
 WHERE t.id=$1 AND r.id=$2 AND t.account_id=$3
 GROUP BY current.effective_access_mode,current.viewer_policy_generation,viewer.updated_at,t.updated_at`,
 		policy.ResourceID, policy.RouteID, policy.OwnerAccountID, now).Scan(&effectiveMode, &effectiveGeneration, &readyAssignments, &oldPublicWithinGrantLifetime)
