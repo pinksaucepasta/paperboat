@@ -1012,6 +1012,7 @@ test_application_pairs ssh-doctor ssh_doctor_lifecycle.py
 test_application_pairs ssh-alias ssh_alias_lifecycle.py
 test_application_pairs inventory-freshness inventory_freshness.py
 test_application_pairs inbox-manage inbox_manage.py
+test_device_application update-observation update_observation.py
 test_inbox_approval
 test_private_access
 test_fresh_pair_access
