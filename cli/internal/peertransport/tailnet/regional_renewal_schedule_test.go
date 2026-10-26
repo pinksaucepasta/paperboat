@@ -20,11 +20,11 @@ func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
 		nodes []RegionalNode
 		want  time.Duration
 	}{
-		{"fresh at issuance", []RegionalNode{at(0, 0)}, 12 * time.Second},
-		{"five seconds old", []RegionalNode{at(5, 5)}, 7 * time.Second},
-		{"earliest node decides", []RegionalNode{at(1, 1), at(6, 2)}, 6 * time.Second},
-		{"older capacity observation decides", []RegionalNode{at(2, 8)}, 4 * time.Second},
-		{"already old stays bounded", []RegionalNode{at(13, 13)}, regionalMinimumRenewal},
+		{"fresh at issuance", []RegionalNode{at(0, 0)}, 57 * time.Second},
+		{"five seconds old", []RegionalNode{at(5, 5)}, 52 * time.Second},
+		{"earliest node decides", []RegionalNode{at(1, 1), at(6, 2)}, 51 * time.Second},
+		{"older capacity observation decides", []RegionalNode{at(2, 8)}, 49 * time.Second},
+		{"already old stays bounded", []RegionalNode{at(58, 58)}, regionalMinimumRenewal},
 	} {
 		if got := regionalRenewalAfter(c.nodes, now); got != c.want {
 			t.Errorf("%s: renew after %v, want %v", c.name, got, c.want)
@@ -42,11 +42,11 @@ func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
 func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	now := time.Now()
-	// Observed 10 s ago: it ends in 5 s, so the renewal is due after the 4 s minimum.
+	// Observed 55 s ago: it ends in 5 s, so the renewal is due after the 4 s minimum.
 	a.regional = &RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
 		NodeID: "relay_renewal", NodeGeneration: 1, ProcessEpoch: "epoch_renewal", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
+		State: "ready", ObservedAt: now.Unix() - 55, CapacityObservedAt: now.Unix() - 55, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
 	}}}
 	a.mu.Lock()
 	a.relay.mu.Lock()

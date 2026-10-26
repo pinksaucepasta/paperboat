@@ -149,8 +149,11 @@ func (a *Authority) RegionalNodes(now time.Time) ([]RegionalNode, error) {
 }
 
 // regionalObservationMaxAge is how old a signed health or capacity observation may be for its
-// node to be selected; an older one withdraws the node until the configuration is renewed.
-const regionalObservationMaxAge = 15 * time.Second
+// node to be selected; an older one withdraws the node until the configuration is renewed. It matches the
+// server's relay registry lease and candidate-set lifetime (1 minute): at 15 s every engine had to renew about
+// every 12 s to keep a relay, and a busy client still lost its relay in half of its pb status samples
+// (hp 2026-10-27). A relay that dies within the minute is noticed on the client's own connection.
+const regionalObservationMaxAge = time.Minute
 
 func (c *RegionalCandidates) Eligible(role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
 	if c == nil || c.ExpiresAt <= now.Unix() {
