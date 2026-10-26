@@ -76,6 +76,7 @@ func Open(cfg config.Database) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres dsn: %w", err)
 	}
+	poolConfig.ConnConfig.Tracer = boundedAcquire{queryObserver: observer, timeout: cmp.Or(cfg.AcquireTimeout, 3*time.Second)}
 	directConfig, err := newPoolConfig(cfg, cmp.Or(strings.TrimSpace(cfg.DirectDSN), cfg.DSN), directMaxConns, observer)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres direct dsn: %w", err)

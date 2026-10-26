@@ -152,6 +152,9 @@ type Database struct {
 	StatementTimeout         time.Duration `json:"statement_timeout"`
 	LockTimeout              time.Duration `json:"lock_timeout"`
 	IdleInTransactionTimeout time.Duration `json:"idle_in_transaction_timeout"`
+	// AcquireTimeout bounds the wait for a request-pool connection (0: 3 s): a full pool answers 503 with
+	// Retry-After instead of holding the request until its own deadline.
+	AcquireTimeout time.Duration `json:"acquire_timeout"`
 }
 
 // SendsStartupParams reports whether connections start with the session settings as startup parameters.

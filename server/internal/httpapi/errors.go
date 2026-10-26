@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5/pgconn"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -219,6 +221,10 @@ func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code,
 			break
 		}
 	}
+	if busy := saturation(r, causes); status == http.StatusInternalServerError && busy != "" {
+		status, code, message = http.StatusServiceUnavailable, busy, "The service is busy right now. Retry in a few seconds."
+		w.Header().Set("Retry-After", busyRetryAfter)
+	}
 	captureSupportFailure(r, status, code, sentry.NewStacktrace(), causes...)
 	if status >= 400 && status < 500 {
 		// A refusal's code is otherwise only in the response body; the request log
@@ -250,4 +256,27 @@ func writeClockSkew(w http.ResponseWriter, r *http.Request, err error) bool {
 func writeClockSkewAnswer(w http.ResponseWriter, r *http.Request) {
 	writeErrorDetails(w, r, http.StatusBadRequest, "clock_skew", "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.",
 		map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)})
+}
+
+// busyRetryAfter is the Retry-After of a busy answer, in seconds: about one lock or acquire bound.
+const busyRetryAfter = "2"
+
+// saturation names a failure that is the service being saturated rather than broken (F21-03), or "":
+// database_busy for a lock wait past lock_timeout (55P03), a statement past statement_timeout or cancelled
+// (57014) or no free server connection (53300); service_busy for a deadline that ended inside the request while
+// the request itself was still live (the request pool's acquire bound, or a bounded call to another service).
+// The request's own deadline is answered by the timeout middleware instead.
+func saturation(r *http.Request, causes []error) string {
+	for _, cause := range causes {
+		var pg *pgconn.PgError
+		if errors.As(cause, &pg) && (pg.Code == "55P03" || pg.Code == "57014" || pg.Code == "53300") {
+			return "database_busy"
+		}
+	}
+	for _, cause := range causes {
+		if errors.Is(cause, context.DeadlineExceeded) && r.Context().Err() == nil {
+			return "service_busy"
+		}
+	}
+	return ""
 }
