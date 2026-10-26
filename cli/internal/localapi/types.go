@@ -35,9 +35,15 @@ type FileTransferRequest struct {
 	AccessSessionID   string    `json:"access_session_id"`
 	Deadline          time.Time `json:"deadline"`
 	MaximumBytes      uint64    `json:"maximum_bytes"`
+	// TransferMode "unlimited" restricts the transfer's streams to a direct or self-hosted relay path (PLAN 3b
+	// File transfer modes); "" and "automatic" use any path.
+	TransferMode string `json:"transfer_mode,omitempty"`
 }
 
 func (r FileTransferRequest) Validate(now time.Time) error {
+	if r.TransferMode != "" && r.TransferMode != "automatic" && r.TransferMode != "unlimited" {
+		return ErrInvalidConfig
+	}
 	if r.Schema != FileTransferSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || !safeValue(r.AccessSessionID) || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || r.MaximumBytes > 1<<40 {
 		return ErrInvalidConfig
 	}

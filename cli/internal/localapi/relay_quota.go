@@ -15,6 +15,21 @@ const RelayQuotaCode = "bandwidth_quota_exhausted"
 // the CLI session's API token scope does not cover the target (F18-06).
 const TokenScopeCode = "outside_token_scope"
 
+// NoEligiblePathCode is the local API code for an Unlimited file transfer stream that was not opened (or was
+// closed) because the only path to the machine is a Paperboat-hosted relay or there is none. The sender waits
+// and resumes when a direct connection or the account's own relay returns.
+const NoEligiblePathCode = "no_eligible_path"
+
+// NoEligiblePathError is the daemon's refusal of an Unlimited stream; Path is the path kind it found.
+type NoEligiblePathError struct{ Path string }
+
+func (e *NoEligiblePathError) Error() string {
+	if e.Path == "hosted_relay" {
+		return "Waiting for a direct connection or your relay: only a Paperboat relay reaches this machine now"
+	}
+	return "Waiting for a direct connection or your relay: this machine is not reachable now"
+}
+
 // Refusal reports whether a local API code is a refusal whose message is shown as it is: the
 // connection was refused before anything was sent or started, and retrying does not help.
 func Refusal(code string) bool { return code == RelayQuotaCode || code == TokenScopeCode }
@@ -34,6 +49,11 @@ func writeServerRefusal(writer http.ResponseWriter, requestID string, err error)
 		message = coded.LocalAPIMessage()
 	case errors.As(err, &refused) && refused.Code == TokenScopeCode:
 		writeError(writer, http.StatusForbidden, requestID, TokenScopeCode, api.PublicMessage(TokenScopeCode))
+		return true
+	case errors.As(err, new(*NoEligiblePathError)):
+		var waiting *NoEligiblePathError
+		errors.As(err, &waiting)
+		writeError(writer, http.StatusServiceUnavailable, requestID, NoEligiblePathCode, waiting.Error())
 		return true
 	case errors.As(err, &refused) && refused.Code == RelayQuotaCode:
 		// The control plane refused the connection descriptor at the plan limit (exec, ssh, probe).

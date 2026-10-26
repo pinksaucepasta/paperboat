@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
@@ -22,6 +23,9 @@ type daemonTransferLease struct {
 	peer   localapi.Peer
 	opener tunnel.DirectTransferStreamOpener
 	closer io.Closer
+	// unlimited restricts the lease's streams to a direct or self-hosted relay path to machineID.
+	unlimited bool
+	machineID string
 }
 
 type transferLeaseCloser struct {
@@ -55,6 +59,8 @@ type FileTransferBroker struct {
 
 type nativeTransferPreparer interface {
 	PrepareNativeFileTransfer(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error)
+	// PathEligibility reports the path the engine uses to the machine and a channel closed on its next change.
+	PathEligibility(context.Context, string) (tailnet.PathKind, <-chan struct{})
 }
 
 func NewFileTransferBroker(peerTunnel nativeTransferPreparer) (*FileTransferBroker, error) {
@@ -112,7 +118,7 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 		_ = closer.Close()
 		return localapi.FileTransferResult{}, errors.New("native file transfer lease limit reached")
 	}
-	b.leases[handle] = daemonTransferLease{peer: peer, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}}
+	b.leases[handle] = daemonTransferLease{peer: peer, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}, unlimited: request.TransferMode == "unlimited", machineID: request.MachineID}
 	b.mu.Unlock()
 	return localapi.FileTransferResult{Handle: handle}, nil
 }
@@ -127,7 +133,62 @@ func (b *FileTransferBroker) OpenFileTransferStream(ctx context.Context, peer lo
 	if !ok {
 		return nil, localapi.ErrPermission
 	}
-	return lease.opener.OpenTransferStream(ctx)
+	if !lease.unlimited {
+		return lease.opener.OpenTransferStream(ctx)
+	}
+	return b.openEligibleStream(ctx, lease)
+}
+
+// eligiblePath reports whether an Unlimited transfer may use this path: never a Paperboat-hosted relay.
+func eligiblePath(kind tailnet.PathKind) bool {
+	return kind == tailnet.PathDirect || kind == tailnet.PathSelfHostedRelay
+}
+
+// openEligibleStream opens an Unlimited stream only on a direct or self-hosted relay path, and closes it as
+// soon as the path moves to a hosted relay or none (PLAN 3b File transfer modes). At most the bytes in flight
+// when the path changed cross the new path; the sender resumes from the committed offset when a path returns.
+func (b *FileTransferBroker) openEligibleStream(ctx context.Context, lease daemonTransferLease) (net.Conn, error) {
+	watch, stopWatch := context.WithCancel(context.Background())
+	kind, changed := b.tunnel.PathEligibility(watch, lease.machineID)
+	if !eligiblePath(kind) {
+		stopWatch()
+		return nil, &localapi.NoEligiblePathError{Path: string(kind)}
+	}
+	stream, err := lease.opener.OpenTransferStream(ctx)
+	if err != nil {
+		stopWatch()
+		return nil, err
+	}
+	guarded := &pathGuardedConn{Conn: stream, stop: stopWatch}
+	go func() {
+		for {
+			select {
+			case <-watch.Done():
+				return
+			case <-changed:
+			}
+			if watch.Err() != nil {
+				return
+			}
+			kind, changed = b.tunnel.PathEligibility(watch, lease.machineID)
+			if !eligiblePath(kind) {
+				_ = guarded.Close()
+				return
+			}
+		}
+	}()
+	return guarded, nil
+}
+
+// pathGuardedConn ends its path watch when the stream closes.
+type pathGuardedConn struct {
+	net.Conn
+	stop context.CancelFunc
+}
+
+func (c *pathGuardedConn) Close() error {
+	c.stop()
+	return c.Conn.Close()
 }
 
 func (b *FileTransferBroker) ReleaseFileTransfer(peer localapi.Peer, handle string) error {

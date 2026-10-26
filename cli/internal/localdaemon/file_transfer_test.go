@@ -3,12 +3,15 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -17,6 +20,39 @@ import (
 type transferPreparerFake struct {
 	direct   *transferDirectFake
 	lifetime chan context.Context
+	paths    *pathFake
+}
+
+func (f transferPreparerFake) PathEligibility(ctx context.Context, machineID string) (tailnet.PathKind, <-chan struct{}) {
+	if f.paths == nil {
+		return tailnet.PathDirect, ctx.Done()
+	}
+	return f.paths.current(ctx)
+}
+
+// pathFake is the engine's path to one machine; set changes it and wakes watchers.
+type pathFake struct {
+	mu      sync.Mutex
+	kind    tailnet.PathKind
+	changed chan struct{}
+}
+
+func newPathFake(kind tailnet.PathKind) *pathFake {
+	return &pathFake{kind: kind, changed: make(chan struct{})}
+}
+
+func (p *pathFake) current(context.Context) (tailnet.PathKind, <-chan struct{}) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.kind, p.changed
+}
+
+func (p *pathFake) set(kind tailnet.PathKind) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.kind = kind
+	close(p.changed)
+	p.changed = make(chan struct{})
 }
 
 func (f transferPreparerFake) PrepareNativeFileTransfer(lifetime context.Context, _ resolver.ConnectInfo, _ string) (tunnel.DirectTransferStreamOpener, error) {
@@ -26,12 +62,20 @@ func (f transferPreparerFake) PrepareNativeFileTransfer(lifetime context.Context
 	return f.direct, nil
 }
 
-type transferDirectFake struct{ closed bool }
+type transferDirectFake struct {
+	closed bool
+	// open keeps the far end of each stream open, draining what is written.
+	open bool
+}
 
 func (f *transferDirectFake) Close() error { f.closed = true; return nil }
-func (*transferDirectFake) OpenTransferStream(context.Context) (net.Conn, error) {
+func (f *transferDirectFake) OpenTransferStream(context.Context) (net.Conn, error) {
 	client, server := net.Pipe()
-	_ = server.Close()
+	if !f.open {
+		_ = server.Close()
+		return client, nil
+	}
+	go func() { _, _ = io.Copy(io.Discard, server) }()
 	return client, nil
 }
 
@@ -129,4 +173,50 @@ type nativeTransferPreparerFunc func(context.Context, resolver.ConnectInfo, stri
 
 func (f nativeTransferPreparerFunc) PrepareNativeFileTransfer(ctx context.Context, info resolver.ConnectInfo, operationID string) (tunnel.DirectTransferStreamOpener, error) {
 	return f(ctx, info, operationID)
+}
+
+func (nativeTransferPreparerFunc) PathEligibility(ctx context.Context, _ string) (tailnet.PathKind, <-chan struct{}) {
+	return tailnet.PathDirect, ctx.Done()
+}
+
+// PLAN 3b File transfer modes: an Unlimited stream never uses a Paperboat-hosted relay. It is refused while the
+// only path is one, opens on a direct path, and is closed the moment the path moves to a hosted relay.
+func TestUnlimitedTransferStreamsUseOnlyDirectOrOwnRelayPaths(t *testing.T) {
+	now := time.Unix(10_000, 0).UTC()
+	paths := newPathFake(tailnet.PathHostedRelay)
+	broker, err := NewFileTransferBroker(transferPreparerFake{direct: &transferDirectFake{open: true}, paths: paths})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = broker.Close() })
+	broker.now = func() time.Time { return now }
+	owner := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
+	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20, TransferMode: "unlimited"}
+	result, err := broker.PrepareFileTransfer(context.Background(), owner, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var waiting *localapi.NoEligiblePathError
+	if _, err := broker.OpenFileTransferStream(context.Background(), owner, result.Handle); !errors.As(err, &waiting) || waiting.Path != "hosted_relay" {
+		t.Fatalf("a stream opened over a hosted relay: %v", err)
+	}
+	paths.set(tailnet.PathDirect)
+	stream, err := broker.OpenFileTransferStream(context.Background(), owner, result.Handle)
+	if err != nil {
+		t.Fatalf("a direct path was refused: %v", err)
+	}
+	if _, err := stream.Write([]byte("x")); err != nil {
+		t.Fatalf("the direct stream did not carry data: %v", err)
+	}
+	paths.set(tailnet.PathHostedRelay)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := stream.Write([]byte("x")); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stream stayed open after the path moved to a hosted relay")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

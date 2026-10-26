@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"io"
 	"net"
 	"net/http"
@@ -50,6 +51,10 @@ type daemonNativeTransferPreparer struct{ opener *daemonNativeHTTPOpener }
 
 func (p daemonNativeTransferPreparer) PrepareNativeFileTransfer(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error) {
 	return p.opener, nil
+}
+
+func (daemonNativeTransferPreparer) PathEligibility(ctx context.Context, _ string) (tailnet.PathKind, <-chan struct{}) {
+	return tailnet.PathDirect, ctx.Done()
 }
 
 func daemonTestPaths(t *testing.T) localapi.Paths {
