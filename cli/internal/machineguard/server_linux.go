@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"golang.org/x/sys/unix"
 	"net"
 	"os"
@@ -68,6 +69,11 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		uid, err := strconv.ParseUint(l.uid, 10, 32)
 		if err != nil {
 			return errors.New("invalid Unix guard owner")
+		}
+		if l.ip == splitdns.BrowserGatewayIP {
+			// Any uid may connect to the gateway; the guard attributes each connection and refuses the rest.
+			fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\n", l.ip, l.port)
+			continue
 		}
 		fmt.Fprintf(&script, "ip daddr %s tcp dport %d meta skuid %d accept\n", l.ip, l.port, uid)
 	}
@@ -145,6 +151,9 @@ func (e linuxLegacyDNSCleanupError) Error() string { return e.message }
 func (e linuxLegacyDNSCleanupError) Unwrap() error { return e.cause }
 
 func shutdownListener(listener net.Listener) error {
+	if route, ok := listener.(*gatewayRoute); ok {
+		return route.release()
+	}
 	tcp, ok := listener.(*net.TCPListener)
 	if !ok {
 		return errors.Join(errors.New("machine guard listener lost kernel ownership"), listener.Close())

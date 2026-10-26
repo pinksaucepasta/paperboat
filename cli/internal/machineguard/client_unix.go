@@ -17,13 +17,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 type Client struct {
 	// claims records whether the guard answered status with FeatureAddressClaims.
 	claims atomic.Bool
-	mu     sync.Mutex
-	conn   *net.UnixConn
+	// gatewayRouting records whether the guard routes the browser gateway by OS user (FeatureGatewayRouting).
+	gatewayRouting atomic.Bool
+	mu             sync.Mutex
+	conn           *net.UnixConn
 }
 
 type peerIdentityError struct{ cause error }
@@ -154,7 +158,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 	return out, file, nil
 }
 func (c *Client) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
-	listener, _, err := c.acquire(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	in := request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port}
+	in.Handoff = hostname == splitdns.BrowserGatewayHostname && c.gatewayRouting.Load()
+	listener, _, err := c.acquire(ctx, in)
 	return listener, err
 }
 
@@ -198,7 +204,12 @@ func (c *Client) acquire(ctx context.Context, in request) (net.Listener, netip.A
 		return nil, netip.Addr{}, errors.New("machine guard returned no listener")
 	}
 	defer file.Close()
-	listener, err := net.FileListener(file)
+	var listener net.Listener
+	if in.Handoff {
+		listener, err = newHandoffListener(file, ip, port)
+	} else {
+		listener, err = net.FileListener(file)
+	}
 	if err != nil {
 		_, _, _ = c.exchange(context.Background(), request{Operation: "release", IP: ip.String(), Port: port})
 		return nil, netip.Addr{}, err
@@ -235,6 +246,7 @@ func (c *Client) Status(ctx context.Context) (RuntimeStatus, error) {
 		return RuntimeStatus{}, errors.New("machine guard returned no ready status")
 	}
 	c.claims.Store(slices.Contains(out.Status.Features, FeatureAddressClaims))
+	c.gatewayRouting.Store(slices.Contains(out.Status.Features, FeatureGatewayRouting))
 	return *out.Status, nil
 }
 func (c *Client) PrepareRangeChange(ctx context.Context, cidr string) error {
@@ -285,3 +297,71 @@ func (c *Client) Certificate(ctx context.Context, hostname string) (CertificateB
 	}
 	return *out.Certificate, nil
 }
+
+// handoffListener accepts the gateway connections the guard attributed to this OS user: each arrives as a
+// descriptor over the daemon's end of a socket pair (FeatureGatewayRouting).
+type handoffListener struct {
+	conn *net.UnixConn
+	addr net.Addr
+	mu   sync.Mutex // one Accept reads the pair at a time
+}
+
+func newHandoffListener(file *os.File, ip netip.Addr, port int) (net.Listener, error) {
+	conn, err := net.FileConn(file)
+	if err != nil {
+		return nil, err
+	}
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		conn.Close()
+		return nil, errors.New("machine guard returned no gateway route")
+	}
+	return &handoffListener{conn: unixConn, addr: net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, uint16(port)))}, nil
+}
+
+func (l *handoffListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for {
+		marker := make([]byte, 1)
+		oob := make([]byte, unix.CmsgSpace(4))
+		n, on, flags, _, err := l.conn.ReadMsgUnix(marker, oob)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = net.ErrClosed
+			}
+			return nil, err
+		}
+		if n == 0 {
+			return nil, net.ErrClosed
+		}
+		var file *os.File
+		messages, _ := unix.ParseSocketControlMessage(oob[:on])
+		for _, message := range messages {
+			fds, e := unix.ParseUnixRights(&message)
+			if e != nil {
+				continue
+			}
+			for _, fd := range fds {
+				unix.CloseOnExec(fd)
+				if file == nil && flags&unix.MSG_CTRUNC == 0 {
+					file = os.NewFile(uintptr(fd), "paperboat-gateway-connection")
+				} else {
+					unix.Close(fd)
+				}
+			}
+		}
+		if file == nil {
+			continue // a marker without a usable descriptor carries no connection
+		}
+		conn, err := net.FileConn(file)
+		file.Close()
+		if err != nil {
+			continue
+		}
+		return conn, nil
+	}
+}
+
+func (l *handoffListener) Close() error   { return l.conn.Close() }
+func (l *handoffListener) Addr() net.Addr { return l.addr }

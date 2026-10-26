@@ -58,6 +58,9 @@ type request struct {
 	Account  string   `json:"account,omitempty"`
 	Machine  string   `json:"machine,omitempty"`
 	Machines []string `json:"machines,omitempty"`
+	// Handoff asks for a gateway route instead of a listener: the daemon receives one end of a socket pair carrying
+	// each gateway connection attributed to its OS user (FeatureGatewayRouting).
+	Handoff bool `json:"handoff,omitempty"`
 }
 type response struct {
 	Certificate *CertificateBundle `json:"certificate,omitempty"`
@@ -90,6 +93,10 @@ type RuntimeStatus struct {
 // FeatureAddressClaims: acquire takes account and machine and answers with the assigned address; the claims
 // operation releases absent machines (PLAN 3b multi-account hosts).
 const FeatureAddressClaims = "address_claims"
+
+// FeatureGatewayRouting: the guard owns the browser gateway ports for every OS user and routes each connection
+// to its uid's daemon; a gateway acquire must set Handoff.
+const FeatureGatewayRouting = "gateway_routing"
 
 type NamePublisher interface {
 	ReplaceNames(context.Context, map[string]netip.Addr) error

@@ -133,7 +133,7 @@ func (c *unixControlConn) Receive() (request, error) {
 func (c *unixControlConn) Send(out response, listener net.Listener) error {
 	var rights []byte
 	if listener != nil {
-		file, err := listener.(*net.TCPListener).File()
+		file, err := listener.(interface{ File() (*os.File, error) }).File()
 		if err != nil {
 			return err
 		}

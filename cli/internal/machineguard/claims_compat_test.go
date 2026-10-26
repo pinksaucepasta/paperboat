@@ -2,6 +2,7 @@ package machineguard
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func TestGuardServesAMachineListenerRequestWithoutAccount(t *testing.T) {
 	if moved, err := g.assignClaim("1002", newer); err != nil || moved.IP == "127.100.0.7" {
 		t.Fatalf("a newer daemon of another uid was not given another address: ip=%q err=%v", moved.IP, err)
 	}
-	if status := g.runtimeStatus(); len(status.Features) != 1 || status.Features[0] != FeatureAddressClaims {
+	if status := g.runtimeStatus(); !slices.Contains(status.Features, FeatureAddressClaims) || slices.Contains(status.Features, FeatureGatewayRouting) != gatewayRouting {
 		t.Fatalf("status features=%v", status.Features)
 	}
 }

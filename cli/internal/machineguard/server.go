@@ -51,6 +51,7 @@ type guardServer struct {
 	reserved         reservations
 	claims           *claimBook
 	leases           map[string]*guardedLease
+	gateways         map[int]*sharedGateway
 	names            map[controlConn]map[string]string
 	aliases          map[controlConn]map[string]string
 	connections      map[controlConn]string
@@ -497,7 +498,7 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 			}
 		}
 	}
-	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...), Features: []string{FeatureAddressClaims}}
+	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...), Features: guardFeatures()}
 }
 
 // validName admits exactly one machine label beneath the owner's local access
@@ -615,6 +616,9 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, errors.New("machine loopback range change is pending")
 		}
 		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && gatewayPortAllowed(in.Port)
+		if gateway && gatewayRouting {
+			return g.acquireGatewayRoute(ctx, conn, uid, in)
+		}
 		domain, err := selectedBrowserDomain(g.cfg.StateDir, uid)
 		if err != nil && !gateway {
 			return nil, err
@@ -664,6 +668,9 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		}
 		return listener, nil
 	case "release":
+		if in.IP == splitdns.BrowserGatewayIP && gatewayRouting {
+			key = gatewayRouteKey(key, uid)
+		}
 		lease, ok := g.leases[key]
 		if !ok {
 			return nil, nil
@@ -849,4 +856,37 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 	}
 	in.IP = ip
 	return in, g.persist()
+}
+
+func guardFeatures() []string {
+	if gatewayRouting {
+		return []string{FeatureAddressClaims, FeatureGatewayRouting}
+	}
+	return []string{FeatureAddressClaims}
+}
+
+func gatewayRouteKey(key, uid string) string { return key + "#" + uid }
+
+// acquireGatewayRoute registers uid's daemon on a gateway port shared by every OS user (F23-01). Called under g.mu.
+func (g *guardServer) acquireGatewayRoute(ctx context.Context, conn controlConn, uid string, in request) (net.Listener, error) {
+	if !in.Handoff {
+		return nil, listenerRefusal{reason: "this machine guard routes the browser gateway by OS user; update pb for this user"}
+	}
+	key := gatewayRouteKey(net.JoinHostPort(in.IP, strconv.Itoa(in.Port)), uid)
+	if _, exists := g.leases[key]; exists {
+		return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
+	}
+	if len(g.leases) >= 8192 {
+		return nil, listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
+	}
+	route, err := g.routeGateway(ctx, uid, in.Port)
+	if err != nil {
+		return nil, fmt.Errorf("create protected listener: %w", err)
+	}
+	g.leases[key] = &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: route}
+	if err = g.applyRules(ctx); err != nil {
+		delete(g.leases, key)
+		return nil, errors.Join(err, shutdownListener(route))
+	}
+	return route, nil
 }
