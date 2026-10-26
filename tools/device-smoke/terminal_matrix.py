@@ -356,7 +356,7 @@ def black_hole(a, sessions):
         dropped, seen, detected, typed = time.monotonic(), len(c1.output), None, False
         try:
             while time.monotonic() - dropped < 60:
-                time.sleep(0.5)
+                c1.settle(0.5)  # reads the pty: output is only collected while reading
                 if detected is None and b'reconnect' in bytes(c1.output)[seen:].lower():
                     detected = time.monotonic() - dropped
                 if not typed and time.monotonic() - dropped >= 20:
