@@ -3,8 +3,10 @@
 package resolver
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -12,24 +14,21 @@ import (
 )
 
 var ErrTerminalInputQueueFull = errors.New("terminal input queue is full")
-var ErrTerminalInputUncertain = errors.New("terminal input delivery is uncertain")
 
 type TerminalInput struct {
 	Sequence uint64
 	Data     []byte
 }
 
-// TerminalInputQueue is shared by all transport attempts for one terminal.
-// It retains only bounded, unacknowledged input and never retransmits bytes on
-// its own. A reconnect reconciles entries against the host's durable cursor;
-// entries whose result cannot be recovered become uncertain and stop the
-// queue until the caller explicitly handles them.
+// TerminalInputQueue is shared by all transport attempts for one terminal. It
+// keeps input the host has not answered yet, so a reattach can deliver each
+// keystroke exactly once: the host refuses a sequence it has passed and
+// answers a repeat of its last one from its journal.
 type TerminalInputQueue struct {
-	mu        sync.Mutex
-	next      uint64
-	limit     int
-	pending   map[uint64]TerminalInput
-	uncertain bool
+	mu      sync.Mutex
+	next    uint64
+	limit   int
+	pending map[uint64]TerminalInput
 }
 
 func NewTerminalInputQueue(limit int) *TerminalInputQueue {
@@ -45,9 +44,6 @@ func (q *TerminalInputQueue) Enqueue(data []byte) (uint64, error) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.uncertain {
-		return 0, ErrTerminalInputUncertain
-	}
 	if len(q.pending) >= q.limit {
 		return 0, ErrTerminalInputQueueFull
 	}
@@ -59,57 +55,57 @@ func (q *TerminalInputQueue) Enqueue(data []byte) (uint64, error) {
 	return q.next, nil
 }
 
-func (q *TerminalInputQueue) Complete(sequence uint64, status string) {
+// Complete removes input the host has answered, whatever its status.
+func (q *TerminalInputQueue) Complete(sequence uint64) {
 	if q == nil {
 		return
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	delete(q.pending, sequence)
-	if status == "uncertain" {
-		q.uncertain = true
-	}
 	if sequence > q.next {
 		q.next = sequence
 	}
 }
 
-// Reconcile marks pending operations at or before the host cursor as
-// uncertain. The host proves that those sequence numbers have a durable
-// decision, but a lost response must never be interpreted as accepted.
-func (q *TerminalInputQueue) Reconcile(hostSequence uint64) []TerminalInput {
+// Reconcile settles pending input against the host's last input sequence after
+// a reattach. Entries before it were decided by the host, but their answers
+// were lost: they are returned as decided and never sent again. The rest are
+// returned in order to send again, before any new input: the one at the host's
+// sequence (the host answers it from its journal) and every later one.
+func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend []TerminalInput) {
 	if q == nil {
-		return nil
+		return nil, nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	var uncertain []TerminalInput
 	for sequence, item := range q.pending {
-		if sequence <= hostSequence {
-			uncertain = append(uncertain, item)
+		if sequence < hostSequence {
+			decided = append(decided, item)
 			delete(q.pending, sequence)
+		} else {
+			resend = append(resend, item)
 		}
 	}
-	if len(uncertain) != 0 {
-		q.uncertain = true
+	slices.SortFunc(decided, func(a, b TerminalInput) int { return cmp.Compare(a.Sequence, b.Sequence) })
+	slices.SortFunc(resend, func(a, b TerminalInput) int { return cmp.Compare(a.Sequence, b.Sequence) })
+	first := q.next + 1
+	if len(resend) > 0 {
+		first = resend[0].Sequence
 	}
-	if hostSequence > q.next {
+	if first > hostSequence+1 {
+		// The host does not know this numbering (a new attachment): what it never
+		// answered cannot be matched, so it counts as decided, and numbering
+		// continues from the host's sequence.
+		for _, item := range resend {
+			delete(q.pending, item.Sequence)
+		}
+		decided, resend = append(decided, resend...), nil
+		q.next = hostSequence
+	} else if hostSequence > q.next {
 		q.next = hostSequence
 	}
-	return uncertain
-}
-
-func (q *TerminalInputQueue) Pending() []TerminalInput {
-	if q == nil {
-		return nil
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	result := make([]TerminalInput, 0, len(q.pending))
-	for _, item := range q.pending {
-		result = append(result, TerminalInput{Sequence: item.Sequence, Data: append([]byte(nil), item.Data...)})
-	}
-	return result
+	return decided, resend
 }
 
 // ConnectRequest describes what the user asked to connect to.

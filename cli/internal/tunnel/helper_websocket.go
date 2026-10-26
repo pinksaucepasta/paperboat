@@ -376,7 +376,8 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	c.target.InputAttachmentID = response.Result.AttachmentID
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
-	for _, pending := range c.inputQueue.Reconcile(response.Result.InputSequence) {
+	decided, resend := c.inputQueue.Reconcile(response.Result.InputSequence)
+	for _, pending := range decided {
 		diagnosticlog.TryInfo("terminal input reconciled without a result", "sequence", pending.Sequence)
 	}
 	if response.Result.Session.Snapshot.Generation != 0 {
@@ -394,6 +395,14 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 		c.initial = append(c.initial, output)
 	}
 	c.initialOutput = initialHelperOutput{}
+	// Input the host has not answered goes again, in order, before any new input:
+	// it answers its last sequence from the journal and writes the later ones once.
+	for _, pending := range resend {
+		if err := c.message.WriteMessage(context.Background(), helperBinaryMessage, c.inputFrame(pending)); err != nil {
+			return errors.Join(ErrTransportLost, err)
+		}
+		c.inputSeq.Store(pending.Sequence)
+	}
 	go c.writeLoop()
 	go c.readLoop()
 	go c.ackLoop()
@@ -622,7 +631,7 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 			c.finish(1, errors.Join(ErrTransportLost, errors.New("invalid helper terminal input result")))
 			return true
 		}
-		c.inputQueue.Complete(event.Sequence, event.Status)
+		c.inputQueue.Complete(event.Sequence)
 		if event.Status != "accepted" {
 			diagnosticlog.TryInfo("terminal input not accepted", "sequence", event.Sequence, "status", event.Status, "code", event.ErrorCode)
 		}
@@ -756,27 +765,43 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 	if c.inputQueue == nil {
 		c.inputQueue = resolver.NewTerminalInputQueue(256)
 	}
-	written := 0
-	for len(p) > 0 {
-		size := min(len(p), helperInputChunkBytes)
-		sequence, queueErr := c.inputQueue.Enqueue(p[:size])
+	// Every chunk is queued first: what is not answered before a transport loss
+	// is sent again by the next attachment, so nothing typed is lost.
+	var chunks []resolver.TerminalInput
+	for rest := p; len(rest) > 0; {
+		size := min(len(rest), helperInputChunkBytes)
+		sequence, queueErr := c.inputQueue.Enqueue(rest[:size])
 		if queueErr != nil {
-			return written, queueErr
+			if len(chunks) == 0 {
+				return 0, queueErr
+			}
+			break
 		}
-		c.inputSeq.Store(sequence)
-		message := make([]byte, 13+size)
-		message[0] = 1
-		binary.BigEndian.PutUint32(message[1:5], c.streamID)
-		binary.BigEndian.PutUint64(message[5:13], sequence)
-		copy(message[13:], p[:size])
-		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: message, result: make(chan error, 1)}); err != nil {
-			c.inputQueue.Complete(sequence, "uncertain")
+		chunks = append(chunks, resolver.TerminalInput{Sequence: sequence, Data: rest[:size]})
+		rest = rest[size:]
+	}
+	written := 0
+	for _, chunk := range chunks {
+		c.inputSeq.Store(chunk.Sequence)
+		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: c.inputFrame(chunk), result: make(chan error, 1)}); err != nil {
 			return written, err
 		}
-		written += size
-		p = p[size:]
+		written += len(chunk.Data)
+	}
+	if written < len(p) {
+		return written, resolver.ErrTerminalInputQueueFull
 	}
 	return written, nil
+}
+
+// inputFrame is one sequenced terminal input message.
+func (c *helperTerminalConn) inputFrame(input resolver.TerminalInput) []byte {
+	message := make([]byte, 13+len(input.Data))
+	message[0] = 1
+	binary.BigEndian.PutUint32(message[1:5], c.streamID)
+	binary.BigEndian.PutUint64(message[5:13], input.Sequence)
+	copy(message[13:], input.Data)
+	return message
 }
 
 func (c *helperTerminalConn) Resize(rows, cols uint16) error {

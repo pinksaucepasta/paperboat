@@ -850,3 +850,45 @@ func TestManyInputResultsDoNotEndTheTerminal(t *testing.T) {
 	default:
 	}
 }
+
+// A drop while typing must not lose or repeat a keystroke, nor stop later input: the next
+// attachment sends the host's last sequence and everything after it again, in order and before
+// new input, and reports what the host had already passed as decided without its answer.
+func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
+	target := &resolver.TerminalTarget{SessionID: "ses_1", InputQueue: resolver.NewTerminalInputQueue(8)}
+	for _, key := range []string{"a", "b", "c"} {
+		if _, err := target.InputQueue.Enqueue([]byte(key)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message := &capturedHelperMessageConnection{}
+	connection := newHelperTerminalConn(message, target, 1)
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_1","input_sequence":2,"session":{"snapshot":{"generation":1}}}}`)}
+	if err := connection.finishAttachment(attached, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Write([]byte("d")); err != nil {
+		t.Fatalf("input after a reattach: %v", err)
+	}
+	connection.finish(0, nil)
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	var sent []string
+	for _, record := range message.writes {
+		if record[0] == 1 {
+			sent = append(sent, fmt.Sprintf("%d:%s", binary.BigEndian.Uint64(record[5:13]), helperTestInputBody(t, record)))
+		}
+	}
+	if strings.Join(sent, " ") != "2:b 3:c 4:d" {
+		t.Fatalf("sent %v, want the host's last sequence, then the rest, then new input", sent)
+	}
+	// The keystroke the host had passed is settled; the rest stay queued until the host answers.
+	decided, resend := target.InputQueue.Reconcile(2)
+	var pending []uint64
+	for _, item := range resend {
+		pending = append(pending, item.Sequence)
+	}
+	if len(decided) != 0 || fmt.Sprint(pending) != "[2 3 4]" {
+		t.Fatalf("decided %d, still queued %v; want 0 and [2 3 4]", len(decided), pending)
+	}
+}
