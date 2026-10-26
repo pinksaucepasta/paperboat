@@ -38,12 +38,16 @@ func nullableText(value string) sql.NullString {
 // BindWorkspacePublisherTx records ownership's grant boundary in the same
 // transaction as creation. It does not bind or grant access to the whole host.
 func BindWorkspacePublisherTx(ctx context.Context, tx *db.Tx, team, kind, id, account string) error {
+	// Only bindings that still hold a resource count toward the cap: ended terminal sessions are
+	// inactive, and an ended preview or deleted tunnel keeps an active binding.
 	var count int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings WHERE team_id=$1`, team).Scan(&count); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b WHERE b.team_id=$1 AND b.active
+		AND NOT (b.resource_kind='preview' AND NOT EXISTS(SELECT 1 FROM preview_leases p WHERE p.id=b.resource_id AND p.terminal_state='active'))
+		AND NOT (b.resource_kind='tunnel' AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=b.resource_id AND t.deleted_at IS NULL))`, team).Scan(&count); err != nil {
 		return err
 	}
 	if count >= teams.MaximumResources {
-		return ErrInvalidInput
+		return &teams.LimitError{Kind: kind, Used: count, Limit: teams.MaximumResources}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,$2,$3,$4)`, team, kind, id, account); err != nil {
 		return err

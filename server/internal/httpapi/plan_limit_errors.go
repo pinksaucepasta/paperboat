@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // writePlanLimitReached answers a new resource refused past its plan's count limit with the
@@ -38,6 +39,11 @@ func planLimitMessage(l *planlimits.LimitError) string {
 // writePreviewTunnelLimitReached answers a new preview or tunnel past the plan's active limit in
 // the preview/tunnel error schema: nothing was created, upgrading or stopping one is the way out.
 func writePreviewTunnelLimitReached(w http.ResponseWriter, r *http.Request, err error) bool {
+	var teamLimit *teams.LimitError
+	if errors.As(err, &teamLimit) {
+		writePreviewTunnelError(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("This team workspace holds %d of %d machines, terminals, previews and tunnels. Remove one you no longer need and retry. No resource was created.", teamLimit.Used, teamLimit.Limit), "unchanged", false, "remove_unused_entries")
+		return true
+	}
 	var limit *planlimits.LimitError
 	if !errors.As(err, &limit) {
 		return false
