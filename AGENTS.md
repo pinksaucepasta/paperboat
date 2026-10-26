@@ -198,7 +198,7 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - **Heavy suites run on GitHub Actions, not on oracle.** `tools/ci-test.sh <module…> [-run X]` runs race and
   PostgreSQL suites, a full module or the console check on the committed HEAD and prints pass/fail and the
   failing tests per job (`tools/remote-test.sh <pbvm2|pbvm3> <module> [go test args]` is the overflow on the
-  spare VMs). Oracle (4 cores, shared by every lane) is for single-package tests and shared builds only.
+  spare VMs). Oracle (4 cores, shared by every lane) is for single-package tests and shared builds only. **Load rule (2026-10-26): on oracle run only `go build`/`go vet`/a single focused `go test -run X` of one package, under `nice -n 15`; anything with -race, -count>1, ./... or a full module goes to tools/ci-test.sh. Lane P runs one device build at a time.**
 - **After each device run**, the lane runs `tools/device-smoke/cleanup_test_account.py --prefix
   <its throwaway prefix, e.g. laner-> --apply`. It revokes only that lane's throwaway machines
   unseen for 2 h on the shared test accounts; every machine is a peer of every other, and
