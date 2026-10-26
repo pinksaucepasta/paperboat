@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -121,8 +122,13 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		err       error
 	}
 	results := make(chan copyResult, 2)
+	// sshdDone is set once sshd's output is drained and the bridge closes both sides itself.
+	var sshdDone atomic.Bool
 	go func() {
 		count, copyErr := io.Copy(sshd, stream)
+		if sshdDone.Load() {
+			copyErr = nil // the read failed because the bridge closed the stream after sshd's end
+		}
 		copyErr = normalizeBridgeError(copyErr)
 		if tcp, ok := sshd.(*net.TCPConn); ok {
 			copyErr = errors.Join(copyErr, normalizeBridgeError(tcp.CloseWrite()))
@@ -143,6 +149,9 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		// opposite copier here deadlocks after a remote command has completed.
 		// Drain target output, publish its FIN, then close both read sides to
 		// unblock the client-to-target copier.
+		if copyErr == nil {
+			sshdDone.Store(true)
+		}
 		_ = finish()
 		results <- copyResult{direction: "from_sshd", bytes: count, err: copyErr}
 	}()

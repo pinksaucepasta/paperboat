@@ -35,6 +35,8 @@ out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat
 set -euo pipefail
 start_ct $TARGET
 sudo -n docker exec $TARGET bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server >/dev/null 2>&1; true"
+# the image may carry sshd host keys another container already published (cloned image): make this target's own
+sudo -n docker exec $TARGET bash -c "rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh"
 pair_user $TARGET pbt 1000 $ALIAS
 fresh $CLIENT $ALIAS-c
 C="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CLIENT"
@@ -57,7 +59,7 @@ grep -qx SSH_OK <<<"$out" || finish FAIL "pb ssh did not run: $(grep '^SSH_OUT='
 query="SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='$TARGET_ID' AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' ORDER BY created_at, id;"
 rows=
 for i in $(seq 1 30); do
-  rows=$(printf '%s\n' "$query" | ssh "$DB_HOST" docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F '|' 2>/dev/null)
+  rows=$(printf '%s\n' "$query" | ssh "$DB_HOST" docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "'|'" 2>/dev/null)
   grep -q '^machine.access_ended|' <<<"$rows" && break
   sleep 5
 done
@@ -72,6 +74,6 @@ ok = bool(starts) and bool(ends)
 for e in ends:
     ok = ok and e[1] == "online" and e[3] == "closed" and int(e[4]) > 0 and int(e[5]) > 0 and e[2] in start_ids
 for s in starts:
-    ok = ok and s[1] == "online" and s[6].startswith("cli_")
+    ok = ok and s[1] == "online" and s[6].startswith("session_")
 sys.exit(0 if ok else 1)
 PY

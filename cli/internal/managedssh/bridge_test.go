@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -464,5 +465,44 @@ func TestBridgeSSHConcurrentStreamsRemainIndependent(t *testing.T) {
 		if err := <-serverErrors; err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// closedReadConn fails a read after Close with its own error, as a native (QUIC) stream does, not net.ErrClosed.
+type closedReadConn struct {
+	net.Conn
+	closed atomic.Bool
+}
+
+func (c *closedReadConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if err != nil && c.closed.Load() {
+		return n, errors.New("stream canceled locally")
+	}
+	return n, err
+}
+func (c *closedReadConn) Close() error { c.closed.Store(true); return c.Conn.Close() }
+
+// F5-12: a session that ends because sshd ended (a command ran and exited) is not a failure, whatever error the
+// client-side read reports after the bridge closed it.
+func TestBridgeSSHTargetEndIsNotAFailureOnANativeStream(t *testing.T) {
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		connection, acceptErr := listener.AcceptTCP()
+		if acceptErr == nil {
+			_, _ = connection.Write([]byte("done"))
+			_ = connection.Close()
+		}
+	}()
+	bridgeSide, clientSide := tcpPair(t)
+	defer clientSide.Close()
+	go func() { _, _ = io.Copy(io.Discard, clientSide) }()
+	_, err = BridgeSSH(t.Context(), &closedReadConn{Conn: bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+	if err != nil {
+		t.Fatalf("a session sshd ended reported %v", err)
 	}
 }
