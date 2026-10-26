@@ -80,6 +80,7 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 		if !retryableTransferFailure(err) {
 			return err
 		}
+		c.noteWaiting(err)
 		retryCtx, cancel := state.afterFailure(ctx)
 		wait := c.retryWait
 		if wait == nil {
@@ -197,7 +198,7 @@ func retryableTransferFailure(err error) bool {
 		switch err.(type) {
 		case *nativeAuthorizationFailure, *nativeSourceFailure:
 			return false
-		case *localDaemonUnavailable:
+		case *localDaemonUnavailable, *PathWaitingError:
 			return true
 		}
 		if remote, ok := err.(*Error); ok && !transientHTTPStatus(remote.StatusCode) {

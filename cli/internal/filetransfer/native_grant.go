@@ -133,6 +133,8 @@ func (o *nativeGrantOwner) RoundTrip(request *http.Request) (*http.Response, err
 		if localDaemonRestarting(err) {
 			// The lease's stream goes through the local daemon, which is restarting.
 			err = &localDaemonUnavailable{err}
+		} else if waiting := waitingForPath(err); waiting != nil {
+			err = waiting
 		}
 		return response, err
 	}
@@ -222,4 +224,27 @@ func localDaemonRestarting(err error) bool {
 	var local *localapi.RemoteError
 	return errors.As(err, &local) && local.StatusCode == http.StatusServiceUnavailable &&
 		(local.Code == "file_transfer_unavailable" || local.Code == "file_transfer_stream_unavailable")
+}
+
+// PathWaitingError is an Unlimited transfer waiting for a direct connection or the account's own relay: the
+// daemon refused (or closed) its stream because the only path is a Paperboat-hosted relay or none. It is
+// retried; the upload resumes from the committed offset.
+type PathWaitingError struct {
+	Message string
+	cause   error
+}
+
+func (e *PathWaitingError) Error() string { return e.Message }
+func (e *PathWaitingError) Unwrap() error { return e.cause }
+
+func waitingForPath(err error) *PathWaitingError {
+	var local *localapi.RemoteError
+	if errors.As(err, &local) && local.Code == localapi.NoEligiblePathCode {
+		message := local.Message
+		if message == "" {
+			message = "Waiting for a direct connection or your relay"
+		}
+		return &PathWaitingError{Message: message, cause: err}
+	}
+	return nil
 }

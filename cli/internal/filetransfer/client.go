@@ -141,12 +141,14 @@ type Client struct {
 	RefreshAuth     func(context.Context) (Auth, error)
 	MaxConcurrent   int
 	DeliveryTimeout time.Duration
-	retryWait       func(context.Context, int) error
-	authMu          sync.RWMutex
-	refreshMu       sync.Mutex
-	auth            Auth
-	binding         Binding
-	native          bool
+	// Waiting is told when an Unlimited transfer pauses for a direct connection or the account's own relay.
+	Waiting   func(message string)
+	retryWait func(context.Context, int) error
+	authMu    sync.RWMutex
+	refreshMu sync.Mutex
+	auth      Auth
+	binding   Binding
+	native    bool
 }
 
 func NewClient(endpoint string, auth Auth, binding Binding, client *http.Client) *Client {
@@ -636,6 +638,7 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 			if !retryableTransferFailure(err) {
 				return err
 			}
+			c.noteWaiting(err)
 		} else {
 			var remote *Error
 			if errors.As(err, &remote) && !transientHTTPStatus(remote.StatusCode) {
@@ -775,6 +778,11 @@ func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err erro
 	if !c.native || c.RefreshAuth == nil || !retryableTransferFailure(err) {
 		return err
 	}
+	if errors.As(err, new(*PathWaitingError)) {
+		// The daemon refused the stream for its path, not its admission: the lease stays valid and the next
+		// stream opens once a direct or own-relay path returns.
+		return err
+	}
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 	if c.currentAuth() != previous {
@@ -863,4 +871,12 @@ func (c *Client) refreshRequestAdmission(ctx context.Context) error {
 	}
 	c.setAuth(fresh)
 	return nil
+}
+
+// noteWaiting tells the caller once per failure that an Unlimited transfer is paused for a path.
+func (c *Client) noteWaiting(err error) {
+	var waiting *PathWaitingError
+	if c.Waiting != nil && errors.As(err, &waiting) {
+		c.Waiting(waiting.Message)
+	}
 }

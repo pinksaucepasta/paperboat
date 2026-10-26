@@ -33,10 +33,16 @@ type nativeTestLease struct {
 	closeErr   error
 	daemonDown *atomic.Bool // the lease's streams go through a local daemon that is restarting
 	downErr    error
+	// refuseFirst refuses the first stream with downErr, as the daemon refuses an Unlimited stream until a
+	// direct path returns.
+	refuseFirst atomic.Bool
 }
 
 func (l *nativeTestLease) OpenTransferStream(ctx context.Context) (net.Conn, error) {
 	if l.daemonDown != nil && l.daemonDown.Load() {
+		return nil, l.downErr
+	}
+	if l.refuseFirst.CompareAndSwap(true, false) {
 		return nil, l.downErr
 	}
 	if l.closed.Load() || !l.expires.After(time.Now()) {
@@ -50,7 +56,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// restarting: the renewal first finds the local daemon's socket gone, as while an update restarts
 	// it (F14-02: two 50 MiB sends in flight across pb update failed instead of resuming).
 	// stopping: the old daemon, shutting down for the update, answers the stream with 503 first.
-	for _, mode := range []string{"allowed", "denied", "restarting", "stopping"} {
+	// waiting: an Unlimited transfer's daemon refuses the stream while only a hosted relay reaches the
+	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
+	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting"} {
 		t.Run(mode, func(t *testing.T) {
 			denied := mode == "denied"
 			daemonDown := 0
@@ -58,6 +66,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			var downErr error = &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ENOENT)}
 			if mode == "stopping" {
 				downErr = &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "file_transfer_stream_unavailable", Message: "file transfer stream could not open"}
+			}
+			if mode == "waiting" {
+				downErr = &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: localapi.NoEligiblePathCode, Message: "Waiting for a direct connection or your relay: only a Paperboat relay reaches this machine now"}
 			}
 			data := bytes.Repeat([]byte("bounded"), protocol.FileTransferChunkBytes/7+17)
 			item := source(data)
@@ -169,7 +180,8 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 				if err = json.NewDecoder(response.Body).Decode(&auth); err != nil {
 					return NativeGrant{}, err
 				}
-				replacement = &nativeTestLease{address: server.Listener.Addr().String(), expires: auth.ExpiresAt}
+				replacement = &nativeTestLease{address: server.Listener.Addr().String(), expires: auth.ExpiresAt, downErr: downErr}
+				replacement.refuseFirst.Store(mode == "waiting")
 				grant := initial
 				grant.Auth = auth
 				grant.Lease = replacement
@@ -181,6 +193,8 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			// Keep the real HTTP maintenance failures without waiting through backoff
 			// in this isolated expiry fixture; the caller deadline is tested separately.
 			client.retryWait = func(ctx context.Context, _ int) error { return ctx.Err() }
+			var waits []string
+			client.Waiting = func(message string) { waits = append(waits, message) }
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			batch, err := client.SendBatch(ctx, manifest.BatchID, "", []Source{item})
@@ -194,6 +208,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			}
 			if creates != 1 || renewals != 1 {
 				t.Fatal("recovery created a new batch or repeatedly probed authorization")
+			}
+			if mode == "waiting" && (len(waits) == 0 || !strings.HasPrefix(waits[0], "Waiting for a direct connection or your relay")) {
+				t.Fatalf("the pause was not reported: %q", waits)
 			}
 			if (mode == "restarting" || mode == "stopping") && daemonDown != 3 {
 				t.Fatal("renewal did not wait for the restarting daemon", daemonDown)
