@@ -4847,5 +4847,8 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 2026-10-26 | Lane K F18 | Round 31 dev-8910ed61 on pbvm3 (guard pass on lanek-c, fresh lanek-h31 revoked and removed): machine_tags.py 9/9, policy_token.py 15/15, policy_cli.sh 13/13. | policy_team.py waits for hp.
 2026-10-26 | Lane K terminal | PLAN 3b "Terminal: review and fixes": 9 reviews merged, 13 slices with matrix checks. | Waits for coordinator + GPT review; slice 0 is Lane M/B's prod outage.
 
-2026-10-26 | SDK F24-00–03 | Lane A approved MCP; full CLI race/vet CI 40269295986 PASS, post-main MCP focused race + license scan PASS; scanner 136014e5. | Waits for Lane A: L/M MCP checks; Lane B: session-bound exec/private-access/file source.
-2026-10-26 | SDK leaves | diagnosticlog 27dbaf6d, decoder guard 3de4805f, wirejson e5f234a9, httptransport 4a0c98c9 pushed; full shared/CLI + Darwin/Windows PASS. | MCP runs 40272424859/40272394965 failed only broadcast rotation test; main fix 4dc95990 included, requalifying.
+2026-10-26 | SDK F24-00–03 | MCP 3c5a04b8 pushed, Lane A approved; full CLI race/vet CI 40280917817 PASS, focused MCP race + license scan PASS; scanner 136014e5. | Waits for Lane A: L/M MCP checks; Lane B: session-bound exec/private-access/file source.
+2026-10-26 | SDK leaves | diagnosticlog 27dbaf6d, decoder guard 3de4805f, wirejson e5f234a9, httptransport 4a0c98c9 pushed; full shared/CLI + Darwin/Windows PASS. | MCP runs 40272424859/40272394965 failed only broadcast rotation test; main fix 4dc95990 included, full MCP run 40280917817 PASS.
+
+2026-10-26 | SDK leaves await Lane A review (session limit resets 13:30 IST) | serverclock aa481a6b, supportref 9c874eec, backoff c39e94c0, machinename 7cce9047, remotepath 6c4d9f81; separate local branches.
+Full shared/CLI CI PASS: 40280973537, 40281027602, 40281077634, 40281114219, 40281173829 respectively; package race/vet PASS. Cross-build each approved slice before push.
