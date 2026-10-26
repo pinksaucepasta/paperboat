@@ -440,6 +440,47 @@ def restarts(a, sessions):
         c1.close()
 
 
+def daemon_restart_typing(a, sessions):
+    """N12 (F3-16): this machine's daemon restarts while output runs and keys are typed during the restart:
+    nothing printed or typed is lost or repeated, and the same shell answers."""
+    if not a.restart_client_cmd:
+        row('N12 daemon restart while typing', None, 'needs --restart-client-cmd')
+        return
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name)
+    try:
+        mark = uuid.uuid4().hex[:12]
+        c1.run(f'export PB_RESTART_MARK={mark}')
+        c1.send("for i in $(seq 1 60); do echo DR$i; sleep 1; done\r")
+        time.sleep(5)
+        restart = subprocess.Popen(a.restart_client_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        key = uuid.uuid4().hex
+        time.sleep(0.5)
+        c1.send("printf '\\nPB_DKEY_%s\\n' '" + key + "'\r")  # typed while the daemon restarts
+        restart.wait(120)
+        try:
+            c1.expect('DR60', 180)
+        except RuntimeError:
+            tail = re.sub(rb'DR[0-9]+\r?\n', b'', bytes(c1.output)[-2000:])[-300:]
+            row('N12 daemon restart: the terminal recovers on its own', False, f'no output 180 s after the restart; client exited={c1.proc.poll() if hasattr(c1, "proc") else "?"} tail={tail!r}')
+            return
+        c1.settle(3)
+        out = bytes(c1.output)
+        ok, why = exactly_once(out, b'DR', 1, 60)
+        row('N12 daemon restart: output arrives exactly once', ok, why)
+        count = out.count(b'PB_DKEY_' + key.encode())
+        row('N12 daemon restart: keys typed during it ran exactly once', count == 1, f'{count} times')
+        probe = uuid.uuid4().hex
+        c1.send("printf '\\nPB_SAME_%s_%s\\n' \"$PB_RESTART_MARK\" '" + probe + "'\r")
+        try:
+            c1.expect('PB_SAME_' + mark + '_' + probe, 60)
+            row('N12 daemon restart: the same shell answers', True)
+        except RuntimeError:
+            row('N12 daemon restart: the same shell answers', False, 'no answer or a different shell')
+    finally:
+        c1.close()
+
+
 def fast_output(a, sessions):
     """W9: 50 MB of output with a stalled second window; the first stays live, Ctrl-C works."""
     name = fresh_name(); sessions.append(name)
@@ -688,7 +729,7 @@ def shared(a, sessions):
 
 
 ROWS = {'two': two_clients, 'reconnect': reconnect_keeps_control, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
-        'server': control_plane_down, 'blackhole': black_hole, 'restart': restarts, 'fast': fast_output, 'resize': resize_storm,
+        'server': control_plane_down, 'blackhole': black_hole, 'restart': restarts, 'daemon': daemon_restart_typing, 'fast': fast_output, 'resize': resize_storm,
         'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'latency': echo_latency, 'shared': shared}
 
 

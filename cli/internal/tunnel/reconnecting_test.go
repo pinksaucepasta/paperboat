@@ -351,3 +351,33 @@ type lostOnStop struct {
 }
 
 func (c *lostOnStop) Wait() (int, error) { <-c.lost; return 1, ErrTransportLost }
+
+// notSentConn fails its first write before sending anything, as the daemon IPC does when the daemon restarts.
+type notSentConn struct {
+	*blockingReconnectConn
+	lost chan struct{}
+	once atomic.Bool
+}
+
+func (c *notSentConn) Write([]byte) (int, error) { return 0, errors.Join(ErrInputNotSent, io.ErrClosedPipe) }
+func (c *notSentConn) MarkTransportLost(error) {
+	if c.once.CompareAndSwap(false, true) {
+		close(c.lost)
+	}
+}
+func (c *notSentConn) Wait() (int, error) { <-c.lost; return 1, ErrTransportLost }
+
+// F3-16 (N12): keys typed while the local daemon restarts were not sent, so they go out once on the new link and
+// the terminal stays open instead of ending.
+func TestReconnectingConnResendsInputThatWasNotSent(t *testing.T) {
+	first := &notSentConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}, lost: make(chan struct{})}
+	second := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	c := NewReconnectingConn(t.Context(), first, 2, 0, func(context.Context) (Conn, error) { return second, nil })
+	defer c.Close()
+	if n, err := c.Write([]byte("keys")); err != nil || n != 4 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if got := second.writes.String(); got != "keys" {
+		t.Fatalf("new link got %q", got)
+	}
+}

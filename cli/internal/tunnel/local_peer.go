@@ -562,6 +562,8 @@ func (c *localBasicPeerConn) ObserveLinkState(observer func(stalled bool)) {
 	c.inner.ObserveLinkState(observer)
 }
 
+func (c *localBasicPeerConn) MarkTransportLost(err error) { c.inner.MarkTransportLost(err) }
+
 func (c *localBasicPeerConn) TerminalRuntimeVersion() string { return c.inner.runtimeVersion }
 
 func (c *localPeerConn) readLoop() {
@@ -774,11 +776,18 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 	}
 	return count, nil
 }
+// Write sends one data frame; the daemon acts only on whole frames, so a failed write sent nothing.
 func (c *localPeerConn) Write(value []byte) (int, error) {
 	if err := c.writer.write(localPeerData, value); err != nil {
-		return 0, err
+		return 0, errors.Join(ErrInputNotSent, err)
 	}
 	return len(value), nil
+}
+
+// MarkTransportLost ends the link as a transport loss, so the terminal reconnects instead of ending.
+func (c *localPeerConn) MarkTransportLost(err error) {
+	c.publishResult(localPeerWaitResult{code: 1, err: errors.Join(ErrTransportLost, err)})
+	_ = c.Abort()
 }
 func (c *localPeerConn) Resize(rows, cols uint16) error {
 	payload := make([]byte, 4)

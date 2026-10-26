@@ -35,6 +35,9 @@ type TelemetryContext struct {
 var ErrWriteUncertain = errors.New("terminal write outcome is uncertain")
 var ErrTransportLost = errors.New("terminal transport lost")
 
+// ErrInputNotSent: a write failed before any of it left this process, so it is safe to send again on the next link.
+var ErrInputNotSent = errors.New("terminal input was not sent")
+
 const terminalOutputBatchWindow = time.Duration(0)
 
 type ReconnectingOption func(*reconnectingOptions)
@@ -408,12 +411,15 @@ func updateAtomicMax(value *atomic.Int64, candidate int64) {
 	}
 }
 func (c *ReconnectingConn) Write(p []byte) (int, error) {
-	conn, err := c.waitCurrent(c.ctx)
-	if err != nil {
-		return 0, err
-	}
-	n, writeErr := conn.Write(p)
-	if writeErr != nil {
+	for {
+		conn, err := c.waitCurrent(c.ctx)
+		if err != nil {
+			return 0, err
+		}
+		n, writeErr := conn.Write(p)
+		if writeErr == nil {
+			return n, nil
+		}
 		if c.maxRetries <= 0 || c.reconnect == nil {
 			return n, writeErr
 		}
@@ -423,9 +429,11 @@ func (c *ReconnectingConn) Write(p []byte) (int, error) {
 		} else {
 			_ = conn.Close()
 		}
-		return n, errors.Join(ErrWriteUncertain, writeErr)
+		if !errors.Is(writeErr, ErrInputNotSent) {
+			return n, errors.Join(ErrWriteUncertain, writeErr)
+		}
+		// Nothing was sent: the same keys go out once on the next link (waitCurrent waits for it).
 	}
-	return n, nil
 }
 func (c *ReconnectingConn) Resize(r, col uint16) error {
 	conn, err := c.waitCurrent(c.ctx)

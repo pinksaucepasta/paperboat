@@ -772,3 +772,22 @@ func TestStalledLinkIsShownAndKeepsInput(t *testing.T) {
 		t.Fatalf("event=%q, want resumed", event)
 	}
 }
+
+// F3-16: a write the daemon IPC could not send says so (ErrInputNotSent), and marking the link lost ends it as a
+// transport loss, which reconnects, instead of a clean end, which would close the terminal.
+func TestLocalPeerConnFailedWriteIsNotSentAndLost(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	conn, err := NewLocalPeerConn(localClient, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = localServer.Close()
+	_, writeErr := conn.Write([]byte("keys"))
+	if !errors.Is(writeErr, ErrInputNotSent) {
+		t.Fatalf("write err=%v, want ErrInputNotSent", writeErr)
+	}
+	conn.(transportFailureMarker).MarkTransportLost(writeErr)
+	if _, err := conn.Wait(); !errors.Is(err, ErrTransportLost) {
+		t.Fatalf("wait err=%v, want ErrTransportLost", err)
+	}
+}
