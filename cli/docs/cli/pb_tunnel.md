@@ -6,7 +6,7 @@ Manage durable tunnels or start an ephemeral tunnel
 
 Manage durable tunnels or start an ephemeral tunnel
 
-Create or manage a durable tunnel, or start an ephemeral tunnel with --ephemeral and a local target. Durable routes, domains, connectors, and traffic state have separate subcommands.
+Create or manage a durable tunnel, or start an ephemeral tunnel with --ephemeral and a local target. Durable routes, domains, and traffic state have separate subcommands.
 
 JSON output is supported with --json.
 
@@ -41,7 +41,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb tunnel create](pb_tunnel_create.md)	 - Create a durable tunnel
-* [pb tunnel delete](pb_tunnel_delete.md)	 - Delete endpoints and routes and revoke connectors while preserving user DNS records
+* [pb tunnel delete](pb_tunnel_delete.md)	 - Delete endpoints and routes while preserving user DNS records
 * [pb tunnel doctor](pb_tunnel_doctor.md)	 - Diagnose tunnel health
 * [pb tunnel domain](pb_tunnel_domain.md)	 - Manage tunnel domains
 * [pb tunnel inspect](pb_tunnel_inspect.md)	 - Show daemon-local HTTP captures

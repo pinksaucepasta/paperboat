@@ -477,30 +477,3 @@ func (m *TunnelDomainMutation) UnmarshalJSON(raw []byte) error {
 	}
 	return nil
 }
-
-func (m *TunnelConnectorMutation) UnmarshalJSON(raw []byte) error {
-	*m = TunnelConnectorMutation{}
-	kind, err := tunnelResponseKind(raw)
-	if err != nil {
-		return err
-	}
-	switch kind {
-	case "connector":
-		if err := decodeTunnelJSON(raw, &m.Connector); err != nil {
-			return err
-		}
-	case "operation":
-		if err := decodeTunnelJSON(raw, &m.Operation); err != nil {
-			return err
-		}
-		m.Connector.ID = m.Operation.ResourceID
-	default:
-		type plain TunnelConnectorMutation
-		var value plain
-		if err := decodeTunnelJSON(raw, &value); err != nil {
-			return err
-		}
-		*m = TunnelConnectorMutation(value)
-	}
-	return nil
-}

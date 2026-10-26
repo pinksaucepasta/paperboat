@@ -90,7 +90,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 		short = "Resume new traffic for a preserved tunnel"
 	}
 	if action == "delete" {
-		short = "Delete endpoints and routes and revoke connectors while preserving user DNS records"
+		short = "Delete endpoints and routes while preserving user DNS records"
 	}
 	command := tunnelCommand(action+" <tunnel>", short, cobra.ExactArgs(1), func(command *cobra.Command, args []string) error {
 		if action == "delete" {
@@ -113,7 +113,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 			return err
 		}
 		if action == "delete" {
-			if err := confirmMutation(command, "tunnel-delete:"+current.ID+":"+current.ETag, fmt.Sprintf("Delete tunnel %s (%s)? Endpoints, routes, domain bindings, and connector credentials will be removed. User-owned DNS records and audit history remain.", current.Name, current.ID)); err != nil {
+			if err := confirmMutation(command, "tunnel-delete:"+current.ID+":"+current.ETag, fmt.Sprintf("Delete tunnel %s (%s)? Endpoints, routes and domain bindings will be removed. User-owned DNS records and audit history remain.", current.Name, current.ID)); err != nil {
 				return err
 			}
 		}

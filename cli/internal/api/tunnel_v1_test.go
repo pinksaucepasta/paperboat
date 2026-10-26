@@ -302,19 +302,6 @@ func TestTunnelV1RejectsUnsafeAndOversizedPages(t *testing.T) {
 	}
 }
 
-func TestTunnelV1ConnectorSurfaceCannotIssueEnrollmentSecrets(t *testing.T) {
-	// The public client deliberately contains only safe connector reads,
-	// drain/revoke and operation-only rotation methods. This response also
-	// proves strict decoding rejects a secret-bearing connector payload.
-	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("ETag", `"connector:con_1:1"`)
-		_, _ = w.Write([]byte(`{"data":{"schema":"paperboat.preview-tunnel/v1","kind":"connector","id":"con_1","tunnel_id":"tun_1","generation":1,"etag":"\"connector:con_1:1\"","enrollment_token":"secret"}}`))
-	})
-	if _, err := client.GetTunnelConnectorV1(context.Background(), "tun_1", "con_1"); err == nil {
-		t.Fatal("expected strict secret field rejection")
-	}
-}
-
 func TestTunnelV1PreservesTypedPreconditionError(t *testing.T) {
 	client := tunnelTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -457,83 +444,6 @@ func TestTunnelStatusV1RedactsUnsafeHumanText(t *testing.T) {
 	}
 	if out.Summary != "[REDACTED]" || out.RepairAction != "[REDACTED]" {
 		t.Fatalf("health=%#v", out)
-	}
-}
-
-func TestTunnelConnectorEnrollmentIssueV1WireContract(t *testing.T) {
-	input := TunnelConnectorEnrollmentInput{HostID: "host_1", Capabilities: []string{"http", "tcp"}, TTLSeconds: 300}
-	wantBody, err := json.Marshal(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/connectors/enrollments" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		if got := r.Header.Get("Idempotency-Key"); got != "idem_enroll_1" {
-			t.Fatalf("Idempotency-Key = %q", got)
-		}
-		gotBody, readErr := io.ReadAll(r.Body)
-		if readErr != nil || string(gotBody) != string(wantBody) {
-			t.Fatalf("body = %q, read error = %v; want %q", gotBody, readErr, wantBody)
-		}
-		if r.Header.Get("Authorization") != "Bearer machine-token" || r.Header.Get("X-Paperboat-Machine-Identity") != "machine-token" || r.Header.Get("X-Paperboat-Machine-Proof") == "" {
-			t.Fatal("host enrollment requires signed machine authentication")
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		enrollment := TunnelConnectorEnrollment{Schema: TunnelV1Schema, Kind: "connector_enrollment", ID: "enrollment_1", TunnelID: "tun_1", HostID: "host_1", Operation: validTunnelOperationTestValue("connector", "enrollment_1"), EnrollmentToken: "one-time-enrollment-token", ExpiresAt: time.Unix(7200, 0).UTC(), Capabilities: input.Capabilities}
-		writeTunnelTestData(t, w, enrollment)
-	})
-	client.SetMachineAuth(machineAuthTestSource{})
-	out, err := client.IssueTunnelConnectorEnrollmentV1(context.Background(), "tun_1", "idem_enroll_1", input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.ID != "enrollment_1" || out.EnrollmentToken != "one-time-enrollment-token" || out.Operation.ResourceID != "enrollment_1" {
-		t.Fatalf("enrollment = %#v", out)
-	}
-}
-
-func TestTunnelConnectorEnrollmentExchangeV1WireContract(t *testing.T) {
-	input := TunnelConnectorEnrollmentExchangeInput{
-		Token:                       "one-time-enrollment-token",
-		HostID:                      "host_1",
-		ProtocolVersion:             "1.0",
-		CredentialReference:         "protected-file://paperboat/connector_1",
-		CredentialThumbprint:        strings.Repeat("A", 43),
-		CredentialVerifierAlgorithm: "ed25519",
-		CredentialVerifierPublicKey: strings.Repeat("B", 43),
-		CredentialProof:             strings.Repeat("C", 86),
-	}
-	wantBody, err := json.Marshal(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/connectors/enrollments/exchange" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
-		}
-		if got := r.Header.Get("Idempotency-Key"); got != "idem_exchange_1" {
-			t.Fatalf("Idempotency-Key = %q", got)
-		}
-		gotBody, readErr := io.ReadAll(r.Body)
-		if readErr != nil || string(gotBody) != string(wantBody) {
-			t.Fatalf("body = %q, read error = %v; want %q", gotBody, readErr, wantBody)
-		}
-		if r.Header.Get("Authorization") != "Bearer machine-token" || r.Header.Get("X-Paperboat-Machine-Identity") != "machine-token" || r.Header.Get("X-Paperboat-Machine-Proof") == "" {
-			t.Fatal("host enrollment requires signed machine authentication")
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		activation := TunnelConnectorActivation{Schema: TunnelV1Schema, Kind: "connector_activation", AccountID: "acc_1", TunnelID: "tun_1", ConnectorID: "connector_1", HostID: "host_1", CredentialGeneration: 2, ProcessGeneration: 3, Operation: validTunnelOperationTestValue("connector", "connector_1")}
-		writeTunnelTestData(t, w, activation)
-	})
-	client.SetMachineAuth(machineAuthTestSource{})
-	out, err := client.ExchangeTunnelConnectorEnrollmentV1(context.Background(), "tun_1", "idem_exchange_1", input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.ConnectorID != "connector_1" || out.CredentialGeneration != 2 || out.Operation.ResourceID != out.ConnectorID {
-		t.Fatalf("activation = %#v", out)
 	}
 }
 

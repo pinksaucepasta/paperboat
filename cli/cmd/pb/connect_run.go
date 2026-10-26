@@ -795,7 +795,7 @@ func friendlyAPIError(err error) string {
 	case "machine_not_ready":
 		return "the machine is not ready yet; retry in a moment"
 	case "machine_offline":
-		return "the machine is offline; start or repair its Paperboat connector, then retry"
+		return "the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry"
 	case "machine_revoked":
 		return "this machine has been disconnected or revoked; repair or reconnect it in the Paperboat dashboard"
 	}

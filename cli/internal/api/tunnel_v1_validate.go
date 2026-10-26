@@ -416,13 +416,6 @@ func validateDomain(v *TunnelDomain) error {
 	return nil
 }
 
-func validateConnector(v TunnelConnector) error {
-	if v.Schema != TunnelV1Schema || v.Kind != "connector" || !validTunnelID(v.ID) || !validTunnelID(v.TunnelID) || !validTunnelID(v.HostID) || v.Generation < 1 || v.RotationGeneration < 1 || !validTunnelETag(v.ETag) || v.ProtocolVersion != "1.0" || !validTunnelCredentialReference(v.CredentialReference) || (v.DesiredState != "active" && v.DesiredState != "draining" && v.DesiredState != "revoked") || (v.DrainState != "accepting" && v.DrainState != "draining" && v.DrainState != "drained" && v.DrainState != "forced_closed") {
-		return ErrUnsafeTunnelResponse
-	}
-	return nil
-}
-
 func validateHealth(v *TunnelHealth, tunnelID string) error {
 	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "health" || v.ResourceKind != "tunnel" || v.ResourceID != tunnelID || v.OverallCode == "" || len(v.Summary) > 1000 || len(v.RepairAction) > 500 || len(v.CorrelationID) > 256 || containsTunnelControl(v.OverallCode+v.Summary+v.RepairAction+v.CorrelationID) {
 		return ErrUnsafeTunnelResponse
@@ -467,16 +460,6 @@ func validateTunnelCapabilities(capabilities []string) error {
 	return nil
 }
 
-func validateTunnelEnrollmentInput(in TunnelConnectorEnrollmentInput) error {
-	if !validTunnelID(in.HostID) {
-		return errors.New("invalid connector enrollment host identifier")
-	}
-	if in.TTLSeconds < 0 || in.TTLSeconds > 900 {
-		return errors.New("connector enrollment TTL must be between 0 and 900 seconds")
-	}
-	return validateTunnelCapabilities(in.Capabilities)
-}
-
 func validTunnelBase64URL(value string, length int) bool {
 	if len(value) != length {
 		return false
@@ -487,56 +470,6 @@ func validTunnelBase64URL(value string, length int) bool {
 		}
 	}
 	return true
-}
-
-func validateTunnelEnrollmentExchangeInput(in TunnelConnectorEnrollmentExchangeInput) error {
-	if in.Token == "" || len(in.Token) > 256 || strings.TrimSpace(in.Token) != in.Token || containsTunnelControl(in.Token) {
-		return errors.New("connector enrollment token is invalid")
-	}
-	if !validTunnelID(in.HostID) {
-		return errors.New("invalid connector enrollment host identifier")
-	}
-	if in.ProtocolVersion == "" {
-		in.ProtocolVersion = "1.0"
-	}
-	if in.ProtocolVersion != "1.0" || len(in.ProtocolVersion) > 32 || containsTunnelControl(in.ProtocolVersion) {
-		return errors.New("unsupported connector protocol version")
-	}
-	if !validTunnelCredentialReference(in.CredentialReference) {
-		return errors.New("invalid connector credential reference")
-	}
-	if !validTunnelBase64URL(in.CredentialThumbprint, 43) || !validTunnelBase64URL(in.CredentialVerifierPublicKey, 43) || !validTunnelBase64URL(in.CredentialProof, 86) {
-		return errors.New("invalid connector credential proof material")
-	}
-	if in.CredentialVerifierAlgorithm != "ed25519" {
-		return errors.New("connector credential verifier must use ed25519")
-	}
-	for _, value := range []*string{in.SoftwareVersion, in.OperatingSystem, in.Architecture} {
-		if value != nil && (len(*value) > 128 || containsTunnelControl(*value)) {
-			return errors.New("connector metadata is invalid")
-		}
-	}
-	return nil
-}
-
-func validateTunnelEnrollment(v *TunnelConnectorEnrollment, tunnel string) error {
-	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "connector_enrollment" || !validTunnelID(v.ID) || v.TunnelID != tunnel || !validTunnelID(v.HostID) || v.EnrollmentToken == "" || len(v.EnrollmentToken) > 256 || strings.TrimSpace(v.EnrollmentToken) != v.EnrollmentToken || containsTunnelControl(v.EnrollmentToken) || v.ExpiresAt.IsZero() {
-		return ErrUnsafeTunnelResponse
-	}
-	if err := validateTunnelCapabilities(v.Capabilities); err != nil {
-		return ErrUnsafeTunnelResponse
-	}
-	if err := validateOperation(&v.Operation, "connector", v.ID); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateTunnelActivation(v *TunnelConnectorActivation, tunnel string) error {
-	if v == nil || v.Schema != TunnelV1Schema || v.Kind != "connector_activation" || !validTunnelID(v.AccountID) || v.TunnelID != tunnel || !validTunnelID(v.ConnectorID) || !validTunnelID(v.HostID) || v.CredentialGeneration < 1 || v.ProcessGeneration < 1 {
-		return ErrUnsafeTunnelResponse
-	}
-	return validateOperation(&v.Operation, "connector", v.ConnectorID)
 }
 
 func validateTunnelEvent(v *TunnelEvent, tunnel string) error {

@@ -236,7 +236,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
 | [pb tunnel](pb_tunnel.md) | Manage durable tunnels or start an ephemeral tunnel |
 | [pb tunnel create](pb_tunnel_create.md) | Create a durable tunnel |
-| [pb tunnel delete](pb_tunnel_delete.md) | Delete endpoints and routes and revoke connectors while preserving user DNS records |
+| [pb tunnel delete](pb_tunnel_delete.md) | Delete endpoints and routes while preserving user DNS records |
 | [pb tunnel doctor](pb_tunnel_doctor.md) | Diagnose tunnel health |
 | [pb tunnel domain](pb_tunnel_domain.md) | Manage tunnel domains |
 | [pb tunnel domain add](pb_tunnel_domain_add.md) | Add a tunnel domain |

@@ -6,7 +6,7 @@ Remove a tunnel route
 
 Remove a tunnel route
 
-Remove one route from a durable tunnel after confirmation. The tunnel and its other routes and connectors remain available.
+Remove one route from a durable tunnel after confirmation. The tunnel and its other routes remain available.
 
 Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
 

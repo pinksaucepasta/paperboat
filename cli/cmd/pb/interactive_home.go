@@ -127,7 +127,7 @@ func actionHomePreviews(command *cobra.Command) error {
 		choice, err := chooseHomeAction(command, "Previews & tunnels", []selector.Item{
 			{ID: "new", Title: "Share a local app", Description: "Guided preview or durable tunnel setup", Action: true},
 			{ID: "previews", Title: "Temporary previews", Description: "View URLs, lifetimes, and stop previews"},
-			{ID: "tunnels", Title: "Durable tunnels", Description: "Inspect readiness, routes, domains, connectors, and access"},
+			{ID: "tunnels", Title: "Durable tunnels", Description: "Inspect readiness, routes, domains, and access"},
 		})
 		if err != nil {
 			return err
@@ -320,7 +320,6 @@ func actionHomeTunnelList(command *cobra.Command) error {
 				{ID: "logs", Title: "Recent events", Description: "Redacted tunnel activity"},
 				{ID: "route", Title: "Routes", Description: "Origins and matching rules"},
 				{ID: "domain", Title: "Domains", Description: "Hostnames, DNS, and certificates"},
-				{ID: "connector", Title: "Connectors", Description: "Daemon connections serving this tunnel"},
 				{ID: "pause", Title: "Pause", Description: "Stop new traffic; preserve tunnel configuration"},
 				{ID: "resume", Title: "Resume", Description: "Resume serving the configured routes"},
 				{ID: "delete", Title: "Delete tunnel", Description: "Remove the tunnel; external DNS records are preserved"},
@@ -333,7 +332,7 @@ func actionHomeTunnelList(command *cobra.Command) error {
 			}
 			args := []string{"tunnel", action.ID, choice.ID}
 			switch action.ID {
-			case "route", "domain", "connector":
+			case "route", "domain":
 				if err := actionHomeTunnelInventory(command, client, choice.ID, action.ID); err != nil && !interactiveCanceled(err) {
 					return err
 				}
@@ -678,17 +677,6 @@ func actionHomeTunnelInventory(command *cobra.Command, client *api.Client, tunne
 					description := item.State + " · certificate " + item.Certificate.State
 					items = append(items, selector.Item{ID: item.ID, Title: item.Hostname, Description: description})
 					details[item.ID] = description + "\nDNS target: " + item.DNS.Target + "\nID: " + item.ID
-				}
-			case "connector":
-				page, err := client.ListTunnelConnectorsV1(ctx, tunnelID, cursor, 100)
-				if err != nil {
-					return err
-				}
-				next = page.NextCursor
-				for _, item := range page.Items {
-					description := item.DesiredState + " · " + item.DrainState
-					items = append(items, selector.Item{ID: item.ID, Title: item.HostID, Description: description})
-					details[item.ID] = description + "\nID: " + item.ID
 				}
 			}
 			return nil
