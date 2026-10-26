@@ -12,25 +12,14 @@ import (
 )
 
 func splitTunnelOrigin(value string) (string, string, error) {
-	return splitTunnelCLIOrigin(value, false)
-}
-
-func splitTunnelRouteOrigin(value string) (string, string, error) {
-	return splitTunnelCLIOrigin(value, true)
-}
-
-func splitTunnelCLIOrigin(value string, allowTCP bool) (string, string, error) {
 	value = strings.TrimSpace(value)
 	at := strings.Index(value, "://")
 	if at < 1 || at == len(value)-3 {
 		return "", "", errors.New("origin must include a scheme and address")
 	}
 	scheme := value[:at]
-	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && (!allowTCP || scheme != "tcp") {
-		if allowTCP {
-			return "", "", errors.New("origin scheme must be http, https, h2c, unix, or tcp")
-		}
-		return "", "", errors.New("origin scheme must be http, https, h2c, or unix")
+	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && scheme != "tcp" {
+		return "", "", errors.New("origin scheme must be http, https, h2c, unix, or tcp")
 	}
 	address := value[at+3:]
 	if address != strings.TrimSpace(address) || len(address) > 512 || strings.ContainsAny(address, "\x00\r\n\t@?#") {

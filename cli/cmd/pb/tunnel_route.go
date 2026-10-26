@@ -72,7 +72,7 @@ func routeAddCommand() *cobra.Command {
 		protocol, _ := command.Flags().GetString("protocol")
 		host, _ := command.Flags().GetString("domain")
 		origin, _ := command.Flags().GetString("to")
-		scheme, address, e := splitTunnelRouteOrigin(origin)
+		scheme, address, e := splitTunnelOrigin(origin)
 		if e != nil {
 			return e
 		}
@@ -214,7 +214,7 @@ func routeUpdateCommand() *cobra.Command {
 		}
 		if command.Flags().Changed("to") {
 			v, _ := command.Flags().GetString("to")
-			scheme, address, err := splitTunnelRouteOrigin(v)
+			scheme, address, err := splitTunnelOrigin(v)
 			if err != nil {
 				return err
 			}
