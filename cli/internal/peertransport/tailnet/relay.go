@@ -44,7 +44,10 @@ type relayAuthority struct {
 	controlPeers []key.NodePublic
 	nodes        map[tailcfg.DERPRegionID]RegionalNode
 	usagePeers   map[key.NodePublic]*relayUsageObservation
-	recovery     *regionalRecovery
+	// hostedData holds one channel per peer that is closed by the next WireGuard data crossing a
+	// relay that is not self-hosted (PathEligibility).
+	hostedData map[key.NodePublic]chan struct{}
+	recovery   *regionalRecovery
 	// regionalRecoveryConfigured distinguishes dynamic regional recovery from
 	// the single fixed-node mode when a stopped worker has been detached.
 	regionalRecoveryConfigured bool

@@ -22,26 +22,37 @@ func (a *Authority) PeerUsagePathDirection(endpointID, direction string) (UsageP
 	if !a.usableLocked() {
 		return UsagePath{Mode: "unknown"}, ErrAuthority
 	}
-	for _, peer := range a.current.Peers {
-		if peer.Identity.EndpointID != endpointID {
-			continue
-		}
-		public, err := publicKey(peer.Identity.WireGuardPublicKey)
-		if err != nil {
-			return UsagePath{Mode: "unknown"}, ErrAuthority
-		}
-		path := UsagePath{Mode: "unknown"}
-		if a.clientEngine != nil {
-			path = a.clientEngine.PeerUsagePath(public)
-		} else if a.server != nil && a.server.server != nil {
-			path = a.server.server.PeerUsagePath(public)
-		}
-		if path.IsRegionalRelay() {
-			path.NodeID = a.relay.usageNode(public, direction, time.Now())
-		}
-		return path, nil
+	public, err := a.peerKeyLocked(endpointID)
+	if err != nil {
+		return UsagePath{Mode: "unknown"}, err
 	}
-	return UsagePath{Mode: "unknown"}, ErrAdmission
+	path := UsagePath{Mode: "unknown"}
+	if a.clientEngine != nil {
+		path = a.clientEngine.PeerUsagePath(public)
+	} else if a.server != nil && a.server.server != nil {
+		path = a.server.server.PeerUsagePath(public)
+	}
+	if path.IsRegionalRelay() {
+		path.NodeID = a.relay.usageNode(public, direction, time.Now())
+	}
+	return path, nil
+}
+
+// peerKeyLocked is the WireGuard key of the admitted peer endpointID. Authority.mu is held.
+func (a *Authority) peerKeyLocked(endpointID string) (key.NodePublic, error) {
+	if a.current == nil {
+		return key.NodePublic{}, ErrAuthority
+	}
+	for _, peer := range a.current.Peers {
+		if peer.Identity.EndpointID == endpointID {
+			public, err := publicKey(peer.Identity.WireGuardPublicKey)
+			if err != nil {
+				return key.NodePublic{}, ErrAuthority
+			}
+			return public, nil
+		}
+	}
+	return key.NodePublic{}, ErrAdmission
 }
 
 func (r *relayAuthority) usageNode(peer key.NodePublic, direction string, now time.Time) string {

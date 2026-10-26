@@ -30,9 +30,18 @@ func (a *Authority) PathKind(endpointID string) (PathKind, error) {
 	if err != nil {
 		return PathNone, err
 	}
+	a.mu.Lock()
+	public, keyErr := a.peerKeyLocked(endpointID)
+	a.mu.Unlock()
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
-	return classifyPath(path, a.relay.nodes), nil
+	kind := classifyPath(path, a.relay.nodes)
+	// The engine's status is cached for about a second, and WireGuard data that crossed a hosted relay
+	// just now is a stronger observation than a cached "direct".
+	if kind == PathDirect && keyErr == nil && a.relay.hostedRelayRecentLocked(public, time.Now()) {
+		return PathHostedRelay, nil
+	}
+	return kind, nil
 }
 
 // classifyPath is PathKind for an observed path and the engine's current relay nodes by region.
@@ -66,9 +75,17 @@ func classifyPath[K comparable](path UsagePath, nodes map[K]RegionalNode) PathKi
 	return PathSelfHostedRelay
 }
 
-// PathEligibility reports the current PathKind to endpointID and a channel closed once the kind changes
-// or ctx ends, whichever comes first; call it again after the channel closes. An unknown peer is PathNone.
+// PathEligibility reports the current PathKind to endpointID and a channel closed once the kind changes,
+// WireGuard data to or from the peer crosses a hosted relay, or ctx ends, whichever comes first; call it
+// again after the channel closes. An unknown peer is PathNone. The relay signal is registered before the
+// path is read, so an Unlimited transfer stops at the first hosted-relay packet, not at the next poll.
 func (a *Authority) PathEligibility(ctx context.Context, endpointID string) (PathKind, <-chan struct{}) {
+	var hosted <-chan struct{}
+	a.mu.Lock()
+	if public, err := a.peerKeyLocked(endpointID); err == nil {
+		hosted = a.relay.hostedRelayData(public)
+	}
+	a.mu.Unlock()
 	kind, _ := a.PathKind(endpointID)
 	changed := make(chan struct{})
 	go func() {
@@ -80,6 +97,8 @@ func (a *Authority) PathEligibility(ctx context.Context, endpointID string) (Pat
 			case <-ctx.Done():
 				return
 			case <-a.done:
+				return
+			case <-hosted:
 				return
 			case <-ticker.C:
 				if now, _ := a.PathKind(endpointID); now != kind {

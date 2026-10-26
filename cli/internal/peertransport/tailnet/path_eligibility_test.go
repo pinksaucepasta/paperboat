@@ -49,3 +49,45 @@ func TestPathEligibilityChannelEndsWithItsContext(t *testing.T) {
 		t.Fatal("the change channel outlived its context")
 	}
 }
+
+// An Unlimited transfer stops at the first WireGuard packet that crosses a hosted relay, not at the next
+// status poll: magicsock sends both ways once its direct address stops being trusted, and a poll plus the
+// engine's cached status let megabytes through (Lane H, F22-01, 10-19 MB per direct-path loss). Data over the
+// account's own relay does not stop it.
+func TestPathEligibilityEndsAtTheFirstHostedRelayPacket(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	peer := cfg.Peers[0].Identity
+	public, err := publicKey(peer.WireGuardPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.relay.mu.Lock()
+	a.relay.updateUsagePeersLocked(cfg.Peers)
+	a.relay.mu.Unlock()
+	own := &usageObservedCarrier{authority: &a.relay, node: RegionalNode{NodeID: "relay_own", Hosting: "self_hosted"}}
+	hosted := &usageObservedCarrier{authority: &a.relay, node: RegionalNode{NodeID: "relay_managed"}}
+
+	_, changed := a.PathEligibility(t.Context(), peer.EndpointID)
+	own.record(public, false, time.Now())
+	select {
+	case <-changed:
+		t.Fatal("data over the account's own relay ended an Unlimited transfer")
+	case <-time.After(100 * time.Millisecond):
+	}
+	hosted.record(public, false, time.Now())
+	select {
+	case <-changed:
+	case <-time.After(300 * time.Millisecond): // well inside the 500 ms status poll
+		t.Fatal("the first hosted-relay packet did not end the watch")
+	}
+	a.relay.mu.Lock()
+	recent := a.relay.hostedRelayRecentLocked(public, time.Now())
+	stale := a.relay.hostedRelayRecentLocked(public, time.Now().Add(2*relayUsageFreshness))
+	a.relay.mu.Unlock()
+	if !recent || stale {
+		t.Fatalf("hosted relay data is recent=%v, and stale after the freshness window=%v", recent, stale)
+	}
+}

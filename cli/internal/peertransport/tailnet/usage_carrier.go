@@ -87,4 +87,39 @@ func (c *usageObservedCarrier) record(peer key.NodePublic, receive bool, at time
 	} else {
 		observation.send = sample
 	}
+	if signal, ok := c.authority.hostedData[peer]; ok && !c.node.SelfHosted() {
+		close(signal)
+		delete(c.authority.hostedData, peer)
+	}
+}
+
+// hostedRelayData returns a channel closed by the next WireGuard data to or from peer that crosses a
+// relay Paperboat hosts. The caller must register it before it reads the path, so no packet slips by.
+func (r *relayAuthority) hostedRelayData(peer key.NodePublic) <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.hostedData == nil {
+		r.hostedData = make(map[key.NodePublic]chan struct{})
+	}
+	signal, ok := r.hostedData[peer]
+	if !ok {
+		signal = make(chan struct{})
+		r.hostedData[peer] = signal
+	}
+	return signal
+}
+
+// hostedRelayRecent reports whether WireGuard data to or from peer crossed a hosted relay within
+// relayUsageFreshness. relayAuthority.mu is held.
+func (r *relayAuthority) hostedRelayRecentLocked(peer key.NodePublic, now time.Time) bool {
+	observation := r.usagePeers[peer]
+	if observation == nil {
+		return false
+	}
+	for _, sample := range []relayUsageSample{observation.send, observation.receive} {
+		if !sample.at.IsZero() && now.Sub(sample.at) <= relayUsageFreshness && !sample.node.SelfHosted() {
+			return true
+		}
+	}
+	return false
 }
