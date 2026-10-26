@@ -168,6 +168,10 @@ export function useTerminalConnection({
   const [reconnects, setReconnects] = useState(0)
   // Output frames the host sent again that were already on screen.
   const [replays, setReplays] = useState(0)
+  // Checkpoints the machine sent again on one connection after the edge dropped output the page could
+  // not keep up with: a repaint, not a reconnect.
+  const [resyncs, setResyncs] = useState(0)
+  const attachedConnectionRef = useRef("")
   // The last typed close ("<code> <close number>"), for checks and bug reports.
   const [lastClose, setLastClose] = useState("")
   const [connectedEdge, setConnectedEdge] = useState("")
@@ -684,6 +688,9 @@ export function useTerminalConnection({
           apiRef.current?.leave(connectionID)
           return
         }
+        const resync = attachedConnectionRef.current === connectionID
+        if (resync) setResyncs((count) => count + 1)
+        attachedConnectionRef.current = connectionID
         setPhaseValue("attached")
         setConnectedEdge(ticketEdgeRef.current)
         retryDelayRef.current = 1000
@@ -697,7 +704,8 @@ export function useTerminalConnection({
           mobileModifiersRef.current = noMobileModifiers
           setMobileModifiers(noMobileModifiers)
         }
-        resizeControlRef.current = nextRole === "owner" && !!event.first_attachment
+        // A resync is the same attachment: it keeps the size control it had.
+        if (!resync) resizeControlRef.current = nextRole === "owner" && !!event.first_attachment
         const screenSequence = normalizeSequence(event.screen_sequence)
         try {
           // The host's screen is authoritative on every attach. Reset through wterm so partial
@@ -961,6 +969,7 @@ export function useTerminalConnection({
     role,
     reconnects,
     replays,
+    resyncs,
     lastClose,
     error,
     notice,

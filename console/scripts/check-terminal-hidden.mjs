@@ -96,7 +96,7 @@ try {
   log(await until(async () => /\/terminals$/.test(await evaluate(page, "location.pathname")), 20000), "the terminal is closed", terminal)
 } finally {
   chrome.kill()
-  rmSync(profile, { recursive: true, force: true })
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
 }
 console.log(failed ? `${failed} failed` : "all passed")
 process.exit(failed ? 1 : 0)
