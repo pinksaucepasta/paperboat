@@ -34,3 +34,17 @@ func TestLocalAPIFailureNeverEchoesACodeThatIsNotAnAuthoredConstant(t *testing.T
 		t.Fatalf("message = %q", got)
 	}
 }
+
+// Agents get the same codes: a retryable "not ready yet" in which nothing ran, with the next step.
+func TestLocalAPIFailureJSONCarriesTheDaemonsCode(t *testing.T) {
+	for _, code := range []string{"peer_transport_unavailable", "peer_stream_unavailable", "inventory_unavailable"} {
+		err := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: code}
+		encoded := classifyCLIJSONError(err)
+		if encoded.Code != code || !encoded.Retryable || encoded.StateChanged != false || encoded.Recovery == "" || encoded.Category != "unavailable_retryable" {
+			t.Errorf("%s: json = %#v", code, encoded)
+		}
+	}
+	if encoded := classifyCLIJSONError(&localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "file_transfer_unavailable"}); encoded.Code == "file_transfer_unavailable" {
+		t.Errorf("an unlisted code must keep the generic classification: %#v", encoded)
+	}
+}

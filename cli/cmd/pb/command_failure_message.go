@@ -289,6 +289,20 @@ func localAPIFailureMessage(code string) string {
 	return "The local Paperboat service could not complete the request" + step + ". Check `pb status` for the local service and the target, then retry; run `pb doctor` if this continues."
 }
 
+// localAPIFailureRecovery is the next step for the codes localAPIFailureMessage names, for --json.
+// Each is a retryable "not ready yet" in which nothing ran.
+func localAPIFailureRecovery(code string) (string, bool) {
+	switch code {
+	case "peer_transport_unavailable":
+		return "Check that the target machine's Runtime is ready in `pb status`, then retry.", true
+	case "peer_stream_unavailable":
+		return "Retry in a minute; run `pb doctor` if this continues.", true
+	case "inventory_unavailable", "snapshot_unavailable", "observation_unavailable", "relay_inventory_unavailable":
+		return "Wait a few seconds for the local service to finish starting, then retry; check `pb status`.", true
+	}
+	return "", false
+}
+
 var localAPICodeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
