@@ -1,9 +1,11 @@
 package runtimeattachment
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"io"
 	"net/http"
 	"sync"
@@ -66,6 +68,28 @@ func (s *Service) FetchEngineTunnels(ctx context.Context) (out []runtimewire.Eng
 	return envelope.Data.Tunnels, nil
 }
 
+// ReportOriginHealth tells the server whether one engine tunnel's route origins are reachable.
+func (s *Service) ReportOriginHealth(ctx context.Context, report tunnelmanager.OriginHealthReport) (returnErr error) {
+	op, err := randomID("operation")
+	if err != nil {
+		return controlFailure(err)
+	}
+	request := runtimewire.OriginHealthRequest{}
+	for _, route := range report.Routes {
+		request.Routes = append(request.Routes, runtimewire.OriginHealthRoute{TunnelID: report.TunnelID, RouteID: route.RouteID, State: route.State, Code: route.Code})
+	}
+	res, err := s.post(ctx, runtimewire.HostTunnelOriginHealthPath, op, request)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+	if res.StatusCode != http.StatusNoContent && res.StatusCode != http.StatusOK {
+		return controlFailure(errorreport.HTTPStatusFailure(res))
+	}
+	return nil
+}
+
 // EngineTunnels serves this machine's tunnels that ride on its runtime carriers (PLAN 3a step 4):
 // each active route is registered on every carrier hub and forwarded to its origin, as the
 // tunnel's own connector did. Served tells the tunnel manager, which reconciles every few seconds,
@@ -80,8 +104,12 @@ type EngineTunnels struct {
 	browserIngress tunnelmanager.IngressAuthorityFunc
 	tunnels        map[string]engineTunnel
 	routes         map[engineRouteKey]*engineRoute
-	cancel         context.CancelFunc
-	done           chan struct{}
+	// origins probes each engine tunnel's route origins once (not per hub) and reports changes.
+	origins map[string]engineOrigins
+	// originInterval overrides the origin probe interval (tests); zero is the default.
+	originInterval time.Duration
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 type engineTunnel struct {
@@ -89,6 +117,12 @@ type engineTunnel struct {
 	hash       string
 	restricted bool
 	routes     []hoststate.TunnelConfigRoute
+}
+
+type engineOrigins struct {
+	generation uint64
+	hash       string
+	stop       func()
 }
 
 type engineRouteKey struct {
@@ -263,6 +297,7 @@ func (e *EngineTunnels) reconcile(ctx context.Context, hubs []*preview.DataCarri
 			delete(e.routes, key)
 		}
 	}
+	e.reconcileOrigins(ctx)
 }
 
 func (e *EngineTunnels) serve(ctx context.Context, hub *preview.DataCarrierPreviewHub, tunnelID string, tunnel engineTunnel, route hoststate.TunnelConfigRoute) (*engineRoute, error) {
@@ -302,5 +337,33 @@ func (e *EngineTunnels) stopAll() {
 		stopEngineRoute(route)
 		delete(e.routes, key)
 	}
+	for tunnelID, current := range e.origins {
+		current.stop()
+		delete(e.origins, tunnelID)
+	}
 	e.tunnels = nil
+}
+
+// reconcileOrigins keeps one origin prober per served engine tunnel, restarted when its
+// configuration changes, so `pb tunnel status` can say the app behind a route stopped.
+func (e *EngineTunnels) reconcileOrigins(ctx context.Context) {
+	if e.origins == nil {
+		e.origins = map[string]engineOrigins{}
+	}
+	for tunnelID, tunnel := range e.tunnels {
+		if current, ok := e.origins[tunnelID]; ok {
+			if current.generation == tunnel.generation && current.hash == tunnel.hash {
+				continue
+			}
+			current.stop()
+		}
+		stop := tunnelmanager.StartOriginHealth(ctx, tunnelID, tunnel.routes, tunnelmanager.NetworkOriginProber{}, e.Service, cmp.Or(e.originInterval, originhealth.DefaultProbeInterval))
+		e.origins[tunnelID] = engineOrigins{generation: tunnel.generation, hash: tunnel.hash, stop: stop}
+	}
+	for tunnelID, current := range e.origins {
+		if _, ok := e.tunnels[tunnelID]; !ok {
+			current.stop()
+			delete(e.origins, tunnelID)
+		}
+	}
 }

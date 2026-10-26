@@ -12,25 +12,18 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 )
 
-// OriginHealthRoute is the latest reachability of one route's local app. Code is set only for
-// unreachable: refused, timeout, unreachable or tls.
+// OriginHealthRoute is the latest reachability of one route's local app: State is reachable or
+// unreachable; Code is set only for unreachable: refused, timeout, unreachable or tls.
 type OriginHealthRoute struct {
-	RouteID    string
-	State      string
-	Code       string
-	ObservedAt time.Time
+	RouteID string
+	State   string
+	Code    string
 }
 
-// OriginHealthReport carries route reachability for one authenticated connector session; the
-// control plane binds it to that exact session and configuration.
+// OriginHealthReport carries route reachability for one tunnel this machine's agent serves.
 type OriginHealthReport struct {
-	TunnelID          string
-	ConnectorID       string
-	SessionID         string
-	ProcessGeneration uint64
-	ConfigGeneration  uint64
-	ContentHash       string
-	Routes            []OriginHealthRoute
+	TunnelID string
+	Routes   []OriginHealthRoute
 }
 
 // OriginHealthReporter delivers an OriginHealthReport to the control plane.
@@ -40,18 +33,11 @@ type OriginHealthReporter interface {
 
 const originHealthReportTimeout = 20 * time.Second
 
-// originHealthIdentity is the exact session a generation's reports are bound to.
-type originHealthIdentity struct {
-	tunnelID, connectorID, sessionID string
-	processGeneration, generation    uint64
-	contentHash                      string
-}
-
-// startOriginHealth probes every active route's local app and reports changes (and a repeat while
+// StartOriginHealth probes every active route's local app and reports changes (and a repeat while
 // it stays down) so `pb tunnel status` can say the app stopped. It stops when the returned
 // function is called or ctx ends. Reports are best effort: the control plane ages an unreachable
 // report out, so a lost one is repaired by the next repeat or by aging.
-func startOriginHealth(ctx context.Context, identity originHealthIdentity, routes []hoststate.TunnelConfigRoute, prober OriginProber, reporter OriginHealthReporter, interval time.Duration) func() {
+func StartOriginHealth(ctx context.Context, tunnelID string, routes []hoststate.TunnelConfigRoute, prober OriginProber, reporter OriginHealthReporter, interval time.Duration) func() {
 	ctx, cancel := context.WithCancel(ctx)
 	events := make(chan originhealth.Event, 64)
 	var lastError sync.Map // route ID -> last probe error, to tell a TLS failure from a refused dial
@@ -89,18 +75,14 @@ func startOriginHealth(ctx context.Context, identity originHealthIdentity, route
 				if up && !reportedDown[event.Key] {
 					continue // the first success is not news; only a recovery is
 				}
-				route := OriginHealthRoute{RouteID: event.Key, State: "ready", ObservedAt: event.At.UTC()}
+				route := OriginHealthRoute{RouteID: event.Key, State: "reachable"}
 				if !up {
 					value, _ := lastError.Load(event.Key)
 					err, _ := value.(error)
 					route.State, route.Code = "unreachable", originHealthCode(event.Reason, err)
 				}
 				sendCtx, done := context.WithTimeout(ctx, originHealthReportTimeout)
-				err := reporter.ReportOriginHealth(sendCtx, OriginHealthReport{
-					TunnelID: identity.tunnelID, ConnectorID: identity.connectorID, SessionID: identity.sessionID,
-					ProcessGeneration: identity.processGeneration, ConfigGeneration: identity.generation,
-					ContentHash: identity.contentHash, Routes: []OriginHealthRoute{route},
-				})
+				err := reporter.ReportOriginHealth(sendCtx, OriginHealthReport{TunnelID: tunnelID, Routes: []OriginHealthRoute{route}})
 				done()
 				if err == nil {
 					reportedDown[event.Key] = !up

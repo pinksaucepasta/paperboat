@@ -50,9 +50,8 @@ func nextReport(t *testing.T, reporter *recordingReporter) OriginHealthReport {
 func TestOriginHealthReportsAStoppedAndRestartedApp(t *testing.T) {
 	prober := &switchableProber{}
 	reporter := &recordingReporter{reports: make(chan OriginHealthReport, 8)}
-	identity := originHealthIdentity{tunnelID: "tun_1", connectorID: "conn_1", sessionID: "session_1", processGeneration: 3, generation: 5, contentHash: "sha256:" + string(make([]byte, 0))}
 	routes := []hoststate.TunnelConfigRoute{{ID: "route_1", DesiredState: "active"}, {ID: "route_off", DesiredState: "paused"}}
-	stop := startOriginHealth(t.Context(), identity, routes, prober, reporter, 10*time.Millisecond)
+	stop := StartOriginHealth(t.Context(), "tun_1", routes, prober, reporter, 10*time.Millisecond)
 	defer stop()
 
 	time.Sleep(60 * time.Millisecond)
@@ -67,13 +66,13 @@ func TestOriginHealthReportsAStoppedAndRestartedApp(t *testing.T) {
 	if len(down.Routes) != 1 || down.Routes[0].RouteID != "route_1" || down.Routes[0].State != "unreachable" || down.Routes[0].Code != "refused" {
 		t.Fatalf("down report %+v", down)
 	}
-	if down.TunnelID != "tun_1" || down.ConnectorID != "conn_1" || down.SessionID != "session_1" || down.ProcessGeneration != 3 || down.ConfigGeneration != 5 {
-		t.Fatalf("report not bound to the session: %+v", down)
+	if down.TunnelID != "tun_1" {
+		t.Fatalf("report not bound to its tunnel: %+v", down)
 	}
 
 	prober.set(nil)
 	up := nextReport(t, reporter)
-	if up.Routes[0].State != "ready" || up.Routes[0].Code != "" {
+	if up.Routes[0].State != "reachable" || up.Routes[0].Code != "" {
 		t.Fatalf("recovery report %+v", up)
 	}
 }
