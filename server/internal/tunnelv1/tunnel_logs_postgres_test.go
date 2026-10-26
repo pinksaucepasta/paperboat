@@ -21,9 +21,6 @@ func TestTunnelLogsRecordStateAndOriginChangesOnPostgres(t *testing.T) {
 	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',$3,$3)`, route, tunnel, account); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host); err != nil {
-		t.Fatal(err)
-	}
 	logs := func() []string {
 		t.Helper()
 		rows, err := f.repository.ListResourceTunnelLogs(ctx, account, tunnel, 0, 50)
@@ -70,6 +67,11 @@ func TestTunnelLogsRecordStateAndOriginChangesOnPostgres(t *testing.T) {
 		t.Fatalf("resume left %v", logs())
 	}
 
+	// A state change syncs the agent's endpoints, and this fixture agent serves none: add the endpoint
+	// the origin reports are about only now.
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host); err != nil {
+		t.Fatal(err)
+	}
 	report := func(state, code string, at time.Duration) {
 		t.Helper()
 		if err := f.repository.RecordOriginHealth(ctx, account, host, "corr_origin_"+f.suffix, []OriginRouteReport{{TunnelID: tunnel, RouteID: route, State: state, Code: code, ObservedAt: f.now.Add(at)}}, f.now.Add(at)); err != nil {
