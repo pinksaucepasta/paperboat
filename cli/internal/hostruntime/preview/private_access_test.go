@@ -488,7 +488,9 @@ func TestPrivateAccessorPreviewHTTPOutlivesGrantAndRevokes(t *testing.T) {
 		edgeResult <- nil
 	}()
 
-	proxy, err := privatepreviewproxy.StartAccessProxy(ctx, privatepreviewproxy.AccessProxyConfig{Source: source, OpenTimeout: 40 * time.Millisecond})
+	// Long enough for the grant and open under the race detector on a loaded host (40 ms returned 503).
+	const openTimeout = time.Second
+	proxy, err := privatepreviewproxy.StartAccessProxy(ctx, privatepreviewproxy.AccessProxyConfig{Source: source, OpenTimeout: openTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +508,7 @@ func TestPrivateAccessorPreviewHTTPOutlivesGrantAndRevokes(t *testing.T) {
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("CONNECT response=%v err=%v", response, err)
 	}
-	time.Sleep(150 * time.Millisecond) // Outlive both setup timeout and credential TTL.
+	time.Sleep(openTimeout + 200*time.Millisecond) // The open timeout bounds setup only: the stream outlives it.
 	if err != nil {
 		t.Fatal(err)
 	}
