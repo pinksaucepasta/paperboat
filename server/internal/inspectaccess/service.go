@@ -527,7 +527,7 @@ func (s *Service) Renew(ctx context.Context, account, credentialID string, ttl t
 		return time.Time{}, ErrNotAuthorized
 	}
 	// revoked_at and expires_at are re-checked here: a revoke between the resolve and this update wins.
-	if err := s.db.Pool().QueryRow(ctx, `UPDATE inspector_credentials SET expires_at=GREATEST(expires_at,$3) WHERE credential_id=$1 AND account_id=$2 AND revoked_at IS NULL AND expires_at>$4 RETURNING expires_at`, credentialID, account, expires, now).Scan(&expires); err != nil {
+	if err := s.db.Pool().QueryRow(ctx, `UPDATE inspector_credentials SET expires_at=GREATEST(expires_at,$3),renewed_at=$4 WHERE credential_id=$1 AND account_id=$2 AND revoked_at IS NULL AND expires_at>$4 RETURNING expires_at`, credentialID, account, expires, now).Scan(&expires); err != nil {
 		return time.Time{}, mapMissing(err)
 	}
 	return expires, nil
