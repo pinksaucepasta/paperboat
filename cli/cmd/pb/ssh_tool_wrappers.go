@@ -35,7 +35,7 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 		return err
 	}
 	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
-		_, machine, sshTarget, err := resolveSSHCommandTargetFast(ctx, target)
+		_, machine, sshTarget, err := resolveSSHCommandTargetWarm(ctx, target)
 		if err != nil {
 			return managedssh.Destination{}, friendlyCommandError(err)
 		}

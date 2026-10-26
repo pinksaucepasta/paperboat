@@ -294,6 +294,9 @@ type MachineStatus struct {
 	TransferReadiness  string              `json:"transfer_readiness"`
 	PreviewReadiness   string              `json:"preview_readiness"`
 	SSHReadiness       string              `json:"ssh_readiness"`
+	// SSHUser and SSHPort are the machine's managed SSH target (its setup user and sshd port) when listed.
+	SSHUser string `json:"ssh_user,omitempty"`
+	SSHPort uint16 `json:"ssh_port,omitempty"`
 	NATMappingIPv4     string              `json:"nat_mapping_ipv4"`
 	NATMappingIPv6     string              `json:"nat_mapping_ipv6"`
 	CaptivePortal      string              `json:"captive_portal"`
@@ -323,6 +326,8 @@ type Snapshot struct {
 	DaemonVersion string          `json:"daemon_version"`
 	Health        []HealthItem    `json:"health"`
 	Machines      []MachineStatus `json:"machines"`
+	// SSHDomain is the alias domain of the managed OpenSSH configuration (<alias>.<domain>), once it is installed.
+	SSHDomain string `json:"ssh_domain,omitempty"`
 }
 
 type StatusEvent struct {

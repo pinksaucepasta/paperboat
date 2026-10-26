@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
@@ -37,19 +36,13 @@ func resolveSSHCommandTarget(ctx *command.Context, requested string) (*api.Clien
 	if err != nil {
 		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, err
 	}
-	observeSSHTargetCacheFailure(ctx.Context, sshTargetCacheStore(d.cfg, machine, target, time.Now()))
 	return client, machine, target, nil
 }
 
-// resolveSSHCommandTargetFast resolves the machine from the daemon's warm
-// inventory snapshot and the SSH target from a short-lived local cache when
-// fresh, avoiding catalog listing round trips on the interactive SSH path.
-// Any unavailable shortcut falls back to the canonical live resolution so
-// error behavior is unchanged.
-func resolveSSHCommandTargetFast(ctx *command.Context, requested string) (*api.Client, api.UserMachine, api.ManagedSSHTarget, error) {
-	var cacheFailures error
-	defer func() { observeSSHTargetCacheFailure(ctx.Context, cacheFailures) }()
-
+// resolveSSHCommandTargetWarm resolves the machine and its SSH target from the daemon's snapshot, which the
+// machine-events topics keep current, so a connection asks Paperboat nothing (F5-07). Without a ready daemon
+// entry it asks the server.
+func resolveSSHCommandTargetWarm(ctx *command.Context, requested string) (*api.Client, api.UserMachine, api.ManagedSSHTarget, error) {
 	d, err := buildDeps(ctx)
 	if err != nil {
 		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, err
@@ -58,58 +51,14 @@ func resolveSSHCommandTargetFast(ctx *command.Context, requested string) (*api.C
 		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, errors.New("Paperboat server is required for SSH")
 	}
 	machine, ok := resolveWarmUserMachine(ctx.Context, requested)
-	if !ok || machine.InstallationGeneration < 1 {
+	if !ok || machine.SSHUser == "" || machine.SSHPort == 0 {
 		return resolveSSHCommandTarget(ctx, requested)
 	}
 	client, err := sshAPIClient(ctx, d)
-	if err != nil {
-		return resolveSSHCommandTarget(ctx, requested)
-	}
-	if target, fresh, cacheErr := sshTargetCacheLookup(d.cfg, machine, time.Now()); cacheErr != nil {
-		cacheFailures = errors.Join(cacheFailures, cacheErr)
-	} else if fresh {
-		return client, machine, target, nil
-	}
-	target, err := client.ManagedSSHTarget(ctx.Context, machine.ID, uint64(machine.InstallationGeneration))
-	if err != nil {
-		return resolveSSHCommandTarget(ctx, requested)
-	}
-	cacheFailures = errors.Join(cacheFailures, sshTargetCacheStore(d.cfg, machine, target, time.Now()))
-	return client, machine, target, nil
-}
-
-// resolveSSHCommandTargetLive skips the machine catalog listing through the
-// daemon's warm snapshot but always validates the SSH target against fresh
-// server data. The managed SSH proxy uses this so destination port validation
-// can never trust a stale local cache.
-func resolveSSHCommandTargetLive(ctx *command.Context, requested string) (*api.Client, api.UserMachine, api.ManagedSSHTarget, error) {
-	d, err := buildDeps(ctx)
 	if err != nil {
 		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, err
 	}
-	if d.cfg.ServerURL == "" {
-		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, errors.New("Paperboat server is required for SSH")
-	}
-	machine, ok := resolveWarmUserMachine(ctx.Context, requested)
-	if !ok || machine.InstallationGeneration < 1 {
-		return resolveSSHCommandTarget(ctx, requested)
-	}
-	client, err := sshAPIClient(ctx, d)
-	if err != nil {
-		return resolveSSHCommandTarget(ctx, requested)
-	}
-	target, err := client.ManagedSSHTarget(ctx.Context, machine.ID, uint64(machine.InstallationGeneration))
-	if err != nil {
-		return resolveSSHCommandTarget(ctx, requested)
-	}
-	observeSSHTargetCacheFailure(ctx.Context, sshTargetCacheStore(d.cfg, machine, target, time.Now()))
-	return client, machine, target, nil
-}
-
-func observeSSHTargetCacheFailure(ctx context.Context, err error) {
-	if err != nil {
-		errorreport.Current().ObserveFailure(ctx, "pb", "ssh", "command", "managed_ssh_failed", err)
-	}
+	return client, machine, api.ManagedSSHTarget{MachineID: machine.ID, MachineGeneration: uint64(machine.InstallationGeneration), OSUser: machine.SSHUser, Port: machine.SSHPort}, nil
 }
 
 func sshAPIClient(ctx *command.Context, d *deps) (*api.Client, error) {

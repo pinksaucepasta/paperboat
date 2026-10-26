@@ -117,3 +117,20 @@ func TestManagedSSHRunsOnTheDaemonLifetimeNotTheRefresh(t *testing.T) {
 		})
 	}
 }
+
+// F5-07: the CLI's SSH helpers read the alias domain and each machine's SSH target from the snapshot, so they ask
+// Paperboat nothing; a later inventory refresh keeps the published domain.
+func TestSnapshotCarriesTheSSHDomainAndTarget(t *testing.T) {
+	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishSSHDomain(store, "example.test")
+	if snapshot, _ := store.Snapshot(t.Context()); snapshot.SSHDomain != "example.test" {
+		t.Fatalf("domain = %q", snapshot.SSHDomain)
+	}
+	machines := applyListedSSH([]api.UserMachine{{ID: "machine_1", Alias: "m", State: "ready", Online: true, InstallationGeneration: 3, SSH: &api.MachineSSH{OSUser: "pbt", Port: 2222, TargetGeneration: 3}}})
+	if status := mapMachines(machines); len(status) != 1 || status[0].SSHUser != "pbt" || status[0].SSHPort != 2222 {
+		t.Fatalf("status = %+v", status)
+	}
+}

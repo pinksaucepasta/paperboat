@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
 // managedSSHInstallTimeout bounds the first managed SSH configuration install, which asks the server.
@@ -34,6 +35,16 @@ type managedSSHOwner struct {
 
 // refresh starts managed SSH when it is not running, else rewrites its aliases for machines (the
 // inventory's latest list). A failed start is reported through report, not returned.
+// domain is the running managed SSH's alias domain, or "" before it starts.
+func (o *managedSSHOwner) domain() string {
+	if o == nil {
+		return ""
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.runtime.Domain()
+}
+
 func (o *managedSSHOwner) refresh(ctx context.Context, machines []api.UserMachine) error {
 	if o == nil {
 		return nil
@@ -74,4 +85,19 @@ func (o *managedSSHOwner) close() error {
 	err := o.runtime.Close()
 	o.runtime = nil
 	return err
+}
+
+// publishSSHDomain puts the managed SSH alias domain in the local snapshot, so the CLI's SSH helpers ask no server.
+func publishSSHDomain(store *localapi.SnapshotStore, domain string) {
+	if domain == "" {
+		return
+	}
+	_, _ = store.Update(time.Now(), func(current *localapi.Snapshot) (localapi.Snapshot, error) {
+		if current == nil {
+			return localapi.Snapshot{}, localapi.ErrSnapshotUnavailable
+		}
+		next := *current
+		next.SSHDomain = domain
+		return next, nil
+	})
 }

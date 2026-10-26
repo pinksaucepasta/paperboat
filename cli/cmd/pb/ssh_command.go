@@ -34,7 +34,7 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return invocationError(err)
 	}
 	ctx := actionContext(command, args)
-	client, machine, target, err := resolveSSHCommandTargetFast(ctx, targetName)
+	client, machine, target, err := resolveSSHCommandTargetWarm(ctx, targetName)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -136,7 +136,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	client, machine, target, err := resolveSSHCommandTargetLive(ctx, alias)
+	client, machine, target, err := resolveSSHCommandTargetWarm(ctx, alias)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -228,7 +228,7 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	client, machine, target, err := resolveSSHCommandTargetFast(ctx, alias)
+	client, machine, target, err := resolveSSHCommandTargetWarm(ctx, alias)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -313,7 +313,11 @@ func managedSSHDomain(ctx context.Context, client *api.Client) (string, error) {
 	return configuration.LocalAccessBaseDomain, nil
 }
 
+// configuredManagedSSHDomain is the alias domain from the daemon's snapshot (no request), else from the server.
 func configuredManagedSSHDomain(ctx *command.Context) (string, error) {
+	if snapshot, err := loadWarmMachineSnapshot(ctx.Context); err == nil && managedssh.ValidateAliasDomain(snapshot.SSHDomain) == nil {
+		return snapshot.SSHDomain, nil
+	}
 	dependencies, err := buildDeps(ctx)
 	if err != nil {
 		return "", err

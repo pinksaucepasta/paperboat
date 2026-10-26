@@ -33,6 +33,8 @@ const (
 type ManagedSSHRuntime struct {
 	closeFn func() error
 	refresh func(context.Context, []api.UserMachine) error
+	// domain is the alias domain of the last installed OpenSSH configuration, guarded by mu after start.
+	domain *string
 	mu      sync.Mutex
 	once    sync.Once
 	err     error
@@ -66,13 +68,18 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, err
 	}
+	domain := new(string)
 	install := func(refreshCtx context.Context, machines []api.UserMachine) error {
 		// The alias domain comes from discovery and may change; it is one small request.
 		configuration, err := client.ClientConfiguration(refreshCtx)
 		if err != nil {
 			return err
 		}
-		return installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, configuration.LocalAccessBaseDomain, managedSSHAliasTargets(machines))
+		if err := installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, configuration.LocalAccessBaseDomain, managedSSHAliasTargets(machines)); err != nil {
+			return err
+		}
+		*domain = configuration.LocalAccessBaseDomain
+		return nil
 	}
 	// ctx is the daemon's lifetime: the agent above serves on it. The first configuration install
 	// asks the server, so it gets its own bound.
@@ -82,7 +89,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 	if err != nil {
 		return nil, errors.Join(err, agentRuntime.Close())
 	}
-	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: install}, nil
+	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: install, domain: domain}, nil
 }
 
 // Refresh rewrites the managed aliases for machines, the inventory's latest list.
@@ -93,6 +100,16 @@ func (r *ManagedSSHRuntime) Refresh(ctx context.Context, machines []api.UserMach
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.refresh(ctx, machines)
+}
+
+// Domain is the alias domain the managed OpenSSH configuration uses, for the CLI's SSH helpers.
+func (r *ManagedSSHRuntime) Domain() string {
+	if r == nil || r.domain == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return *r.domain
 }
 
 func (r *ManagedSSHRuntime) Close() error {

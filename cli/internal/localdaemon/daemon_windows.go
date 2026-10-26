@@ -123,6 +123,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 			if managedSSH != nil {
 				sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
 				observeSSHRefresh(managedSSH.refresh(sshCtx, machines))
+			publishSSHDomain(store, managedSSH.domain())
 				cancelSSH()
 			}
 			if config.WarmPeerMetadata == nil {

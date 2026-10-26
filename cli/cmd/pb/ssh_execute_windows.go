@@ -30,7 +30,7 @@ var (
 )
 
 func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machine api.UserMachine, destination managedssh.Destination, passthrough []string, includePassthrough bool, environment []string) error {
-	client, liveMachine, liveTarget, err := resolveSSHCommandTargetLive(ctx, machine.ID)
+	client, liveMachine, liveTarget, err := resolveSSHCommandTargetWarm(ctx, machine.ID)
 	if err != nil {
 		return friendlyCommandError(err)
 	}

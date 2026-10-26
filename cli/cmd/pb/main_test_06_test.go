@@ -79,7 +79,8 @@ func TestPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
 	}
 }
 
-func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
+// F5-07: with a ready daemon the SSH target and alias domain come from its snapshot; Paperboat is asked nothing.
+func TestResolveSSHCommandTargetWarmAsksTheServerNothing(t *testing.T) {
 	root := commandRuntimeTestRoot(t)
 	home := filepath.Join(root, "home")
 	runtimeRoot := filepath.Join(root, "runtime")
@@ -142,7 +143,8 @@ func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 	snapshot := localapi.Snapshot{
 		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
-		Machines: []localapi.MachineStatus{{ID: "mch_1", EnvironmentID: "env_1", WorkspaceRoot: "/root", Alias: "machine-ready", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "ready", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
+		Machines: []localapi.MachineStatus{{ID: "mch_1", EnvironmentID: "env_1", WorkspaceRoot: "/root", Alias: "machine-ready", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "ready", SSHUser: "root", SSHPort: 22, NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
+		SSHDomain: "example.test",
 	}
 	store, err := localapi.NewSnapshotStore(&snapshot)
 	if err != nil {
@@ -166,38 +168,18 @@ func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
 	set.String("server", "", "")
 	commandContext := command.NewContext(set, strings.NewReader(""))
 
-	client, machine, target, err := resolveSSHCommandTargetFast(commandContext, "machine-ready")
+	client, machine, target, err := resolveSSHCommandTargetWarm(commandContext, "machine-ready")
 	if err != nil {
-		t.Fatalf("fast resolve: %v", err)
+		t.Fatalf("warm resolve: %v", err)
 	}
-	if client == nil || machine.ID != "mch_1" || machine.Alias != "machine-ready" || target.Port != 22 || target.OSUser != "root" {
+	if client == nil || machine.ID != "mch_1" || machine.Alias != "machine-ready" || target.Port != 22 || target.OSUser != "root" || target.MachineGeneration != 4 {
 		t.Fatalf("client=%v machine=%+v target=%+v", client != nil, machine, target)
 	}
-	if got := atomic.LoadInt32(&machineListCalls); got != 0 {
-		t.Fatalf("warm fast path listed machines %d times", got)
+	if domain, err := configuredManagedSSHDomain(commandContext); err != nil || domain != "example.test" {
+		t.Fatalf("domain=%q err=%v", domain, err)
 	}
-	if got := atomic.LoadInt32(&sshTargetCalls); got != 1 {
-		t.Fatalf("warm fast path fetched SSH target %d times, want 1", got)
-	}
-
-	if _, _, cached, err := resolveSSHCommandTargetFast(commandContext, "machine-ready"); err != nil || cached.Port != 22 || cached.OSUser != "root" {
-		t.Fatalf("cached resolve: %+v %v", cached, err)
-	}
-	if got := atomic.LoadInt32(&machineListCalls); got != 0 {
-		t.Fatalf("cached fast path listed machines %d times", got)
-	}
-	if got := atomic.LoadInt32(&sshTargetCalls); got != 1 {
-		t.Fatalf("cached fast path fetched SSH target %d times, want 1", got)
-	}
-
-	if _, _, live, err := resolveSSHCommandTargetLive(commandContext, "machine-ready"); err != nil || live.Port != 22 {
-		t.Fatalf("live resolve: %+v %v", live, err)
-	}
-	if got := atomic.LoadInt32(&machineListCalls); got != 0 {
-		t.Fatalf("live path listed machines %d times", got)
-	}
-	if got := atomic.LoadInt32(&sshTargetCalls); got != 2 {
-		t.Fatalf("live path fetched SSH target %d times, want 2", got)
+	if lists, targets := atomic.LoadInt32(&machineListCalls), atomic.LoadInt32(&sshTargetCalls); lists != 0 || targets != 0 {
+		t.Fatalf("warm path asked the server: %d machine lists, %d ssh-target", lists, targets)
 	}
 
 	cancel()
@@ -242,7 +224,7 @@ func TestSelectTerminalSessionPrefersWarmMachineSnapshot(t *testing.T) {
 	}
 }
 
-func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
+func TestResolveSSHCommandTargetWarmFallsBackWithoutDaemon(t *testing.T) {
 	root := commandRuntimeTestRoot(t)
 	home := filepath.Join(root, "home")
 	runtimeRoot := filepath.Join(root, "runtime")
@@ -298,9 +280,8 @@ func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
 	set.String("server", "", "")
 	commandContext := command.NewContext(set, strings.NewReader(""))
 
-	// No daemon socket exists: the fast path must fall back to the canonical
-	// live resolution instead of failing.
-	client, machine, target, err := resolveSSHCommandTargetFast(commandContext, "machine-ready")
+	// No daemon socket exists: resolution falls back to the server instead of failing.
+	client, machine, target, err := resolveSSHCommandTargetWarm(commandContext, "machine-ready")
 	if err != nil {
 		t.Fatalf("fallback resolve: %v", err)
 	}

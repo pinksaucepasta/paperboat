@@ -259,7 +259,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
 		if current != nil {
-			desired.Machines = current.Machines
+			desired.Machines, desired.SSHDomain = current.Machines, current.SSHDomain
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
@@ -420,6 +420,8 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			TransferReadiness: capabilityReadiness(machine.Online, machine.Capabilities.FileReceive),
 			PreviewReadiness:  capabilityReadiness(machine.Online, machine.Capabilities.PreviewLaunch),
 			SSHReadiness:      sshReadiness(machine, generation),
+			SSHUser:           machine.SSHUser,
+			SSHPort:           machine.SSHPort,
 			NATMappingIPv4:    "unknown",
 			NATMappingIPv6:    "unknown",
 			CaptivePortal:     "unknown",
