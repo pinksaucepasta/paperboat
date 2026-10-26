@@ -157,3 +157,19 @@ func TestRestartWithoutPaperboatRestoresTheLastVerifiedPeers(t *testing.T) {
 		t.Fatalf("an altered persisted configuration = %v, want refused", err)
 	}
 }
+
+// The daemon asks for until-revoked authority on every configuration request (server 2026.10.23.94+).
+func TestConfigurationRequestsAskForUntilRevokedAuthority(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	var asked string
+	client := networkAPIFunc{
+		configuration: func(context.Context, string) (string, error) { return networkToken(t, signer, cfg), nil },
+		requests:      func(request api.PeerNetworkConfigurationRequest) { asked = request.Authority },
+	}
+	if err := a.Refresh(t.Context(), client); err != nil {
+		t.Fatal(err)
+	}
+	if asked != "until_revoked_v1" {
+		t.Fatalf("authority asked = %q, want until_revoked_v1", asked)
+	}
+}

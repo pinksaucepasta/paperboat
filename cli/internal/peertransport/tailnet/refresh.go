@@ -89,6 +89,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		request.Endpoints = a.endpointReportDue()
 	}
 	request.MembershipGrants = a.membershipGrants.Load()
+	request.Authority = api.PeerNetworkAuthorityUntilRevoked
 	result, err := client.PeerNetworkConfiguration(ctx, request)
 	if err == nil && request.Endpoints != nil {
 		a.endpointsReported(*request.Endpoints)

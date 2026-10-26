@@ -48,7 +48,13 @@ type PeerNetworkConfigurationRequest struct {
 	Endpoints      *[]string              `json:"endpoints,omitempty"`
 	// MembershipGrants asks for relay grants with memberships; this client verifies and uses them.
 	MembershipGrants bool `json:"membership_grants,omitempty"`
+	// Authority "until_revoked_v1" asks for machine_network scopes and host session rights without expiry
+	// (expires_at 0): this client keeps its last verified configuration while Paperboat is unreachable (F21-01).
+	Authority string `json:"authority,omitempty"`
 }
+
+// PeerNetworkAuthorityUntilRevoked is the authority this client asks for.
+const PeerNetworkAuthorityUntilRevoked = "until_revoked_v1"
 
 // RelayDenial is the typed error for a refresh that withheld hosted relays, or nil.
 func (r PeerNetworkConfigurationResult) RelayDenial() *APIError {
