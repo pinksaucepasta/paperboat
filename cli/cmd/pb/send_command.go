@@ -178,7 +178,8 @@ func sendCommand() *cobra.Command {
 				if acceptance.Status == "not_required" {
 					descriptorRequestID, descriptorDigest = "", ""
 				}
-				descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
+				declared := api.TransferDeclaration{Mode: "automatic", Bytes: batchTotal(prepared.Sources)}
+				descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
 				if err != nil {
 					return friendlyCommandError(err)
 				}
@@ -225,7 +226,7 @@ func sendCommand() *cobra.Command {
 						return grantErr
 					}
 					nativeClient, nativeErr := filetransfer.NewRenewableNativeClient(initialGrant, func(renewCtx context.Context) (filetransfer.NativeGrant, error) {
-						fresh, renewErr := client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
+						fresh, renewErr := client.MachineFileTransferDescriptorForRequest(renewCtx, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
 						if renewErr != nil {
 							return filetransfer.NativeGrant{}, renewErr
 						}
@@ -267,4 +268,13 @@ func sendCommand() *cobra.Command {
 	command.Flags().Bool("json", false, "print JSON")
 	addSendManagementCommands(command)
 	return command
+}
+
+// batchTotal is the declared size of a send: every prepared file, directories expanded.
+func batchTotal(sources []filetransfer.Source) int64 {
+	var total int64
+	for _, source := range sources {
+		total += source.Size
+	}
+	return total
 }

@@ -338,20 +338,30 @@ func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, exp
 }
 
 func (c *Client) MachineFileTransferDescriptor(ctx context.Context, destinationMachineID, sourceMachineID, sessionID string) (FileTransfer, error) {
-	return c.MachineFileTransferDescriptorForRequest(ctx, destinationMachineID, sourceMachineID, sessionID, "", "")
+	return c.MachineFileTransferDescriptorForRequest(ctx, destinationMachineID, sourceMachineID, sessionID, "", "", TransferDeclaration{})
 }
 
-func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, destinationMachineID, sourceMachineID, sessionID, requestID, manifestDigest string) (FileTransfer, error) {
+// TransferDeclaration is what a send declares for its credential (PLAN 3b File transfer modes): the mode and the
+// batch total in bytes. The server signs an automatic credential with max_bytes = Bytes. Zero declares nothing.
+type TransferDeclaration struct {
+	Mode  string
+	Bytes int64
+}
+
+func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, destinationMachineID, sourceMachineID, sessionID, requestID, manifestDigest string, declared TransferDeclaration) (FileTransfer, error) {
 	if strings.TrimSpace(destinationMachineID) == "" || strings.TrimSpace(sourceMachineID) == "" {
 		return FileTransfer{}, errors.New("source and destination machine IDs are required")
 	}
 	var out FileTransfer
-	body := map[string]string{
+	body := map[string]any{
 		"source_machine_id": sourceMachineID,
 		"session_id":        sessionID,
 	}
 	if requestID != "" || manifestDigest != "" {
 		body["request_id"], body["manifest_digest"] = requestID, manifestDigest
+	}
+	if declared.Mode != "" {
+		body["transfer_mode"], body["declared_bytes"] = declared.Mode, declared.Bytes
 	}
 	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(destinationMachineID)+"/file-transfer-descriptor", body, &out)
 	return out, err
