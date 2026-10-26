@@ -73,6 +73,11 @@ type browserTerminal struct {
 	stopOnce        sync.Once
 	keyEvents       chan browserbroadcast.Epoch
 	writes          *terminalWriterQueue
+	// attachState is the attachment the page was told about; a resync re-sends it with a fresh screen.
+	attachState terminalAttachState
+	// screenRequestID is the pending request for a fresh screen; resynced hands its boundary to readBroadcast.
+	screenRequestID string
+	resynced        chan uint64
 }
 
 type websocketMessage struct {

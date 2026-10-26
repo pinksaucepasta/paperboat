@@ -262,11 +262,23 @@ func (connection *browserTerminal) connectAndServe() error {
 		return connection.readTerminalStream(clientTLS)
 	}
 	connection.keyEvents = make(chan browserbroadcast.Epoch, 4)
+	connection.mu.Lock()
+	connection.attachState = attachState
+	connection.resynced = make(chan uint64, 1)
+	connection.mu.Unlock()
 	go connection.writeLoop(clientTLS, ws)
+	connection.emitAttached(attachState, attachState.InputSequence, checkpoint, checkpointSequence)
+	go connection.readBroadcast(ws, peer.Certificate.Claims.QUICPublicKey, attachState.Generation, checkpointSequence)
+	return connection.readTerminalStream(clientTLS)
+}
+
+// emitAttached tells the page its terminal is attached at a coherent screen. A resync on the same connection sends
+// the same event again with a fresh screen; the page resets to it in one paint.
+func (connection *browserTerminal) emitAttached(attachState terminalAttachState, inputSequence uint64, checkpoint []byte, checkpointSequence uint64) {
 	connection.emit("attached", map[string]any{
 		"role":              connection.config.Role,
 		"stream_id":         attachState.StreamID,
-		"input_sequence":    strconv.FormatUint(attachState.InputSequence, 10),
+		"input_sequence":    strconv.FormatUint(inputSequence, 10),
 		"from_sequence":     strconv.FormatUint(attachState.ReplayFrom, 10),
 		"to_sequence":       strconv.FormatUint(attachState.ReplayTo, 10),
 		"earliest_sequence": strconv.FormatUint(attachState.EarliestSequence, 10),
@@ -278,33 +290,23 @@ func (connection *browserTerminal) connectAndServe() error {
 		"screen":            jsByteArray(checkpoint),
 		"screen_sequence":   strconv.FormatUint(checkpointSequence, 10),
 	})
-	go connection.readBroadcast(ws, peer.Certificate.Claims.QUICPublicKey, attachState.Generation, checkpointSequence)
-	return connection.readTerminalStream(clientTLS)
 }
 
 func readScreenCheckpoint(stream io.Reader, streamID uint32) ([]byte, uint64, error) {
-	checkpoint := make([]byte, 0, 64<<10)
-	var sequence uint64
+	checkpoint := screenCheckpoint{data: make([]byte, 0, 64<<10)}
 	for {
 		kind, payload, err := readApplicationFrame(stream)
 		if err != nil || kind != appKindBinary {
 			return nil, 0, errors.New("missing terminal screen checkpoint")
 		}
 		frame, err := protocol.DecodeTerminalOutput(payload)
-		if err != nil || frame.Channel != protocol.TerminalScreenCheckpoint || frame.StreamID != streamID || len(frame.Data) == 0 || frame.Data[0] > 1 {
+		if err != nil {
 			return nil, 0, errors.New("invalid terminal screen checkpoint")
 		}
-		if len(checkpoint) == 0 {
-			sequence = frame.StartSequence
-		} else if frame.StartSequence != sequence {
-			return nil, 0, errors.New("terminal screen checkpoint boundary changed")
-		}
-		if len(frame.Data)-1 > protocol.MaxTerminalScreenCheckpointBytes-len(checkpoint) {
-			return nil, 0, errors.New("terminal screen checkpoint is too large")
-		}
-		checkpoint = append(checkpoint, frame.Data[1:]...)
-		if frame.Data[0] == 1 {
-			return checkpoint, sequence, nil
+		if done, err := checkpoint.add(frame, streamID); err != nil {
+			return nil, 0, err
+		} else if done {
+			return checkpoint.data, checkpoint.sequence, nil
 		}
 	}
 }
@@ -374,6 +376,7 @@ func parseAttachResponse(payload []byte) (terminalAttachState, error) {
 }
 
 func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
+	var resync screenCheckpoint
 	for {
 		kind, payload, err := readApplicationFrame(stream)
 		if err != nil {
@@ -392,6 +395,17 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			connection.mu.Unlock()
 			if frame.StreamID != streamID {
 				return &terminalConnectError{state: "transport-error", code: "wrong_stream", message: "Terminal output did not match this attachment."}
+			}
+			if frame.Channel == protocol.TerminalScreenCheckpoint {
+				done, err := resync.add(frame, streamID)
+				if err != nil {
+					return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen.", cause: err}
+				}
+				if done {
+					connection.finishResync(resync.data, resync.sequence)
+					resync = screenCheckpoint{}
+				}
+				continue
 			}
 			if frame.Channel == protocol.TerminalBroadcastKey {
 				if len(frame.Data) != 49 || frame.Data[0] != 1 {
@@ -422,6 +436,15 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 		}
 		if connection.deliverFileResponse(frame) || connection.deliverInspectorResponse(frame) {
 			continue
+		}
+		connection.mu.Lock()
+		screenResponse := frame.RequestID != "" && frame.RequestID == connection.screenRequestID
+		connection.mu.Unlock()
+		if screenResponse {
+			if frame.Type == "response" {
+				continue // the screen itself follows as checkpoint frames
+			}
+			return &terminalConnectError{state: "reconnecting", code: "resync_failed", message: "The terminal fell behind and could not restore its screen. Reconnecting."}
 		}
 		connection.mu.Lock()
 		cursorResponse := frame.RequestID != "" && frame.RequestID == connection.cursorRequestID
@@ -489,8 +512,20 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 		}
 	}()
 	cursor := checkpointSequence
+	// A dropped record (here, or by the edge behind a flood) leaves a gap: instead of failing, ask the machine for a
+	// fresh screen and hold output until it arrives; its boundary becomes the cursor.
+	resyncing := false
+	resync := func() error {
+		if !resyncing {
+			resyncing = true
+			if err := connection.requestScreen(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	process := func() error {
-		for len(pending) > 0 {
+		for len(pending) > 0 && !resyncing {
 			hint, err := browserbroadcast.EpochHint(pending[0])
 			if err != nil {
 				return err
@@ -504,22 +539,25 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 				return browserbroadcast.ErrInvalidRecord
 			}
 			previous := indexes[hint]
-			if previous != 0 && record.Index != previous+1 || record.Index == 0 {
+			if record.Index == 0 || previous != 0 && record.Index <= previous {
 				return browserbroadcast.ErrInvalidRecord
+			}
+			if previous != 0 && record.Index != previous+1 {
+				return resync() // records were dropped
+			}
+			end := record.StartSequence + uint64(len(record.Data))
+			if end < record.StartSequence {
+				return browserbroadcast.ErrInvalidRecord
+			}
+			if record.StartSequence > cursor {
+				return resync() // output before this record was dropped
 			}
 			indexes[hint] = record.Index
 			ws.broadcasts.release(pending[0])
 			pending[0] = nil
 			pending = pending[1:]
-			end := record.StartSequence + uint64(len(record.Data))
-			if end < record.StartSequence {
-				return browserbroadcast.ErrInvalidRecord
-			}
 			if end <= cursor {
 				continue
-			}
-			if record.StartSequence > cursor {
-				return browserbroadcast.ErrInvalidRecord
 			}
 			data := record.Data
 			if record.StartSequence < cursor {
@@ -553,11 +591,24 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 			}
 		case record := <-ws.broadcasts.items:
 			if len(pending) >= terminalBroadcastQueueDepth {
-				ws.broadcasts.release(record)
-				ws.fail(errors.New("terminal output is behind; reconnect for a fresh screen"))
-				return
+				ws.broadcasts.release(pending[0]) // the fresh screen covers it
+				pending[0] = nil
+				pending = pending[1:]
+				if err := resync(); err != nil {
+					ws.fail(err)
+					return
+				}
 			}
 			pending = append(pending, record)
+		case <-ws.broadcasts.lagged:
+			if err := resync(); err != nil {
+				ws.fail(err)
+				return
+			}
+		case boundary := <-connection.resynced:
+			// Index continuity restarts after the gap; sequences still reject any reordering.
+			cursor, resyncing = boundary, false
+			clear(indexes)
 		}
 		if err := process(); err != nil {
 			ws.fail(err)
@@ -717,6 +768,58 @@ func (connection *browserTerminal) sendCursor() (string, error) {
 		return "", err
 	}
 	return requestID, nil
+}
+
+// requestScreen asks the machine for a fresh screen on this stream after output was dropped behind a flood. One
+// request is pending at a time; its screen covers everything dropped before it was taken.
+func (connection *browserTerminal) requestScreen() error {
+	requestID, err := randomID("request")
+	if err != nil {
+		return err
+	}
+	operationID, err := randomID("operation")
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"action": "screen", "session_id": connection.config.TerminalSessionID})
+	if err != nil {
+		return err
+	}
+	connection.mu.Lock()
+	defer connection.mu.Unlock()
+	if connection.screenRequestID != "" {
+		return nil
+	}
+	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
+		return net.ErrClosed
+	}
+	frame := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: payload}
+	encoded, err := json.Marshal(frame)
+	if err == nil {
+		err = frame.Validate()
+	}
+	if err == nil {
+		err = connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5})
+	}
+	if err == nil {
+		connection.screenRequestID = requestID
+	}
+	return err
+}
+
+// finishResync paints the fresh screen and moves the shared-output cursor to its boundary.
+func (connection *browserTerminal) finishResync(checkpoint []byte, boundary uint64) {
+	connection.mu.Lock()
+	state, inputSequence := connection.attachState, connection.inputSequence
+	connection.screenRequestID = ""
+	resynced := connection.resynced
+	connection.mu.Unlock()
+	connection.emitAttached(state, inputSequence, checkpoint, boundary)
+	select {
+	case <-resynced:
+	default:
+	}
+	resynced <- boundary
 }
 
 func (connection *browserTerminal) sendDetach() {

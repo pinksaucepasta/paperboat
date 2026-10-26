@@ -107,8 +107,9 @@ func TestTerminalReceiveBudgetCoversPendingRecordsBeforeCopy(t *testing.T) {
 	}
 	pending := <-q.items
 	copied := false
-	if err := q.copyAndEnqueue(1, func([]byte) bool { copied = true; return true }); err == nil || copied {
-		t.Fatal("pending ciphertext escaped budget or rejected record was copied")
+	// Over budget a record is dropped uncopied and the consumer is told to restore a fresh screen.
+	if err := q.copyAndEnqueue(1, func([]byte) bool { copied = true; return true }); err != nil || copied || len(q.lagged) != 1 {
+		t.Fatal("pending ciphertext escaped budget, a dropped record was copied, or the lag was not signalled")
 	}
 	q.release(pending)
 	if err := q.copyAndEnqueue(7, copyOK); err != nil {
@@ -134,8 +135,8 @@ func TestTerminalReceiveCopyFailureAndQueueCapacityRelease(t *testing.T) {
 		}
 	}
 	copied := false
-	if err := q.copyAndEnqueue(1, func([]byte) bool { copied = true; return true }); err == nil || copied {
-		t.Fatal("full queue copied or admitted ciphertext")
+	if err := q.copyAndEnqueue(1, func([]byte) bool { copied = true; return true }); err != nil || copied || len(q.lagged) != 1 {
+		t.Fatal("full queue copied or admitted ciphertext, or did not signal the lag")
 	}
 	active := <-q.items
 	q.close()

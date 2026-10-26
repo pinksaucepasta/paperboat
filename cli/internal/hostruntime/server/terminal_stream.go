@@ -25,6 +25,13 @@ type terminalOutputStream struct {
 	checkpointSent     bool
 	broadcast          *browserbroadcastserver.Registry
 	keyUpdates         <-chan browserbroadcastserver.Epoch
+	// screenRequests asks a browser stream for a fresh checkpoint of its own attachment (accountID, clientID,
+	// generation); unregisterScreens withdraws it from the dispatcher when the stream closes.
+	screenRequests    chan struct{}
+	accountID         string
+	clientID          string
+	generation        uint64
+	unregisterScreens func()
 	// participants is the last participant list this stream reported; participantsCheckedAt
 	// bounds how often a busy stream looks again.
 	participants          string
@@ -182,6 +189,10 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 		}
 		stream.broadcast = d.config.BrowserOutput
 		stream.keyUpdates = updates
+		requests := make(chan struct{}, 1)
+		stream.screenRequests, stream.accountID, stream.clientID, stream.generation = requests, authorization.AccountID, authorization.ClientID, generation
+		d.browserScreens.Store(response.AttachmentID, requests)
+		stream.unregisterScreens = func() { d.browserScreens.CompareAndDelete(response.AttachmentID, requests) }
 	}
 	ready = true
 	return nil

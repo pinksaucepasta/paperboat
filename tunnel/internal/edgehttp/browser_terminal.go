@@ -12,6 +12,9 @@ const browserTerminalTicketPrefix = "pb-ticket."
 const (
 	browserTerminalTLSDiscriminator          byte = 0x00
 	browserTerminalSharedOutputDiscriminator byte = 0x01
+	// browserTerminalLaggedDiscriminator alone tells the browser its shared output was dropped behind a flood:
+	// it asks the host for a fresh screen on its stream and keeps the connection.
+	browserTerminalLaggedDiscriminator byte = 0x02
 )
 
 var ErrBrowserTerminalMessage = errors.New("invalid browser terminal message")

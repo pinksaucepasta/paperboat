@@ -237,3 +237,28 @@ func sha256Sum(data []byte) []byte {
 }
 
 func bigOne() *big.Int { return big.NewInt(1) }
+
+// A screen arrives in frames at one boundary, whether at the first join or on a resync after a flood.
+func TestScreenCheckpointAssemblesFramesAtOneBoundary(t *testing.T) {
+	frame := func(final byte, start uint64, data string) protocol.TerminalOutputFrame {
+		return protocol.TerminalOutputFrame{StreamID: 3, Channel: protocol.TerminalScreenCheckpoint, StartSequence: start, Data: append([]byte{final}, data...)}
+	}
+	var checkpoint screenCheckpoint
+	if done, err := checkpoint.add(frame(0, 40, "ab"), 3); done || err != nil {
+		t.Fatalf("first frame: done=%v err=%v", done, err)
+	}
+	if done, err := checkpoint.add(frame(1, 40, "cd"), 3); !done || err != nil || string(checkpoint.data) != "abcd" || checkpoint.sequence != 40 {
+		t.Fatalf("last frame: done=%v err=%v data=%q at %d", done, err, checkpoint.data, checkpoint.sequence)
+	}
+	for name, bad := range map[string]protocol.TerminalOutputFrame{
+		"boundary moved": frame(1, 41, "x"),
+		"other stream":   {StreamID: 4, Channel: protocol.TerminalScreenCheckpoint, StartSequence: 40, Data: []byte{1, 'x'}},
+		"not a screen":   {StreamID: 3, Channel: protocol.TerminalStdout, StartSequence: 40, Data: []byte{1, 'x'}},
+		"bad final flag": frame(2, 40, "x"),
+	} {
+		next := screenCheckpoint{started: true, sequence: 40}
+		if _, err := next.add(bad, 3); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}

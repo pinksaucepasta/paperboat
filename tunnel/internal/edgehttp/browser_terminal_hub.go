@@ -25,8 +25,10 @@ var (
 	ErrBrowserTerminalHubClosed  = errors.New("browser terminal fanout is closed")
 	ErrBrowserTerminalHubStale   = errors.New("browser terminal carrier generation is stale")
 	ErrBrowserTerminalHubFull    = errors.New("browser terminal participant limit reached")
-	ErrBrowserTerminalHubBusy    = errors.New("browser terminal output publisher already exists")
-	ErrBrowserTerminalHubEnded   = errors.New("browser terminal participant ended")
+	// ErrBrowserTerminalLagged: the viewer fell behind and its backlog was dropped; it needs a fresh screen.
+	ErrBrowserTerminalLagged   = errors.New("browser terminal viewer fell behind")
+	ErrBrowserTerminalHubBusy  = errors.New("browser terminal output publisher already exists")
+	ErrBrowserTerminalHubEnded = errors.New("browser terminal participant ended")
 )
 
 // BrowserTerminalSessionKey binds opaque shared output to one route, host
@@ -353,8 +355,11 @@ func (s *BrowserTerminalSubscription) Next(ctx context.Context) ([]byte, error) 
 		case <-s.done:
 			return nil, ErrBrowserTerminalHubEnded
 		default:
-			return record, nil
 		}
+		if record == nil {
+			return nil, ErrBrowserTerminalLagged
+		}
+		return record, nil
 	}
 }
 
@@ -375,6 +380,22 @@ func (s *BrowserTerminalSubscription) Close() {
 }
 
 func (s *BrowserTerminalSubscription) closeDone() { s.doneOnce.Do(func() { close(s.done) }) }
+
+// lagLocked drops a viewer's backlog when it fell too far behind and queues one lag marker (an empty record) in its
+// place: the viewer stays attached, and its browser restores a fresh screen instead of reconnecting. Every dropped
+// record is older than that screen. The caller holds hub.mu; nothing else sends on records.
+func (s *BrowserTerminalSubscription) lagLocked() {
+	for {
+		select {
+		case record := <-s.records:
+			s.queuedBytes -= len(record)
+			continue
+		default:
+		}
+		break
+	}
+	s.records <- nil
+}
 
 // BrowserTerminalPublisher owns the only host output stream for one terminal
 // generation.
@@ -407,19 +428,13 @@ func (p *BrowserTerminalPublisher) Publish(record []byte) error {
 	if session == nil || session.publisher != p {
 		return ErrBrowserTerminalHubStale
 	}
-	for attachmentID, subscription := range session.subscribers {
-		if subscription.queuedBytes+len(record) > browserTerminalQueuedBytes {
-			delete(session.subscribers, attachmentID)
-			subscription.closeDone()
+	for _, subscription := range session.subscribers {
+		if subscription.queuedBytes+len(record) > browserTerminalQueuedBytes || len(subscription.records) == cap(subscription.records) {
+			subscription.lagLocked()
 			continue
 		}
-		select {
-		case subscription.records <- record:
-			subscription.queuedBytes += len(record)
-		default:
-			delete(session.subscribers, attachmentID)
-			subscription.closeDone()
-		}
+		subscription.records <- record
+		subscription.queuedBytes += len(record)
 	}
 	h.cleanupSessionLocked(p.key, session)
 	return nil

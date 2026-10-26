@@ -69,6 +69,12 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 				return nil
 			}
 			switch data[0] {
+			case 2: // the edge dropped output behind a flood
+				if len(data) != 1 {
+					connection.fail(errors.New("invalid lag notice"))
+					return nil
+				}
+				connection.broadcasts.markLagged()
 			case 0:
 				if len(data) == 1 {
 					connection.fail(errors.New("empty TLS envelope"))

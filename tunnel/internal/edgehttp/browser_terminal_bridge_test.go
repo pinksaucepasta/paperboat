@@ -244,3 +244,94 @@ func TestBrowserTerminalBridgeWaitsForAFrozenBrowser(t *testing.T) {
 		}
 	}
 }
+
+// A flood of shared output faster than the browser reads drops that browser's backlog: the bridge stays up, tells
+// the browser once with the lagged byte, and keeps delivering live output after it.
+func TestBrowserTerminalBridgeTellsALaggingBrowserAndStaysUp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	identity := testEdgePreviewIdentity(1, 1)
+	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if err := hub.ActivateRoute("route_lag", fence); err != nil {
+		t.Fatal(err)
+	}
+	key := BrowserTerminalSessionKey{RouteID: "route_lag", TerminalSessionID: "term_lag", ProcessGeneration: identity.ProcessGeneration}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		_, _, _ = conn.Read(r.Context())
+	}))
+	defer upstream.Close()
+	completed := make(chan error, 1)
+	subscribed := make(chan struct{})
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub, err := hub.Subscribe(key, fence, "browser_lag")
+		if err != nil {
+			completed <- err
+			return
+		}
+		defer sub.Close()
+		host, _, err := websocket.Dial(r.Context(), "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
+		if err != nil {
+			completed <- err
+			return
+		}
+		browser, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			host.CloseNow()
+			completed <- err
+			return
+		}
+		close(subscribed)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
+	}))
+	defer edge.Close()
+	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browser.CloseNow()
+	browser.SetReadLimit(browserTerminalMaxRecordBytes + 1)
+	<-subscribed
+	publisher, err := hub.RegisterPublisher(key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer publisher.Close()
+	record := make([]byte, 64<<10)
+	for range 400 { // 25 MiB while the browser does not read
+		if err := publisher.Publish(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lagged := false
+	for !lagged {
+		_, message, err := browser.Read(ctx)
+		if err != nil {
+			t.Fatalf("bridge ended under the flood: %v", err)
+		}
+		lagged = len(message) == 1 && message[0] == browserTerminalLaggedDiscriminator
+	}
+	if err := publisher.Publish([]byte("live after lag")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, message, err := browser.Read(ctx)
+		if err != nil {
+			t.Fatalf("no live output after the lag: %v", err)
+		}
+		if string(message[1:]) == "live after lag" {
+			break
+		}
+	}
+	select {
+	case err := <-completed:
+		t.Fatalf("bridge ended: %v", err)
+	default:
+	}
+}

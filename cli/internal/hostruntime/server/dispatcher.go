@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,8 @@ type Dispatcher struct {
 	config                DispatcherConfig
 	browserTransferCreate chan struct{}
 	ssh                   sshStreamRegistry
+	// browserScreens maps a live browser attachment to its stream's checkpoint requests ("screen").
+	browserScreens sync.Map
 }
 
 func NewDispatcher(config DispatcherConfig) (*Dispatcher, error) {
@@ -428,6 +431,13 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			select {
 			case <-ctx.Done():
 				return protocol.BinaryFrame{}, ctx.Err()
+			case <-s.screenRequests:
+				checkpoint, boundary, err := s.manager.BrowserScreenAttachment(s.sessionID, s.attachmentID, s.accountID, s.clientID, s.generation)
+				if err != nil {
+					return protocol.BinaryFrame{}, err
+				}
+				s.checkpoint, s.checkpointSequence, s.checkpointOffset, s.checkpointSent = checkpoint, boundary, 0, false
+				return s.Next(ctx)
 			case epoch, ok := <-s.keyUpdates:
 				if !ok {
 					return protocol.BinaryFrame{}, ErrStreamClosed
@@ -520,6 +530,9 @@ func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {
 }
 
 func (s *terminalOutputStream) Close() error {
+	if s.unregisterScreens != nil {
+		s.unregisterScreens()
+	}
 	if s.broadcast != nil {
 		s.broadcast.Leave(s.sessionID, s.attachmentID)
 	}
@@ -726,6 +739,17 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			d.config.Writers.Detach(request.SessionID, request.AttachmentID)
 		}
 		return domainResult(struct{}{}, err)
+	case "screen":
+		// A browser that fell behind a flood asks for a fresh screen on its live stream instead of reconnecting.
+		requests, ok := d.browserScreens.Load(authorization.BrowserAttachmentID)
+		if !authorization.BrowserTerminal || !ok {
+			return failure("not_found_or_forbidden")
+		}
+		select {
+		case requests.(chan struct{}) <- struct{}{}:
+		default: // one is already pending; it will reflect everything up to when it is taken
+		}
+		return result(struct{}{})
 	case "resize":
 		if authorization.BrowserTerminal && !browserAttachmentMatches(authorization, request.AttachmentID) {
 			return failure("not_found_or_forbidden")
@@ -795,7 +819,7 @@ func browserAttachmentMatches(authorization Authorization, attachmentID string) 
 
 func browserTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {
 	switch request.Action {
-	case "attach", "replay", "detach", "cursor":
+	case "attach", "replay", "detach", "cursor", "screen":
 		return role == TerminalRoleOwner || role == TerminalRoleViewer || role == TerminalRoleInteractive
 	case "resize", "signal":
 		return role == TerminalRoleOwner || role == TerminalRoleInteractive

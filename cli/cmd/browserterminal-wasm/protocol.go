@@ -275,3 +275,27 @@ func decodeStructuredFrame(payload []byte) (protocol.Frame, error) {
 	}
 	return frame, err
 }
+
+// screenCheckpoint assembles one checkpoint from its frames, all at one boundary.
+type screenCheckpoint struct {
+	data     []byte
+	sequence uint64
+	started  bool
+}
+
+// add takes the next checkpoint frame and reports whether the checkpoint is complete.
+func (c *screenCheckpoint) add(frame protocol.TerminalOutputFrame, streamID uint32) (bool, error) {
+	if frame.Channel != protocol.TerminalScreenCheckpoint || frame.StreamID != streamID || len(frame.Data) == 0 || frame.Data[0] > 1 {
+		return false, errors.New("invalid terminal screen checkpoint")
+	}
+	if !c.started {
+		c.started, c.sequence = true, frame.StartSequence
+	} else if frame.StartSequence != c.sequence {
+		return false, errors.New("terminal screen checkpoint boundary changed")
+	}
+	if len(frame.Data)-1 > protocol.MaxTerminalScreenCheckpointBytes-len(c.data) {
+		return false, errors.New("terminal screen checkpoint is too large")
+	}
+	c.data = append(c.data, frame.Data[1:]...)
+	return frame.Data[0] == 1, nil
+}

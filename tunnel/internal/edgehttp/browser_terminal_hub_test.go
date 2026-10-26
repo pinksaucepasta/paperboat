@@ -138,7 +138,7 @@ func TestBrowserTerminalHubDropsOutputWithoutParticipantsAndBoundsRecords(t *tes
 	}
 }
 
-func TestBrowserTerminalHubDisconnectsOnlySlowParticipantAndFencesOldGeneration(t *testing.T) {
+func TestBrowserTerminalHubLagsOnlySlowParticipantAndFencesOldGeneration(t *testing.T) {
 	hub := NewBrowserTerminalHub()
 	defer hub.Close()
 	identity := testEdgePreviewIdentity(1, 1)
@@ -176,19 +176,18 @@ func TestBrowserTerminalHubDisconnectsOnlySlowParticipantAndFencesOldGeneration(
 			t.Fatalf("fast participant at %d got %q, err=%v", i, got, err)
 		}
 	}
-	select {
-	case <-slow.Done():
-	case <-ctx.Done():
-		t.Fatal("slow participant was not disconnected")
-	}
 	if err := publisher.Publish([]byte("after slow participant")); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := fast.Next(ctx); err != nil || string(got) != "after slow participant" {
 		t.Fatalf("fast participant got %q, err=%v", got, err)
 	}
-	if _, err := slow.Next(ctx); !errors.Is(err, ErrBrowserTerminalHubEnded) {
-		t.Fatalf("slow participant remained active: %v", err)
+	// The slow participant stays attached: its backlog was dropped for one lag notice, then live output follows.
+	if _, err := slow.Next(ctx); !errors.Is(err, ErrBrowserTerminalLagged) {
+		t.Fatalf("slow participant was not told it lagged: %v", err)
+	}
+	if got, err := slow.Next(ctx); err != nil || string(got) != "after slow participant" {
+		t.Fatalf("slow participant after the lag got %q, err=%v", got, err)
 	}
 
 	identity2 := testEdgePreviewIdentity(2, 2)
@@ -245,10 +244,29 @@ func TestBrowserTerminalHubBuffersBurstButBoundsSlowViewerBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Past the byte budget the backlog is dropped for a lag notice; what is queued after it fits the budget.
+	if _, err := viewer.Next(ctx); !errors.Is(err, ErrBrowserTerminalLagged) {
+		t.Fatalf("slow viewer exceeded its byte budget without a lag notice: %v", err)
+	}
+	drain, stop := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stop()
+	queued := 0
+	for {
+		got, err := viewer.Next(drain)
+		if errors.Is(err, context.DeadlineExceeded) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if queued += len(got); queued > browserTerminalQueuedBytes {
+			t.Fatalf("%d bytes queued after the lag", queued)
+		}
+	}
 	select {
 	case <-viewer.Done():
-	case <-ctx.Done():
-		t.Fatal("slow viewer exceeded byte budget without disconnect")
+		t.Fatal("a lagging viewer was disconnected")
+	default:
 	}
 }
 

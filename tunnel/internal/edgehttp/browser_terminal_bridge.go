@@ -240,12 +240,13 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		defer workers.Done()
 		for {
 			record, err := subscription.Next(ctx)
-			if err != nil {
+			var message []byte
+			if errors.Is(err, ErrBrowserTerminalLagged) {
+				message = []byte{browserTerminalLaggedDiscriminator}
+			} else if err != nil {
 				report(err)
 				return
-			}
-			message, err := browserTerminalSharedOutputMessagePayload(record)
-			if err != nil {
+			} else if message, err = browserTerminalSharedOutputMessagePayload(record); err != nil {
 				report(err)
 				return
 			}

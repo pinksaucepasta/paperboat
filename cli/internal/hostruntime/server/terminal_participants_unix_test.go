@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
@@ -67,5 +69,48 @@ func TestBrowserTerminalStreamReportsParticipantChanges(t *testing.T) {
 	time.Sleep(participantsInterval)
 	if err := stream.participantsEvent(); err != nil {
 		t.Fatalf("an unchanged list was reported again: %v", err)
+	}
+}
+
+// A browser that fell behind asks its live stream for a fresh screen: the stream answers with a complete
+// checkpoint of the current screen at the current boundary, without a new attachment.
+func TestBrowserTerminalStreamSendsAScreenOnRequest(t *testing.T) {
+	root := t.TempDir()
+	adapter, err := pty.NewAdapter(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := session.NewManager(session.ManagerConfig{Launch: func(command pty.Command) (session.PTYProcess, error) { return adapter.Start(command) }, MaxSessions: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sessions.Shutdown(context.Background())
+	created, err := sessions.Create(context.Background(), session.CreateRequest{Name: "screen", Command: pty.Command{Path: "/bin/sh", Args: []string{"-c", "printf screen-marker; exec sleep 60"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := session.Participant{AttachmentID: "att_browser", AccountID: "acct_owner", ClientID: "client_browser", Role: "owner", ConnectedAt: time.Now().UTC(), Browser: true}
+	if _, err := sessions.AttachLiveParticipantAtGeneration(created.ID, browser, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if snapshot, _ := sessions.Snapshot(created.ID); snapshot.LatestSequence >= uint64(len("screen-marker")) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	requests := make(chan struct{}, 1)
+	stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: browser.AttachmentID, checkpointSent: true, keyUpdates: make(chan browserbroadcastserver.Epoch), screenRequests: requests, accountID: browser.AccountID, clientID: browser.ClientID, generation: created.Generation}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var event *StreamEvent
+	if _, err := stream.Next(ctx); !errors.As(err, &event) { // the first participants report
+		t.Fatalf("first frame: %v", err)
+	}
+	requests <- struct{}{}
+	frame, err := stream.Next(ctx)
+	if err != nil || frame.Channel != protocol.TerminalScreenCheckpoint || len(frame.Data) < 2 || frame.Data[0] != 1 || !bytes.Contains(frame.Data[1:], []byte("screen-marker")) || frame.StartSequence < uint64(len("screen-marker")) {
+		t.Fatalf("screen on request: channel=%d start=%d err=%v", frame.Channel, frame.StartSequence, err)
 	}
 }

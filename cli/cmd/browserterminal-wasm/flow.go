@@ -114,17 +114,31 @@ type terminalReceiveQueue struct {
 	items  chan []byte
 	bytes  int
 	closed bool
+	// lagged wakes the consumer when output was dropped (here when full, or by the edge): it restores a fresh
+	// screen from the machine instead of reconnecting.
+	lagged chan struct{}
 }
 
 func newTerminalReceiveQueue() *terminalReceiveQueue {
-	return &terminalReceiveQueue{items: make(chan []byte, terminalBroadcastQueueDepth)}
+	return &terminalReceiveQueue{items: make(chan []byte, terminalBroadcastQueueDepth), lagged: make(chan struct{}, 1)}
+}
+
+func (q *terminalReceiveQueue) markLagged() {
+	select {
+	case q.lagged <- struct{}{}:
+	default:
+	}
 }
 
 func (q *terminalReceiveQueue) copyAndEnqueue(size int, copyRecord func([]byte) bool) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed || size < 1 || size > terminalBroadcastQueueBytes-terminalBroadcastRecordMetadataBytes-q.bytes || len(q.items) == cap(q.items) {
-		return errors.New("terminal output receive queue is closed or full")
+	if q.closed || size < 1 {
+		return errors.New("terminal output receive queue is closed")
+	}
+	if size > terminalBroadcastQueueBytes-terminalBroadcastRecordMetadataBytes-q.bytes || len(q.items) == cap(q.items) {
+		q.markLagged() // dropped: the consumer resyncs
+		return nil
 	}
 	data := make([]byte, size)
 	if !copyRecord(data) {
