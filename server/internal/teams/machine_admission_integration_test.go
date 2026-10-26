@@ -175,4 +175,12 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	if got, err := s.AdmissionFor(ctx, member2, team); err != nil || got != AdmissionPending {
 		t.Fatalf("admission for a member with approval on: %q %v", got, err)
 	}
+	// Ended entries do not take capacity: a team whose binding rows are full of ended terminal
+	// sessions still takes a new machine (paperboat-smoke-paid refused every share at 128 rows,
+	// 92 of them inactive).
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources)
+	m7 := machine("ma_m7", owner)
+	if _, err = act(owner, MachineRequest{MachineID: m7, Action: "share"}); err != nil || !bound(m7) {
+		t.Fatalf("a team full of ended entries refused a machine: %v", err)
+	}
 }

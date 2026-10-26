@@ -305,7 +305,7 @@ func ShareEnrolledMachineTx(ctx context.Context, tx *db.Tx, account, team, machi
 func bindMachineTx(ctx context.Context, tx *db.Tx, team, machine, owner string) error {
 	var count int
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT count(*),coalesce(bool_or(resource_kind='machine' AND resource_id=$2),false) FROM team_resource_bindings WHERE team_id=$1`, team, machine).Scan(&count, &exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE active),coalesce(bool_or(resource_kind='machine' AND resource_id=$2),false) FROM team_resource_bindings WHERE team_id=$1`, team, machine).Scan(&count, &exists); err != nil {
 		return err
 	}
 	if !exists && count >= MaximumResources {
