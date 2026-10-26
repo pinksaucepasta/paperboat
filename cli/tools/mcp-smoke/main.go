@@ -139,13 +139,15 @@ func (s *suite) execution() map[string]any {
 }
 
 func (s *suite) sleeper(kind string, timeout int) mcpserver.ExecArgs {
-	code := "import os,pathlib,time; pathlib.Path(" + strconv.Quote("/tmp/"+s.run+"-"+kind+".pid") + ").write_text(str(os.getpid())); time.sleep(120)"
-	return mcpserver.ExecArgs{Machine: s.targetID, Argv: []string{"python3", "-c", code, s.run}, TimeoutSeconds: timeout}
+	return mcpserver.ExecArgs{Machine: s.targetID,
+		Argv:           []string{"python3", "-c", "import time; time.sleep(120)", s.run, kind},
+		TimeoutSeconds: timeout}
 }
 
 func (s *suite) await(kind, wanted string, timeout time.Duration) {
-	code := "from pathlib import Path\np=Path(" + strconv.Quote("/tmp/"+s.run+"-"+kind+".pid") + ")\n"
-	code += "if not p.exists(): print('waiting')\nelse:\n try: raw=(Path('/proc')/p.read_text()/'cmdline').read_bytes()\n except FileNotFoundError: raw=b''\n print('running' if " + strconv.Quote(s.run) + ".encode() in raw else 'stopped')\n"
+	// The worker has PrivateTmp; observe its unique argv nonce through /proc.
+	code := "from pathlib import Path\nwanted=[" + strconv.Quote(s.run) + ".encode()," + strconv.Quote(kind) + ".encode()]\nrunning=False\n"
+	code += "for p in Path('/proc').glob('[0-9]*/cmdline'):\n try: parts=p.read_bytes().split(b'\\0')\n except (FileNotFoundError,PermissionError): continue\n if parts[-3:-1]==wanted: running=True\nprint('running' if running else 'stopped')\n"
 	end := time.Now().Add(timeout)
 	for time.Now().Before(end) {
 		if s.python(s.target, code) == wanted {
