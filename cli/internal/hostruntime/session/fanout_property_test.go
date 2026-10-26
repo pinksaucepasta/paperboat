@@ -25,7 +25,7 @@ func FuzzFanoutMatchesQueueModel(f *testing.F) {
 			switch operation % 4 {
 			case 0:
 				maxBytes := uint64(operation/4%8 + 1)
-				err := fanout.Attach(id, maxBytes)
+				err := fanout.AttachBackpressured(id, maxBytes)
 				if state != nil && state.attached {
 					if err != ErrAttachmentExists {
 						t.Fatalf("attach existing %s: %v", id, err)

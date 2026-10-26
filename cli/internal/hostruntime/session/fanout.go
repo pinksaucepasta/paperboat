@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 )
@@ -15,6 +16,9 @@ var (
 	ErrAttachmentExists  = errors.New("attachment already exists")
 	ErrAttachmentUnknown = errors.New("attachment not found")
 	ErrAttachmentEvicted = errors.New("slow consumer evicted")
+	// ErrAttachmentLagged: a free-running attachment fell behind and its backlog was dropped; the consumer
+	// restores a fresh screen in-band and keeps its connection.
+	ErrAttachmentLagged  = errors.New("attachment fell behind; restore the screen")
 	ErrOutputOrder       = errors.New("output sequence is not contiguous")
 	ErrInvalidQueueLimit = errors.New("invalid attachment queue limit")
 )
@@ -28,13 +32,18 @@ type Eviction struct {
 type attachmentCursor struct {
 	state         AttachmentState
 	receiveOutput bool
-	maxBytes      uint64
-	queuedBytes   uint64
-	evictedBytes  uint64
-	cursor        uint64
-	enqueuedEnd   uint64
-	hasCursor     bool
-	notify        chan struct{}
+	// backpressure: the controlling owner, whose queue holds the PTY back (WaitRoom) so it sees every byte. Any
+	// other attachment runs free and lags (backlog dropped, ErrAttachmentLagged) instead of slowing the program.
+	backpressure bool
+	lagged       bool
+	progressAt   time.Time
+	maxBytes     uint64
+	queuedBytes  uint64
+	evictedBytes uint64
+	cursor       uint64
+	enqueuedEnd  uint64
+	hasCursor    bool
+	notify       chan struct{}
 }
 
 // Fanout retains one ordered ring of immutable chunks. Attachments track only
@@ -51,21 +60,59 @@ type Fanout struct {
 	atMinimum   int
 	active      sync.Map
 	ring        []history.Event
+	// room wakes the producer waiting in WaitRoom when a consumer drains.
+	room chan struct{}
 }
 
-func NewFanout() *Fanout { return &Fanout{attachments: make(map[string]*attachmentCursor)} }
+func NewFanout() *Fanout {
+	return &Fanout{attachments: make(map[string]*attachmentCursor), room: make(chan struct{}, 1)}
+}
 
 func (f *Fanout) Attach(attachmentID string, maxPendingBytes uint64) error {
-	return f.attach(attachmentID, maxPendingBytes, true)
+	return f.attach(attachmentID, maxPendingBytes, true, false)
+}
+
+// AttachBackpressured attaches the controlling owner: the PTY waits for it instead of dropping its output.
+func (f *Fanout) AttachBackpressured(attachmentID string, maxPendingBytes uint64) error {
+	return f.attach(attachmentID, maxPendingBytes, true, true)
+}
+
+// WaitRoom holds the producer until every backpressured attachment has room for size more bytes. An owner
+// that drains nothing for stall is treated as gone (a dead link): WaitRoom returns and the next publish evicts
+// it, so a suspended laptop never freezes the program; it reconnects and replays from history.
+func (f *Fanout) WaitRoom(ctx context.Context, size uint64, stall time.Duration) {
+	for {
+		f.mu.Lock()
+		full := false
+		for _, cursor := range f.attachments {
+			if cursor.state == Attached && cursor.backpressure && size > cursor.maxBytes-cursor.queuedBytes && time.Since(cursor.progressAt) < stall {
+				full = true
+				break
+			}
+		}
+		f.mu.Unlock()
+		if !full {
+			return
+		}
+		timer := time.NewTimer(stall / 10)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-f.room:
+		case <-timer.C:
+		}
+		timer.Stop()
+	}
 }
 
 // AttachControl keeps an authorized participant present for input and
 // revocation while a shared encrypted output feed serves the browser.
 func (f *Fanout) AttachControl(attachmentID string, maxPendingBytes uint64) error {
-	return f.attach(attachmentID, maxPendingBytes, false)
+	return f.attach(attachmentID, maxPendingBytes, false, false)
 }
 
-func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutput bool) error {
+func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutput, backpressure bool) error {
 	if attachmentID == "" || maxPendingBytes == 0 {
 		return ErrInvalidQueueLimit
 	}
@@ -74,7 +121,7 @@ func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutp
 	if existing := f.attachments[attachmentID]; existing != nil && existing.state == Attached {
 		return ErrAttachmentExists
 	}
-	f.attachments[attachmentID] = &attachmentCursor{state: Attached, receiveOutput: receiveOutput, maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
+	f.attachments[attachmentID] = &attachmentCursor{state: Attached, receiveOutput: receiveOutput, backpressure: backpressure, progressAt: time.Now(), maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
 	f.active.Store(attachmentID, struct{}{})
 	return nil
 }
@@ -166,6 +213,13 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 			continue
 		}
 		if uint64(len(event.Data)) > cursor.maxBytes-cursor.queuedBytes {
+			if !cursor.backpressure {
+				// Drop the backlog, this event included: the consumer restores a screen covering all of it.
+				cursor.cursor, cursor.enqueuedEnd, cursor.hasCursor = event.EndSequence, event.EndSequence, true
+				cursor.queuedBytes, cursor.lagged = 0, true
+				notify(cursor.notify)
+				continue
+			}
 			evictions = append(evictions, Eviction{AttachmentID: id, QueuedBytes: cursor.queuedBytes, Reason: "slow_consumer"})
 			cursor.evictedBytes = cursor.queuedBytes
 			cursor.queuedBytes = 0
@@ -258,6 +312,11 @@ func (f *Fanout) WaitNextOwned(ctx context.Context, attachmentID string) (histor
 			f.mu.Unlock()
 			return history.Event{}, ErrInvalidTransition
 		}
+		if cursor.lagged {
+			cursor.lagged = false
+			f.mu.Unlock()
+			return history.Event{}, ErrAttachmentLagged
+		}
 		if cursor.hasCursor && cursor.cursor < cursor.enqueuedEnd {
 			event, found := f.eventAtLocked(cursor.cursor)
 			if !found {
@@ -273,8 +332,10 @@ func (f *Fanout) WaitNextOwned(ctx context.Context, attachmentID string) (histor
 			consumed := retained.EndSequence - retained.StartSequence
 			cursor.cursor = retained.EndSequence
 			cursor.queuedBytes -= consumed
+			cursor.progressAt = time.Now()
 			f.compactAfterAdvanceLocked(start)
 			f.mu.Unlock()
+			notify(f.room)
 			return retained, nil
 		}
 		notification := cursor.notify
@@ -302,6 +363,11 @@ func (f *Fanout) Next(attachmentID string) (history.Event, bool, error) {
 		f.mu.Unlock()
 		return history.Event{}, false, ErrInvalidTransition
 	}
+	if cursor.lagged {
+		cursor.lagged = false
+		f.mu.Unlock()
+		return history.Event{}, false, ErrAttachmentLagged
+	}
 	if !cursor.hasCursor || cursor.cursor >= cursor.enqueuedEnd {
 		f.mu.Unlock()
 		return history.Event{}, false, nil
@@ -316,8 +382,10 @@ func (f *Fanout) Next(attachmentID string) (history.Event, bool, error) {
 	end := event.EndSequence
 	cursor.cursor = end
 	cursor.queuedBytes -= end - start
+	cursor.progressAt = time.Now()
 	f.compactAfterAdvanceLocked(start)
 	f.mu.Unlock()
+	notify(f.room)
 	return history.Event{Channel: event.Channel, StartSequence: start, EndSequence: end, Data: data}, true, nil
 }
 

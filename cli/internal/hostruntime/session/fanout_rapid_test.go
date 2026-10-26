@@ -25,7 +25,7 @@ func TestFanoutRapidStateMachine(t *testing.T) {
 			switch operation % 4 {
 			case 0:
 				limit := uint64(operation/4%16 + 1)
-				err := fanout.Attach(id, limit)
+				err := fanout.AttachBackpressured(id, limit)
 				if state != nil && state.attached {
 					if err != ErrAttachmentExists {
 						t.Fatalf("attach existing %q: %v", id, err)

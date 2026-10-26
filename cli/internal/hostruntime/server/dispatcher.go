@@ -432,11 +432,9 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			case <-ctx.Done():
 				return protocol.BinaryFrame{}, ctx.Err()
 			case <-s.screenRequests:
-				checkpoint, boundary, err := s.manager.BrowserScreenAttachment(s.sessionID, s.attachmentID, s.accountID, s.clientID, s.generation)
-				if err != nil {
+				if err := s.loadScreen(); err != nil {
 					return protocol.BinaryFrame{}, err
 				}
-				s.checkpoint, s.checkpointSequence, s.checkpointOffset, s.checkpointSent = checkpoint, boundary, 0, false
 				return s.Next(ctx)
 			case epoch, ok := <-s.keyUpdates:
 				if !ok {
@@ -508,6 +506,13 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			}
 			return protocol.BinaryFrame{}, &StreamEnd{Payload: payload}
 		}
+		if errors.Is(err, session.ErrAttachmentLagged) {
+			// A free-running viewer fell behind a flood: send it the current screen in-band, no reconnect.
+			if err := s.loadScreen(); err != nil {
+				return protocol.BinaryFrame{}, err
+			}
+			return s.Next(ctx)
+		}
 		if errors.Is(err, session.ErrAttachmentEvicted) {
 			_, queued, _ := s.manager.AttachmentStatus(s.sessionID, s.attachmentID)
 			details, _ := json.Marshal(struct {
@@ -520,6 +525,16 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 		}
 		return protocol.BinaryFrame{}, err
 	}
+}
+
+// loadScreen queues a fresh checkpoint of this attachment's screen and moves it to that boundary.
+func (s *terminalOutputStream) loadScreen() error {
+	checkpoint, boundary, err := s.manager.BrowserScreenAttachment(s.sessionID, s.attachmentID, s.accountID, s.clientID, s.generation)
+	if err != nil {
+		return err
+	}
+	s.checkpoint, s.checkpointSequence, s.checkpointOffset, s.checkpointSent = checkpoint, boundary, 0, false
+	return nil
 }
 
 func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {

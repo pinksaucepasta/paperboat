@@ -219,6 +219,9 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 	}()
 	for {
 		event, err := r.manager.WaitNext(ctx, p.sessionID, p.attachmentID)
+		if errors.Is(err, session.ErrAttachmentLagged) {
+			continue // records skip ahead; each browser sees the gap and restores its screen in-band
+		}
 		if err != nil {
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
 			return

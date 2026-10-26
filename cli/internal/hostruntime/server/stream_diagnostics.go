@@ -161,7 +161,7 @@ func expectedStreamOpenFailure(err error) bool {
 		case session.ErrSessionExists, session.ErrSessionUnknown, session.ErrSessionRunning,
 			session.ErrManagerStopped, session.ErrResourceLimit, session.ErrUpdateBusy,
 			session.ErrUpdateInProgress, session.ErrStaleGeneration, session.ErrInvalidTransition,
-			session.ErrAttachmentExists, session.ErrAttachmentUnknown, session.ErrAttachmentEvicted,
+			session.ErrAttachmentExists, session.ErrAttachmentUnknown, session.ErrAttachmentEvicted, session.ErrAttachmentLagged,
 			session.ErrInvalidInput, session.ErrInputConflict, session.ErrInputSequence,
 			session.ErrInputUncertain, session.ErrInputUnknown, session.ErrInputJournalFull,
 			execprocess.ErrInvalid, execprocess.ErrConflict, execprocess.ErrCapacity,

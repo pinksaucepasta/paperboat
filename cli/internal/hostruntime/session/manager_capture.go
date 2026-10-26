@@ -3,10 +3,14 @@ package session
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 )
+
+// ownerStallBound is how long the PTY waits for an owner that drains nothing before treating its link as gone.
+const ownerStallBound = 5 * time.Second
 
 func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	var readErr, deliveryErr error
@@ -14,6 +18,8 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 		buffer := history.AcquireBuffer()
 		n, err := process.Read(buffer)
 		if n > 0 {
+			// Outside opMu: input, resize and attach never wait for the owner to drain.
+			session.fanout.WaitRoom(context.Background(), uint64(n), ownerStallBound)
 			session.opMu.Lock()
 			state, _ := session.lifecycle.Snapshot()
 			if state == Running || state == Closing {

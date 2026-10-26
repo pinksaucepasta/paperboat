@@ -147,7 +147,11 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 	if isGenerationBoundTerminal(authorization) {
 		expectedGeneration = authorization.TerminalGeneration
 	}
-	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true}
+	generation := authorization.TerminalGeneration
+	if generation == 0 {
+		generation = response.Session.Snapshot.Generation
+	}
+	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
 	if authorization.BrowserTerminal || request.AtLiveBoundary {
 		if err := d.prepareTerminalCheckpoint(ctx, authorization, request, response, stream); err != nil {
 			return nil, false, err
@@ -190,7 +194,7 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 		stream.broadcast = d.config.BrowserOutput
 		stream.keyUpdates = updates
 		requests := make(chan struct{}, 1)
-		stream.screenRequests, stream.accountID, stream.clientID, stream.generation = requests, authorization.AccountID, authorization.ClientID, generation
+		stream.screenRequests = requests
 		d.browserScreens.Store(response.AttachmentID, requests)
 		stream.unregisterScreens = func() { d.browserScreens.CompareAndDelete(response.AttachmentID, requests) }
 	}

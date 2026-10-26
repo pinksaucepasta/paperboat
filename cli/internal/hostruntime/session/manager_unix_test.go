@@ -785,3 +785,41 @@ func TestCtrlCOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	}
 	waitState(t, manager, created.ID, Exited)
 }
+
+// A flood with a slow owner and a viewer that does not read (F3-11, F3-13): the owner paces the program and
+// receives every byte in order, never evicted; the viewer is never evicted either, it is told it lagged.
+func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
+	manager, root, shell := realManager(t)
+	const total = 4_000_000 // four times the attachment queue and the history
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "flood", Command: shellCommand(shell, root, "head -c 4000000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	owner := Participant{AttachmentID: "att_owner", AccountID: "acct", ClientID: "cli_owner", Role: "owner", ConnectedAt: time.Now()}
+	viewer := Participant{AttachmentID: "att_viewer", AccountID: "acct_2", ClientID: "cli_viewer", Role: "viewer", ConnectedAt: time.Now()}
+	if _, err := manager.AttachParticipantAtGeneration(created.ID, owner, 0, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.AttachParticipantAtGeneration(created.ID, viewer, 0, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var received, next uint64
+	for received < total {
+		event, err := manager.WaitNext(ctx, created.ID, owner.AttachmentID)
+		if err != nil {
+			t.Fatalf("owner after %d of %d bytes: %v", received, total, err)
+		}
+		if next != 0 && event.StartSequence != next {
+			t.Fatalf("owner output jumped from %d to %d", next, event.StartSequence)
+		}
+		next = event.EndSequence
+		received += uint64(bytes.Count(event.Data, []byte("x")))
+		time.Sleep(time.Millisecond) // a slow link
+	}
+	if _, err := manager.WaitNext(ctx, created.ID, viewer.AttachmentID); !errors.Is(err, ErrAttachmentLagged) {
+		t.Fatalf("stalled viewer: %v, want lagged (never evicted)", err)
+	}
+}

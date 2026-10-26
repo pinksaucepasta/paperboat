@@ -15,7 +15,7 @@ func (m *Manager) Attach(sessionID, attachmentID string, fromSequence uint64) (A
 	}
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
-	return m.attachLocked(session, attachmentID, fromSequence, false)
+	return m.attachLocked(session, attachmentID, fromSequence, false, false)
 }
 
 func (m *Manager) AttachParticipant(sessionID string, participant Participant, fromSequence uint64) (AttachResult, error) {
@@ -43,7 +43,7 @@ func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Pa
 	if fromSequence == 0 {
 		fromSequence, _, _ = session.history.Bounds()
 	}
-	result, err := m.attachLocked(session, participant.AttachmentID, fromSequence, participant.Browser)
+	result, err := m.attachLocked(session, participant.AttachmentID, fromSequence, participant.Browser, controllingOwner(participant))
 	if err == nil {
 		if session.participants == nil {
 			session.participants = make(map[string]Participant)
@@ -77,7 +77,7 @@ func (m *Manager) AttachLive(sessionID, attachmentID string) (AttachResult, erro
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	_, latest, _ := session.history.Bounds()
-	return m.attachLocked(session, attachmentID, latest, false)
+	return m.attachLocked(session, attachmentID, latest, false, false)
 }
 
 func (m *Manager) AttachLiveParticipant(sessionID string, participant Participant) (AttachResult, error) {
@@ -100,7 +100,7 @@ func (m *Manager) AttachLiveParticipantAtGeneration(sessionID string, participan
 		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
 	m.pruneParticipantsLocked(session)
-	result, err := m.attachLocked(session, participant.AttachmentID, latest, participant.Browser)
+	result, err := m.attachLocked(session, participant.AttachmentID, latest, participant.Browser, controllingOwner(participant))
 	if err == nil {
 		if session.participants == nil {
 			session.participants = make(map[string]Participant)
@@ -159,7 +159,13 @@ func validParticipant(participant Participant, expectedGeneration uint64) bool {
 	return true
 }
 
-func (m *Manager) attachLocked(session *managedSession, attachmentID string, fromSequence uint64, controlOnly bool) (AttachResult, error) {
+// controllingOwner is the attachment whose consumption paces the PTY, like an ssh session: the owner's own
+// native terminal. Viewers, interactive guests and browsers (fed by the shared publisher) run free and resync.
+func controllingOwner(participant Participant) bool {
+	return participant.Role == "owner" && !participant.Browser
+}
+
+func (m *Manager) attachLocked(session *managedSession, attachmentID string, fromSequence uint64, controlOnly, backpressure bool) (AttachResult, error) {
 	if err := m.checkRetiring(); err != nil {
 		return AttachResult{}, err
 	}
@@ -198,7 +204,11 @@ func (m *Manager) attachLocked(session *managedSession, attachmentID string, fro
 			return AttachResult{}, err
 		}
 	}
-	if err := session.fanout.Attach(attachmentID, m.config.AttachmentBytes); err != nil {
+	attach := session.fanout.Attach
+	if backpressure {
+		attach = session.fanout.AttachBackpressured
+	}
+	if err := attach(attachmentID, m.config.AttachmentBytes); err != nil {
 		replay.Release()
 		return AttachResult{}, err
 	}

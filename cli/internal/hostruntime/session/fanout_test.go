@@ -29,7 +29,8 @@ func TestWaitNextWakesForOutputDetachEvictionAndCancellation(t *testing.T) {
 			if testCase.name == "output" || testCase.name == "detach" {
 				limit = 8
 			}
-			if err := fanout.Attach("att", limit); err != nil {
+			// Backpressured: only the owner is ever evicted (a link that stopped draining).
+			if err := fanout.AttachBackpressured("att", limit); err != nil {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
@@ -208,8 +209,8 @@ func TestFanoutMirrorsOrderedOutput(t *testing.T) {
 
 func TestSlowConsumerEvictsOnlyFullAttachment(t *testing.T) {
 	f := NewFanout()
-	f.Attach("slow", 3)
-	f.Attach("fast", 3)
+	f.AttachBackpressured("slow", 3)
+	f.AttachBackpressured("fast", 3)
 	f.Publish(history.Event{StartSequence: 0, EndSequence: 3, Data: []byte("abc")})
 	if _, ok, err := f.Next("fast"); err != nil || !ok {
 		t.Fatalf("fast drain ok=%v err=%v", ok, err)
@@ -332,5 +333,26 @@ func TestFanoutReleaseKeepsOutputOwedToAttachedViewers(t *testing.T) {
 	}
 	if string(tail) != "bc" || len(f.ring) != 0 {
 		t.Fatalf("tail=%q ring=%d", tail, len(f.ring))
+	}
+}
+
+// A free-running attachment (a viewer, the browser publisher) that falls behind is never evicted: its backlog is
+// dropped, it is told once that it lagged, and it continues with the next output.
+func TestFreeRunningAttachmentLagsInsteadOfEviction(t *testing.T) {
+	f := NewFanout()
+	f.Attach("viewer", 3)
+	f.Publish(history.Event{StartSequence: 0, EndSequence: 3, Data: []byte("abc")})
+	if evictions, err := f.Publish(history.Event{StartSequence: 3, EndSequence: 4, Data: []byte("d")}); err != nil || len(evictions) != 0 {
+		t.Fatalf("evictions=%#v err=%v", evictions, err)
+	}
+	if _, _, err := f.Next("viewer"); !errors.Is(err, ErrAttachmentLagged) {
+		t.Fatalf("lagging viewer: %v", err)
+	}
+	f.Publish(history.Event{StartSequence: 4, EndSequence: 5, Data: []byte("e")})
+	if event, ok, err := f.Next("viewer"); err != nil || !ok || string(event.Data) != "e" || event.StartSequence != 4 {
+		t.Fatalf("after the lag: %q at %d ok=%v err=%v", event.Data, event.StartSequence, ok, err)
+	}
+	if state, _, err := f.Status("viewer"); err != nil || state != Attached {
+		t.Fatalf("state=%s err=%v", state, err)
 	}
 }
