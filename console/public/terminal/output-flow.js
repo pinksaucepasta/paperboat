@@ -84,6 +84,9 @@ export class TerminalOutputFlow {
       this.records++
       if (screen) this.screens++
     }
+    // A flood outruns a zero-delay timer: post every sealed entry now rather than let the queue reach the byte
+    // limit while waiting for it. The last entry stays queued so the next record can still merge into it.
+    while (!this.closed && this.inflight.size < MAX_INFLIGHT && this.pending.length > 1) this.flush()
     this.scheduleNext()
     return true
   }

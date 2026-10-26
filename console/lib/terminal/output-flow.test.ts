@@ -47,6 +47,27 @@ describe("worker output flow", () => {
     expect(got).toBe(2000)
   })
 
+  test("a burst is posted as it arrives, without waiting for a timer tick", () => {
+    // The worker's zero-delay timer never runs during a flood burst; the queue must not grow to the byte limit.
+    const sent: { events: Event[] }[] = []
+    let overflowed = 0
+    const flow = new TerminalOutputFlow({
+      send: (batch: { id: number; events: Event[] }) => {
+        sent.push(batch)
+        flow.consumed(batch.id)
+      },
+      overflow: () => overflowed++,
+      schedule: () => 0 as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => undefined,
+    })
+    for (let n = 0; n < 5000; n++) {
+      // 40 KiB records on alternating channels cannot merge: ~200 MB in all, far above the 512 KiB limit.
+      flow.push({ ...output(n), channel: n % 2 === 0 ? 1 : 3, data: new Uint8Array(40 << 10) })
+    }
+    expect(overflowed).toBe(0)
+    expect(sent.flatMap((batch) => batch.events).length).toBeGreaterThanOrEqual(4999)
+  })
+
   test("a screen restore replaces what the page has not been sent, and a second one does not overflow", () => {
     const { flow, sent, drain, overflowed } = flowWithConsumer()
     for (let n = 0; n < 5; n++) flow.push(output(n))
