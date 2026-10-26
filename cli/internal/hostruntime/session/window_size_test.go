@@ -1,7 +1,9 @@
 package session
 
 import (
+	"encoding/json"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -157,4 +159,22 @@ func TestWindowSizesAreRaceFree(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// A participant's window size stays off its public JSON (the server decodes snapshot participants strictly; a
+// "dimensions" field there refused every second browser window, F3-14) but crosses the owner boundary.
+func TestParticipantDimensionsStayPrivate(t *testing.T) {
+	participant := Participant{AttachmentID: "a", Role: "owner", Browser: true, Dimensions: dims(120, 40)}
+	public, err := json.Marshal(participant)
+	if err != nil || strings.Contains(string(public), "dimensions") {
+		t.Fatalf("public participant JSON = %s, %v", public, err)
+	}
+	private, err := json.Marshal(remoteParticipant{Participant: participant, Browser: participant.Browser, Dimensions: participant.Dimensions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded remoteParticipant
+	if err := json.Unmarshal(private, &decoded); err != nil || decoded.participant() != participant {
+		t.Fatalf("owner boundary participant = %+v, %v", decoded.participant(), err)
+	}
 }

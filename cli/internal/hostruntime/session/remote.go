@@ -77,7 +77,7 @@ func (m *RemoteManager) AttachParticipant(sessionID string, participant Particip
 		Sessionid    string
 		Participant  remoteParticipant
 		Fromsequence uint64
-	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser}, fromSequence}, &out)
+	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser, Dimensions: participant.Dimensions}, fromSequence}, &out)
 	return out.V0, err
 }
 func (m *RemoteManager) AttachParticipantAtGeneration(sessionID string, participant Participant, fromSequence, expectedGeneration uint64) (AttachResult, error) {
@@ -87,7 +87,7 @@ func (m *RemoteManager) AttachParticipantAtGeneration(sessionID string, particip
 		Participant        remoteParticipant
 		Fromsequence       uint64
 		Expectedgeneration uint64
-	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser}, fromSequence, expectedGeneration}, &out)
+	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser, Dimensions: participant.Dimensions}, fromSequence, expectedGeneration}, &out)
 	return out.V0, err
 }
 func (m *RemoteManager) AttachLive(sessionID, attachmentID string) (AttachResult, error) {
@@ -103,7 +103,7 @@ func (m *RemoteManager) AttachLiveParticipant(sessionID string, participant Part
 	err := m.invoke(context.Background(), "AttachLiveParticipant", struct {
 		Sessionid   string
 		Participant remoteParticipant
-	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser}}, &out)
+	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser, Dimensions: participant.Dimensions}}, &out)
 	return out.V0, err
 }
 func (m *RemoteManager) AttachLiveParticipantAtGeneration(sessionID string, participant Participant, expectedGeneration uint64) (AttachResult, error) {
@@ -112,7 +112,7 @@ func (m *RemoteManager) AttachLiveParticipantAtGeneration(sessionID string, part
 		Sessionid          string
 		Participant        remoteParticipant
 		Expectedgeneration uint64
-	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser}, expectedGeneration}, &out)
+	}{sessionID, remoteParticipant{Participant: participant, Browser: participant.Browser, Dimensions: participant.Dimensions}, expectedGeneration}, &out)
 	return out.V0, err
 }
 func (m *RemoteManager) BrowserScreenAttachment(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) ([]byte, uint64, error) {
@@ -382,15 +382,17 @@ func (m *RemoteManager) ShutdownForRecovery(ctx context.Context) error { return 
 
 var ErrOwnerUnavailable = errors.New("terminal owner unavailable")
 
-// Browser is intentionally absent from public participant JSON. It is required
-// across the private owner boundary for live screen authorization.
+// Browser and Dimensions are intentionally absent from public participant JSON (snapshots reach the server, which
+// decodes participants strictly). They cross the private owner boundary: Browser for live screen authorization,
+// Dimensions for the window size rule.
 type remoteParticipant struct {
 	Participant
-	Browser bool
+	Browser    bool
+	Dimensions pty.Dimensions
 }
 
 func (p remoteParticipant) participant() Participant {
 	v := p.Participant
-	v.Browser = p.Browser
+	v.Browser, v.Dimensions = p.Browser, p.Dimensions
 	return v
 }

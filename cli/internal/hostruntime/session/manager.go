@@ -153,7 +153,7 @@ type Participant struct {
 	ConnectedAt  time.Time `json:"connected_at"`
 	Browser      bool      `json:"-"`
 	// Dimensions is the window's size when it attached; 0x0 until it reports one.
-	Dimensions pty.Dimensions `json:"dimensions,omitempty"`
+	Dimensions pty.Dimensions `json:"-"`
 }
 
 type AttachResult struct {
