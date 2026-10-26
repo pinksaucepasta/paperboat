@@ -2111,6 +2111,8 @@ SET certificate_state = 'ready',
     certificate_expires_at = $2,
     certificate_renewal_attempted_at = $3,
     certificate_failure_code = NULL,
+    certificate_failure_attempts = 0,
+    certificate_retry_at = NULL,
     caa_state = 'ready',
     generation = generation + 1,
     updated_at = $3
@@ -2455,6 +2457,7 @@ func (q *Queries) RebindPreviewCertificatesForLeaseV1(ctx context.Context, arg R
 const recoverTunnelDomainCertificateProjectionV1 = `-- name: RecoverTunnelDomainCertificateProjectionV1 :execrows
 UPDATE tunnel_domains AS d
 SET certificate_state = 'ready', certificate_failure_code = NULL,
+    certificate_failure_attempts = 0, certificate_retry_at = NULL,
     certificate_renewal_attempted_at = $1,
     generation = d.generation + 1, updated_at = $1
 FROM tunnel_certificate_records AS cert, tunnels AS t, tunnel_routes AS r

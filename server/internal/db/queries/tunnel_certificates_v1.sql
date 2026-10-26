@@ -654,6 +654,8 @@ SET certificate_state = 'ready',
     certificate_expires_at = sqlc.arg(certificate_expires_at),
     certificate_renewal_attempted_at = sqlc.arg(now),
     certificate_failure_code = NULL,
+    certificate_failure_attempts = 0,
+    certificate_retry_at = NULL,
     caa_state = 'ready',
     generation = generation + 1,
     updated_at = sqlc.arg(now)
@@ -963,6 +965,7 @@ WHERE domain_id = sqlc.arg(domain_id);
 -- this statement; the issuance commit's stricter generation fence is unchanged.
 UPDATE tunnel_domains AS d
 SET certificate_state = 'ready', certificate_failure_code = NULL,
+    certificate_failure_attempts = 0, certificate_retry_at = NULL,
     certificate_renewal_attempted_at = sqlc.arg(now),
     generation = d.generation + 1, updated_at = sqlc.arg(now)
 FROM tunnel_certificate_records AS cert, tunnels AS t, tunnel_routes AS r

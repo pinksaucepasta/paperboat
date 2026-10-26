@@ -135,11 +135,12 @@ func (q *Queries) ListDuePreviewCertificateDomainsV1(ctx context.Context, arg Li
 }
 
 const listDueTunnelCertificateDomainsV1 = `-- name: ListDueTunnelCertificateDomainsV1 :many
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts
 FROM tunnel_domains AS d
 WHERE d.deleted_at IS NULL
   AND d.ownership_state = 'verified'
   AND d.conflict_state = 'clear'
+  AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > $1::timestamptz)
   AND (
     d.certificate_state IN ('issuing','renewing','failed')
     OR d.certificate_expires_at <= $1::timestamptz + $2::interval
@@ -223,6 +224,8 @@ func (q *Queries) ListDueTunnelCertificateDomainsV1(ctx context.Context, arg Lis
 			&i.DnsTtlSeconds,
 			&i.VerificationAttempts,
 			&i.QuarantineUntil,
+			&i.CertificateRetryAt,
+			&i.CertificateFailureAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -345,7 +348,7 @@ func (q *Queries) ListOnDemandPreviewDomainsForEdgeV1(ctx context.Context, arg L
 }
 
 const listOnDemandWildcardDomainsForEdgeV1 = `-- name: ListOnDemandWildcardDomainsForEdgeV1 :many
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts
 FROM tunnel_domains AS d
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
@@ -420,6 +423,8 @@ func (q *Queries) ListOnDemandWildcardDomainsForEdgeV1(ctx context.Context, arg 
 			&i.DnsTtlSeconds,
 			&i.VerificationAttempts,
 			&i.QuarantineUntil,
+			&i.CertificateRetryAt,
+			&i.CertificateFailureAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -539,18 +544,21 @@ UPDATE tunnel_domains
 SET certificate_state = CASE WHEN certificate_state = 'ready' THEN 'renewing' ELSE 'failed' END,
     certificate_renewal_attempted_at = $1,
     certificate_failure_code = $2,
+    certificate_failure_attempts = certificate_failure_attempts + 1,
+    certificate_retry_at = $3,
     generation = generation + 1,
     updated_at = $1
-WHERE id = $3
-  AND generation = $4
+WHERE id = $4
+  AND generation = $5
   AND ownership_state = 'verified'
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts
 `
 
 type MarkTunnelDomainCertificateFailureV1Params struct {
 	Now                sql.NullTime
 	FailureCode        sql.NullString
+	RetryAt            sql.NullTime
 	DomainID           string
 	ExpectedGeneration int64
 }
@@ -559,6 +567,7 @@ func (q *Queries) MarkTunnelDomainCertificateFailureV1(ctx context.Context, arg 
 	row := q.db.QueryRow(ctx, markTunnelDomainCertificateFailureV1,
 		arg.Now,
 		arg.FailureCode,
+		arg.RetryAt,
 		arg.DomainID,
 		arg.ExpectedGeneration,
 	)
@@ -594,6 +603,8 @@ func (q *Queries) MarkTunnelDomainCertificateFailureV1(ctx context.Context, arg 
 		&i.DnsTtlSeconds,
 		&i.VerificationAttempts,
 		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
 	)
 	return i, err
 }
@@ -605,6 +616,8 @@ SET certificate_state = 'ready',
     certificate_expires_at = $2,
     certificate_renewal_attempted_at = $3,
     certificate_failure_code = NULL,
+    certificate_failure_attempts = 0,
+    certificate_retry_at = NULL,
     caa_state = 'ready',
     generation = generation + 1,
     updated_at = $3
@@ -613,7 +626,7 @@ WHERE id = $4
   AND ownership_state = 'verified'
   AND conflict_state = 'clear'
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts
 `
 
 type MarkTunnelDomainCertificateReadyV1Params struct {
@@ -664,6 +677,8 @@ func (q *Queries) MarkTunnelDomainCertificateReadyV1(ctx context.Context, arg Ma
 		&i.DnsTtlSeconds,
 		&i.VerificationAttempts,
 		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
 	)
 	return i, err
 }

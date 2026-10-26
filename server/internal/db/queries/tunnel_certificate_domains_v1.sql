@@ -4,6 +4,7 @@ FROM tunnel_domains AS d
 WHERE d.deleted_at IS NULL
   AND d.ownership_state = 'verified'
   AND d.conflict_state = 'clear'
+  AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > sqlc.arg(now)::timestamptz)
   AND (
     d.certificate_state IN ('issuing','renewing','failed')
     OR d.certificate_expires_at <= sqlc.arg(now)::timestamptz + sqlc.arg(renew_before)::interval
@@ -229,6 +230,8 @@ SET certificate_state = 'ready',
     certificate_expires_at = sqlc.arg(certificate_expires_at),
     certificate_renewal_attempted_at = sqlc.arg(now),
     certificate_failure_code = NULL,
+    certificate_failure_attempts = 0,
+    certificate_retry_at = NULL,
     caa_state = 'ready',
     generation = generation + 1,
     updated_at = sqlc.arg(now)
@@ -244,6 +247,8 @@ UPDATE tunnel_domains
 SET certificate_state = CASE WHEN certificate_state = 'ready' THEN 'renewing' ELSE 'failed' END,
     certificate_renewal_attempted_at = sqlc.arg(now),
     certificate_failure_code = sqlc.arg(failure_code),
+    certificate_failure_attempts = certificate_failure_attempts + 1,
+    certificate_retry_at = sqlc.arg(retry_at),
     generation = generation + 1,
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(domain_id)

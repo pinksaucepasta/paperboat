@@ -108,7 +108,8 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 				w.emitTelemetry(ctx, row.ID, "", certificateOperation(row.CertificateReference.Valid), "failed", now.Add(time.Minute))
 				return changed, ensureErr
 			}
-			_, markErr := w.db.Queries().MarkTunnelDomainCertificateFailureV1(ctx, dbsqlc.MarkTunnelDomainCertificateFailureV1Params{Now: sql.NullTime{Time: now, Valid: true}, FailureCode: sql.NullString{String: failureCode, Valid: true}, DomainID: row.ID, ExpectedGeneration: row.Generation})
+			retryAt := certificateRetryAt(now, row.CertificateFailureAttempts+1, ensureErr)
+			_, markErr := w.db.Queries().MarkTunnelDomainCertificateFailureV1(ctx, dbsqlc.MarkTunnelDomainCertificateFailureV1Params{Now: sql.NullTime{Time: now, Valid: true}, FailureCode: sql.NullString{String: failureCode, Valid: true}, RetryAt: sql.NullTime{Time: retryAt, Valid: true}, DomainID: row.ID, ExpectedGeneration: row.Generation})
 			if markErr != nil && !isSolePostgresNoRows(markErr) {
 				return changed, errors.Join(ensureErr, markErr)
 			}
@@ -116,7 +117,7 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 				workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", ensureErr)
 			}
 			changed++
-			w.emitTelemetry(ctx, row.ID, "", certificateOperation(row.CertificateReference.Valid), "failed", now.Add(time.Minute))
+			w.emitTelemetry(ctx, row.ID, "", certificateOperation(row.CertificateReference.Valid), "failed", retryAt)
 			continue
 		}
 		certificate, found, currentErr := w.coordinator.CurrentCertificate(ctx, row.ID)
@@ -524,6 +525,32 @@ func certificateFailureCode(err error) string {
 	default:
 		return ""
 	}
+}
+
+// A failed durable-route certificate waits before its next issuance attempt, so an edge that never
+// confirms does not spend the issuer's rate limit on every tick. The wait starts at certificateRetryBase,
+// doubles per consecutive failure and stops at certificateRetryMax. An issuer Retry-After (rate limit)
+// lengthens the wait up to certificateRetryAfterMax.
+const (
+	certificateRetryBase     = time.Minute
+	certificateRetryMax      = time.Hour
+	certificateRetryAfterMax = 24 * time.Hour
+)
+
+// certificateRetryAt returns when a domain that has failed `failures` times in a row may be issued again.
+func certificateRetryAt(now time.Time, failures int32, err error) time.Time {
+	delay := certificateRetryBase
+	for i := int32(1); i < failures && delay < certificateRetryMax; i++ {
+		delay *= 2
+	}
+	delay = min(delay, certificateRetryMax)
+	var limited *tunnelcert.RateLimitError
+	if errors.As(err, &limited) {
+		if after := min(limited.RetryAt.Sub(now), certificateRetryAfterMax); after > delay {
+			delay = after
+		}
+	}
+	return now.Add(delay)
 }
 
 func expectedCertificateDeferral(err error) (expected bool) {

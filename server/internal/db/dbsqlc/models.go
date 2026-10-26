@@ -2827,6 +2827,8 @@ type TunnelDomain struct {
 	DnsTtlSeconds                 sql.NullInt32
 	VerificationAttempts          int32
 	QuarantineUntil               sql.NullTime
+	CertificateRetryAt            sql.NullTime
+	CertificateFailureAttempts    int32
 }
 
 type TunnelEdgeRouteAssignment struct {

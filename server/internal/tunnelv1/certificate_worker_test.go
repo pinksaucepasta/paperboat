@@ -192,3 +192,28 @@ func TestCertificateWorkerRetriesPreviewPlacementWithoutExitingOnPostgres(t *tes
 		t.Fatal("cooldown retry bypassed absent-placement authorization")
 	}
 }
+
+func TestCertificateRetryAtDoublesToAnHourAndHonorsRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name     string
+		failures int32
+		err      error
+		want     time.Duration
+	}{
+		{name: "first failure waits a minute", failures: 1, want: time.Minute},
+		{name: "doubles per failure", failures: 3, want: 4 * time.Minute},
+		{name: "capped at an hour", failures: 7, want: time.Hour},
+		{name: "stays capped", failures: 50, want: time.Hour},
+		{name: "issuer retry-after lengthens the wait", failures: 1, err: fmt.Errorf("issue: %w", &tunnelcert.RateLimitError{RetryAt: now.Add(10 * time.Minute)}), want: 10 * time.Minute},
+		{name: "issuer retry-after is bounded", failures: 1, err: &tunnelcert.RateLimitError{RetryAt: now.Add(48 * time.Hour)}, want: 24 * time.Hour},
+		{name: "a past retry-after adds nothing", failures: 1, err: &tunnelcert.RateLimitError{RetryAt: now.Add(-time.Hour)}, want: time.Minute},
+		{name: "a longer backoff is not shortened", failures: 7, err: &tunnelcert.RateLimitError{RetryAt: now.Add(5 * time.Minute)}, want: time.Hour},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := certificateRetryAt(now, test.failures, test.err).Sub(now); got != test.want {
+				t.Fatalf("retry after %d failures = %v, want %v", test.failures, got, test.want)
+			}
+		})
+	}
+}
