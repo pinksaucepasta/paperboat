@@ -87,7 +87,7 @@ def render(sections):
         rows = rows_of(ids)
         if rows:
             d, b, t = count(rows, 0)
-            cards.append(f'<div class="card"><h2>{title}</h2><div class="row"><span>Linux</span>'
+            cards.append(f'<div class="card"><h2>{title}</h2><div class="row"><span>Done</span>'
                          f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]
     if not cross:
