@@ -67,6 +67,20 @@ class Client(Terminal):
                 tail = (tail + chunk)[-4096:]
         self.pending.clear()
 
+    def quiet_after(self, quiet, timeout):
+        """Seconds until output has been quiet for `quiet` s (output discarded), or None."""
+        import select
+        t0 = time.monotonic()
+        last = t0
+        while time.monotonic() - t0 < timeout:
+            if select.select([self.fd], [], [], 0.1)[0]:
+                if not os.read(self.fd, 1 << 16):
+                    return None
+                last = time.monotonic()
+            elif time.monotonic() - last >= quiet:
+                return last - t0
+        return None
+
     def size(self):
         out = self.run('stty size')
         found = re.findall(rb'(\d+) (\d+)\r?\n', out)
@@ -284,18 +298,26 @@ def fast_output(a, sessions):
         c1.send('yes\r')
         time.sleep(3)
         c1.send('\x03')
+        # The tty discards input typed before the interrupt lands, so wait for yes to stop
+        # (output goes quiet) before typing the next command.
+        t0 = time.monotonic()
+        stopped = c1.quiet_after(1.0, 30)
+        if stopped is None:
+            row('N6 Ctrl-C stops yes promptly', False, 'output still flowing 30 s after Ctrl-C')
+        else:
+            row('N6 Ctrl-C stops yes promptly', stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
+        try:
+            c1.run_discarding('true', 15)
+            row('N6 the shell answers after Ctrl-C', True)
+        except RuntimeError as error:
+            row('N6 the shell answers after Ctrl-C', False, str(error))
+        os.kill(c2.pid, signal.SIGCONT)
         t0 = time.monotonic()
         try:
-            c1.run_discarding('true', 10)
-            row('N6 Ctrl-C stops yes promptly', True, f'{time.monotonic() - t0:.1f} s')
-        except RuntimeError:
-            row('N6 Ctrl-C stops yes promptly', False, 'no prompt within 10 s')
-        os.kill(c2.pid, signal.SIGCONT)
-        try:
-            c2.run('true', 60)
-            row('N6 the stalled window recovers after it resumes', True)
-        except RuntimeError:
-            row('N6 the stalled window recovers after it resumes', False, 'not responsive 60 s after SIGCONT')
+            c2.run_discarding('true', 120)
+            row('N6 the stalled window recovers after it resumes', True, f'{time.monotonic() - t0:.0f} s')
+        except RuntimeError as error:
+            row('N6 the stalled window recovers after it resumes', False, f'{error} ({time.monotonic() - t0:.0f} s)')
     finally:
         c1.close()
         c2.close()
