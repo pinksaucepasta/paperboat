@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -54,8 +55,31 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return err
 	}
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
-	explainChangedSSHHostIdentity(command, client, machine, err)
+	if !explainRevokedSSHAccess(command, client, machine, err) {
+		explainChangedSSHHostIdentity(command, client, machine, err)
+	}
 	return err
+}
+
+// explainRevokedSSHAccess follows an OpenSSH connection failure (exit 255) with the reason when it is a revocation: the
+// host closes open sessions within seconds of the user's access ending, and OpenSSH itself only says the connection closed.
+// The server answers a cheap read about this machine with 401 (this sign-in was revoked) or 403 (access to the machine ended).
+func explainRevokedSSHAccess(command *cobra.Command, client *api.Client, machine api.UserMachine, err error) bool {
+	var exit managedssh.NativeExitError
+	if !errors.As(err, &exit) || exit.Code != 255 || client == nil {
+		return false
+	}
+	_, probeErr := client.ManagedSSHPendingHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
+	var apiErr *api.APIError
+	switch {
+	case errors.Is(probeErr, api.ErrUnauthenticated):
+		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: this sign-in was ended. Run `pb login` to sign in again.\n", machine.Alias)
+	case errors.As(probeErr, &apiErr) && apiErr.Status == http.StatusForbidden:
+		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: your account no longer has permission to use it. Ask its owner or team admin.\n", machine.Alias)
+	default:
+		return false
+	}
+	return true
 }
 
 // explainChangedSSHHostIdentity follows an OpenSSH connection failure (exit 255) with what to do when the

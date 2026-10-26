@@ -47,3 +47,37 @@ func TestManagedSSHNamesTheTrustHostCommandAfterAHostKeyChange(t *testing.T) {
 		}
 	}
 }
+
+// F5-10: a session closed by revocation says so, for a signed-out CLI (401) and for a withdrawn grant (403); other
+// failures say nothing.
+func TestManagedSSHSaysAccessWasRevoked(t *testing.T) {
+	status := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"error":{"code":"x","message":"x"}}`))
+	}))
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	for name, test := range map[string]struct {
+		status int
+		err    error
+		want   string
+	}{
+		"signed out":       {401, managedssh.NativeExitError{Code: 255}, "access to studio was revoked: this sign-in was ended"},
+		"grant withdrawn":  {403, managedssh.NativeExitError{Code: 255}, "access to studio was revoked: your account no longer has permission"},
+		"no pending keys":  {404, managedssh.NativeExitError{Code: 255}, ""},
+		"remote exit code": {401, managedssh.NativeExitError{Code: 1}, ""},
+	} {
+		status = test.status
+		var stderr bytes.Buffer
+		command := &cobra.Command{}
+		command.SetErr(&stderr)
+		command.SetContext(t.Context())
+		said := explainRevokedSSHAccess(command, client, machine, test.err)
+		if said != (test.want != "") || !strings.Contains(stderr.String(), test.want) {
+			t.Fatalf("%s: said=%v stderr %q", name, said, stderr.String())
+		}
+	}
+}
