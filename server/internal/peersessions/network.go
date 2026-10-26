@@ -49,6 +49,8 @@ type NetworkConfigRequest struct {
 	OperationID, UserID, EndpointID string
 	AdmittedScopes                  []AdmittedScope
 	AdmittedCertificates            []AdmittedCertificate
+	// Endpoints are the engine's own candidate endpoints (ip:port); nil when the request reports none.
+	Endpoints []string
 }
 type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
@@ -58,6 +60,8 @@ type NetworkConfigResult struct {
 	// RelayDeniedQuotaExhausted); BillingURL then says where to add bandwidth.
 	RelayDenied string `json:"relay_denied,omitempty"`
 	BillingURL  string `json:"billing_url,omitempty"`
+	// EndpointReports tells the engine this server keeps the endpoints it reports (N5); it reports only then.
+	EndpointReports bool `json:"endpoint_reports"`
 }
 
 type NetworkOptions struct{ STUNServers []string }
@@ -284,7 +288,14 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	// The generation is allocated first, on its own connection, so a build never holds a
 	// snapshot while waiting for a second pool connection (a burst would exhaust the pool).
 	var generation int64
-	err = s.store.SQL().QueryRowContext(ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1 WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`, now, in.UserID, in.EndpointID).Scan(&generation)
+	// The reported endpoints ride on the same row write; the stored set changes only when it differs.
+	endpoints, err := normalizeEndpoints(in.Endpoints)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	err = s.store.SQL().QueryRowContext(ctx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1,
+ endpoints=CASE WHEN $4::text[] IS NULL OR endpoints IS NOT DISTINCT FROM $4::text[] THEN endpoints ELSE $4::text[] END
+ WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`, now, in.UserID, in.EndpointID, endpoints).Scan(&generation)
 	if err == sql.ErrNoRows {
 		return NetworkConfigResult{}, ErrDenied
 	}
@@ -550,7 +561,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err = tx.Commit(); err != nil {
 		return NetworkConfigResult{}, err
 	}
-	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
+	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants, EndpointReports: true}
 	if withheld {
 		result.RelayDenied, result.BillingURL = RelayDeniedQuotaExhausted, s.billingURL
 	}

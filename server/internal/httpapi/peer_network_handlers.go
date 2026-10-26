@@ -26,6 +26,9 @@ type peerNetworkConfigBody struct {
 	OperationID          string                             `json:"operation_id"`
 	AdmittedScopes       []peersessions.AdmittedScope       `json:"admitted_scopes,omitempty"`
 	AdmittedCertificates []peersessions.AdmittedCertificate `json:"admitted_certificates,omitempty"`
+	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent once a config
+	// answer said endpoint_reports.
+	Endpoints []string `json:"endpoints,omitempty"`
 }
 type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
@@ -91,7 +94,7 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates})
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates, Endpoints: body.Endpoints})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
@@ -164,7 +167,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
 		}
-		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates})
+		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates, Endpoints: body.Endpoints})
 		if e != nil {
 			peerNetworkError(w, r, e)
 			return
