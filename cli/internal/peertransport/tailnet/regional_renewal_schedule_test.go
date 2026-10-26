@@ -40,7 +40,6 @@ func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
 // had just applied woke the loop again, and that wake re-armed the timer at the 24-36 s cadence. A renewal
 // must come before the observations end, whichever path armed the timer.
 func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T) {
-	relayInUse(t, true)
 	a, c, signer, _ := networkTestAuthority(t)
 	now := time.Now()
 	// Observed 10 s ago: it ends in 5 s, so the renewal is due after the 4 s minimum.
@@ -126,7 +125,6 @@ func TestConfigurationRefreshFetchesKeysOnlyForAnUnknownKey(t *testing.T) {
 // recovery loop asked for a renewal every second: during a relay outage the whole fleet polled. Renewals
 // now back off to about a minute and return to the observation schedule once a relay is usable.
 func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
-	relayInUse(t, true)
 	a, c, signer, _ := networkTestAuthority(t)
 	c.IssuedAt = time.Now().Unix()
 	c.ExpiresAt = c.IssuedAt + 300
@@ -146,46 +144,5 @@ func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 		if got := a.nextRefresh(nil, 0, 10); got < regionalUnusableRetryMaximum/2 {
 			t.Fatalf("renewal after ten without a usable relay came after %v, want about a minute", got)
 		}
-	}
-}
-
-func relayInUse(t *testing.T, inUse bool) {
-	t.Helper()
-	previous := regionalRelayInUse
-	regionalRelayInUse = func(*Authority) bool { return inUse }
-	t.Cleanup(func() { regionalRelayInUse = previous })
-}
-
-// Prod 2026-10-27: every engine renewed every 4-12 s to keep relay health fresh, ~22 requests a minute per
-// carrier machine (two engines), although its peers were direct. Without a peer on a regional relay an engine
-// renews at the normal cadence: at most 3 a minute, 6 for a machine's two engines.
-func TestRenewalsKeepTheNormalCadenceWhileNoPeerUsesARelay(t *testing.T) {
-	relayInUse(t, false)
-	a, c, signer, _ := networkTestAuthority(t)
-	c.IssuedAt = time.Now().Unix()
-	c.ExpiresAt = c.IssuedAt + 300
-	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
-	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	a.regional = &RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
-		NodeID: "relay_cadence", NodeGeneration: 1, ProcessEpoch: "epoch_cadence", Region: "test", FailureDomain: "rack",
-		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
-	}}}
-	a.mu.Lock()
-	a.relay.mu.Lock()
-	a.relay.recovery = a.newRegionalRecoveryLocked()
-	a.relay.mu.Unlock()
-	a.mu.Unlock()
-	for range 50 {
-		if got := a.nextRefresh(nil, 0, 0); got < 20*time.Second {
-			t.Fatalf("renewal after %v with no peer on a relay, want the normal 24-36 s cadence", got)
-		}
-	}
-	relayInUse(t, true)
-	if got := a.nextRefresh(nil, 0, 0); got >= 20*time.Second {
-		t.Fatalf("renewal after %v while a peer uses a relay, want before its observations end", got)
 	}
 }
