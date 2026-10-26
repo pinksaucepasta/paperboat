@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 )
 
 type revocationTokenSource interface {

@@ -20,7 +20,6 @@ import (
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -29,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 

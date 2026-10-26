@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 

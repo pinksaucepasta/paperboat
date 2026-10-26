@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 

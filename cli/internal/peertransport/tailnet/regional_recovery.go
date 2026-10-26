@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/backoff"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
