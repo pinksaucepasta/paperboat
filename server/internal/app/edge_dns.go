@@ -46,8 +46,8 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 }
 
 // edgeDNSWorker withdraws the per-hostname DNS records edges used to get, then idles on an empty list: managed
-// tunnel, preview and runtime names are covered by DNS-only wildcards on every managed edge (*.pprbt.app and
-// *.runtime.pprbt.dev), and a custom domain's CNAME points at the resource's own managed name, so nothing is
+// tunnel, preview and runtime names are covered by DNS-only wildcards on every managed edge (the apex and runtime
+// wildcards), and a custom domain's CNAME points at the resource's own managed name, so nothing is
 // published any more. Each publication row that still holds records, or is not verified, has its provider records
 // deleted by exact provider id and ends up verified with none.
 func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler) func(context.Context) error {
