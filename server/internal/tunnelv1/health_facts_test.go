@@ -97,3 +97,29 @@ func TestStatusReportsAHealthyTunnelAsReadyAndReadFailuresAsErrors(t *testing.T)
 		t.Fatal("a failed live-facts read was reported as a healthy status")
 	}
 }
+
+// F20-02: a tunnel the endpoint engine serves has no connector session. A connector row left by tunnel
+// creation must not turn its status into connector_offline or connector_missing, while the edge,
+// DNS and certificate checks still apply.
+func TestEngineServedTunnelIsNotReportedAsConnectorOffline(t *testing.T) {
+	for name, tc := range map[string]struct {
+		summary string
+		facts   HealthFacts
+		want    string
+	}{
+		"ready with a half-enrolled connector row": {"ready", HealthFacts{EngineServed: true, ActiveConnectors: 1, EdgeReady: true}, "ready"},
+		"pending without any connector":            {"pending", HealthFacts{EngineServed: true, EdgeReady: true}, "tunnel_pending"},
+		"engine served but no edge ready":          {"pending", HealthFacts{EngineServed: true, ActiveConnectors: 1}, "edge_unavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repository := &fakeTunnelRepository{facts: tc.facts, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: DesiredActive, AccessMode: AccessPrivate, SummaryCode: tc.summary, Generation: 1}}
+			status, err := testService(t, repository, sequentialID()).Status(context.Background(), testRequest(false), "tun_1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.OverallCode != tc.want {
+				t.Fatalf("status = %q, want %q (%+v)", status.OverallCode, tc.want, status)
+			}
+		})
+	}
+}

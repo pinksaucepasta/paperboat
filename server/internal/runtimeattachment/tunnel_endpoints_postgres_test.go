@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"os"
 	"path/filepath"
 	"strings"
@@ -353,6 +354,18 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		if target.EdgeNodeID != f.edge.NodeID && target.EdgeNodeID != f.backupEdge.NodeID {
 			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
 		}
+	}
+	// `pb tunnel route add --wait` on an engine tunnel ends: the route operation settles once the
+	// engine's edges serve the route's current generation (it waited on connector assignments only).
+	routeOperation := "op_route_" + f.prefix
+	f.exec(t, `INSERT INTO operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at)
+VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connecting','running',50,'changed',$5,now(),now())`, routeOperation, f.account, "idem_"+routeOperation, route, "cor_"+routeOperation)
+	routeStore, err := previewtunnelstore.New(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operation, err := routeStore.GetOperation(f.ctx, f.account, routeOperation); err != nil || operation.State != "succeeded" {
+		t.Fatalf("engine route operation = %+v, %v; want succeeded once its engine edges serve it", operation, err)
 	}
 	// An operator edge's usage report for an engine route is bound to the route the edge serves, at the
 	// tunnel route generation and agent environment its ingress decision carried: the usage endpoint read
