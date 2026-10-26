@@ -147,6 +147,9 @@ func TestTunnelEdgeRouteJSONPrivateTCPCarriesNoMatchOrPriority(t *testing.T) {
 		AssignmentID: "asn_route_02", RouteID: "rte_02", AccountID: "acct_01", TunnelID: "tun_01",
 		ConfigContentHash: make([]byte, 32), AccessMode: "private", Kind: "tunnel_private_tcp",
 		MatchType: "catch_all", Priority: 100, Protocol: "private_tcp", OriginScheme: "tcp", State: "staged", ObservedState: "pending",
+		// The engine's assignment query names a catch-all route's host as the tunnel host
+		// (prod 2026-10-26: the edge refused such private TCP assignments, never observing them).
+		PublicHost: "fast-dusty-port-3544.tunnels.example.test",
 	}
 	value := tunnelEdgeRouteJSON(row)
 	if value["match_type"] != "" || value["priority"] != 0 || value["public_host"] != "" || value["path_prefix"] != nil {

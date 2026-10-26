@@ -200,8 +200,9 @@ func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) 
 	}
 	if row.Protocol == "private_tcp" {
 		// A private TCP route is an access-only carrier binding with no host, path or priority of its
-		// own: the stored catch-all match and default priority are not part of what the edge is told.
-		value["match_type"], value["priority"] = "", 0
+		// own: the tunnel host, stored catch-all match and default priority are not part of what the edge is
+		// told (the edge refuses a private TCP assignment that carries them).
+		value["public_host"], value["match_type"], value["priority"] = "", "", 0
 	}
 	if row.ScopedDomainHostname != "" {
 		value["public_host"] = row.ScopedDomainHostname
