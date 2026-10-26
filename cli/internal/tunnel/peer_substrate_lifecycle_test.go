@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
 type substrateTransport func(*http.Request) (*http.Response, error)
@@ -75,6 +76,13 @@ func TestCachedNativeRuntimeSkipsRefreshWhenItAlreadyAdmitsTheTarget(t *testing.
 	got, consumed, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(network *tailnet.Authority) bool { return network == networkAuthority })
 	if err != nil || got != current || consumed || refreshes.Load() != 0 {
 		t.Fatalf("admitting runtime: same=%t consumed=%t refreshes=%d err=%v", got == current, consumed, refreshes.Load(), err)
+	}
+	// F5-07/08: a stream the host admits from its own rules reuses the engine with no request, even offline.
+	if got, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, hostRulesAdmission(&resolver.TerminalTarget{Auth: resolver.AuthTarget{Offline: true}})); err != nil || got != current || refreshes.Load() != 0 {
+		t.Fatalf("host-rules stream: same=%t refreshes=%d err=%v", got == current, refreshes.Load(), err)
+	}
+	if hostRulesAdmission(&resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: "credential"}}) != nil {
+		t.Fatal("a credentialed stream skipped the refresh its new grant needs")
 	}
 	if _, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return false }); err == nil || refreshes.Load() == 0 {
 		t.Fatalf("a runtime that does not admit the target was reused without refresh: refreshes=%d err=%v", refreshes.Load(), err)

@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
@@ -156,7 +157,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		}
 		return nil, err
 	}
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, nil)
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal))
 	if !consumed {
 		authority.Clear()
 	}
@@ -168,6 +169,16 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, &terminalTransportError{transport: "native application", cause: err}
 	}
 	return connection, nil
+}
+
+// hostRulesAdmission lets a stream the host admits from its own signed rules (every SSH stream, D1; any stream
+// while Paperboat is unreachable) reuse the running engine as is: no descriptor created a new grant, so the
+// per-stream network refresh would only cost a control request (F5-07) and fail offline (F5-08).
+func hostRulesAdmission(target *resolver.TerminalTarget) func(*tailnet.Authority) bool {
+	if target == nil || !target.Auth.Offline {
+		return nil
+	}
+	return func(*tailnet.Authority) bool { return true }
 }
 
 // DirectTransferStreamOpener exposes only an authorized application stream.
