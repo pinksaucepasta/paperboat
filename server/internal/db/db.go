@@ -384,6 +384,24 @@ func (e *transactionCleanupFailure) Unwrap() []error {
 	return []error{e.operation, e.rollback}
 }
 
+// rollbackTimeout bounds the rollback of a failed transaction, which does not use the request's context.
+const rollbackTimeout = 5 * time.Second
+
+// rollbackFailedTx ends a transaction whose callback failed. The request's context is not used: a canceled or
+// timed-out request is exactly when callbacks fail, and a rollback under that context fails too, destroying a
+// healthy connection and hiding the callback's error behind transactionCleanupFailure (101 edge 503s with a
+// connLockError, 2026-10-23..26). A connection already closed needs no rollback: the server ended the transaction
+// with its session, and nothing was committed, so the callback's own error stays the one reported.
+func rollbackFailedTx(tx pgx.Tx) error {
+	closed := tx.Conn().IsClosed()
+	ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
+	defer cancel()
+	if err := tx.Rollback(ctx); err != nil && !closed && !errors.Is(err, pgx.ErrTxClosed) {
+		return err
+	}
+	return nil
+}
+
 func (d *DB) runInTx(ctx context.Context, options pgx.TxOptions, fn func(context.Context, *Tx) error) error {
 	tx, err := d.pool.BeginTx(ctx, options)
 	if err != nil {
@@ -395,13 +413,13 @@ func (d *DB) runInTx(ctx context.Context, options pgx.TxOptions, fn func(context
 		setup += "; " + serializableSetup
 	}
 	if _, err := wrapped.Exec(ctx, setup); err != nil {
-		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+		if rollbackErr := rollbackFailedTx(tx); rollbackErr != nil {
 			return &transactionCleanupFailure{operation: err, rollback: rollbackErr}
 		}
 		return fmt.Errorf("set transaction search path: %w", err)
 	}
 	if err := fn(ctx, wrapped); err != nil {
-		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+		if rollbackErr := rollbackFailedTx(tx); rollbackErr != nil {
 			return &transactionCleanupFailure{operation: err, rollback: rollbackErr}
 		}
 		return err

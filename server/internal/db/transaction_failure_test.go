@@ -50,7 +50,10 @@ func TestIsSerializationFailureRetriesOnlyPurePostgresLeaves(t *testing.T) {
 	}
 }
 
-func TestInTxPreservesCallbackCauseAfterConnectionLoss(t *testing.T) {
+// A callback that fails on a connection that is gone keeps its own error: the server ended the transaction with the
+// session and nothing was committed, so there is no cleanup to report (it used to surface as a connLockError that hid
+// the cause: 101 edge 503s, 2026-10-23..26).
+func TestInTxKeepsCallbackErrorAfterConnectionLoss(t *testing.T) {
 	store := openTransactionFailureTestDB(t)
 	cause := errors.New("private callback cause")
 	callbackErr := panicFormattingTransactionError{cause: cause}
@@ -64,19 +67,13 @@ func TestInTxPreservesCallbackCauseAfterConnectionLoss(t *testing.T) {
 	if connectionCloseErr != nil {
 		t.Fatalf("close transaction connection failed: %T", connectionCloseErr)
 	}
-
 	var cleanup *transactionCleanupFailure
-	if !errors.As(err, &cleanup) || cleanup.rollback == nil || !errors.Is(err, cause) {
-		t.Fatalf("transaction cleanup did not preserve both failures: cleanup=%v original=%t", cleanup != nil, errors.Is(err, cause))
+	if errors.As(err, &cleanup) || !errors.Is(err, cause) {
+		t.Fatalf("closed-connection rollback: cleanup failure=%t original=%t, want the callback's error alone", cleanup != nil, errors.Is(err, cause))
 	}
 	if calls != 1 {
 		t.Fatalf("callback ran %d times, want one", calls)
 	}
-	stats := store.TransactionStats().Serializable
-	if stats.Calls != 1 || stats.Attempts != 1 || stats.Retries != 0 {
-		t.Fatalf("cleanup failure transaction stats = %+v", stats)
-	}
-
 	queryCtx, cancelQuery := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelQuery()
 	var one int
@@ -85,30 +82,46 @@ func TestInTxPreservesCallbackCauseAfterConnectionLoss(t *testing.T) {
 	}
 }
 
-func TestInTxDoesNotReplayCleanupFailureWithSerializationCode(t *testing.T) {
+// Nothing was committed when the connection is gone, so a serialization failure is retried like any other.
+func TestInTxRetriesSerializationFailureOnAClosedConnection(t *testing.T) {
 	store := openTransactionFailureTestDB(t)
 	calls := 0
-	var connectionCloseErr error
 	err := store.InTx(context.Background(), func(ctx context.Context, tx *Tx) error {
 		calls++
-		connectionCloseErr = tx.tx.Conn().Close(ctx)
+		if calls > 1 {
+			return nil
+		}
+		if err := tx.tx.Conn().Close(ctx); err != nil {
+			t.Fatalf("close transaction connection failed: %T", err)
+		}
 		return &pgconn.PgError{Code: "40001"}
 	})
-	if connectionCloseErr != nil {
-		t.Fatalf("close transaction connection failed: %T", connectionCloseErr)
+	if err != nil || calls != 2 {
+		t.Fatalf("retry after closed connection: err=%v calls=%d, want nil and 2", err, calls)
 	}
+}
 
+// A request that is canceled while its connection is healthy still rolls back (on a context of its own): the
+// callback's error is reported alone and the connection returns to the pool.
+func TestInTxRollsBackAfterTheRequestContextIsCanceled(t *testing.T) {
+	store := openTransactionFailureTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	before := store.Pool().Stat().NewConnsCount()
+	err := store.InTx(ctx, func(ctx context.Context, tx *Tx) error {
+		cancel()
+		return ctx.Err()
+	})
 	var cleanup *transactionCleanupFailure
-	var postgres *pgconn.PgError
-	if !errors.As(err, &cleanup) || cleanup.rollback == nil || !errors.As(err, &postgres) || postgres.Code != "40001" {
-		t.Fatalf("cleanup wrapper did not retain serialization callback cause: cleanup=%t postgres=%t", cleanup != nil, postgres != nil)
+	if errors.As(err, &cleanup) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled request: cleanup failure=%t canceled=%t, want context.Canceled alone", cleanup != nil, errors.Is(err, context.Canceled))
 	}
-	if calls != 1 {
-		t.Fatalf("callback ran %d times after cleanup failure, want one", calls)
+	var one int
+	if err := store.Pool().QueryRow(context.Background(), "SELECT 1").Scan(&one); err != nil || one != 1 {
+		t.Fatalf("query after canceled request: %v", err)
 	}
-	stats := store.TransactionStats().Serializable
-	if stats.Calls != 1 || stats.Attempts != 1 || stats.Retries != 0 {
-		t.Fatalf("cleanup failure transaction stats = %+v", stats)
+	if opened := store.Pool().Stat().NewConnsCount() - before; opened > 0 {
+		t.Fatalf("a canceled request destroyed its pooled connection: %d new connections", opened)
 	}
 }
 
