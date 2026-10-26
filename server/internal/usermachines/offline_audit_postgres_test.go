@@ -66,3 +66,59 @@ func TestOfflineAuditBacklogLandsOnceInTheDecidingWorkspacePostgres(t *testing.T
 		t.Errorf("revoked machine: %v, want ErrNotFound", err)
 	}
 }
+
+// PLAN 3b D1: managed SSH has no server admission, so the host reports every SSH session, online or offline, through
+// the same endpoint: a start and its end, and a refusal with a typed reason.
+func TestSSHSessionEventsLandInTheAuditLogOfTheDecidingWorkspacePostgres(t *testing.T) {
+	f := newWorkspaceMachineFixture(t)
+	var generation int64
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT installation_generation FROM paperboat.user_machines WHERE id=$1`, f.machine).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	start := OfflineAuditEvent{EventID: "ssh_start_" + f.suffix, Kind: "ssh_session_started", PeerEndpointID: "cli_" + f.suffix, PeerAccountID: f.account, OccurredAt: now.Add(-time.Minute), Origin: "online", Generation: 3}
+	end := OfflineAuditEvent{EventID: "ssh_end_" + f.suffix, Kind: "ssh_session_ended", PeerEndpointID: start.PeerEndpointID, PeerAccountID: f.account, OccurredAt: now, Origin: "online", SessionID: start.EventID, Outcome: "revoked", BytesIn: 10, BytesOut: 20}
+	refused := OfflineAuditEvent{EventID: "ssh_no_" + f.suffix, Kind: "ssh_session_refused", PeerEndpointID: start.PeerEndpointID, PeerAccountID: f.account, OccurredAt: now, Origin: "offline", Reason: "busy"}
+	receipt, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, []OfflineAuditEvent{start, end, refused})
+	if err != nil || receipt.Accepted != 3 {
+		t.Fatalf("upload: %+v %v", receipt, err)
+	}
+	rows, err := f.store.SQL().QueryContext(f.ctx, `SELECT event_type,result,coalesce(activity_workspace_id,''),metadata->>'origin',metadata->>'capability',coalesce(metadata->>'outcome',''),coalesce(metadata->>'bytes_out','') FROM paperboat.audit_events WHERE resource_type='machine_access' AND resource_id=$1 AND metadata->>'capability'='managed_ssh' ORDER BY event_type`, f.machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var typ, result, workspace, origin, capability, outcome, out string
+		if err := rows.Scan(&typ, &result, &workspace, &origin, &capability, &outcome, &out); err != nil {
+			t.Fatal(err)
+		}
+		if workspace != "personal:"+f.account {
+			t.Errorf("%s filed in %q", typ, workspace)
+		}
+		got = append(got, typ+"/"+result+"/"+origin+"/"+outcome+"/"+out)
+	}
+	want := []string{accessDeniedEvent + "/denied/offline//", accessEndedEvent + "/success/online/revoked/20", accessStartedEvent + "/success/online//"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("audit rows %v, want %v", got, want)
+	}
+	bad := map[string]OfflineAuditEvent{}
+	e := start
+	e.EventID, e.Origin = "bad_origin_"+f.suffix, ""
+	bad["origin"] = e
+	e = refused
+	e.EventID, e.Reason = "bad_reason_"+f.suffix, "no_scope"
+	bad["reason"] = e
+	e = end
+	e.EventID, e.SessionID = "bad_end_"+f.suffix, ""
+	bad["end without session"] = e
+	e = end
+	e.EventID, e.Outcome = "bad_outcome_"+f.suffix, "weird"
+	bad["outcome"] = e
+	for name, ev := range bad {
+		if _, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, []OfflineAuditEvent{ev}); !errors.Is(err, ErrOfflineAuditInvalid) {
+			t.Errorf("%s: %v, want ErrOfflineAuditInvalid", name, err)
+		}
+	}
+}

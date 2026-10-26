@@ -22,6 +22,7 @@ import (
 const (
 	accessStartedEvent = "machine.access_started"
 	accessDeniedEvent  = "machine.access_denied"
+	accessEndedEvent   = "machine.access_ended"
 	accessResource     = "machine_access"
 	// One refusal per account, machine, capability and reason per minute: retries do not flood the log.
 	accessDeniedWindow = time.Minute

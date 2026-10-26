@@ -14,7 +14,8 @@ import (
 // PLAN 3b offline-capable authority, point 5 (F21-11): a host records every session it starts or refuses while the
 // control plane is unreachable and uploads them on reconnect. Each event lands once (deduplicated by the host's
 // event id) in the audit log of the workspace that decides that access, like an online access event, marked
-// origin=offline.
+// origin=offline. Managed SSH (PLAN 3b D1) has no server-side admission, so the host also reports every SSH session
+// it starts, refuses and ends, online or offline (origin online|offline), through the same endpoint.
 const (
 	MaxOfflineAuditEvents = 500
 	// OfflineAuditRetention is how long a host keeps an event it could not upload; older ones are refused.
@@ -33,6 +34,13 @@ type OfflineAuditEvent struct {
 	OperationID    string    `json:"operation_id"`
 	OccurredAt     time.Time `json:"occurred_at"`
 	Reason         string    `json:"reason,omitempty"`
+	// The fields below belong to the ssh_session_* kinds.
+	Origin     string `json:"origin,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Outcome    string `json:"outcome,omitempty"`
+	BytesIn    int64  `json:"bytes_in,omitempty"`
+	BytesOut   int64  `json:"bytes_out,omitempty"`
 }
 
 type OfflineAuditReceipt struct {
@@ -46,15 +54,44 @@ var offlineAuditIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
 var offlinePolicyCapability = map[string]string{"terminal": "terminal", "exec": "exec", "managed_ssh": "managed_ssh", "file_transfer": "files"}
 
 var offlineRefusalReasons = map[string]bool{"no_scope": true, "backlog_full": true, "peer_unknown": true}
+var sshRefusalReasons = map[string]bool{"busy": true, "no_access": true, "wrong_user": true, "not_set_up": true}
+var sshEndOutcomes = map[string]bool{"closed": true, "revoked": true, "failed": true}
 
-func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
-	if !offlineAuditIdentifier.MatchString(e.EventID) || !offlineAuditIdentifier.MatchString(e.PeerEndpointID) || !offlineAuditIdentifier.MatchString(e.PeerAccountID) || !offlineAuditIdentifier.MatchString(e.OperationID) {
+const sshCapability = "managed_ssh"
+
+func isSSHKind(kind string) bool {
+	return kind == "ssh_session_started" || kind == "ssh_session_refused" || kind == "ssh_session_ended"
+}
+
+// validSSHAuditEvent checks the ssh_session_* kinds: capability is implied, the operation id is optional, and an
+// end names the started event it closes.
+func validSSHAuditEvent(e OfflineAuditEvent) bool {
+	if e.Capability != "" && e.Capability != sshCapability || e.Generation < 0 || e.BytesIn < 0 || e.BytesOut < 0 {
 		return false
 	}
-	if _, ok := offlinePolicyCapability[e.Capability]; !ok {
+	if e.Origin != "online" && e.Origin != "offline" || e.OperationID != "" && !offlineAuditIdentifier.MatchString(e.OperationID) {
+		return false
+	}
+	switch e.Kind {
+	case "ssh_session_started":
+		return e.Reason == "" && e.Outcome == "" && e.SessionID == ""
+	case "ssh_session_refused":
+		return sshRefusalReasons[e.Reason] && e.Outcome == "" && e.SessionID == ""
+	}
+	return e.Reason == "" && sshEndOutcomes[e.Outcome] && offlineAuditIdentifier.MatchString(e.SessionID)
+}
+
+func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
+	if !offlineAuditIdentifier.MatchString(e.EventID) || !offlineAuditIdentifier.MatchString(e.PeerEndpointID) || !offlineAuditIdentifier.MatchString(e.PeerAccountID) {
 		return false
 	}
 	if e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(time.Minute)) || e.OccurredAt.Before(now.Add(-OfflineAuditRetention)) {
+		return false
+	}
+	if isSSHKind(e.Kind) {
+		return validSSHAuditEvent(e)
+	}
+	if _, ok := offlinePolicyCapability[e.Capability]; !ok || !offlineAuditIdentifier.MatchString(e.OperationID) || e.Origin != "" {
 		return false
 	}
 	switch e.Kind {
@@ -131,6 +168,31 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 		return nil
 	})
 	return receipt, err
+}
+
+// auditEventFor maps a host event to its audit event type, result and metadata.
+func auditEventFor(e OfflineAuditEvent, installationGeneration int64) (string, string, map[string]any) {
+	capability, origin := offlinePolicyCapability[e.Capability], "offline"
+	if isSSHKind(e.Kind) {
+		capability, origin = sshCapability, e.Origin
+	}
+	metadata := map[string]any{"capability": capability, "scope_set": false, "origin": origin,
+		"peer_endpoint_id": e.PeerEndpointID, "peer_account_id": e.PeerAccountID,
+		"occurred_at": e.OccurredAt.UTC().Format(time.RFC3339Nano), "installation_generation": installationGeneration}
+	if e.OperationID != "" {
+		metadata["operation_id"] = e.OperationID
+	}
+	if e.Generation > 0 {
+		metadata["scope_generation"] = e.Generation
+	}
+	switch e.Kind {
+	case "ssh_session_ended":
+		metadata["session_id"], metadata["outcome"], metadata["bytes_in"], metadata["bytes_out"] = e.SessionID, e.Outcome, e.BytesIn, e.BytesOut
+		return accessEndedEvent, audit.ResultSuccess, metadata
+	case "offline_session_refused", "ssh_session_refused":
+		return accessDeniedEvent, audit.ResultDenied, metadata
+	}
+	return accessStartedEvent, audit.ResultSuccess, metadata
 }
 
 func stringSet(ctx context.Context, tx *db.Tx, query string, args ...any) (map[string]bool, error) {
