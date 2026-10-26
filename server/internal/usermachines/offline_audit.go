@@ -144,13 +144,7 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 				receipt.Duplicates++
 				continue
 			}
-			eventType, result := accessStartedEvent, audit.ResultSuccess
-			if e.Kind == "offline_session_refused" {
-				eventType, result = accessDeniedEvent, audit.ResultDenied
-			}
-			metadata := map[string]any{"capability": offlinePolicyCapability[e.Capability], "scope_set": false, "origin": "offline",
-				"peer_endpoint_id": e.PeerEndpointID, "peer_account_id": e.PeerAccountID, "operation_id": e.OperationID,
-				"occurred_at": e.OccurredAt.UTC().Format(time.RFC3339Nano), "installation_generation": installationGeneration}
+			eventType, result, metadata := auditEventFor(e, installationGeneration)
 			// The host names the peer's account. The deciding workspace comes from that account's access to the
 			// machine; an account that does not exist (anymore) cannot decide anything, so its event is filed under the
 			// machine itself, in the machine's workspace, with the account in the metadata.
