@@ -791,7 +791,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			ID:           newID("pairing"),
 			VerifierHash: verifierHash[:], UserCode: sql.NullString{String: userCode, Valid: true},
 			RequestedAlias: sql.NullString{String: machine.Alias, Valid: true}, Platform: sql.NullString{String: machine.Platform, Valid: true}, Architecture: sql.NullString{String: machine.Architecture, Valid: true},
-			WorkspaceRoot: sql.NullString{String: machine.WorkspaceRoot, Valid: true}, RuntimeVersions: machine.RuntimeVersions,
+			WorkspaceRoot: sql.NullString{String: machine.WorkspaceRoot, Valid: true}, RuntimeVersions: machine.InstalledRuntimeVersions,
 			PublicIdentityKey:       sql.NullString{String: machine.PublicIdentityKey, Valid: true},
 			SshUser:                 sql.NullString{String: in.SSHUser, Valid: in.SSHUser != ""},
 			SshPort:                 sql.NullInt32{Int32: int32(in.SSHPort), Valid: in.SSHPort != 0},

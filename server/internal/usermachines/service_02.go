@@ -35,7 +35,7 @@ func (s *Service) validateAuthenticatedMachineInstallationMachine(machine UserMa
 	pairingInput := PairingInput{
 		Verifier: in.Verifier, Alias: machine.Alias, Platform: machine.Platform,
 		Architecture: machine.Architecture, WorkspaceRoot: machine.WorkspaceRoot,
-		PublicIdentityKey: machine.PublicIdentityKey, RuntimeVersions: machine.RuntimeVersions,
+		PublicIdentityKey: machine.PublicIdentityKey, RuntimeVersions: machine.InstalledRuntimeVersions,
 		SSHUser: in.SSHUser, SSHPort: in.SSHPort, CanReuseRuntimeIdentity: in.CanReuseRuntimeIdentity,
 	}
 	if err := s.validatePairing(pairingInput); err != nil {
@@ -58,7 +58,7 @@ func authenticatedMachineInstallationPairingFieldsMatch(pairing dbsqlc.UserMachi
 		pairing.ApprovedByUserID.Valid && pairing.ApprovedByUserID.String == userID && pairing.UserMachineID.Valid && pairing.UserMachineID.String == machine.ID &&
 		pairing.PublicIdentityKey.String == machine.PublicIdentityKey && bytes.Equal(pairing.VerifierHash, verifierHash) &&
 		pairing.RequestedAlias.String == machine.Alias && pairing.Platform.String == machine.Platform && pairing.Architecture.String == machine.Architecture &&
-		pairing.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(pairing.RuntimeVersions, machine.RuntimeVersions) && pairing.CanReuseRuntimeIdentity == in.CanReuseRuntimeIdentity && pairing.KeepAwake == in.KeepAwake &&
+		pairing.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(pairing.RuntimeVersions, machine.InstalledRuntimeVersions) && pairing.CanReuseRuntimeIdentity == in.CanReuseRuntimeIdentity && pairing.KeepAwake == in.KeepAwake &&
 		pairing.SshUser == (sql.NullString{String: in.SSHUser, Valid: in.SSHUser != ""}) && pairing.SshPort == (sql.NullInt32{Int32: int32(in.SSHPort), Valid: in.SSHPort != 0}) &&
 		pairing.PublicIdentityKey.String == machine.PublicIdentityKey && bytes.Equal(pairing.VerifierHash, verifierHash)
 }
@@ -407,31 +407,36 @@ type UserMachine struct {
 	// Tags are the machine's tags in the selected workspace's policy file (tag:<name>).
 	Tags []string `json:"tags"`
 	// Update is the machine's latest update observation, null before its first report.
-	Update                 *UpdateObservation      `json:"update"`
-	CanManage              bool                    `json:"can_manage"`
-	Shared                 bool                    `json:"shared"`
-	ID                     string                  `json:"id"`
-	EnvironmentID          string                  `json:"environment_id"`
-	Alias                  string                  `json:"alias"`
-	Platform               string                  `json:"platform"`
-	Architecture           string                  `json:"architecture"`
-	WorkspaceRoot          string                  `json:"workspace_root"`
-	State                  string                  `json:"state"`
-	SeatState              string                  `json:"seat_state"`
-	Online                 bool                    `json:"online"`
-	RuntimeVersions        json.RawMessage         `json:"runtime_versions"`
-	Capabilities           MachineCapabilities     `json:"capabilities"`
-	MachineCapabilities    MachineCapabilityPolicy `json:"machine_capabilities"`
-	PublicIdentityKey      string                  `json:"public_identity_key"`
-	AssignedIP             string                  `json:"assigned_ip,omitempty"`
-	NetworkApproved        bool                    `json:"network_approved"`
-	InstallationGeneration int64                   `json:"installation_generation"`
-	EnrolledAt             *time.Time              `json:"enrolled_at,omitempty"`
-	LastSeenAt             *time.Time              `json:"last_seen_at,omitempty"`
-	Availability           AvailabilityPolicy      `json:"availability"`
-	RuntimeDiagnostics     RuntimeDiagnostics      `json:"runtime_diagnostics"`
-	Installation           *ClientInstallation     `json:"installation,omitempty"`
-	SSH                    *MachineSSH             `json:"ssh,omitempty"`
+	Update        *UpdateObservation `json:"update"`
+	CanManage     bool               `json:"can_manage"`
+	Shared        bool               `json:"shared"`
+	ID            string             `json:"id"`
+	EnvironmentID string             `json:"environment_id"`
+	Alias         string             `json:"alias"`
+	Platform      string             `json:"platform"`
+	Architecture  string             `json:"architecture"`
+	WorkspaceRoot string             `json:"workspace_root"`
+	State         string             `json:"state"`
+	SeatState     string             `json:"seat_state"`
+	Online        bool               `json:"online"`
+	// RuntimeVersions is what the machine runs: {"pb": <version>} from its latest runtime observation,
+	// or, before its first one, what its installation declared at pairing.
+	RuntimeVersions json.RawMessage `json:"runtime_versions"`
+	// InstalledRuntimeVersions is what the installation declared at pairing; installation matching
+	// compares it with the pairing's own copy, so a heartbeat never changes that match.
+	InstalledRuntimeVersions json.RawMessage         `json:"-"`
+	Capabilities             MachineCapabilities     `json:"capabilities"`
+	MachineCapabilities      MachineCapabilityPolicy `json:"machine_capabilities"`
+	PublicIdentityKey        string                  `json:"public_identity_key"`
+	AssignedIP               string                  `json:"assigned_ip,omitempty"`
+	NetworkApproved          bool                    `json:"network_approved"`
+	InstallationGeneration   int64                   `json:"installation_generation"`
+	EnrolledAt               *time.Time              `json:"enrolled_at,omitempty"`
+	LastSeenAt               *time.Time              `json:"last_seen_at,omitempty"`
+	Availability             AvailabilityPolicy      `json:"availability"`
+	RuntimeDiagnostics       RuntimeDiagnostics      `json:"runtime_diagnostics"`
+	Installation             *ClientInstallation     `json:"installation,omitempty"`
+	SSH                      *MachineSSH             `json:"ssh,omitempty"`
 }
 
 type ClientInstallation struct {

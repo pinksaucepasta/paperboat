@@ -845,7 +845,7 @@ func authenticatedMachineInstallationRecoveryPairingMatches(current, expected db
 		current.AuthenticatedSetupGeneration.Valid && current.AuthenticatedSetupGeneration == expected.AuthenticatedSetupGeneration && current.AuthenticatedSetupGeneration.Int64 == binding.Generation &&
 
 		current.RequestedAlias.String == machine.Alias && current.Platform.String == machine.Platform && current.Architecture.String == machine.Architecture &&
-		current.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(current.RuntimeVersions, machine.RuntimeVersions) &&
+		current.WorkspaceRoot.String == machine.WorkspaceRoot && bytes.Equal(current.RuntimeVersions, machine.InstalledRuntimeVersions) &&
 		current.SshUser == expected.SshUser && current.SshPort == expected.SshPort && current.CanReuseRuntimeIdentity == expected.CanReuseRuntimeIdentity &&
 		current.State == "consumed" && current.InstallationConfigConsumedAt.Valid && current.InstallationConfigConsumedAt == expected.InstallationConfigConsumedAt &&
 		current.InstallationRecoveryOperationKey.Valid && current.InstallationRecoveryOperationKey == expected.InstallationRecoveryOperationKey &&

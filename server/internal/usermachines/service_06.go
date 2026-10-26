@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -258,6 +259,16 @@ func validMachineArchitecture(value string) bool {
 	return value == "amd64" || value == "arm64"
 }
 
+// reportedRuntimeVersions is the version the machine's runtime reported in its latest observation. The
+// runtime_versions column is written once, at pairing, and every update after it would leave it behind.
+func reportedRuntimeVersions(row dbsqlc.UserMachine) json.RawMessage {
+	if !row.ReporterVersion.Valid || row.ReporterVersion.String == "" {
+		return row.RuntimeVersions
+	}
+	encoded, _ := json.Marshal(map[string]string{"pb": row.ReporterVersion.String}) // a string map always encodes
+	return encoded
+}
+
 func mapMachine(row dbsqlc.UserMachine) UserMachine {
 	diagnostics := RuntimeDiagnostics{WorkerGeneration: uint64(row.WorkerGeneration), OSBootID: row.OsBootID.String, WorkerServiceScope: row.WorkerServiceScope, ConnectorState: row.ConnectorState, ConnectorGeneration: uint64(row.ConnectorGeneration)}
 	// Unchanged diagnostics are not rewritten; the heartbeat that confirms them refreshes last_seen_at.
@@ -268,7 +279,7 @@ func mapMachine(row dbsqlc.UserMachine) UserMachine {
 		}
 		diagnostics.ObservedAt = &observed
 	}
-	m := UserMachine{Ownership: "personal", OwnerAccount: row.UserID, Permissions: []string{}, ID: row.ID, EnvironmentID: row.EnvironmentID, Alias: row.Alias, Platform: row.Platform, Architecture: row.Architecture, WorkspaceRoot: row.WorkspaceRoot, State: row.State, SeatState: row.SeatState, Online: row.Online, RuntimeVersions: row.RuntimeVersions, Capabilities: mapCapabilities(row.ConfiguredCapabilities, row.ObservedCapabilities), MachineCapabilities: mapMachineCapabilityPolicy(row), PublicIdentityKey: row.PublicIdentityKey.String, InstallationGeneration: row.InstallationGeneration, Availability: mapAvailability(row), RuntimeDiagnostics: diagnostics}
+	m := UserMachine{Ownership: "personal", OwnerAccount: row.UserID, Permissions: []string{}, ID: row.ID, EnvironmentID: row.EnvironmentID, Alias: row.Alias, Platform: row.Platform, Architecture: row.Architecture, WorkspaceRoot: row.WorkspaceRoot, State: row.State, SeatState: row.SeatState, Online: row.Online, RuntimeVersions: reportedRuntimeVersions(row), InstalledRuntimeVersions: row.RuntimeVersions, Capabilities: mapCapabilities(row.ConfiguredCapabilities, row.ObservedCapabilities), MachineCapabilities: mapMachineCapabilityPolicy(row), PublicIdentityKey: row.PublicIdentityKey.String, InstallationGeneration: row.InstallationGeneration, Availability: mapAvailability(row), RuntimeDiagnostics: diagnostics}
 	if row.OwnerTeamID.Valid {
 		m.Ownership = "team"
 		m.OwnerTeamID = row.OwnerTeamID.String
