@@ -812,7 +812,7 @@ Rows for the top 10 of PLAN 3b "Robustness gaps vs reference implementations" (L
 | F23-01 | Two OS users on one Linux host, each with its own account, use machines at the same time: distinct addresses for the same slot, one gateway routed by the caller's uid, short names per user, neither can reach or receive the other's traffic. | [ ] | [ ] | [ ] | Owner: Lane A (guard, daemon), Lane Q (per-account slots). Done: one refused listener skips only that item (TestCoordinatorRefusedListenerSkipsOnlyThatItem, 5080a29b). Device: two OS users in one pbvm2 container. |
 | F23-02 | Gateway attribution fails closed: unknown uid, closed peer, ambiguous or reused tuple under churn are refused, never misrouted; root and system users get the refusal page. | [ ] | [ ] | [ ] | Owner: Lane A. Tests to write in machineguard (Linux INET_DIAG). |
 | F23-03 | Claims are released only from a complete verified set, held 7 days for their previous owner, adopted per entry from legacy state; a server outage with a truncated or empty answer releases nothing. | [ ] | [ ] | [ ] | Owner: Lane A. Tests to write: 600 machines come and go; 10-min outage then empty list. |
-| F23-04 | macOS multi-user (pcblist_n so_uid attribution under the 2 ms budget at 10,000 sockets, proven under churn on device). | [ ] | [ ] | [ ] | Owner: Lane A, after the user's macOS go. |
+| F23-04 | macOS multi-user (pcblist_n so_uid attribution under the 2 ms budget at 10,000 sockets, proven under churn on device). | n/a | [ ] | n/a | L/W n/a: macOS-only row. Owner: Lane A, after the user's macOS go. |
 
 ## P. Performance (PLAN 3b)
 
