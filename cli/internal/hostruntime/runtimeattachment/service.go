@@ -180,8 +180,6 @@ type live struct {
 	streams *tunnelmanager.RunningOriginStreams
 	release func(context.Context) error
 	open    browserbroadcastserver.OpenPublisher
-	// goaway tells the edge this carrier is going away, so it routes nothing new to it (T10).
-	goaway func()
 }
 
 // attachmentCheckTimeout bounds one attachment reconciliation: the control
@@ -699,7 +697,7 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 		}
 	}
 	s.setHub(key, hub, goaway)
-	return &live{key: key, active: carrier.Active, hub: hub, streams: streams, release: carrier.Release, open: opener, goaway: goaway}, nil
+	return &live{key: key, active: carrier.Active, hub: hub, streams: streams, release: carrier.Release, open: opener}, nil
 }
 
 // runtimeOriginForwarder serves the machine's own runtime listener over the carrier. The control
@@ -731,10 +729,10 @@ func (s *Service) closeLive(l *live) error {
 	if l == nil {
 		return nil
 	}
+	// No goaway here: the carrier is shared and refcounted (previews hold it too), so retiring
+	// this live does not close it; a goaway would leave the edge treating a carrier still in use as
+	// going away (prod 2026-10-26). Shutdown sends the goaways, when every carrier closes.
 	s.setHub(l.key, nil, nil)
-	if l.goaway != nil {
-		l.goaway()
-	}
 	if l.hub != nil {
 		_ = l.hub.Close()
 	}
