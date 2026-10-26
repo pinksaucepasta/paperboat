@@ -62,7 +62,12 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND o.state IN ('pending','running') AND (
  (t.summary_code IN ('ready','expired','origin_unreachable') AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END
- AND NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=t.id AND x.desired='active'))
+ AND NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=t.id AND x.desired='active')
+ -- The edges have dropped the route: every live edge fetched a route snapshot that began after the change (the
+ -- second absorbs the change's commit after the operation's own timestamp).
+ AND NOT EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
+ AND n.tunnel_endpoints_epoch=n.process_epoch AND n.drain_deadline IS NULL AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
+ AND (n.tunnel_snapshot_at IS NULL OR n.tunnel_snapshot_at<o.updated_at+interval '1 second')))
  )`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
 	return err
 }

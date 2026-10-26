@@ -58,6 +58,7 @@ func validTunnelEdgeProcessEpoch(value string) bool {
 // shared connector thumbprint of the agent's key, the one the edge's durable admission registry
 // checks, computed here by the same shared function (connectorprotocol.IdentityThumbprint).
 func (s *EdgeService) CanonicalRouteSnapshot(ctx context.Context, nodeID, processEpoch string) ([]map[string]any, error) {
+	started := s.clock().UTC()
 	rows, err := s.ListTunnelEdgeRouteAssignmentsForNodeV1(ctx, nodeID, processEpoch)
 	if err != nil {
 		return nil, err
@@ -74,6 +75,10 @@ func (s *EdgeService) CanonicalRouteSnapshot(ctx context.Context, nodeID, proces
 			}
 		}
 		items = append(items, tunnelEdgeRouteJSON(row))
+	}
+	// Everything committed before this fetch started is in it: tunnel pause and deletion wait for that.
+	if _, err := s.store.Pool().Exec(ctx, `UPDATE paperboat.control_tunnel_nodes SET tunnel_snapshot_at=$3 WHERE id=$1 AND process_epoch=$2`, nodeID, processEpoch, started); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
