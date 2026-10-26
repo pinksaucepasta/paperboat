@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/machinename"
+	"github.com/pinksaucepasta/paperboat/shared/machinename"
 	"github.com/spf13/cobra"
 )
 

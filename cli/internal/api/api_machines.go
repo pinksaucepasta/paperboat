@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/machinename"
+	"github.com/pinksaucepasta/paperboat/shared/machinename"
 )
 
 type Pagination struct {
