@@ -4960,3 +4960,6 @@ Capture listing/detail and replay/purge/disable passed; test tunnel/captures/pro
 
 2026-10-27 | SDK lane command verification | C089 L PASS `tunnel_entry.py`; C126 waits for Merger: ready private route but access returns local_io/unreachable before listener on dev-9525ef32/server .112/edge .26.9.
 Results: tools/device-smoke/results/tunnel-entry-20261027.json and tunnel-private-access-20261027.json; exact failures sent to Merger. Tunnel/origin/probe files removed; kept pair retained. M/W and C126 echo not checked.
+
+2026-10-27 | SDK lane C126 diagnostics | Moved to own lanesdkhp-a/b on hp (pbvm3 unreachable), dev-6ca3b523 hash verified; C126 still fails local_io before listener. A lists B tunnel; doctor healthy, no matching hostd/runtime journal lines ±30s.
+Capture tools/device-smoke/results/tunnel-private-access-hp-20261027.json sent to Merger; fixture tunnel/origin removed, hp pair retained, no other containers touched. No product edits; waits for Merger fix.
