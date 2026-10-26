@@ -11,7 +11,7 @@ fi
 work=$(mktemp -d)
 trap 'git -C "$root" worktree remove --force "$work/old" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 mkdir -p "$work/artifacts"
-(cd "$root/server" && COMPAT_ARTIFACTS_DIR="$work/artifacts" go test ./internal/compat -run TestEmitCompatArtifacts -count=1)
+(cd "$root/server" && COMPAT_ARTIFACTS_DIR="$work/artifacts" go test ./internal/compat ./internal/peersessions -run 'TestEmitCompat' -count=1)
 git -C "$root" worktree add -q --detach "$work/old" "$tag"
 for f in "$root"/tools/compat/*_compat_test.go; do
 	target=$(sed -n 's|^// compat:target ||p' "$f" | head -1)

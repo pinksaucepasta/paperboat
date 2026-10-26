@@ -34,7 +34,8 @@ type meshChange struct {
 // right after a bulk change (stale statistics) it scanned all of the owner's environments per machine, or every
 // certificate on the server, and a 1,000-machine build passed the 30 s statement timeout on CI.
 const meshEntriesQuery = `SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
- n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at
+ n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at,
+ array_to_json(n.published_endpoints)
 FROM paperboat.peer_network_identities n
 JOIN LATERAL (SELECT * FROM paperboat.peer_endpoint_certificates c WHERE c.fingerprint=n.quic_certificate_fingerprint LIMIT 1) c ON true
 LEFT JOIN LATERAL (SELECT * FROM paperboat.user_machines m WHERE m.id=n.endpoint_id LIMIT 1) m ON n.role='machine'
@@ -62,10 +63,14 @@ func buildMesh(ctx context.Context, tx *sql.Tx, account string, now time.Time) (
 	var earliest time.Time
 	for rows.Next() {
 		b := networkBinding{AccountID: account}
-		var key, disco, fingerprint, quicPublic []byte
+		var key, disco, fingerprint, quicPublic, delivered []byte
 		var expiry time.Time
 		if err := rows.Scan(&b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration,
-			&key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry); err != nil {
+			&key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry, &delivered); err != nil {
+			return nil, time.Time{}, err
+		}
+		var err error
+		if b.Endpoints, err = publishedEndpoints(delivered); err != nil {
 			return nil, time.Time{}, err
 		}
 		if len(out) == maximumAccountEndpoints {

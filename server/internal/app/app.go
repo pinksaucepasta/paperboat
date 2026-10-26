@@ -964,6 +964,14 @@ func New(opts Options) (*App, error) {
 		supportService.Operation(ctx, "worker_team_retention", outcome, "", -1)
 		return ctx.Err()
 	}), progress))
+	// Endpoint sets held back by the once-a-minute publication bound are published when it passes (N5).
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_peer_endpoints", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
+		publishContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
+		defer cancel()
+		_, err := peerNetworkService.PublishDueEndpoints(publishContext)
+		workers.IterationFailure(ctx, "peer_endpoint_publication", "peer_endpoints_failed", err)
+		return ctx.Err()
+	}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_entitlements", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
 		expiryContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
