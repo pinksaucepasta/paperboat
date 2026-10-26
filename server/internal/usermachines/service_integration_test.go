@@ -3911,11 +3911,15 @@ func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {
 		t.Fatalf("create after one unreachable attempt = %s/%d, want pending/3", s, attempts)
 	}
 	exec(`UPDATE paperboat.user_machine_terminal_session_operations SET next_attempt_at=now() WHERE user_machine_id=$1`, machineID)
-	if err := service.processDueTerminalSessionOperations(ctx); err == nil || !strings.Contains(err.Error(), "terminal creation ended") {
-		t.Fatalf("the creation given up was not reported once: %v", err)
+	if err := service.processDueTerminalSessionOperations(ctx); err != nil {
+		t.Fatalf("a creation given up failed the worker: %v", err)
 	}
 	if s, _ := state("op_create_" + suffix); s != "failed" {
 		t.Fatalf("create at the attempt limit = %s, want failed", s)
+	}
+	var givenUpCause string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(last_error,'') FROM paperboat.user_machine_terminal_session_operations WHERE id=$1`, "op_create_"+suffix).Scan(&givenUpCause); err != nil || givenUpCause == "" {
+		t.Fatalf("the creation given up recorded no cause: %q %v", givenUpCause, err)
 	}
 	var runtime string
 	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_state FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, created).Scan(&runtime); err != nil {
@@ -3957,5 +3961,49 @@ func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {
 	}
 	if left != 0 {
 		t.Fatal("an operation finished 8 days ago was kept")
+	}
+}
+
+// F3-20: a revoked or deleted machine never answers again, so its pending terminal operations end as failed
+// (machine_removed) instead of being retried forever; a live machine's operation keeps pending.
+func TestTerminalOperationsOfRevokedAndDeletedMachinesEnd(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "usr_um_opsgone_" + suffix
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v: %s", err, query)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, userID)
+	})
+	exec(`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_opsgone_"+suffix, "opsgone-"+suffix+"@example.test")
+	machines := map[string]string{"live": "", "revoked": "revoked_at=now()", "deleted": "deleted_at=now()"}
+	for name, mark := range machines {
+		machine, session := "um_opsgone_"+name+"_"+suffix, "umts_opsgone_"+name+"_"+suffix
+		exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',false,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, userID, "env_opsgone_"+name+"_"+suffix)
+		exec(`INSERT INTO paperboat.user_machine_terminal_sessions (id,user_machine_id,name,owner_account,launch_cwd,desired_state,runtime_state) VALUES ($1,$2,'a',$3,'/w','closed','running')`, session, machine, userID)
+		exec(`INSERT INTO paperboat.user_machine_terminal_session_operations (id,user_machine_id,terminal_session_id,operation,attempts) VALUES ($1,$2,$3,'close',2600)`, "op_opsgone_"+name+"_"+suffix, machine, session)
+		if mark != "" {
+			exec(`UPDATE paperboat.user_machines SET `+mark+` WHERE id=$1`, machine)
+		}
+	}
+	// The worker takes the oldest 32 due operations; keep other tests' leftovers out of this batch.
+	exec(`UPDATE paperboat.user_machine_terminal_session_operations SET next_attempt_at=now()+interval '1 day' WHERE user_machine_id NOT LIKE $1 AND state='pending'`, "um_opsgone_%_"+suffix)
+	service := New(store, audit.NewWriter(store), Policy{TerminalCreateMaxAttempts: 4}, nil)
+	if err := service.processDueTerminalSessionOperations(ctx); err != nil {
+		t.Fatalf("the worker failed: %v", err)
+	}
+	for name, want := range map[string][2]string{"live": {"pending", ""}, "revoked": {"failed", "machine_removed"}, "deleted": {"failed", "machine_removed"}} {
+		var state, lastError string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT state,coalesce(last_error,'') FROM paperboat.user_machine_terminal_session_operations WHERE id=$1`, "op_opsgone_"+name+"_"+suffix).Scan(&state, &lastError); err != nil {
+			t.Fatal(err)
+		}
+		if state != want[0] || (want[1] != "" && lastError != want[1]) {
+			t.Fatalf("%s machine's close = %s (%q), want %s (%q)", name, state, lastError, want[0], want[1])
+		}
 	}
 }

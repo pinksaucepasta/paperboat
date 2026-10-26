@@ -649,7 +649,8 @@ func (s *Service) processDueTerminalSessionOperations(ctx context.Context) error
 		// A host that cannot be reached yet is not a worker failure: the operation is rescheduled with its cause in
 		// last_error. Only a failure to record the outcome is.
 		var rescheduled terminalOperationRescheduled
-		if err != nil && !errors.As(err, &rescheduled) {
+		var ended terminalOperationEnded
+		if err != nil && !errors.As(err, &rescheduled) && !errors.As(err, &ended) {
 			errs = append(errs, err)
 		}
 	}
@@ -755,9 +756,16 @@ func (s *Service) failTerminalSessionCreation(ctx context.Context, operationID, 
 	if err != nil {
 		return errors.Join(cause, err)
 	}
-	// Reported once, when the creation is given up.
-	return fmt.Errorf("terminal creation ended after %d attempts: %w", s.policy.TerminalCreateMaxAttempts, cause)
+	// The outcome is recorded (operation failed with its cause, session "failed"); a synchronous caller still gets it.
+	return terminalOperationEnded{cause: fmt.Errorf("terminal creation ended after %d attempts: %w", s.policy.TerminalCreateMaxAttempts, cause)}
 }
+
+// terminalOperationEnded is the outcome of a creation the host never accepted: it is settled in the database, so it is
+// not a worker failure (a host that stays away would otherwise raise one report per attempted creation).
+type terminalOperationEnded struct{ cause error }
+
+func (e terminalOperationEnded) Error() string { return e.cause.Error() }
+func (e terminalOperationEnded) Unwrap() error { return e.cause }
 
 // terminalOperationRescheduled is the outcome of an operation the host could not apply yet; it carries the cause so a
 // synchronous caller can still report it.
