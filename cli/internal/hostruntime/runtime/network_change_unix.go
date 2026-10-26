@@ -22,23 +22,12 @@ type networkChangeService struct {
 	closed   bool
 }
 
-type canonicalNetworkRecovery interface{ HandleNetworkEvent(networkmonitor.Event) }
-
 type networkMetricRecorder interface {
 	Record(string, float64, map[string]string) error
 }
 
 type networkChangeHandler struct {
-	connector canonicalNetworkRecovery
-	metrics   networkMetricRecorder
-}
-
-// SetCanonical attaches the durable connector-v1 recovery path after the
-// tunnel assembly is constructed. Production uses only this canonical path.
-func (h *networkChangeHandler) SetCanonical(recovery canonicalNetworkRecovery) {
-	if h != nil {
-		h.connector = recovery
-	}
+	metrics networkMetricRecorder
 }
 
 func newNetworkChangeHandler(metrics networkMetricRecorder) (*networkChangeHandler, error) {
@@ -53,9 +42,6 @@ func (h *networkChangeHandler) Handle(event networkmonitor.Event) {
 		return
 	}
 	h.record(event)
-	if h.connector != nil {
-		h.connector.HandleNetworkEvent(event)
-	}
 }
 
 func (h *networkChangeHandler) record(event networkmonitor.Event) {

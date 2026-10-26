@@ -289,7 +289,7 @@ func TestHostsAlwaysExposeUpdateGate(t *testing.T) {
 	root := t.TempDir()
 	runtimeConfig := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
 	host, err := NewHost(context.Background(), HostConfig{Runtime: runtimeConfig, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine_01", InboxPath: func() (string, error) { return root, nil }}, HostDependencies{
-		SessionLauncherFactory: machineTestLauncherFactory, Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, Connector: machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
+		SessionLauncherFactory: machineTestLauncherFactory, Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, NetworkMonitor: machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
 	})
 	if err != nil {
 		t.Fatal(err)

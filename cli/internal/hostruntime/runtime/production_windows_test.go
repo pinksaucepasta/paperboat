@@ -7,8 +7,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 )
 
 func TestWindowsProductionHostRejectsIncompleteConfiguration(t *testing.T) {
@@ -27,14 +25,6 @@ func TestWindowsWorkspaceRejectsRelativePath(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("relative Windows workspace was accepted")
-	}
-}
-
-func TestWindowsConnectorServiceReportsDisconnected(t *testing.T) {
-	service := &windowsConnectorService{status: func() connector.Status { return connector.Status{} }}
-	status := service.Status()
-	if status.Connected || status.Stopping || status.Generation != 0 {
-		t.Fatalf("status = %#v", status)
 	}
 }
 

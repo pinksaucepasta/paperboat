@@ -41,10 +41,6 @@ func (s sessionOwner) Shutdown(ctx context.Context) error { return s.sessions.Sh
 
 type tunnelWorkloadsStub struct{ testService }
 
-func (*tunnelWorkloadsStub) ResourceCounts() map[string]uint64 {
-	return map[string]uint64{"tunnels": 1}
-}
-
 type failingStartService struct {
 	testService
 	startErr    error
@@ -103,7 +99,7 @@ func TestWorkerReplacementDoesNotTerminateHostdOwnedPTY(t *testing.T) {
 	// The other workload fields are non-nil test sentinels. They are not used
 	// by worker replacement and cannot be reached through WorkerController.
 	tunnels := &tunnelWorkloadsStub{}
-	d, err := New(Config{Workloads: Workloads{Sessions: sessions, Executions: &execprocess.Manager{}, Transfers: &filetransfer.Service{}, Tunnels: tunnels}, Components: []Component{{Name: "sessions", Required: true, Service: sessionOwner{sessions: sessions}}, {Name: "tunnels", Required: true, Service: tunnels}, {Name: "ingress", Required: true, Service: &testService{}}}})
+	d, err := New(Config{Workloads: Workloads{Sessions: sessions, Executions: &execprocess.Manager{}, Transfers: &filetransfer.Service{}}, Components: []Component{{Name: "sessions", Required: true, Service: sessionOwner{sessions: sessions}}, {Name: "tunnels", Required: true, Service: tunnels}, {Name: "ingress", Required: true, Service: &testService{}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,8 +120,8 @@ func TestWorkerReplacementDoesNotTerminateHostdOwnedPTY(t *testing.T) {
 	if process.wasTerminated() {
 		t.Fatal("worker replacement terminated hostd-owned PTY")
 	}
-	if tunnels.shutdowns != 0 || d.Workloads().Tunnels != tunnels || d.Workloads().Tunnels.ResourceCounts()["tunnels"] != 1 {
-		t.Fatalf("worker replacement changed stable tunnel ownership: shutdowns=%d workloads=%#v", tunnels.shutdowns, d.Workloads().Tunnels)
+	if tunnels.shutdowns != 0 {
+		t.Fatalf("worker replacement changed stable tunnel ownership: shutdowns=%d", tunnels.shutdowns)
 	}
 	if snapshots := sessions.List(); len(snapshots) != 1 || snapshots[0].State != session.Running {
 		t.Fatalf("sessions=%#v", snapshots)

@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/google/uuid"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -50,7 +51,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
@@ -69,22 +69,10 @@ type productionClock struct{}
 func (productionClock) Now() time.Time { return time.Now().UTC() }
 
 func NewProductionHost(ctx context.Context, version string, environ func(string) string) (*Host, error) {
-	return newProductionHost(ctx, version, environ, nil)
+	return newProductionHost(ctx, version, environ)
 }
 
-// NewProductionHostWithTunnelAssembly enables the connector-v1 stable
-// tunnel-manager composition. The provider is deliberately explicit because
-// current deployment configuration does not contain the server-issued
-// connector identity, renewable credential reference, carrier certificates,
-// or route authorizer needed to construct it safely.
-func NewProductionHostWithTunnelAssembly(ctx context.Context, version string, environ func(string) string, provider ProductionTunnelAssemblyProvider) (*Host, error) {
-	if provider == nil {
-		return nil, errors.Join(ErrProductionInvalid, ErrProductionTunnelAssemblyRequired)
-	}
-	return newProductionHost(ctx, version, environ, provider)
-}
-
-func newProductionHost(ctx context.Context, version string, environ func(string) string, tunnelProvider ProductionTunnelAssemblyProvider, ownerDependencies ...HostDependencies) (*Host, error) {
+func newProductionHost(ctx context.Context, version string, environ func(string) string, ownerDependencies ...HostDependencies) (*Host, error) {
 	if environ == nil {
 		return nil, ErrProductionInvalid
 	}
@@ -271,7 +259,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
 	var runtimeObservation *runtimeObservationService
 	resolver, resolverErr := availability.NewResolver(controlURL.ResolveReference(&url.URL{Path: "/v1/helper-runtime-policies/resolve"}).String(), renewingTokens, enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID, &http.Client{Transport: transport, Timeout: 10 * time.Second})
 	if resolverErr != nil {
@@ -307,7 +294,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities}
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities}
 		machineServiceObserver = sender
 		if runtimeLayers != nil {
 			sender.layers = runtimeLayers
@@ -385,7 +372,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return server.BrowserTerminalIdentity{}, err
 		}
 		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
-	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
+	}, AuthorizationService: authorizationRefresh, NetworkMonitor: networkChanges, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
 	var engineTunnels *runtimeattachment.EngineTunnels
 	{
 		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
@@ -397,44 +384,14 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, errors.Join(ErrProductionInvalid, bindErr)
 		}
 		dependencies.RuntimeAttachmentService = attachment
+		runtimeObservation.sender.carriers = attachment
 		engineTunnels = &runtimeattachment.EngineTunnels{Service: attachment, Events: machineEvents.Subscribe(machineevents.TopicTunnels)}
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
 	if machineServiceObserver != nil {
 		nativePrivateValidators = append(nativePrivateValidators, machineServiceObserver.validateMachineService)
 	}
-	if tunnelProvider == nil {
-		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService, engineTunnels)
-		if enrollmentErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, enrollmentErr)
-		}
-		dependencies.TunnelEnrollment = tunnelEnrollment
-		if engineTunnels != nil {
-			dependencies.EngineTunnels = engineTunnels
-		}
-		dependencies.TunnelEnrollmentLifecycle = platformTunnelEnrollmentLifecycle(tunnelEnrollment)
-		dependencies.TunnelManager = tunnelEnrollment
-		connectorService.status = tunnelEnrollment.Status
-		networkHandler.SetCanonical(tunnelEnrollment)
-	} else {
-		tunnelAssembly, assemblyErr := productionTunnelAssembly(ctx, tunnelProvider, ProductionTunnelAssemblyInputs{
-			StateRoot: runtimeConfig.StateRoot, ControlURL: controlURL.String(), ControlTransport: transport,
-			EnvironmentID: identity.EnvironmentID, MachineID: machineID,
-			InstallationGeneration: uint64(machineRegistration.InstallationGeneration), Metrics: metrics,
-		})
-		if assemblyErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
-		}
-		dependencies.TunnelManager = tunnelAssembly
-		connectorService.status = tunnelAssembly.ConnectorStatus
-		nativePrivateValidators = append(nativePrivateValidators, localNativePrivateValidator(tunnelAssembly.Manager.Manager))
-		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: machineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
-		if gateErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, gateErr)
-		}
-		dependencies.UpdateGate = updateGate
-		networkHandler.SetCanonical(tunnelAssembly)
-	}
+	dependencies.EngineTunnels = engineTunnels
 	if managedSSHIdentity != nil && nativeDispatch == nil {
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
 			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore, usage: dependencies.Bandwidth, offlineAudit: offlineAudit, networkEvents: machineEvents.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)})

@@ -24,8 +24,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
@@ -228,7 +228,10 @@ type runtimeObservationSender struct {
 	lazyBootID             string
 	lazyStartedAt          time.Time
 	serviceScope           string
-	connector              interface{ Status() connector.Status }
+	// carriers is the agent's runtime carrier set; its hubs decide the reported connector_state.
+	carriers interface {
+		Hubs() ([]*preview.DataCarrierPreviewHub, <-chan struct{})
+	}
 	transferPolicy         *filetransfer.PolicyStore
 	capabilities           []string
 	capabilitiesController *machineCapabilityController
@@ -507,25 +510,21 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 }
 
 type runtimeDiagnosticsObservation struct {
-	Capabilities        []string  `json:"capabilities"`
-	WorkerGeneration    uint64    `json:"worker_generation"`
-	OSBootID            string    `json:"os_boot_id"`
-	ConnectorState      string    `json:"connector_state"`
-	ConnectorGeneration uint64    `json:"connector_generation"`
-	WorkerServiceScope  string    `json:"worker_service_scope"`
-	ObservedAt          time.Time `json:"observed_at"`
+	Capabilities       []string  `json:"capabilities"`
+	WorkerGeneration   uint64    `json:"worker_generation"`
+	OSBootID           string    `json:"os_boot_id"`
+	ConnectorState     string    `json:"connector_state"`
+	WorkerServiceScope string    `json:"worker_service_scope"`
+	ObservedAt         time.Time `json:"observed_at"`
 }
 
 func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, environmentEnabled bool) *runtimeDiagnosticsObservation {
-	if s.workerGeneration < 1 || s.osBootID == "" || s.connector == nil {
+	if s.workerGeneration < 1 || s.osBootID == "" || s.carriers == nil {
 		return nil
 	}
-	status := s.connector.Status()
 	state := "unavailable"
-	if status.Connected {
+	if hubs, _ := s.carriers.Hubs(); len(hubs) > 0 {
 		state = "ready"
-	} else if status.Stopping {
-		state = "degraded"
 	}
 	capabilities := append([]string(nil), s.capabilities...)
 	if len(capabilities) == 0 {
@@ -534,7 +533,7 @@ func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, envi
 	if environmentEnabled && !slices.Contains(capabilities, "environment_injection") {
 		capabilities = append(capabilities, "environment_injection")
 	}
-	return &runtimeDiagnosticsObservation{Capabilities: capabilities, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID, ConnectorState: state, ConnectorGeneration: status.Generation, WorkerServiceScope: s.serviceScope, ObservedAt: observedAt}
+	return &runtimeDiagnosticsObservation{Capabilities: capabilities, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID, ConnectorState: state, WorkerServiceScope: s.serviceScope, ObservedAt: observedAt}
 }
 
 type serverHeartbeatReceipt struct {

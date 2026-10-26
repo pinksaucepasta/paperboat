@@ -21,15 +21,15 @@ import (
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"golang.org/x/crypto/ssh"
 )
 
 type testTokenSource struct{}
 
-type runtimeObservationConnector struct{}
+type runtimeObservationCarriers struct{}
 
 type peerEnrollmentSequence struct {
 	errors []error
@@ -46,8 +46,8 @@ func (s *peerEnrollmentSequence) Ensure(context.Context) error {
 	return err
 }
 
-func (runtimeObservationConnector) Status() connector.Status {
-	return connector.Status{Connected: true, Generation: 2}
+func (runtimeObservationCarriers) Hubs() ([]*preview.DataCarrierPreviewHub, <-chan struct{}) {
+	return []*preview.DataCarrierPreviewHub{nil}, nil
 }
 
 func (testTokenSource) Token(context.Context) (string, error) { return "helper-identity", nil }
@@ -402,7 +402,7 @@ func TestRuntimeObservationUsesRenewableIdentityAndExactBodyProof(t *testing.T) 
 	}))
 	defer server.Close()
 	proofs := &testProofSource{}
-	sender := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", tokens: testTokenSource{}, proofs: proofs, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), workerGeneration: 1, osBootID: "boot-1", serviceScope: "system", connector: runtimeObservationConnector{}}
+	sender := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", tokens: testTokenSource{}, proofs: proofs, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), workerGeneration: 1, osBootID: "boot-1", serviceScope: "system", carriers: runtimeObservationCarriers{}}
 	if err := sender.Send(context.Background()); err != nil {
 		t.Fatal(err)
 	}

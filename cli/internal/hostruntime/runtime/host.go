@@ -74,7 +74,8 @@ type HostDependencies struct {
 	BrowserTerminalIdentity   server.BrowserTerminalIdentityProvider
 	AuthorizationService      Service
 	Listener                  ListenerFactory
-	Connector                 Service
+	// NetworkMonitor watches the platform network and records its changes.
+	NetworkMonitor            Service
 	PreviewRoutesChanged      func()
 	PreviewDispatcher         server.PreviewDispatcher
 	PreviewRecovery           Service
@@ -98,12 +99,8 @@ type HostDependencies struct {
 	// sanitized retrieval and deliberate audited replay). It is mounted at
 	// /v1/inspector/ only with a control token, on the loopback service.
 	Inspector                 *inspectorapi.Service
-	TunnelEnrollment          http.Handler
-	TunnelEnrollmentLifecycle Service
 	ManagedSSH                *managedssh.Host
 	ManagedSSHService         Service
-	TunnelManager             stablehostd.TunnelWorkloads
-	UpdateGate                hostdproto.UpdateGateHandler
 	NativePeerFactory         func(func(net.Conn) error, http.Handler) (Service, error)
 	NativeDispatch            *server.NativeDispatchConfig
 	NativeWorkerEpoch         uint64
@@ -478,9 +475,6 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		mux.Handle("/v1/preview-owner-sessions", dependencies.PreviewOwnerSessions)
 		mux.Handle("/v1/preview-owner-sessions/", dependencies.PreviewOwnerSessions)
 	}
-	if dependencies.TunnelEnrollment != nil && dependencies.LocalControlToken != "" {
-		mux.Handle("/v1/tunnel-connectors/enroll", dependencies.TunnelEnrollment)
-	}
 	if source, ok := dependencies.ManagedEnvironment.(ownerShellEnvironment); ok {
 		if handler := newShellEnvironmentHandler(source, dependencies.LocalControlToken); handler != nil {
 			mux.Handle(ShellEnvironmentPath, handler)
@@ -581,11 +575,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		// terminal, file-transfer, or preview services down with it.
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: false, Service: dependencies.ManagedSSHService})
 	}
-	if dependencies.TunnelManager != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "tunnel_manager", Required: true, Service: dependencies.TunnelManager})
-	}
-	if dependencies.Connector != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "edge", Required: true, Service: dependencies.Connector})
+	if dependencies.NetworkMonitor != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "network_monitor", Required: true, Service: dependencies.NetworkMonitor})
 	}
 	if nativeDispatch != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "native_dispatch", Required: true, Service: shutdownService{shutdown: nativeDispatch.Close}})
@@ -598,7 +589,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "engine_tunnels", Required: false, Service: dependencies.EngineTunnels})
 	}
 	daemon, err := stablehostd.New(stablehostd.Config{
-		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
+		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, ManagedSSH: dependencies.ManagedSSH},
 		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
 	})
 	if err != nil {
@@ -625,13 +616,11 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			dispatchErr = nativeDispatch.Close(context.Background())
 		}
 		return errors.Join(dispatchErr, durable.Close(), usageService.Shutdown(context.Background()))
-	}, updateGate: dependencies.UpdateGate, reconcileCarrierSSH: dependencies.ReconcileCarrierSSH}
+	}, reconcileCarrierSSH: dependencies.ReconcileCarrierSSH}
 	host.managedSSHSelection, _ = dependencies.ManagedSSHService.(interface{ Disable(context.Context) error })
-	if host.updateGate == nil {
-		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: host.beginTransferUpdate, EndUpdate: host.endTransferUpdate})
-		if err != nil {
-			return nil, errors.Join(ErrHostInvalid, err)
-		}
+	host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: host.beginTransferUpdate, EndUpdate: host.endTransferUpdate})
+	if err != nil {
+		return nil, errors.Join(ErrHostInvalid, err)
 	}
 	return host, nil
 }
@@ -712,19 +701,6 @@ func (h *Host) WorkloadStatus() hostdproto.WorkloadStatus {
 	}
 	if h.transfers != nil {
 		counts["transfers"] = h.transfers.ActiveCount()
-	}
-	if h.hostd != nil {
-		workloads := h.hostd.Workloads()
-		if workloads.Tunnels != nil {
-			for key, value := range workloads.Tunnels.ResourceCounts() {
-				counts[key] += value
-			}
-			if source, ok := workloads.Tunnels.(interface{ WorkloadIdentities() []string }); ok {
-				for _, value := range source.WorkloadIdentities() {
-					identities = append(identities, "tunnel\x00"+value)
-				}
-			}
-		}
 	}
 	keys := make([]string, 0, len(counts))
 	var protected uint64

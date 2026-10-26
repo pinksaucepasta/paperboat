@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 )
@@ -40,48 +39,6 @@ var (
 	hostnamePattern         = regexp.MustCompile(`^[a-z0-9.-]+$`)
 	stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
-
-type State struct {
-	Tunnels          []Tunnel             `json:"tunnels,omitempty"`
-	RouteGenerations []RouteGeneration    `json:"route_generations,omitempty"`
-	Connectors       []Connector          `json:"connectors,omitempty"`
-	UpdateJournal    []UpdateJournalEntry `json:"update_journal,omitempty"`
-}
-
-// Tunnel stores desired and last-known-good snapshots independently. A failed
-// desired generation must never replace LastKnownGood.
-type Tunnel struct {
-	ID                string          `json:"id"`
-	StableEndpointID  string          `json:"stable_endpoint_id"`
-	DesiredState      string          `json:"desired_state"`
-	DesiredGeneration uint64          `json:"desired_generation"`
-	AppliedGeneration uint64          `json:"applied_generation"`
-	DesiredSnapshot   ConfigSnapshot  `json:"desired_snapshot"`
-	LastKnownGood     *ConfigSnapshot `json:"last_known_good,omitempty"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-}
-
-type RouteGeneration struct {
-	TunnelID   string `json:"tunnel_id"`
-	RouteID    string `json:"route_id"`
-	Generation uint64 `json:"generation"`
-}
-
-// Connector contains only the write-only credential locator. Secret bytes are
-// held by the platform credential store and cannot be represented here.
-type Connector struct {
-	ID                    string              `json:"id"`
-	TunnelID              string              `json:"tunnel_id"`
-	HostID                string              `json:"host_id"`
-	Credential            CredentialReference `json:"credential"`
-	RotationGeneration    uint64              `json:"rotation_generation"`
-	LastAppliedGeneration uint64              `json:"last_applied_generation"`
-}
-
-type CredentialReference struct {
-	Reference  string `json:"reference"`
-	Generation uint64 `json:"generation"`
-}
 
 type ConfigSnapshot struct {
 	TunnelID    string          `json:"tunnel_id"`
@@ -128,17 +85,6 @@ type TunnelConfigRoute struct {
 	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
 	MaxConcurrentStreams    int32   `json:"max_concurrent_streams"`
 	DesiredState            string  `json:"desired_state"`
-}
-
-type UpdateJournalEntry struct {
-	ID               string    `json:"id"`
-	TunnelID         string    `json:"tunnel_id"`
-	Phase            string    `json:"phase"`
-	State            string    `json:"state"`
-	TargetGeneration uint64    `json:"target_generation"`
-	FailureCode      string    `json:"failure_code,omitempty"`
-	StartedAt        time.Time `json:"started_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // NewConfigSnapshot canonicalizes the JSON before hashing it. It rejects
@@ -354,152 +300,6 @@ func validMatchHostname(value string) bool {
 	return len(value) <= 253 && strings.TrimSpace(value) == value && value == strings.ToLower(value) && !strings.HasSuffix(value, ".") && !strings.Contains(value, "*") && hostnamePattern.MatchString(value)
 }
 
-func (s State) Validate() error {
-	if len(s.Tunnels) > maxTunnels || len(s.RouteGenerations) > maxRoutes || len(s.Connectors) > maxConnectors || len(s.UpdateJournal) > maxJournalEntries {
-		return ErrInvalidState
-	}
-	tunnels := make(map[string]Tunnel, len(s.Tunnels))
-	for _, tunnel := range s.Tunnels {
-		if !validID(tunnel.ID) || ValidateStableEndpointID(tunnel.StableEndpointID) != nil || (tunnel.DesiredState != "active" && tunnel.DesiredState != "paused") || tunnel.DesiredGeneration == 0 || tunnel.AppliedGeneration > tunnel.DesiredGeneration || tunnel.UpdatedAt.IsZero() {
-			return ErrInvalidState
-		}
-		if _, exists := tunnels[tunnel.ID]; exists {
-			return ErrInvalidState
-		}
-		if err := validateSnapshot(tunnel.DesiredSnapshot); err != nil {
-			return safeStoreFailure("host state desired snapshot is invalid", ErrInvalidState, err)
-		}
-		if tunnel.DesiredSnapshot.TunnelID != tunnel.ID || tunnel.DesiredSnapshot.Generation != tunnel.DesiredGeneration {
-			return ErrInvalidState
-		}
-		if err := validateStableEndpointIdentity(tunnel.StableEndpointID, tunnel.DesiredSnapshot); err != nil {
-			return err
-		}
-		if tunnel.AppliedGeneration > 0 && tunnel.LastKnownGood == nil {
-			return ErrInvalidState
-		}
-		if tunnel.LastKnownGood != nil {
-			if err := validateSnapshot(*tunnel.LastKnownGood); err != nil {
-				return safeStoreFailure("host state last-known-good snapshot is invalid", ErrInvalidState, err)
-			}
-			if tunnel.LastKnownGood.TunnelID != tunnel.ID || tunnel.LastKnownGood.Generation != tunnel.AppliedGeneration || tunnel.LastKnownGood.Generation > tunnel.DesiredGeneration {
-				return ErrInvalidState
-			}
-			if err := validateStableEndpointIdentity(tunnel.StableEndpointID, *tunnel.LastKnownGood); err != nil {
-				return err
-			}
-		}
-		tunnels[tunnel.ID] = tunnel
-	}
-	routes := make(map[string]struct{}, len(s.RouteGenerations))
-	for _, route := range s.RouteGenerations {
-		tunnel, ok := tunnels[route.TunnelID]
-		key := route.TunnelID + "\x00" + route.RouteID
-		if !ok || !validID(route.RouteID) || route.Generation == 0 || route.Generation > tunnel.DesiredGeneration {
-			return ErrInvalidState
-		}
-		if _, exists := routes[key]; exists {
-			return ErrInvalidState
-		}
-		routes[key] = struct{}{}
-	}
-	connectors := make(map[string]struct{}, len(s.Connectors))
-	for _, connector := range s.Connectors {
-		tunnel, ok := tunnels[connector.TunnelID]
-		if !ok || !validID(connector.ID) || !validID(connector.HostID) || connector.RotationGeneration == 0 || connector.LastAppliedGeneration > tunnel.DesiredGeneration || connector.Credential.Generation != connector.RotationGeneration {
-			return ErrInvalidState
-		}
-		if _, exists := connectors[connector.ID]; exists {
-			return ErrInvalidState
-		}
-		if err := connector.Credential.validate(connector.ID); err != nil {
-			return err
-		}
-		connectors[connector.ID] = struct{}{}
-	}
-	journal := make(map[string]struct{}, len(s.UpdateJournal))
-	for _, entry := range s.UpdateJournal {
-		tunnel, ok := tunnels[entry.TunnelID]
-		if !ok || !validID(entry.ID) || !knownJournalPhase(entry.Phase) || !knownJournalState(entry.State) || entry.TargetGeneration == 0 || entry.TargetGeneration > tunnel.DesiredGeneration || entry.StartedAt.IsZero() || entry.UpdatedAt.Before(entry.StartedAt) || (entry.FailureCode != "" && !codePattern.MatchString(entry.FailureCode)) {
-			return ErrInvalidState
-		}
-		if entry.State == "failed" && entry.FailureCode == "" || entry.State != "failed" && entry.FailureCode != "" {
-			return ErrInvalidState
-		}
-		if _, exists := journal[entry.ID]; exists {
-			return ErrInvalidState
-		}
-		journal[entry.ID] = struct{}{}
-	}
-	return nil
-}
-
-func validateSnapshot(snapshot ConfigSnapshot) error {
-	if !validID(snapshot.TunnelID) || snapshot.Generation == 0 || len(snapshot.Payload) == 0 || len(snapshot.Payload) > maxSnapshotBytes {
-		return ErrInvalidState
-	}
-	canonical, err := canonicalSafeJSON(snapshot.Payload)
-	if err != nil {
-		return safeStoreFailure("host state snapshot is invalid", ErrInvalidState, err)
-	}
-	if !bytes.Equal(canonical, snapshot.Payload) {
-		return ErrInvalidState
-	}
-	digest := sha256.Sum256(canonical)
-	if snapshot.ContentHash != "sha256:"+hex.EncodeToString(digest[:]) {
-		return ErrInvalidState
-	}
-	if _, err := parseTunnelConfigSnapshot(canonical, snapshot.TunnelID, snapshot.Generation); err != nil {
-		return safeStoreFailure("host state snapshot is invalid", ErrInvalidState, err)
-	}
-	return nil
-}
-
-func validateStableEndpointIdentity(stableEndpointID string, snapshot ConfigSnapshot) error {
-	if err := ValidateStableEndpointID(stableEndpointID); err != nil {
-		return err
-	}
-	decoded, err := ParseTunnelConfigSnapshot(snapshot.Payload, snapshot.TunnelID, snapshot.Generation)
-	if err != nil {
-		return safeStoreFailure("host state snapshot identity could not be checked", ErrInvalidState, err)
-	}
-	if decoded.StableEndpointID != stableEndpointID {
-		return ErrInvalidState
-	}
-	return nil
-}
-
-func (r CredentialReference) validate(_ string) error {
-	if r.Generation == 0 || len(r.Reference) == 0 || len(r.Reference) > maxCredentialRefSize || strings.TrimSpace(r.Reference) != r.Reference {
-		return ErrInvalidState
-	}
-	parsed, err := url.Parse(r.Reference)
-	if err != nil || parsed.User != nil || parsed.Opaque != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Host != "paperboat" {
-		return ErrInvalidState
-	}
-	switch parsed.Scheme {
-	case "keychain", "credential-manager", "secret-service", "protected-file", "tpm":
-		// The reference is created before the server assigns its connector ID.
-		// Keep that local opaque key stable and bind it to the connector through
-		// the surrounding Connector record instead of requiring the path segment
-		// to equal the server-owned ID.
-	default:
-		return ErrInvalidState
-	}
-	if strings.Contains(parsed.EscapedPath(), "%") || parsed.Path == "" {
-		return ErrInvalidState
-	}
-	const prefix = "/connectors/"
-	if !strings.HasPrefix(parsed.Path, prefix) {
-		return ErrInvalidState
-	}
-	segment := strings.TrimPrefix(parsed.Path, prefix)
-	if strings.Contains(segment, "/") || !validID(segment) || path.Clean(parsed.Path) != parsed.Path {
-		return ErrInvalidState
-	}
-	return nil
-}
-
 func canonicalSafeJSON(payload []byte) ([]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
@@ -657,48 +457,4 @@ func forbiddenCredentialKey(key string) bool {
 	return strings.HasSuffix(key, "_token") || strings.HasSuffix(key, "_password") || strings.HasSuffix(key, "_secret") || strings.HasSuffix(key, "_private_key")
 }
 
-func normalizeState(state State) State {
-	state = cloneState(state)
-	slices.SortFunc(state.Tunnels, func(a, b Tunnel) int { return strings.Compare(a.ID, b.ID) })
-	slices.SortFunc(state.RouteGenerations, func(a, b RouteGeneration) int {
-		if result := strings.Compare(a.TunnelID, b.TunnelID); result != 0 {
-			return result
-		}
-		return strings.Compare(a.RouteID, b.RouteID)
-	})
-	slices.SortFunc(state.Connectors, func(a, b Connector) int { return strings.Compare(a.ID, b.ID) })
-	slices.SortFunc(state.UpdateJournal, func(a, b UpdateJournalEntry) int { return strings.Compare(a.ID, b.ID) })
-	return state
-}
-
-func cloneState(state State) State {
-	clone := State{
-		Tunnels:          append([]Tunnel(nil), state.Tunnels...),
-		RouteGenerations: append([]RouteGeneration(nil), state.RouteGenerations...),
-		Connectors:       append([]Connector(nil), state.Connectors...),
-		UpdateJournal:    append([]UpdateJournalEntry(nil), state.UpdateJournal...),
-	}
-	for index := range clone.Tunnels {
-		clone.Tunnels[index].DesiredSnapshot.Payload = append(json.RawMessage(nil), clone.Tunnels[index].DesiredSnapshot.Payload...)
-		if state.Tunnels[index].LastKnownGood != nil {
-			lastKnownGood := *state.Tunnels[index].LastKnownGood
-			lastKnownGood.Payload = append(json.RawMessage(nil), lastKnownGood.Payload...)
-			clone.Tunnels[index].LastKnownGood = &lastKnownGood
-		}
-	}
-	return clone
-}
-
 func validID(value string) bool { return idPattern.MatchString(value) }
-
-func knownJournalPhase(value string) bool {
-	switch value {
-	case "received", "validated", "persisted", "applying", "ready", "draining", "complete":
-		return true
-	}
-	return false
-}
-
-func knownJournalState(value string) bool {
-	return value == "pending" || value == "applied" || value == "failed"
-}

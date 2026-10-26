@@ -61,14 +61,6 @@ type Component struct {
 	Service  Service
 }
 
-// TunnelWorkloads is the stable ownership boundary for durable tunnel
-// reconciliation. Coordination-worker replacement may inspect counts but must
-// never acquire or stop the manager.
-type TunnelWorkloads interface {
-	Service
-	ResourceCounts() map[string]uint64
-}
-
 // Workloads is the only owner of live workload managers.  It is intentionally
 // exposed read-only through Daemon so protocol handlers can use the same
 // managers without duplicating process ownership in workers.
@@ -77,7 +69,6 @@ type Workloads struct {
 	Executions execprocess.Service
 	Transfers  *filetransfer.Service
 	ManagedSSH *managedssh.Host
-	Tunnels    TunnelWorkloads
 }
 
 func (w Workloads) valid() bool {

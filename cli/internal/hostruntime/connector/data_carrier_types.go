@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -294,4 +295,57 @@ type dataCarrierAcceptResult struct {
 	stream *DataCarrierStream
 	open   StreamOpen
 	err    error
+}
+
+func connectorErrorLeaves(err error, expected func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		if typeOf.Comparable() {
+			if _, ok := seen[current]; ok {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children) > 16-visited-1 || len(remaining)+len(children) > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil || len(remaining)+1 > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if !expected(current) {
+				return false
+			}
+		}
+	}
+	return leaves > 0
 }

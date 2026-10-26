@@ -77,7 +77,7 @@ func TestUnifiedRuntimeSupportsStableLifecycle(t *testing.T) {
 	}, HostDependencies{
 		SessionLauncherFactory: machineTestLauncherFactory,
 		Authorizer:             func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
-		Connector:              machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
+		NetworkMonitor: machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
 		NativePeerFactory: func(func(net.Conn) error, http.Handler) (Service, error) { return peer, nil },
 	})
 	if err != nil {

@@ -5,12 +5,13 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -24,10 +25,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
 )
-
-// Compatibility names keep the existing Windows contract tests attached to
-// the full production composition rather than the retired reduced runtime.
-type windowsConnectorService = dedicatedConnectorService
 
 func windowsWorkspace(environ func(string) string) (string, error) {
 	workspace := strings.TrimSpace(environ("PAPERBOAT_WORKSPACE_ROOT"))

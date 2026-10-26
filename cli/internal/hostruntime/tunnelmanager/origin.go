@@ -36,43 +36,6 @@ type OriginSecretResolver interface {
 	ResolveOriginSecret(context.Context, string) ([]byte, error)
 }
 
-type OriginCredentialStore interface {
-	Get(string) (string, error)
-}
-
-// CredentialStoreOriginSecretResolver adapts the platform keychain,
-// Credential Manager, Secret Service, or protected-file store without making
-// the origin runtime depend on a concrete OS backend.
-type CredentialStoreOriginSecretResolver struct {
-	Store OriginCredentialStore
-}
-
-func (r CredentialStoreOriginSecretResolver) ResolveOriginSecret(ctx context.Context, reference string) ([]byte, error) {
-	if ctx == nil || r.Store == nil {
-		return nil, ErrInvalidConfig
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	value, err := r.Store.Get(reference)
-	if err != nil {
-		return nil, errors.New("origin credential store is unavailable")
-	}
-	return []byte(value), nil
-}
-
-// NewOriginRuntime constructs matching probe and request-forwarding policy so
-// readiness cannot pass with different TLS settings from live traffic.
-func NewOriginRuntime(secrets OriginSecretResolver, allowInsecureDevelopment bool, observe func(OriginProbeObservation)) (NetworkOriginProber, *OriginStreamForwarder, error) {
-	if secrets == nil {
-		return NetworkOriginProber{}, nil, ErrInvalidConfig
-	}
-	provider := ReferenceOriginTLSProvider{Secrets: secrets}
-	transport := &OriginHTTPTransport{TLS: provider, AllowInsecureDevelopment: allowInsecureDevelopment, Observe: observe}
-	prober := NetworkOriginProber{TLS: provider, AllowInsecureDevelopment: allowInsecureDevelopment, Observe: observe}
-	return prober, &OriginStreamForwarder{Transport: transport}, nil
-}
-
 // ReferenceOriginTLSProvider resolves custom roots and mTLS identities without
 // putting PEM material in route state. A client identity is stored as one
 // bounded JSON document with certificate_pem and private_key_pem fields.

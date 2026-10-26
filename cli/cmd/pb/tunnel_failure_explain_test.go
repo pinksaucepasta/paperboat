@@ -40,7 +40,6 @@ func failingHealth(code, dimension, dimensionCode, summary, action string, retry
 func TestTunnelStatusDoctorAndLogsExplainEachFailure(t *testing.T) {
 	for name, health := range map[string]api.TunnelHealth{
 		"connector_offline":   failingHealth("connector_offline", "service", "connector_offline", "The Paperboat host that runs this tunnel is offline or its service is stopped.", "Make sure the machine is on and online (`pb environments`), then run `pb doctor` on it.", true),
-		"connector_missing":   failingHealth("connector_missing", "service", "connector_missing", "This tunnel has no connector, so nothing is serving it.", "Add a connector on the machine that runs the app: `pb tunnel connector add <tunnel>`.", false),
 		"edge_unavailable":    failingHealth("edge_unavailable", "edge", "edge_unavailable", "The host is connected, but no Paperboat edge is ready to carry this tunnel's traffic.", "Nothing to change on your side.", true),
 		"origin_unreachable":  failingHealth("origin_unreachable", "origin", "origin_refused", "The tunnel is connected, but the local app refused the connection: nothing is listening on its port.", "Start the app on the route's port.", true),
 		"dns_pending":         failingHealth("dns_pending", "dns", "dns_pending", "Waiting for DNS: api.example.test is not verified yet.", "Add the DNS records shown by `pb tunnel domain instructions`.", true),

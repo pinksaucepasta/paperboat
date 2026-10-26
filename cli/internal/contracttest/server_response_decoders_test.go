@@ -16,8 +16,6 @@ func TestServerResponseDecodersDoNotRejectUnknownFields(t *testing.T) {
 		"../hostruntime/preview/readiness_observer.go",
 		"../hostruntime/preview/accessor_discovery.go",
 		"../hostruntime/preview/private_access.go",
-		"../hostruntime/tunnelenrollment/client.go",
-		"../hostruntime/tunnelenrollment/bootstrap_descriptor.go",
 		"../hostruntime/peeridentity/enroll.go",
 	} {
 		data, err := os.ReadFile(path)

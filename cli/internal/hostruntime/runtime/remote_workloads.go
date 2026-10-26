@@ -21,7 +21,7 @@ func NewProductionFeatureHost(ctx context.Context, version string, environ func(
 	} else if workerEpoch == 0 {
 		return nil, ErrHostInvalid
 	}
-	return newProductionHost(ctx, version, environ, nil, HostDependencies{Sessions: sessions, Executions: executions, ReuseAgentToken: true, NativeDispatch: dispatch, ReconcileCarrierSSH: reconcileSSH, NativeWorkerEpoch: workerEpoch})
+	return newProductionHost(ctx, version, environ, HostDependencies{Sessions: sessions, Executions: executions, ReuseAgentToken: true, NativeDispatch: dispatch, ReconcileCarrierSSH: reconcileSSH, NativeWorkerEpoch: workerEpoch})
 }
 
 type launchSessions struct {

@@ -72,28 +72,15 @@ func TestNetworkChangeServicePropagatesObserverFailure(t *testing.T) {
 	}
 }
 
-type recordingCanonicalRecovery struct {
-	events []networkmonitor.Event
-}
-
-func (r *recordingCanonicalRecovery) HandleNetworkEvent(event networkmonitor.Event) {
-	r.events = append(r.events, event)
-}
-
-func TestNetworkChangeHandlerForwardsCurrentRecoveryEvents(t *testing.T) {
+func TestNetworkChangeHandlerRecordsCurrentEvents(t *testing.T) {
 	metrics := &recordingNetworkMetrics{}
 	handler, err := newNetworkChangeHandler(metrics)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recovery := &recordingCanonicalRecovery{}
-	handler.SetCanonical(recovery)
 	handler.Handle(networkmonitor.Event{Generation: 7, Rebind: true, Viable: true, Reasons: networkmonitor.ReasonDefaultRoute})
 	handler.Handle(networkmonitor.Event{Generation: 8, Reasons: networkmonitor.ReasonDNS})
 	handler.Handle(networkmonitor.Event{Reasons: networkmonitor.ReasonWake})
-	if len(recovery.events) != 2 || recovery.events[0].Generation != 7 || recovery.events[1].Generation != 8 {
-		t.Fatalf("forwarded events=%+v", recovery.events)
-	}
 	if len(metrics.records) != 4 || metrics.records[1].labels["reason"] != "default_route" || metrics.records[1].labels["action"] != "rebind" || metrics.records[3].labels["reason"] != "dns" || metrics.records[3].labels["action"] != "observe" {
 		t.Fatalf("metrics=%+v", metrics.records)
 	}

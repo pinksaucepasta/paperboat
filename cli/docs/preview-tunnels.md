@@ -111,7 +111,6 @@ name the failing step and what to do about it; `--json` carries the code in
 
 | Code | Meaning | What to do |
 |---|---|---|
-| `connector_missing` | No agent serves this tunnel | Make sure the machine that runs the app is online (`pb environments`) and run `pb doctor` on it |
 | `connector_offline` | The host that runs the tunnel is off or its service is stopped | Make sure the machine is on (`pb environments`) and run `pb doctor` on it; the tunnel reconnects by itself |
 | `edge_unavailable` | The host is connected but no edge is ready | Nothing to change; if it lasts several minutes run `pb tunnel doctor` and send the support reference |
 | `dns_pending` | A custom domain is not verified yet | Add the records from `pb tunnel domain instructions`, then `pb tunnel domain verify` |
