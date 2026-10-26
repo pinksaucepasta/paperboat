@@ -499,7 +499,14 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err = database.SQL().QueryRowContext(ctx, `SELECT applied_node_id FROM control_routes WHERE id=$1`, route).Scan(&appliedNode); err != nil || appliedNode != node {
 		t.Fatalf("route after failover=%q error=%v", appliedNode, err)
 	}
+	// The agent's named edge is ready again: it becomes active again, as the rest of this test expects.
 	backupObservation.Ready = true
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := service.Attach(ctx, proof, request); err != nil || back.ActiveEdgeNodeID != backupNode {
+		t.Fatalf("ready named edge not reactivated: active=%q err=%v", back.ActiveEdgeNodeID, err)
+	}
 	ready(true)
 	// Keep registry liveness independent of the admission-expiry scenario.
 	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, node, backupNode)
