@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/remotepath"
+	"github.com/pinksaucepasta/paperboat/shared/remotepath"
 )
 
 type TransferDestinationDefault struct {
