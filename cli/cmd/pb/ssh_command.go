@@ -186,7 +186,11 @@ func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrit
 		_, copyErr := io.Copy(connection, input)
 		inputDone <- inputResult{copyErr: copyErr, closeWriteErr: halfCloser.CloseWrite()}
 	}()
-	_, outputErr := io.Copy(output, connection)
+	remote := bufio.NewReader(connection)
+	if refused := managedssh.ReadRefusal(remote); refused != nil {
+		return refused
+	}
+	_, outputErr := io.Copy(output, remote)
 	if outputErr != nil && !errors.Is(outputErr, io.EOF) {
 		return outputErr
 	}

@@ -3,6 +3,7 @@ package managedssh
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/google/uuid"
 )
@@ -66,16 +67,9 @@ type SessionAudit func(SessionEvent) error
 // ErrSSHAuditUnavailable refuses an offline session whose start could not be recorded.
 var ErrSSHAuditUnavailable = errors.New("managed SSH session could not be recorded for audit; it needs Paperboat online")
 
-// RefusalReason names why Serve refused a stream.
-func RefusalReason(err error) string {
-	if errors.Is(err, ErrSSHHostBusy) {
-		return RefusedBusy
-	}
-	return RefusedNotSetUp
-}
-
-// Refused audits a stream refused before it reached Serve (no target ready).
-func (h *Host) Refused(ctx context.Context, generation uint64, reason string) {
+// Refused tells the client why its stream is refused and audits it.
+func (h *Host) Refused(ctx context.Context, stream io.Writer, generation uint64, reason string) {
+	writeRefusal(stream, reason)
 	if h == nil || h.config.Audit == nil {
 		return
 	}

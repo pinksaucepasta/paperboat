@@ -233,7 +233,7 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 	target := h.target
 	if h.retired || h.disabled || target.Generation == 0 || target.Generation != generation {
 		h.mu.Unlock()
-		h.Refused(ctx, generation, RefusedNotSetUp)
+		h.Refused(ctx, stream, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
 	}
 	select {
@@ -242,7 +242,7 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.activeBySource[target.SourceSHA256]++
 	default:
 		h.mu.Unlock()
-		h.Refused(ctx, generation, RefusedBusy)
+		h.Refused(ctx, stream, generation, RefusedBusy)
 		return BridgeResult{}, ErrSSHHostBusy
 	}
 	bridgeCtx, cancel := context.WithCancel(ctx)

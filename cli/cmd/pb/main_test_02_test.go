@@ -791,3 +791,25 @@ type execChunkReader struct {
 	chunks [][]byte
 	index  int
 }
+
+// F5-09: a host's refusal line becomes pb's own error and never reaches OpenSSH; a banner passes through.
+func TestCopySSHProxyPrintsAHostRefusal(t *testing.T) {
+	for _, remoteSays := range []string{"PAPERBOAT-REFUSED busy\r\n", "SSH-2.0-OpenSSH_9.6\r\n"} {
+		proxy, remote := net.Pipe()
+		connection := &sshProxyTestConn{Conn: proxy, closeWrite: func() error { return nil }}
+		var output bytes.Buffer
+		done := make(chan error, 1)
+		go func() { done <- copySSHProxy(connection, connection, strings.NewReader(""), &output) }()
+		_, _ = remote.Write([]byte(remoteSays))
+		_ = remote.Close()
+		err := <-done
+		var refused *managedssh.RefusedError
+		if strings.HasPrefix(remoteSays, "PAPERBOAT") {
+			if !errors.As(err, &refused) || refused.Reason != managedssh.RefusedBusy || output.Len() != 0 || !strings.Contains(err.Error(), "limit") {
+				t.Fatalf("refusal: err=%v output=%q", err, output.String())
+			}
+		} else if err != nil || output.String() != remoteSays {
+			t.Fatalf("banner: err=%v output=%q", err, output.String())
+		}
+	}
+}

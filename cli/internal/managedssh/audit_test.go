@@ -1,6 +1,7 @@
 package managedssh
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -101,13 +102,27 @@ func TestServeAuditsRefusalsWithTheirReason(t *testing.T) {
 	}
 	extra, extraServer := net.Pipe()
 	defer extra.Close()
+	sent := make(chan error, 3)
+	go func() {
+		remote := bufio.NewReader(extra)
+		for range 3 {
+			sent <- ReadRefusal(remote)
+		}
+	}()
 	if _, err := host.Serve(ctx, 4, extraServer); !errors.Is(err, ErrSSHHostBusy) {
 		t.Fatalf("busy: %v", err)
 	}
 	if _, err := host.Serve(ctx, 9, extraServer); !errors.Is(err, ErrSSHHostStale) {
 		t.Fatalf("stale: %v", err)
 	}
-	host.Refused(ctx, 0, RefusedNotSetUp)
+	host.Refused(ctx, extraServer, 0, RefusedNotSetUp)
+	// F5-09: the client reads each reason from the stream.
+	for _, want := range []string{RefusedBusy, RefusedNotSetUp, RefusedNotSetUp} {
+		var refused *RefusedError
+		if err := <-sent; !errors.As(err, &refused) || refused.Reason != want {
+			t.Fatalf("client read %v, want %s", err, want)
+		}
+	}
 	reasons := []string{}
 	for _, event := range log.wait(t, 4) {
 		if event.Kind == SessionRefused {
@@ -120,9 +135,6 @@ func TestServeAuditsRefusalsWithTheirReason(t *testing.T) {
 	// Busy (full), stale generation, then the explicit no-target refusal: in the order they happened.
 	if len(reasons) != 3 || reasons[0] != RefusedBusy || reasons[1] != RefusedNotSetUp || reasons[2] != RefusedNotSetUp {
 		t.Fatalf("refusal reasons = %v", reasons)
-	}
-	if RefusalReason(ErrSSHHostBusy) != RefusedBusy || RefusalReason(ErrSSHHostStale) != RefusedNotSetUp {
-		t.Fatal("refusal reasons do not follow the error")
 	}
 }
 

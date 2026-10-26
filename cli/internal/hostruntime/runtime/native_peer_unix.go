@@ -657,7 +657,7 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 		}
 		target, ok := s.config.ssh.Target()
 		if !ok {
-			s.config.ssh.Refused(ctx, 0, managedssh.RefusedNotSetUp)
+			s.config.ssh.Refused(ctx, stream, 0, managedssh.RefusedNotSetUp)
 			return managedssh.ErrSSHHostStale
 		}
 		_, err := s.config.ssh.Serve(ctx, target.Generation, stream)
