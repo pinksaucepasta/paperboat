@@ -306,16 +306,21 @@ func TestInvitationMailPostgresHTTP(t *testing.T) {
 	call("admin", "POST", adminPath, teams.AcceptRequest{OperationID: "admin-denied"}, 403, nil)
 	exec(`UPDATE paperboat.team_invitations SET mail_requested_at=now()-interval '2 minutes' WHERE invitation_id=$1`, third.InvitationID)
 	call("owner", "POST", adminPath, teams.AcceptRequest{OperationID: "owner-resend"}, 200, nil)
-	// A test team listed in mail.suppressed_invitation_teams records its invitations without mailing
-	// anyone: smoke runs mailed a real inbox on every run.
-	suppressed := policy
-	suppressed.SuppressedInvitationTeams = []string{team}
-	service.ConfigureMail(suppressed, true)
-	quiet := invite("suppressed-invite", "mail-suppressed-"+suffix+"@example.test", "member")
-	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM transactional_mail_outbox WHERE invitation_id=$1`, quiet.InvitationID).Scan(&count); e != nil || count != 0 {
-		t.Fatalf("suppressed test team queued %d invitation mails, want 0 (%v)", count, e)
+	// Invite, cancel, invite the same address again within the dedup window: one mail. Smoke runs
+	// that re-invite the teammate fixture mailed a real inbox on every run. An explicit resend still mails.
+	dedupAddress := "mail-dedup-" + suffix + "@example.test"
+	dedupFirst := invite("dedup-first", dedupAddress, "member")
+	call("owner", "POST", "/v1/teams/"+team+"/invitations/"+dedupFirst.InvitationID+"/cancel", teams.MutationRequest{OperationID: "dedup-cancel", ExpectedGeneration: generation()}, 200, nil)
+	again := invite("dedup-again", dedupAddress, "member")
+	var dedupMails int
+	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM transactional_mail_outbox o JOIN team_invitations i USING(invitation_id) WHERE i.invitation_id IN ($1,$2)`, dedupFirst.InvitationID, again.InvitationID).Scan(&dedupMails); e != nil || dedupMails != 1 {
+		t.Fatalf("invite, cancel, invite queued %d mails, want 1 (%v)", dedupMails, e)
 	}
-	service.ConfigureMail(policy, true)
+	exec(`UPDATE paperboat.team_invitations SET mail_requested_at=now()-interval '2 minutes' WHERE invitation_id=$1`, again.InvitationID)
+	call("owner", "POST", "/v1/teams/"+team+"/invitations/"+again.InvitationID+"/resend", teams.AcceptRequest{OperationID: "dedup-resend"}, 200, nil)
+	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM transactional_mail_outbox WHERE invitation_id=$1`, again.InvitationID).Scan(&dedupMails); e != nil || dedupMails != 1 {
+		t.Fatalf("explicit resend queued %d mails, want 1 (%v)", dedupMails, e)
+	}
 
 	// A former owner remains an admin: the owner-only stored-role rule, rather
 	// than ordinary membership loss, must reject replay while the invite is pending.

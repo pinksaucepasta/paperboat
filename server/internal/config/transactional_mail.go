@@ -12,15 +12,17 @@ type TransactionalMail struct {
 	From                      string `json:"from"`
 	ConsoleOrigin             string `json:"console_origin"`
 	InvitationLifetimeSeconds int64  `json:"invitation_lifetime_seconds"`
-	// SuppressedInvitationTeams are test teams whose invitations never send mail: the invitation is
-	// recorded and logged, and tests read it from the API. Smoke runs otherwise mailed a real inbox
-	// on every run.
-	SuppressedInvitationTeams []string `json:"suppressed_invitation_teams"`
+	// InvitationMailDedupSeconds: a new invitation to an address that already got one for the same
+	// team within this window sends no mail (pending or cancelled and re-created). Resend always mails.
+	InvitationMailDedupSeconds int64 `json:"invitation_mail_dedup_seconds"`
 }
 
 func (m TransactionalMail) Validate(key string) error {
 	if m.InvitationLifetimeSeconds < 60 || m.InvitationLifetimeSeconds > int64(90*24*time.Hour/time.Second) {
 		return errors.New("mail invitation_lifetime_seconds must be between 60 and 7776000")
+	}
+	if m.InvitationMailDedupSeconds < 0 || m.InvitationMailDedupSeconds > int64(30*24*time.Hour/time.Second) {
+		return errors.New("mail invitation_mail_dedup_seconds must be between 0 and 2592000")
 	}
 	if key == "" {
 		return nil

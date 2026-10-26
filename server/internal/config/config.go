@@ -471,7 +471,7 @@ func Default() Config {
 	return Config{
 		Certificates:      Certificates{Challenge: CertificateChallengeDNS01},
 		EdgeIngressLimits: edgelimits.Default(),
-		Mail:              TransactionalMail{InvitationLifetimeSeconds: 2592000},
+		Mail:              TransactionalMail{InvitationLifetimeSeconds: 2592000, InvitationMailDedupSeconds: 86400},
 		Reporting: Reporting{
 			Enabled: reportingEnabled,
 			Release: DefaultSentryRelease,

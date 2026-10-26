@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"html"
-	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +22,9 @@ func (e *RetryAfterError) Error() string {
 	return "invitation email requested recently; retry after the cooldown"
 }
 
-func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string) error {
+// enqueueInvitation queues the invitation's mail. explicit is a resend the inviter asked for; a new
+// invitation skips the mail when the same address got one for this team within the dedup window.
+func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string, explicit bool) error {
 	if _, err := tx.Exec(ctx, `UPDATE team_invitations SET latest_mail_id=NULL,mail_requested_at=now() WHERE invitation_id=$1`, id); err != nil {
 		return err
 	}
@@ -36,18 +36,25 @@ func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string) e
 	if !s.mailEnabled {
 		return nil
 	}
-	var address, name, team string
+	var address, name string
 	var expires time.Time
-	err := tx.QueryRow(ctx, `SELECT coalesce(i.recipient_email,CASE WHEN u.email_verified AND u.status='active' THEN u.primary_email END,''),coalesce(t.display_name,t.team_id),i.expires_at,i.team_id FROM team_invitations i JOIN teams t USING(team_id) LEFT JOIN users u ON u.id=i.recipient_account WHERE i.invitation_id=$1`, id).Scan(&address, &name, &expires, &team)
+	err := tx.QueryRow(ctx, `SELECT coalesce(i.recipient_email,CASE WHEN u.email_verified AND u.status='active' THEN u.primary_email END,''),coalesce(t.display_name,t.team_id),i.expires_at FROM team_invitations i JOIN teams t USING(team_id) LEFT JOIN users u ON u.id=i.recipient_account WHERE i.invitation_id=$1`, id).Scan(&address, &name, &expires)
 	if err != nil {
 		return err
 	}
 	if address == "" {
 		return nil
 	}
-	if slices.Contains(s.mail.SuppressedInvitationTeams, team) {
-		slog.InfoContext(ctx, "team invitation mail suppressed for a test team", "team_id", team, "invitation_id", id)
-		return nil
+	if !explicit && s.mail.InvitationMailDedupSeconds > 0 {
+		var recent bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_invitations p LEFT JOIN users u ON u.id=p.recipient_account
+ WHERE p.team_id=(SELECT team_id FROM team_invitations WHERE invitation_id=$1) AND p.invitation_id<>$1 AND p.latest_mail_id IS NOT NULL
+ AND p.mail_requested_at>now()-$3*interval '1 second' AND lower(coalesce(p.recipient_email,u.primary_email,''))=lower($2))`, id, address, s.mail.InvitationMailDedupSeconds).Scan(&recent); err != nil {
+			return err
+		}
+		if recent {
+			return nil
+		}
 	}
 	mailID := "mail_" + uuid.NewString()
 	message := transactionalmail.Message{From: s.mail.From, To: []string{address}, Subject: "Paperboat team invitation", HTML: "<p>You are invited to join " + html.EscapeString(name) + " on Paperboat.</p><p>This invitation expires " + expires.UTC().Format(time.RFC3339) + ".</p><p><a href=\"" + html.EscapeString(strings.TrimRight(s.mail.ConsoleOrigin, "/")+"/team") + "\">Sign in to view your team invitation</a></p>"}
@@ -111,7 +118,7 @@ func (s *Service) ResendInvitation(ctx context.Context, account, team, id string
 		if err != nil {
 			return err
 		}
-		if err = s.enqueueInvitation(ctx, tx, id); err != nil {
+		if err = s.enqueueInvitation(ctx, tx, id, true); err != nil {
 			return err
 		}
 		if err = advance(ctx, tx, team); err != nil {

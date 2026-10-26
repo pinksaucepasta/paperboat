@@ -382,7 +382,7 @@ func (s *Service) Invite(ctx context.Context, account, team string, r InviteRequ
 		if err != nil {
 			return err
 		}
-		if err = s.enqueueInvitation(ctx, tx, out.InvitationID); err != nil {
+		if err = s.enqueueInvitation(ctx, tx, out.InvitationID, false); err != nil {
 			return err
 		}
 		if err = advance(ctx, tx, team); err != nil {

@@ -17,14 +17,6 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 			c.Network.STUNServers = strings.Split(v, ",")
 		}
 	}
-	if v, ok := lookup("PAPERBOAT_MAIL_SUPPRESSED_INVITATION_TEAMS"); ok {
-		c.Mail.SuppressedInvitationTeams = nil
-		for _, team := range strings.Split(v, ",") {
-			if team = strings.TrimSpace(team); team != "" {
-				c.Mail.SuppressedInvitationTeams = append(c.Mail.SuppressedInvitationTeams, team)
-			}
-		}
-	}
 	setString := func(name string, target *string) {
 		if v, ok := lookup(name); ok {
 			*target = v
