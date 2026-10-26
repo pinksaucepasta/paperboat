@@ -638,13 +638,6 @@ func (f observationSinkFunc) PublishObservation(ctx context.Context, peer Peer, 
 	return f(ctx, peer, observation)
 }
 
-func validSnapshot() Snapshot {
-	return Snapshot{
-		Schema: SnapshotSchemaV1, Generation: 7, ObservedAt: time.Date(2026, 8, 4, 1, 2, 3, 0, time.UTC), DaemonState: "ready", DaemonVersion: "dev",
-		Machines: []MachineStatus{{ID: "machine_1", Alias: "studio", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "relay", RelayRegion: "bom", TransferReadiness: "ready", PreviewReadiness: "degraded", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown", Health: []HealthItem{{Code: "ssh_unavailable", Severity: "warning", Title: "SSH is unavailable", Recovery: "Run pb ssh doctor", ETag: "etag_1"}}}},
-	}
-}
-
 func TestLocalAPIServesStrictSnapshotToOSPeer(t *testing.T) {
 	root := localAPITestDir(t)
 	socket := filepath.Join(root, "paperboat.sock")

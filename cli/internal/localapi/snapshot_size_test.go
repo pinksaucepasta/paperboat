@@ -4,7 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
+
+// Shared by the unix and Windows test builds: this file has no build tag.
+func validSnapshot() Snapshot {
+	return Snapshot{
+		Schema: SnapshotSchemaV1, Generation: 7, ObservedAt: time.Date(2026, 8, 4, 1, 2, 3, 0, time.UTC), DaemonState: "ready", DaemonVersion: "dev",
+		Machines: []MachineStatus{{ID: "machine_1", Alias: "studio", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "relay", RelayRegion: "bom", TransferReadiness: "ready", PreviewReadiness: "degraded", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown", Health: []HealthItem{{Code: "ssh_unavailable", Severity: "warning", Title: "SSH is unavailable", Recovery: "Run pb ssh doctor", ETag: "etag_1"}}}},
+	}
+}
 
 // A snapshot of the most machines the daemon accepts, each with a health item, fits the snapshot bound
 // (Lane X audit A1: the 1 MiB request bound broke pb status near 1,500 machines).
