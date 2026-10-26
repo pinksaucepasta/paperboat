@@ -48,7 +48,6 @@ type locoBackend struct {
 	ns                     *netstack.Impl
 	dm                     *tailcfg.DERPMap
 	homeDERP               tailcfg.DERPRegionID
-	stunServers            []string
 	logf                   logger.Logf
 	allowedPeers           map[key.NodePublic]netip.Addr
 	// contacts are the allowed peers' direct contacts from the signed configuration (peer_contacts.go).

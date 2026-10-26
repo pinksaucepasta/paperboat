@@ -49,7 +49,6 @@ type Reporting struct {
 
 type Config struct {
 	Mail                   TransactionalMail `json:"mail"`
-	Network                Network           `json:"network"`
 	OperatorBootstrapEmail string            `json:"operator_bootstrap_email"`
 	Backups                BackupReporting   `json:"backups"`
 	Reporting              Reporting         `json:"reporting"`
@@ -569,9 +568,6 @@ func Default() Config {
 
 func (c Config) Validate() error {
 	if err := c.Retention.validate(c.UserMachines.ExpiredAccessSessionRetention); err != nil {
-		return err
-	}
-	if err := c.Network.Validate(); err != nil {
 		return err
 	}
 	if err := c.BrowserSessions.Validate(); err != nil {

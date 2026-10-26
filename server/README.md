@@ -224,23 +224,9 @@ Each operation has one user-facing PB support reference. The server provides aud
 staff lookup and account-safe status APIs, with Sentry reporting disabled by default.
 See [configuration, privacy, retention and rollout](docs/runbooks/support-references.md).
 
-### Supplemental STUN discovery
+### STUN
 
-`network.stun_servers` (or comma-separated `PAPERBOAT_NETWORK_STUN_SERVERS`)
-optionally configures up to eight distinct public `host:port` destinations.
-It defaults to empty. The control plane signs this discovery list in the
-endpoint-bound `paperboat.regional-candidates.v1` document. Endpoints remove
-it when that document expires; it never grants relay or application access.
-The registered Paperboat relays continue supplying STUN and relay fallback.
-
-Multiple discovery destinations can expose NAT mappings missed by one server.
-Use operator-supported services or owned STUN listeners; do not pin addresses
-from another service's relay inventory. Public services see the requesting
-public IP and STUN metadata, but carry no terminal, file, or application traffic.
-Cloudflare documents `stun.cloudflare.com:3478` as public STUN at
-https://developers.cloudflare.com/realtime/sfu/get-started/connection-patterns/.
-Configure destinations explicitly according to the deployment's privacy policy;
-empty or unreachable supplemental discovery does not authorize public relays.
+STUN is served only by the registered Paperboat relays; there is no separate STUN server list to configure.
 
 Billing portal configurations must be separate for Personal and Team workspaces.
 Each configuration permits price changes only between the monthly and yearly

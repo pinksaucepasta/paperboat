@@ -130,7 +130,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	network, err := peersessions.NewNetworkService(database, signer, base, peersessions.NetworkOptions{})
+	network, err := peersessions.NewNetworkService(database, signer, base)
 	if err != nil {
 		t.Fatal(err)
 	}

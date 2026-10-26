@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"golang.org/x/crypto/curve25519"
 )
@@ -74,11 +73,8 @@ type NetworkConfigResult struct {
 	EndpointReports bool `json:"endpoint_reports"`
 }
 
-type NetworkOptions struct{ STUNServers []string }
-
 type NetworkService struct {
 	endpointBuilds keyedLocks
-	stunServers    []string
 	store          *db.DB
 	signer         interface {
 		SignNetworkConfiguration(map[string]any) (string, error)
@@ -96,15 +92,11 @@ func NewNetworkService(store *db.DB, signer interface {
 	SignNetworkConfiguration(map[string]any) (string, error)
 	SignRegionalCandidates(map[string]any) (string, error)
 	SignRelayGrant(map[string]any) (string, error)
-}, issuer string, options NetworkOptions) (*NetworkService, error) {
+}, issuer string) (*NetworkService, error) {
 	if store == nil || signer == nil || issuer == "" {
 		return nil, ErrInvalid
 	}
-	if err := (config.Network{STUNServers: options.STUNServers}).Validate(); err != nil {
-		return nil, err
-	}
-	stunServers := append([]string(nil), options.STUNServers...)
-	return &NetworkService{store: store, signer: signer, issuer: issuer, now: time.Now, stunServers: stunServers}, nil
+	return &NetworkService{store: store, signer: signer, issuer: issuer, now: time.Now}, nil
 }
 
 // Register records a peer endpoint registration. Its serializable transaction is replayed after a
@@ -958,9 +950,6 @@ func RegionalCandidateSet(issuer, accountID, endpointID string, generation int64
 }
 
 func (s *NetworkService) signRegionalCandidates(claims map[string]any) (string, error) {
-	if len(s.stunServers) != 0 {
-		claims["stun_servers"] = append([]string(nil), s.stunServers...)
-	}
 	return s.signer.SignRegionalCandidates(claims)
 }
 

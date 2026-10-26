@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 )
 
 const MaxRegionalCandidates = 32
@@ -54,7 +52,6 @@ type RegionalNode struct {
 func (n RegionalNode) SelfHosted() bool { return n.Hosting == "self_hosted" }
 
 type RegionalCandidates struct {
-	STUNServers             []string       `json:"stun_servers,omitempty"`
 	Schema                  string         `json:"schema"`
 	Issuer                  string         `json:"iss"`
 	Audience                string         `json:"aud"`
@@ -117,36 +114,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 			}
 		}
 	}
-	if mesh.ValidateSTUNServers(c.STUNServers) != nil {
-		return ErrRegionalAuthority
-	}
-	if a.server != nil {
-		if err := a.server.server.SetSTUNServers(c.STUNServers); err != nil {
-			return err
-		}
-	}
-	if a.clientEngine != nil {
-		if err := a.clientEngine.SetSTUNServers(c.STUNServers); err != nil {
-			return err
-		}
-	}
 	a.regional = &c
-	if a.stunTimer != nil {
-		a.stunTimer.Stop()
-	}
-	a.stunTimer = time.AfterFunc(time.Until(time.Unix(c.ExpiresAt, 0)), func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		if a.regional != &c || a.closed {
-			return
-		}
-		if a.server != nil {
-			_ = a.server.server.SetSTUNServers(nil)
-		}
-		if a.clientEngine != nil {
-			_ = a.clientEngine.SetSTUNServers(nil)
-		}
-	})
 	return nil
 }
 
@@ -241,12 +209,4 @@ func validEndpointHost(value string) bool {
 		}
 	}
 	return true
-}
-
-// stunServersLocked returns only verified endpoint-bound discovery configuration.
-func (a *Authority) stunServersLocked() []string {
-	if a.regional == nil || a.regional.ExpiresAt <= time.Now().Unix() {
-		return nil
-	}
-	return append([]string(nil), a.regional.STUNServers...)
 }

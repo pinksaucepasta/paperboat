@@ -67,7 +67,6 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	defer b.policyMu.Unlock()
 	dm := derpMapOf(regions)
 	b.mu.Lock()
-	dm = withSTUNServers(dm, b.stunServers)
 	b.dm = dm
 	b.homeDERP = 0
 	if len(regions) != 0 {

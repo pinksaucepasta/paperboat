@@ -504,7 +504,7 @@ func New(opts Options) (*App, error) {
 	// Environment management reuses only the public account-root resolver. The general
 	// server encryption key is deliberately never passed to ENV code.
 	environmentVariableService := environment.NewService(store, auditWriter, peerIdentityService, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
-	peerNetworkService, err := peersessions.NewNetworkService(store, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), peersessions.NetworkOptions{STUNServers: opts.Config.Network.STUNServers})
+	peerNetworkService, err := peersessions.NewNetworkService(store, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure peer network authority: %w", err)

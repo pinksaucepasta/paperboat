@@ -91,7 +91,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	join(0, 999)
 
 	var signed map[string]any
-	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test", NetworkOptions{})
+	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}

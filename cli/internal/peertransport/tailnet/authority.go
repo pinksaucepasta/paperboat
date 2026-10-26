@@ -145,7 +145,6 @@ type Authority struct {
 	options      AuthorityOptions
 	current      *NetworkConfiguration
 	private      key.NodePrivate
-	stunTimer    *time.Timer
 	closed       bool
 	expired      bool
 	lastVerified time.Time
@@ -570,10 +569,6 @@ func (a *Authority) Restore(ctx context.Context) error {
 
 func (a *Authority) dropLocked() {
 	a.expired = false
-	if a.stunTimer != nil {
-		a.stunTimer.Stop()
-		a.stunTimer = nil
-	}
 	a.expiresAt.Store(0)
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery

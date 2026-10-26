@@ -11,12 +11,6 @@ import (
 )
 
 func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(string) ([]byte, error)) error {
-	if v, ok := lookup("PAPERBOAT_NETWORK_STUN_SERVERS"); ok {
-		c.Network.STUNServers = nil
-		if v != "" {
-			c.Network.STUNServers = strings.Split(v, ",")
-		}
-	}
 	setString := func(name string, target *string) {
 		if v, ok := lookup(name); ok {
 			*target = v

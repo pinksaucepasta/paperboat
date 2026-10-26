@@ -44,7 +44,7 @@ func configureInspectorNativeAuthority(t *testing.T, database *db.DB, linked *in
 	if err != nil {
 		t.Fatal(err)
 	}
-	network, err := peersessions.NewNetworkService(database, linked.Signer, issuer, peersessions.NetworkOptions{})
+	network, err := peersessions.NewNetworkService(database, linked.Signer, issuer)
 	if err != nil {
 		t.Fatal(err)
 	}

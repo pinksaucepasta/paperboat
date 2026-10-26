@@ -121,7 +121,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewNetworkService(store, provider, "https://api.example.test", NetworkOptions{})
+	service, err := NewNetworkService(store, provider, "https://api.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}

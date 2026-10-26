@@ -41,7 +41,6 @@ import (
 type Server struct {
 	// usagePaths caches each peer's accounting path for usagePathTTL.
 	usagePaths             usagePathCache
-	STUNServers            []string
 	TestOnlyPacketListener nettype.PacketListener
 	PeerRelayNodes         []*tailcfg.Node
 	RelayControlPeers      []key.NodePublic
@@ -83,9 +82,6 @@ func (s *Server) Start() error {
 	if s.UDPIdleTimeout < 0 {
 		return errors.New("mesh: Server.UDPIdleTimeout must not be negative")
 	}
-	if err := ValidateSTUNServers(s.STUNServers); err != nil {
-		return err
-	}
 	logf := s.Logf
 	if logf == nil {
 		logf = logger.Discard
@@ -117,8 +113,6 @@ func (s *Server) Start() error {
 	for _, region := range regions {
 		mak.Set(&lb.dm.Regions, region.RegionID, region)
 	}
-	lb.stunServers = append([]string(nil), s.STUNServers...)
-	lb.dm = withSTUNServers(lb.dm, lb.stunServers)
 	if reg != nil {
 		lb.homeDERP = reg.RegionID
 	}

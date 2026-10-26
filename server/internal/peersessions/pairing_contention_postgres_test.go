@@ -63,7 +63,7 @@ wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,upd
 SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
  ('100.'||(64+$2::int)||'.'||$3::int||'.'||(1+g))::inet,now(),now() FROM generate_series(0,59) g`, account, int(net[0])%64, int(net[1]))
 
-	service, err := NewNetworkService(store, meshTestSigner{}, "https://issuer.example.test", NetworkOptions{})
+	service, err := NewNetworkService(store, meshTestSigner{}, "https://issuer.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
