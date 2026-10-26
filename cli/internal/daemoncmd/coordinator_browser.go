@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // prepareBrowserGatewayLocked binds the public wildcard address once. Every

@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/fixedpacket"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
 	"github.com/quic-go/quic-go/qlogwriter"

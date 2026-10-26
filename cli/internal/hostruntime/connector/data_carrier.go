@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func NewDataCarrierClient(ctx context.Context, link io.ReadWriteCloser, config DataCarrierConfig, identity ...DataCarrierIdentity) (*DataCarrier, error) {

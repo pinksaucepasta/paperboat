@@ -15,11 +15,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const (

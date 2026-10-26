@@ -16,7 +16,6 @@ import (
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -31,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/spf13/cobra"
 )
 

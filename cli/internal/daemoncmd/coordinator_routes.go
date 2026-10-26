@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func mapPeerSnapshot(peers []*daemonrpc.PeerUpdate, cidr string) ([]*daemonrpc.PeerUpdate, error) {

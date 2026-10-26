@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 var (

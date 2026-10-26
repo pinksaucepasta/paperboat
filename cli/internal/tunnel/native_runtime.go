@@ -14,16 +14,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
-	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 type nativeRuntimeClock struct{}
@@ -655,7 +655,6 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	}
 	return authority, peerTLS, relayTLS, nil
 }
-
 
 func observeCLINativePeerEvent(event native.Event) {
 	if event.Kind == "connected" {

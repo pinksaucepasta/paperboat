@@ -8,7 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/backoff"
-	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // Announced-service leases last only as long as a host keeps announcing (the server's snapshot
