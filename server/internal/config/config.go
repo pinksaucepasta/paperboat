@@ -265,14 +265,17 @@ type Certificates struct {
 	Issuer       string `json:"issuer"`
 	// Challenge selects the ACME challenge type: dns-01 (default, Cloudflare)
 	// or http-01 (staging only; the edge answers /.well-known/acme-challenge).
-	Challenge                       string        `json:"challenge"`
-	AccountKeyReference             string        `json:"account_key_reference"`
-	MasterKeyReference              string        `json:"master_key_reference"`
-	DNSProvider                     string        `json:"dns_provider"`
-	DNSZoneID                       string        `json:"dns_zone_id"`
-	PublicDNSZoneID                 string        `json:"public_dns_zone_id"`
-	DNSTokenReference               string        `json:"dns_token_reference"`
-	ChallengeZone                   string        `json:"challenge_zone"`
+	Challenge           string `json:"challenge"`
+	AccountKeyReference string `json:"account_key_reference"`
+	MasterKeyReference  string `json:"master_key_reference"`
+	DNSProvider         string `json:"dns_provider"`
+	DNSZoneID           string `json:"dns_zone_id"`
+	PublicDNSZoneID     string `json:"public_dns_zone_id"`
+	DNSTokenReference   string `json:"dns_token_reference"`
+	ChallengeZone       string `json:"challenge_zone"`
+	// DNSWriteBase, when set, confines every Cloudflare write to TXT records at or under this name
+	// (a staging server sharing a token with a production zone).
+	DNSWriteBase                    string        `json:"dns_write_base"`
 	CAAResolver                     string        `json:"caa_resolver"`
 	DistributionCredentialReference string        `json:"distribution_credential_reference"`
 	OwnerID                         string        `json:"owner_id"`
@@ -958,6 +961,9 @@ func (c Certificates) validateDNS01() []error {
 	}
 	if !validEndpointBaseDomain(c.ChallengeZone) {
 		errs = append(errs, fmt.Errorf("certificates.challenge_zone must be a DNS hostname"))
+	}
+	if c.DNSWriteBase != "" && !validEndpointBaseDomain(c.DNSWriteBase) {
+		errs = append(errs, fmt.Errorf("certificates.dns_write_base must be a DNS hostname"))
 	}
 	return errs
 }

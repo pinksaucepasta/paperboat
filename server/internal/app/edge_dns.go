@@ -33,6 +33,7 @@ func newEdgeDNSReconciler(database *db.DB, cfg config.Config, zoneID string) (*t
 		AddressAdmission: admission, ZoneID: zoneID, TokenReference: cfg.Certificates.DNSTokenReference,
 		TokenSource: tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv},
 		HTTPClient:  providerHTTPClient("cloudflare-edge-dns", 5*time.Second),
+		WriteBase:   cfg.Certificates.DNSWriteBase,
 	})
 	if err != nil {
 		return nil, err

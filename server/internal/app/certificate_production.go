@@ -158,6 +158,7 @@ func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentRefe
 		TokenReference: certificateConfig.DNSTokenReference,
 		TokenSource:    secrets,
 		HTTPClient:     providerHTTPClient("cloudflare-dns", cfg.HTTP.RequestTimeout),
+		WriteBase:      certificateConfig.DNSWriteBase,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
@@ -165,6 +166,7 @@ func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentRefe
 	publicDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
 		ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
 		TokenSource: secrets, HTTPClient: providerHTTPClient("cloudflare-public-dns", cfg.HTTP.RequestTimeout),
+		WriteBase: certificateConfig.DNSWriteBase,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: public DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)

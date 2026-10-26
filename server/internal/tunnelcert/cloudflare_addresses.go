@@ -318,6 +318,9 @@ func (p *CloudflareDNSProvider) ListAddressRecords(ctx context.Context, hostname
 // CreateAddressRecord performs one write attempt. A request error is pending:
 // callers must list and reconcile before deciding whether to try another POST.
 func (p *CloudflareDNSProvider) CreateAddressRecord(ctx context.Context, record AddressRecord, ipv6ReachabilityVerified bool) (AddressRecord, error) {
+	if p.writeBase != "" {
+		return AddressRecord{}, addressErrorWithCauses(AddressPublicationUnsupported, "address records are refused under a DNS write base", 0, ErrDNSWriteOutsideBase)
+	}
 	host, ip, err := validateAddressRecord(record, false)
 	if err != nil {
 		return AddressRecord{}, err
@@ -355,6 +358,9 @@ func (p *CloudflareDNSProvider) CreateAddressRecord(ctx context.Context, record 
 // DeleteAddressRecord reads the provider record by ID and deletes only when
 // every supplied identity field still matches. A missing record is complete.
 func (p *CloudflareDNSProvider) DeleteAddressRecord(ctx context.Context, record AddressRecord) error {
+	if p.writeBase != "" {
+		return addressErrorWithCauses(AddressPublicationUnsupported, "address records are refused under a DNS write base", 0, ErrDNSWriteOutsideBase)
+	}
 	host, ip, err := validateAddressRecord(record, true)
 	if err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -91,6 +92,10 @@ type CloudflareDNSConfig struct {
 	PollInterval     time.Duration
 	MaxAttempts      int
 	AddressAdmission CloudflareAddressAdmission
+	// WriteBase, when set, confines every write to TXT records at or under this name: address
+	// records are refused and so is any TXT outside it. A staging server sharing a token with a
+	// production zone sets it so it can never touch production records.
+	WriteBase string
 }
 
 // CloudflareDNSProvider is deliberately record-scoped. It never accepts a
@@ -107,6 +112,7 @@ type CloudflareDNSProvider struct {
 	pollInterval     time.Duration
 	maxAttempts      int
 	addressAdmission CloudflareAddressAdmission
+	writeBase        string
 }
 
 func NewCloudflareDNSProvider(config CloudflareDNSConfig) (*CloudflareDNSProvider, error) {
@@ -152,11 +158,30 @@ func NewCloudflareDNSProvider(config CloudflareDNSConfig) (*CloudflareDNSProvide
 		resolver = net.DefaultResolver
 	}
 	addressAdmission := config.AddressAdmission
-	return &CloudflareDNSProvider{baseURL: parsed, zoneID: config.ZoneID, tokenReference: config.TokenReference, tokens: config.TokenSource, httpClient: client, resolver: resolver, propagationWait: propagationWait, pollInterval: pollInterval, maxAttempts: maxAttempts, addressAdmission: addressAdmission}, nil
+	writeBase := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(config.WriteBase), "."))
+	if config.WriteBase != "" && (writeBase == "" || strings.Contains(writeBase, "*") || strings.Count(writeBase, ".") < 1) {
+		return nil, fmt.Errorf("%w: DNS write base must be a DNS name", ErrInvalid)
+	}
+	return &CloudflareDNSProvider{writeBase: writeBase, baseURL: parsed, zoneID: config.ZoneID, tokenReference: config.TokenReference, tokens: config.TokenSource, httpClient: client, resolver: resolver, propagationWait: propagationWait, pollInterval: pollInterval, maxAttempts: maxAttempts, addressAdmission: addressAdmission}, nil
+}
+
+// ErrDNSWriteOutsideBase is a write the provider's WriteBase forbids; nothing was sent.
+var ErrDNSWriteOutsideBase = errors.New("DNS write outside the configured write base refused")
+
+// txtWriteAllowed reports whether a TXT record name may be written or deleted under WriteBase.
+func (p *CloudflareDNSProvider) txtWriteAllowed(name string) bool {
+	if p.writeBase == "" {
+		return true
+	}
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	return name == p.writeBase || strings.HasSuffix(name, "."+p.writeBase)
 }
 
 func (p *CloudflareDNSProvider) Present(ctx context.Context, record DNS01Record) (DNS01Record, error) {
 	ctx = certificateContext(ctx)
+	if p != nil && !p.txtWriteAllowed(record.Name) {
+		return DNS01Record{}, fmt.Errorf("%w: %w", ErrDNSChallengeUnavailable, ErrDNSWriteOutsideBase)
+	}
 	if p == nil || p.tokens == nil || p.baseURL == nil || !validDNS01Record(record) {
 		return DNS01Record{}, ErrDNSChallengeUnavailable
 	}
@@ -249,6 +274,9 @@ func expectedDNSPropagationMiss(err error) bool {
 
 func (p *CloudflareDNSProvider) Cleanup(ctx context.Context, record DNS01Record) error {
 	ctx = certificateContext(ctx)
+	if p != nil && !p.txtWriteAllowed(record.Name) {
+		return fmt.Errorf("%w: %w", ErrDNSChallengeUnavailable, ErrDNSWriteOutsideBase)
+	}
 	if p == nil || p.baseURL == nil || !validProviderID(record.ProviderID) {
 		return ErrDNSChallengeUnavailable
 	}
