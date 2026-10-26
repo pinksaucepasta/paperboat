@@ -97,14 +97,6 @@ type helperOutput struct {
 	endSequence uint64
 }
 
-type TerminalInputResult struct {
-	StreamID     uint32
-	Sequence     uint64
-	Status       string
-	BytesWritten int
-	ErrorCode    string
-}
-
 type helperWrite struct {
 	messageType helperMessageType
 	data        []byte
@@ -187,7 +179,6 @@ type helperTerminalConn struct {
 	finalSequence             atomic.Uint64
 	ackNotify                 chan struct{}
 	ackMu                     sync.Mutex
-	inputResults              chan TerminalInputResult
 	inputQueue                *resolver.TerminalInputQueue
 	closing                   atomic.Bool
 	finishOnce                sync.Once
@@ -214,7 +205,7 @@ func newHelperTerminalConn(message helperMessageConnection, target *resolver.Ter
 	if target != nil {
 		inputQueue = target.InputQueue
 	}
-	return &helperTerminalConn{message: message, target: target, out: make(chan helperOutput, queue), done: make(chan struct{}), inputWrites: make(chan helperWrite, 64), controlWrites: make(chan helperWrite, 16), detachWrites: make(chan helperWrite, 1), ackWrites: make(chan helperWrite, 1), ackNotify: make(chan struct{}, 1), responses: make(map[string]chan helperFrame), inputResults: make(chan TerminalInputResult, 256), inputQueue: inputQueue}
+	return &helperTerminalConn{message: message, target: target, out: make(chan helperOutput, queue), done: make(chan struct{}), inputWrites: make(chan helperWrite, 64), controlWrites: make(chan helperWrite, 16), detachWrites: make(chan helperWrite, 1), ackWrites: make(chan helperWrite, 1), ackNotify: make(chan struct{}, 1), responses: make(map[string]chan helperFrame), inputQueue: inputQueue}
 }
 
 func newInitializedHelperTerminalConn(ctx context.Context, message helperMessageConnection, target *resolver.TerminalTarget, queue int) (*helperTerminalConn, error) {
@@ -386,7 +377,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
 	for _, pending := range c.inputQueue.Reconcile(response.Result.InputSequence) {
-		c.publishInputResult(TerminalInputResult{StreamID: c.streamID, Sequence: pending.Sequence, Status: "uncertain", BytesWritten: 0, ErrorCode: "delivery_reconciled_without_result"})
+		diagnosticlog.TryInfo("terminal input reconciled without a result", "sequence", pending.Sequence)
 	}
 	if response.Result.Session.Snapshot.Generation != 0 {
 		c.generation = response.Result.Session.Snapshot.Generation
@@ -632,7 +623,9 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 			return true
 		}
 		c.inputQueue.Complete(event.Sequence, event.Status)
-		c.publishInputResult(TerminalInputResult{StreamID: event.StreamID, Sequence: event.Sequence, Status: event.Status, BytesWritten: event.BytesWritten, ErrorCode: event.ErrorCode})
+		if event.Status != "accepted" {
+			diagnosticlog.TryInfo("terminal input not accepted", "sequence", event.Sequence, "status", event.Status, "code", event.ErrorCode)
+		}
 		return false
 	}
 	if event.Event != "terminal_stream_end" {
@@ -655,25 +648,6 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 	}
 	c.finish(code, nil)
 	return true
-}
-
-func (c *helperTerminalConn) publishInputResult(result TerminalInputResult) {
-	if c.inputResults == nil {
-		return
-	}
-	select {
-	case c.inputResults <- result:
-	case <-c.done:
-	default:
-		// A full decision queue is a local safety fault. Do not discard the
-		// durable status silently; close the connection so the caller observes
-		// a bounded failure and can reconcile through a fresh attachment.
-		c.finish(1, errors.Join(ErrTransportLost, errors.New("terminal input result queue is full")))
-	}
-}
-
-func (c *helperTerminalConn) InputResults() <-chan TerminalInputResult {
-	return c.inputResults
 }
 
 func (c *helperTerminalConn) Read(p []byte) (int, error) {
@@ -797,7 +771,6 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 		copy(message[13:], p[:size])
 		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: message, result: make(chan error, 1)}); err != nil {
 			c.inputQueue.Complete(sequence, "uncertain")
-			c.publishInputResult(TerminalInputResult{StreamID: c.streamID, Sequence: sequence, Status: "uncertain", ErrorCode: "transport_write_uncertain"})
 			return written, err
 		}
 		written += size

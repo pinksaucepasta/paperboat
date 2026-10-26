@@ -827,3 +827,26 @@ func TestHelperTerminalIgnoresEventsItDoesNotUse(t *testing.T) {
 		t.Fatal("an unknown event ended the terminal")
 	}
 }
+
+// Every keyed input gets a terminal_input_result from the host. They used to go into a 256-slot
+// channel nothing read, and the 257th closed the connection: a native terminal reconnected about
+// every 256 keystrokes. Results now only complete the input queue.
+func TestManyInputResultsDoNotEndTheTerminal(t *testing.T) {
+	target := &resolver.TerminalTarget{SessionID: "ses_1", InputQueue: resolver.NewTerminalInputQueue(512)}
+	connection := newHelperTerminalConn(&capturedHelperMessageConnection{}, target, 1)
+	connection.streamID = 7
+	for sequence := 1; sequence <= 1000; sequence++ {
+		if _, err := target.InputQueue.Enqueue([]byte("x")); err != nil && sequence <= 512 {
+			t.Fatal(err)
+		}
+		payload := fmt.Sprintf(`{"event":"terminal_input_result","stream_id":7,"sequence":%d,"status":"accepted"}`, sequence)
+		if connection.handleEvent(helperFrame{Type: "event", Payload: json.RawMessage(payload)}) {
+			t.Fatalf("input result %d ended the terminal: %v", sequence, connection.terminalError())
+		}
+	}
+	select {
+	case <-connection.done:
+		t.Fatalf("terminal ended: %v", connection.terminalError())
+	default:
+	}
+}
