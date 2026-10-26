@@ -72,8 +72,6 @@ var eraseSteps = []struct{ name, query string }{
 	{"personal tunnel domains", `UPDATE tunnel_domains SET deleted_at=now(), updated_at=now(), generation=generation+1 WHERE account_id=$1 AND deleted_at IS NULL`},
 	{"personal tunnels", `UPDATE tunnels SET desired_state='deleted', deleted_at=now(), updated_at=now(), generation=generation+1 WHERE account_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL`},
 	{"tunnel logs", `DELETE FROM tunnel_log_entries WHERE account_id=$1`},
-	{"tunnel connector enrollments", `DELETE FROM tunnel_connector_enrollments WHERE account_id=$1`},
-	{"tunnel rotation targets", `DELETE FROM tunnel_connector_rotation_targets WHERE account_id=$1`},
 
 	{"config conflict resolutions", `DELETE FROM control_config_conflict_resolutions WHERE requested_by_user_id=$1`},
 	{"team config default adoptions", `DELETE FROM team_config_default_adoptions WHERE account_id=$1`},

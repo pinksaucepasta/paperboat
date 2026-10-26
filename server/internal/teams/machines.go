@@ -235,7 +235,7 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 				return ErrInvalid
 			}
 			var published bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM preview_leases WHERE owner_machine_id=$1 AND access_mode='public' AND terminal_state='active') OR EXISTS(SELECT 1 FROM tunnels t WHERE t.access_mode='public' AND t.deleted_at IS NULL AND (t.created_by_host_id=$1 OR EXISTS(SELECT 1 FROM tunnel_connectors c WHERE c.tunnel_id=t.id AND c.host_id=$1 AND c.revoked_at IS NULL)))`, r.MachineID).Scan(&published); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM preview_leases WHERE owner_machine_id=$1 AND access_mode='public' AND terminal_state='active') OR EXISTS(SELECT 1 FROM tunnels t WHERE t.access_mode='public' AND t.deleted_at IS NULL AND t.created_by_host_id=$1)`, r.MachineID).Scan(&published); err != nil {
 				return err
 			}
 			if published {

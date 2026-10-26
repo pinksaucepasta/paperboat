@@ -173,7 +173,7 @@ func (r *AccessorRepository) MachineRoutes(ctx context.Context, accountID, machi
 		if !v.AccessorPublicKey.Valid {
 			return nil, ErrInvalid
 		}
-		a, err := admissionFromValues(now, v.AccountID, v.ResourceKind, v.ResourceID, v.TunnelName, v.RouteName, v.OperationID, v.ConnectorID, v.CarrierSessionID, v.RouteID, v.RouteGeneration, v.SessionGeneration, v.ProcessGeneration, v.ConfigGeneration, v.AssignmentGeneration, v.EdgeNodeID, v.EdgeProcessEpoch, v.Protocol, v.Hostname, v.EdgeEndpoints, v.ExpiresAt, v.TunnelID, v.CarrierConnectorID, v.AssignmentID, v.ConfigContentHash, v.MatchType, v.WildcardSuffix, v.AccessorMachineID, v.InstallationGeneration, v.AccessorPublicKey.String, v.EdgeCarrierServerSpkiSha256.String, v.EdgeCarrierServerCertificateChainPem.String)
+		a, err := admissionFromValues(now, v.AccountID, v.ResourceKind, v.ResourceID, v.TunnelName, v.RouteName, v.OperationID, v.ConnectorID, v.CarrierSessionID, v.RouteID, v.RouteGeneration, v.SessionGeneration, v.ProcessGeneration, v.ConfigGeneration, v.AssignmentGeneration, v.EdgeNodeID, v.EdgeProcessEpoch, v.Protocol, v.Hostname, v.EdgeEndpoints, v.ExpiresAt, v.TunnelID, v.CarrierConnectorID, v.AssignmentID, v.ConfigContentHash, v.MatchType, v.WildcardSuffix, v.AccessorMachineID, v.InstallationGeneration, v.AccessorPublicKey.String, v.EdgeCarrierServerSpkiSha256, v.EdgeCarrierServerCertificateChainPem)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +196,7 @@ func (r *AccessorRepository) EdgeAdmissions(ctx context.Context, nodeID, epoch s
 		if !v.AccessorPublicKey.Valid {
 			return nil, ErrInvalid
 		}
-		a, e := admissionFromValues(now, v.AccountID, v.ResourceKind, v.ResourceID, v.TunnelName, v.RouteName, v.OperationID, v.ConnectorID, v.CarrierSessionID, v.RouteID, v.RouteGeneration, v.SessionGeneration, v.ProcessGeneration, v.ConfigGeneration, v.AssignmentGeneration, v.EdgeNodeID, v.EdgeProcessEpoch, v.Protocol, v.Hostname, v.EdgeEndpoints, v.ExpiresAt, v.TunnelID, v.CarrierConnectorID, v.AssignmentID, v.ConfigContentHash, v.MatchType, v.WildcardSuffix, v.AccessorMachineID, v.InstallationGeneration, v.AccessorPublicKey.String, v.EdgeCarrierServerSpkiSha256.String, v.EdgeCarrierServerCertificateChainPem.String)
+		a, e := admissionFromValues(now, v.AccountID, v.ResourceKind, v.ResourceID, v.TunnelName, v.RouteName, v.OperationID, v.ConnectorID, v.CarrierSessionID, v.RouteID, v.RouteGeneration, v.SessionGeneration, v.ProcessGeneration, v.ConfigGeneration, v.AssignmentGeneration, v.EdgeNodeID, v.EdgeProcessEpoch, v.Protocol, v.Hostname, v.EdgeEndpoints, v.ExpiresAt, v.TunnelID, v.CarrierConnectorID, v.AssignmentID, v.ConfigContentHash, v.MatchType, v.WildcardSuffix, v.AccessorMachineID, v.InstallationGeneration, v.AccessorPublicKey.String, v.EdgeCarrierServerSpkiSha256, v.EdgeCarrierServerCertificateChainPem)
 		if e != nil {
 			return nil, e
 		}

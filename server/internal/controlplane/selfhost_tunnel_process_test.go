@@ -80,19 +80,11 @@ func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
 		t.Fatal(e)
 	}
 	edge.SetCertificateDistribution(distribution.Handler())
-	previews, e := previewattachment.NewProduction(database)
-	if e != nil {
-		t.Fatal(e)
-	}
 	verifier, e := previewattachment.NewDBPreviewEdgeRequestVerifier(database, managed)
 	if e != nil {
 		t.Fatal(e)
 	}
 	verifier.SetNodeCredentials(s)
-	previewHandler, e := previewattachment.NewEdgeHTTPHandler(previews.Service, previews.Repository, verifier)
-	if e != nil {
-		t.Fatal(e)
-	}
 	enrollment := controlplane.NewEnrollmentService(database, signer, audit.NewWriter(database), "https://control.example.test", secret)
 	accessors, e := privateaccess.NewAccessorRepository(database)
 	if e != nil {
@@ -104,9 +96,6 @@ func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /.well-known/jwks.json", signer)
-	if e = previewHandler.Register(mux); e != nil {
-		t.Fatal(e)
-	}
 	mux.Handle("POST "+privateaccess.EdgeAdmissionsPath, accessorHandler)
 	mux.Handle("/", edge.Handler())
 	api := httptest.NewTLSServer(mux)

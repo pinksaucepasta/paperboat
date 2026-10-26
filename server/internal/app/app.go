@@ -6,6 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"runtime"
+	"strings"
+	"sync/atomic"
+	"time"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
@@ -22,7 +29,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
 	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
-	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -77,13 +83,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
-	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"log/slog"
-	"net/http"
-	"runtime"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 func New(opts Options) (*App, error) {
@@ -134,11 +133,6 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure atomic preview domains: %w", err)
 	}
-	previewAttachmentProduction, err := previewattachment.NewProduction(store)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure preview carrier attachment: %w", err)
-	}
 	cursorKey := sha256.Sum256([]byte("paperboat.preview-tunnel.cursor\x00" + opts.Config.Secrets.EncryptionKey))
 	previewDomainService, err := previewdomain.NewService(previewDomainRepository, previewdomain.Config{
 		CursorKey:     cursorKey[:],
@@ -156,7 +150,7 @@ func New(opts Options) (*App, error) {
 	previewLeaseService, err := previewv1.NewService(previewTunnelStore, previewv1.Config{
 		EndpointDomain:      opts.Config.Preview.BaseDomain,
 		CursorKey:           cursorKey[:],
-		AttachmentReadiness: endpoints.PreviewReadiness{DB: store, Attachments: previewAttachmentProduction.Service},
+		AttachmentReadiness: endpoints.PreviewReadiness{DB: store},
 		PreviewDomains:      previewDomainRepository,
 	})
 	if err != nil {
@@ -334,62 +328,6 @@ func New(opts Options) (*App, error) {
 		}
 	}
 	enrollmentService := controlplane.NewEnrollmentService(store, mintKeys, auditWriter, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
-	connectorControlStore, err := connectorprotocol.NewSQLControlStore(store, connectorprotocol.SQLControlStoreConfig{})
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector control store: %w", err)
-	}
-	connectorPersistentServer, err := connectorprotocol.NewPersistentServer(connectorControlStore, connectorControlStore, wire.ServerConfig{Capabilities: wire.ProductionCapabilities()})
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector control server: %w", err)
-	}
-	connectorRotationDispatcher, err := connectorprotocol.NewRotationDispatcher(connectorprotocol.RotationDispatcherConfig{
-		Store: connectorControlStore, VerifyOldProof: connectorControlStore.VerifyRotationOldProof,
-		// observedWorker installs the safe, cause-aware progress observer for
-		// each real reconciliation pass. Reporting here would duplicate it.
-		ReportError: func(error) {},
-	})
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector rotation dispatcher: %w", err)
-	}
-	connectorDrainDispatcher, err := connectorprotocol.NewDrainDispatcher(connectorprotocol.DrainDispatcherConfig{
-		Store:       connectorControlStore,
-		ReportError: func(error) {},
-	})
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector drain dispatcher: %w", err)
-	}
-	connectorControlTransport, err := connectorprotocol.NewControlTransportWithDispatchers(connectorPersistentServer, nil, connectorRotationDispatcher, connectorDrainDispatcher)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector control transport: %w", err)
-	}
-	connectorControlHandler, err := connectorprotocol.NewWebSocketHandler(connectorControlTransport)
-	if err == nil {
-		connectorControlHandler.WithGoneCheck(connectorprotocol.SQLConnectorGone(store))
-	}
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector control websocket: %w", err)
-	}
-	connectorCarrierBootstrapHandler, err := httpapi.NewConnectorCarrierBootstrapHandler(
-		connectorControlTransport.Sessions(),
-		connectorprotocol.SQLCarrierBootstrapSource{DB: store, Quota: workspaceBilling},
-		enrollmentService,
-		connectorprotocol.SQLConnectorGone(store),
-	)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector carrier bootstrap: %w", err)
-	}
-	connectorOriginHealthHandler, err := httpapi.NewConnectorOriginHealthHandler(connectorControlTransport.Sessions(), tunnelRepository, enrollmentService)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure connector origin health: %w", err)
-	}
 	machineEventHub := machineevents.NewHub(store.Pool(), store.Direct())
 	machineEventSigning, err := httpapi.NewMachineEventSigning(mintKeys, publicBaseURL)
 	if err != nil {
@@ -598,29 +536,17 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure preview carrier machine verifier: %w", err)
 	}
-	previewAttachmentLeasePrecondition, err := httpapi.NewPreviewAttachmentLeasePreconditionChecker(previewTunnelStore)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure preview carrier lease precondition: %w", err)
-	}
-	previewAttachmentHandler, err := previewattachment.NewHTTPHandler(previewAttachmentProduction.Service, previewAttachmentMachineVerifier, previewAttachmentLeasePrecondition)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure preview carrier host handler: %w", err)
-	}
 	if opts.Config.Certificates.Enabled && opts.Config.Certificates.PublicDNSZoneID != "" {
 		previewAddressPublisher, publisherErr := newPreviewAddressPublisher(store, opts.Config)
 		if publisherErr != nil {
 			_ = store.Close()
 			return nil, fmt.Errorf("configure preview DNS publisher: %w", publisherErr)
 		}
-		previewAttachmentHandler.SetAddressPublisher(previewAddressPublisher)
 		previewLeaseService.ConfigureAddressPublisher(previewAddressPublisher)
 	}
 	lazyActivator := &lazyaccess.Activator{DB: store, Leases: previewLeaseService, OwnerLease: opts.Config.UserMachines.OfflineAfter}
 	inspectorHandlers := &httpapi.InspectorHandlers{Access: inspectaccess.NewService(store), Machine: previewAttachmentMachineVerifier}
 	var browserAccessHandlers *httpapi.BrowserAccessHandlers
-	var previewEdgeAttachmentHandler http.Handler
 	var runtimeAttachmentHandler http.Handler
 	var privateAccessAuthorizeHandler http.Handler
 	var privateAccessGrantHandler http.Handler
@@ -632,7 +558,7 @@ func New(opts Options) (*App, error) {
 			return nil, fmt.Errorf("configure preview carrier edge verifier: %w", verifierErr)
 		}
 		previewEdgeVerifier.SetNodeCredentials(nodeCredentials)
-		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store, AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier}
+		runtimeAttachmentHandler = &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: store, AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime}, Machine: previewAttachmentMachineVerifier, Edge: previewEdgeVerifier, OriginHealth: tunnelRepository}
 		if trustedLoginOrigin != "" {
 			newBrowserService := browseraccess.NewService
 			if opts.Config.Environment != config.EnvironmentProduction {
@@ -648,31 +574,10 @@ func New(opts Options) (*App, error) {
 				return nil, err
 			}
 			browserService.MachineServiceDomain = opts.Config.Preview.BaseDomain
-			browserAccessHandlers = &httpapi.BrowserAccessHandlers{Lazy: lazyActivator, Access: browserService, Ingress: &browseringress.Service{DB: store, Access: browserService, Quota: workspaceBilling}, Edge: previewEdgeVerifier, Machine: previewAttachmentMachineVerifier, ViewerPolicyReconciler: edgeControlService}
+			browserAccessHandlers = &httpapi.BrowserAccessHandlers{Lazy: lazyActivator, Access: browserService, Ingress: &browseringress.Service{DB: store, Access: browserService, Quota: workspaceBilling}, Edge: previewEdgeVerifier, Machine: previewAttachmentMachineVerifier}
 		}
-		previewEdgeHandler, edgeHandlerErr := previewattachment.NewEdgeHTTPHandler(previewAttachmentProduction.Service, previewAttachmentProduction.Repository, previewEdgeVerifier)
-		err = edgeHandlerErr
-		if err != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("configure preview carrier edge handler: %w", err)
-		}
-		previewCertificateReadiness, readinessErr := tunnelcert.NewSQLStore(store)
-		if readinessErr != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("configure preview certificate readiness: %w", readinessErr)
-		}
-		previewAliasProjector, projectorErr := previewdomain.NewPreviewCarrierAliasProjector(previewDomainRepository, previewCertificateReadiness, nil)
-		if projectorErr != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("configure preview carrier aliases: %w", projectorErr)
-		}
-		if err = previewEdgeHandler.SetAliasProjector(previewAliasProjector); err != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("attach preview carrier aliases: %w", err)
-		}
-		previewEdgeAttachmentHandler = previewEdgeHandler
 		privateAccessProduction, productionErr := privateaccess.NewProduction(
-			store, previewAttachmentProduction.Repository, mintKeys,
+			store, mintKeys,
 			config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), enrollmentService,
 			privateaccess.PreviewEdgeVerifierAdapter{Verifier: previewEdgeVerifier},
 			privateaccess.AuditWriterSink{Writer: auditWriter}, workspaceBilling,
@@ -705,10 +610,6 @@ func New(opts Options) (*App, error) {
 		},
 	}
 	telemetryProducer := &telemetry.Producer{Metrics: telemetryMetrics, Health: telemetryHealth, Now: time.Now}
-	// Connector protocol persistence owns the live session lifecycle. Attach
-	// telemetry after the producer is composed; the adapter is best-effort and
-	// never changes protocol persistence outcomes.
-	connectorPersistentServer.SetTelemetryProducer(telemetryProducer)
 	telemetryDiagnostics, telemetryErr := telemetry.NewDiagnostics(telemetry.DiagnosticsConfig{
 		Metrics: telemetryMetrics,
 		Health:  telemetryHealth,
@@ -844,93 +745,88 @@ func New(opts Options) (*App, error) {
 	subscriptionCanceller, _ := stripeClient.(accountdeletion.Subscriptions)
 	accountDeletionOutbox := accountDeletion.Worker(workOSVerifier(opts.Config), subscriptionCanceller)
 	router := httpapi.NewRouter(httpapi.Options{
-		ClientUpdatePolicy:        clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
-		SupportReports:            supportService,
-		OperatorInfrastructure:    infrastructureService,
-		OperatorBackups:           backupService,
-		OperatorReporting:         reportingService,
-		Operator:                  operatorService,
-		OperatorAuth:              &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail},
-		OperatorHealth:            telemetryHealth,
-		OperatorActions:           operatoractions.NewService(store),
-		OperatorBilling:           billing.NewOperatorService(store, priceReader),
-		OperatorAudit:             auditWriter,
-		Selfhost:                  &httpapi.SelfhostHandlers{Service: selfhostService},
-		Config:                    opts.Config,
-		Logger:                    opts.Logger,
-		ReadinessChecker:          checker,
-		Auth:                      authService,
-		DeviceAuth:                deviceAuthService,
-		WorkspaceBilling:          workspaceBilling,
-		WorkspaceBillingRecovery:  workspaceRecovery,
-		GitHub:                    githubService,
-		EnvironmentVariables:      environmentVariableService,
-		Teams:                     teamService,
-		Policy:                    teamService,
-		TeamInbox:                 teamInboxService,
-		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.UserMachines.OfflineAfter/2, opts.Config.ConfigSync.StaleHeartbeatAfter),
-		RuntimeIdentity:           enrollmentService,
-		Machines:                  userMachineService,
-		Inbox:                     inboxDispatcher,
-		Workspaces:                workspace.New(store),
-		BrowserTerminal:           browserTerminalGateway,
-		MintKeys:                  mintKeys,
-		EdgeControl:               edgeControlHandler,
-		EdgeControlAdmin:          edgeControlService,
-		Enrollment:                enrollmentService,
-		ConfigAssignments:         configAssignmentService,
-		ConfigCredentials:         configCredentialService,
-		ConfigLeases:              configLeaseService,
-		ConfigStatuses:            configStatusService,
-		ConfigRepositoryAccess:    configRepositoryAccessService,
-		ConfigRuntime:             configRuntimeService,
-		MachineLatency:            &machinelatency.Service{DB: store.SQL()},
-		ConfigConflicts:           configConflictService,
-		Routes:                    routeService,
-		Favorites:                 favorites.NewService(store),
-		APITokens:                 apiTokens,
-		AccountDeletion:           accountDeletion,
-		AccountPreferences:        accountprefs.New(store),
-		ControlDiagnostics:        controlDiagnostics,
-		OperationRecovery:         operationRecovery,
-		PeerIdentity:              peerIdentityService,
-		PeerNetwork:               peerNetworkService,
-		MachineServices:           machineServices,
-		ResourceUsage:             resourceUsageService,
-		Activity:                  activityLog,
-		TeamIdentity:              teamIdentity,
-		AuditStreams:              auditStreams,
-		NativePrivateAccess:       nativePrivateService,
-		ManagedSSH:                managedSSHService,
-		DiagnosticUploads:         diagnosticUploadService,
-		ReleaseFiles:              releaseFileHandler,
-		ReleaseAuthority:          releaseAuthorityService,
-		PreviewTunnelAPI:          previewTunnelAPI,
-		LazyPolicies:              lazyPolicyService,
-		LazyActivation:            lazyActivator,
-		PreviewLeases:             previewLeaseService,
-		PreviewDomains:            previewDomainService,
-		Tunnels:                   tunnelService,
-		TunnelResources:           tunnelResourceService,
-		Domains:                   domaininventory.New(store),
-		PreviewLogs:               tunnelResourceService,
-		PreviewCarrierAttachment:  previewAttachmentHandler,
-		RuntimeCarrierAttachment:  runtimeAttachmentHandler,
-		PreviewCarrierEdge:        previewEdgeAttachmentHandler,
-		BrowserAccess:             browserAccessHandlers,
-		Inspector:                 inspectorHandlers,
-		PrivateAccessAuthorize:    privateAccessAuthorizeHandler,
-		PrivateAccessGrant:        privateAccessGrantHandler,
-		PrivateAccessRoutes:       privateAccessRoutesHandler,
-		ConnectorControl:          connectorControlHandler,
-		ConnectorCarrierBootstrap: connectorCarrierBootstrapHandler,
-		ConnectorOriginHealth:     connectorOriginHealthHandler,
-		MachineEvents:             machineEventsHandler,
-		MachineEventWaiter:        machineEventHub,
-		MachineEventSigning:       machineEventSigning,
-		TelemetryHTTP:             telemetryHTTP,
-		TelemetryMetrics:          telemetryMetrics,
-		TelemetryDiagnostics:      telemetryDiagnostics,
+		ClientUpdatePolicy:       clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
+		SupportReports:           supportService,
+		OperatorInfrastructure:   infrastructureService,
+		OperatorBackups:          backupService,
+		OperatorReporting:        reportingService,
+		Operator:                 operatorService,
+		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail},
+		OperatorHealth:           telemetryHealth,
+		OperatorActions:          operatoractions.NewService(store),
+		OperatorBilling:          billing.NewOperatorService(store, priceReader),
+		OperatorAudit:            auditWriter,
+		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService},
+		Config:                   opts.Config,
+		Logger:                   opts.Logger,
+		ReadinessChecker:         checker,
+		Auth:                     authService,
+		DeviceAuth:               deviceAuthService,
+		WorkspaceBilling:         workspaceBilling,
+		WorkspaceBillingRecovery: workspaceRecovery,
+		GitHub:                   githubService,
+		EnvironmentVariables:     environmentVariableService,
+		Teams:                    teamService,
+		Policy:                   teamService,
+		TeamInbox:                teamInboxService,
+		MeteringRepo:             metering.NewRuntimeRepository(store, opts.Config.UserMachines.OfflineAfter/2, opts.Config.ConfigSync.StaleHeartbeatAfter),
+		RuntimeIdentity:          enrollmentService,
+		Machines:                 userMachineService,
+		Inbox:                    inboxDispatcher,
+		Workspaces:               workspace.New(store),
+		BrowserTerminal:          browserTerminalGateway,
+		MintKeys:                 mintKeys,
+		EdgeControl:              edgeControlHandler,
+		EdgeControlAdmin:         edgeControlService,
+		Enrollment:               enrollmentService,
+		ConfigAssignments:        configAssignmentService,
+		ConfigCredentials:        configCredentialService,
+		ConfigLeases:             configLeaseService,
+		ConfigStatuses:           configStatusService,
+		ConfigRepositoryAccess:   configRepositoryAccessService,
+		ConfigRuntime:            configRuntimeService,
+		MachineLatency:           &machinelatency.Service{DB: store.SQL()},
+		ConfigConflicts:          configConflictService,
+		Routes:                   routeService,
+		Favorites:                favorites.NewService(store),
+		APITokens:                apiTokens,
+		AccountDeletion:          accountDeletion,
+		AccountPreferences:       accountprefs.New(store),
+		ControlDiagnostics:       controlDiagnostics,
+		OperationRecovery:        operationRecovery,
+		PeerIdentity:             peerIdentityService,
+		PeerNetwork:              peerNetworkService,
+		MachineServices:          machineServices,
+		ResourceUsage:            resourceUsageService,
+		Activity:                 activityLog,
+		TeamIdentity:             teamIdentity,
+		AuditStreams:             auditStreams,
+		NativePrivateAccess:      nativePrivateService,
+		ManagedSSH:               managedSSHService,
+		DiagnosticUploads:        diagnosticUploadService,
+		ReleaseFiles:             releaseFileHandler,
+		ReleaseAuthority:         releaseAuthorityService,
+		PreviewTunnelAPI:         previewTunnelAPI,
+		LazyPolicies:             lazyPolicyService,
+		LazyActivation:           lazyActivator,
+		PreviewLeases:            previewLeaseService,
+		PreviewDomains:           previewDomainService,
+		Tunnels:                  tunnelService,
+		TunnelResources:          tunnelResourceService,
+		Domains:                  domaininventory.New(store),
+		PreviewLogs:              tunnelResourceService,
+		RuntimeCarrierAttachment: runtimeAttachmentHandler,
+		BrowserAccess:            browserAccessHandlers,
+		Inspector:                inspectorHandlers,
+		PrivateAccessAuthorize:   privateAccessAuthorizeHandler,
+		PrivateAccessGrant:       privateAccessGrantHandler,
+		PrivateAccessRoutes:      privateAccessRoutesHandler,
+		MachineEvents:            machineEventsHandler,
+		MachineEventWaiter:       machineEventHub,
+		MachineEventSigning:      machineEventSigning,
+		TelemetryHTTP:            telemetryHTTP,
+		TelemetryMetrics:         telemetryMetrics,
+		TelemetryDiagnostics:     telemetryDiagnostics,
 	})
 	// Membership is authoritative; provider retries run outside its transaction.
 	progress := workers.NewProgress(opts.Config.Reporting.WorkerStallTimeout)
@@ -943,11 +839,8 @@ func New(opts Options) (*App, error) {
 		observedWorker(supportService, "worker_config_revocation", configRepositoryAccessService.RevocationWorker(opts.Config.TerminalSessions.WorkerInterval, 25), progress),
 		observedWorker(supportService, "worker_preview_leases", previewLeaseReconciliationWorker(previewLeaseService, opts.Config.TerminalSessions.WorkerInterval, telemetryProducer), progress),
 		observedWorker(supportService, "worker_tunnel_expiry", tunnelExpiryReconciliationWorker(tunnelService, opts.Config.TerminalSessions.WorkerInterval), progress),
-		observedWorker(supportService, "worker_connector_rotation", connectorRotationDispatcher.Run, progress),
-		observedWorker(supportService, "worker_connector_drain", connectorDrainDispatcher.Run, progress),
 		observedWorker(supportService, "worker_domain_dns", domainReconciler.Worker(opts.Config.TerminalSessions.WorkerInterval, 100), progress),
 		observedWorker(supportService, "worker_preview_dns", previewDomainReconciler.Worker(opts.Config.TerminalSessions.WorkerInterval, 100), progress),
-		observedWorker(supportService, "worker_preview_outbox", previewAttachmentProduction.Repository.OutboxWorker(opts.Config.TerminalSessions.WorkerInterval), progress),
 	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)
@@ -1036,7 +929,6 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_inbox", teamInboxReceiptWorker.Run, progress))
 	}
 	if edgeControlService != nil {
-		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_assignments", edgeControlService.TunnelEdgeAssignmentWorker(opts.Config.TerminalSessions.WorkerInterval, 100), progress))
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_mint_withdrawals", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {

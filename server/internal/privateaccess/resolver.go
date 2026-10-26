@@ -5,87 +5,78 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// AttachmentStore is the narrow read-only view needed to bind a private
-// preview. The SQL previewattachment repository is the production
-// implementation; no private credential material is read here.
-type AttachmentStore interface {
-	Get(context.Context, string, string) (previewattachment.Attachment, error)
+// PreviewRouteResolver binds a private preview to its current route on an edge, read from
+// preview_routes (the agent's runtime carrier route of the preview).
+type PreviewRouteResolver struct {
+	db  *db.DB
+	now func() time.Time
 }
 
-type PreviewAttachmentResolver struct {
-	store AttachmentStore
-	now   func() time.Time
-}
-
-func NewPreviewAttachmentResolver(store AttachmentStore) (*PreviewAttachmentResolver, error) {
-	if store == nil {
-		return nil, fmt.Errorf("%w: preview attachment store is required", ErrInvalid)
+func NewPreviewRouteResolver(database *db.DB) (*PreviewRouteResolver, error) {
+	if database == nil || database.Pool() == nil {
+		return nil, fmt.Errorf("%w: preview route database is required", ErrInvalid)
 	}
-	return &PreviewAttachmentResolver{store: store, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &PreviewRouteResolver{db: database, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
-func (r *PreviewAttachmentResolver) SetClock(now func() time.Time) error {
+func (r *PreviewRouteResolver) SetClock(now func() time.Time) error {
 	if r == nil || now == nil {
-		return fmt.Errorf("%w: preview resolver clock is required", ErrInvalid)
+		return fmt.Errorf("%w: preview route clock is required", ErrInvalid)
 	}
 	r.now = now
 	return nil
 }
 
-func (r *PreviewAttachmentResolver) ResolvePrivate(ctx context.Context, lookup Lookup) (Binding, error) {
-	if r == nil || r.store == nil || ctx == nil {
+const resolvePrivatePreviewSQL = `
+SELECT pr.account_id, pr.preview_id, pr.operation_id, pr.route_id, pr.connector_session_id, pr.owner_machine_id, pr.owner_session_id,
+       pr.route_generation, pr.lease_generation, pr.process_generation, pr.config_generation, p.access_mode, p.endpoint,
+       pr.edge_node_id, pr.edge_process_epoch, pr.state, pr.expires_at
+FROM preview_routes pr JOIN preview_leases p ON p.id = pr.preview_id AND p.account_id = pr.account_id
+WHERE pr.account_id = $1 AND pr.preview_id = $2 AND pr.operation_id = $3`
+
+func (r *PreviewRouteResolver) ResolvePrivate(ctx context.Context, lookup Lookup) (Binding, error) {
+	if r == nil || r.db == nil || ctx == nil {
 		return Binding{}, ErrIdentityUnavailable
 	}
 	if lookup.Request.ResourceKind != ResourcePreview || lookup.Request.OperationID == "" {
 		return Binding{}, ErrResourceNotFound
 	}
-	attachment, err := r.store.Get(ctx, lookup.AccountID, lookup.Request.OperationID)
-	if pureExpectedPrivateAccessError(err, previewattachment.ErrNotFound) {
+	var b Binding
+	var sessionState, endpoint string
+	var routeGeneration, leaseGeneration, processGeneration, configGeneration int64
+	err := r.db.Pool().QueryRow(ctx, resolvePrivatePreviewSQL, lookup.AccountID, lookup.Request.ResourceID, lookup.Request.OperationID).Scan(
+		&b.AccountID, &b.ResourceID, &b.OperationID, &b.RouteID, &b.CarrierSessionID, &b.OwnerMachineID, &b.OwnerSessionID,
+		&routeGeneration, &leaseGeneration, &processGeneration, &configGeneration, &b.AccessMode, &endpoint,
+		&b.EdgeNodeID, &b.EdgeProcessEpoch, &sessionState, &b.ExpiresAt)
+	if pureExpectedPrivateAccessError(err, pgx.ErrNoRows) {
 		return Binding{}, ErrResourceNotFound
 	}
 	if err != nil {
-		return Binding{}, fmt.Errorf("%w: resolve private preview attachment: %w", ErrRouteUnavailable, err)
+		return Binding{}, fmt.Errorf("%w: resolve private preview route: %w", ErrRouteUnavailable, err)
 	}
-	if attachment.AccountID != lookup.AccountID || attachment.PreviewID != lookup.Request.ResourceID || attachment.OperationID != lookup.Request.OperationID {
-		return Binding{}, ErrResourceNotFound
-	}
-	state := "paused"
-	switch attachment.State {
-	case previewattachment.StateEdgeReady:
-		state = "edge_ready"
-	case previewattachment.StateReady:
-		state = "ready"
-	case previewattachment.StatePending, previewattachment.StateAdmitted:
-		state = "paused"
-	case previewattachment.StateFailed, previewattachment.StateReleased:
+	b.State = "paused"
+	switch sessionState {
+	case "edge_ready":
+		b.State = "edge_ready"
+	case "ready":
+		b.State = "ready"
+	case "failed", "released":
 		return Binding{}, newDenied(ReasonExpired)
 	}
 	now := lookup.Now
 	if now.IsZero() {
-		now = r.clock()
+		now = r.now().UTC()
 	}
-	if !attachment.ExpiresAt.After(now) {
+	if !b.ExpiresAt.After(now) {
 		return Binding{}, newDenied(ReasonExpired)
 	}
-	return Binding{
-		AccountID: attachment.AccountID, ResourceKind: ResourcePreview, ResourceID: attachment.PreviewID,
-		// Preview authorization binds the operation; the connector belongs to
-		// the separate carrier admission, not the preview resource grant.
-		RouteID: attachment.RouteID, OperationID: attachment.OperationID,
-		CarrierSessionID: attachment.SessionID, OwnerMachineID: attachment.OwnerMachineID, OwnerSessionID: attachment.OwnerSessionID,
-		RouteGeneration: attachment.RouteGeneration, SessionGeneration: attachment.LeaseGeneration, ProcessGeneration: attachment.ProcessGeneration, ConfigGeneration: attachment.ConfigGeneration, AssignmentGeneration: attachment.LeaseGeneration,
-		Protocol: ProtocolHTTP, AccessMode: attachment.AccessMode, State: state, ExpiresAt: attachment.ExpiresAt,
-		Hostname: hostFromEndpoint(attachment.Endpoint), EdgeNodeID: attachment.EdgeNodeID,
-		EdgeProcessEpoch: attachment.EdgeProcessEpoch,
-	}, nil
-}
-
-func (r *PreviewAttachmentResolver) clock() time.Time {
-	if r == nil || r.now == nil {
-		return time.Now().UTC()
-	}
-	return r.now().UTC()
+	b.ResourceKind, b.Protocol, b.Hostname = ResourcePreview, ProtocolHTTP, hostFromEndpoint(endpoint)
+	b.RouteGeneration, b.SessionGeneration, b.ProcessGeneration, b.ConfigGeneration, b.AssignmentGeneration =
+		uint64(routeGeneration), uint64(leaseGeneration), uint64(processGeneration), uint64(configGeneration), uint64(leaseGeneration)
+	return b, nil
 }

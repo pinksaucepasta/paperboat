@@ -221,3 +221,11 @@ func TestMachineEventsFailClosedWithoutSigning(t *testing.T) {
 		t.Fatalf("unsigned answer: status=%d header=%q body=%s", response.Code, response.Header().Get(MachineEventsAnswerHeader), response.Body.String())
 	}
 }
+
+type bootstrapVerifier struct {
+	claims controlplane.MachineRequestClaims
+}
+
+func (v bootstrapVerifier) VerifyMachineRequest(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error) {
+	return v.claims, nil
+}

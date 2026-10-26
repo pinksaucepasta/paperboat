@@ -233,12 +233,6 @@ func translate(err error) error {
 			if strings.Contains(pgErr.ConstraintName, "tunnel_domains_hostname") {
 				return fmt.Errorf("%w: %s", ErrDomainConflict, pgErr.ConstraintName)
 			}
-			if strings.Contains(pgErr.ConstraintName, "tunnel_connectors_tunnel_id_host_id") || strings.Contains(pgErr.ConstraintName, "tunnel_connectors_credential") || strings.Contains(pgErr.ConstraintName, "tunnel_connector_credentials") {
-				return fmt.Errorf("%w: %s", ErrConnectorConflict, pgErr.ConstraintName)
-			}
-			if strings.Contains(pgErr.ConstraintName, "tunnel_connector_enrollments_token_hash") {
-				return fmt.Errorf("%w: %s", ErrEnrollmentReplay, pgErr.ConstraintName)
-			}
 			return fmt.Errorf("%w: %s", ErrConflict, pgErr.ConstraintName)
 		case "23503", "23514", "23502":
 			return fmt.Errorf("%w: %s", ErrInvalidInput, pgErr.ConstraintName)

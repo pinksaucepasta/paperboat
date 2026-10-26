@@ -3,7 +3,7 @@ package privateaccess
 import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
-	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
@@ -23,11 +23,11 @@ type Production struct {
 	AccessorRoutes *AccessorHTTPHandler
 }
 
-func NewProduction(database *db.DB, attachments AttachmentStore, provider *mint.Provider, issuer string, machine MachineRequestVerifier, edge EdgeVerifier, auditSink AuditSink, quota accountingauthority.QuotaChecker) (*Production, error) {
-	if database == nil || attachments == nil || provider == nil || machine == nil || edge == nil || auditSink == nil {
+func NewProduction(database *db.DB, provider *mint.Provider, issuer string, machine MachineRequestVerifier, edge EdgeVerifier, auditSink AuditSink, quota accountingauthority.QuotaChecker) (*Production, error) {
+	if database == nil || provider == nil || machine == nil || edge == nil || auditSink == nil {
 		return nil, fmt.Errorf("%w: private access production dependencies are incomplete", ErrInvalid)
 	}
-	resolver, err := NewSQLResolver(database, attachments)
+	resolver, err := NewSQLResolver(database)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func NewProduction(database *db.DB, attachments AttachmentStore, provider *mint.
 		return nil, err
 	}
 	service, err := NewService(resolver, auditSink, Config{
-		IngressSource: &connectorprotocol.SQLIngressSource{DB: database, Quota: quota},
+		IngressSource: &ingressprojection.SQLIngressSource{DB: database, Quota: quota},
 		GrantVerifier: grantIssuer,
 		GrantMinter:   grantIssuer,
 		MachineState:  machineState,

@@ -113,28 +113,6 @@ VALUES
    sqlc.arg(caa_state), sqlc.arg(conflict_state), 1, sqlc.arg(now), sqlc.arg(now))
 RETURNING *;
 
--- name: CreatePreviewTunnelConnector :one
-INSERT INTO tunnel_connectors
-  (id, tunnel_id, host_id, credential_reference, credential_thumbprint, rotation_generation,
-   desired_state, software_version, protocol_version, operating_system, architecture,
-   drain_state, created_at, updated_at)
-VALUES
-  (sqlc.arg(id), sqlc.arg(tunnel_id), sqlc.arg(host_id), sqlc.arg(credential_reference),
-   sqlc.arg(credential_thumbprint), sqlc.arg(rotation_generation), sqlc.arg(desired_state),
-   sqlc.narg(software_version), sqlc.arg(protocol_version), sqlc.narg(operating_system),
-   sqlc.narg(architecture), sqlc.arg(drain_state), sqlc.arg(now), sqlc.arg(now))
-RETURNING *;
-
--- name: CreatePreviewTunnelConnectorSession :one
-INSERT INTO tunnel_connector_sessions
-  (id, connector_id, process_generation, protocol_version, capabilities, state,
-   lease_deadline, last_heartbeat_at, retained_until, created_at)
-VALUES
-  (sqlc.arg(id), sqlc.arg(connector_id), sqlc.arg(process_generation), sqlc.arg(protocol_version),
-   sqlc.arg(capabilities), sqlc.arg(state), sqlc.arg(lease_deadline), sqlc.arg(now),
-   sqlc.arg(retained_until), sqlc.arg(now))
-RETURNING *;
-
 -- name: CreatePreviewLease :one
 INSERT INTO preview_leases
   (id, endpoint, account_id, owner_team_id, actor_id, owner_machine_id, owner_session_id,owner_session_kind,

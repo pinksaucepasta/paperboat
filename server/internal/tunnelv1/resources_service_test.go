@@ -3,7 +3,6 @@ package tunnelv1
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -54,25 +53,10 @@ type fakeResourceRepository struct {
 	verifyDomainResult ResourceMutationRecord
 	verifyDomainErr    error
 
-	listConnectors      []dbsqlc.TunnelConnector
-	listConnectorsErr   error
-	listConnectorsAfter *ListPosition
-	listConnectorsLimit int
-	connector           dbsqlc.TunnelConnector
-	getConnectorErr     error
-	enrollmentResult    EnrollmentRecord
-	enrollmentErr       error
-	enrollmentInput     EnrollmentRecordInput
-	exchangeResult      ResourceMutationRecord
-	exchangeErr         error
-	exchangeInput       EnrollmentExchangeRecord
-	drainResult         ResourceMutationRecord
-	drainErr            error
-	revokeResult        ResourceMutationRecord
-	revokeErr           error
-	rotationResult      dbsqlc.Operation
-	rotationErr         error
-	rotationInput       RotationRecord
+	drainResult  ResourceMutationRecord
+	drainErr     error
+	revokeResult ResourceMutationRecord
+	revokeErr    error
 
 	tunnelLogs     []dbsqlc.ListTunnelLogsV1Row
 	tunnelLogsErr  error
@@ -150,56 +134,6 @@ func (f *fakeResourceRepository) BeginResourceDomainVerification(context.Context
 	return f.verifyDomainResult, f.verifyDomainErr
 }
 
-func (f *fakeResourceRepository) ListResourceConnectors(_ context.Context, _ string, _ string, after *ListPosition, limit int) ([]dbsqlc.TunnelConnector, error) {
-	f.listConnectorsAfter, f.listConnectorsLimit = after, limit
-	return f.listConnectors, f.listConnectorsErr
-}
-
-func (f *fakeResourceRepository) GetResourceConnector(context.Context, string, string, string) (dbsqlc.TunnelConnector, error) {
-	return f.connector, f.getConnectorErr
-}
-
-func (f *fakeResourceRepository) IssueConnectorEnrollment(_ context.Context, input EnrollmentRecordInput) (EnrollmentRecord, error) {
-	f.enrollmentInput = input
-	if f.enrollmentResult.Enrollment.ID == "" {
-		f.enrollmentResult = EnrollmentRecord{Enrollment: dbsqlc.TunnelConnectorEnrollment{ID: input.EnrollmentID, AccountID: input.AccountID, TunnelID: input.TunnelID, HostID: input.HostID, Capabilities: input.Capabilities, ExpiresAt: input.ExpiresAt}, Operation: resourceOperation(input.OperationID, input.EnrollmentID, "ready", "succeeded", "changed"), Token: input.Token}
-	}
-	return f.enrollmentResult, f.enrollmentErr
-}
-
-func (f *fakeResourceRepository) ExchangeConnectorEnrollment(_ context.Context, input EnrollmentExchangeRecord) (ResourceMutationRecord, error) {
-	f.exchangeInput = input
-	if f.exchangeResult.Connector.ID == "" {
-		connector := resourceConnector("con_1")
-		connector.RotationGeneration = 1
-		f.exchangeResult = ResourceMutationRecord{Connector: connector, Operation: resourceOperation(input.OperationID, "con_1", "connecting", "running", "changed"), StableEndpointID: "endpoint_11111111-1111-4111-8111-111111111111", ProcessGeneration: 1, Changed: true}
-	}
-	return f.exchangeResult, f.exchangeErr
-}
-
-func (f *fakeResourceRepository) DrainResourceConnector(context.Context, ConnectorRecord) (ResourceMutationRecord, error) {
-	if f.drainResult.Connector.ID == "" {
-		f.drainResult = ResourceMutationRecord{Connector: resourceConnector("con_1"), Operation: resourceOperation("op_1", "con_1", "draining", "running", "changed"), Changed: true}
-	}
-	return f.drainResult, f.drainErr
-}
-
-func (f *fakeResourceRepository) RevokeResourceConnector(context.Context, ConnectorRecord) (ResourceMutationRecord, error) {
-	if f.revokeResult.Connector.ID == "" {
-		f.revokeResult = ResourceMutationRecord{Connector: resourceConnector("con_1"), Operation: resourceOperation("op_1", "con_1", "draining", "running", "changed"), Changed: true}
-	}
-	return f.revokeResult, f.revokeErr
-}
-
-func (f *fakeResourceRepository) RotateResourceCredentials(_ context.Context, input RotationRecord) (dbsqlc.Operation, error) {
-	f.rotationInput = input
-	if f.rotationResult.ID == "" {
-		f.rotationResult = resourceOperation(input.OperationID, input.TunnelID, "connecting", "running", "changed")
-		f.rotationResult.ResourceKind = "tunnel"
-	}
-	return f.rotationResult, f.rotationErr
-}
-
 func (f *fakeResourceRepository) ListResourceTunnelLogs(_ context.Context, accountID, scopeID string, after int64, limit int) ([]dbsqlc.ListTunnelLogsV1Row, error) {
 	f.lastLogAccount, f.lastLogScope, f.lastLogAfter, f.lastLogLimit = accountID, scopeID, after, limit
 	return f.tunnelLogs, f.tunnelLogsErr
@@ -210,18 +144,12 @@ func (f *fakeResourceRepository) ListResourcePreviewLogs(_ context.Context, acco
 	return f.previewLogs, f.previewLogsErr
 }
 
-func resourceServiceForTest(t *testing.T, repo *fakeResourceRepository, overlap time.Duration) *ResourceService {
+func resourceServiceForTest(t *testing.T, repo *fakeResourceRepository) *ResourceService {
 	t.Helper()
-	if overlap == 0 {
-		overlap = 10 * time.Minute
-	}
 	service, err := NewResourceService(repo, ResourceConfig{
-		CursorKey:          bytes.Repeat([]byte{9}, 32),
-		Now:                func() time.Time { return testNow },
-		NewID:              sequentialID(),
-		EnrollmentTTL:      5 * time.Minute,
-		RotationOverlap:    overlap,
-		CredentialLifetime: 24 * time.Hour,
+		CursorKey: bytes.Repeat([]byte{9}, 32),
+		Now:       func() time.Time { return testNow },
+		NewID:     sequentialID(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -245,10 +173,6 @@ func resourceDomain(id, hostname, ownership, conflict string) dbsqlc.TunnelDomai
 	return dbsqlc.TunnelDomain{ID: id, AccountID: "acct_1", TunnelID: "tun_1", RouteID: "rte_1", Hostname: hostname, MatchType: "exact", OwnershipChallengeReference: "dns-challenge://dns_1", OwnershipState: ownership, DnsTarget: "target.example.net", ObservedRecords: []byte(`[]`), CertificateStrategy: "managed", CertificateState: "pending", ConflictState: conflict, Generation: 2, CreatedAt: testNow.Add(-time.Minute), UpdatedAt: testNow}
 }
 
-func resourceConnector(id string) dbsqlc.TunnelConnector {
-	return dbsqlc.TunnelConnector{ID: id, TunnelID: "tun_1", HostID: "host_1", CredentialReference: "keychain://paperboat/connector", CredentialThumbprint: "thumbprint", RotationGeneration: 2, DesiredState: "active", ProtocolVersion: "1.0", OperatingSystem: sql.NullString{String: "darwin", Valid: true}, Architecture: sql.NullString{String: "arm64", Valid: true}, DrainState: "accepting", Generation: 3, CreatedAt: testNow.Add(-time.Minute), UpdatedAt: testNow}
-}
-
 func resourceOperation(id, resourceID, phase, state, outcome string) dbsqlc.Operation {
 	return dbsqlc.Operation{ID: id, AccountID: "acct_1", ResourceID: sql.NullString{String: resourceID, Valid: resourceID != ""}, OperationType: "resource.mutation", ResourceKind: "connector", Phase: phase, State: state, Progress: 60, Outcome: outcome, CorrelationID: "corr_1", CreatedAt: testNow, UpdatedAt: testNow}
 }
@@ -259,7 +183,7 @@ func resourceStringPtr(value string) *string {
 
 func TestResourceServiceRouteNormalizationAndCanonicalWireVocabulary(t *testing.T) {
 	repo := &fakeResourceRepository{}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	result, err := service.CreateRoute(context.Background(), testRequest(false), "tun_1", RouteCreateRequest{
 		Name: "private", Protocol: "tcp_private", MatchType: "catch_all", Origin: RouteOriginRequest{Scheme: "tcp", Address: "127.0.0.1:5432"}, Mutation: ResourceMutationInput{IdempotencyKey: "route_1", RequestHash: testHash()},
 	})
@@ -346,7 +270,7 @@ func TestPublicHTTPRouteRejectsCatchAll(t *testing.T) {
 
 func TestResourceServicePublicTCPAllocatesListenerIdentity(t *testing.T) {
 	repo := &fakeResourceRepository{}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	hostname := "11111111-1111-4111-8111-111111111111.tunnels.example.test"
 	_, err := service.CreateRoute(context.Background(), testRequest(false), "tun_1", RouteCreateRequest{
 		Name: "database", Protocol: "tcp", MatchType: "managed_exact", Hostname: hostname,
@@ -372,7 +296,7 @@ func TestResourceServicePublicTCPAllocatesListenerIdentity(t *testing.T) {
 
 func TestResourceServicePatchCarriesFullOriginTLSAndLimitProjection(t *testing.T) {
 	repo := &fakeResourceRepository{}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	name, protocol, priority := "renamed", "http", int32(7)
 	connect, idle, streams := int32(500), int32(2500), int32(64)
 	serverName, caReference, mtlsReference := "backend.example.test", "keychain://paperboat/origins/rte_1/ca", "keychain://paperboat/origins/rte_1/client"
@@ -477,7 +401,7 @@ func TestRouteJSONContainsOnlyOpaqueTLSReferences(t *testing.T) {
 func TestResourceServiceListCursorsAreScopedAndTailBounded(t *testing.T) {
 	repo := &fakeResourceRepository{listRoutes: []dbsqlc.TunnelRoute{resourceRoute("rte_1", "http", "managed"), resourceRoute("rte_2", "http", "managed")}}
 	repo.listRoutes[1].CreatedAt = testNow.Add(-2 * time.Minute)
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	page, err := service.ListRoutes(context.Background(), testRequest(false), "tun_1", "", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -496,16 +420,11 @@ func TestResourceServiceListCursorsAreScopedAndTailBounded(t *testing.T) {
 		t.Fatalf("tail page = %+v, %v", page, err)
 	}
 
-	repo.listConnectors = []dbsqlc.TunnelConnector{resourceConnector("con_1"), resourceConnector("con_2")}
-	connectorPage, err := service.ListConnectors(context.Background(), testRequest(false), "tun_1", "", 1)
-	if err != nil || connectorPage.NextCursor == "" || repo.listConnectorsLimit != 2 {
-		t.Fatalf("connector keyset page = %+v repo limit=%d err=%v", connectorPage, repo.listConnectorsLimit, err)
-	}
 }
 
 func TestResourceServiceDomainInstructionsUsePersistedStateAndSupportApex(t *testing.T) {
 	repo := &fakeResourceRepository{domain: resourceDomain("dom_1", "foo.example.co.uk", "verified", "clear"), route: resourceRoute("rte_1", "http", "managed")}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	instructions, err := service.DomainInstructions(context.Background(), testRequest(false), "tun_1", "dom_1")
 	if err != nil {
 		t.Fatal(err)
@@ -535,7 +454,7 @@ func TestResourceServicePublicTCPDomainUsesDNSWithoutHTTPTLS(t *testing.T) {
 	domain.CertificateStrategy = "none"
 	domain.CertificateState = "not_applicable"
 	repo := &fakeResourceRepository{route: route, domain: domain}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 
 	_, err := service.CreateDomain(context.Background(), testRequest(false), "tun_1", DomainCreateRequest{
 		Hostname: "db.example.test", RouteID: "rte_1", Mutation: ResourceMutationInput{IdempotencyKey: "tcp-domain", RequestHash: testHash()},
@@ -578,7 +497,7 @@ func resourceLog(sequence int64, message, correlation string, preview bool) dbsq
 
 func TestResourceServiceLogsAreBoundedResumableAndRedacted(t *testing.T) {
 	repo := &fakeResourceRepository{tunnelLogs: []dbsqlc.ListTunnelLogsV1Row{{ID: "log_1", AccountID: "acct_1", TunnelID: sql.NullString{String: "tun_1", Valid: true}, Level: "info", Component: "control", Code: "route_updated", Message: "route persisted", Metadata: []byte(`{"attempt":2,"nested":{"state":"ready"}}`), CorrelationID: "corr_1", OccurredAt: testNow, CursorSequence: sql.NullInt64{Int64: 3, Valid: true}}}}
-	service := resourceServiceForTest(t, repo, 0)
+	service := resourceServiceForTest(t, repo)
 	page, err := service.ListTunnelLogs(context.Background(), testRequest(false), "tun_1", "", 2)
 	if err != nil || len(page.Items) != 1 || page.NextCursor != "" || repo.lastLogAccount != "acct_1" || repo.lastLogScope != "tun_1" || repo.lastLogLimit != 3 {
 		t.Fatalf("tail tunnel logs = %+v repo=%+v err=%v", page, repo, err)
@@ -598,55 +517,6 @@ func TestResourceServiceLogsAreBoundedResumableAndRedacted(t *testing.T) {
 		if _, err := service.ListTunnelLogs(context.Background(), testRequest(false), "tun_1", "", 1); !errors.Is(err, previewtunnelapi.ErrUnsafeMetadata) {
 			t.Errorf("unsafe log %q error = %v", message, err)
 		}
-	}
-}
-
-func TestResourceServiceEnrollmentRejectsUnrecoverableReplayAndProofBindsVerifier(t *testing.T) {
-	repo := &fakeResourceRepository{enrollmentResult: EnrollmentRecord{Enrollment: dbsqlc.TunnelConnectorEnrollment{ID: "enr_1", AccountID: "acct_1", TunnelID: "tun_1", HostID: "host_1", ExpiresAt: testNow.Add(time.Minute)}, Operation: resourceOperation("op_1", "enr_1", "ready", "succeeded", "changed"), Replayed: true}}
-	service := resourceServiceForTest(t, repo, 0)
-	request := testRequest(false)
-	if _, err := service.IssueEnrollment(context.Background(), request, "tun_1", EnrollmentRequest{HostID: "host_1", Capabilities: []string{"http"}, Mutation: ResourceMutationInput{IdempotencyKey: "enr_1", RequestHash: testHash()}}); !errors.Is(err, ErrEnrollmentAlreadyIssued) {
-		t.Fatalf("unrecoverable enrollment replay error = %v", err)
-	}
-
-	seed := bytes.Repeat([]byte{21}, ed25519.SeedSize)
-	private := ed25519.NewKeyFromSeed(seed)
-	public := private.Public().(ed25519.PublicKey)
-	thumbprint := ConnectorCredentialThumbprint(public)
-	const token = "pbce_token_for_exchange"
-	const reference = "keychain://paperboat/connector"
-	proof := ed25519.Sign(private, ConnectorCredentialProofPayload("tun_1", "host_1", token, reference, thumbprint, "exchange_1"))
-	hostRequest := testRequest(true)
-	result, err := service.ExchangeEnrollment(context.Background(), hostRequest, EnrollmentExchangeRequest{TunnelID: "tun_1", Token: token, HostID: "host_1", ProtocolVersion: "1.0", CredentialReference: reference, CredentialThumbprint: thumbprint,
-		CredentialVerifierAlgorithm: "ed25519", CredentialVerifierPublicKey: public, CredentialProof: proof, Mutation: ResourceMutationInput{IdempotencyKey: "exchange_1", RequestHash: testHash()}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repo.exchangeInput.CredentialVerifierAlgorithm != "ed25519" || !bytes.Equal(repo.exchangeInput.CredentialVerifierPublicKey, public) || repo.exchangeInput.CredentialOverlap != 10*time.Minute || result.Operation.State != "running" || result.Activation == nil || result.Activation.AccountID != hostRequest.Actor.AccountID || result.Activation.StableEndpointID != "endpoint_11111111-1111-4111-8111-111111111111" || result.Activation.CredentialGeneration != 1 || result.Activation.ProcessGeneration != 1 {
-		t.Fatalf("exchange proof projection = %+v result=%+v", repo.exchangeInput, result)
-	}
-	if _, err := service.ExchangeEnrollment(context.Background(), hostRequest, EnrollmentExchangeRequest{TunnelID: "tun_1", Token: token + "-changed", HostID: "host_1", ProtocolVersion: "1.0", CredentialReference: reference, CredentialThumbprint: thumbprint,
-		CredentialVerifierAlgorithm: "ed25519", CredentialVerifierPublicKey: public, CredentialProof: proof, Mutation: ResourceMutationInput{IdempotencyKey: "exchange_2", RequestHash: testHash()}}); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("changed token proof error = %v", err)
-	}
-}
-
-func TestResourceServiceRotationUsesConfiguredOverlapAndReturnsOperationOnly(t *testing.T) {
-	repo := &fakeResourceRepository{}
-	service := resourceServiceForTest(t, repo, 3*time.Minute)
-	operation, err := service.RotateCredentials(context.Background(), testRequest(false), "tun_1", ResourceMutationInput{ExpectedGeneration: 4, IdempotencyKey: "rotate_1", RequestHash: testHash()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !repo.rotationInput.OverlapUntil.Equal(testNow.Add(3*time.Minute)) || repo.rotationInput.NewID == nil || operation.State != "running" || operation.Phase != "connecting" {
-		t.Fatalf("rotation projection = %+v operation=%+v", repo.rotationInput, operation)
-	}
-	if operation.ResourceKind != "tunnel" || operation.ResourceID != "tun_1" {
-		t.Fatalf("rotation operation scope = kind=%q id=%#v", operation.ResourceKind, operation.ResourceID)
-	}
-	encoded, err := json.Marshal(operation)
-	if err != nil || bytes.Contains(encoded, []byte("keychain://")) || strings.Contains(string(encoded), "thumbprint") {
-		t.Fatalf("operation contains credential material: %s (%v)", encoded, err)
 	}
 }
 

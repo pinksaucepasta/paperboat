@@ -11,40 +11,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-func TestTunnelEdgeRouteAssignmentIDIsDeterministicAndTupleBound(t *testing.T) {
-	candidate := dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row{
-		AccountID: "acct_01", TunnelID: "tun_01", RouteID: "route_01",
-		ConnectorID: "connector_01", ConnectorSessionID: sql.NullString{String: "session_01", Valid: true},
-		ConnectorGeneration: 2, ConnectorProcessGeneration: 3, ConfigGeneration: 4,
-		ConfigContentHash: bytes.Repeat([]byte{0x42}, 32), AccessMode: "public", ViewerPolicyGeneration: 1,
-		EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001",
-	}
-	first := tunnelEdgeRouteAssignmentID(candidate, 5)
-	if first == "" || first != tunnelEdgeRouteAssignmentID(candidate, 5) || !validTunnelEdgeIdentifier(first) {
-		t.Fatalf("assignment ID is not stable and valid: %q", first)
-	}
-	for name, mutate := range map[string]func(*dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row){
-		"generation": func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) { row.ConfigGeneration++ },
-		"connector session": func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) {
-			row.ConnectorSessionID.String = "session_02"
-		},
-		"edge process":          func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) { row.EdgeProcessEpoch = "epoch_0002" },
-		"assignment generation": func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) { row.ConfigContentHash[0] ^= 1 },
-		"access mode":           func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) { row.AccessMode = "private" },
-		"viewer policy generation": func(row *dbsqlc.ListReadyTunnelEdgeRouteCandidatesV1Row) {
-			row.ViewerPolicyGeneration++
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			changed := candidate
-			mutate(&changed)
-			if got := tunnelEdgeRouteAssignmentID(changed, 5); got == first {
-				t.Fatalf("tuple mutation kept assignment ID %q", got)
-			}
-		})
-	}
-}
-
 func TestCanonicalRouteObservationRequiresOneExplicitState(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -70,35 +36,6 @@ func TestCanonicalRouteObservationRequiresOneExplicitState(t *testing.T) {
 			}
 			if err != nil || got != test.want {
 				t.Fatalf("state = %q, error = %v, want %q", got, err, test.want)
-			}
-		})
-	}
-}
-
-func TestTunnelEdgeRouteAssignmentRequestValidation(t *testing.T) {
-	valid := TunnelEdgeRouteAssignmentRequest{
-		AssignmentID: "asn_route_01", AssignmentGeneration: 2, AccountID: "acct_01", TunnelID: "tun_01",
-		ConnectorID: "con_01", ConnectorGeneration: 3, ConnectorSessionID: "ses_01", ConnectorProcessGeneration: 4,
-		ConfigGeneration: 5, ConfigContentHash: make([]byte, 32), EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001", RouteID: "rte_01",
-		AccessMode: "public", ViewerPolicyGeneration: 1,
-	}
-	if err := validateTunnelEdgeRouteAssignmentRequest(valid); err != nil {
-		t.Fatalf("valid request error = %v", err)
-	}
-	for name, mutate := range map[string]func(*TunnelEdgeRouteAssignmentRequest){
-		"spaced assignment":             func(r *TunnelEdgeRouteAssignmentRequest) { r.AssignmentID = " asn_route_01" },
-		"unsafe node":                   func(r *TunnelEdgeRouteAssignmentRequest) { r.EdgeNodeID = "edge/node" },
-		"short epoch":                   func(r *TunnelEdgeRouteAssignmentRequest) { r.EdgeProcessEpoch = "epoch" },
-		"short hash":                    func(r *TunnelEdgeRouteAssignmentRequest) { r.ConfigContentHash = make([]byte, 31) },
-		"zero generation":               func(r *TunnelEdgeRouteAssignmentRequest) { r.AssignmentGeneration = 0 },
-		"invalid access mode":           func(r *TunnelEdgeRouteAssignmentRequest) { r.AccessMode = "wildcard" },
-		"zero viewer policy generation": func(r *TunnelEdgeRouteAssignmentRequest) { r.ViewerPolicyGeneration = 0 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			candidate := valid
-			mutate(&candidate)
-			if !errors.Is(validateTunnelEdgeRouteAssignmentRequest(candidate), ErrAssignmentInvalid) {
-				t.Fatal("invalid request was accepted")
 			}
 		})
 	}

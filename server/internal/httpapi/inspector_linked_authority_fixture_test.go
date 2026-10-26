@@ -69,7 +69,7 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 		t.Fatal("linked origin must be literal loopback")
 	}
 	exec(`UPDATE paperboat.preview_leases SET target_address=$1 WHERE id=$2`, origin, lease)
-	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET expires_at=$1 WHERE preview_id=$2`, now.Add(time.Hour), lease)
+	exec(`UPDATE paperboat.runtime_carrier_attachments SET expires_at=$1 WHERE machine_id=$2 AND edge_node_id=$3`, now.Add(time.Hour), machine, node)
 	exec(`UPDATE paperboat.tunnel_routes SET origin_address=$1 WHERE id=$2`, origin, route)
 	exec(`UPDATE paperboat.tunnels SET created_by_host_id=$1 WHERE id=$2`, machine, tunnel)
 	exec(`UPDATE paperboat.control_tunnel_nodes SET registry_expires_at=$1,region='test',failure_domain='test',roles=ARRAY['edge'],transports=ARRAY['http3','http2'],capacity_limit=10,capacity_observed_at=now() WHERE id=$2`, now.Add(time.Hour), node)
@@ -127,7 +127,7 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 	spki := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
 	pin := fmt.Sprintf("sha256:%x", spki)
 	exec(`UPDATE paperboat.control_tunnel_nodes SET carrier_server_spki_sha256=$1,carrier_server_certificate_chain_pem=$2 WHERE id=$3`, pin, string(certPEM), node)
-	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET edge_carrier_server_spki_sha256=$1,edge_carrier_server_certificate_chain_pem=$2 WHERE preview_id=$3`, pin, string(certPEM), lease)
+	exec(`UPDATE paperboat.runtime_carrier_attachments SET admission=jsonb_set(jsonb_set(admission,'{binding,edge_carrier_server_spki_sha256}',to_jsonb($1::text)),'{binding,edge_carrier_server_certificate_chain_pem}',to_jsonb($2::text)) WHERE machine_id=$3 AND edge_node_id=$4`, pin, string(certPEM), machine, node)
 	edgeSecret := make([]byte, 32)
 	if _, err = rand.Read(edgeSecret); err != nil {
 		t.Fatal(err)

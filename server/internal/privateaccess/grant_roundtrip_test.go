@@ -14,7 +14,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
-	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -54,12 +53,6 @@ func TestMintGrantIssuerRoundTripsEveryAuthorizationFence(t *testing.T) {
 	}
 }
 
-type grantAttachmentStore struct{ attachment previewattachment.Attachment }
-
-func (s grantAttachmentStore) Get(context.Context, string, string) (previewattachment.Attachment, error) {
-	return s.attachment, nil
-}
-
 func TestPreviewAttachmentIssuesWireValidGrant(t *testing.T) {
 	now := testClock()
 	id := func(noun string) string { return noun + "_11111111-1111-4111-8111-111111111111" }
@@ -68,18 +61,12 @@ func TestPreviewAttachmentIssuesWireValidGrant(t *testing.T) {
 	r.MachineID, r.SessionID, r.CarrierSessionID = id("machine"), id("session"), "session_22222222-2222-4222-8222-222222222222"
 	r.OperationID, r.IdempotencyKey, r.RequestID, r.CorrelationID = id("operation"), "operation_33333333-3333-4333-8333-333333333333", id("request"), id("correlation")
 	r.AssignmentGeneration = r.SessionGeneration
-	a := previewattachment.Attachment{
-		Binding: previewattachment.Binding{AccountID: r.AccountID, PreviewID: r.ResourceID, OperationID: r.OperationID,
-			OwnerMachineID: r.MachineID, OwnerSessionID: id("session"), TunnelID: r.MachineID, ConnectorID: r.MachineID,
-			SessionID: r.CarrierSessionID, RouteID: r.RouteID, LeaseGeneration: r.SessionGeneration,
-			RouteGeneration: r.RouteGeneration, ProcessGeneration: r.ProcessGeneration, ConfigGeneration: r.ConfigGeneration,
-			EdgeNodeID: r.EdgeNodeID, EdgeProcessEpoch: r.EdgeProcessEpoch},
-		Endpoint: "https://" + r.Host, AccessMode: "private", State: previewattachment.StateReady, ExpiresAt: now.Add(time.Minute),
-	}
-	resolver, err := NewPreviewAttachmentResolver(grantAttachmentStore{a})
-	if err != nil {
-		t.Fatal(err)
-	}
+	resolver := &fakeResolver{binding: Binding{
+		AccountID: r.AccountID, ResourceKind: ResourcePreview, ResourceID: r.ResourceID, RouteID: r.RouteID, OperationID: r.OperationID,
+		CarrierSessionID: r.CarrierSessionID, OwnerMachineID: r.MachineID, OwnerSessionID: id("session"),
+		RouteGeneration: r.RouteGeneration, SessionGeneration: r.SessionGeneration, ProcessGeneration: r.ProcessGeneration,
+		ConfigGeneration: r.ConfigGeneration, AssignmentGeneration: r.SessionGeneration, Protocol: ProtocolHTTP, AccessMode: "private",
+		State: "ready", ExpiresAt: now.Add(time.Minute), Hostname: r.Host, EdgeNodeID: r.EdgeNodeID, EdgeProcessEpoch: r.EdgeProcessEpoch}}
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
 		seed[i] = byte(i + 1)

@@ -169,7 +169,6 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 | `billing` | Plan, seats, top-ups, Customer Portal sessions, bandwidth exhaustion. |
 | `client_update_policy` | Paperboat operations: the CLI update policy. |
 | `config` | Config sync: assignments, consents, conflicts, credentials. |
-| `connector` | Tunnel connectors: enrollment, credentials, draining. |
 | `control` | Paperboat operations: recovered control operations. |
 | `backup` | Paperboat operations: database backup reports. |
 | `diagnostic_upload` | Support diagnostics uploaded by a user. |
@@ -195,7 +194,7 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 | `team` | Team membership, invitations, roles, sharing, grants, policy, SSO, directory sync, audit export and streaming. |
 | `terminal` | Terminal browser access and access codes. |
 | `transfer_destination` | Default and per-session file transfer destinations. |
-| `tunnel` | Tunnels: created, updated, paused, domains, connectors. |
+| `tunnel` | Tunnels: created, updated, paused, domains. |
 | `user_machine` | Machines: enrollment, approval, renames, availability, removal. |
 <!-- event-catalog:end -->
 

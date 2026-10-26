@@ -526,18 +526,6 @@ type ConfigCompareAdmission struct {
 	ExpiresAt              time.Time
 }
 
-type ConnectorProofReplay struct {
-	AccountID            string
-	TunnelID             string
-	ConnectorID          string
-	CredentialGeneration int64
-	ProofKind            string
-	Nonce                string
-	ProofDigest          []byte
-	ExpiresAt            time.Time
-	CreatedAt            time.Time
-}
-
 type ControlConfigAssignment struct {
 	ID                    string
 	EnvironmentID         string
@@ -863,11 +851,9 @@ type ControlSigningKeyRevocationOperation struct {
 }
 
 type ControlSyncLease struct {
-	MachineID   sql.NullString
+	MachineID   string
 	AddressSlot int32
-	Tags        []byte
-	ReleasedAt  sql.NullTime
-	AccountID   sql.NullString
+	AccountID   string
 }
 
 type ControlTunnelNode struct {
@@ -1539,12 +1525,6 @@ type LazyRuntimeOwner struct {
 	ExpiresAt              time.Time
 }
 
-type MachineAddressPool struct {
-	Singleton  bool
-	Size       int32
-	Quarantine pgtype.Interval
-}
-
 type MachineControlRenewal struct {
 	OperationID            string
 	MachineID              string
@@ -1948,27 +1928,6 @@ type PolicyMigration struct {
 	Rule         int32
 }
 
-// Replayable edge admission/detach intents containing safe binding metadata only.
-type PreviewCarrierAttachmentOutbox struct {
-	AccountID            string
-	OperationID          string
-	AttachmentGeneration int64
-	Action               string
-	Binding              []byte
-	ConfigContentHash    string
-	EdgeEndpoints        []string
-	Endpoint             string
-	AccessMode           string
-	ExpiresAt            time.Time
-	State                string
-	Attempts             int32
-	NextAttemptAt        time.Time
-	LastErrorCode        sql.NullString
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	DeliveredAt          sql.NullTime
-}
-
 type PreviewDomain struct {
 	ID                            string
 	AccountID                     string
@@ -2028,49 +1987,6 @@ type PreviewLease struct {
 	OwnerTeamID      sql.NullString
 }
 
-// Ephemeral preview-to-canonical-carrier binding metadata. Never stores bearer or private material.
-type PreviewLeaseCarrierAttachment struct {
-	AccountID      string
-	PreviewID      string
-	OperationID    string
-	IdempotencyKey string
-	RequestID      string
-	CorrelationID  string
-	// SHA-256 of the canonical attachment request envelope; not secret material.
-	RequestHash                          []byte
-	OwnerMachineID                       string
-	OwnerSessionID                       string
-	HostID                               string
-	EdgeNodeID                           string
-	MachineIdentityPublicKey             string
-	MachineIdentityThumbprint            string
-	CarrierKind                          string
-	LeaseGeneration                      int64
-	TunnelID                             string
-	ConnectorID                          string
-	ConnectorSessionID                   string
-	ProcessGeneration                    int64
-	ConfigGeneration                     int64
-	RouteID                              string
-	RouteGeneration                      int64
-	ConfigContentHash                    string
-	EdgeEndpoints                        []string
-	AttachmentGeneration                 int64
-	State                                string
-	EdgeReady                            bool
-	OriginReady                          bool
-	IssuedAt                             time.Time
-	ExpiresAt                            time.Time
-	ReadyAt                              sql.NullTime
-	ReleasedAt                           sql.NullTime
-	CreatedAt                            time.Time
-	UpdatedAt                            time.Time
-	EdgeProcessEpoch                     string
-	EdgeCarrierServerSpkiSha256          sql.NullString
-	EdgeCarrierServerCertificateChainPem sql.NullString
-	EdgeSlot                             int16
-}
-
 type PreviewLeaseCreateOperation struct {
 	AccountID   string
 	PreviewID   string
@@ -2100,11 +2016,11 @@ type PreviewRoute struct {
 	AttachmentGeneration                 int64
 	MachineIdentityPublicKey             string
 	EdgeEndpoints                        []string
-	EdgeCarrierServerSpkiSha256          sql.NullString
-	EdgeCarrierServerCertificateChainPem sql.NullString
+	EdgeCarrierServerSpkiSha256          string
+	EdgeCarrierServerCertificateChainPem string
 	State                                string
 	EdgeReady                            bool
-	OriginReady                          bool
+	OriginReady                          interface{}
 	ExpiresAt                            time.Time
 	Endpoint                             bool
 }
@@ -2730,133 +2646,6 @@ type TunnelConfigGeneration struct {
 	RetainedUntil      time.Time
 }
 
-type TunnelConnector struct {
-	ID                          string
-	TunnelID                    string
-	HostID                      string
-	CredentialReference         string
-	CredentialThumbprint        string
-	RotationGeneration          int64
-	DesiredState                string
-	SoftwareVersion             sql.NullString
-	ProtocolVersion             string
-	OperatingSystem             sql.NullString
-	Architecture                sql.NullString
-	LastSessionID               sql.NullString
-	LastHeartbeatAt             sql.NullTime
-	ReadyAt                     sql.NullTime
-	DisconnectReasonCode        sql.NullString
-	LastAppliedConfigGeneration int64
-	DrainState                  string
-	Generation                  int64
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
-	RevokedAt                   sql.NullTime
-}
-
-type TunnelConnectorActivation struct {
-	OperationID          string
-	AccountID            string
-	TunnelID             string
-	ConnectorID          string
-	HostID               string
-	CredentialGeneration int64
-	ProcessGeneration    int64
-	CreatedAt            time.Time
-}
-
-type TunnelConnectorCredentialGeneration struct {
-	ConnectorID          string
-	TunnelID             string
-	Generation           int64
-	CredentialReference  string
-	CredentialThumbprint string
-	VerifierAlgorithm    string
-	VerifierPublicKey    []byte
-	State                string
-	ValidUntil           time.Time
-	CreatedAt            time.Time
-	RevokedAt            sql.NullTime
-	SourceOperationID    sql.NullString
-}
-
-type TunnelConnectorEnrollment struct {
-	ID               string
-	AccountID        string
-	TunnelID         string
-	HostID           string
-	OperationID      string
-	TokenHash        []byte
-	Capabilities     []string
-	ExpiresAt        time.Time
-	ConsumedAt       sql.NullTime
-	ConnectorID      sql.NullString
-	CreatedByActorID string
-	CreatedAt        time.Time
-}
-
-type TunnelConnectorRotationTarget struct {
-	OperationID                  string
-	AccountID                    string
-	TunnelID                     string
-	ConnectorID                  string
-	HostID                       string
-	TargetSetHash                string
-	OldCredentialGeneration      int64
-	NewCredentialGeneration      int64
-	State                        string
-	OldIdentityKeyID             sql.NullString
-	OldIdentityKeyThumbprint     sql.NullString
-	ChallengeNonce               sql.NullString
-	ChallengeIssuedAt            sql.NullTime
-	ChallengeExpiresAt           sql.NullTime
-	OverlapUntil                 sql.NullTime
-	NewCredentialValidUntil      sql.NullTime
-	ProofSessionID               sql.NullString
-	ProofProcessGeneration       sql.NullInt64
-	NewIdentityKeyID             sql.NullString
-	NewIdentityKeyThumbprint     sql.NullString
-	NewPublicKey                 []byte
-	NewCredentialReference       sql.NullString
-	ReplacementSessionID         sql.NullString
-	ReplacementProcessGeneration sql.NullInt64
-	ConfigGeneration             sql.NullInt64
-	ConfigContentHash            []byte
-	EdgeReady                    sql.NullBool
-	RouteReady                   sql.NullBool
-	OriginReady                  sql.NullBool
-	ReadyAt                      sql.NullTime
-	RevokeNonce                  sql.NullString
-	RevokeSessionID              sql.NullString
-	RevokeProcessGeneration      sql.NullInt64
-	RevokeIssuedAt               sql.NullTime
-	RevokeDeadline               sql.NullTime
-	RevokedAt                    sql.NullTime
-	FailureCode                  sql.NullString
-	FailureMessage               sql.NullString
-	CreatedAt                    time.Time
-	UpdatedAt                    time.Time
-}
-
-type TunnelConnectorSession struct {
-	ID                      string
-	ConnectorID             string
-	ProcessGeneration       int64
-	ProtocolVersion         string
-	Capabilities            []string
-	State                   string
-	LeaseDeadline           time.Time
-	LastHeartbeatAt         time.Time
-	ReadyAt                 sql.NullTime
-	DisconnectedAt          sql.NullTime
-	DisconnectReasonCode    sql.NullString
-	AppliedConfigGeneration int64
-	RetainedUntil           time.Time
-	CreatedAt               time.Time
-	CredentialGeneration    int64
-	LastHeartbeatSentAt     sql.NullTime
-}
-
 type TunnelDomain struct {
 	ID                            string
 	AccountID                     string
@@ -2890,37 +2679,6 @@ type TunnelDomain struct {
 	QuarantineUntil               sql.NullTime
 	CertificateRetryAt            sql.NullTime
 	CertificateFailureAttempts    int32
-}
-
-type TunnelEdgeRouteAssignment struct {
-	AssignmentID               string
-	RouteID                    string
-	AssignmentGeneration       int64
-	AccountID                  string
-	TunnelID                   string
-	ConnectorID                string
-	HostID                     string
-	MachineIdentityPublicKey   string
-	MachineIdentityThumbprint  string
-	ConnectorGeneration        int64
-	ConnectorSessionID         string
-	ConnectorProcessGeneration int64
-	ConfigGeneration           int64
-	ConfigContentHash          []byte
-	AccessMode                 string
-	RouteGeneration            int64
-	RouteRevision              int64
-	EdgeNodeID                 string
-	EdgeProcessEpoch           string
-	EdgeFailureDomain          string
-	State                      string
-	ObservedState              string
-	AssignedAt                 time.Time
-	ObservedAt                 sql.NullTime
-	ReleasedAt                 sql.NullTime
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	ViewerPolicyGeneration     int64
 }
 
 type TunnelLogEntry struct {
@@ -2993,20 +2751,19 @@ type TunnelRoute struct {
 }
 
 type TunnelRouteOriginHealth struct {
-	RouteID     string
-	ConnectorID string
-	TunnelID    string
-	SessionID   string
-	State       string
-	Code        sql.NullString
-	ObservedAt  time.Time
-	ReportedAt  time.Time
+	RouteID    string
+	MachineID  string
+	TunnelID   string
+	State      string
+	Code       sql.NullString
+	ObservedAt time.Time
+	ReportedAt time.Time
 }
 
 type TunnelRouteReadyEdgesV1 struct {
 	AccountID            string
-	TunnelID             string
-	RouteID              string
+	TunnelID             sql.NullString
+	RouteID              sql.NullString
 	EdgeNodeID           string
 	EdgeProcessEpoch     string
 	AssignmentGeneration int64

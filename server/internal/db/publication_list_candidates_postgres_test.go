@@ -45,7 +45,7 @@ func TestPublicationListCandidatesMatchTheAccessRulesOnPostgres(t *testing.T) {
 		if kind == "tunnel" {
 			query = `SELECT id FROM paperboat.tunnels t WHERE id LIKE 'pc_tunnel_%_'||$4 AND desired_state<>'deleted' AND paperboat.tunnel_management_allowed($1,id)
  AND (NOT $2 OR paperboat.workspace_tunnel_management_allowed($1,$3,id))
- AND ($5='' OR created_by_host_id=$5 OR EXISTS(SELECT 1 FROM paperboat.tunnel_connectors c WHERE c.tunnel_id=t.id AND c.host_id=$5 AND c.revoked_at IS NULL)) ORDER BY id`
+ AND ($5='' OR created_by_host_id=$5) ORDER BY id`
 		}
 		rows, err := store.SQL().QueryContext(ctx, query, actor, set, teamID, s, machine)
 		if err != nil {
@@ -324,23 +324,6 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$2,$8)`, fmt.Sprintf("pc_tunnel_r%d_%s", i, s), admi
 			fmt.Sprintf("https://pctr%d-%s.example.test", i, s), revoked, team)
 	}
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, revoked)
-	// Connectors: on a host without tunnel_manage (blocks), on one with it, a revoked one (ignored), and on the
-	// creating host itself.
-	connector := func(tunnel int, host string, revoked bool) {
-		id := fmt.Sprintf("pc_connector_%d_%s_%s", tunnel, host, s)
-		state, revokedAt := "active", any(nil)
-		if revoked {
-			state, revokedAt = "revoked", time.Now()
-		}
-		exec(`INSERT INTO paperboat.tunnel_connectors(id,tunnel_id,host_id,credential_reference,credential_thumbprint,desired_state,protocol_version,revoked_at)
-VALUES($1,$2,$3,'ref',$1,$4,'1',$5)`, id, fmt.Sprintf("pc_tunnel_%d_%s", tunnel, s), host, state, revokedAt)
-	}
-	connector(1, teamNone, false)
-	connector(2, shared, false)
-	connector(4, teamAll, false)
-	connector(5, outsiderOwn, true)
-	connector(10, memberOwn, false)
-	connector(19, teamAll, false)
 	exec(`UPDATE paperboat.tunnels SET deleted_at=now(),desired_state='deleted' WHERE id=$1`, fmt.Sprintf("pc_tunnel_%d_%s", 8, s))
 	var machines []string
 	rows, err := store.SQL().QueryContext(ctx, `SELECT id FROM paperboat.user_machines WHERE id LIKE 'pc_machine_%_'||$1 ORDER BY id`, s)

@@ -4,18 +4,13 @@ import "context"
 
 // EdgeHoldsUsageRoute reports whether an edge node serves the route an independent operator's
 // usage report names, at the revision and environment of the ingress decision the edge metered
-// it under. A route is held through a connector assignment, a preview route, a runtime carrier
-// attachment, or (PLAN 3a step 4) an engine tunnel's endpoint_edge_assignments, whose ingress
+// it under. A route is held through a preview route, a runtime carrier
+// attachment, or an engine tunnel's endpoint_edge_assignments, whose ingress
 // decision carries the tunnel route generation and the agent machine's environment. One owner
 // for the question, used by the usage endpoint and tested against each path's fixtures.
 func (d *DB) EdgeHoldsUsageRoute(ctx context.Context, node, route string, revision int64, environment string) (bool, error) {
 	var held bool
 	err := d.SQL().QueryRowContext(ctx, `SELECT EXISTS (
- SELECT 1 FROM paperboat.tunnel_edge_route_assignments a
- JOIN paperboat.user_machines m ON m.id=a.host_id AND m.user_id=a.account_id
- WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
- AND paperboat.node_route_eligible(a.edge_node_id,a.account_id,a.route_id)
- UNION ALL
  SELECT 1 FROM paperboat.preview_routes a
  JOIN paperboat.user_machines m ON m.id=a.owner_machine_id
  WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
@@ -35,6 +30,7 @@ func (d *DB) EdgeHoldsUsageRoute(ctx context.Context, node, route string, revisi
  JOIN paperboat.user_machines m ON m.id=e.agent_machine_id AND m.user_id=t.account_id
  JOIN paperboat.control_tunnel_nodes node ON node.id=x.edge_node_id AND node.process_epoch=x.edge_process_epoch
  WHERE x.edge_node_id=$1 AND r.id=$2 AND r.generation=$3 AND m.environment_id=$4 AND x.desired='active'
+ AND paperboat.node_route_eligible(x.edge_node_id,t.account_id,r.id)
  )`, node, route, revision, environment).Scan(&held)
 	return held, err
 }

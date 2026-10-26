@@ -880,64 +880,6 @@ type ConnectorSessionInput struct {
 	IDs           SafeIDs
 }
 
-func (p *Producer) RecordConnectorSession(input ConnectorSessionInput) error {
-	state := normalizeConnectorSessionState(input.State)
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.SetGauge(MetricConnectorSessions, MetricLabels{"state": string(state)}, 1); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair := connectorSessionHealth(state)
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, RetryNone, time.Time{}); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_session", code, connectorStateOutcome(state), connectorStateSeverity(state), connectorStateMessage(state), RetryNone, time.Time{}, input.Generations)
-}
-
-func (p *Producer) ConnectorSession(input ConnectorSessionInput) error {
-	return p.RecordConnectorSession(input)
-}
-
-func normalizeConnectorSessionState(value ConnectorSessionState) ConnectorSessionState {
-	switch value {
-	case ConnectorSessionActive, ConnectorSessionDraining, ConnectorSessionClosed:
-		return value
-	default:
-		return ConnectorSessionClosed
-	}
-}
-
-func connectorSessionHealth(state ConnectorSessionState) (HealthStatus, string, string, string) {
-	switch state {
-	case ConnectorSessionActive:
-		return StatusReady, "connector_ready", "Connector session is active.", "No action is required."
-	case ConnectorSessionDraining:
-		return StatusDegraded, "connector_draining", "Connector session is draining.", "Wait for a replacement connector session."
-	default:
-		return StatusDegraded, "connector_closed", "Connector session is closed.", "Reconnect the connector."
-	}
-}
-
-func connectorStateOutcome(state ConnectorSessionState) EventOutcome {
-	if state == ConnectorSessionActive {
-		return OutcomeSuccess
-	}
-	return OutcomeStateChange
-}
-
-func connectorStateSeverity(state ConnectorSessionState) EventSeverity {
-	if state == ConnectorSessionActive {
-		return SeverityInfo
-	}
-	return SeverityWarn
-}
-
-func connectorStateMessage(state ConnectorSessionState) string {
-	return "Connector session is " + string(state) + "."
-}
-
 type ConnectorConnectionOutcome string
 
 const (
@@ -954,35 +896,6 @@ type ConnectorConnectionInput struct {
 	RequestID     string
 	CorrelationID string
 	IDs           SafeIDs
-}
-
-func (p *Producer) RecordConnectorConnection(input ConnectorConnectionInput) error {
-	outcome := normalizeConnectorConnectionOutcome(input.Outcome)
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricConnectorConnections, MetricLabels{"outcome": string(outcome)}); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair, retry, next := connectorOutcomeHealth(string(outcome), RetryNone, time.Time{}, p)
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, retry, next); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_connection", code, connectorConnectionEventOutcome(outcome), connectorConnectionSeverity(outcome), "Connector connection "+string(outcome)+".", retry, next, input.Generations)
-}
-
-func (p *Producer) ConnectorConnection(input ConnectorConnectionInput) error {
-	return p.RecordConnectorConnection(input)
-}
-
-func normalizeConnectorConnectionOutcome(value ConnectorConnectionOutcome) ConnectorConnectionOutcome {
-	switch value {
-	case ConnectorConnectionOpened, ConnectorConnectionClosed, ConnectorConnectionFailed:
-		return value
-	default:
-		return ConnectorConnectionFailed
-	}
 }
 
 type ConnectorReconnectOutcome string
@@ -1004,73 +917,6 @@ type ConnectorReconnectInput struct {
 	IDs           SafeIDs
 }
 
-func (p *Producer) RecordConnectorReconnect(input ConnectorReconnectInput) error {
-	outcome := input.Outcome
-	if outcome != ConnectorReconnectSucceeded && outcome != ConnectorReconnectFailed {
-		outcome = ConnectorReconnectFailed
-	}
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricConnectorReconnects, MetricLabels{"outcome": string(outcome)}); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair, retry, next := connectorOutcomeHealth(string(outcome), input.Retry, input.NextRetryAt, p)
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, retry, next); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_reconnect", code, connectorReconnectEventOutcome(outcome), connectorReconnectSeverity(outcome), "Connector reconnect "+string(outcome)+".", retry, next, input.Generations)
-}
-
-func (p *Producer) ConnectorReconnect(input ConnectorReconnectInput) error {
-	return p.RecordConnectorReconnect(input)
-}
-
-func connectorOutcomeHealth(outcome string, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
-	if outcome == string(ConnectorConnectionOpened) || outcome == string(ConnectorReconnectSucceeded) {
-		return StatusReady, "connector_ready", "Connector connectivity is healthy.", "No action is required.", RetryNone, time.Time{}
-	}
-	if retry == "" {
-		retry = RetryScheduled
-	}
-	if retry == RetryScheduled && next.IsZero() {
-		next = p.now().Add(time.Minute)
-	}
-	return StatusDegraded, "connector_connection_failed", "Connector connectivity failed.", "Reconnect the connector and retry the operation.", retry, next
-}
-
-func connectorConnectionEventOutcome(value ConnectorConnectionOutcome) EventOutcome {
-	if value == ConnectorConnectionOpened {
-		return OutcomeSuccess
-	}
-	if value == ConnectorConnectionClosed {
-		return OutcomeStateChange
-	}
-	return OutcomeFailed
-}
-
-func connectorConnectionSeverity(value ConnectorConnectionOutcome) EventSeverity {
-	if value == ConnectorConnectionFailed {
-		return SeverityError
-	}
-	return SeverityInfo
-}
-
-func connectorReconnectEventOutcome(value ConnectorReconnectOutcome) EventOutcome {
-	if value == ConnectorReconnectSucceeded {
-		return OutcomeSuccess
-	}
-	return OutcomeFailed
-}
-
-func connectorReconnectSeverity(value ConnectorReconnectOutcome) EventSeverity {
-	if value == ConnectorReconnectSucceeded {
-		return SeverityInfo
-	}
-	return SeverityError
-}
-
 type ConnectorBackoffState string
 
 const (
@@ -1089,58 +935,6 @@ type ConnectorBackoffInput struct {
 	IDs           SafeIDs
 }
 
-func (p *Producer) RecordConnectorBackoff(input ConnectorBackoffInput) error {
-	state := normalizeConnectorBackoffState(input.State)
-	duration, err := boundedSeconds(input.Duration)
-	if err != nil {
-		return err
-	}
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.SetGauge(MetricConnectorBackoff, MetricLabels{"state": string(state)}, uint64(duration)); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair, retry, next := connectorBackoffHealth(state, p)
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, retry, next); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_backoff", code, connectorBackoffEventOutcome(state), connectorBackoffSeverity(state), "Connector backoff state updated.", retry, next, input.Generations)
-}
-
-func (p *Producer) ConnectorBackoff(input ConnectorBackoffInput) error {
-	return p.RecordConnectorBackoff(input)
-}
-
-func normalizeConnectorBackoffState(value ConnectorBackoffState) ConnectorBackoffState {
-	if value == ConnectorBackoffScheduled {
-		return value
-	}
-	return ConnectorBackoffExhausted
-}
-
-func connectorBackoffHealth(state ConnectorBackoffState, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
-	if state == ConnectorBackoffScheduled {
-		return StatusDegraded, "connector_retry_scheduled", "Connector retry is scheduled.", "Wait for the next retry attempt.", RetryScheduled, p.now().Add(time.Minute)
-	}
-	return StatusDown, "connector_retry_exhausted", "Connector retries are exhausted.", "Repair connector connectivity before retrying.", RetryNotRetryable, time.Time{}
-}
-
-func connectorBackoffEventOutcome(state ConnectorBackoffState) EventOutcome {
-	if state == ConnectorBackoffScheduled {
-		return OutcomeStateChange
-	}
-	return OutcomeFailed
-}
-
-func connectorBackoffSeverity(state ConnectorBackoffState) EventSeverity {
-	if state == ConnectorBackoffScheduled {
-		return SeverityWarn
-	}
-	return SeverityError
-}
-
 type ConnectorHandshakeOutcome string
 
 const (
@@ -1157,47 +951,6 @@ type ConnectorHandshakeInput struct {
 	RequestID     string
 	CorrelationID string
 	IDs           SafeIDs
-}
-
-func (p *Producer) RecordConnectorHandshake(input ConnectorHandshakeInput) error {
-	outcome := input.Outcome
-	if outcome != ConnectorHandshakeSucceeded && outcome != ConnectorHandshakeFailed {
-		outcome = ConnectorHandshakeFailed
-	}
-	duration, err := boundedSeconds(input.Duration)
-	if err != nil {
-		return err
-	}
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.ObserveHistogram(MetricConnectorHandshakeLatency, MetricLabels{"outcome": string(outcome)}, duration); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair, retry, next := connectorOutcomeHealth(string(outcome), RetryNone, time.Time{}, p)
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, retry, next); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_handshake", code, connectorHandshakeEventOutcome(outcome), connectorHandshakeSeverity(outcome), "Connector handshake "+string(outcome)+".", retry, next, input.Generations)
-}
-
-func (p *Producer) ConnectorHandshake(input ConnectorHandshakeInput) error {
-	return p.RecordConnectorHandshake(input)
-}
-
-func connectorHandshakeEventOutcome(value ConnectorHandshakeOutcome) EventOutcome {
-	if value == ConnectorHandshakeSucceeded {
-		return OutcomeSuccess
-	}
-	return OutcomeFailed
-}
-
-func connectorHandshakeSeverity(value ConnectorHandshakeOutcome) EventSeverity {
-	if value == ConnectorHandshakeSucceeded {
-		return SeverityInfo
-	}
-	return SeverityError
 }
 
 type ConnectorDisconnectReason string
@@ -1219,38 +972,6 @@ type ConnectorDisconnectInput struct {
 	RequestID     string
 	CorrelationID string
 	IDs           SafeIDs
-}
-
-func (p *Producer) RecordConnectorDisconnect(input ConnectorDisconnectInput) error {
-	reason := normalizeConnectorDisconnectReason(input.Reason)
-	if p != nil && p.Metrics != nil {
-		if err := p.Metrics.IncCounter(MetricConnectorDisconnects, MetricLabels{"reason": string(reason)}); err != nil {
-			return err
-		}
-	}
-	identity := mergeIdentity(input.Identity, input.RequestID, input.CorrelationID, input.IDs)
-	correlationID := normalizedCorrelation(identity, p)
-	status, code, summary, repair, retry, next := connectorOutcomeHealth(string(ConnectorConnectionFailed), RetryScheduled, time.Time{}, p)
-	if reason == ConnectorDisconnectShutdown {
-		status, code, summary, repair, retry, next = StatusReady, "connector_shutdown", "Connector shutdown completed.", "No action is required.", RetryNone, time.Time{}
-	}
-	if err := p.updateHealth(DimensionEdge, status, code, summary, repair, correlationID, retry, next); err != nil {
-		return err
-	}
-	return p.recordEventWithGenerations(identity, "connector_disconnect", code, OutcomeStateChange, SeverityWarn, "Connector disconnected.", retry, next, input.Generations)
-}
-
-func (p *Producer) ConnectorDisconnect(input ConnectorDisconnectInput) error {
-	return p.RecordConnectorDisconnect(input)
-}
-
-func normalizeConnectorDisconnectReason(value ConnectorDisconnectReason) ConnectorDisconnectReason {
-	switch value {
-	case ConnectorDisconnectAuth, ConnectorDisconnectNetwork, ConnectorDisconnectServer, ConnectorDisconnectProtocol, ConnectorDisconnectShutdown, ConnectorDisconnectUnknown:
-		return value
-	default:
-		return ConnectorDisconnectUnknown
-	}
 }
 
 // ConfigGenerationState reports whether a configuration generation is desired or applied.

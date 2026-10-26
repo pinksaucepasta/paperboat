@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
@@ -55,7 +55,7 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 			return d, wire.ErrIngressDenied
 		}
 		policyGeneration = a.ViewerPolicyGeneration
-		d, err = (connectorprotocol.SQLIngressSource{DB: s.DB}).RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
+		d, err = (ingressprojection.SQLIngressSource{DB: s.DB}).RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
 	} else if a.ResourceKind == "preview" {
 		d, err = s.preview(ctx, a, node, epoch)
 	} else {

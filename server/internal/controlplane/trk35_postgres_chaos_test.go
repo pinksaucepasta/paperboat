@@ -118,72 +118,6 @@ WHERE o.id = $1`, operationID, eventType, resourceType, resourceID, idempotencyK
 	}
 }
 
-// TestTRK35PostgresChaosStaleReplacementReplayPreservesLKG verifies the
-// ready-new-before-drain fence in the real assignment tables. A stale
-// generation and an old detached callback cannot erase the active assignment;
-// once the replacement is ready, the old terminal callback is idempotent.
-func TestTRK35PostgresChaosStaleReplacementReplayPreservesLKG(t *testing.T) {
-	database, fixture := newTRK35PostgresFixture(t)
-	ctx := context.Background()
-	now := fixture.now
-	service := &EdgeService{store: database, clock: func() time.Time { return now }}
-
-	fixture.insertConnector(t, database, fixture.connectorOne, fixture.hostOne, fixture.sessionOne, 11)
-	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged != 1 {
-		t.Fatalf("initial reconciliation = %d, %v; want one staged assignment", staged, err)
-	}
-	first := fixture.loadAssignment(t, database, 1)
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{fixture.observation(first, "ready")}); err != nil {
-		t.Fatalf("activate initial assignment: %v", err)
-	}
-
-	replacementSession := "ses_trk35_replacement_" + fixture.suffix
-	fixture.replaceConnectorSession(t, database, fixture.connectorOne, replacementSession, 33)
-	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged != 1 {
-		t.Fatalf("replacement reconciliation = %d, %v; want one staged assignment", staged, err)
-	}
-	replacement := fixture.loadAssignment(t, database, 2)
-
-	// An old callback with a mismatched assignment generation is rejected by
-	// the exact SQL tuple. A late detach before replacement readiness is also
-	// rejected, leaving the old active assignment as the last-known-good row.
-	staleGeneration := fixture.observation(first, "ready")
-	staleGeneration.AssignmentGeneration = replacement.generation
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{staleGeneration}); !errors.Is(err, ErrAssignmentConflict) {
-		t.Fatalf("stale assignment generation error = %v, want ErrAssignmentConflict", err)
-	}
-	lateDetach := fixture.observation(first, "detached")
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{lateDetach}); !errors.Is(err, ErrAssignmentConflict) {
-		t.Fatalf("early old detach error = %v, want ErrAssignmentConflict", err)
-	}
-	trk35AssertAssignmentState(t, database, first.assignmentID, "active", "ready")
-	trk35AssertAssignmentState(t, database, replacement.assignmentID, "staged", "pending")
-
-	// Readiness promotes the replacement atomically and drains the old row.
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{fixture.observation(replacement, "ready")}); err != nil {
-		t.Fatalf("activate replacement: %v", err)
-	}
-	trk35AssertAssignmentState(t, database, first.assignmentID, "draining", "draining")
-	trk35AssertAssignmentState(t, database, replacement.assignmentID, "active", "ready")
-
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{lateDetach}); err != nil {
-		t.Fatalf("late old detach: %v", err)
-	}
-	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{lateDetach}); err != nil {
-		t.Fatalf("replayed old detach: %v", err)
-	}
-	trk35AssertAssignmentState(t, database, first.assignmentID, "detached", "detached")
-	trk35AssertAssignmentState(t, database, replacement.assignmentID, "active", "ready")
-
-	rows, err := service.ListTunnelEdgeRouteAssignmentsForNodeV1(ctx, fixture.nodeID, fixture.epoch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 || rows[0].AssignmentID != replacement.assignmentID || rows[0].AssignmentGeneration != replacement.generation {
-		t.Fatalf("last-known-good route snapshot = %#v, want replacement only", rows)
-	}
-}
-
 func newTRK35PostgresFixture(t *testing.T) (*db.DB, tunnelEdgeAcceptanceFixture) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
@@ -295,19 +229,5 @@ func trk35AssertOperationAndAuditCount(t *testing.T, database *db.DB, operationI
 	}
 	if operations != wantOperations || audits != wantAudits {
 		t.Fatalf("operation/audit rows = %d/%d, want %d/%d", operations, audits, wantOperations, wantAudits)
-	}
-}
-
-func trk35AssertAssignmentState(t *testing.T, database *db.DB, assignmentID, wantState, wantObserved string) {
-	t.Helper()
-	var state, observed string
-	if err := database.SQL().QueryRowContext(context.Background(), `
-SELECT state, observed_state
-FROM paperboat.tunnel_edge_route_assignments
-WHERE assignment_id=$1`, assignmentID).Scan(&state, &observed); err != nil {
-		t.Fatal(err)
-	}
-	if state != wantState || observed != wantObserved {
-		t.Fatalf("assignment %s state = %q/%q, want %q/%q", assignmentID, state, observed, wantState, wantObserved)
 	}
 }

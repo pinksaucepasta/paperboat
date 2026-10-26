@@ -102,7 +102,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$4,ARRAY['edge']::text[],ARRA
 func TestEndpointRoutesRideOnAgentRuntimeCarriersOnPostgres(t *testing.T) {
 	f := newAgentFixture(t, "endpoint")
 	database, ctx, prefix := f.database, f.ctx, f.prefix
-	account, machine, node, backupNode, key := f.account, f.machine, f.node, f.backupNode, f.key
+	account, machine, node, backupNode := f.account, f.machine, f.node, f.backupNode
 	lease := prefix + "_preview"
 	host := strings.ReplaceAll(prefix, "_", "-") + ".preview.example.test"
 	exec := func(query string, args ...any) {
@@ -136,8 +136,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		return out
 	}
 
-	oldPath := errors.New("old attachment path")
-	readiness := endpoints.PreviewReadiness{DB: database, Attachments: attachmentReadinessFunc(func() error { return oldPath })}
+	readiness := endpoints.PreviewReadiness{DB: database}
 	gate := func() error {
 		return readiness.RequirePreviewAttachmentReady(ctx, account, lease, "operation_unused", machine, "owner_session_endpoint")
 	}
@@ -159,15 +158,15 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		return out
 	}
 
-	// An agent that does not advertise endpoints gets no assignment: its previews stay on the old path.
+	// An agent that does not advertise endpoints gets no assignment and its previews are not served.
 	if _, err := service.Attach(ctx, proof, request); err != nil {
 		t.Fatal(err)
 	}
 	if got := assignments(); len(got) != 0 {
 		t.Fatalf("assignments for an agent without the endpoints capability: %v", got)
 	}
-	if err := gate(); !errors.Is(err, oldPath) {
-		t.Fatalf("readiness of a preview whose agent lacks the capability = %v, want the old attachment gate", err)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness of a preview whose agent lacks the capability = %v, want not serving", err)
 	}
 	request.Capabilities = capable
 	a, err := service.Attach(ctx, proof, request)
@@ -177,12 +176,12 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); len(got) != 2 || got[node] != "active/false" || got[backupNode] != "active/false" {
 		t.Fatalf("assignments after capable attach = %v, want both edges active and unobserved", got)
 	}
-	// No edge has advertised endpoints yet: the agent keeps its previews on the old path.
+	// No edge has advertised endpoints yet: nothing is served.
 	if a.EndpointsServed {
 		t.Fatal("endpoints served before any edge admitted them")
 	}
-	if err := gate(); !errors.Is(err, oldPath) {
-		t.Fatalf("readiness before the edges admit endpoints = %v, want the old attachment gate", err)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness before the edges admit endpoints = %v, want not serving", err)
 	}
 	backupEdge := f.backupEdge
 	for _, e := range []previewattachment.PreviewEdgeIdentity{edge, backupEdge} {
@@ -366,24 +365,6 @@ SELECT $1,$2,'epoch_usage',$3,$4,x.route_generation,'egress',4096,4096,now(),now
 	if got := assignments(); got[node] != "active/true" {
 		t.Fatalf("renewal reset a ready assignment: %v", got)
 	}
-	// A preview that runs on its own per-preview carrier (its agent chose the old path) never also
-	// gets an endpoint route for the same hostname.
-	// The fixture row stands for a live attachment; its ownership triggers and foreign keys are
-	// not what this test is about.
-	if err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role=replica`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `INSERT INTO preview_lease_carrier_attachments(account_id,preview_id,operation_id,idempotency_key,request_id,correlation_id,request_hash,owner_machine_id,owner_session_id,host_id,edge_node_id,machine_identity_public_key,machine_identity_thumbprint,lease_generation,tunnel_id,connector_id,connector_session_id,process_generation,config_generation,route_id,route_generation,config_content_hash,edge_endpoints,expires_at,edge_process_epoch,edge_carrier_server_spki_sha256,edge_carrier_server_certificate_chain_pem)
-VALUES($1,$2,'operation_legacy','operation_legacy','request_legacy','correlation_legacy',decode(repeat('ab',32),'hex'),$3,'owner_session_endpoint',$3,$4,$5,'sha256:'||repeat('A',43),1,'tunnel_legacy','connector_legacy','session_legacy',1,1,'route_legacy',1,'sha256:'||repeat('a',64),ARRAY['h2://edge.example.test:1','h3://edge.example.test:2'],now()+interval '5 minutes','epoch_endpoint','sha256:'||repeat('1',64),'fixture')`, account, lease, machine, node, key)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if values, err := service.Pull(ctx, edge, capable); err != nil || len(values) != 1 {
-		t.Fatalf("preview on its own carrier also got an endpoint route: %d admissions, %v", len(values), err)
-	}
-	exec(`DELETE FROM preview_lease_carrier_attachments WHERE preview_id=$1`, lease)
 	// The lease ends: the route leaves the edge snapshot at once and the next reconcile removes it.
 	exec(`UPDATE preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, lease)
 	if values, err := service.Pull(ctx, edge, capable); err != nil || len(values) != 1 {
@@ -395,10 +376,4 @@ VALUES($1,$2,'operation_legacy','operation_legacy','request_legacy','correlation
 	if got := assignments(); got[node] != "removed/false" || got[backupNode] != "removed/false" {
 		t.Fatalf("assignments after the lease ended = %v", got)
 	}
-}
-
-type attachmentReadinessFunc func() error
-
-func (f attachmentReadinessFunc) RequirePreviewAttachmentReady(context.Context, string, string, string, string, string) error {
-	return f()
 }

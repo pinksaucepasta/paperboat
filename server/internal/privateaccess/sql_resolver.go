@@ -11,20 +11,20 @@ import (
 )
 
 // SQLResolver is the production account-scoped resolver. Preview rows are
-// read through the canonical preview attachment repository while durable
+// read from preview_routes while durable
 // tunnel rows, route rows, and the current connector session are checked in a
 // single SQL statement. Every call rechecks current state and expiry.
 type SQLResolver struct {
 	db      *db.DB
-	preview *PreviewAttachmentResolver
+	preview *PreviewRouteResolver
 	clock   func() time.Time
 }
 
-func NewSQLResolver(database *db.DB, attachments AttachmentStore) (*SQLResolver, error) {
+func NewSQLResolver(database *db.DB) (*SQLResolver, error) {
 	if database == nil || database.Pool() == nil {
 		return nil, fmt.Errorf("%w: private access database is not open", ErrInvalid)
 	}
-	preview, err := NewPreviewAttachmentResolver(attachments)
+	preview, err := NewPreviewRouteResolver(database)
 	if err != nil {
 		return nil, err
 	}

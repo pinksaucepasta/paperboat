@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"os"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
@@ -145,12 +146,9 @@ func TestSharedTunnelManagementKeepsActorAndDeniesPublication(t *testing.T) {
 		t.Fatalf("shared patch identity: %+v", repo.patch)
 	}
 	resources := &fakeResourceRepository{managementOwner: "owner_other", managementShared: true}
-	resourceService := resourceServiceForTest(t, resources, 0)
+	resourceService := resourceServiceForTest(t, resources)
 	if _, err = resourceService.CreateDomain(context.Background(), testRequest(false), "tun_1", DomainCreateRequest{}); !errors.Is(err, ErrMachinePublicationDenied) {
 		t.Fatalf("domain publication: %v", err)
-	}
-	if _, err = resourceService.IssueEnrollment(context.Background(), testRequest(false), "tun_1", EnrollmentRequest{}); !errors.Is(err, ErrMachinePublicationDenied) {
-		t.Fatalf("connector enrollment: %v", err)
 	}
 	if _, err = resourceService.ListRoutes(context.Background(), testRequest(false), "tun_1", "", 10); err != nil {
 		t.Fatal(err)

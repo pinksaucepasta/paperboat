@@ -7,21 +7,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// ErrNotServing means the preview's agent serves endpoints but no edge has observed its route yet.
+// ErrNotServing means no edge has observed the preview's endpoint route yet.
 var ErrNotServing = errors.New("preview endpoint route is not served by any edge yet")
 
-// AttachmentReadiness is previewv1.AttachmentReadiness for the old per-preview carrier path.
-type AttachmentReadiness interface {
-	RequirePreviewAttachmentReady(ctx context.Context, accountID, previewID, operationID, ownerMachineID, ownerSessionID string) error
-}
-
-// PreviewReadiness gates a preview's readiness report. A preview whose agent serves endpoints on an
-// edge that admits them is ready once at least one edge serves its route (preview_routes); any
-// other preview still needs
-// its own carrier attachment (Attachments) until that path is deleted (3a step 5).
+// PreviewReadiness gates a preview's readiness report: it is ready once its agent serves endpoints
+// on an edge that admits them and at least one edge serves its route (preview_routes).
 type PreviewReadiness struct {
-	DB          *db.DB
-	Attachments AttachmentReadiness
+	DB *db.DB
 }
 
 func (r PreviewReadiness) RequirePreviewAttachmentReady(ctx context.Context, accountID, previewID, operationID, ownerMachineID, ownerSessionID string) error {
@@ -36,7 +28,7 @@ func (r PreviewReadiness) RequirePreviewAttachmentReady(ctx context.Context, acc
 		return err
 	}
 	if !engine {
-		return r.Attachments.RequirePreviewAttachmentReady(ctx, accountID, previewID, operationID, ownerMachineID, ownerSessionID)
+		return ErrNotServing
 	}
 	if !serving {
 		return ErrNotServing

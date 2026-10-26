@@ -117,7 +117,7 @@ WHERE d.deleted_at IS NULL
           AND cert.expires_at > sqlc.arg(now)
           AND EXISTS (
             SELECT 1
-            FROM preview_lease_carrier_attachments AS attachment
+            FROM preview_routes AS attachment
             WHERE attachment.account_id = d.account_id
               AND attachment.preview_id = d.preview_id
               AND attachment.lease_generation > 0 AND attachment.lease_generation <= d.preview_generation
@@ -143,12 +143,12 @@ WHERE d.deleted_at IS NULL
 ORDER BY d.certificate_expires_at NULLS FIRST, d.id
 LIMIT sqlc.arg(row_limit);
 
--- Current ready preview attachment tuples are the distribution targets for a
+-- Current ready preview route tuples are the distribution targets for a
 -- preview certificate. The attachment generation is used as the assignment
 -- fence because preview carriers do not have durable route assignments.
 -- name: ListReadyPreviewCertificateEdgesV1 :many
 SELECT a.edge_node_id, a.edge_process_epoch, a.attachment_generation
-FROM preview_lease_carrier_attachments AS a
+FROM preview_routes AS a
 JOIN preview_leases AS lease
   ON lease.id = a.preview_id AND lease.account_id = a.account_id
 JOIN preview_domains AS d
@@ -156,7 +156,7 @@ JOIN preview_domains AS d
 JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
 JOIN user_machines m ON m.id=a.host_id AND m.id=lease.owner_machine_id AND m.user_id=lease.account_id
 WHERE d.id = sqlc.arg(domain_id)
-  AND a.state IN ('pending','admitted','ready')
+  AND a.state IN ('pending','admitted','edge_ready','ready')
   AND a.lease_generation>0 AND a.lease_generation<=lease.generation
   AND a.owner_session_id=lease.owner_session_id
   AND a.machine_identity_public_key=m.public_identity_key
@@ -186,7 +186,7 @@ SELECT d.*
 FROM preview_domains AS d
 JOIN preview_leases AS lease
   ON lease.id = d.preview_id AND lease.account_id = d.account_id
-JOIN preview_lease_carrier_attachments AS a
+JOIN preview_routes AS a
   ON a.account_id = d.account_id AND a.preview_id = d.preview_id
  AND a.lease_generation > 0 AND a.lease_generation <= d.preview_generation
  AND a.owner_session_id=lease.owner_session_id AND a.host_id=lease.owner_machine_id

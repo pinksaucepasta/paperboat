@@ -62,31 +62,6 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := producer.RecordConnectorSession(ConnectorSessionInput{
-		State: ConnectorSessionActive, Identity: identity,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := producer.RecordConnectorReconnect(ConnectorReconnectInput{
-		Outcome: ConnectorReconnectSucceeded, Identity: identity,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := producer.RecordConnectorBackoff(ConnectorBackoffInput{
-		State: ConnectorBackoffScheduled, Duration: 3 * time.Second, Identity: identity,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := producer.RecordConnectorHandshake(ConnectorHandshakeInput{
-		Outcome: ConnectorHandshakeSucceeded, Duration: 50 * time.Millisecond, Identity: identity,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := producer.RecordConnectorDisconnect(ConnectorDisconnectInput{
-		Reason: ConnectorDisconnectNetwork, Identity: identity,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := producer.RecordConfigApply(ConfigApplyInput{
 		State: ConfigGenerationApplied, Generation: 4, Identity: identity,
 	}); err != nil {
@@ -126,11 +101,11 @@ func TestProducerRecordsTypedSignalsWithSafeIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := len(events.Snapshot()); got != 17 {
-		t.Fatalf("event count = %d, want 17", got)
+	if got := len(events.Snapshot()); got != 12 {
+		t.Fatalf("event count = %d, want 12", got)
 	}
-	if got := len(lifecycle.Snapshot()); got != 17 {
-		t.Fatalf("lifecycle count = %d, want 17", got)
+	if got := len(lifecycle.Snapshot()); got != 12 {
+		t.Fatalf("lifecycle count = %d, want 12", got)
 	}
 	for _, event := range events.Snapshot() {
 		if event.RequestID != "req_01" || event.CorrelationID != "cor_01" {
@@ -285,8 +260,8 @@ func TestProducerValidatesServiceUptimeWithoutMetricsSink(t *testing.T) {
 func TestProducerRejectsUnboundedDurationsWithoutRecording(t *testing.T) {
 	metrics := NewMetrics()
 	producer := &Producer{Metrics: metrics, Now: time.Now}
-	if err := producer.RecordConnectorHandshake(ConnectorHandshakeInput{
-		Outcome: ConnectorHandshakeSucceeded, Duration: 25 * time.Hour,
+	if err := producer.RecordRouteLatency(RouteLatencyInput{
+		Duration: 25 * time.Hour,
 	}); ErrorCodeOf(err) != ErrorInvalidObservation {
 		t.Fatalf("duration error = %v, want %s", err, ErrorInvalidObservation)
 	}

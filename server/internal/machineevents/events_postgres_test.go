@@ -299,19 +299,16 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 		exec(`UPDATE paperboat.control_config_assignments SET version=version+1 WHERE id=$1`, "assignment_"+stamp)
 	}), map[string]bool{laptop: true, server: false})
 
-	// tunnels: the machines hosting the tunnel's connectors.
+	// tunnels: the machine that created the tunnel.
 	tunnel := "tunnel_" + stamp
 	endpointID := testutil.EndpointID("topics:" + stamp)
 	exec(`INSERT INTO paperboat.tunnels (id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES ($1,$2,$3,'active','public',1,$4,$5,$6,$2,'pending')`, tunnel, account, "t-"+stamp, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", laptop)
-	expect("connector", moved(TopicTunnels, all, func() {
-		exec(`INSERT INTO paperboat.tunnel_connectors (id,tunnel_id,host_id,credential_reference,credential_thumbprint,rotation_generation,desired_state,protocol_version,last_applied_config_generation,drain_state,generation) VALUES ($1,$2,$3,'keychain://x','thumb',1,'active','1.0',0,'accepting',1)`, "connector_"+stamp, tunnel, server)
-	}), map[string]bool{server: true, outsider: false})
 	expect("tunnel config", moved(TopicTunnels, all, func() {
 		exec(`INSERT INTO paperboat.tunnel_config_generations (tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until) VALUES ($1,1,$2,'{}','pending',$3,now()+interval '1 hour')`, tunnel, make([]byte, 32), account)
-	}), map[string]bool{server: true, laptop: true, outsider: false})
+	}), map[string]bool{server: false, laptop: true, outsider: false})
 	expect("tunnel deleted", moved(TopicTunnels, all, func() {
 		exec(`UPDATE paperboat.tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
-	}), map[string]bool{server: true, laptop: true, outsider: false})
+	}), map[string]bool{server: false, laptop: true, outsider: false})
 
 	// config: the availability policy an idle host asks for only on this topic (PR-03).
 	expect("availability", moved(TopicConfig, all, func() {

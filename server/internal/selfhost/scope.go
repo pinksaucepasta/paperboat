@@ -226,10 +226,6 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 }
 func revokeIneligible(ctx context.Context, tx *sql.Tx, scope Scope) error {
 	_, err := tx.ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET relay_revocation_generation=relay_revocation_generation+1 WHERE paperboat.selfhost_scope_visible($1,$2,user_id)`, scope.Kind, scope.ID)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE paperboat.tunnel_edge_route_assignments SET state='draining',observed_state='draining',updated_at=now() WHERE state IN('staged','active') AND paperboat.selfhost_scope_visible($1,$2,account_id) AND NOT paperboat.node_route_eligible(edge_node_id,account_id,route_id)`, scope.Kind, scope.ID)
 	return err
 }
 func (s *Service) RemoveScoped(ctx context.Context, actor, id string, operator bool) error {

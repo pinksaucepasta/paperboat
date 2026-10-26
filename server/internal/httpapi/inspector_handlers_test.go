@@ -8,14 +8,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -55,30 +58,13 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 	machinePrivate := ed25519.NewKeyFromSeed(key[:])
 	machinePublic := machinePrivate.Public().(ed25519.PublicKey)
 	publicKey := base64.RawURLEncoding.EncodeToString(machinePublic)
-	thumbprint := sha256.Sum256(machinePublic)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,installation_generation,worker_generation,worker_service_scope,connector_state) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,$4,1,1,'system','ready')`, machine, owner, "env_ih_"+suffix, publicKey)
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,state,ready,capacity,last_heartbeat_at) VALUES($1,'test','1.0',$2,'edge.example.test',24001,24002,'edge.example.test',25001,25002,'sha256:'||repeat('b',64),'test-public-certificate-chain','ready',true,'{}',$3)`, node, "epoch-ih-"+suffix, now)
 	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,allocation_state,edge_state,origin_state,terminal_state,created_at,last_renewed_at) VALUES('foreground',$1,$2,$3,$3,$4,$5,'http','127.0.0.1:3000','team',$6,'ready','ready','ready','active',$7,$7)`, lease, "https://ih-"+suffix+".preview.example.test", owner, machine, session, now.Add(time.Hour), now)
 	operationHash := sha256.Sum256([]byte("ih-operation:" + operation))
 	exec(`INSERT INTO paperboat.operations(id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,retrying,outcome,correlation_id,created_at,updated_at) VALUES($1,$2,$1,$3,'preview.create','preview_lease',$4,'connecting','running',60,false,'changed',$5,$6,$6)`, operation, owner, operationHash[:], lease, "cor_"+operation, now)
 	exec(`INSERT INTO paperboat.preview_lease_create_operations(account_id,preview_id,operation_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, owner, lease, operation)
-	repo, err := previewattachment.NewSQLRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := previewattachment.Request{PreviewID: lease, OperationID: operation, OwnerMachineID: machine, OwnerSessionID: session, IdempotencyKey: operation, RequestID: "req_" + operation, CorrelationID: "cor_" + operation}
-	hash, err := request.Hash(owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = repo.CreatePending(ctx, previewattachment.Attachment{
-		Schema: previewattachment.Schema, Kind: previewattachment.Kind,
-		Binding:        previewattachment.Binding{AccountID: owner, PreviewID: lease, OperationID: operation, OwnerMachineID: machine, OwnerSessionID: session, HostID: machine, LeaseGeneration: 1, TunnelID: "pvc-tun-ih-" + suffix, ConnectorID: "pvc-con-ih-" + suffix, SessionID: "pvc-ses-ih-" + suffix, ProcessGeneration: 1, ConfigGeneration: 1, RouteID: "pvc-rte-ih-" + suffix, RouteGeneration: 4, EdgeNodeID: node, EdgeProcessEpoch: "epoch-ih-" + suffix, EdgeCarrierServerSPKISHA256: "sha256:" + strings.Repeat("b", 64), EdgeCarrierServerCertificateChainPEM: "test-public-certificate-chain", MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(thumbprint[:])},
-		IdempotencyKey: operation, RequestID: "req_" + operation, CorrelationID: "cor_" + operation, RequestHash: hash, Endpoint: "https://ih-" + suffix + ".preview.example.test", Target: previewattachment.Target{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "team", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeEndpoints: []string{"h2://edge.example.test:25001", "h3://edge.example.test:25002"}, AttachmentGeneration: 1, IssuedAt: now, ExpiresAt: now.Add(20 * time.Minute), State: previewattachment.StatePending,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	exec(`UPDATE paperboat.preview_lease_carrier_attachments SET state='ready',edge_ready=true,origin_ready=true,ready_at=$3 WHERE account_id=$1 AND preview_id=$2`, owner, lease, now)
+	testutil.EnginePreview{Suffix: suffix, Lease: lease, Account: owner, Machine: machine, Node: node, Epoch: "epoch-ih-" + suffix, PublicKey: publicKey, RouteRevision: 4, Now: now}.Serve(t, exec)
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','team',3,$3,$4,'host',$2,$5,$5)`, tunnel, owner, "endpoint_00000000-0000-4000-8000-"+suffix[len(suffix)-12:], "https://00000000-0000-8000-8000-"+suffix[len(suffix)-12:]+".tunnels.example.test", now)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, owner, now)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, teamID, owner)
@@ -96,6 +82,7 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.operations WHERE id=$1`, operation)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.control_environments WHERE id IN (SELECT environment_id FROM paperboat.user_machines WHERE id=$1)`, machine)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
 		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.users WHERE id IN($1,$2)`, owner, mate)
 	})

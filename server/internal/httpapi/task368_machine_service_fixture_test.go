@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
@@ -142,11 +143,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attachments, err := previewattachment.NewProduction(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previews, err := previewv1.NewService(previewStore, previewv1.Config{EndpointDomain: cfg.Preview.BaseDomain, CursorKey: []byte(secret)[:32], AttachmentReadiness: attachments.Service})
+	previews, err := previewv1.NewService(previewStore, previewv1.Config{EndpointDomain: cfg.Preview.BaseDomain, CursorKey: []byte(secret)[:32], AttachmentReadiness: endpoints.PreviewReadiness{DB: database}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,25 +178,13 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	precondition, err := NewPreviewAttachmentLeasePreconditionChecker(previewStore)
-	if err != nil {
-		t.Fatal(err)
-	}
-	attachmentHTTP, err := previewattachment.NewHTTPHandler(attachments.Service, machineVerifier, precondition)
-	if err != nil {
-		t.Fatal(err)
-	}
 	edgeVerifier, err := previewattachment.NewDBPreviewEdgeRequestVerifier(database, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edgeHTTP, err := previewattachment.NewEdgeHTTPHandler(attachments.Service, attachments.Repository, edgeVerifier)
 	if err != nil {
 		t.Fatal(err)
 	}
 	browserHandlers := &BrowserAccessHandlers{Lazy: lazy, Access: browser, Ingress: &browseringress.Service{DB: database, Access: browser, Quota: billingService}, Edge: edgeVerifier, Machine: machineVerifier}
 	machineServices := machineservices.New(database, "local.example.test")
-	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, MachineServices: machineServices, NativePrivateAccess: &nativeprivateaccess.Service{Resolver: nativeResolver, Signer: signer, Issuer: base}, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, LazyActivation: lazy, LazyPolicies: policies, PreviewLeases: previews, PreviewTunnelAPI: previewAPI, BrowserAccess: browserHandlers, PreviewCarrierAttachment: attachmentHTTP, PreviewCarrierEdge: edgeHTTP, MeteringRepo: metering.NewRuntimeRepository(database, cfg.UserMachines.OfflineAfter/2, cfg.ConfigSync.StaleHeartbeatAfter)})}
+	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, MachineServices: machineServices, NativePrivateAccess: &nativeprivateaccess.Service{Resolver: nativeResolver, Signer: signer, Issuer: base}, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, LazyActivation: lazy, LazyPolicies: policies, PreviewLeases: previews, PreviewTunnelAPI: previewAPI, BrowserAccess: browserHandlers, MeteringRepo: metering.NewRuntimeRepository(database, cfg.UserMachines.OfflineAfter/2, cfg.ConfigSync.StaleHeartbeatAfter)})}
 	type actor struct {
 		Name      string         `json:"name"`
 		AccountID string         `json:"account_id"`

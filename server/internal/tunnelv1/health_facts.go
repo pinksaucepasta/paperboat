@@ -12,14 +12,8 @@ import (
 // when status is requested so a stopped host, an unready edge, a domain still waiting for DNS or an
 // exhausted bandwidth allowance is named instead of everything collapsing into "pending".
 type HealthFacts struct {
-	// ActiveConnectors counts the tunnel's connectors that are neither revoked nor deleted.
-	ActiveConnectors int
-	// ConnectorSessions counts those connectors with a ready session whose heartbeat is current.
-	ConnectorSessions int
 	// EdgeReady reports whether any edge node can currently accept tunnel traffic.
 	EdgeReady bool
-	// FailedRoutes counts active routes whose edge assignment reported failed or degraded.
-	FailedRoutes int
 	// PendingDomains and PendingCertificates hold hostnames still waiting for DNS ownership
 	// verification, or for their certificate once ownership is verified.
 	PendingDomains      []string
@@ -28,9 +22,10 @@ type HealthFacts struct {
 	OriginReason string
 	// BandwidthExhausted reports that the workspace has used its bandwidth allowance.
 	BandwidthExhausted bool
-	// EngineServed reports that the endpoint engine serves the tunnel (PLAN 3a step 4): an active
-	// tunnel endpoint with an edge assignment observed ready. Connector facts then say nothing about
-	// whether it is served.
+	// HostConnected reports that the machine running the tunnel holds a live carrier to an edge.
+	HostConnected bool
+	// EngineServed reports that the endpoint engine serves the tunnel: an active tunnel endpoint
+	// with an edge assignment observed ready.
 	EngineServed bool
 }
 
@@ -42,19 +37,16 @@ func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID str
 	var facts HealthFacts
 	fresh := now.Add(-healthFactsFreshness)
 	err := r.db.Pool().QueryRow(ctx, `SELECT
- (SELECT count(*) FROM tunnel_connectors c WHERE c.tunnel_id=$2 AND c.desired_state='active' AND c.revoked_at IS NULL),
- (SELECT count(*) FROM tunnel_connectors c JOIN tunnel_connector_sessions s ON s.id=c.last_session_id AND s.connector_id=c.id
-   WHERE c.tunnel_id=$2 AND c.desired_state='active' AND c.revoked_at IS NULL AND s.state='ready' AND s.lease_deadline>$3 AND s.last_heartbeat_at>$4),
  EXISTS(SELECT 1 FROM control_tunnel_nodes n WHERE n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
-   AND n.registry_expires_at>$3 AND n.last_heartbeat_at>$4 AND n.drain_deadline IS NULL),
- (SELECT count(*) FROM tunnel_edge_route_assignments a JOIN tunnel_routes r ON r.id=a.route_id AND r.desired_state='active' AND r.deleted_at IS NULL
-   WHERE a.account_id=$1 AND a.tunnel_id=$2 AND a.state='active' AND a.observed_state IN ('failed','degraded') AND a.observed_at>$3::timestamptz-interval '1 minute'),
+   AND n.registry_expires_at>$2 AND n.last_heartbeat_at>$3 AND n.drain_deadline IS NULL),
  coalesce((SELECT oh.code FROM tunnel_route_origin_health oh JOIN tunnel_routes r ON r.id=oh.route_id AND r.desired_state='active' AND r.deleted_at IS NULL
-   WHERE oh.tunnel_id=$2 AND oh.state='unreachable' AND oh.observed_at>$3::timestamptz-($5::double precision*interval '1 second') ORDER BY oh.observed_at DESC LIMIT 1),''),
+   WHERE oh.tunnel_id=$1 AND oh.state='unreachable' AND oh.observed_at>$2::timestamptz-($4::double precision*interval '1 second') ORDER BY oh.observed_at DESC LIMIT 1),''),
  EXISTS(SELECT 1 FROM endpoints e JOIN endpoint_edge_assignments x ON x.endpoint_id=e.id
-   WHERE e.tunnel_id=$2 AND e.kind='tunnel' AND e.desired_state='active' AND x.desired='active' AND x.observed_ready)`,
-		accountID, tunnelID, now, fresh, OriginHealthMaxAge.Seconds()).
-		Scan(&facts.ActiveConnectors, &facts.ConnectorSessions, &facts.EdgeReady, &facts.FailedRoutes, &facts.OriginReason, &facts.EngineServed)
+   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND e.desired_state='active' AND x.desired='active' AND x.observed_ready),
+ EXISTS(SELECT 1 FROM endpoints e JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id
+   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND ra.expires_at>$2)`,
+		tunnelID, now, fresh, OriginHealthMaxAge.Seconds()).
+		Scan(&facts.EdgeReady, &facts.OriginReason, &facts.EngineServed, &facts.HostConnected)
 	if err != nil {
 		return HealthFacts{}, translate(err)
 	}
@@ -99,9 +91,6 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 		return set("bandwidth_exhausted", "Your workspace has used its bandwidth allowance, so traffic is not forwarded.",
 			"Add bandwidth or change plan on the Billing page; traffic resumes when the allowance is available.", false)
 	}
-	if view.OverallCode == "ready" && !facts.EngineServed && facts.ActiveConnectors > 0 && facts.ConnectorSessions == 0 {
-		view.OverallCode = "pending"
-	}
 	switch view.OverallCode {
 	case "origin_unreachable":
 		view.Dimensions.Origin = HealthDimension{Status: "down", Code: originCode(facts.OriginReason)}
@@ -115,13 +104,7 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 		return view
 	}
 	switch {
-	// A tunnel the engine serves has no connector session; a connector row left by tunnel creation
-	// says nothing about it, so only the connector cases are skipped.
-	case !facts.EngineServed && facts.ActiveConnectors == 0:
-		view.Dimensions.Service = HealthDimension{Status: "down", Code: "connector_missing"}
-		return set("connector_missing", "This tunnel has no connector, so nothing is serving it.",
-			"Add a connector on the machine that runs the app: `pb tunnel connector add <tunnel>`.", false)
-	case !facts.EngineServed && facts.ConnectorSessions == 0:
+	case !facts.EngineServed && !facts.HostConnected:
 		view.Dimensions.Service = HealthDimension{Status: "down", Code: "connector_offline"}
 		return set("connector_offline", "The Paperboat host that runs this tunnel is offline or its service is stopped.",
 			"Make sure the machine is on and online (`pb environments`), then run `pb doctor` on it; the tunnel reconnects by itself.", true)

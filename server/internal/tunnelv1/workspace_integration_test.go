@@ -4,16 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
-	"strings"
-	"testing"
-	"time"
 )
 
 // Exercises durable scope, authorization and replay against the production SQL.
@@ -140,7 +140,6 @@ func TestPublisherWorkspaceOwnershipOnPostgres(t *testing.T) {
    (SELECT count(*) FROM paperboat.team_resource_bindings),
    (SELECT count(*) FROM paperboat.team_resource_grants),
    (SELECT count(*) FROM paperboat.tunnel_routes),
-   (SELECT count(*) FROM paperboat.tunnel_connectors),
    (SELECT count(*) FROM paperboat.tunnel_config_generations))::text`).Scan(&counts)
 		if err != nil {
 			t.Fatal(err)
@@ -181,18 +180,7 @@ func TestPublisherWorkspaceOwnershipOnPostgres(t *testing.T) {
 	if _, err := store.GetPreviewLeaseV1(ctxB, owner, previewID); !errors.Is(err, previewtunnelstore.ErrNotFound) {
 		t.Fatalf("cross-workspace preview get: %v", err)
 	}
-	resolver, resolverErr := previewattachment.NewDBPreviewLeaseResolver(f.database)
-	if resolverErr != nil {
-		t.Fatal(resolverErr)
-	}
-	lookup := previewattachment.LeaseLookupRequest{UserID: owner, MachineID: host, InstallationGeneration: 1, PreviewID: previewID, OperationID: lease.Operation.ID, OwnerSessionID: lease.Lease.OwnerSessionID}
-	if resolved, err := resolver.ResolvePreviewLease(ctx, lookup); err != nil || resolved.AccountID != owner {
-		t.Fatalf("team-bound attachment issuer: %+v %v", resolved, err)
-	}
 	exec(`UPDATE paperboat.team_members SET active=false WHERE team_id=$1 AND account_id=$2`, teamA, owner)
-	if _, err := resolver.ResolvePreviewLease(ctx, lookup); !errors.Is(err, previewattachment.ErrUnauthorized) {
-		t.Fatalf("revoked team attachment admission: %v", err)
-	}
 	if _, err := f.repository.Create(ctxA, initial); !errors.Is(err, workspace.ErrForbidden) {
 		t.Fatalf("revoked creator replay: %v", err)
 	}

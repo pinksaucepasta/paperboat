@@ -24,14 +24,11 @@ import (
 )
 
 type BrowserAccessHandlers struct {
-	Lazy                   *lazyaccess.Activator
-	Access                 *browseraccess.Service
-	Ingress                *browseringress.Service
-	Edge                   previewattachment.PreviewEdgeRequestVerifier
-	Machine                previewattachment.MachineProofVerifier
-	ViewerPolicyReconciler interface {
-		ReconcileTunnelEdgeRouteAssignments(context.Context, int32) (int, error)
-	}
+	Lazy    *lazyaccess.Activator
+	Access  *browseraccess.Service
+	Ingress *browseringress.Service
+	Edge    previewattachment.PreviewEdgeRequestVerifier
+	Machine previewattachment.MachineProofVerifier
 }
 
 func browserAccessError(w http.ResponseWriter, r *http.Request, err error) {

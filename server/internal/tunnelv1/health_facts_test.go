@@ -11,14 +11,14 @@ import (
 
 // Each failure a tunnel can be in must say which one it is, whether it fixes itself, and what to do.
 func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
-	healthyConnector := HealthFacts{ActiveConnectors: 1, ConnectorSessions: 1, EdgeReady: true}
+	healthyConnector := HealthFacts{HostConnected: true, EdgeReady: true}
 	with := func(change func(*HealthFacts)) HealthFacts {
 		facts := healthyConnector
 		change(&facts)
 		return facts
 	}
 	wantDimension := map[string]string{
-		"no connector at all": "connector_missing", "host offline": "connector_offline", "host went offline after the tunnel was ready": "connector_offline",
+		"host offline":     "connector_offline",
 		"edge unreachable": "edge_unavailable", "dns pending": "dns_pending", "certificate pending": "certificate_pending",
 		"origin refused": "origin_refused", "origin timeout": "origin_timeout", "origin tls": "origin_tls",
 		"route rejected": "route_rejected", "bandwidth exhausted": "bandwidth_exhausted",
@@ -32,11 +32,7 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 		wantAction   string
 		wantRetrying bool
 	}{
-		"no connector at all": {summary: "pending", facts: HealthFacts{EdgeReady: true}, wantCode: "connector_missing",
-			wantDimCode: func(v HealthView) string { return v.Dimensions.Service.Code }, wantAction: "pb tunnel connector add"},
-		"host offline": {summary: "pending", facts: HealthFacts{ActiveConnectors: 1, EdgeReady: true}, wantCode: "connector_offline",
-			wantDimCode: func(v HealthView) string { return v.Dimensions.Service.Code }, wantAction: "pb doctor", wantRetrying: true},
-		"host went offline after the tunnel was ready": {summary: "ready", facts: HealthFacts{ActiveConnectors: 1, EdgeReady: true}, wantCode: "connector_offline",
+		"host offline": {summary: "pending", facts: HealthFacts{EdgeReady: true}, wantCode: "connector_offline",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Service.Code }, wantAction: "pb doctor", wantRetrying: true},
 		"edge unreachable": {summary: "pending", facts: with(func(f *HealthFacts) { f.EdgeReady = false }), wantCode: "edge_unavailable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Edge.Code }, wantAction: "pb tunnel doctor", wantRetrying: true},
@@ -50,7 +46,7 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "not responding", wantRetrying: true},
 		"origin tls": {summary: "origin_unreachable", facts: with(func(f *HealthFacts) { f.OriginReason = "tls" }), wantCode: "origin_unreachable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "certificate", wantRetrying: true},
-		"route rejected": {summary: "route_unavailable", facts: with(func(f *HealthFacts) { f.FailedRoutes = 1 }), wantCode: "route_unavailable",
+		"route rejected": {summary: "route_unavailable", facts: healthyConnector, wantCode: "route_unavailable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Route.Code }, wantAction: "pb tunnel route update", wantRetrying: true},
 		"bandwidth exhausted": {summary: "ready", facts: healthyConnector, bandwidth: true, wantCode: "bandwidth_exhausted",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Access.Code }, wantAction: "Billing"},
@@ -87,7 +83,7 @@ func TestStatusKeepsTheDesiredStateExplanationsAheadOfLiveFacts(t *testing.T) {
 }
 
 func TestStatusReportsAHealthyTunnelAsReadyAndReadFailuresAsErrors(t *testing.T) {
-	repository := &fakeTunnelRepository{facts: HealthFacts{ActiveConnectors: 1, ConnectorSessions: 1, EdgeReady: true}, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: DesiredActive, AccessMode: AccessPrivate, SummaryCode: "ready", Generation: 1}}
+	repository := &fakeTunnelRepository{facts: HealthFacts{HostConnected: true, EdgeReady: true}, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: DesiredActive, AccessMode: AccessPrivate, SummaryCode: "ready", Generation: 1}}
 	status, err := testService(t, repository, sequentialID()).Status(context.Background(), testRequest(false), "tun_1")
 	if err != nil || status.OverallCode != "ready" || status.RepairAction != "No action required." {
 		t.Fatalf("healthy status = %+v err=%v", status, err)
@@ -98,18 +94,17 @@ func TestStatusReportsAHealthyTunnelAsReadyAndReadFailuresAsErrors(t *testing.T)
 	}
 }
 
-// F20-02: a tunnel the endpoint engine serves has no connector session. A connector row left by tunnel
-// creation must not turn its status into connector_offline or connector_missing, while the edge,
-// DNS and certificate checks still apply.
-func TestEngineServedTunnelIsNotReportedAsConnectorOffline(t *testing.T) {
+// F20-02: a tunnel the endpoint engine serves is not offline just because no host fact is set; the
+// edge, DNS and certificate checks still apply.
+func TestEngineServedTunnelIsNotReportedAsHostOffline(t *testing.T) {
 	for name, tc := range map[string]struct {
 		summary string
 		facts   HealthFacts
 		want    string
 	}{
-		"ready with a half-enrolled connector row": {"ready", HealthFacts{EngineServed: true, ActiveConnectors: 1, EdgeReady: true}, "ready"},
-		"pending without any connector":            {"pending", HealthFacts{EngineServed: true, EdgeReady: true}, "tunnel_pending"},
-		"engine served but no edge ready":          {"pending", HealthFacts{EngineServed: true, ActiveConnectors: 1}, "edge_unavailable"},
+		"ready":                           {"ready", HealthFacts{EngineServed: true, EdgeReady: true}, "ready"},
+		"pending":                         {"pending", HealthFacts{EngineServed: true, EdgeReady: true}, "tunnel_pending"},
+		"engine served but no edge ready": {"pending", HealthFacts{EngineServed: true}, "edge_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repository := &fakeTunnelRepository{facts: tc.facts, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: DesiredActive, AccessMode: AccessPrivate, SummaryCode: tc.summary, Generation: 1}}

@@ -20,11 +20,8 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 		}
 	}
 	exec(`UPDATE paperboat.tunnel_routes SET match_type='managed' WHERE id=$1`, f.routeID)
-	f.insertConnector(t, database, f.connectorOne, f.hostOne, f.sessionOne, 11)
+	f.insertEngine(t, database)
 	service := &EdgeService{store: database, clock: func() time.Time { return f.now }}
-	if n, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || n != 1 {
-		t.Fatalf("stage = %d, %v", n, err)
-	}
 	read := func() []dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row {
 		t.Helper()
 		rows, err := service.ListTunnelEdgeRouteAssignmentsForNodeV1(ctx, f.nodeID, f.epoch)
@@ -49,6 +46,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// route whose verified domain names this ingress address (064 publication).
 	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
+	f.setCarrierHost(t, database, true)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("scoped route without owned domain was admitted: %+v", rows)
 	}
@@ -78,10 +76,12 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// pool switches to managed-only for this check and back afterwards.
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='global' WHERE id=$1`, installation)
 	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='managed-only',installation_ids='{}' WHERE scope_kind='account' AND scope_id=$1`, f.accountID)
+	f.setCarrierHost(t, database, false)
 	if rows := read(); len(rows) != 1 || rows[0].ScopedDomainHostname != "" {
 		t.Fatalf("global edge lost managed hostname: %+v", rows)
 	}
 	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='self-hosted-only',installation_ids=ARRAY[$2] WHERE scope_kind='account' AND scope_id=$1`, f.accountID, installation)
+	f.setCarrierHost(t, database, true)
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='account' WHERE id=$1`, installation)
 	exec(`UPDATE paperboat.tunnel_domains SET hostname=$2,match_type='one_label_wildcard',certificate_state='pending' WHERE id=$1`, domain, "*.apps-"+f.suffix+".example.test")
 	view = tunnelEdgeRouteJSON(read()[0])

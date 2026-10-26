@@ -202,7 +202,6 @@ type TunnelStatus struct {
 	Generation            int64            `json:"generation"`
 	SummaryCode           string           `json:"summary_code"`
 	SummaryTransitionedAt time.Time        `json:"summary_transitioned_at"`
-	ConnectorSessions     ObservationLayer `json:"connector_sessions"`
 	EdgeAssignments       ObservationLayer `json:"edge_assignments"`
 	DNSPublications       ObservationLayer `json:"dns_publications"`
 	Certificates          ObservationLayer `json:"certificates"`
@@ -699,8 +698,7 @@ func readTunnelStatus(ctx context.Context, tx *db.Tx, id string) (TunnelStatus, 
 		destination                  *ObservationLayer
 	}
 	queries := []layerQuery{
-		{`SELECT s.state,count(*) FROM tunnel_connector_sessions s JOIN tunnel_connectors c ON c.id=s.connector_id WHERE c.tunnel_id=$1 GROUP BY s.state ORDER BY s.state`, `SELECT max(s.last_heartbeat_at) FROM tunnel_connector_sessions s JOIN tunnel_connectors c ON c.id=s.connector_id WHERE c.tunnel_id=$1`, `SELECT count(*) FROM tunnel_connectors c WHERE c.tunnel_id=$1 AND c.revoked_at IS NULL AND NOT EXISTS(SELECT 1 FROM tunnel_connector_sessions s WHERE s.connector_id=c.id)`, &out.ConnectorSessions},
-		{`SELECT observed_state,count(*) FROM tunnel_edge_route_assignments WHERE tunnel_id=$1 GROUP BY observed_state ORDER BY observed_state`, `SELECT max(observed_at) FROM tunnel_edge_route_assignments WHERE tunnel_id=$1`, `SELECT count(*) FROM tunnel_routes r WHERE r.tunnel_id=$1 AND r.deleted_at IS NULL AND r.desired_state='active' AND NOT EXISTS(SELECT 1 FROM tunnel_edge_route_assignments a WHERE a.route_id=r.id AND a.state<>'detached')`, &out.EdgeAssignments},
+		{`SELECT CASE WHEN x.observed_ready THEN 'ready' ELSE 'pending' END,count(*) FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=$1 AND x.desired='active' GROUP BY 1 ORDER BY 1`, `SELECT max(x.observed_at) FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=$1`, `SELECT count(*) FROM tunnel_routes r WHERE r.tunnel_id=$1 AND r.deleted_at IS NULL AND r.desired_state='active' AND NOT EXISTS(SELECT 1 FROM endpoint_routes er JOIN endpoint_edge_assignments x ON x.route_id=er.id WHERE er.tunnel_route_id=r.id AND x.desired='active')`, &out.EdgeAssignments},
 		{`SELECT p.state,count(*) FROM edge_dns_publications p WHERE p.owner_id=$1 GROUP BY p.state ORDER BY p.state`, `SELECT max(p.observed_at) FROM edge_dns_publications p WHERE p.owner_id=$1`, `SELECT count(*) FROM tunnel_domains d WHERE d.tunnel_id=$1 AND d.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM edge_dns_publications p WHERE p.hostname=d.hostname AND p.owner_id=d.tunnel_id)`, &out.DNSPublications},
 		{`SELECT c.state,count(*) FROM tunnel_certificate_records c WHERE c.tunnel_id=$1 GROUP BY c.state ORDER BY c.state`, `SELECT max(d.observed_at) FROM tunnel_certificate_edge_distributions d JOIN tunnel_certificate_records c ON c.id=d.certificate_id WHERE c.tunnel_id=$1`, `SELECT count(*) FROM tunnel_domains d WHERE d.tunnel_id=$1 AND d.deleted_at IS NULL AND d.certificate_strategy<>'none' AND NOT EXISTS(SELECT 1 FROM tunnel_certificate_records c WHERE c.domain_id=d.id)`, &out.Certificates},
 	}

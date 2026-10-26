@@ -18,10 +18,10 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
@@ -299,7 +299,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}
 	// The edge's public ingress authority for the route is bound to the same carrier identity its
 	// stream preface carries, and names the tunnel route and its origin.
-	decisions, err := connectorprotocol.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	decisions, err := ingressprojection.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
 	if err != nil {
 		t.Fatal(err)
 	}

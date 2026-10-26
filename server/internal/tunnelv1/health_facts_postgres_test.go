@@ -2,6 +2,8 @@ package tunnelv1
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,7 +24,7 @@ func TestHealthFactsReadDomainAndOriginStateOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if facts.ConnectorSessions != 0 || facts.FailedRoutes != 0 || facts.OriginReason != "" || len(facts.PendingDomains) != 0 || len(facts.PendingCertificates) != 0 {
+	if facts.HostConnected || facts.EngineServed || facts.OriginReason != "" || len(facts.PendingDomains) != 0 || len(facts.PendingCertificates) != 0 {
 		t.Fatalf("a fresh tunnel reports live facts: %+v", facts)
 	}
 	insertDomain := func(id, hostname, ownership, certificate string) {
@@ -42,28 +44,49 @@ VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','gen
 	if len(facts.PendingDomains) != 1 || facts.PendingDomains[0] != "pending-"+f.suffix+".example.test" || len(facts.PendingCertificates) != 1 || facts.PendingCertificates[0] != "cert-"+f.suffix+".example.test" {
 		t.Fatalf("domain facts = %+v", facts)
 	}
-	connector, session := "con_health_"+f.suffix, "ses_health_"+f.suffix
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_connectors (id,tunnel_id,host_id,credential_reference,credential_thumbprint,rotation_generation,desired_state,protocol_version,last_session_id,last_heartbeat_at,ready_at,last_applied_config_generation,drain_state,generation,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$4,1,'active','1.0',$5,$6,$6,1,'accepting',1,$6,$6)`, connector, tunnel, host, "keychain://health/"+connector, session, now); err != nil {
-		t.Fatal(err)
+	// The tunnel's endpoint on the host's agent: connected once the agent holds a live carrier, served
+	// once an edge observes the route ready.
+	node, epoch, carrierRoute := "node_health_"+f.suffix, "epoch_health_"+f.suffix, "runtime_health_"+f.suffix
+	session := fmt.Sprintf("session_00000000-0000-4000-8000-%012d", now.UnixNano()%1e12)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := f.database.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_connector_sessions (id,connector_id,process_generation,protocol_version,capabilities,credential_generation,state,lease_deadline,last_heartbeat_at,ready_at,applied_config_generation,retained_until,created_at)
-VALUES ($1,$2,1,'1.0',ARRAY['config.snapshot.v1'],1,'ready',$3,$4,$4,1,$5,$4)`, session, connector, now.Add(time.Hour), now, now.Add(2*time.Hour)); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_routes WHERE id=$1`, carrierRoute)
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, "env_"+host)
+	})
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at) VALUES($1,'test','1.0',$2,'ready',true,$3,ARRAY['edge'],$3::timestamptz+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,$3)`, node, epoch, now)
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) SELECT environment_id,environment_id,user_id,'active' FROM paperboat.user_machines WHERE id=$1 ON CONFLICT DO NOTHING`, host)
+	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) SELECT $1,environment_id,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080 FROM paperboat.user_machines WHERE id=$2`, carrierRoute, host)
+	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'private','persistent',$1)`, tunnel, account, host)
+	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, route, tunnel, "engine-"+strings.ReplaceAll(f.suffix, "_", "-")+".example.test")
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now)
+	if err != nil || !facts.EdgeReady || facts.HostConnected || facts.EngineServed {
+		t.Fatalf("a tunnel whose agent holds no carrier is reported connected: %+v err=%v", facts, err)
 	}
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,m.installation_generation,1,'process_health',1,$2,$3,m.public_identity_key,1,$4,$4,'{}',$5::timestamptz+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$6`, carrierRoute, node, epoch, session, now, host)
 	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(5*time.Second))
-	if err != nil || facts.ActiveConnectors != 1 || facts.ConnectorSessions != 1 {
-		t.Fatalf("a connected host is not reported online: %+v err=%v", facts, err)
+	if err != nil || !facts.HostConnected || facts.EngineServed {
+		t.Fatalf("a connected agent is not reported online: %+v err=%v", facts, err)
 	}
-	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(2*time.Minute))
-	if err != nil || facts.ActiveConnectors != 1 || facts.ConnectorSessions != 0 {
-		t.Fatalf("a host that stopped heartbeating still counts as online: %+v err=%v", facts, err)
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(2*time.Hour))
+	if err != nil || facts.HostConnected {
+		t.Fatalf("an agent whose carrier expired still counts as online: %+v err=%v", facts, err)
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_route_origin_health(route_id,connector_id,tunnel_id,session_id,state,code,observed_at) VALUES($1,$2,$3,'ses_1','unreachable','refused',$4)`, route, connector, tunnel, now.Add(-10*time.Second)); err != nil {
+	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,$4,$5,true,$6)`, route, tunnel, node, epoch, session, now)
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now)
+	if err != nil || !facts.EngineServed {
+		t.Fatalf("a route an edge observes ready is not reported served: %+v err=%v", facts, err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_route_origin_health(route_id,machine_id,tunnel_id,state,code,observed_at) VALUES($1,$2,$3,'unreachable','refused',$4)`, route, host, tunnel, now.Add(-10*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now)
-	if err != nil || facts.OriginReason != "refused" || facts.ActiveConnectors != 1 {
+	if err != nil || facts.OriginReason != "refused" {
 		t.Fatalf("origin fact = %+v err=%v", facts, err)
 	}
 	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now.Add(OriginHealthMaxAge+time.Second))

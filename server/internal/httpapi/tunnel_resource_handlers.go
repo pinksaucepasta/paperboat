@@ -2,13 +2,11 @@ package httpapi
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
@@ -520,217 +518,6 @@ func tunnelResourceDomainInstructions(service tunnelv1.ResourceAPI) http.Handler
 	}
 }
 
-func tunnelResourceConnectorList(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		limit, err := previewtunnelapi.PageLimit(r.URL.Query().Get("limit"))
-		if err != nil {
-			writeTunnelResourceError(w, r, fmt.Errorf("%w: %v", tunnelv1.ErrInvalidInput, err))
-			return
-		}
-		page, err := service.ListConnectors(r.Context(), request, tunnelIDFromPath(r), r.URL.Query().Get("cursor"), limit)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		writeResourceJSON(w, http.StatusOK, page)
-	}
-}
-
-func tunnelResourceConnectorGet(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		value, err := service.GetConnector(r.Context(), request, tunnelIDFromPath(r), strings.TrimSpace(r.PathValue("connector_id")))
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		w.Header().Set("ETag", value.ETag)
-		writeResourceJSON(w, http.StatusOK, value)
-	}
-}
-
-func tunnelResourceIssueEnrollment(service tunnelv1.ResourceAPI, machineIdentities ...machineRequestVerifier) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, hash, ok := resourceMutationBody(w, r, false)
-		if !ok {
-			return
-		}
-		var document tunnelResourceEnrollmentDocument
-		if !decodeTunnelJSON(body, &document) {
-			writeTunnelResourceError(w, r, fmt.Errorf("%w: invalid enrollment document", tunnelv1.ErrInvalidInput))
-			return
-		}
-		input, err := resourceMutationInput(r, "", "", hash, false)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		if document.TTLSeconds < 0 || document.TTLSeconds > 15*60 {
-			writeTunnelResourceError(w, r, fmt.Errorf("%w: ttl_seconds is out of range", tunnelv1.ErrInvalidInput))
-			return
-		}
-		var identities machineRequestVerifier
-		if len(machineIdentities) > 0 {
-			identities = machineIdentities[0]
-		}
-		request, ok := tunnelEnrollmentRequestContext(w, r, body, input.IdempotencyKey, document.HostID, identities)
-		if !ok {
-			return
-		}
-		value, err := service.IssueEnrollment(r.Context(), request, tunnelIDFromPath(r), tunnelv1.EnrollmentRequest{HostID: document.HostID, Capabilities: document.Capabilities, TTL: time.Duration(document.TTLSeconds) * time.Second, Mutation: input})
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusCreated, SuccessResponse{Data: value})
-	}
-}
-
-// tunnelEnrollmentRequestContext is shared by enrollment issue and exchange.
-// Both operations are host-owned and require the renewable machine identity
-// to be authenticated over the exact request body and idempotency key.
-func tunnelEnrollmentRequestContext(w http.ResponseWriter, r *http.Request, body []byte, idempotencyKey, hostID string, identities machineRequestVerifier) (previewtunnelapi.RequestContext, bool) {
-	if !tunnelMachineHeadersPresent(r) {
-		writePreviewTunnelError(w, r, http.StatusUnauthorized, "machine_identity_required", "A signed host identity is required for connector enrollment.", "unchanged", false, "run_on_authorized_host")
-		return previewtunnelapi.RequestContext{}, false
-	}
-	authorizationValues := r.Header.Values("Authorization")
-	identityValues := r.Header.Values("X-Paperboat-Machine-Identity")
-	proofValues := r.Header.Values("X-Paperboat-Machine-Proof")
-	if len(authorizationValues) != 1 || len(identityValues) != 1 || len(proofValues) != 1 {
-		code := "machine_identity_invalid"
-		if len(authorizationValues) == 0 || len(identityValues) == 0 || len(proofValues) == 0 {
-			code = "machine_identity_required"
-		}
-		writePreviewTunnelError(w, r, http.StatusUnauthorized, code, "The signed host identity could not be verified.", "unchanged", false, "run_on_authorized_host")
-		return previewtunnelapi.RequestContext{}, false
-	}
-	request, ok := tunnelMachineRequestContext(w, r, body, idempotencyKey, identities)
-	if !ok {
-		return previewtunnelapi.RequestContext{}, false
-	}
-	if hostID == "" || strings.TrimSpace(hostID) != hostID || request.Actor.HostID != hostID {
-		writePreviewTunnelError(w, r, http.StatusForbidden, "connector_access_forbidden", "This host is not authorized for connector enrollment.", "unchanged", false, "use_authorized_host")
-		return previewtunnelapi.RequestContext{}, false
-	}
-	return request, true
-}
-
-func tunnelResourceExchangeEnrollment(service tunnelv1.ResourceAPI, identities machineRequestVerifier) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, hash, ok := resourceMutationBody(w, r, false)
-		if !ok {
-			return
-		}
-		var document tunnelResourceEnrollmentExchangeDocument
-		if !decodeTunnelJSON(body, &document) {
-			writeTunnelResourceError(w, r, fmt.Errorf("%w: invalid enrollment exchange document", tunnelv1.ErrInvalidInput))
-			return
-		}
-		idempotencyKey, err := previewtunnelapi.ParseIdempotencyKey(r.Header)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		request, ok := tunnelEnrollmentRequestContext(w, r, body, idempotencyKey, document.HostID, identities)
-		if !ok {
-			return
-		}
-		credentialPublicKey, publicKeyErr := base64.RawURLEncoding.Strict().DecodeString(strings.TrimSpace(document.CredentialVerifierPublicKey))
-		credentialProof, credentialProofErr := base64.RawURLEncoding.Strict().DecodeString(strings.TrimSpace(document.CredentialProof))
-		if publicKeyErr != nil || credentialProofErr != nil || !tunnelv1.VerifyConnectorCredentialProof(document.CredentialVerifierAlgorithm, credentialPublicKey, credentialProof,
-			tunnelIDFromPath(r), document.HostID, document.Token, document.CredentialReference, document.CredentialThumbprint, idempotencyKey) {
-			writePreviewTunnelError(w, r, http.StatusUnauthorized, "connector_credential_proof_invalid", "The connector credential proof could not be verified.", "unchanged", false, "retry_with_new_connector_key")
-			return
-		}
-		value, err := service.ExchangeEnrollment(r.Context(), request, tunnelv1.EnrollmentExchangeRequest{
-			TunnelID: tunnelIDFromPath(r), Token: document.Token, HostID: document.HostID, ProtocolVersion: document.ProtocolVersion,
-			SoftwareVersion: document.SoftwareVersion, CredentialReference: document.CredentialReference, CredentialThumbprint: document.CredentialThumbprint,
-			CredentialVerifierAlgorithm: document.CredentialVerifierAlgorithm, CredentialVerifierPublicKey: credentialPublicKey, CredentialProof: credentialProof,
-			OperatingSystem: document.OperatingSystem, Architecture: document.Architecture,
-			Mutation: tunnelv1.ResourceMutationInput{IdempotencyKey: idempotencyKey, RequestHash: hash},
-		})
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		writeConnectorActivation(w, r, value)
-	}
-}
-
-func tunnelResourceConnectorDrain(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return tunnelResourceConnectorState(service, false)
-}
-
-func tunnelResourceConnectorRevoke(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return tunnelResourceConnectorState(service, true)
-}
-
-func tunnelResourceConnectorState(service tunnelv1.ResourceAPI, revoke bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, hash, ok := resourceMutationBody(w, r, true)
-		if !ok {
-			return
-		}
-		_ = body
-		connectorID := strings.TrimSpace(r.PathValue("connector_id"))
-		input, err := resourceMutationInput(r, "connector", connectorID, hash, true)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		var value tunnelv1.ConnectorMutationResult
-		var mutateErr error
-		if revoke {
-			value, mutateErr = service.RevokeConnector(r.Context(), request, tunnelIDFromPath(r), connectorID, input)
-		} else {
-			value, mutateErr = service.DrainConnector(r.Context(), request, tunnelIDFromPath(r), connectorID, input)
-		}
-		if mutateErr != nil {
-			writeTunnelResourceError(w, r, mutateErr)
-			return
-		}
-		writeConnectorMutation(w, value, false)
-	}
-}
-
-func tunnelResourceRotateCredentials(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, hash, ok := resourceMutationBody(w, r, true)
-		if !ok {
-			return
-		}
-		_ = body
-		input, err := resourceMutationInput(r, "tunnel", tunnelIDFromPath(r), hash, true)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		value, err := service.RotateCredentials(r.Context(), request, tunnelIDFromPath(r), input)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		writeResourceJSON(w, http.StatusAccepted, value)
-	}
-}
-
 func tunnelResourceTunnelLogs(service tunnelv1.ResourceAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, ok := resourceRequestContext(w, r)
@@ -799,29 +586,6 @@ func writeDomainMutation(w http.ResponseWriter, result tunnelv1.DomainMutationRe
 	writeJSON(w, status, SuccessResponse{Data: result.Domain})
 }
 
-func writeConnectorMutation(w http.ResponseWriter, result tunnelv1.ConnectorMutationResult, create bool) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("ETag", result.Connector.ETag)
-	if result.Operation.State == "running" {
-		writeJSON(w, http.StatusAccepted, SuccessResponse{Data: result.Operation})
-		return
-	}
-	status := http.StatusOK
-	if create && !result.Replayed {
-		status = http.StatusCreated
-	}
-	writeJSON(w, status, SuccessResponse{Data: result.Connector})
-}
-
-func writeConnectorActivation(w http.ResponseWriter, r *http.Request, result tunnelv1.ConnectorMutationResult) {
-	w.Header().Set("Cache-Control", "no-store")
-	if result.Activation == nil {
-		writeError(w, r, http.StatusInternalServerError, "connector_activation_unavailable", "Connector activation metadata is unavailable.")
-		return
-	}
-	writeJSON(w, http.StatusAccepted, SuccessResponse{Data: result.Activation})
-}
-
 func writeResourceJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, status, SuccessResponse{Data: value})
@@ -844,7 +608,7 @@ func writeTunnelResourceError(w http.ResponseWriter, r *http.Request, err error)
 		status, code, message, outcome, retryable, action = http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is invalid.", "unchanged", false, "send_valid_idempotency_key"
 	case expectedHTTPErrorOnly(err, previewtunnelapi.ErrForbidden, previewtunnelapi.ErrHostActorRequired, tunnelv1.ErrHostNotFound):
 		status, code, message, outcome, retryable, action = http.StatusForbidden, "forbidden", "You are not allowed to access this resource.", "unchanged", false, "authenticate_with_required_scope"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrNotFound, tunnelv1.ErrRouteNotFound, tunnelv1.ErrDomainNotFound, tunnelv1.ErrConnectorNotFound):
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrNotFound, tunnelv1.ErrRouteNotFound, tunnelv1.ErrDomainNotFound):
 		status, code, message, outcome, retryable, action = http.StatusNotFound, "resource_not_found", "The resource was not found.", "unchanged", false, "refresh"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrGenerationConflict):
 		status, code, message, outcome, retryable, action = http.StatusPreconditionFailed, "generation_conflict", "The resource changed before this update was applied.", "unchanged", false, "fetch_current_resource"
@@ -860,16 +624,8 @@ func writeTunnelResourceError(w http.ResponseWriter, r *http.Request, err error)
 		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_quarantined", "This domain was removed from a tunnel recently and is held for a week before it can be added again.", "unchanged", false, "choose_different_domain"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrDomainConflict):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_conflict", "The domain binding conflicts with an existing binding.", "unchanged", false, "inspect_domain"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrConnectorConflict):
-		status, code, message, outcome, retryable, action = http.StatusConflict, "connector_conflict", "The connector conflicts with current tunnel state.", "unchanged", false, "refresh_and_retry"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrConflict):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "resource_conflict", "The resource conflicts with current state.", "unchanged", false, "refresh_and_retry"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrEnrollmentAlreadyIssued):
-		status, code, message, outcome, retryable, action = http.StatusConflict, "enrollment_token_unrecoverable", "The one-time enrollment token cannot be recovered after issuance. Issue a new enrollment with a new idempotency key.", "changed", false, "issue_new_enrollment"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrEnrollmentExpired):
-		status, code, message, outcome, retryable, action = http.StatusGone, "enrollment_expired", "The connector enrollment has expired. Issue a new enrollment.", "unchanged", false, "issue_new_enrollment"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrEnrollmentReplay):
-		status, code, message, outcome, retryable, action = http.StatusConflict, "enrollment_replay", "The connector enrollment was already consumed. Issue a new enrollment.", "changed", false, "issue_new_enrollment"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrDNSInstructionsUnavailable):
 		status, code, message, outcome, retryable, action = http.StatusNotImplemented, "dns_instructions_unavailable", "Provider-aware instructions for this domain are not available yet.", "unchanged", false, "configure_dns_provider"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrTerminalState):

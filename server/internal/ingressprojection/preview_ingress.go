@@ -1,4 +1,4 @@
-package connectorprotocol
+package ingressprojection
 
 import (
 	"context"

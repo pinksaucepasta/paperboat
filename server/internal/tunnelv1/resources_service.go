@@ -3,19 +3,15 @@ package tunnelv1
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +20,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )
@@ -34,73 +29,13 @@ type ResourceService struct {
 	cursors                  *resourceCursorCodec
 	now                      func() time.Time
 	newID                    func(prefix string) (string, error)
-	enrollmentTTL            time.Duration
-	rotationOverlap          time.Duration
-	credentialLifetime       time.Duration
 	allowInsecureDevelopment bool
 	challengeZone            string
 	publicTCPPortMin         int32
 	publicTCPPortMax         int32
 }
 
-type connectorCredentialProofBinding struct {
-	Purpose               string `json:"purpose"`
-	TunnelID              string `json:"tunnel_id"`
-	HostID                string `json:"host_id"`
-	EnrollmentTokenSHA256 string `json:"enrollment_token_sha256"`
-	CredentialReference   string `json:"credential_reference"`
-	CredentialThumbprint  string `json:"credential_thumbprint"`
-	IdempotencyKey        string `json:"idempotency_key"`
-}
-
 const maxResourceLogMessageBytes = 1000
-
-// ConnectorCredentialProofPayload is the exact host-signed binding used when
-// an enrollment installs a connector credential. Only the SHA-256 digest of
-// the one-time enrollment token is included in the transcript, so a proof,
-// transcript, or diagnostic can never disclose the reusable token itself.
-func ConnectorCredentialProofPayload(tunnelID, hostID, enrollmentToken, credentialReference, credentialThumbprint, idempotencyKey string) []byte {
-	tokenHash := sha256.Sum256([]byte(enrollmentToken))
-	return ConnectorCredentialProofPayloadForTokenHash(tunnelID, hostID, hex.EncodeToString(tokenHash[:]), credentialReference, credentialThumbprint, idempotencyKey)
-}
-
-// ConnectorCredentialProofPayloadForTokenHash is the low-level transcript
-// constructor for callers that already have the enrollment token digest.
-// Hashes are lowercase hexadecimal SHA-256 values to match the durable token
-// hash representation used by the enrollment table.
-func ConnectorCredentialProofPayloadForTokenHash(tunnelID, hostID, enrollmentTokenSHA256, credentialReference, credentialThumbprint, idempotencyKey string) []byte {
-	payload, _ := json.Marshal(connectorCredentialProofBinding{
-		Purpose: "paperboat.connector.enrollment.v1", TunnelID: tunnelID, HostID: hostID,
-		EnrollmentTokenSHA256: enrollmentTokenSHA256, CredentialReference: credentialReference,
-		CredentialThumbprint: credentialThumbprint, IdempotencyKey: idempotencyKey,
-	})
-	return payload
-}
-
-// ConnectorCredentialThumbprint returns the stable public-key thumbprint
-// stored with a credential generation. Private key bytes never cross this
-// boundary.
-func ConnectorCredentialThumbprint(publicKey []byte) string {
-	thumbprint, err := connectorprotocol.IdentityThumbprint(ed25519.PublicKey(publicKey))
-	if err != nil {
-		return ""
-	}
-	return thumbprint
-}
-
-func validateConnectorCredentialVerifier(algorithm string, publicKey, proof []byte, thumbprint string) bool {
-	return algorithm == "ed25519" && len(publicKey) == ed25519.PublicKeySize && len(proof) == ed25519.SignatureSize &&
-		connectorprotocol.ValidateIdentityKey("ed25519:"+thumbprint, thumbprint) == nil && thumbprint == ConnectorCredentialThumbprint(publicKey)
-}
-
-// VerifyConnectorCredentialProof verifies proof-of-possession for a new
-// connector key in addition to the enclosing signed machine request.
-func VerifyConnectorCredentialProof(algorithm string, publicKey, proof []byte, tunnelID, hostID, enrollmentToken, credentialReference, credentialThumbprint, idempotencyKey string) bool {
-	if !validateConnectorCredentialVerifier(algorithm, publicKey, proof, credentialThumbprint) {
-		return false
-	}
-	return ed25519.Verify(ed25519.PublicKey(publicKey), ConnectorCredentialProofPayload(tunnelID, hostID, enrollmentToken, credentialReference, credentialThumbprint, idempotencyKey), proof)
-}
 
 func NewResourceService(repository ResourceRepository, config ResourceConfig) (*ResourceService, error) {
 	if repository == nil {
@@ -118,27 +53,6 @@ func NewResourceService(repository ResourceRepository, config ResourceConfig) (*
 	if newID == nil {
 		newID = randomID
 	}
-	ttl := config.EnrollmentTTL
-	if ttl == 0 {
-		ttl = 10 * time.Minute
-	}
-	if ttl < time.Minute || ttl > 15*time.Minute {
-		return nil, fmt.Errorf("enrollment TTL must be between one and fifteen minutes")
-	}
-	overlap := config.RotationOverlap
-	if overlap == 0 {
-		overlap = 10 * time.Minute
-	}
-	if overlap < time.Minute || overlap > 24*time.Hour {
-		return nil, fmt.Errorf("rotation overlap must be between one minute and one day")
-	}
-	lifetime := config.CredentialLifetime
-	if lifetime == 0 {
-		lifetime = 365 * 24 * time.Hour
-	}
-	if lifetime < time.Hour || lifetime > connectorprotocol.MaxRotationCredentialLifetime || overlap >= lifetime {
-		return nil, fmt.Errorf("credential lifetime is out of bounds")
-	}
 	if config.PublicTCPPortMin == 0 && config.PublicTCPPortMax == 0 {
 		config.PublicTCPPortMin, config.PublicTCPPortMax = 20000, 29999
 	}
@@ -151,7 +65,7 @@ func NewResourceService(repository ResourceRepository, config ResourceConfig) (*
 			return nil, fmt.Errorf("challenge zone is invalid")
 		}
 	}
-	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, enrollmentTTL: ttl, rotationOverlap: overlap, credentialLifetime: lifetime, allowInsecureDevelopment: config.AllowInsecureDevelopment, challengeZone: challengeZone, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
+	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, allowInsecureDevelopment: config.AllowInsecureDevelopment, challengeZone: challengeZone, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
 }
 
 func (s *ResourceService) authorize(request previewtunnelapi.RequestContext, action string, requireHost bool) error {
@@ -604,261 +518,6 @@ func dnsRecordTypeAndNote(hostname, provider string) (string, string) {
 	}
 }
 
-func (s *ResourceService) ListConnectors(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, rawCursor string, limit int) (ConnectorPage, error) {
-	if err := s.authorize(request, "read", false); err != nil {
-		return ConnectorPage{}, err
-	}
-	ctx, request, _, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return ConnectorPage{}, scopeErr
-	}
-	if err := validateResourceListLimit(limit); err != nil {
-		return ConnectorPage{}, err
-	}
-	position, err := s.decodeListCursor(rawCursor, request.Actor.AccountID, tunnelID, "connector")
-	if err != nil {
-		return ConnectorPage{}, err
-	}
-	rows, err := s.repository.ListResourceConnectors(ctx, request.Actor.AccountID, tunnelID, position, limit+1)
-	if err != nil {
-		return ConnectorPage{}, err
-	}
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	page := ConnectorPage{Items: make([]ConnectorView, 0, len(rows))}
-	for _, row := range rows {
-		page.Items = append(page.Items, connectorView(row))
-	}
-	if hasMore && len(rows) > 0 {
-		last := rows[len(rows)-1]
-		page.NextCursor, err = s.cursors.EncodeList("connector", request.Actor.AccountID, tunnelID, ListPosition{CreatedAt: last.CreatedAt, ID: last.ID})
-		if err != nil {
-			return ConnectorPage{}, err
-		}
-	}
-	return page, nil
-}
-
-func (s *ResourceService) GetConnector(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, connectorID string) (ConnectorView, error) {
-	if err := s.authorize(request, "read", false); err != nil {
-		return ConnectorView{}, err
-	}
-	ctx, request, _, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return ConnectorView{}, scopeErr
-	}
-	row, err := s.repository.GetResourceConnector(ctx, request.Actor.AccountID, tunnelID, connectorID)
-	if err != nil {
-		return ConnectorView{}, err
-	}
-	return connectorView(row), nil
-}
-
-func (s *ResourceService) IssueEnrollment(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input EnrollmentRequest) (EnrollmentResult, error) {
-	if err := s.authorize(request, "write", false); err != nil {
-		return EnrollmentResult{}, err
-	}
-	ctx, request, shared, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return EnrollmentResult{}, scopeErr
-	}
-	if shared {
-		return EnrollmentResult{}, ErrMachinePublicationDenied
-	}
-	hostID := strings.TrimSpace(input.HostID)
-	if hostID == "" || len(hostID) > 128 {
-		return EnrollmentResult{}, fmt.Errorf("%w: host_id is required", ErrInvalidInput)
-	}
-	capabilities, err := normalizeCapabilities(input.Capabilities)
-	if err != nil {
-		return EnrollmentResult{}, err
-	}
-	ttl := input.TTL
-	if ttl == 0 {
-		ttl = s.enrollmentTTL
-	}
-	if ttl < time.Minute || ttl > 15*time.Minute {
-		return EnrollmentResult{}, fmt.Errorf("%w: enrollment TTL is bounded to fifteen minutes", ErrInvalidInput)
-	}
-	request, err = normalizeRequestContext(request, s.newID)
-	if err != nil {
-		return EnrollmentResult{}, err
-	}
-	opID, auditID, parentAuditID, err := s.mutationIDs()
-	if err != nil {
-		return EnrollmentResult{}, err
-	}
-	enrollmentID, err := s.newID("enrollment")
-	if err != nil {
-		return EnrollmentResult{}, err
-	}
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return EnrollmentResult{}, err
-	}
-	token := "pbce_" + base64.RawURLEncoding.EncodeToString(tokenBytes)
-	tokenHash := sha256.Sum256([]byte(token))
-	record := EnrollmentRecordInput{OperationID: opID, EnrollmentID: enrollmentID, AuditEventID: auditID, ParentAuditEventID: parentAuditID, AccountID: request.Actor.AccountID,
-		TunnelID: tunnelID, HostID: hostID, TokenHash: tokenHash[:], Token: token, Capabilities: capabilities, ExpiresAt: s.now().UTC().Add(ttl), IdempotencyKey: input.Mutation.IdempotencyKey,
-		RequestHash: input.Mutation.RequestHash, ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor), RequestID: request.RequestID,
-		CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC(), CredentialLifetime: s.credentialLifetime}
-	result, err := s.repository.IssueConnectorEnrollment(ctx, record)
-	if err != nil {
-		return EnrollmentResult{}, err
-	}
-	if result.Replayed && strings.TrimSpace(result.Token) == "" {
-		// The enrollment bearer is intentionally write-only. A lost response
-		// cannot be reconstructed from the stored token hash, so make the
-		// recovery boundary explicit instead of returning a false success with
-		// an unusable empty token.
-		return EnrollmentResult{}, ErrEnrollmentAlreadyIssued
-	}
-	view := EnrollmentResult{Schema: Schema, Kind: "connector_enrollment", ID: result.Enrollment.ID, TunnelID: result.Enrollment.TunnelID, HostID: result.Enrollment.HostID,
-		Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Token: result.Token, ExpiresAt: result.Enrollment.ExpiresAt.UTC(), Capabilities: append([]string(nil), result.Enrollment.Capabilities...), Replayed: result.Replayed}
-	return view, nil
-}
-
-func (s *ResourceService) ExchangeEnrollment(ctx context.Context, request previewtunnelapi.RequestContext, input EnrollmentExchangeRequest) (ConnectorMutationResult, error) {
-	if err := s.authorize(request, "write", true); err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	if strings.TrimSpace(input.Token) == "" || len(input.Token) > 256 {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: enrollment token is required", ErrInvalidInput)
-	}
-	if input.TunnelID == "" || input.HostID == "" || input.HostID != request.Actor.HostID {
-		return ConnectorMutationResult{}, ErrHostNotFound
-	}
-	if !VerifyConnectorCredentialProof(input.CredentialVerifierAlgorithm, input.CredentialVerifierPublicKey, input.CredentialProof,
-		input.TunnelID, input.HostID, input.Token, input.CredentialReference, input.CredentialThumbprint, input.Mutation.IdempotencyKey) {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: connector credential proof is invalid", ErrInvalidInput)
-	}
-	protocol := strings.TrimSpace(input.ProtocolVersion)
-	if protocol == "" {
-		protocol = "1.0"
-	}
-	if protocol != "1.0" {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: unsupported connector protocol", ErrInvalidInput)
-	}
-	request, err := normalizeRequestContext(request, s.newID)
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	opID, auditID, parentAuditID, err := s.mutationIDs()
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	connectorID, err := s.newID("connector")
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	credentialReference := strings.TrimSpace(input.CredentialReference)
-	if credentialReference == "" {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: host credential reference is required", ErrInvalidInput)
-	}
-	if err := validateWriteOnlyReference(credentialReference); err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	thumbprint := strings.TrimSpace(input.CredentialThumbprint)
-	if thumbprint == "" {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: host credential thumbprint is required", ErrInvalidInput)
-	}
-	if len(thumbprint) > 256 || strings.ContainsAny(thumbprint, "\r\n\t ") {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: credential thumbprint is invalid", ErrInvalidInput)
-	}
-	tokenHash := sha256.Sum256([]byte(input.Token))
-	record := EnrollmentExchangeRecord{OperationID: opID, AuditEventID: auditID, ParentAuditEventID: parentAuditID, AccountID: request.Actor.AccountID, TunnelID: input.TunnelID, HostID: input.HostID,
-		TokenHash: tokenHash[:], ProtocolVersion: protocol, SoftwareVersion: nullableStringPtr(input.SoftwareVersion), OperatingSystem: nullableStringPtr(input.OperatingSystem), Architecture: nullableStringPtr(input.Architecture), ConnectorID: connectorID,
-		CredentialReference: credentialReference, CredentialThumbprint: thumbprint, CredentialVerifierAlgorithm: input.CredentialVerifierAlgorithm, CredentialVerifierPublicKey: append([]byte(nil), input.CredentialVerifierPublicKey...), CredentialProof: append([]byte(nil), input.CredentialProof...), IdempotencyKey: input.Mutation.IdempotencyKey, RequestHash: input.Mutation.RequestHash,
-		ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor), RequestID: request.RequestID, CorrelationID: request.CorrelationID,
-		SourceMachineID: request.Actor.MachineID, Now: s.now().UTC(), CredentialLifetime: s.credentialLifetime, CredentialOverlap: s.rotationOverlap}
-	result, err := s.repository.ExchangeConnectorEnrollment(ctx, record)
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	operation := previewtunnelapi.OperationView(result.Operation, request.RequestID)
-	if result.ProcessGeneration < 1 || result.Connector.RotationGeneration < 1 {
-		return ConnectorMutationResult{}, ErrGenerationConflict
-	}
-	if err := validateEndpointID(result.StableEndpointID); err != nil {
-		return ConnectorMutationResult{}, fmt.Errorf("%w: managed endpoint identity is unavailable", ErrInvalidInput)
-	}
-	activation := &ConnectorActivation{
-		Schema: Schema, Kind: "connector_activation", AccountID: request.Actor.AccountID, TunnelID: result.Connector.TunnelID,
-		ConnectorID: result.Connector.ID, HostID: result.Connector.HostID,
-		StableEndpointID:     result.StableEndpointID,
-		CredentialGeneration: result.Connector.RotationGeneration,
-		ProcessGeneration:    result.ProcessGeneration, Operation: operation,
-	}
-	return ConnectorMutationResult{Connector: connectorView(result.Connector), Operation: operation, Activation: activation, Replayed: result.Replayed, Changed: result.Changed}, nil
-}
-
-func (s *ResourceService) DrainConnector(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, connectorID string, input ResourceMutationInput) (ConnectorMutationResult, error) {
-	return s.mutateConnector(ctx, request, tunnelID, connectorID, input, false)
-}
-
-func (s *ResourceService) RevokeConnector(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, connectorID string, input ResourceMutationInput) (ConnectorMutationResult, error) {
-	return s.mutateConnector(ctx, request, tunnelID, connectorID, input, true)
-}
-
-func (s *ResourceService) mutateConnector(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, connectorID string, input ResourceMutationInput, revoke bool) (ConnectorMutationResult, error) {
-	if err := s.authorize(request, "write", false); err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	ctx, request, _, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return ConnectorMutationResult{}, scopeErr
-	}
-	request, err := normalizeRequestContext(request, s.newID)
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	opID, auditID, parentAuditID, err := s.mutationIDs()
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	record := ConnectorRecord{OperationID: opID, AuditEventID: auditID, ParentAuditEventID: parentAuditID, AccountID: request.Actor.AccountID, TunnelID: tunnelID, ConnectorID: connectorID,
-		ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor),
-		RequestID: request.RequestID, CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC()}
-	var result ResourceMutationRecord
-	if revoke {
-		result, err = s.repository.RevokeResourceConnector(ctx, record)
-	} else {
-		result, err = s.repository.DrainResourceConnector(ctx, record)
-	}
-	if err != nil {
-		return ConnectorMutationResult{}, err
-	}
-	return ConnectorMutationResult{Connector: connectorView(result.Connector), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
-}
-
-func (s *ResourceService) RotateCredentials(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input ResourceMutationInput) (previewtunnelapi.Operation, error) {
-	if err := s.authorize(request, "write", false); err != nil {
-		return previewtunnelapi.Operation{}, err
-	}
-	ctx, request, _, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return previewtunnelapi.Operation{}, scopeErr
-	}
-	request, err := normalizeRequestContext(request, s.newID)
-	if err != nil {
-		return previewtunnelapi.Operation{}, err
-	}
-	opID, auditID, parentAuditID, err := s.mutationIDs()
-	if err != nil {
-		return previewtunnelapi.Operation{}, err
-	}
-	record := RotationRecord{OperationID: opID, AuditEventID: auditID, ParentAuditEventID: parentAuditID, AccountID: request.Actor.AccountID, TunnelID: tunnelID,
-		ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor),
-		RequestID: request.RequestID, CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC(), OverlapUntil: s.now().UTC().Add(s.rotationOverlap), CredentialLifetime: s.credentialLifetime, NewID: s.newID}
-	result, err := s.repository.RotateResourceCredentials(ctx, record)
-	if err != nil {
-		return previewtunnelapi.Operation{}, err
-	}
-	return previewtunnelapi.OperationView(result, request.RequestID), nil
-}
-
 func (s *ResourceService) ListTunnelLogs(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, rawCursor string, limit int) (LogPage, error) {
 	if err := s.authorize(request, "read", false); err != nil {
 		return LogPage{}, err
@@ -1032,33 +691,6 @@ func wireDomainLifecycleState(row dbsqlc.TunnelDomain) string {
 	default:
 		return "verified"
 	}
-}
-
-func connectorView(row dbsqlc.TunnelConnector) ConnectorView {
-	view := ConnectorView{Schema: Schema, Kind: "connector", ID: row.ID, TunnelID: row.TunnelID, HostID: row.HostID, CredentialReference: row.CredentialReference,
-		RotationGeneration: row.RotationGeneration, DesiredState: row.DesiredState, ProtocolVersion: row.ProtocolVersion, DrainState: row.DrainState,
-		Generation: row.Generation, ETag: previewtunnelapi.ETag("connector", row.ID, row.Generation), LastAppliedConfigGeneration: row.LastAppliedConfigGeneration}
-	if row.SoftwareVersion.Valid {
-		view.SoftwareVersion = row.SoftwareVersion.String
-	}
-	if row.OperatingSystem.Valid {
-		view.OperatingSystem = row.OperatingSystem.String
-	}
-	if row.Architecture.Valid {
-		view.Architecture = row.Architecture.String
-	}
-	if row.LastSessionID.Valid {
-		view.LastSessionID = row.LastSessionID.String
-	}
-	if row.LastHeartbeatAt.Valid {
-		value := row.LastHeartbeatAt.Time.UTC()
-		view.LastHeartbeatAt = &value
-	}
-	if row.ReadyAt.Valid {
-		value := row.ReadyAt.Time.UTC()
-		view.ReadyAt = &value
-	}
-	return view
 }
 
 func logView(row any) (LogEntry, error) {
@@ -1542,28 +1174,6 @@ func normalizeIDNAHostname(value string) (string, error) {
 		return "", err
 	}
 	return ascii, nil
-}
-
-func normalizeCapabilities(values []string) ([]string, error) {
-	set := make(map[string]struct{}, len(values))
-	for _, raw := range values {
-		value := strings.ToLower(strings.TrimSpace(raw))
-		switch value {
-		case "http", "tcp_private", "h2c", "unix":
-		default:
-			return nil, fmt.Errorf("%w: unsupported connector capability", ErrInvalidInput)
-		}
-		set[value] = struct{}{}
-	}
-	if len(set) == 0 {
-		return nil, fmt.Errorf("%w: at least one connector capability is required", ErrInvalidInput)
-	}
-	result := make([]string, 0, len(set))
-	for value := range set {
-		result = append(result, value)
-	}
-	sort.Strings(result)
-	return result, nil
 }
 
 func wireMatchType(value string) string {

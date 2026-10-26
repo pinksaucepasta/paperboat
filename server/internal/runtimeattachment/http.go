@@ -2,21 +2,54 @@ package runtimeattachment
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net/http"
+	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 )
 
 type Handler struct {
-	Service *Service
-	Machine previewattachment.MachineProofVerifier
-	Edge    previewattachment.PreviewEdgeRequestVerifier
+	Service      *Service
+	Machine      previewattachment.MachineProofVerifier
+	Edge         previewattachment.PreviewEdgeRequestVerifier
+	OriginHealth OriginHealthRecorder
+}
+
+// OriginHealthRecorder stores a machine's report of which tunnel origins are reachable.
+type OriginHealthRecorder interface {
+	RecordOriginHealth(ctx context.Context, accountID, machineID, correlationID string, routes []tunnelv1.OriginRouteReport, now time.Time) error
+}
+
+func originHealthReports(request runtimewire.OriginHealthRequest, now time.Time) ([]tunnelv1.OriginRouteReport, bool) {
+	if len(request.Routes) == 0 || len(request.Routes) > runtimewire.MaximumOriginHealthRoutes {
+		return nil, false
+	}
+	reports := make([]tunnelv1.OriginRouteReport, 0, len(request.Routes))
+	for _, route := range request.Routes {
+		report := tunnelv1.OriginRouteReport{TunnelID: route.TunnelID, RouteID: route.RouteID, Code: route.Code, ObservedAt: now}
+		switch route.State {
+		case "reachable":
+			report.State = "ready"
+		case "unreachable":
+			report.State = "unreachable"
+		}
+		codeOK := route.Code == "" && report.State == "ready" ||
+			report.State == "unreachable" && (route.Code == "refused" || route.Code == "timeout" || route.Code == "unreachable" || route.Code == "tls")
+		if report.State == "" || !codeOK || route.TunnelID == "" || route.RouteID == "" {
+			return nil, false
+		}
+		reports = append(reports, report)
+	}
+	return reports, true
 }
 
 func decode(raw []byte, out any) error {
@@ -44,6 +77,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == runtimewire.HostPath || r.URL.Path == runtimewire.HostTunnelsPath {
 		maximum = 4096
 	}
+	if r.URL.Path == runtimewire.HostTunnelOriginHealthPath {
+		maximum = 128 << 10
+	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maximum))
 	if err != nil {
 		writeError(w, 400, "invalid_request")
@@ -70,6 +106,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": admission})
+		return
+	}
+	if r.URL.Path == runtimewire.HostTunnelOriginHealthPath {
+		var request runtimewire.OriginHealthRequest
+		if decode(raw, &request) != nil {
+			writeError(w, 400, "invalid_request")
+			return
+		}
+		proof, err := h.Machine.VerifyMachineRequest(r.Context(), r, raw)
+		if err != nil {
+			if err == previewattachment.ErrUnauthorized {
+				writeError(w, 401, "device_identity_invalid")
+			} else {
+				serviceError(w, r, err)
+			}
+			return
+		}
+		now := time.Now().UTC()
+		reports, ok := originHealthReports(request, now)
+		if proof.Validate() != nil || !ok {
+			writeError(w, 400, "invalid_request")
+			return
+		}
+		if err := h.OriginHealth.RecordOriginHealth(r.Context(), proof.UserID, proof.MachineID, proof.OperationID, reports, now); err != nil {
+			serviceError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.URL.Path == runtimewire.HostTunnelsPath {

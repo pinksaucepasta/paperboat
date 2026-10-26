@@ -41,6 +41,26 @@ const EdgeEndpointPullPath = "/v1/edge/runtime/endpoint-admissions"
 // their active config snapshots (the routes and their origins), so it can forward their streams.
 const HostTunnelsPath = "/v1/runtime/endpoint-tunnels"
 
+// HostTunnelOriginHealthPath takes the agent's report of whether each tunnel route's local app is
+// reachable. The machine proof binds the body; only routes of tunnels this machine serves count.
+const HostTunnelOriginHealthPath = HostTunnelsPath + "/origin-health"
+
+// MaximumOriginHealthRoutes bounds one origin health report.
+const MaximumOriginHealthRoutes = 256
+
+// OriginHealthRoute is one route's origin state. State is "reachable" or "unreachable"; Code names
+// why an unreachable origin is down: refused, timeout, unreachable or tls.
+type OriginHealthRoute struct {
+	TunnelID string `json:"tunnel_id"`
+	RouteID  string `json:"route_id"`
+	State    string `json:"state"`
+	Code     string `json:"code,omitempty"`
+}
+
+type OriginHealthRequest struct {
+	Routes []OriginHealthRoute `json:"routes"`
+}
+
 // TunnelsRequest asks for the calling machine's engine tunnels; the machine proof binds it.
 type TunnelsRequest struct {
 	OperationID string `json:"operation_id"`

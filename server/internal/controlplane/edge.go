@@ -13,15 +13,15 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
-	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -252,8 +252,7 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 				if observation.AssignmentID == "" || observation.AssignmentGeneration < 1 || observation.EdgeProcessEpoch == "" || observation.ConnectorID == "" || observation.HostID == "" || observation.ConnectorSessionID == "" || observation.ConnectorProcessGeneration < 1 || !validEdgeAccessMode(observation.AccessMode) || observation.ViewerPolicyGeneration < 1 {
 					return invalidUsage("edge.go:235")
 				}
-				configHash, err := parseTunnelEdgeConfigHash(observation.ConfigContentHash)
-				if err != nil {
+				if _, err := parseTunnelEdgeConfigHash(observation.ConfigContentHash); err != nil {
 					return invalidUsage("edge.go:239")
 				}
 				if _, duplicate := observedCanonical[observation.AssignmentID]; duplicate {
@@ -270,70 +269,8 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 					}
 					continue
 				}
-				if state == "detached" {
-					if _, err := tx.Queries().FinalizeDrainingTunnelEdgeRouteAssignmentV1(ctx, dbsqlc.FinalizeDrainingTunnelEdgeRouteAssignmentV1Params{
-						Now: sql.NullTime{Time: now, Valid: true}, AssignmentID: observation.AssignmentID, RouteID: observation.RouteID,
-						AssignmentGeneration: observation.AssignmentGeneration, EdgeNodeID: observation.EdgeNodeID,
-						EdgeProcessEpoch: observation.EdgeProcessEpoch, ConnectorID: observation.ConnectorID,
-						HostID:              observation.HostID,
-						ConnectorGeneration: observation.ConnectorGeneration, ConnectorSessionID: observation.ConnectorSessionID,
-						ConnectorProcessGeneration: observation.ConnectorProcessGeneration, ConfigGeneration: observation.ConfigGeneration,
-						ConfigContentHash: configHash, AccessMode: observation.AccessMode, ViewerPolicyGeneration: observation.ViewerPolicyGeneration,
-					}); err != nil {
-						if !errors.Is(err, sql.ErrNoRows) {
-							return err
-						}
-						existing, getErr := tx.Queries().GetTunnelEdgeRouteAssignmentForObservationV1(ctx, dbsqlc.GetTunnelEdgeRouteAssignmentForObservationV1Params{
-							AssignmentID: observation.AssignmentID, RouteID: observation.RouteID, AssignmentGeneration: observation.AssignmentGeneration,
-							EdgeNodeID: observation.EdgeNodeID, EdgeProcessEpoch: observation.EdgeProcessEpoch, ConnectorID: observation.ConnectorID,
-							ConnectorGeneration: observation.ConnectorGeneration, ConnectorSessionID: observation.ConnectorSessionID,
-							HostID: observation.HostID, ConnectorProcessGeneration: observation.ConnectorProcessGeneration, ConfigGeneration: observation.ConfigGeneration,
-							ConfigContentHash: configHash, AccessMode: observation.AccessMode, ViewerPolicyGeneration: observation.ViewerPolicyGeneration,
-						})
-						if getErr != nil || existing.State != "detached" {
-							return ErrAssignmentConflict
-						}
-					}
-					var accountID, tunnelID string
-					if err := tx.QueryRow(ctx, `SELECT account_id,tunnel_id FROM tunnel_edge_route_assignments WHERE assignment_id=$1`, observation.AssignmentID).Scan(&accountID, &tunnelID); err != nil {
-						return err
-					}
-					if err := tunnelv1.RefreshHealth(ctx, tx, accountID, []string{tunnelID}, now); err != nil {
-						return err
-					}
-					continue
-				}
-				assignment, err := tx.Queries().ApplyTunnelEdgeRouteObservationV1(ctx, dbsqlc.ApplyTunnelEdgeRouteObservationV1Params{
-					ObservedState: state,
-					Now:           sql.NullTime{Time: now, Valid: true}, AssignmentID: observation.AssignmentID, AssignmentGeneration: observation.AssignmentGeneration,
-					RouteID: observation.RouteID, RouteRevision: observation.RouteRevision, EdgeNodeID: observation.EdgeNodeID,
-					EdgeProcessEpoch: observation.EdgeProcessEpoch, ConnectorID: observation.ConnectorID,
-					HostID:              observation.HostID,
-					ConnectorGeneration: observation.ConnectorGeneration, ConnectorSessionID: observation.ConnectorSessionID,
-					ConnectorProcessGeneration: observation.ConnectorProcessGeneration, ConfigGeneration: observation.ConfigGeneration,
-					ConfigContentHash: configHash, AccessMode: observation.AccessMode, ViewerPolicyGeneration: observation.ViewerPolicyGeneration,
-				})
-				if err != nil {
-					if errors.Is(err, sql.ErrNoRows) {
-						return fmt.Errorf("apply exact tunnel edge route observation: %w", ErrAssignmentConflict)
-					}
-					return err
-				}
-				switch state {
-				case "ready":
-					if _, err := tx.Queries().ActivateTunnelEdgeRouteAssignmentV1(ctx, dbsqlc.ActivateTunnelEdgeRouteAssignmentV1Params{
-						AssignmentID: observation.AssignmentID, RouteID: observation.RouteID, Now: now,
-					}); err != nil {
-						if errors.Is(err, sql.ErrNoRows) {
-							return fmt.Errorf("activate exact tunnel edge route assignment: %w", ErrAssignmentConflict)
-						}
-						return fmt.Errorf("activate exact tunnel edge route assignment: %w", err)
-					}
-				}
-				if err := tunnelv1.RefreshHealth(ctx, tx, assignment.AccountID, []string{assignment.TunnelID}, now); err != nil {
-					return err
-				}
-				continue
+				// Only tunnels on the endpoint engine are observed through assignments.
+				return invalidUsage("edge.go:engine_only")
 			}
 			if _, duplicate := observedLegacy[observation.RouteID]; duplicate {
 				return invalidUsage("edge.go:315")

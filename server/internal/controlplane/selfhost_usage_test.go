@@ -49,18 +49,13 @@ func TestSelfhostUsageCannotChargeOrNameOtherResources(t *testing.T) {
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.users WHERE id=$1`, f.accountID)
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, f.nodeID)
 	})
-	// The usage report is for a route the customer's node holds: stage the real
-	// tunnel assignment as TestIndependentOperatorUsageIsBoundToItsAssignedRoutes does.
+	// The usage report is for a route the customer's node holds: serve the real
+	// tunnel route on the agent's carrier as TestIndependentOperatorUsageIsBoundToItsAssignedRoutes does.
 	f.insertBase(t, store)
-	f.insertConnector(t, store, f.connectorOne, f.hostOne, f.sessionOne, 11)
-	f.markConnectorPreReady(t, store, f.connectorOne, f.sessionOne)
-	assignments := &EdgeService{store: store, clock: func() time.Time { return now }}
-	if staged, err := assignments.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged == 0 {
-		t.Fatalf("stage assignment = %d, %v", staged, err)
-	}
+	f.insertEngine(t, store)
 	var generation int64
 	var heldEnvironment string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT a.route_generation,m.environment_id FROM paperboat.tunnel_edge_route_assignments a JOIN paperboat.user_machines m ON m.id=a.host_id WHERE a.route_id=$1 AND a.edge_node_id=$2 LIMIT 1`, f.routeID, f.nodeID).Scan(&generation, &heldEnvironment); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT r.generation,m.environment_id FROM paperboat.endpoint_edge_assignments x JOIN paperboat.endpoint_routes er ON er.id=x.route_id JOIN paperboat.tunnel_routes r ON r.id=er.tunnel_route_id JOIN paperboat.endpoints e ON e.id=x.endpoint_id JOIN paperboat.user_machines m ON m.id=e.agent_machine_id WHERE r.id=$1 AND x.edge_node_id=$2 LIMIT 1`, f.routeID, f.nodeID).Scan(&generation, &heldEnvironment); err != nil {
 		t.Fatal(err)
 	}
 	if heldEnvironment != environment {
@@ -68,7 +63,7 @@ func TestSelfhostUsageCannotChargeOrNameOtherResources(t *testing.T) {
 	}
 	// A customer edge serves its account's self-hosted-only pool, and a route only
 	// with a verified domain that names the edge's public ingress address (064).
-	exec(`INSERT INTO paperboat.control_environments (id, workspace_id) VALUES ($1,$2)`, environment, "workspace_"+suffix)
+	exec(`INSERT INTO paperboat.control_environments (id, workspace_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, environment, "workspace_"+suffix)
 	exec(`UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=$2,public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID, make([]byte, 32))
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'ciphertext','usage test','tunnel','account',$4,$1,true)`, installation, f.nodeID, []byte(pub), f.accountID)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
@@ -168,15 +163,11 @@ func TestIndependentOperatorUsageIsBoundToItsAssignedRoutes(t *testing.T) {
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, f.nodeID)
 	})
 	f.insertBase(t, store)
-	f.insertConnector(t, store, f.connectorOne, f.hostOne, f.sessionOne, 11)
-	f.markConnectorPreReady(t, store, f.connectorOne, f.sessionOne)
+	f.insertEngine(t, store)
 	service := &EdgeService{store: store, clock: func() time.Time { return now }}
-	if staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10); err != nil || staged == 0 {
-		t.Fatalf("stage assignment = %d, %v", staged, err)
-	}
 	var generation int64
 	var environment string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT a.route_generation,m.environment_id FROM paperboat.tunnel_edge_route_assignments a JOIN paperboat.user_machines m ON m.id=a.host_id WHERE a.route_id=$1 AND a.edge_node_id=$2 LIMIT 1`, f.routeID, f.nodeID).Scan(&generation, &environment); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT r.generation,m.environment_id FROM paperboat.endpoint_edge_assignments x JOIN paperboat.endpoint_routes er ON er.id=x.route_id JOIN paperboat.tunnel_routes r ON r.id=er.tunnel_route_id JOIN paperboat.endpoints e ON e.id=x.endpoint_id JOIN paperboat.user_machines m ON m.id=e.agent_machine_id WHERE r.id=$1 AND x.edge_node_id=$2 LIMIT 1`, f.routeID, f.nodeID).Scan(&generation, &environment); err != nil {
 		t.Fatal(err)
 	}
 	pub, _, err := ed25519.GenerateKey(rand.Reader)

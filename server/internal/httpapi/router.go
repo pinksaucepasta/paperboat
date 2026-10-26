@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
-	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
@@ -40,7 +41,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorreporting"
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
-	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
@@ -132,26 +132,19 @@ type Options struct {
 	TunnelResources          tunnelv1.ResourceAPI
 	Domains                  *domaininventory.Service
 	PreviewLogs              tunnelv1.PreviewLogAPI
-	// PreviewCarrierAttachment is the machine-proof host attachment surface;
-	// PreviewCarrierEdge is the edge-control pull/ACK/observation surface.
 	RuntimeCarrierAttachment http.Handler
-	PreviewCarrierAttachment http.Handler
-	PreviewCarrierEdge       http.Handler
 	// PrivateAccessAuthorize and PrivateAccessGrant are edge-only handlers.
 	// Both first authenticate the edge node/process epoch, then verify the
 	// renewable user/machine identity against the current private route.
-	PrivateAccessAuthorize    http.Handler
-	PrivateAccessGrant        http.Handler
-	PrivateAccessRoutes       http.Handler
-	ConnectorControl          http.Handler
-	ConnectorCarrierBootstrap http.Handler
-	ConnectorOriginHealth     http.Handler
-	MachineEvents             http.Handler
-	MachineEventWaiter        machineEventWaiter
-	MachineEventSigning       MachineEventSigning
-	TelemetryHTTP             *telemetry.HTTPObserver
-	TelemetryMetrics          *telemetry.Metrics
-	TelemetryDiagnostics      *telemetry.Diagnostics
+	PrivateAccessAuthorize http.Handler
+	PrivateAccessGrant     http.Handler
+	PrivateAccessRoutes    http.Handler
+	MachineEvents          http.Handler
+	MachineEventWaiter     machineEventWaiter
+	MachineEventSigning    MachineEventSigning
+	TelemetryHTTP          *telemetry.HTTPObserver
+	TelemetryMetrics       *telemetry.Metrics
+	TelemetryDiagnostics   *telemetry.Diagnostics
 }
 
 // tunnelCreateAuth mirrors the preview machine-auth boundary: machine
@@ -164,21 +157,6 @@ func tunnelCreateAuth(user *auth.Service, machines *auth.DeviceService, next htt
 			return
 		}
 		requireAnyAuth(user, machines, requireScope("tunnels:write", requireCSRF(user, next))).ServeHTTP(w, r)
-	})
-}
-
-// tunnelConnectorEnrollmentAuth is deliberately machine-only. Issuing an
-// enrollment creates a one-time connector credential for a host, and
-// exchanging it installs that credential on the same host. A browser or CLI
-// client-session bearer must never be able to select or impersonate host_id;
-// the handler verifies the renewable machine proof over the exact body.
-func tunnelConnectorEnrollmentAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !tunnelMachineHeadersPresent(r) {
-			writePreviewTunnelError(w, r, http.StatusUnauthorized, "machine_identity_required", "A signed host identity is required for connector enrollment.", "unchanged", false, "run_on_authorized_host")
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -294,12 +272,6 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/tunnels/{tunnel_id}/status", tunnelRead(tunnelStatus(opts.Tunnels)))
 			mux.Handle("GET /v1/tunnels/{tunnel_id}/events", tunnelRead(previewTunnelEvents(opts.PreviewTunnelAPI, "tunnel", "tunnel_id")))
 			if opts.TunnelResources != nil {
-				var connectorIdentity machineRequestVerifier
-				if opts.Enrollment != nil {
-					connectorIdentity = opts.Enrollment
-				} else if opts.RuntimeIdentity != nil {
-					connectorIdentity = opts.RuntimeIdentity
-				}
 				mux.Handle("POST /v1/tunnels/{tunnel_id}/routes", tunnelWrite(tunnelResourceRouteCreate(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/routes", tunnelRead(tunnelResourceRouteList(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/routes/{route_id}", tunnelRead(tunnelResourceRouteGet(opts.TunnelResources)))
@@ -311,27 +283,11 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("DELETE /v1/tunnels/{tunnel_id}/domains/{domain_id}", tunnelWrite(tunnelResourceDomainDelete(opts.TunnelResources)))
 				mux.Handle("POST /v1/tunnels/{tunnel_id}/domains/{domain_id}/verify", tunnelWrite(tunnelResourceDomainVerify(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/domains/{domain_id}/instructions", tunnelRead(tunnelResourceDomainInstructions(opts.TunnelResources)))
-				mux.Handle("GET /v1/tunnels/{tunnel_id}/connectors", tunnelRead(tunnelResourceConnectorList(opts.TunnelResources)))
-				mux.Handle("GET /v1/tunnels/{tunnel_id}/connectors/{connector_id}", tunnelRead(tunnelResourceConnectorGet(opts.TunnelResources)))
-				mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/enrollments", tunnelConnectorEnrollmentAuth(tunnelResourceIssueEnrollment(opts.TunnelResources, connectorIdentity)))
-				mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/enrollments/exchange", tunnelConnectorEnrollmentAuth(tunnelResourceExchangeEnrollment(opts.TunnelResources, connectorIdentity)))
-				mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/drain", tunnelWrite(tunnelResourceConnectorDrain(opts.TunnelResources)))
-				mux.Handle("DELETE /v1/tunnels/{tunnel_id}/connectors/{connector_id}", tunnelWrite(tunnelResourceConnectorRevoke(opts.TunnelResources)))
-				mux.Handle("POST /v1/tunnels/{tunnel_id}/credentials/rotate", tunnelWrite(tunnelResourceRotateCredentials(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/logs", tunnelRead(tunnelResourceTunnelLogs(opts.TunnelResources)))
 			}
 		}
-		if opts.ConnectorControl != nil {
-			mux.Handle("GET /v1/tunnels/{tunnel_id}/connectors/{connector_id}/control", opts.ConnectorControl)
-		}
-		if opts.ConnectorCarrierBootstrap != nil {
-			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap", opts.ConnectorCarrierBootstrap)
-		}
 		if opts.MachineEvents != nil {
 			mux.Handle("POST "+MachineEventsPath, opts.MachineEvents)
-		}
-		if opts.ConnectorOriginHealth != nil {
-			mux.Handle("POST /v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health", opts.ConnectorOriginHealth)
 		}
 
 		if opts.DiagnosticUploads == nil || opts.DeviceAuth == nil {
@@ -344,21 +300,10 @@ func NewRouter(opts Options) http.Handler {
 		if opts.RuntimeCarrierAttachment != nil {
 			mux.Handle("POST /v1/runtime/carrier-attachment", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/runtime/endpoint-tunnels", opts.RuntimeCarrierAttachment)
+			mux.Handle("POST /v1/runtime/endpoint-tunnels/origin-health", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/carrier-admissions", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/carrier-observations", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/endpoint-admissions", opts.RuntimeCarrierAttachment)
-		}
-		if opts.PreviewCarrierAttachment != nil {
-			mux.Handle("POST /v1/previews/{preview_id}/carrier-attachment", opts.PreviewCarrierAttachment)
-			mux.Handle("POST /v1/previews/{preview_id}/carrier-attachment/renew", opts.PreviewCarrierAttachment)
-			mux.Handle("POST /v1/previews/{preview_id}/carrier-attachment/readiness", opts.PreviewCarrierAttachment)
-			mux.Handle("POST /v1/previews/{preview_id}/carrier-attachment/release", opts.PreviewCarrierAttachment)
-		}
-		if opts.PreviewCarrierEdge != nil {
-			mux.Handle("POST "+previewattachment.EdgeAdmissionPullPath, opts.PreviewCarrierEdge)
-			mux.Handle("POST "+previewattachment.EdgeAdmissionAckPath, opts.PreviewCarrierEdge)
-			mux.Handle("POST "+previewattachment.EdgeObservationPath, opts.PreviewCarrierEdge)
-			mux.Handle("POST "+previewattachment.EdgeDetachmentPath, opts.PreviewCarrierEdge)
 		}
 		if opts.PrivateAccessGrant != nil {
 			mux.Handle("POST "+privateaccess.GrantPath, opts.PrivateAccessGrant)

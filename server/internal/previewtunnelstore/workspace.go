@@ -87,8 +87,6 @@ func resolveWorkspaceResourceAccount(ctx context.Context, q workspaceQuerier, ac
 		query = `SELECT t.account_id FROM paperboat.tunnel_domains d JOIN paperboat.tunnels t ON t.id=d.tunnel_id WHERE d.id=$3 AND paperboat.workspace_tunnel_management_allowed($1,$2,t.id)`
 	case "preview_domain_binding":
 		query = `SELECT p.account_id FROM paperboat.preview_domains d JOIN paperboat.preview_leases p ON p.id=d.preview_id WHERE d.id=$3 AND paperboat.workspace_preview_management_allowed($1,$2,p.id)`
-	case "connector":
-		query = `SELECT t.account_id FROM paperboat.tunnel_connectors c JOIN paperboat.tunnels t ON t.id=c.tunnel_id WHERE c.id=$3 AND paperboat.workspace_tunnel_management_allowed($1,$2,t.id)`
 	default:
 		return "", ErrNotFound
 	}

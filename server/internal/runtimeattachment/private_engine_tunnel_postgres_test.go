@@ -1,7 +1,6 @@
 package runtimeattachment
 
 import (
-	"context"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
-	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
@@ -74,7 +72,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if admissions, err := repository.EdgeAdmissions(f.ctx, f.node, f.edge.ProcessEpoch); err != nil || len(admissions) != 1 || admissions[0].RouteID != route {
 		t.Fatalf("edge admissions = %+v, %v", admissions, err)
 	}
-	resolver, err := privateaccess.NewSQLResolver(f.database, noAttachments{})
+	resolver, err := privateaccess.NewSQLResolver(f.database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,10 +87,4 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil || binding.ConnectorID != r.ConnectorID || binding.CarrierSessionID != r.CarrierSessionID || binding.Protocol != privateaccess.ProtocolHTTP || binding.AssignmentGeneration != r.AssignmentGeneration {
 		t.Fatalf("resolved binding = %+v, %v", binding, err)
 	}
-}
-
-type noAttachments struct{}
-
-func (noAttachments) Get(context.Context, string, string) (previewattachment.Attachment, error) {
-	return previewattachment.Attachment{}, privateaccess.ErrResourceNotFound
 }

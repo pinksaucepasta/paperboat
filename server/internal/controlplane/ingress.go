@@ -8,7 +8,7 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 )
 
 // HTTP01Source supplies the http-01 responses an edge must serve. ForEdge also
@@ -42,7 +42,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	}
 	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
 	var denied []wire.IngressQuotaDenial
-	decisions, err := (connectorprotocol.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(r.Context(), input.NodeID, input.ProcessEpoch)
+	decisions, err := (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(r.Context(), input.NodeID, input.ProcessEpoch)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return

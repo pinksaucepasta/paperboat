@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -48,6 +50,7 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	f := newAccessorAcceptanceFixture(fmt.Sprint(time.Now().UnixNano()), now)
 	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_environments WHERE id IN (SELECT environment_id FROM paperboat.user_machines WHERE id=$1)`, f.hostID)
 		if _, err := database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, f.accountID, f.otherAccountID); err != nil {
 			t.Errorf("clean up accessor test users: %v", err)
 		}
@@ -183,7 +186,8 @@ func (f accessorAcceptanceFixture) insert(t *testing.T, database *db.DB) {
 	exec(`INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,state,ready,capacity,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES ($1,'test','1.0',$2,'edge.example.test',24001,24002,'edge.example.test',25001,25002,'sha256:' || repeat('b',64),'test-public-certificate-chain','ready',true,'{}',$3,'test','test',ARRAY['edge'],ARRAY['http3','http2'],100,0,$3,$3::timestamptz+interval '1 hour')`, f.nodeID, f.epoch, f.now)
 	exec(`INSERT INTO paperboat.preview_leases (owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,allocation_state,edge_state,origin_state,terminal_state,created_at,last_renewed_at) VALUES ('foreground',$1,$2,$3,$3,$4,$5,'http','127.0.0.1:3000','private',$6,'ready','ready','ready','active',$7,$7)`, f.previewID, "https://preview-"+f.suffix+".preview.example.test", f.accountID, f.hostID, "owner_"+f.suffix, f.now.Add(time.Hour), f.now)
 	exec(`INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,retrying,outcome,correlation_id,created_at,updated_at,completed_at) VALUES ($1,$2,$1,$3,'preview.create','preview_lease',$4,'ready','succeeded',100,false,'changed',$5,$6,$6,$6)`, f.operationID, f.accountID, requestHash[:], f.previewID, "cor_"+f.suffix, f.now)
-	exec(`INSERT INTO paperboat.preview_lease_carrier_attachments (account_id,preview_id,operation_id,idempotency_key,request_id,correlation_id,request_hash,owner_machine_id,owner_session_id,host_id,edge_node_id,edge_process_epoch,edge_carrier_server_spki_sha256,edge_carrier_server_certificate_chain_pem,machine_identity_public_key,machine_identity_thumbprint,lease_generation,tunnel_id,connector_id,connector_session_id,process_generation,config_generation,route_id,route_generation,config_content_hash,edge_endpoints,state,edge_ready,origin_ready,issued_at,expires_at,ready_at) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$7,$9,$10,'sha256:' || repeat('b',64),'test-public-certificate-chain',$11,$12,4,$13,$14,$15,2,3,$16,7,$17,ARRAY['h2://edge.example.test:25001','h3://edge.example.test:25002'],'ready',true,true,$18,$19,$18)`, f.accountID, f.previewID, f.operationID, "req_"+f.suffix, "cor_"+f.suffix, requestHash[:], f.hostID, "owner_"+f.suffix, f.nodeID, f.epoch, f.hostPublicKey, "sha256:"+strings.TrimPrefix(f.hostThumbprint, "sha256:"), "pvc_"+f.suffix, "pcc_"+f.suffix, "pcs_"+f.suffix, "proute_"+f.suffix, "sha256:"+strings.Repeat("a", 64), f.now, f.now.Add(30*time.Minute))
+	testutil.EnginePreview{Suffix: f.suffix, Lease: f.previewID, Account: f.accountID, Machine: f.hostID, Node: f.nodeID, Epoch: f.epoch, PublicKey: f.hostPublicKey,
+		RouteRevision: 7, WorkerGeneration: 2, ConfigGeneration: 3, Now: f.now}.Serve(t, exec)
 }
 
 func assertAccessorBindings(t *testing.T, routes []AccessorAdmission, f accessorAcceptanceFixture) {
@@ -196,7 +200,7 @@ func assertAccessorBindings(t *testing.T, routes []AccessorAdmission, f accessor
 		}
 	}
 	p := byKind["preview\x00http"]
-	if p.RouteGeneration != 7 || p.SessionGeneration != 4 || p.ProcessGeneration != 2 || p.ConfigGeneration != 3 || p.AssignmentGeneration != 4 || p.AssignmentID != f.operationID || p.ConfigContentHash != "sha256:"+strings.Repeat("a", 64) || p.MatchType != "exact" {
+	if p.RouteGeneration != 7 || p.SessionGeneration != 1 || p.ProcessGeneration != 2 || p.ConfigGeneration != 3 || p.AssignmentGeneration != 1 || p.AssignmentID != f.previewID || p.ConfigContentHash != "sha256:"+strings.Repeat("a", 64) || p.MatchType != "exact" {
 		t.Fatalf("preview generations=%#v", p)
 	}
 }

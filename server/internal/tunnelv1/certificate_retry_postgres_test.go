@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"strings"
 	"sync"
@@ -138,7 +137,6 @@ func TestOneFailingCertificateDomainDoesNotBlockTheRestOnPostgres(t *testing.T) 
 	blockedHost, nextHost := "block-"+label+".example.test", "next-"+label+".example.test"
 	endpointID := testutil.EndpointID("certificate-fanout:" + f.suffix)
 	identity := sha256.Sum256([]byte("connector:" + connector))
-	publicKey := base64.RawURLEncoding.EncodeToString(identity[:])
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := f.database.SQL().ExecContext(ctx, query, args...); err != nil {
@@ -154,14 +152,12 @@ INSERT INTO paperboat.tunnel_routes
  (id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id,created_at,updated_at)
 VALUES ($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, route, tunnel, blockedHost, account, now)
 	exec(`INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until) VALUES($1,1,$2,$3,'pending',$4,$5)`, tunnel, identity[:], []byte(`{}`), account, now.Add(24*time.Hour))
-	exec(`INSERT INTO paperboat.tunnel_connectors (id,tunnel_id,host_id,credential_reference,credential_thumbprint,rotation_generation,desired_state,protocol_version,last_session_id,last_heartbeat_at,ready_at,last_applied_config_generation,drain_state,generation,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$4,1,'active','1.0',$5,$6,$6,1,'accepting',1,$6,$6)`, connector, tunnel, host, "keychain://fanout/"+connector, session, now)
-	exec(`INSERT INTO paperboat.tunnel_connector_sessions (id,connector_id,process_generation,protocol_version,capabilities,credential_generation,state,lease_deadline,last_heartbeat_at,ready_at,applied_config_generation,retained_until,created_at)
-VALUES ($1,$2,1,'1.0',ARRAY['config.snapshot.v1'],1,'ready',$3,$4,$4,1,$5,$4)`, session, connector, now.Add(time.Hour), now, now.Add(2*time.Hour))
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,roles,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at)
 VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','domain',ARRAY['http2','http3']::text[],100,0,$3,$3::timestamptz+interval '1 hour')`, edge, epoch, now)
-	exec(`INSERT INTO paperboat.tunnel_edge_route_assignments (assignment_id,route_id,assignment_generation,account_id,tunnel_id,connector_id,host_id,machine_identity_public_key,machine_identity_thumbprint,connector_generation,connector_session_id,connector_process_generation,config_generation,config_content_hash,access_mode,route_generation,route_revision,viewer_policy_generation,edge_node_id,edge_process_epoch,edge_failure_domain,state,observed_state,assigned_at,observed_at,created_at,updated_at)
-VALUES ($1,$2,1,$3,$4,$5,$6,$7,$7,1,$8,1,1,$9,'public',1,1,1,$10,$11,'test','active','ready',$12,$12,$12,$12)`, "asg_fanout_"+f.suffix, route, account, tunnel, connector, host, publicKey, session, identity[:], edge, epoch, now)
+	// The edge serves the route on the agent's carrier: the endpoint's assignment, observed ready.
+	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host)
+	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, route, tunnel, blockedHost)
+	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,$4,$5,true,$6)`, route, tunnel, edge, epoch, session, now)
 	for _, domain := range []struct{ id, hostname string }{{blocked, blockedHost}, {next, nextHost}} {
 		exec(`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state)
 VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain.id, account, tunnel, route, domain.hostname)

@@ -95,7 +95,7 @@ func (s *Store) GetOperation(ctx context.Context, accountID, operationID string)
  AND o.operation_type IN ('route.delete','route.create','route.patch') AND o.state IN ('pending','running') AND t.account_id=$1
  AND r.deleted_at IS NOT NULL
  AND (o.operation_type<>'route.delete' OR (
- NOT EXISTS (SELECT 1 FROM tunnel_edge_route_assignments a WHERE a.route_id=r.id AND a.state<>'detached')
+ NOT EXISTS (SELECT 1 FROM endpoint_routes er JOIN endpoint_edge_assignments x ON x.route_id=er.id WHERE er.tunnel_route_id=r.id AND x.desired='active')
  AND (t.desired_state='deleted' OR (
  (t.summary_code='ready' OR NOT EXISTS (SELECT 1 FROM tunnel_routes remaining WHERE remaining.tunnel_id=t.id AND remaining.desired_state='active' AND remaining.deleted_at IS NULL))
  AND EXISTS (
@@ -120,9 +120,8 @@ func (s *Store) GetOperation(ctx context.Context, accountID, operationID string)
  WHERE o.id=$2 AND o.account_id=$1 AND o.resource_kind='route' AND o.resource_id=r.id
  AND o.operation_type IN ('route.create','route.patch') AND o.state IN ('pending','running') AND t.account_id=$1
  AND r.deleted_at IS NULL AND r.desired_state='active'
- AND (EXISTS (SELECT 1 FROM tunnel_edge_route_assignments a WHERE a.route_id=r.id AND a.state='active' AND a.observed_state='ready' AND a.route_generation=r.generation)
-  OR EXISTS (SELECT 1 FROM endpoint_routes er JOIN endpoint_edge_assignments x ON x.route_id=er.id
-   WHERE er.tunnel_route_id=r.id AND er.revision=r.generation AND x.desired='active' AND x.observed_ready))`, accountID, operationID, s.now())
+ AND EXISTS (SELECT 1 FROM endpoint_routes er JOIN endpoint_edge_assignments x ON x.route_id=er.id
+   WHERE er.tunnel_route_id=r.id AND er.revision=r.generation AND x.desired='active' AND x.observed_ready)`, accountID, operationID, s.now())
 		if refreshErr != nil {
 			return dbsqlc.Operation{}, translate(refreshErr)
 		}
@@ -416,16 +415,6 @@ func (s *Store) CreateDomain(ctx context.Context, params dbsqlc.CreatePreviewTun
 	}
 	params.ObservedRecords = canonical
 	value, err := s.db.Queries().CreatePreviewTunnelDomain(ctx, params)
-	return value, translate(err)
-}
-
-func (s *Store) CreateConnector(ctx context.Context, params dbsqlc.CreatePreviewTunnelConnectorParams) (dbsqlc.TunnelConnector, error) {
-	value, err := s.db.Queries().CreatePreviewTunnelConnector(ctx, params)
-	return value, translate(err)
-}
-
-func (s *Store) CreateConnectorSession(ctx context.Context, params dbsqlc.CreatePreviewTunnelConnectorSessionParams) (dbsqlc.TunnelConnectorSession, error) {
-	value, err := s.db.Queries().CreatePreviewTunnelConnectorSession(ctx, params)
 	return value, translate(err)
 }
 

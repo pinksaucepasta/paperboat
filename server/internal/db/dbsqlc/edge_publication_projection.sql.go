@@ -96,12 +96,9 @@ func (q *Queries) ListEdgeDNSPublicationResourcesV1(ctx context.Context, arg Lis
 const listReadyEdgeDNSAddressesV1 = `-- name: ListReadyEdgeDNSAddressesV1 :many
 SELECT DISTINCT node.id,t.generation AS resource_generation,statement_timestamp()::timestamptz AS observed_at, COALESCE(host(node.public_ingress_ipv4),'')::text AS ipv4,
  COALESCE(host(node.public_ingress_ipv6),'')::text AS ipv6,
- (node.process_epoch || '/' || COALESCE((
-   SELECT string_agg(a.assignment_id,',' ORDER BY a.assignment_id)
-   FROM tunnel_edge_route_assignments a WHERE a.tunnel_id=t.id AND a.edge_node_id=node.id
-    AND a.edge_process_epoch=node.process_epoch AND a.state='active' AND a.observed_state='ready'
- ),'') || '/' || COALESCE((
-   -- Tunnel routes on the endpoint engine (PLAN 3a step 4), ready on this edge.
+ -- The empty second segment keeps readiness versions unchanged from when connector assignments filled it.
+ (node.process_epoch || '//' || COALESCE((
+   -- Tunnel routes on the endpoint engine, ready on this edge.
    SELECT string_agg(x.route_id || ':' || x.generation,',' ORDER BY x.route_id)
    FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id
    WHERE x.edge_node_id=node.id AND x.edge_process_epoch=node.process_epoch AND x.desired='active' AND x.observed_ready
@@ -112,10 +109,6 @@ SELECT DISTINCT node.id,t.generation AS resource_generation,statement_timestamp(
     AND d.state IN ('ready','active') AND (cert.tunnel_id=t.id OR cert.target_kind='platform_wildcard')
  ),''))::text AS readiness_version,
  LEAST(t.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',
-   (SELECT min(LEAST(s.lease_deadline,s.last_heartbeat_at+interval '15 seconds'))
-    FROM tunnel_edge_route_assignments a JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id
-    WHERE a.tunnel_id=t.id AND a.edge_node_id=node.id AND a.edge_process_epoch=node.process_epoch
-     AND a.state='active' AND a.observed_state='ready'),
    (SELECT min(ra.expires_at) FROM endpoint_edge_assignments x
     JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id
     JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
@@ -150,26 +143,6 @@ WHERE t.id=$1 AND t.desired_state='active' AND t.deleted_at IS NULL
    AND ((r.match_type IN ('managed','exact') AND r.match_hostname=$3::text)
      OR (r.match_type='one_label_wildcard' AND substring($3::text from position('.' in $3::text))='.'||r.wildcard_suffix)
      OR EXISTS (SELECT 1 FROM tunnel_domains domain WHERE domain.route_id=r.id AND domain.tunnel_id=r.tunnel_id AND domain.hostname=$3::text AND domain.deleted_at IS NULL AND domain.ownership_state='verified' AND domain.conflict_state='clear'))
-   AND NOT EXISTS (
-    SELECT 1 FROM tunnel_edge_route_assignments a
-    JOIN tunnel_connectors c ON c.id=a.connector_id AND c.tunnel_id=t.id
-    JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id AND s.connector_id=c.id
-    JOIN tunnel_config_generations config ON config.tunnel_id=t.id AND config.generation=a.config_generation
-    JOIN current_tunnel_route_viewer_policy viewer_policy ON viewer_policy.route_id=r.id
-    WHERE a.route_id=r.id AND a.route_generation=r.generation AND a.account_id=t.account_id
-     AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
-     AND a.state='active' AND a.observed_state='ready'
-     AND a.access_mode=viewer_policy.effective_access_mode
-     AND a.viewer_policy_generation=viewer_policy.viewer_policy_generation
-     AND a.edge_node_id=node.id AND a.edge_process_epoch=node.process_epoch
-     AND c.desired_state='active' AND c.drain_state='accepting' AND c.revoked_at IS NULL
-     AND c.generation=a.connector_generation AND c.last_session_id=s.id
-     AND c.last_applied_config_generation>=a.config_generation
-     AND s.state='ready' AND s.process_generation=a.connector_process_generation
-     AND s.applied_config_generation>=a.config_generation AND s.lease_deadline>$2
-     AND s.last_heartbeat_at>$2::timestamptz-interval '15 seconds'
-     AND config.activation_state='active' AND config.content_hash=a.config_content_hash
-   )
    AND NOT EXISTS (
     SELECT 1 FROM endpoint_edge_assignments x
     JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'

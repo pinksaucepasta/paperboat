@@ -122,8 +122,8 @@ type ListPrivateAccessCarrierAdmissionsForEdgeV1Row struct {
 	ConfigContentHash                    string
 	MatchType                            string
 	WildcardSuffix                       string
-	EdgeCarrierServerSpkiSha256          sql.NullString
-	EdgeCarrierServerCertificateChainPem sql.NullString
+	EdgeCarrierServerSpkiSha256          string
+	EdgeCarrierServerCertificateChainPem string
 	AccessorMachineID                    string
 	InstallationGeneration               int64
 	AccessorPublicKey                    sql.NullString
@@ -319,8 +319,8 @@ type ListPrivateAccessRoutesForMachineV1Row struct {
 	ConfigContentHash                    string
 	MatchType                            string
 	WildcardSuffix                       string
-	EdgeCarrierServerSpkiSha256          sql.NullString
-	EdgeCarrierServerCertificateChainPem sql.NullString
+	EdgeCarrierServerSpkiSha256          string
+	EdgeCarrierServerCertificateChainPem string
 	AccessorMachineID                    string
 	InstallationGeneration               int64
 	AccessorPublicKey                    sql.NullString

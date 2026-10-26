@@ -165,13 +165,11 @@ func (s *Service) SetPlacement(ctx context.Context, actor, kind, id string, inst
 		}
 	}
 
-	if kind == "tunnel" {
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.tunnel_edge_route_assignments SET state='draining',observed_state='draining',updated_at=now() WHERE tunnel_id=$1 AND state IN('active','staged')`, id)
-	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.preview_leases SET edge_state='pending' WHERE id=$1`, id)
-	}
-	if err != nil {
-		return out, err
+	// A tunnel needs no edge update: its edge snapshot filters on node_route_eligible, so the move takes effect on the next pull.
+	if kind != "tunnel" {
+		if _, err = tx.ExecContext(ctx, `UPDATE paperboat.preview_leases SET edge_state='pending' WHERE id=$1`, id); err != nil {
+			return out, err
+		}
 	}
 	return out, tx.Commit()
 }

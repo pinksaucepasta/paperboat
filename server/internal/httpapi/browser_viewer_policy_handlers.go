@@ -1,11 +1,9 @@
 package httpapi
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
-	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 func browserViewerPolicyError(w http.ResponseWriter, r *http.Request, err error) {
@@ -74,31 +72,6 @@ func (h *BrowserAccessHandlers) ViewerPolicyPut(w http.ResponseWriter, r *http.R
 	if err != nil {
 		browserViewerPolicyError(w, r, err)
 		return
-	}
-	if h.ViewerPolicyReconciler != nil && policy.ResourceKind == "tunnel" {
-		// The policy is already durable. Reconcile immediately after commit so
-		// the edge sees the effective mode/generation without waiting for the
-		// periodic worker. A failed/pending edge transition remains represented
-		// in serving_state; it must not be reported as an unsaved conflict.
-		_, reconcileErr := h.ViewerPolicyReconciler.ReconcileTunnelEdgeRouteAssignments(r.Context(), 100)
-		current, readErr := h.Access.GetViewerPolicy(r.Context(), p.User.ID, policy.ResourceKind, policy.ResourceID, policy.RouteID)
-		if readErr == nil {
-			policy = current
-		}
-		if reconcileErr != nil || readErr != nil {
-			code := "edge_route_reconcile_failed"
-			cause := reconcileErr
-			if readErr != nil {
-				if cause == nil {
-					code = "viewer_policy_unavailable"
-					cause = readErr
-				} else {
-					cause = errors.Join(cause, readErr)
-				}
-			}
-			ctx := supportreport.WithFailureIdentity(r.Context(), p.User.ID, requestIDFromContext(r.Context()), supportReference(r.Context()))
-			supportreport.ObserveFromContext(ctx, "paperboat-server", supportOperation(r.URL.Path), "service_error", code, cause)
-		}
 	}
 	if policy.ServingState != "ready" && policy.ServingState != "not_applicable" {
 		w.Header().Set("Retry-After", "1")

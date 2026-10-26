@@ -204,26 +204,6 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+suffix, "trk03-"+suffix+"@e
 		t.Fatalf("domain generation = %d", domain.Generation)
 	}
 
-	connector, err := store.CreateConnector(ctx, dbsqlc.CreatePreviewTunnelConnectorParams{
-		ID: "con_" + suffix, TunnelID: created.Tunnel.ID, HostID: "host_" + suffix,
-		CredentialReference: "credential://connector/" + suffix, CredentialThumbprint: "sha256:" + suffix,
-		RotationGeneration: 1, DesiredState: "active", ProtocolVersion: "1.0",
-		DrainState: "accepting", Now: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if connector.ID == connector.TunnelID {
-		t.Fatal("connector identity was conflated with tunnel identity")
-	}
-	if _, err := store.CreateConnectorSession(ctx, dbsqlc.CreatePreviewTunnelConnectorSessionParams{
-		ID: "csn_" + suffix, ConnectorID: connector.ID, ProcessGeneration: 1,
-		ProtocolVersion: "1.0", Capabilities: []string{"snapshot.v1"}, State: "authenticating",
-		LeaseDeadline: now.Add(time.Minute), RetainedUntil: now.Add(time.Hour), Now: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	preview, err := store.CreatePreviewLease(ctx, dbsqlc.CreatePreviewLeaseParams{
 		ID: "prv_" + suffix, Endpoint: "https://" + suffix + ".preview.example.test", AccountID: accountID,
 		ActorID: accountID, OwnerMachineID: "dev_" + suffix, OwnerSessionID: "ses_" + suffix, OwnerSessionKind: "foreground",
@@ -284,7 +264,7 @@ FROM paperboat.tunnel_config_generations WHERE tunnel_id=$1`, created.Tunnel.ID)
 	if err := database.SQL().QueryRowContext(ctx, `
 SELECT count(*) FROM information_schema.columns
 WHERE table_schema='paperboat'
-  AND table_name IN ('tunnels','tunnel_routes','tunnel_domains','tunnel_connectors','tunnel_connector_sessions','preview_leases','tunnel_config_generations','operations')
+  AND table_name IN ('tunnels','tunnel_routes','tunnel_domains','preview_leases','tunnel_config_generations','operations')
   AND (column_name LIKE '%private_key%' OR column_name LIKE '%password%' OR column_name IN ('token','secret','credential_ciphertext'))`).Scan(&forbiddenColumns); err != nil {
 		t.Fatal(err)
 	}

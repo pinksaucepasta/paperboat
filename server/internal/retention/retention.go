@@ -62,25 +62,12 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	{"managed_ssh_operations", batchOf("managed_ssh_operations", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
-	// A connector enrollment once consumed or expired; before operations, which it holds.
-	{"tunnel_connector_enrollments", batchOf("tunnel_connector_enrollments",
-		`expires_at < now()-make_interval(secs=>$2) AND (consumed_at IS NULL OR consumed_at < now()-make_interval(secs=>$2))`),
-		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
-	// A finished operation still referenced (a live preview's carrier attachment cascades from it; tunnel connector
-	// rows restrict it) stays until its referrer goes.
+	// A finished operation still referenced stays until its referrer goes.
 	{"operations", batchOf("operations", `completed_at < now()-make_interval(secs=>$2)
- AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_carrier_attachments x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)
- AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_create_operations x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_activations x WHERE x.operation_id=operations.id)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_credential_generations x WHERE x.source_operation_id=operations.id)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_enrollments x WHERE x.operation_id=operations.id)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_rotation_targets x WHERE x.operation_id=operations.id)`),
+ AND NOT EXISTS(SELECT 1 FROM paperboat.preview_lease_create_operations x WHERE x.account_id=operations.account_id AND x.operation_id=operations.id)`),
 		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
 	// Its recoveries cascade; reconciliation attempts keep their row without it.
 	{"control_operations", batchOf("control_operations", `completed_at < now()-make_interval(secs=>$2)`),
-		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
-	{"preview_carrier_attachment_outbox", batchOf("preview_carrier_attachment_outbox",
-		`state IN ('delivered','failed') AND updated_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
 	// An invitation's latest_mail_id is cleared with it.
 	{"transactional_mail_outbox", batchOf("transactional_mail_outbox", `state <> 'queued' AND created_at < now()-make_interval(secs=>$2)`),
@@ -131,8 +118,6 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.AcknowledgedUsageReceipts })},
 	{"tunnel_log_entries", batchOf("tunnel_log_entries", `occurred_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.TunnelLogs })},
-	{"tunnel_connector_sessions", batchOf("tunnel_connector_sessions", `state IN ('disconnected','expired') AND retained_until < now()`),
-		none},
 	{"team_machine_requests", batchOf("team_machine_requests", `decided_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.DecidedMachineRequests })},
 	{"stripe_events", batchOf("stripe_events", `processed_at < now()-make_interval(secs=>$2)`),

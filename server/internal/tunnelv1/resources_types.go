@@ -20,9 +20,6 @@ type ResourceConfig struct {
 	ChallengeZone            string
 	Now                      func() time.Time
 	NewID                    func(prefix string) (string, error)
-	EnrollmentTTL            time.Duration
-	RotationOverlap          time.Duration
-	CredentialLifetime       time.Duration
 	PublicTCPPortMin         int32
 	PublicTCPPortMax         int32
 	AllowInsecureDevelopment bool
@@ -41,14 +38,6 @@ type ResourceAPI interface {
 	DeleteDomain(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (DomainMutationResult, error)
 	VerifyDomain(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (DomainMutationResult, error)
 	DomainInstructions(context.Context, previewtunnelapi.RequestContext, string, string) (DNSInstructions, error)
-
-	ListConnectors(context.Context, previewtunnelapi.RequestContext, string, string, int) (ConnectorPage, error)
-	GetConnector(context.Context, previewtunnelapi.RequestContext, string, string) (ConnectorView, error)
-	IssueEnrollment(context.Context, previewtunnelapi.RequestContext, string, EnrollmentRequest) (EnrollmentResult, error)
-	ExchangeEnrollment(context.Context, previewtunnelapi.RequestContext, EnrollmentExchangeRequest) (ConnectorMutationResult, error)
-	DrainConnector(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (ConnectorMutationResult, error)
-	RevokeConnector(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (ConnectorMutationResult, error)
-	RotateCredentials(context.Context, previewtunnelapi.RequestContext, string, ResourceMutationInput) (previewtunnelapi.Operation, error)
 
 	ListTunnelLogs(context.Context, previewtunnelapi.RequestContext, string, string, int) (LogPage, error)
 	ListPreviewLogs(context.Context, previewtunnelapi.RequestContext, string, string, int) (LogPage, error)
@@ -119,29 +108,6 @@ type DomainCreateRequest struct {
 	Provider            string
 	CertificateStrategy string
 	Mutation            ResourceMutationInput
-}
-
-type EnrollmentRequest struct {
-	HostID       string
-	Capabilities []string
-	TTL          time.Duration
-	Mutation     ResourceMutationInput
-}
-
-type EnrollmentExchangeRequest struct {
-	TunnelID                    string
-	Token                       string
-	HostID                      string
-	ProtocolVersion             string
-	SoftwareVersion             *string
-	CredentialReference         string
-	CredentialThumbprint        string
-	CredentialVerifierAlgorithm string
-	CredentialVerifierPublicKey []byte
-	CredentialProof             []byte
-	OperatingSystem             *string
-	Architecture                *string
-	Mutation                    ResourceMutationInput
 }
 
 type RouteHostMatch struct {
@@ -227,72 +193,6 @@ type DomainPage struct {
 	NextCursor string       `json:"next_cursor,omitempty"`
 }
 
-type ConnectorView struct {
-	Schema                      string     `json:"schema"`
-	Kind                        string     `json:"kind"`
-	ID                          string     `json:"id"`
-	TunnelID                    string     `json:"tunnel_id"`
-	HostID                      string     `json:"host_id"`
-	CredentialReference         string     `json:"credential_reference"`
-	RotationGeneration          int64      `json:"rotation_generation"`
-	DesiredState                string     `json:"desired_state"`
-	SoftwareVersion             string     `json:"software_version,omitempty"`
-	ProtocolVersion             string     `json:"protocol_version"`
-	OperatingSystem             string     `json:"operating_system,omitempty"`
-	Architecture                string     `json:"architecture,omitempty"`
-	LastSessionID               string     `json:"last_session_id,omitempty"`
-	LastHeartbeatAt             *time.Time `json:"last_heartbeat_at,omitempty"`
-	ReadyAt                     *time.Time `json:"ready_at,omitempty"`
-	LastAppliedConfigGeneration int64      `json:"last_applied_config_generation,omitempty"`
-	DrainState                  string     `json:"drain_state"`
-	Generation                  int64      `json:"generation"`
-	ETag                        string     `json:"etag"`
-}
-
-type ConnectorPage struct {
-	Items      []ConnectorView `json:"items"`
-	NextCursor string          `json:"next_cursor,omitempty"`
-}
-
-type EnrollmentResult struct {
-	Schema       string                     `json:"schema"`
-	Kind         string                     `json:"kind"`
-	ID           string                     `json:"id"`
-	TunnelID     string                     `json:"tunnel_id"`
-	HostID       string                     `json:"host_id"`
-	Operation    previewtunnelapi.Operation `json:"operation"`
-	Token        string                     `json:"enrollment_token"`
-	ExpiresAt    time.Time                  `json:"expires_at"`
-	Capabilities []string                   `json:"capabilities"`
-	Replayed     bool                       `json:"replayed"`
-}
-
-type ConnectorMutationResult struct {
-	Connector  ConnectorView              `json:"connector"`
-	Operation  previewtunnelapi.Operation `json:"operation"`
-	Activation *ConnectorActivation       `json:"activation,omitempty"`
-	Replayed   bool                       `json:"replayed"`
-	Changed    bool                       `json:"changed"`
-}
-
-// ConnectorActivation is the secret-free, server-authoritative input needed
-// before the first connector-v1 Hello. The stable endpoint identity and
-// credential/process generations are read from or reserved by the same durable
-// enrollment transaction and remain stable on an exact idempotent replay. The
-// host must never guess or derive any of these values.
-type ConnectorActivation struct {
-	Schema               string                     `json:"schema"`
-	Kind                 string                     `json:"kind"`
-	AccountID            string                     `json:"account_id"`
-	TunnelID             string                     `json:"tunnel_id"`
-	ConnectorID          string                     `json:"connector_id"`
-	HostID               string                     `json:"host_id"`
-	StableEndpointID     string                     `json:"stable_endpoint_id"`
-	CredentialGeneration int64                      `json:"credential_generation"`
-	ProcessGeneration    int64                      `json:"process_generation"`
-	Operation            previewtunnelapi.Operation `json:"operation"`
-}
-
 type RouteMutationResult struct {
 	Route     RouteView                  `json:"route"`
 	Operation previewtunnelapi.Operation `json:"operation"`
@@ -355,19 +255,11 @@ type DNSInstructions struct {
 type ResourceMutationRecord struct {
 	Route             dbsqlc.TunnelRoute
 	Domain            dbsqlc.TunnelDomain
-	Connector         dbsqlc.TunnelConnector
 	Operation         dbsqlc.Operation
 	StableEndpointID  string
 	ProcessGeneration int64
 	Replayed          bool
 	Changed           bool
-}
-
-type EnrollmentRecord struct {
-	Enrollment dbsqlc.TunnelConnectorEnrollment
-	Operation  dbsqlc.Operation
-	Token      string
-	Replayed   bool
 }
 
 type ResourceRepository interface {
@@ -383,13 +275,6 @@ type ResourceRepository interface {
 	CreateResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	DeleteResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	BeginResourceDomainVerification(context.Context, DomainRecord) (ResourceMutationRecord, error)
-	ListResourceConnectors(context.Context, string, string, *ListPosition, int) ([]dbsqlc.TunnelConnector, error)
-	GetResourceConnector(context.Context, string, string, string) (dbsqlc.TunnelConnector, error)
-	IssueConnectorEnrollment(context.Context, EnrollmentRecordInput) (EnrollmentRecord, error)
-	ExchangeConnectorEnrollment(context.Context, EnrollmentExchangeRecord) (ResourceMutationRecord, error)
-	DrainResourceConnector(context.Context, ConnectorRecord) (ResourceMutationRecord, error)
-	RevokeResourceConnector(context.Context, ConnectorRecord) (ResourceMutationRecord, error)
-	RotateResourceCredentials(context.Context, RotationRecord) (dbsqlc.Operation, error)
 	ListResourceTunnelLogs(context.Context, string, string, int64, int) ([]dbsqlc.ListTunnelLogsV1Row, error)
 	ListResourcePreviewLogs(context.Context, string, string, int64, int) ([]dbsqlc.TunnelLogEntry, error)
 }
@@ -423,7 +308,6 @@ type RouteRecord struct {
 	CorrelationID        string
 	SourceMachineID      string
 	Now                  time.Time
-	CredentialLifetime   time.Duration
 	PublicTCPListenerID  string
 	PublicTCPPortMin     int32
 	PublicTCPPortMax     int32
@@ -466,102 +350,4 @@ type DomainRecord struct {
 	CorrelationID       string
 	SourceMachineID     string
 	Now                 time.Time
-}
-
-type ConnectorRecord struct {
-	OperationID        string
-	AuditEventID       string
-	ParentAuditEventID string
-	AccountID          string
-	TunnelID           string
-	ConnectorID        string
-	ExpectedGeneration int64
-	IdempotencyKey     string
-	RequestHash        [sha256.Size]byte
-	ActorID            string
-	AuditActorID       string
-	ActorType          string
-	RequestID          string
-	CorrelationID      string
-	SourceMachineID    string
-	Now                time.Time
-}
-
-type EnrollmentRecordInput struct {
-	OperationID        string
-	EnrollmentID       string
-	AuditEventID       string
-	ParentAuditEventID string
-	AccountID          string
-	TunnelID           string
-	HostID             string
-	TokenHash          []byte
-	Token              string
-	Capabilities       []string
-	ExpiresAt          time.Time
-	IdempotencyKey     string
-	RequestHash        [sha256.Size]byte
-	ActorID            string
-	AuditActorID       string
-	ActorType          string
-	RequestID          string
-	CorrelationID      string
-	SourceMachineID    string
-	Now                time.Time
-	CredentialLifetime time.Duration
-}
-
-type EnrollmentExchangeRecord struct {
-	OperationID                 string
-	AuditEventID                string
-	ParentAuditEventID          string
-	AccountID                   string
-	TunnelID                    string
-	HostID                      string
-	TokenHash                   []byte
-	ProtocolVersion             string
-	SoftwareVersion             sql.NullString
-	OperatingSystem             sql.NullString
-	Architecture                sql.NullString
-	ConnectorID                 string
-	CredentialReference         string
-	CredentialThumbprint        string
-	CredentialVerifierAlgorithm string
-	CredentialVerifierPublicKey []byte
-	CredentialProof             []byte
-	IdempotencyKey              string
-	RequestHash                 [sha256.Size]byte
-	ActorID                     string
-	AuditActorID                string
-	ActorType                   string
-	RequestID                   string
-	CorrelationID               string
-	SourceMachineID             string
-	Now                         time.Time
-	CredentialLifetime          time.Duration
-	CredentialOverlap           time.Duration
-}
-
-type RotationRecord struct {
-	OperationID        string
-	AuditEventID       string
-	ParentAuditEventID string
-	AccountID          string
-	TunnelID           string
-	ExpectedGeneration int64
-	IdempotencyKey     string
-	RequestHash        [sha256.Size]byte
-	ActorID            string
-	AuditActorID       string
-	ActorType          string
-	RequestID          string
-	CorrelationID      string
-	SourceMachineID    string
-	Now                time.Time
-	OverlapUntil       time.Time
-	// CredentialLifetime is supplied by the configured resource policy. The
-	// repository persists the resulting absolute deadline in the immutable
-	// rotation target rows so a retry or restart never has to reconstruct policy.
-	CredentialLifetime time.Duration
-	NewID              func(prefix string) (string, error)
 }

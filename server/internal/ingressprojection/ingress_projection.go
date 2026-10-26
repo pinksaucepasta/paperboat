@@ -1,4 +1,4 @@
-package connectorprotocol
+package ingressprojection
 
 import (
 	"context"
@@ -50,19 +50,12 @@ func (s SQLIngressSource) rowFailed(ctx context.Context, stage, routeID string, 
 	return nil
 }
 
-func (s SQLIngressSource) Daemon(ctx context.Context, active ActiveControlSession) ([]wire.IngressDecision, error) {
-	if active.validate() != nil {
-		return nil, wire.ErrInvalidInput
-	}
-	return s.project(ctx, active, "", "", "public", "", "")
-}
-
 func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wire.IngressDecision, error) {
 	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil {
 		return nil, wire.ErrInvalidInput
 	}
 	s.edge = true
-	durable, err := s.project(ctx, ActiveControlSession{}, nodeID, epoch, "public", "", "")
+	durable, err := s.project(ctx, nodeID, epoch, "public", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -75,77 +68,6 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 	}
 	return append(durable, previews...), nil
 }
-
-// Both selectors are scoped: a complete authenticated daemon session or an
-// exact edge process. No caller may request an account-wide/global projection.
-const ingressProjectionSQL = `
-SELECT t.account_id,environment.id,t.id,t.generation,r.id,r.generation,c.host_id,m.installation_generation,
- publication.hostname,CASE WHEN r.protocol IN ('tcp','tls') THEN '' ELSE COALESCE(r.path_prefix,'/') END,r.origin_scheme,r.origin_address,
- r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),
- COALESCE(r.public_tcp_listener_id,''),COALESCE(r.public_tcp_port,0),r.protocol,
- publication.publication_id,publication.publication_generation,
- a.edge_node_id,a.edge_process_epoch,c.id,session.id,session.process_generation,
- config.generation,a.assignment_generation,a.viewer_policy_generation,
- LEAST($1::timestamptz + interval '10 seconds',session.lease_deadline,t.expires_at,identity.expires_at,credential.valid_until,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds',session.last_heartbeat_at+interval '15 seconds')
-FROM tunnel_edge_route_assignments a
-JOIN tunnels t ON t.id=a.tunnel_id AND t.account_id=a.account_id
-JOIN tunnel_routes r ON r.id=a.route_id AND r.tunnel_id=t.id
-JOIN paperboat.current_tunnel_route_viewer_policy viewer_policy ON viewer_policy.route_id=r.id
-LEFT JOIN LATERAL (
- SELECT COALESCE(r.match_hostname,substring(t.stable_endpoint from 9)) AS hostname,r.id AS publication_id,r.generation AS publication_generation
- WHERE paperboat.workspace_edge_mode(t.account_id,t.owner_team_id)='managed-only' OR r.protocol='tcp'
- OR (r.match_type='exact' AND EXISTS(SELECT 1 FROM tunnel_domains exact_domain WHERE exact_domain.account_id=t.account_id AND exact_domain.tunnel_id=t.id AND exact_domain.route_id=r.id AND exact_domain.hostname=r.match_hostname AND exact_domain.deleted_at IS NULL AND exact_domain.ownership_state='verified' AND exact_domain.conflict_state='clear' AND exact_domain.match_type='exact' AND (r.protocol='http' OR(exact_domain.certificate_strategy='none' AND exact_domain.certificate_state='not_applicable'))))
- UNION ALL
- SELECT d.hostname,d.id,d.generation FROM tunnel_domains d
- WHERE r.protocol IN ('http','tls') AND d.account_id=t.account_id
-   AND d.route_id=r.id AND d.tunnel_id=r.tunnel_id AND d.deleted_at IS NULL
-   AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
-   AND d.hostname<>COALESCE(r.match_hostname,substring(t.stable_endpoint from 9))
-   AND (r.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
-) publication ON true
-JOIN tunnel_connectors c ON c.id=a.connector_id AND c.tunnel_id=t.id AND c.host_id=a.host_id
-JOIN user_machines m ON m.id=c.host_id AND m.user_id=t.account_id
-JOIN control_environments environment ON environment.id=m.environment_id AND environment.owner_user_id=t.account_id AND environment.workspace_id=m.id
-JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
-JOIN tunnel_connector_sessions session ON session.id=a.connector_session_id AND session.connector_id=c.id
-JOIN tunnel_connector_credential_generations credential ON credential.connector_id=c.id AND credential.tunnel_id=t.id AND credential.generation=session.credential_generation
-JOIN tunnel_config_generations config ON config.tunnel_id=t.id AND config.generation=a.config_generation
-JOIN control_tunnel_nodes node ON node.id=a.edge_node_id AND node.process_epoch=a.edge_process_epoch
-WHERE ((a.state='active' AND a.observed_state='ready') OR (a.state='staged' AND a.observed_state='prepared'))
- AND (t.owner_team_id IS NULL OR paperboat.workspace_tunnel_management_allowed(t.account_id,t.owner_team_id,t.id))
- AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$1)
- AND environment.desired_state='active' AND environment.revoked_at IS NULL
- AND viewer_policy.effective_access_mode=$13
- AND a.access_mode=viewer_policy.effective_access_mode
- AND a.viewer_policy_generation=viewer_policy.viewer_policy_generation
- AND ($14::text='' OR r.id=$14)
- AND ($15::text='' OR publication.hostname=$15)
- AND r.desired_state='active' AND r.deleted_at IS NULL AND r.protocol IN ('http','tcp','tls')
- AND (r.protocol<>'tls' OR r.match_hostname=substring(t.stable_endpoint from 9))
- AND r.generation=a.route_generation AND (r.match_type IN ('managed','exact') OR ($13<>'public' AND r.match_type='catch_all'))
- AND ((r.protocol='http' AND r.origin_scheme IN ('http','https','h2c')) OR (r.protocol IN ('tcp','tls') AND r.origin_scheme='tcp'))
- AND r.tls_verification IN ('not_applicable','system','custom_ca')
- AND c.desired_state='active' AND c.revoked_at IS NULL AND c.drain_state='accepting'
- AND c.generation=a.connector_generation AND c.last_session_id=session.id
- AND (c.last_applied_config_generation=a.config_generation OR (a.state='active' AND c.last_applied_config_generation>=a.config_generation))
- AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN ('pending','revoked','deleted')
- AND m.seat_state='occupied' AND m.public_identity_key=a.machine_identity_public_key
- AND identity.issued_at<=$1 AND identity.expires_at>$1
- AND credential.state IN ('active','overlap') AND credential.revoked_at IS NULL AND credential.valid_until>$1
- AND session.state='ready' AND session.process_generation=a.connector_process_generation
- AND session.last_heartbeat_at>$1::timestamptz-interval '15 seconds' AND session.lease_deadline>$1
- AND (session.applied_config_generation=a.config_generation OR (a.state='active' AND session.applied_config_generation>=a.config_generation))
- AND config.activation_state='active' AND config.content_hash=a.config_content_hash
- AND node.registry_expires_at>$1 AND node.roles @> ARRAY['edge']::text[]
- AND node.drain_deadline IS NULL
- AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
- AND node.state='ready' AND node.ready=true AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
- AND (($2::text<>'' AND t.account_id=$2 AND t.id=$3 AND c.id=$4 AND c.host_id=$5
-       AND session.id=$6 AND session.process_generation=$7 AND config.generation=$8
-       AND 'sha256:'||encode(config.content_hash,'hex')=$9 AND session.credential_generation=$10)
-      OR ($2::text='' AND $11::text<>'' AND node.id=$11 AND node.process_epoch=$12))
-ORDER BY a.route_id,a.assignment_generation,a.assignment_id,publication.hostname,publication.publication_id
-LIMIT 4097`
 
 // engineTunnelIngressSQL projects the public (or, for a browser grant, the restricted) authority of
 // tunnel routes served on the endpoint engine (PLAN 3a step 4) for one edge process: the route
@@ -237,7 +159,7 @@ func queryInWrittenJoinOrder(ctx context.Context, database *sql.DB, query string
 	}, nil
 }
 
-func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSession, nodeID, epoch, audience, routeID, hostname string) (decisions []wire.IngressDecision, resultErr error) {
+func (s SQLIngressSource) project(ctx context.Context, nodeID, epoch, audience, routeID, hostname string) (decisions []wire.IngressDecision, resultErr error) {
 	if ctx == nil || s.DB == nil || s.DB.SQL() == nil {
 		return nil, wire.ErrInvalidInput
 	}
@@ -245,20 +167,9 @@ func (s SQLIngressSource) project(ctx context.Context, active ActiveControlSessi
 	if s.Clock != nil {
 		now = s.Clock.Now().UTC()
 	}
-	out, err := s.scanIngressRows(ctx, now, ingressProjectionSQL, now, active.AccountID, active.TunnelID, active.ConnectorID, active.HostID, active.SessionID, active.ProcessGeneration, active.ConfigGeneration, active.ConfigContentHash, active.CredentialGeneration, nodeID, epoch, audience, routeID, hostname)
+	out, err := s.scanIngressRows(ctx, now, engineTunnelIngressSQL, now, nodeID, epoch, audience, routeID, hostname)
 	if err != nil {
 		return nil, err
-	}
-	if nodeID != "" {
-		// Tunnels on the endpoint engine are served by edges only, never through a connector session.
-		engine, err := s.scanIngressRows(ctx, now, engineTunnelIngressSQL, now, nodeID, epoch, audience, routeID, hostname)
-		if err != nil {
-			return nil, err
-		}
-		if len(out)+len(engine) > maximumIngressDecisions {
-			return nil, wire.ErrIngressDenied
-		}
-		out = append(out, engine...)
 	}
 	if audience == "public" {
 		admitted := out[:0]
@@ -390,7 +301,7 @@ func (s SQLIngressSource) RestrictedRoute(ctx context.Context, nodeID, epoch, au
 	if wire.ValidateIdentifier(nodeID) != nil || wire.ValidateOpaqueEpoch(epoch) != nil || wire.ValidateIdentifier(routeID) != nil || (hostname == "" || len(hostname) > 253) || (audience != "private" && audience != "team") {
 		return wire.IngressDecision{}, wire.ErrIngressDenied
 	}
-	rows, err := s.project(ctx, ActiveControlSession{}, nodeID, epoch, audience, routeID, hostname)
+	rows, err := s.project(ctx, nodeID, epoch, audience, routeID, hostname)
 	if err != nil {
 		return wire.IngressDecision{}, err
 	}

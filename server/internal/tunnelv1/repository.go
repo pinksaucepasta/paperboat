@@ -43,13 +43,8 @@ var (
 	// ErrDomainQuarantined (always with ErrDomainConflict): the domain was removed recently and is held
 	// before it can be bound again.
 	ErrDomainQuarantined          = errors.New("domain was removed recently and is held before it can be added again")
-	ErrConnectorConflict          = errors.New("connector conflicts with an existing connector")
-	ErrConnectorNotFound          = errors.New("connector not found")
 	ErrRouteNotFound              = errors.New("route not found")
 	ErrDomainNotFound             = errors.New("domain binding not found")
-	ErrEnrollmentExpired          = errors.New("connector enrollment expired")
-	ErrEnrollmentReplay           = errors.New("connector enrollment was already consumed")
-	ErrEnrollmentAlreadyIssued    = errors.New("connector enrollment was already issued")
 	ErrDNSInstructionsUnavailable = errors.New("dns instructions are unavailable for this domain")
 	ErrPublicListenerCapacity     = errors.New("public listener port range is exhausted")
 	ErrConfigGenerationChain      = errors.New("tunnel configuration generation chain is incomplete")

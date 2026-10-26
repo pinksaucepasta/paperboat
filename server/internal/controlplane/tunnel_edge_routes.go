@@ -7,69 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
-
-// TunnelEdgeRouteAssignmentRequest is the immutable binding used when a
-// connector-ready route is published to an edge process. The origin address
-// is intentionally absent: it belongs to the connector's authenticated
-// configuration snapshot and is never an edge dialing target.
-type TunnelEdgeRouteAssignmentRequest struct {
-	AssignmentID               string
-	AssignmentGeneration       int64
-	AccountID                  string
-	TunnelID                   string
-	ConnectorID                string
-	ConnectorGeneration        int64
-	ConnectorSessionID         string
-	ConnectorProcessGeneration int64
-	ConfigGeneration           int64
-	ConfigContentHash          []byte
-	AccessMode                 string
-	ViewerPolicyGeneration     int64
-	EdgeNodeID                 string
-	EdgeProcessEpoch           string
-	RouteID                    string
-}
-
-func (s *EdgeService) StageTunnelEdgeRouteAssignmentV1(ctx context.Context, request TunnelEdgeRouteAssignmentRequest) (dbsqlc.TunnelEdgeRouteAssignment, error) {
-	if err := validateTunnelEdgeRouteAssignmentRequest(request); err != nil {
-		return dbsqlc.TunnelEdgeRouteAssignment{}, err
-	}
-	if s == nil || s.store == nil {
-		return dbsqlc.TunnelEdgeRouteAssignment{}, ErrAssignmentForbidden
-	}
-	row, err := s.store.Queries().StageTunnelEdgeRouteAssignmentV1(ctx, dbsqlc.StageTunnelEdgeRouteAssignmentV1Params{
-		AssignmentID: request.AssignmentID, AssignmentGeneration: request.AssignmentGeneration, Now: s.clock().UTC(),
-		AccountID: request.AccountID, ConnectorID: request.ConnectorID, ConnectorSessionID: request.ConnectorSessionID,
-		ConfigGeneration: request.ConfigGeneration, EdgeNodeID: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch,
-		RouteID: request.RouteID, TunnelID: request.TunnelID, ConnectorGeneration: request.ConnectorGeneration,
-		ConnectorProcessGeneration: request.ConnectorProcessGeneration, ConfigContentHash: append([]byte(nil), request.ConfigContentHash...),
-		AccessMode: request.AccessMode, ViewerPolicyGeneration: request.ViewerPolicyGeneration,
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return dbsqlc.TunnelEdgeRouteAssignment{}, ErrAssignmentConflict
-	}
-	return row, err
-}
-
-func (s *EdgeService) ActivateTunnelEdgeRouteAssignmentV1(ctx context.Context, assignmentID, routeID string) (dbsqlc.ActivateTunnelEdgeRouteAssignmentV1Row, error) {
-	if !validTunnelEdgeIdentifier(assignmentID) || !validTunnelEdgeIdentifier(routeID) || s == nil || s.store == nil {
-		return dbsqlc.ActivateTunnelEdgeRouteAssignmentV1Row{}, ErrAssignmentInvalid
-	}
-	row, err := s.store.Queries().ActivateTunnelEdgeRouteAssignmentV1(ctx, dbsqlc.ActivateTunnelEdgeRouteAssignmentV1Params{
-		AssignmentID: assignmentID, RouteID: routeID, Now: s.clock().UTC(),
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return dbsqlc.ActivateTunnelEdgeRouteAssignmentV1Row{}, ErrAssignmentConflict
-	}
-	return row, err
-}
 
 func (s *EdgeService) ListTunnelEdgeRouteAssignmentsForNodeV1(ctx context.Context, nodeID, processEpoch string) ([]dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row, error) {
 	if !validTunnelEdgeIdentifier(nodeID) || !validTunnelEdgeProcessEpoch(processEpoch) || s == nil || s.store == nil {
@@ -79,20 +22,6 @@ func (s *EdgeService) ListTunnelEdgeRouteAssignmentsForNodeV1(ctx context.Contex
 		EdgeNodeID: nodeID, EdgeProcessEpoch: processEpoch, Now: sql.NullTime{Time: s.clock().UTC(), Valid: true},
 	})
 	return rows, err
-}
-
-func validateTunnelEdgeRouteAssignmentRequest(request TunnelEdgeRouteAssignmentRequest) error {
-	for _, value := range []string{request.AccountID, request.TunnelID, request.ConnectorID, request.ConnectorSessionID, request.EdgeNodeID, request.RouteID} {
-		if !validTunnelEdgeIdentifier(value) {
-			return ErrAssignmentInvalid
-		}
-	}
-	if !validTunnelEdgeIdentifier(request.AssignmentID) || !validTunnelEdgeProcessEpoch(request.EdgeProcessEpoch) ||
-		request.AssignmentGeneration < 1 || request.ConnectorGeneration < 1 || request.ConnectorProcessGeneration < 1 ||
-		request.ConfigGeneration < 1 || len(request.ConfigContentHash) != 32 || !validEdgeAccessMode(request.AccessMode) || request.ViewerPolicyGeneration < 1 {
-		return ErrAssignmentInvalid
-	}
-	return nil
 }
 
 func validTunnelEdgeIdentifier(value string) bool {
@@ -215,18 +144,6 @@ func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) 
 		}
 	}
 	return value
-}
-
-func canonicalMachineIdentityThumbprint(encoded string) (string, error) {
-	publicKey, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return "", ErrAssignmentInvalid
-	}
-	thumbprint, err := connectorprotocol.IdentityThumbprint(ed25519.PublicKey(publicKey))
-	if err != nil {
-		return "", ErrAssignmentInvalid
-	}
-	return thumbprint, nil
 }
 
 func nullableTunnelEdgeText(value sql.NullString) any {

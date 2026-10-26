@@ -1,4 +1,4 @@
-package connectorprotocol
+package ingressprojection
 
 import (
 	"context"
@@ -75,9 +75,6 @@ func TestIngressProjectionRejectsInvalidTargetAndExpiry(t *testing.T) {
 
 func TestIngressProjectionRejectsUnscopedSelectors(t *testing.T) {
 	source := SQLIngressSource{}
-	if _, err := source.Daemon(context.Background(), ActiveControlSession{}); err == nil {
-		t.Fatal("empty session accepted")
-	}
 	if _, err := source.Edge(context.Background(), "", ""); err == nil {
 		t.Fatal("empty edge accepted")
 	}

@@ -33,40 +33,8 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  ELSE 'pending' END AS code
  FROM tunnels t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
  LEFT JOIN LATERAL (SELECT bool_and(ok) AS ready, bool_or(bad) AS failed FROM (
- SELECT a.observed_state='ready' AND a.observed_at>$3::timestamptz-interval '15 seconds' AS ok,
- a.observed_state IN ('failed','degraded') AND a.observed_at>$3::timestamptz-interval '15 seconds' AS bad
- FROM tunnel_edge_route_assignments a
- JOIN tunnel_connectors c ON c.id=a.connector_id AND c.tunnel_id=t.id AND c.host_id=a.host_id
- JOIN tunnel_connector_sessions s ON s.id=a.connector_session_id AND s.connector_id=c.id
- JOIN tunnel_config_generations g ON g.tunnel_id=t.id AND g.generation=a.config_generation
- JOIN control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
- JOIN user_machines m ON m.id=c.host_id AND m.user_id=t.account_id
- JOIN control_environments environment ON environment.id=m.environment_id AND environment.owner_user_id=t.account_id AND environment.workspace_id=m.id
- JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
- JOIN tunnel_connector_credential_generations credential ON credential.connector_id=c.id AND credential.tunnel_id=t.id AND credential.generation=s.credential_generation
- JOIN current_tunnel_route_viewer_policy v ON v.route_id=r.id
- WHERE a.route_id=r.id AND a.account_id=t.account_id AND a.state='active'
- AND a.route_generation=r.generation AND a.route_revision=r.generation
- AND a.access_mode=v.effective_access_mode AND a.viewer_policy_generation=v.viewer_policy_generation
- AND c.desired_state='active' AND c.revoked_at IS NULL AND c.drain_state='accepting'
- AND c.generation=a.connector_generation AND c.last_session_id=s.id
- AND c.last_applied_config_generation=a.config_generation
- AND s.process_generation=a.connector_process_generation AND s.state='ready'
- AND s.applied_config_generation=a.config_generation AND s.lease_deadline>$3
- AND s.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
- AND g.activation_state='active' AND g.content_hash=a.config_content_hash
- AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.public_identity_key=a.machine_identity_public_key
- AND m.state NOT IN ('pending','revoked','deleted') AND m.seat_state='occupied'
- AND environment.desired_state='active' AND environment.revoked_at IS NULL
- AND identity.issued_at<=$3 AND identity.expires_at>$3
- AND credential.state IN ('active','overlap') AND credential.revoked_at IS NULL AND credential.valid_until>$3
- AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
- AND n.registry_expires_at>$3 AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
- AND n.drain_deadline IS NULL AND paperboat.node_route_eligible(n.id,t.account_id,r.id)
- UNION ALL
- -- A tunnel on the endpoint engine (PLAN 3a step 4): its route on each edge where the agent's
- -- runtime carrier holds it, observed ready by that edge.
- SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '2 minutes', false
+ -- A tunnel's route on each edge where the agent's runtime carrier holds it, observed ready by that edge.
+ SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '2 minutes' AS ok, false AS bad
  FROM endpoint_edge_assignments x
  JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
  JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id
@@ -94,7 +62,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND o.state IN ('pending','running') AND (
  (t.summary_code IN ('ready','expired','origin_unreachable') AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END
- AND NOT EXISTS (SELECT 1 FROM tunnel_edge_route_assignments a WHERE a.tunnel_id=t.id AND a.state<>'detached'))
+ AND NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id WHERE e.tunnel_id=t.id AND x.desired='active'))
  )`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
 	return err
 }
