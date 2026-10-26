@@ -732,6 +732,7 @@ func NewRouter(opts Options) http.Handler {
 	handler = apiTokenAuth(opts.APITokens, tokenFailures, handler)
 	handler = workspaceQueryContext(handler)
 	handler = secureHeaders(handler)
+	handler = compressResponses(handler)
 	handler = cors(opts.Config.HTTP.AllowedOrigins, handler)
 	handler = bodyLimit(opts.Config.HTTP.MaxBodyBytes, handler)
 	handler = signInLimit(ratelimit.New(opts.Config.RateLimits.SignInPerMinute, opts.Config.RateLimits.SignInBurst, opts.Config.RateLimits.MaxClients), handler)
