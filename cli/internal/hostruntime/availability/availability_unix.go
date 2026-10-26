@@ -190,6 +190,26 @@ type Service struct {
 	}
 	lastRollbacks uint64
 	lastFailure   *failureClass
+	// events wakes a refresh when the server publishes a policy change; while it is healthy the server
+	// is asked only then and every policyFallback, otherwise every interval (PR-03).
+	events interface {
+		Changed() <-chan struct{}
+		Healthy() bool
+	}
+	resolved   *Resolution
+	resolvedAt time.Time
+}
+
+// policyFallback is how often a host still asks for its policy while policy changes are delivered.
+const policyFallback = 30 * time.Minute
+
+// WatchPolicy makes the service ask the server for its policy only when events reports a change.
+// Call it before Start.
+func (s *Service) WatchPolicy(events interface {
+	Changed() <-chan struct{}
+	Healthy() bool
+}) {
+	s.events = events
 }
 
 func NewService(resolver interface {
@@ -239,42 +259,64 @@ func (s *Service) Start(ctx context.Context) error {
 	// first heartbeat from reporting a durable "pending" state merely because
 	// the reconciliation goroutine has not received its first scheduler tick.
 	// Failures remain retryable in the background and do not prevent startup.
-	_ = s.applyOnce(runCtx)
-	go s.run(runCtx, done)
+	startErr := s.apply(runCtx, true)
+	go s.run(runCtx, done, startErr != nil)
 	return nil
 }
 
-func (s *Service) run(ctx context.Context, done chan struct{}) {
+// run applies the policy locally every interval, which also reads the host service's state for the
+// heartbeat, and asks the server for the policy only when it is due (refreshDue).
+func (s *Service) run(ctx context.Context, done chan struct{}, startFailed bool) {
 	defer close(done)
 	backoff := time.Second
+	wait, refresh := s.interval, false
+	if startFailed {
+		wait, refresh = 0, true
+	}
+	var changed <-chan struct{}
+	if s.events != nil {
+		changed = s.events.Changed()
+	}
 	for {
-		err := s.applyOnce(ctx)
-		wait := backoff
-		if err == nil {
-			wait, backoff = s.interval, time.Second
-		} else if backoff < 30*time.Second {
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
-		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
+		case <-changed:
+			timer.Stop()
+			refresh = true
 		case <-timer.C:
 		}
+		err := s.apply(ctx, refresh || s.refreshDue(time.Now()))
+		refresh = false
+		wait = s.interval
+		if err == nil {
+			backoff = time.Second
+			continue
+		}
+		wait, refresh = backoff, true
+		backoff = min(backoff*2, 30*time.Second)
 	}
 }
 
-func (s *Service) applyOnce(ctx context.Context) error {
-	resolution, err := s.resolver.Resolve(ctx)
-	if err != nil {
-		failure := controlFailure(err)
-		s.observeFailure(ctx, controlRequestStage, controlRequestCode, failure)
-		return failure
+// refreshDue reports whether the server must be asked: no policy yet, change delivery is down, or the
+// fallback passed.
+func (s *Service) refreshDue(now time.Time) bool {
+	return s.resolved == nil || s.events == nil || !s.events.Healthy() || now.Sub(s.resolvedAt) >= policyFallback
+}
+
+func (s *Service) apply(ctx context.Context, refresh bool) error {
+	if refresh || s.resolved == nil {
+		resolution, err := s.resolver.Resolve(ctx)
+		if err != nil {
+			failure := controlFailure(err)
+			s.observeFailure(ctx, controlRequestStage, controlRequestCode, failure)
+			return failure
+		}
+		s.resolved, s.resolvedAt = &resolution, time.Now()
 	}
+	resolution := *s.resolved
 	observation, err := s.host.Apply(ctx, resolution)
 	if err != nil {
 		failure := localFailure(err)

@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,7 +52,7 @@ func windowsWorkspace(environ func(string) string) (string, error) {
 	return workspace, nil
 }
 
-func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation, workerEpoch uint64) (Service, error) {
+func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation, workerEpoch uint64, keyEvents *machineevents.Subscription) (Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil {
 		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows managed SSH registration is incomplete"))
 	}
@@ -149,7 +150,7 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 		publicKeys[i] = inventory.Keys[i].PublicKey
 	}
 	client := api.New(controlURL, config.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second}, nil
+	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents}, nil
 }
 
 func validatedMachineShell(path string) (string, error) {

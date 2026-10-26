@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net/http"
 	"sync"
 	"time"
@@ -32,7 +33,7 @@ type managedSSHService struct {
 	shutdownErr       error
 }
 
-func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate) (*managedssh.Host, Service, error) {
+func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription) (*managedssh.Host, Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil || generation == 0 || gate == nil {
 		return nil, nil, ErrProductionInvalid
 	}
@@ -47,7 +48,7 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 		return nil, nil, err
 	}
 	service := &managedSSHService{gate: gate, interval: 2 * time.Second, timeout: 45 * time.Second, cleanup: func(ctx context.Context) error { return cleanupProductionManagedSSH(ctx, registration) }, initialize: func(ctx context.Context) (Service, error) {
-		return initializeProductionManagedSSH(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch)
+		return initializeProductionManagedSSH(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch, keyEvents)
 	}}
 	return host, service, nil
 }

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -623,5 +624,66 @@ func TestServiceDoesNotDuplicateOwnedControlAttempt(t *testing.T) {
 	}
 	if strings.Contains(faults[0].fault.Cause, "private-response-value") {
 		t.Fatalf("response body escaped in fault: %+v", fault)
+	}
+}
+
+type countingResolver struct{ calls atomic.Int64 }
+
+func (r *countingResolver) Resolve(context.Context) (Resolution, error) {
+	r.calls.Add(1)
+	return Resolution{Schema: PolicySchemaV1, UserMachineID: "um_1", Mode: "keep_awake", Version: 3}, nil
+}
+
+type policyEvents struct {
+	changed chan struct{}
+	healthy atomic.Bool
+}
+
+func (e *policyEvents) Changed() <-chan struct{} { return e.changed }
+func (e *policyEvents) Healthy() bool            { return e.healthy.Load() }
+
+// PR-03: while policy changes are delivered, the host applies locally every interval but asks the
+// server only at start and on a change; when delivery is down it asks every interval again.
+func TestServiceAsksForPolicyOnlyOnChangeWhileEventsAreHealthy(t *testing.T) {
+	resolver := &countingResolver{}
+	host := hostStub{applied: make(chan Resolution, 64)}
+	events := &policyEvents{changed: make(chan struct{}, 1)}
+	events.healthy.Store(true)
+	service, err := NewService(resolver, host, 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.WatchPolicy(events)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		<-host.applied
+	}
+	if calls := resolver.calls.Load(); calls != 1 {
+		t.Fatalf("idle host asked for its policy %d times, want once at start", calls)
+	}
+	events.changed <- struct{}{}
+	deadline := time.Now().Add(5 * time.Second)
+	for resolver.calls.Load() < 2 && time.Now().Before(deadline) {
+		<-host.applied
+	}
+	if calls := resolver.calls.Load(); calls != 2 {
+		t.Fatalf("policy change: %d requests, want 2", calls)
+	}
+	events.healthy.Store(false)
+	for resolver.calls.Load() < 5 && time.Now().Before(deadline) {
+		<-host.applied
+	}
+	if calls := resolver.calls.Load(); calls < 5 {
+		t.Fatalf("with event delivery down the host stopped polling: %d requests", calls)
+	}
+	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
 	}
 }

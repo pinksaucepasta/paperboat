@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"log/slog"
 	"net"
 	"net/http"
@@ -33,6 +34,7 @@ type managedSSHKeyReconciler struct {
 	ownerUID       uint32
 	interval       time.Duration
 	timeout        time.Duration
+	events         *machineevents.Subscription
 	sequence       atomic.Uint64
 	ready          atomic.Bool
 	hostKeyInUse   atomic.Bool
@@ -77,29 +79,33 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	return nil
 }
 
+// run asks the server again when a key change is published (machine_access), after a failure, every
+// interval while change delivery is down, and otherwise every managedSSHKeyFallback (PR-03).
 func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
-	timer := time.NewTimer(s.nextReconcile())
-	defer timer.Stop()
+	failed := false
 	for {
+		timer := time.NewTimer(s.nextReconcile(failed))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
+		case <-s.events.Changed():
+			timer.Stop()
 		case <-timer.C:
-			if !s.hostKeysChangedOrRetryDue(time.Now()) {
-				timer.Reset(s.nextReconcile())
-				continue
-			}
-			reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
-			if err := s.reconcile(reconcileCtx); err != nil {
-				// A managed key is only authoritative while the host can obtain a
-				// current authority response. Retaining it after a failed refresh
-				// would turn a temporary control-plane failure into unbounded
-				// revocation latency.
-				slog.Warn("managed SSH authority refresh failed", "error", err)
-			}
-			cancel()
-			timer.Reset(s.nextReconcile())
+		}
+		if !s.hostKeysChangedOrRetryDue(time.Now()) {
+			continue
+		}
+		reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
+		err := s.reconcile(reconcileCtx)
+		cancel()
+		// A managed key is only authoritative while the host can obtain a
+		// current authority response. Retaining it after a failed refresh
+		// would turn a temporary control-plane failure into unbounded
+		// revocation latency.
+		if failed = err != nil; failed {
+			slog.Warn("managed SSH authority refresh failed", "error", err)
 		}
 	}
 }
@@ -202,8 +208,16 @@ func hostKeysInUseElsewhere(err error) bool {
 	return errors.As(err, &response) && response.Status == http.StatusConflict && response.Code == managedSSHHostKeyInUseCode
 }
 
-func (s *managedSSHKeyReconciler) nextReconcile() time.Duration {
-	return s.interval
+// managedSSHKeyFallback is how often a host still asks for its keys while key changes are delivered. A
+// key also leaves the set without a write when its CLI session goes unused past the active window
+// (days), so this bounds how late such a key is removed.
+const managedSSHKeyFallback = 10 * time.Minute
+
+func (s *managedSSHKeyReconciler) nextReconcile(failed bool) time.Duration {
+	if failed || !s.events.Healthy() {
+		return s.interval
+	}
+	return managedSSHKeyFallback
 }
 
 // hostKeysChangedOrRetryDue reports whether a tick should reconcile. Refused host keys do not change

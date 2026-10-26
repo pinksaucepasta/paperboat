@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -311,4 +312,31 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	expect("tunnel deleted", moved(TopicTunnels, all, func() {
 		exec(`UPDATE paperboat.tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
 	}), map[string]bool{server: true, laptop: true, outsider: false})
+
+	// config: the availability policy an idle host asks for only on this topic (PR-03).
+	expect("availability", moved(TopicConfig, all, func() {
+		exec(`UPDATE paperboat.user_machines SET availability_desired_version=availability_desired_version+1 WHERE id=$1`, server)
+	}), map[string]bool{server: true, laptop: false, outsider: false})
+	expect("unchanged availability", moved(TopicConfig, all, func() {
+		exec(`UPDATE paperboat.user_machines SET availability_mode=availability_mode WHERE id=$1`, server)
+	}), map[string]bool{server: false})
+
+	// machine_access: a managed SSH client key wakes every machine of its account (PR-03).
+	session := "topics_cli_" + stamp
+	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES($1,$2,'paperboat','topics','desktop','linux',ARRAY['machines:connect'],'active',now()-interval '3 days',now(),now()-interval '3 days')`, session, account)
+	fingerprint := make([]byte, 32)
+	fingerprint[0] = 1
+	publicKey := "ssh-ed25519 " + strings.Repeat("A", 68) + " topics"
+	expect("ssh key added", moved(TopicMachineAccess, all, func() {
+		exec(`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key) VALUES($1,$2,$3,'ssh-ed25519',$4)`, fingerprint, account, session, publicKey)
+	}), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("idle session used again", moved(TopicMachineAccess, all, func() {
+		exec(`UPDATE paperboat.cli_client_sessions SET last_used_at=now() WHERE id=$1`, session)
+	}), map[string]bool{laptop: true, server: true, outsider: false})
+	expect("session in daily use", moved(TopicMachineAccess, all, func() {
+		exec(`UPDATE paperboat.cli_client_sessions SET last_used_at=now() WHERE id=$1`, session)
+	}), map[string]bool{laptop: false, server: false})
+	expect("ssh key revoked", moved(TopicMachineAccess, all, func() {
+		exec(`UPDATE paperboat.managed_ssh_client_keys SET state='revoked',revoked_at=now(),revocation_reason='client_revoked' WHERE cli_client_session_id=$1`, session)
+	}), map[string]bool{laptop: true, server: true, outsider: false})
 }

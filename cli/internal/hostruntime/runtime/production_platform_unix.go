@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net/http"
 	"os/user"
 	"strconv"
@@ -14,8 +15,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
-func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64) (Service, error) {
-	return initializeProductionManagedSSHUnix(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch)
+func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, keyEvents *machineevents.Subscription) (Service, error) {
+	return initializeProductionManagedSSHUnix(ctx, host, controlURL, transport, registration, identity, generation, workerEpoch, keyEvents)
 }
 
 func validatedMachineShell(path string) (string, error) { return validatedMachineShellUnix(path) }

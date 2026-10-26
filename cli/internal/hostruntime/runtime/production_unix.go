@@ -283,6 +283,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
+	availabilityService.WatchPolicy(machineEvents.Subscribe(machineevents.TopicConfig))
 	var machineServiceObserver *runtimeObservationSender
 	{
 		runtimeEndpoint := controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String()
@@ -356,7 +357,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController)
+	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController, machineEvents.Subscribe(machineevents.TopicMachineAccess))
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +500,7 @@ type managedSSHControlClient interface {
 	ManagedSSHAuthorizedKeys(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHAuthorizedKeys, error)
 }
 
-func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identitySource managedSSHIdentitySource, observationGeneration uint64, workerEpoch uint64) (Service, error) {
+func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identitySource managedSSHIdentitySource, observationGeneration uint64, workerEpoch uint64, keyEvents *machineevents.Subscription) (Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || registration.SSHPort == 0 || registration.SSHUser == "" || identitySource == nil {
 		return nil, nil
 	}
@@ -533,7 +534,7 @@ func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Ho
 	reconciler := &managedSSHKeyReconciler{
 		client: client, identity: identitySource, registration: registration,
 		workerGeneration: observationGeneration, publicKeys: publicKeys, readPublicKeys: readSSHHostPublicKeysUnix,
-		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second,
+		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents,
 	}
 	return reconciler, nil
 }
