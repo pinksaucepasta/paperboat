@@ -15337,6 +15337,17 @@
                 }
               }
             }
+          },
+          "update": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UpdateObservation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The machine's latest update observation (as in GET /v1/machines/update-summary), null before its first report."
           }
         }
       },

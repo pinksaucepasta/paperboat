@@ -405,7 +405,9 @@ type UserMachine struct {
 	OwnerTeamID  string   `json:"owner_team_id,omitempty"`
 	Permissions  []string `json:"permissions"`
 	// Tags are the machine's tags in the selected workspace's policy file (tag:<name>).
-	Tags                   []string                `json:"tags"`
+	Tags []string `json:"tags"`
+	// Update is the machine's latest update observation, null before its first report.
+	Update                 *UpdateObservation      `json:"update"`
 	CanManage              bool                    `json:"can_manage"`
 	Shared                 bool                    `json:"shared"`
 	ID                     string                  `json:"id"`

@@ -269,8 +269,7 @@ func (s *Service) FleetUpdateSummary(ctx context.Context, userID string, options
 	if err != nil {
 		return result, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.online,coalesce(o.state,'not_reporting'),CASE WHEN o.user_machine_id IS NULL THEN NULL ELSE jsonb_build_object(
- 'schema',o.schema,'state',o.state,'current_version',o.current_version,'target_version',coalesce(o.target_version,''),'channel',o.channel,'operation_id',o.operation_id,'installation_generation',o.installation_generation,'worker_generation',o.worker_generation,'os_boot_id',o.os_boot_id,'rollback_count',o.rollback_count,'error_code',coalesce(o.error_code,''),'observed_at',o.observed_at) END`+predicate+` ORDER BY lower(m.alias),m.id LIMIT $5 OFFSET $6`, append(args, options.Limit, options.Offset)...)
+	rows, err := tx.QueryContext(ctx, `SELECT m.id,m.alias,m.online,coalesce(o.state,'not_reporting'),CASE WHEN o.user_machine_id IS NULL THEN NULL ELSE `+updateObservationJSON+` END`+predicate+` ORDER BY lower(m.alias),m.id LIMIT $5 OFFSET $6`, append(args, options.Limit, options.Offset)...)
 	if err != nil {
 		return result, err
 	}
@@ -488,4 +487,34 @@ func mapMaintenanceApproval(row dbsqlc.UserMachineMaintenanceApproval) Maintenan
 
 func validMaintenanceAction(action string) bool {
 	return action == "update" || action == "restart" || action == "migration"
+}
+
+// updateObservationJSON is a machine's update observation o (user_machine_update_observations) as the
+// UpdateObservation JSON, for the update summary and the machine list.
+const updateObservationJSON = `jsonb_build_object(
+ 'schema',o.schema,'state',o.state,'current_version',o.current_version,'target_version',coalesce(o.target_version,''),'channel',o.channel,'operation_id',o.operation_id,'installation_generation',o.installation_generation,'worker_generation',o.worker_generation,'os_boot_id',o.os_boot_id,'rollback_count',o.rollback_count,'error_code',coalesce(o.error_code,''),'observed_at',o.observed_at)`
+
+// describeUpdateObservations sets each machine's latest update observation (nil before its first report), in one
+// query for the page: the Machines page reads its version column from the list itself.
+func (s *Service) describeUpdateObservations(ctx context.Context, machines map[string]*UserMachine, ids []string) error {
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT o.user_machine_id,`+updateObservationJSON+` FROM user_machine_update_observations o
+ JOIN user_machines m ON m.id=o.user_machine_id AND m.environment_id=o.environment_id WHERE o.user_machine_id=ANY($1::text[])`, ids)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if err := rows.Scan(&id, &raw); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		observation := &UpdateObservation{}
+		if err := json.Unmarshal(raw, observation); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		if machine := machines[id]; machine != nil {
+			machine.Update = observation
+		}
+	}
+	return errors.Join(rows.Err(), rows.Close())
 }

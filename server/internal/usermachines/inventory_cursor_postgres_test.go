@@ -57,6 +57,8 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
 	if err := store.SQL().QueryRowContext(ctx, `SELECT '127.100.'||(address_slot/256)||'.'||(address_slot%256) FROM paperboat.control_sync_leases WHERE machine_id=$1`, user+"_m5").Scan(&address); err != nil {
 		t.Fatal(err)
 	}
+	exec(`INSERT INTO paperboat.user_machine_update_observations(user_machine_id,environment_id,schema,current_version,target_version,channel,state,error_code,operation_id,installation_generation,worker_generation,os_boot_id,rollback_count,observed_at,payload_hash)
+ SELECT id,environment_id,$2,'2026.10.25.1','2026.10.25.1','stable','healthy',NULL,$1||'_op',1,1,'boot',0,now(),decode(repeat('00',32),'hex') FROM paperboat.user_machines WHERE id=$1||'_m1'`, user, UpdateObservationSchemaV1)
 	service := New(store, nil, Policy{}, nil)
 	personal := workspace.WithContext(ctx, workspace.Scope{ID: "personal"})
 	ids := func(items []UserMachine) []string {
@@ -72,6 +74,13 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
 	}
 	if got := ids(full); !slices.Equal(got, []string{"m2", "m1", "m4", "m3", "m5", "m6", "m7"}) {
 		t.Fatalf("full list order %v, want alias order", got)
+	}
+	// Each item carries its update observation (the Machines page's version column), null before a report.
+	for _, item := range full {
+		reported := item.ID == user+"_m1"
+		if (item.Update != nil) != reported || (reported && item.Update.CurrentVersion != "2026.10.25.1") {
+			t.Fatalf("machine %s update observation %+v", item.ID, item.Update)
+		}
 	}
 	var walked []string
 	opts := InventoryOptions{Limit: 2}

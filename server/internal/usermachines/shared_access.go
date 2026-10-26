@@ -41,6 +41,9 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 		ids = append(ids, machine.ID)
 		byID[machine.ID] = machine
 	}
+	if err := s.describeUpdateObservations(ctx, byID, ids); err != nil {
+		return err
+	}
 	scope, scoped := workspace.FromContext(ctx)
 	var teamID any
 	if scoped && scope.TeamID != "" {
