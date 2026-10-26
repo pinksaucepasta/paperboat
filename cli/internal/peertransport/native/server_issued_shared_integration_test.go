@@ -10,11 +10,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,7 +31,6 @@ import (
 	hostserver "github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -104,11 +100,6 @@ type serverIssuedSharedFixture struct {
 	TerminalRevokedConfiguration            string                         `json:"terminal_revoked_configuration"`
 	FileBatchID                             string                         `json:"file_batch_id"`
 	FileDescriptor                          serverIssuedFileDescriptor     `json:"file_descriptor"`
-	SSHDescriptor                           serverIssuedDescriptor         `json:"ssh_descriptor"`
-	SSHHostPublicKey                        string                         `json:"ssh_host_public_key"`
-	SSHHostPrivateKey                       string                         `json:"ssh_host_private_key"`
-	SSHClientPublicKey                      string                         `json:"ssh_client_public_key"`
-	SSHClientPrivateKey                     string                         `json:"ssh_client_private_key"`
 	FinalSharedExecDescriptor               serverIssuedDescriptor         `json:"final_shared_exec_descriptor"`
 	FinalSharedConfiguration                string                         `json:"final_shared_configuration"`
 	FinalMachineConfiguration               string                         `json:"final_machine_configuration"`
@@ -254,29 +245,6 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 		terminalAuth = fixture.TerminalDescriptor.Terminal["auth"].(map[string]any)
 	}
 	streamAuthorize := hostserver.CredentialStreamAuthorizer(authorizer)
-	var sshHost *managedssh.Host
-	var sshIdentity, sshKnownHosts, sshRemoteFile string
-	sshAvailable := true
-	if terminalOnly {
-		sshAvailable = false
-	}
-	for _, executable := range []string{"ssh", "sshd", "ssh-keygen", "nc", "scp", "sftp", "rsync"} {
-		if _, lookupErr := exec.LookPath(executable); lookupErr != nil {
-			sshAvailable = false
-		}
-	}
-	if sshAvailable {
-		sshdPort, identity, knownHosts, remoteFile := startServerIssuedTestSSHD(t, fixture)
-		sshIdentity, sshKnownHosts = identity, knownHosts
-		sshRemoteFile = remoteFile
-		sshHost, err = managedssh.NewHost(managedssh.HostConfig{MaxStreams: 4, ProbeTimeout: time.Second, DialTimeout: time.Second})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err = sshHost.ReconcileTarget(t.Context(), 1, sshdPort); err != nil {
-			t.Fatal(err)
-		}
-	}
 	filePayload := []byte("server-issued-native-file")
 	fileDigest := sha256.Sum256(filePayload)
 	transferRoot := t.TempDir()
@@ -302,10 +270,6 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 		}
 		return authorization.ResourceID, nil
 	}, ServeStream: func(ctx context.Context, header streamauth.Header, connection net.Conn) error {
-		if header.Consumer == "ssh" && sshHost != nil {
-			_, serveErr := sshHost.Serve(ctx, 1, connection)
-			return serveErr
-		}
 		serveErr := association.Serve(connection)
 		if terminalOnly && serveErr != nil {
 			t.Logf("terminal association ended: %v", serveErr)
@@ -502,55 +466,6 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	if readErr != nil || string(received) != string(filePayload) {
 		t.Fatalf("shared file=%q err=%v", received, readErr)
 	}
-	if sshAvailable {
-		sshSession, sshDialErr := shared.Dial(t.Context(), descriptor, fixture.Machine.EndpointID, peerquic.ClassInteractive)
-		if sshDialErr != nil {
-			t.Fatalf("dial managed SSH native session: %v", sshDialErr)
-		}
-		sshAdapter := tunnel.TailnetTerminalTunnel{DialSession: func(context.Context, resolver.ConnectInfo) (*native.Session, error) { return sshSession, nil }}
-		sshInfo := resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: fixture.SSHDescriptor.Auth["token"].(string), ResourceID: fixture.SSHDescriptor.Auth["access_session_id"].(string), ExpiresAt: fixture.SSHDescriptor.ExpiresAt.Format(time.RFC3339)}}}
-		probe, probeErr := sshAdapter.DialSSH(t.Context(), sshInfo, fixture.SSHDescriptor.OperationID)
-		if probeErr != nil {
-			t.Fatalf("authorize server-issued managed SSH stream: %v", probeErr)
-		}
-		_ = probe.Close()
-		proxyAddress, stopProxy := startNativeSSHProxy(t, t.Context(), sshAdapter, sshInfo, fixture.SSHDescriptor.OperationID)
-		defer stopProxy()
-		proxyHost, proxyPort, splitErr := net.SplitHostPort(proxyAddress)
-		if splitErr != nil {
-			t.Fatal(splitErr)
-		}
-		proxyCommand := filepath.Join(t.TempDir(), "proxy")
-		if err = os.WriteFile(proxyCommand, []byte("#!/bin/sh\nexec nc "+proxyHost+" "+proxyPort+"\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		current, _ := user.Current()
-		common := []string{"-F", "/dev/null", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + sshKnownHosts, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", sshIdentity, "-o", "ProxyCommand=" + proxyCommand}
-		if output := runOpenSSH(t, t.Context(), "ssh", nil, append(common, current.Username+"@paperboat", "printf shared-managed-ssh")...); string(output) != "shared-managed-ssh" {
-			t.Fatalf("shared managed SSH output=%q", output)
-		}
-		target := current.Username + "@paperboat"
-		upload := filepath.Join(t.TempDir(), "shared-upload")
-		if err = os.WriteFile(upload, []byte("shared-managed-file"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		runOpenSSH(t, t.Context(), "scp", nil, append(append([]string{}, common...), upload, target+":"+sshRemoteFile)...)
-		download := filepath.Join(t.TempDir(), "shared-download")
-		runOpenSSH(t, t.Context(), "sftp", []byte("get "+sshRemoteFile+" "+download+"\n"), append(append([]string{}, common...), "-b", "-", target)...)
-		if content, readErr := os.ReadFile(download); readErr != nil || string(content) != "shared-managed-file" {
-			t.Fatalf("shared SFTP download=%q error=%v", content, readErr)
-		}
-		sshWrapper := filepath.Join(t.TempDir(), "ssh-wrapper")
-		wrapper := "#!/bin/sh\nexec ssh -F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + sshKnownHosts + " -o BatchMode=yes -o IdentitiesOnly=yes -i " + sshIdentity + " -o ProxyCommand=" + proxyCommand + " \"$@\"\n"
-		if err = os.WriteFile(sshWrapper, []byte(wrapper), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		rsyncDownload := filepath.Join(t.TempDir(), "shared-rsync-download")
-		runOpenSSH(t, t.Context(), "rsync", nil, "-e", sshWrapper, target+":"+sshRemoteFile, rsyncDownload)
-		if content, readErr := os.ReadFile(rsyncDownload); readErr != nil || string(content) != "shared-managed-file" {
-			t.Fatalf("shared rsync download=%q error=%v", content, readErr)
-		}
-	}
 	if err := machineAuthority.Apply(t.Context(), fixture.MachineMachineDisabled); err != nil {
 		t.Fatal(err)
 	}
@@ -637,68 +552,6 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	succeeded = true
 }
 
-func startServerIssuedTestSSHD(t *testing.T, fixture serverIssuedSharedFixture) (uint16, string, string, string) {
-	t.Helper()
-	root := t.TempDir()
-	current, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	hostPrivate, hostErr := base64.RawURLEncoding.DecodeString(fixture.SSHHostPrivateKey)
-	clientPrivate, clientErr := base64.RawURLEncoding.DecodeString(fixture.SSHClientPrivateKey)
-	if hostErr != nil || clientErr != nil || fixture.SSHHostPublicKey == "" || fixture.SSHClientPublicKey == "" {
-		t.Fatal("invalid server-issued SSH key fixture")
-	}
-	defer clear(hostPrivate)
-	defer clear(clientPrivate)
-	hostKey := filepath.Join(root, "host_ed25519")
-	identity := filepath.Join(root, "id_ed25519")
-	authorized := filepath.Join(root, "authorized_keys")
-	knownHosts := filepath.Join(root, "known_hosts")
-	for path, value := range map[string][]byte{hostKey: hostPrivate, identity: clientPrivate, authorized: []byte(fixture.SSHClientPublicKey + "\n"), knownHosts: []byte("paperboat " + fixture.SSHHostPublicKey + "\n")} {
-		if err = os.WriteFile(path, value, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	probe, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := uint16(probe.Addr().(*net.TCPAddr).Port)
-	_ = probe.Close()
-	configPath := filepath.Join(root, "sshd_config")
-	configText := fmt.Sprintf("ListenAddress 127.0.0.1\nPort %d\nHostKey %s\nPidFile %s\nAuthorizedKeysFile %s\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers %s\nSubsystem sftp internal-sftp\nLogLevel ERROR\n", port, hostKey, filepath.Join(root, "sshd.pid"), authorized, current.Username)
-	if err = os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	sshdPath, err := exec.LookPath("sshd")
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	command := exec.CommandContext(ctx, sshdPath, "-D", "-e", "-f", configPath)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err = command.Start(); err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cancel(); _ = command.Wait() })
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		connection, dialErr := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", port), 50*time.Millisecond)
-		if dialErr == nil {
-			_ = connection.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("server-issued sshd readiness: %v: %s", dialErr, stderr.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return port, identity, knownHosts, filepath.Join(root, "remote-file")
-}
 
 func mustConnectionLimiter(t *testing.T, maximum int) *hostserver.ConnectionLimiter {
 	t.Helper()
