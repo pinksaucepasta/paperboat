@@ -99,6 +99,8 @@ type HTTPConfig struct {
 	ReadHeaderTimeout  time.Duration `json:"read_header_timeout"`
 	RequestTimeout     time.Duration `json:"request_timeout"`
 	ShutdownTimeout    time.Duration `json:"shutdown_timeout"`
+	IdleTimeout        time.Duration `json:"idle_timeout"`
+	MaxHeaderBytes     int           `json:"max_header_bytes"`
 	MaxBodyBytes       int64         `json:"max_body_bytes"`
 	TrustedProxyCIDRs  []string      `json:"trusted_proxy_cidrs"`
 }
@@ -489,6 +491,8 @@ func Default() Config {
 			ReadHeaderTimeout: 5 * time.Second,
 			RequestTimeout:    15 * time.Second,
 			ShutdownTimeout:   10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    64 << 10,
 			MaxBodyBytes:      1 << 20,
 		},
 		Database: Database{
@@ -624,8 +628,11 @@ func (c Config) Validate() error {
 	} else if _, err := url.ParseRequestURI(c.HTTP.PublicBaseURL); err != nil {
 		errs = append(errs, fmt.Errorf("http.public_base_url must be a valid absolute URL"))
 	}
-	if c.HTTP.ReadHeaderTimeout <= 0 || c.HTTP.RequestTimeout <= 0 || c.HTTP.ShutdownTimeout <= 0 {
+	if c.HTTP.ReadHeaderTimeout <= 0 || c.HTTP.RequestTimeout <= 0 || c.HTTP.ShutdownTimeout <= 0 || c.HTTP.IdleTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("http timeouts must be positive"))
+	}
+	if c.HTTP.MaxHeaderBytes <= 0 {
+		errs = append(errs, fmt.Errorf("http.max_header_bytes must be positive"))
 	}
 	if c.HTTP.BrowserLoginOrigin != "" {
 		origin, e := url.Parse(c.HTTP.BrowserLoginOrigin)

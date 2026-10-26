@@ -1076,19 +1076,15 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_platform_certificates", certificateRuntime.PlatformWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 3), progress))
 	}
 	application := &App{
-		draining:       draining,
-		machineEvents:  machineEventHub,
-		supportReports: supportService,
-		selfhost:       selfhostService,
-		healthMonitor:  healthMonitor,
-		cfg:            opts.Config,
-		logger:         opts.Logger,
-		db:             store,
-		server: &http.Server{
-			Addr:              opts.Config.HTTP.Address,
-			Handler:           router,
-			ReadHeaderTimeout: opts.Config.HTTP.ReadHeaderTimeout,
-		},
+		draining:             draining,
+		machineEvents:        machineEventHub,
+		supportReports:       supportService,
+		selfhost:             selfhostService,
+		healthMonitor:        healthMonitor,
+		cfg:                  opts.Config,
+		logger:               opts.Logger,
+		db:                   store,
+		server:               newHTTPServer(opts.Config.HTTP, router),
 		worker:               workers.NewLeaderSupervisor(workerLeader(store, telemetryMetrics, opts.Logger), serverWorkers...),
 		certificateRuntime:   certificateRuntime,
 		telemetryMetrics:     telemetryMetrics,
@@ -1100,6 +1096,21 @@ func New(opts Options) (*App, error) {
 	reporterTransferred = true
 	runtimeTransferred = true
 	return application, nil
+}
+
+// newHTTPServer builds the public server. ReadTimeout bounds reading each request, headers and body, by
+// the request timeout. WriteTimeout stays unset: streaming routes hold their responses open by design
+// and do not extend a write deadline, so a server-wide one would cut them. Ordinary routes are bounded
+// by the request timeout in the router instead.
+func newHTTPServer(cfg config.HTTPConfig, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.Address,
+		Handler:           handler,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.RequestTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+	}
 }
 
 // consoleBillingURL is the console's Billing page, or empty when no console origin is configured.

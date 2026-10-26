@@ -399,7 +399,7 @@ func TestTimeoutDoesNotBufferStreamingResponse(t *testing.T) {
 		}
 	})))
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/previews/prv_1/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -428,7 +428,7 @@ func TestTimeoutBypassesStreamingRequestDeadline(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})))
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/previews/prv_1/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -477,7 +477,7 @@ func TestRouterPreservesStreamingFlushSupport(t *testing.T) {
 		}),
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/previews/prv_1/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

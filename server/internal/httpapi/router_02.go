@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,7 +52,7 @@ func timeout(duration time.Duration, logger *slog.Logger, next http.Handler) htt
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isStreamingRequest(r) || isReleaseDownload(r) || isMachineEventsWait(r.URL.Path) {
+		if isStreamingRoute(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -103,16 +104,25 @@ func isReleaseDownload(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/selfhost/") || r.URL.Path == "/install" || strings.HasPrefix(r.URL.Path, "/tuf/") || strings.HasPrefix(r.URL.Path, "/helper-releases/tuf/")
 }
 
-func isStreamingRequest(r *http.Request) bool {
-	if r != nil && strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
-		for _, value := range r.Header.Values("Connection") {
-			for _, token := range strings.Split(value, ",") {
-				if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
-					return true
-				}
-			}
-		}
+// streamingRoutePath matches the GET routes that hold a response or socket open by design: the preview and
+// tunnel event streams and the connector control socket. Each one bounds its own lifetime.
+var streamingRoutePath = regexp.MustCompile(`^/v1/(previews/[^/]+/events|tunnels/[^/]+/events|tunnels/[^/]+/connectors/[^/]+/control)$`)
+
+// isStreamingRoute reports whether r is on the streaming allow-list, the only routes that skip the request
+// timeout. Request headers never decide it: an ordinary route asked for text/event-stream or an upgrade is
+// still a request that must finish within the request timeout.
+func isStreamingRoute(r *http.Request) bool {
+	if r.Method == http.MethodGet && streamingRoutePath.MatchString(r.URL.Path) {
+		// An event route streams only when asked for its event-stream representation; its JSON
+		// representation is an ordinary request and keeps the request timeout.
+		return !strings.HasSuffix(r.URL.Path, "/events") || acceptsEventStream(r)
 	}
+	return isMachineEventsWait(r.URL.Path) || isReleaseDownload(r)
+}
+
+// acceptsEventStream reports whether the client asked for a text/event-stream representation. It picks the
+// representation of an event route only; it never changes the timeout.
+func acceptsEventStream(r *http.Request) bool {
 	for _, accept := range r.Header.Values("Accept") {
 		for _, part := range strings.Split(accept, ",") {
 			mediaType := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])

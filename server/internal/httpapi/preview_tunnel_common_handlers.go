@@ -70,7 +70,7 @@ func previewTunnelEvents(service PreviewTunnelAPI, resourceKind, pathParameter s
 			writePreviewTunnelEventError(w, r, err)
 			return
 		}
-		if !isStreamingRequest(r) {
+		if !acceptsEventStream(r) {
 			limit, limitErr := previewtunnelapi.PageLimit(r.URL.Query().Get("limit"))
 			if limitErr != nil {
 				writePreviewTunnelEventError(w, r, limitErr)
