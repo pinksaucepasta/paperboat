@@ -68,7 +68,11 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 		t.Fatalf("listing machines allocated %d address leases; only a control sync connection allocates one", n)
 	}
 
-	// One allocation's transaction stays open; another allocation must not wait for it.
+	// One allocation's transaction stays open; another account's allocation must not wait for it. (Two of one
+	// account's do queue briefly: each lease moves the account's inventory topic row, migration 179.)
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user+"_b")
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
+VALUES($1,$2,$1,'b','linux','amd64','/w','online','occupied',true)`, user+"_b_m1", user+"_b")
 	holder, err := store.Pool().Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +91,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 		t.Fatal(err)
 	}
 	var second int
-	if err := other.QueryRow(ctx, `SELECT address_slot FROM paperboat.ensure_control_sync_lease($1)`, user+"_m2").Scan(&second); err != nil {
+	if err := other.QueryRow(ctx, `SELECT address_slot FROM paperboat.ensure_control_sync_lease($1)`, user+"_b_m1").Scan(&second); err != nil {
 		t.Fatalf("an allocation while another one's transaction is open: %v (it waited on a table lock)", err)
 	}
 	if err := other.Commit(ctx); err != nil {

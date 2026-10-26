@@ -57,7 +57,8 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
         WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL
         ELSE team_machine_capability_allowed($1,$4,m.id,capability) END),'[]'::json),
  coalesce(l.address_slot, 0), EXISTS(SELECT 1 FROM paperboat.peer_network_identities n JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.revoked_at IS NULL AND c.expires_at>now() WHERE n.machine_id=m.id AND n.machine_generation=m.installation_generation AND n.revoked_at IS NULL)
- FROM user_machines m LEFT JOIN paperboat.control_sync_leases l ON l.machine_id=m.id WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
+ FROM user_machines m LEFT JOIN LATERAL (SELECT x.address_slot FROM paperboat.control_sync_leases x WHERE x.machine_id=m.id
+  ORDER BY x.account_id=$1 DESC LIMIT 1) l ON true WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
 	if err != nil {
 		return err
 	}

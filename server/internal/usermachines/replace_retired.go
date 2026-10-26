@@ -73,18 +73,23 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 // 127.100.x.y slot users paste into connection strings), so a computer keeps its address across
 // a reset or reinstall. The replacement's own, freshly allocated lease is released.
 func adoptControlSyncLease(ctx context.Context, tx *db.Tx, retiredID, replacementID string) error {
-	var slot int
-	err := tx.QueryRow(ctx, `SELECT address_slot FROM paperboat.control_sync_leases WHERE machine_id=$1 FOR UPDATE`, retiredID).Scan(&slot)
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
-		return nil // the retired record never had an address; the replacement keeps its own
-	}
-	if err != nil {
+	// Leases are keyed by (account, machine): the replacement's own leases in the accounts that held the retired
+	// record go, and the retired record's leases move to it, so no account's address changes and no other
+	// account's lease with the same slot is touched.
+	// The retired record's leases are locked first, as concurrent recoveries of one machine take the same path;
+	// without any, the replacement keeps its own.
+	var held int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM paperboat.control_sync_leases WHERE machine_id=$1 FOR UPDATE) locked`, retiredID).Scan(&held); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.control_sync_leases WHERE machine_id=$1`, replacementID); err != nil {
+	if held == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.control_sync_leases r WHERE r.machine_id=$2
+ AND EXISTS(SELECT 1 FROM paperboat.control_sync_leases o WHERE o.machine_id=$1 AND o.account_id IS NOT DISTINCT FROM r.account_id)`, retiredID, replacementID); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE paperboat.control_sync_leases SET machine_id=$1 WHERE address_slot=$2`, replacementID, slot)
+	_, err := tx.Exec(ctx, `UPDATE paperboat.control_sync_leases SET machine_id=$2 WHERE machine_id=$1`, retiredID, replacementID)
 	return err
 }
 

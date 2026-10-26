@@ -35,7 +35,7 @@ func (a *SQLAuthority) Snapshot(ctx context.Context, p auth.ClientPrincipal, sou
 		if !owned {
 			return nil, status.Error(codes.PermissionDenied, "source machine is unavailable")
 		}
-		ip, _, err := a.lease(ctx, source)
+		ip, _, err := a.lease(ctx, p.User.ID, source)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +104,7 @@ func (a *SQLAuthority) Snapshot(ctx context.Context, p auth.ClientPrincipal, sou
 		}
 		// Unenrolled/revoked identities remain visible as pending, without usable network state.
 		if c.peer.Approved {
-			ip, tags, err := a.lease(ctx, id)
+			ip, tags, err := a.lease(ctx, p.User.ID, id)
 			if err != nil {
 				return nil, err
 			}
@@ -119,14 +119,21 @@ func (a *SQLAuthority) Snapshot(ctx context.Context, p auth.ClientPrincipal, sou
 
 	return out, nil
 }
-func (a *SQLAuthority) lease(ctx context.Context, machine string) (string, []string, error) {
+
+// lease is the machine's local address as the viewer account sees it (its own lease, else the owner's until
+// per-viewer leases exist; PLAN 3b "Multi-account hosts"), allocating the owner's lease if the machine has none.
+func (a *SQLAuthority) lease(ctx context.Context, viewer, machine string) (string, []string, error) {
 	var slot int
 	var encoded []byte
-	err := a.DB.Pool().QueryRow(ctx, `SELECT address_slot,tags FROM paperboat.ensure_control_sync_lease($1)`, machine).Scan(&slot, &encoded)
-	if err != nil {
+	if _, err := a.DB.Pool().Exec(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machine); err != nil {
 		if postgresErrorCode(err, "54000") {
 			return "", nil, status.Error(codes.ResourceExhausted, "machine address pool exhausted; remove retired machines before retrying")
 		}
+		return "", nil, err
+	}
+	err := a.DB.Pool().QueryRow(ctx, `SELECT address_slot,tags FROM paperboat.control_sync_leases WHERE machine_id=$1
+ ORDER BY account_id=$2 DESC LIMIT 1`, machine, viewer).Scan(&slot, &encoded)
+	if err != nil {
 		return "", nil, err
 	}
 	var tags []string

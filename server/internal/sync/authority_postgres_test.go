@@ -55,7 +55,7 @@ func TestPostgresLeasePersistenceConcurrencyAndTagAuthority(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ip, _, err := authority.lease(ctx, machine)
+			ip, _, err := authority.lease(ctx, owner, machine)
 			if err != nil {
 				errs <- err
 			} else {
@@ -80,7 +80,7 @@ func TestPostgresLeasePersistenceConcurrencyAndTagAuthority(t *testing.T) {
 	}
 	// Recreating the adapter cannot reset a durable lease.
 	replacement := &SQLAuthority{DB: store}
-	ip, _, err := replacement.lease(ctx, machine)
+	ip, _, err := replacement.lease(ctx, owner, machine)
 	if err != nil || ip != expected {
 		t.Fatalf("restart lease: %s %v", ip, err)
 	}
@@ -92,7 +92,7 @@ func TestPostgresLeasePersistenceConcurrencyAndTagAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, tags, err := replacement.lease(ctx, machine)
+	_, tags, err := replacement.lease(ctx, owner, machine)
 	if err != nil || len(tags) != 1 || tags[0] != "dev" {
 		t.Fatalf("persisted tags: %v %v", tags, err)
 	}
