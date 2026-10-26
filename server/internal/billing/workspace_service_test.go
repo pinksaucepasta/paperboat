@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 type workspaceStripeFake struct {
@@ -19,6 +20,9 @@ type workspaceStripeFake struct {
 	portalCustomers, portalReturns, portalKeys []string
 	portalConfigurations                       []string
 	checkoutState                              string
+	// lockProbe, when set, runs inside each provider read: it fails if the caller holds a database lock.
+	lockProbe    func() error
+	lockProbeErr error
 }
 
 func (f *workspaceStripeFake) CreateCustomer(_ context.Context, workspaceID, email, key string) (string, error) {
@@ -47,6 +51,9 @@ func (f *workspaceStripeFake) CreatePortal(_ context.Context, in billing.StripeP
 	return billing.CustomerPortalSession{URL: "https://billing.stripe.test/session"}, nil
 }
 func (f *workspaceStripeFake) GetCheckoutSession(_ context.Context, id string) (billing.StripeCheckoutState, error) {
+	if f.lockProbe != nil && f.lockProbeErr == nil {
+		f.lockProbeErr = f.lockProbe()
+	}
 	in := f.checkoutInputs[len(f.checkoutInputs)-1]
 	status := f.checkoutState
 	if status == "" {
@@ -165,6 +172,9 @@ func TestWorkspaceCheckoutAndPortalRecoverSameProviderOperation(t *testing.T) {
 	}
 }
 func (f *workspaceStripeFake) GetSubscription(context.Context, string) (billing.StripeSubscription, error) {
+	if f.lockProbe != nil && f.lockProbeErr == nil {
+		f.lockProbeErr = f.lockProbe()
+	}
 	f.gets++
 	return f.sub, nil
 }
@@ -220,8 +230,21 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	if fake.customers != 1 || fake.checkouts != 1 {
 		t.Fatalf("provider calls customer/checkout=%d/%d", fake.customers, fake.checkouts)
 	}
+	// The Stripe read for the earlier checkout runs with no database lock held (F21-20): another
+	// transaction takes the team write lock meanwhile.
+	fake.lockProbe = func() error {
+		return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '300ms'`); err != nil {
+				return err
+			}
+			return db.LockTeamWrites(ctx, tx)
+		})
+	}
 	if _, err = service.Checkout(ctx, user, "workspace@example.com", "", code, "second-"+suffix, in[5], in[6], 1); err != billing.ErrCheckoutPending {
 		t.Fatalf("second checkout error=%v", err)
+	}
+	if fake.lockProbe = nil; fake.lockProbeErr != nil {
+		t.Fatalf("the Stripe read ran while the team write lock was held: %v", fake.lockProbeErr)
 	}
 	wrongCode := "team-plan-" + suffix
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref,active) VALUES($1,$2,'stripe',$3,$4,'team_subscription','team',true)`, "bp_team_"+suffix, wrongCode, "prod_team_"+suffix, "price_team_"+suffix); err != nil {
@@ -253,9 +276,19 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.billing_products SET active=false WHERE code=$1`, code); err != nil {
 		t.Fatal(err)
 	}
+	// The subscription read runs with no lock on the workspace row (F21-20).
+	fake.lockProbe = func() error {
+		return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			var id string
+			return tx.QueryRow(ctx, `SELECT id FROM paperboat.billing_workspaces WHERE id=$1 FOR UPDATE NOWAIT`, "personal:"+user).Scan(&id)
+		})
+	}
 	processed, err = service.HandleWebhook(ctx, event)
 	if err != nil || !processed {
 		t.Fatalf("processed=%v err=%v", processed, err)
+	}
+	if fake.lockProbe = nil; fake.lockProbeErr != nil {
+		t.Fatalf("the subscription read ran while the workspace row was locked: %v", fake.lockProbeErr)
 	}
 	processed, err = service.HandleWebhook(ctx, event)
 	if err != nil || processed {

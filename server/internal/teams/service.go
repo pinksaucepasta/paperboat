@@ -92,7 +92,8 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 		return out, ErrInvalid
 	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		// One team's write waits only for its own bucket and global writers (F21-20).
+		if err := LockTeam(ctx, tx, team); err != nil {
 			return err
 		}
 		done, digest, err := replay(ctx, tx, account, op, kind, []any{team, request}, &out)

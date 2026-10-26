@@ -37,6 +37,11 @@ func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
 func Lock(ctx context.Context, tx *db.Tx) error {
 	return db.LockTeamWrites(ctx, tx)
 }
+
+// LockTeam serializes writes that touch only this team (see db.LockTeamWritesFor).
+func LockTeam(ctx context.Context, tx *db.Tx, team string) error {
+	return db.LockTeamWritesFor(ctx, tx, team)
+}
 func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation string, metadata map[string]any) error {
 	metadata, err := activityMetadata(metadata, true)
 	if err != nil {

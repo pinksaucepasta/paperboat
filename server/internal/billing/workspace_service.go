@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"hash/fnv"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -204,6 +206,13 @@ func (s *WorkspaceService) Checkout(ctx context.Context, account, email, team, p
 	if err != nil {
 		return CheckoutSession{}, err
 	}
+	// The newest checkout's Stripe state is read before the transaction: WorkspaceTx holds the team write
+	// lock, and no provider call runs under a database lock (F21-20). The transaction uses it only if that
+	// checkout is still the newest.
+	priorState, err := s.priorCheckoutState(ctx, account, team)
+	if err != nil {
+		return CheckoutSession{}, err
+	}
 	var workspace Workspace
 	var priceID string
 	var replay *CheckoutSession
@@ -299,10 +308,14 @@ func (s *WorkspaceService) Checkout(ctx context.Context, account, email, team, p
 				if e = s.decryptResult(priorCipher, &prior); e != nil {
 					return e
 				}
-				state, getErr := s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
-				if getErr != nil {
-					return getErr
+				if priorState.key != priorKey {
+					// Another checkout finished since the read before the lock; the caller retries.
+					return ErrCheckoutPending
 				}
+				if priorState.err != nil {
+					return priorState.err
+				}
+				state := priorState.session
 				if state.ID != prior.ProviderSessionID || state.CustomerID != prior.ProviderCustomerID || state.CheckoutOperation != priorKey {
 					return ErrProviderOutcomeUnknown
 				}
@@ -510,6 +523,11 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 // reconcileSubscription applies an authoritative Stripe snapshot. Webhooks and
 // operator recovery share this path so neither can manufacture subscription state.
 func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscriptionID string, event *StripeWebhook) (bool, error) {
+	// One reconcile per subscription at a time in this process: the Stripe read happens before any
+	// database lock (F21-20), and the snapshot applied is the one read after the previous reconcile.
+	gate := &subscriptionReconcileGates[subscriptionGate(subscriptionID)]
+	gate.Lock()
+	defer gate.Unlock()
 	initial, err := s.stripe.GetSubscription(ctx, subscriptionID)
 	if err != nil {
 		return false, err
@@ -529,10 +547,7 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 				return err
 			}
 		}
-		current, err := s.stripe.GetSubscription(ctx, subscriptionID)
-		if err != nil {
-			return err
-		}
+		current := initial
 		if current.CustomerID != initial.CustomerID || current.ID != subscriptionID {
 			return errors.New("stripe subscription identity changed during reconciliation")
 		}
@@ -629,4 +644,44 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		return nil
 	})
 	return processed, err
+}
+
+// checkoutProviderState is the provider's view of a workspace's newest successful checkout, read with no
+// database lock held.
+type checkoutProviderState struct {
+	key     string
+	session StripeCheckoutState
+	err     error
+}
+
+func (s *WorkspaceService) priorCheckoutState(ctx context.Context, account, team string) (checkoutProviderState, error) {
+	workspaceID := "personal:" + account
+	if team != "" {
+		workspaceID = "team:" + team
+	}
+	var out checkoutProviderState
+	var priorCipher []byte
+	err := s.store.SQL().QueryRowContext(ctx, `SELECT idempotency_key,result_ciphertext FROM paperboat.billing_workspace_operations WHERE workspace_id=$1 AND kind='checkout' AND state='succeeded' ORDER BY updated_at DESC LIMIT 1`, workspaceID).Scan(&out.key, &priorCipher)
+	if errors.Is(err, sql.ErrNoRows) {
+		return checkoutProviderState{}, nil
+	}
+	if err != nil {
+		return checkoutProviderState{}, err
+	}
+	var prior CheckoutSession
+	if err = s.decryptResult(priorCipher, &prior); err != nil {
+		return checkoutProviderState{}, err
+	}
+	out.session, out.err = s.stripe.GetCheckoutSession(ctx, prior.ProviderSessionID)
+	return out, nil
+}
+
+// subscriptionReconcileGates serialize reconciles of one subscription in this process (bounded: a
+// subscription hashes onto one of them).
+var subscriptionReconcileGates [64]sync.Mutex
+
+func subscriptionGate(subscriptionID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(subscriptionID))
+	return int(h.Sum32() % uint32(len(subscriptionReconcileGates)))
 }

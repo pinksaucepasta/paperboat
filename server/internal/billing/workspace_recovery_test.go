@@ -161,7 +161,7 @@ func TestWorkspaceOperatorRetiresOnlyExpiredNotAppliedOperation(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT w.provider_subscription_id,o.state FROM paperboat.billing_workspaces w JOIN paperboat.billing_workspace_operations o ON o.workspace_id=w.id WHERE w.id=$1 AND o.idempotency_key=$2`, "team:"+team, checkoutOp).Scan(&newSub, &newOpState); err != nil {
 		t.Fatal(err)
 	}
-	if newSub != "sub_new_"+x || newOpState != "succeeded" || f2.checkoutGets != 2 || f2.subscriptionGets != 3 {
+	if newSub != "sub_new_"+x || newOpState != "succeeded" || f2.checkoutGets != 2 || f2.subscriptionGets != 2 { // one subscription read per reconcile, outside the lock (F21-20)
 		t.Fatalf("applied recovery sub/state/gets=%s/%s/%d/%d", newSub, newOpState, f2.checkoutGets, f2.subscriptionGets)
 	}
 	openOp := "checkout-open-" + x
