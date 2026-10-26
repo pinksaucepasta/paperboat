@@ -66,7 +66,13 @@ def count(rows, platform):
 
 
 def render(sections):
-    feats = [r for s in sections if s["id"].startswith(("F", "P")) for r in s["feature"]]
+    # Product features count per platform; reliability/scale and the SDK get their own cards
+    # (user decision 2026-10-26).
+    groups = {"reliability": ("F21", "P"), "sdk": ("F24",)}
+    def rows_of(ids):
+        return [r for s in sections if s["id"] in ids for r in s["feature"]]
+    feats = [r for s in sections if s["id"].startswith("F")
+             and s["id"] not in groups["reliability"] + groups["sdk"] for r in s["feature"]]
     cmds = [r for s in sections for r in s["command"]]
     cards = []
     for index, name in ((0, "Linux"), (1, "macOS"), (2, "Windows")):
@@ -76,6 +82,13 @@ def render(sections):
             lines.append(f'<div class="row"><span>{label}</span><b>{d}/{t}</b>'
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
+    for title, ids in (("Reliability, scale and efficiency", groups["reliability"]),
+                       ("SDK and agent tools (after Linux)", groups["sdk"])):
+        rows = rows_of(ids)
+        if rows:
+            d, b, t = count(rows, 0)
+            cards.append(f'<div class="card"><h2>{title}</h2><div class="row"><span>Linux</span>'
+                         f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]
     if not cross:
         cards.append('<div class="card"><h2>Cross-platform</h2><div class="row"><span>'
