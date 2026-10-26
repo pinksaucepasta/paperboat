@@ -1,17 +1,17 @@
 "use client"
 
 import { DownloadSimpleIcon, FolderIcon, LinkIcon, PaperPlaneTiltIcon, TrashIcon } from "@phosphor-icons/react"
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { ApiError, meQuery, useApiQuery, useMachines, useWorkspace, type Machine } from "@/lib/api"
+import { meQuery, useApiQuery, useMachines, useWorkspace, type Machine } from "@/lib/api"
 import {
   decideRequest,
   deleteInboxFile,
   downloadUrl,
   fileKeys,
   inboxLive,
-  inboxQuery,
+  inboxListQuery,
   requestsQuery,
   type InboxFile,
   type InboxRequest,
@@ -39,7 +39,7 @@ export function MachineFiles() {
   return <FileList machine={useCurrentMachine()} />
 }
 
-type Row = { file: InboxFile; machine: Machine }
+type Row = { file: InboxFile; machine: { id: string; alias: string } }
 const rowKey = (row: Row) => `${row.machine.id}/${row.file.id}`
 
 /**
@@ -52,27 +52,29 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const { scope, machine } = useListScope(tabMachine)
-  const machines = useMachines()
-  const inScope = (machines.data ?? []).filter((entry) => !scope || entry.id === scope)
-  const readable = inScope.filter((entry) => entry.online)
-  const offline = inScope.filter((entry) => !entry.online)
-  const inboxes = useQueries({ queries: readable.map((entry) => inboxQuery(entry.id, workspace?.id ?? "")) })
   const [search, setSearch] = useState("")
-  const text = useDeferredValue(search.trim().toLowerCase())
+  const q = useDeferredValue(search.trim())
+  const inbox = useInfiniteQuery({
+    ...inboxListQuery(workspace?.id ?? "", q, scope ?? undefined),
+    enabled: Boolean(workspace),
+  })
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
   const drop = usePageFileDrop()
 
-  const loading = machines.isPending || inboxes.some((query) => query.isPending)
-  const rows: Row[] = readable
-    .flatMap((entry, index) => (inboxes[index]?.data?.items ?? []).map((file) => ({ file, machine: entry })))
-    .filter((row) => !text || row.file.name.toLowerCase().includes(text))
+  const batches = inbox.data?.pages ?? []
+  const loading = inbox.isPending
+  const rows: Row[] = batches
+    .flatMap((batch) => batch.items.map(({ machine: owner, ...file }) => ({ file, machine: owner })))
     .sort((a, b) => Date.parse(b.file.received_at) - Date.parse(a.file.received_at))
-  const outdated = readable.filter((_, index) => isOutdated(inboxes[index]?.error))
-  const failed = readable.filter(
-    (_, index) => inboxes[index]?.isError && !isOffline(inboxes[index].error) && !isOutdated(inboxes[index].error),
-  )
-  const unavailable = [...offline, ...readable.filter((_, index) => isOffline(inboxes[index]?.error))]
+  const notes = batches.flatMap((batch) => batch.unavailable)
+  const unavailable = notes.filter((note) => note.reason === "machine_offline")
+  const outdated = notes.filter((note) => note.reason === "machine_update_required")
+  const failed = notes.filter((note) => note.reason !== "machine_offline" && note.reason !== "machine_update_required")
+  const aliasOf = (id: string) =>
+    rows.find((row) => row.machine.id === id)?.machine.alias ?? notes.find((note) => note.machine_id === id)?.alias ?? id
+  const truncated = batches.flatMap((batch) => batch.truncated).map((id) => ({ alias: aliasOf(id) }))
+  const checked = batches.reduce((sum, batch) => sum + batch.machines_checked, 0)
   const selectedRows = rows.filter((row) => selected.has(rowKey(row)))
   const allSelected = rows.length > 0 && selectedRows.length === rows.length
   const toggle = (key: string, on: boolean) =>
@@ -83,10 +85,6 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
       return next
     })
   const columns = 4 + (scope ? 0 : 1)
-  const truncated = readable.filter((_, index) => {
-    const listing = inboxes[index]?.data
-    return listing && listing.total > listing.items.length
-  })
 
   const dropped = (
     <>
@@ -95,8 +93,8 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     </>
   )
 
-  const allUnavailable = inScope.length > 0 && unavailable.length === inScope.length
-  const empty = !loading && rows.length === 0 && !text && failed.length === 0
+  const allUnavailable = checked === 0 && notes.length > 0 && !inbox.hasNextPage
+  const empty = !loading && rows.length === 0 && !q && failed.length === 0 && !inbox.hasNextPage
 
   return (
     <section className="flex flex-col gap-4">
@@ -195,7 +193,7 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
                   ))}
             </tbody>
           </table>
-          {!loading && rows.length === 0 && text && (
+          {!loading && rows.length === 0 && q && (
             <p className="py-12 text-center text-sm text-muted-foreground">No files match “{search.trim()}”</p>
           )}
           {failed.length > 0 && (
@@ -204,15 +202,21 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
               <button
                 type="button"
                 className="underline-offset-4 hover:text-foreground hover:underline"
-                onClick={() =>
-                  failed.forEach((entry) => queryClient.invalidateQueries({ queryKey: fileKeys.inbox(entry.id) }))
-                }
+                onClick={() => void inbox.refetch()}
               >
                 Try again
               </button>
             </p>
           )}
           <InboxNotes unavailable={unavailable} outdated={outdated} truncated={truncated} />
+          {inbox.hasNextPage && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              Showing files from the first {checked} machines.
+              <Button variant="outline" size="sm" disabled={inbox.isFetchingNextPage} onClick={() => void inbox.fetchNextPage()}>
+                {inbox.isFetchingNextPage ? "Loading…" : "Load more machines"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -228,11 +232,8 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
             await Promise.all(selectedRows.map((row) => deleteInboxFile(row.machine.id, row.file.id)))
           },
           onSuccess: async () => {
-            const affected = new Set(selectedRows.map((row) => row.machine.id))
             setSelected(new Set())
-            await Promise.all(
-              [...affected].map((id) => queryClient.invalidateQueries({ queryKey: fileKeys.inbox(id) })),
-            )
+            await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
           },
         }}
       />
@@ -240,10 +241,6 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
   )
 }
 
-/** The server answers 409 machine_offline when the machine went away between lists. */
-const isOffline = (error: unknown) => error instanceof ApiError && error.code === "machine_offline"
-/** The machine runs a Paperboat that cannot list its Inbox yet. */
-const isOutdated = (error: unknown) => error instanceof ApiError && error.code === "machine_update_required"
 
 /** What the list can't say: machines whose Inbox is unavailable, and Inboxes longer than the list. */
 function InboxNotes({
@@ -251,12 +248,12 @@ function InboxNotes({
   outdated,
   truncated,
 }: {
-  unavailable: Machine[]
-  outdated: Machine[]
-  truncated: Machine[]
+  unavailable: { alias: string }[]
+  outdated: { alias: string }[]
+  truncated: { alias: string }[]
 }) {
   if (!unavailable.length && !outdated.length && !truncated.length) return null
-  const names = (machines: Machine[]) => machines.map((entry) => entry.alias).join(", ")
+  const names = (machines: { alias: string }[]) => machines.map((entry) => entry.alias).join(", ")
   return (
     <div className="flex flex-col gap-1 text-sm text-muted-foreground">
       {unavailable.length > 0 && <p>{names(unavailable)}: machine offline, Inbox unavailable.</p>}
@@ -362,7 +359,7 @@ function FileRow({
             mutation={{
               mutationFn: () => deleteInboxFile(machine.id, file.id),
               onSuccess: async () => {
-                await queryClient.invalidateQueries({ queryKey: fileKeys.inbox(machine.id) })
+                await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
                 toast.success(`${file.name} deleted`)
               },
             }}

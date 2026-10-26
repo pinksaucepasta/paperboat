@@ -76,7 +76,7 @@ export function SendFilesDialog({
         update(index, { state: "failed", error: (error as Error).message })
       }
     }
-    await queryClient.invalidateQueries({ queryKey: fileKeys.inbox(target.id) })
+    await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
   }
 
   // Files dropped on the page start as soon as there's a machine to take them.
@@ -218,7 +218,7 @@ export function ShareInboxFileDialog({
   file,
   onClose,
 }: {
-  machine: Machine
+  machine: Pick<Machine, "id" | "alias">
   file: InboxFile
   onClose: () => void
 }) {
@@ -288,7 +288,7 @@ export function SendToMachineDialog({
   file,
   onClose,
 }: {
-  machine: Machine
+  machine: Pick<Machine, "id" | "alias">
   file: InboxFile
   onClose: () => void
 }) {
@@ -300,7 +300,7 @@ export function SendToMachineDialog({
   const send = useMutation({
     mutationFn: () => sendToMachine(machine.id, file.id, target!.id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: fileKeys.inbox(target!.id) })
+      await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
       toast.success(`${file.name} sent to ${target!.alias}`)
       onClose()
     },
