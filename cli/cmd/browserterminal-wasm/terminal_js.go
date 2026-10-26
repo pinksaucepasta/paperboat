@@ -509,6 +509,9 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 // readBroadcast consumes one ordered edge fanout feed. Output is accepted only
 // after the machine sends its epoch key over the independently authenticated
 // inner TLS channel; every record must also carry the machine's Ed25519 proof.
+// broadcastWorkSlice bounds how long readBroadcast keeps the thread before the JS event loop runs again.
+const broadcastWorkSlice = 20 * time.Millisecond
+
 func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePublic ed25519.PublicKey, generation, checkpointSequence uint64) {
 	keys := make(map[[16]byte]browserbroadcast.Epoch)
 	indexes := make(map[[16]byte]uint64)
@@ -583,7 +586,15 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 		}
 		return nil
 	}
+	busySince := time.Now()
 	for {
+		// Go hands the thread back to JS only when every goroutine waits. A flood keeps this loop busy (each record is
+		// decrypted and verified), which starved the worker's timers that post events to the page: the page froze ~0.1 MB
+		// in (W9). Yield after a slice of work; records arriving meanwhile overflow the queue and resync as designed.
+		if time.Since(busySince) > broadcastWorkSlice {
+			time.Sleep(time.Millisecond)
+			busySince = time.Now()
+		}
 		select {
 		case <-ws.done:
 			return
