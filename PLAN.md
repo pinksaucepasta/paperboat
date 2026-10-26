@@ -1102,7 +1102,7 @@ preview flips edges under its URL and a tunnel's second route stalled.
 **Model.** One resource, `endpoints(id, kind preview|tunnel, account, owner_team, agent_id, access_mode, lifetime
 lease|persistent, lease_deadline, desired_state, generation)`, with `endpoint_routes` (hostname or generated name,
 protocol http|ws|tcp|tls|private_tcp, match, origin on the agent, access policy) and `endpoint_hostnames` (generated under
-the platform wildcard; custom domains for tunnels only). Kind is a policy preset, not a code path: preview = one http route,
+the platform wildcard; custom domains for tunnels and previews). Kind is a policy preset, not a code path: preview = one http route,
 lease with renewal, generated immutable name, deleted on expiry; tunnel = many routes, persistent, rename is a label,
 custom domains, connector rotation. `/v1/previews/*` and `/v1/tunnels/*` stay as thin facades over `endpoints`.
 
@@ -1206,7 +1206,7 @@ routes; public TCP listener publication and the browser authorize endpoint accep
 checks the frontend's grant (`zrok/controller/access.go`, `share.go`): our restricted path keeps both checks.
 
 **Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
-edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
+edge is ready; custom domains work for previews as for tunnels. Timing: engine work starts after Linux is done, before macOS.
 
 **CLI and host half (Lane F draft, docs only; code waits for Linux done and for Lane B's step 1 on the server).**
 
