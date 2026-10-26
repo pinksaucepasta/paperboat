@@ -412,13 +412,6 @@ func TestPublisherWriteContractFailuresAreCapturedAndRecover(t *testing.T) {
 				return writer.(*shortHeaderPublisher).closed
 			},
 		},
-		{
-			name: "write deadline reset",
-			open: func() io.WriteCloser { return &deadlineResetPublisher{closed: make(chan struct{})} },
-			closed: func(writer io.WriteCloser) <-chan struct{} {
-				return writer.(*deadlineResetPublisher).closed
-			},
-		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -586,20 +579,6 @@ func (p *shortHeaderPublisher) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 func (p *shortHeaderPublisher) Close() error { p.once.Do(func() { close(p.closed) }); return nil }
-
-type deadlineResetPublisher struct {
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (*deadlineResetPublisher) Write(data []byte) (int, error) { return len(data), nil }
-func (p *deadlineResetPublisher) SetWriteDeadline(deadline time.Time) error {
-	if deadline.IsZero() {
-		return errors.New("private deadline reset marker")
-	}
-	return nil
-}
-func (p *deadlineResetPublisher) Close() error { p.once.Do(func() { close(p.closed) }); return nil }
 
 type causePublisher struct {
 	failure error

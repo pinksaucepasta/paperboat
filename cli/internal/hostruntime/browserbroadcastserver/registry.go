@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -264,17 +263,11 @@ func clearPrivateKey(key ed25519.PrivateKey) {
 	}
 }
 
-func writeRecord(writer io.Writer, payload []byte) (writeErr error) {
+// writeRecord has no write deadline: a congested carrier blocks the publisher and the browsers lag in-band (the
+// fanout drops the backlog); a dead carrier resets the stream, which fails the write.
+func writeRecord(writer io.Writer, payload []byte) error {
 	if len(payload) == 0 || len(payload) > browserbroadcast.MaxRecordBytes {
 		return browserbroadcast.ErrInvalidRecord
-	}
-	if deadline, ok := writer.(interface{ SetWriteDeadline(time.Time) error }); ok {
-		if err := deadline.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			return err
-		}
-		defer func() {
-			writeErr = errors.Join(writeErr, deadline.SetWriteDeadline(time.Time{}))
-		}()
 	}
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
