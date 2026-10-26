@@ -59,7 +59,7 @@ for i in \$(seq 1 120); do
   sleep 1
 done
 sleep 10
-if [ -n "\$waited" ] && ! arrived unlimited.bin \$sha; then echo UNLIMITED_PAUSED; fi
+if [ -n "\$waited" ] && ! arrived unlimited.bin \$sha; then echo UNLIMITED_PAUSED; else echo UNLIMITED_NOT_PAUSED; \$C tail -c 300 /home/pbt/unlimited.log; fi
 sudo -n docker exec $CLIENT iptables -D \$block
 sudo -n docker exec $CLIENT ip6tables -D \$block 2>/dev/null || true
 for i in \$(seq 1 900); do
