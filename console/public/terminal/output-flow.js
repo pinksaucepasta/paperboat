@@ -1,5 +1,8 @@
 const OUTPUT_LIMIT = 512 << 10
-const RECORD_LIMIT = 256
+// A flood is thousands of small records a second; 8 batches of 32 events in flight is already 256 of them.
+// Bytes bound the memory (OUTPUT_LIMIT); the count only bounds per-record overhead.
+const RECORD_LIMIT = 8192
+const MAX_SCREENS = 4
 const RECORD_BYTES = 128 << 10
 const BATCH_BYTES = 64 << 10
 const SCREEN_BYTES = 4 << 20
@@ -32,10 +35,12 @@ export class TerminalOutputFlow {
     const bytes = output && event.data instanceof Uint8Array ? event.data.byteLength : 0
     const screenBytes = screen && event.screen instanceof Uint8Array ? event.screen.byteLength : 0
     if ((output && (!(event.data instanceof Uint8Array) || bytes > RECORD_BYTES)) ||
-        (screen && (!(event.screen instanceof Uint8Array) || screenBytes > SCREEN_BYTES || this.screens !== 0))) {
+        (screen && (!(event.screen instanceof Uint8Array) || screenBytes > SCREEN_BYTES || this.screens >= MAX_SCREENS))) {
       this.fail()
       return false
     }
+    // A screen restore replaces everything the page has not been sent yet.
+    if (screen) this.supersede()
     const previous = this.pending.at(-1)
     // Browser channel 2 carries geometry and must remain a parse barrier.
     const merge = previous && output && event.channel === 1 &&
@@ -81,6 +86,16 @@ export class TerminalOutputFlow {
     }
     this.scheduleNext()
     return true
+  }
+
+  supersede() {
+    for (const entry of this.pending) {
+      this.bytes -= entry.bytes
+      this.allocatedBytes -= entry.capacity
+      this.records--
+      if (entry.screen) this.screens--
+    }
+    this.pending = []
   }
 
   scheduleNext() {
