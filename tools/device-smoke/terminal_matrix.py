@@ -132,8 +132,33 @@ def iptables(*rule):
 
 # Rows. Each takes (args, sessions) and records its own result; sessions collects names to clean up.
 
+def pty_size(target, tty):
+    """The session's PTY size read from outside it (pb exec), so measuring never counts as activity."""
+    out = subprocess.run([str(PB), 'exec', target, '--', 'stty', '-F', tty, 'size'], capture_output=True, text=True, timeout=60).stdout
+    found = re.findall(r'(\d+) (\d+)', out)
+    return tuple(map(int, found[-1])) if found else None
+
+
+def settled_size(target, tty, want, seconds=10):
+    deadline, size = time.monotonic() + seconds, None
+    while time.monotonic() < deadline:
+        size = pty_size(target, tty)
+        if size == want:
+            break
+        time.sleep(0.5)
+    return size
+
+
+def session_tty(c):
+    out = c.run('tty')
+    found = re.findall(rb'(/dev/pts/\d+)', out)
+    return found[-1].decode() if found else None
+
+
 def two_clients(a, sessions):
-    """W1/W5: two windows of the same session: both see all output; the PTY size follows a rule."""
+    """W1/W5, F3-17: two windows of one session both see all output, and the PTY has the size of the window that
+    was last active (typing; tmux window-size latest): attaching does not take it and a resize from the other
+    window does not apply."""
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name, 30, 100)
     try:
@@ -149,13 +174,40 @@ def two_clients(a, sessions):
             except RuntimeError:
                 seen = False
             row('N1 two windows: output typed in one shows in the other', seen)
-            s1, s2 = c1.size(), c2.size()
-            row('N1 two windows: both report the same PTY size', s1 == s2, f'{s1} vs {s2}')
-            c1.resize(40, 120)
+            tty = session_tty(c2)  # typing in window 2: it is the latest active
+            size = settled_size(a.target, tty, (24, 80))
+            row('N1 two windows: the size is the window that typed last (window 2)', size == (24, 80), f'{size}')
+            c1.run('true')
+            size = settled_size(a.target, tty, (30, 100))
+            row('N1 two windows: typing moves the size to that window (window 1)', size == (30, 100), f'{size}')
+            c2.resize(20, 70)
             time.sleep(2)
-            after = c2.size()
-            row('N1 two windows: PTY size is one client\'s size (record policy)',
-                after in [(40, 120), (24, 80), (30, 100)], f'after window 1 → 40x120: {after}')
+            size = pty_size(a.target, tty)
+            row('N1 two windows: the other window resizing does not change it', size == (30, 100), f'{size}')
+            c1.resize(40, 120)
+            size = settled_size(a.target, tty, (40, 120))
+            row('N1 two windows: the active window resizing does', size == (40, 120), f'{size}')
+        finally:
+            c2.close()
+    finally:
+        c1.close()
+
+
+def reconnect_keeps_control(a, sessions):
+    """N15, F3-17: a window that reconnects does not take the size from the window in use."""
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name, 30, 100)
+    try:
+        _, s = selected(PB, a.target, name)
+        c2 = attach(a.target, s['id'], 24, 80)
+        try:
+            tty = session_tty(c1)  # window 1 is in use
+            before = settled_size(a.target, tty, (30, 100))
+            c2.close()
+            c2 = attach(a.target, s['id'], 24, 80)  # window 2 reconnects without typing
+            time.sleep(3)
+            after = pty_size(a.target, tty)
+            row('N15 a reconnecting window never takes control', before == (30, 100) and after == (30, 100), f'{before} -> {after}')
         finally:
             c2.close()
     finally:
@@ -632,7 +684,7 @@ def shared(a, sessions):
         c1.close()
 
 
-ROWS = {'two': two_clients, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
+ROWS = {'two': two_clients, 'reconnect': reconnect_keeps_control, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
         'server': control_plane_down, 'blackhole': black_hole, 'restart': restarts, 'fast': fast_output, 'resize': resize_storm,
         'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'latency': echo_latency, 'shared': shared}
 
