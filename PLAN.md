@@ -4986,3 +4986,6 @@ Public TCP from oracle PASS4120 bytes, status ready/logs2, cleaned; result tunne
 
 2026-10-27 | SDK lane final management checks | hp dev-785d6f16/server .117/edge .26.15: tunnel-manage and preview-manage PASS, including route mutations/rename and preview stop/delete/TTL; identities unchanged.
 Result tools/device-smoke/results/tunnel-preview-manage-785d6f16-edge15-20261027.json; all requested C126/public TCP/TLS/manage checks now green. Own resources removed; pair retained, Merger mgc126 untouched. M/W/custom-domain rerun skipped.
+
+2026-10-27 | Transfers lane first-exec | Not reproduced on dev-ad441296 (main 5724c3cc runtime), 0/20 fresh container -> install -> pair -> sleep 8 -> 3 execs on hp (4 parallel x5); exec1 ok in 20/20. 3 later execs (2nd/3rd on 2 targets) failed "could not reach" during batch 1 only, while I was revoking an earlier batch (peer-network churn); none in batches 2-5.
+Closed per user rule; the final re-check catches it if back. Throwaway records revoked by exact id, containers removed.
