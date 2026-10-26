@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -96,6 +97,9 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	}
 	if err != nil {
 		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
+			renewalBudget.hold(time.Now(), apiErr.RetryAfter)
+		}
 		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {
 			a.mu.Lock()
 			a.dropLocked()
@@ -200,6 +204,10 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			// A configuration applied elsewhere may expire sooner than the current schedule.
 			earlier(a.nextRefresh(nil, 0, unusable))
 		case <-timer.C:
+			if wait := renewalBudget.take(time.Now()); wait > 0 {
+				reset(wait)
+				continue
+			}
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.Refresh(request, client)
 			lastRefresh = time.Now()

@@ -11,7 +11,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -316,7 +318,7 @@ func (c *Client) responseError(resp *http.Response, path, requestSupportReferenc
 	if decodeErr != nil {
 		cause = errors.Join(cause, &ResponseDecodeError{Err: decodeErr})
 	}
-	return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: cause})
+	return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, RetryAfter: retryAfter(resp.Header), cause: cause})
 }
 
 func safeRequestID(value string) string {
@@ -336,4 +338,12 @@ func validManagedSSHHostKeySetID(value string) bool {
 	suffix, ok := strings.CutPrefix(value, "keyset_")
 	id, err := uuid.Parse(suffix)
 	return ok && err == nil && id.Version() == 4 && id.Variant() == uuid.RFC4122 && id.String() == suffix
+}
+
+func retryAfter(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(header.Get("Retry-After"))
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(min(seconds, 3600)) * time.Second
 }

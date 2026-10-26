@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // ErrUnauthenticated means the server rejected the reused credential. Callers
@@ -44,6 +45,8 @@ type APIError struct {
 	RequestID        string
 	SupportReference string
 	Details          map[string]any
+	// RetryAfter is the response's Retry-After in whole seconds, 0 when absent.
+	RetryAfter time.Duration
 	// Team is set by the CLI command that knows which team the request was about; it is never decoded
 	// from the response. A team_suspended refusal names it.
 	Team  string

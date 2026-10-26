@@ -4992,3 +4992,6 @@ Closed per user rule; the final re-check catches it if back. Throwaway records r
 
 2026-10-27 | SDK lane config command checks | config_commands.py adds main/error paths for C127–C138,C169,C172,C177,C179–C181, reusing local-access apply/restore and config-sync Git/file owners; manifest entries added.
 Device run waits for Server/builds verified renewal-fix build; hp pair remains stopped. Requires signed-in cleanup authority and unassigned config fixture; product failures will be reported, no product edits.
+
+2026-10-27 | Lane I renewal budget | 9e88775e: one renewal budget per engine process (1 per 12 s, burst 2; two processes per machine = 10/min, 429 Retry-After honoured); ends the 30→170/min ramps of the 3e01ffd6/49105093 builds (3e01ffd6 reverted in b7651a0a).
+FIRST SCALE ITEM: relay observations signed valid 15 s force a renewal ~every 12 s per engine; a 15 s budget left relays unusable. Fix (Lane B + I): long-lived relay map, clients judge relay health from their own connections (Tailscale DERP model), plus the push model (renew only on change).
