@@ -55,7 +55,9 @@ func supportMiddleware(service *supportreport.Service, logger *slog.Logger, next
 	})
 }
 func captureSupportFailure(r *http.Request, status int, code string, stack *sentry.Stacktrace, causes ...error) {
-	if status < 500 {
+	// A client that cancelled its own request (a timeout, a closed connection) did not meet a server failure: no
+	// report, no error log. The 503 written after the cancel goes nowhere.
+	if status < 500 || errors.Is(r.Context().Err(), context.Canceled) {
 		return
 	}
 	sc, _ := r.Context().Value(supportContextKey{}).(supportContext)

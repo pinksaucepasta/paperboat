@@ -78,3 +78,22 @@ func TestViewerPolicyFailureLogsActualCauseSafely(t *testing.T) {
 		t.Fatal("viewer policy failure exposed arbitrary error text")
 	}
 }
+
+// A request its client cancelled is not a server failure: the 503 written after the cancel produces no report and
+// no error log (57 "context canceled" peer-network 503s after one rollout).
+func TestClientCancelledRequestProducesNoFailureReport(t *testing.T) {
+	request, logs, reference := diagnosticRequest("/v1/e2ee/pending-endpoints")
+	ctx, cancel := context.WithCancel(request.Context())
+	cancel()
+	request = request.WithContext(context.WithValue(ctx, authContextKey{}, principal{
+		User:   auth.User{ID: "account_fault_01"},
+		Client: &auth.ClientPrincipal{SessionID: "cli_fault_01"},
+	}))
+	response := httptest.NewRecorder()
+	pendingEndpoints(pendingEndpointReaderFunc(func(context.Context, string, time.Time) ([]peeridentity.EndpointEnrollmentRequest, error) {
+		return nil, context.Canceled
+	})).ServeHTTP(response, request)
+	if strings.Contains(logs.String(), reference) {
+		t.Fatalf("a client-cancelled request was logged as a server failure: %s", logs.String())
+	}
+}
