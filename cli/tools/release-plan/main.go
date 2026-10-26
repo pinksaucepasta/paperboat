@@ -61,7 +61,7 @@ func runManifest(args []string) error {
 	version := fs.String("version", "", "release version")
 	commit := fs.String("source-commit", "", "lowercase source commit SHA")
 	toolchain := fs.String("toolchain", "", "exact Go toolchain version")
-	artifacts := fs.String("artifacts", "", "absolute directory containing the five release assets")
+	artifacts := fs.String("artifacts", "", "absolute directory containing the three release assets")
 	output := fs.String("output", "", "absolute output path; stdout when omitted")
 	if err := parse(fs, args, "release-plan manifest -version VERSION -source-commit SHA -toolchain goVERSION -artifacts DIR [-output FILE]"); err != nil {
 		return err

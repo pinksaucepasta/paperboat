@@ -57,26 +57,3 @@ func TestShellInstallerParses(t *testing.T) {
 		t.Fatalf("sh -n install.sh: %v\n%s", err, output)
 	}
 }
-
-func TestWindowsInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
-	body := installerSource(t, "install.ps1")
-	for _, required := range []string{
-		"@paperboat_product_windows_amd64_sha256@", "'--proto-redir' '=https'", "releases/download", "product length mismatch",
-		"product digest mismatch", "invoke-paperboatinstall $download", "result.data.executable", "[io.path]::ispathrooted",
-		"setsecuritydescriptorsddlform", "--enrollment-token-file", "resetresult.data.executable", "$pairargs = @('pair'", "invoke-paperboat $installedpb $pairargs", "finally", "remove-item -literalpath $dir -recurse",
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("Windows installer is missing %q", required)
-		}
-	}
-	for _, removed := range []string{"__install", "--source", "--skip", "--fresh", "invoke-freshpairrollback", "start-isolatedinstallerprocess", "-verb runas", "pb-bootstrap", "paperboat_bootstrap", "--tuf-url"} {
-		if strings.Contains(body, removed) {
-			t.Fatalf("Windows installer retains obsolete behavior %q", removed)
-		}
-	}
-	requireInOrder(t, body, "product length mismatch", "product digest mismatch", "invoke-paperboatinstall $download")
-	requireInOrder(t, body, "$resetraw = & $download 'reset'", "if ($resume)", "invoke-paperboatinstall $download")
-	if strings.Index(body, "invoke-paperboat $installedpb $pairargs") < strings.Index(body, "result.data.executable") {
-		t.Fatal("Windows installer pairs before validating the returned installed executable")
-	}
-}

@@ -55,7 +55,7 @@ cross-build: verify-toolchain
 
 release-binaries: verify-toolchain
 	@mkdir -p dist
-	@rm -f dist/pb-linux-amd64 dist/pb-linux-arm64 dist/pb-windows-amd64.exe dist/pb-windows-arm64.exe dist/pb-darwin-arm64.pkg
+	@rm -f dist/pb-linux-amd64 dist/pb-linux-arm64
 	@./tools/build-release-asset.sh --platform linux --architecture amd64 --output dist/pb-linux-amd64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
 	@./tools/build-release-asset.sh --platform linux --architecture arm64 --output dist/pb-linux-arm64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
 
@@ -63,7 +63,7 @@ release-macos: verify-toolchain
 	@test "$$(uname -s)" = Darwin || { echo 'release-macos requires macOS' >&2; exit 1; }
 	@test "$$(uname -m)" = arm64 || { echo 'release-macos requires an Apple Silicon runner' >&2; exit 1; }
 	@mkdir -p dist
-	@rm -f dist/pb-darwin-arm64 dist/pb-darwin-arm64.pkg
+	@rm -f dist/pb-darwin-arm64
 	@./tools/build-release-asset.sh --platform darwin --architecture arm64 --output dist/pb-darwin-arm64 --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
 	@codesign --force --sign - --timestamp=none dist/pb-darwin-arm64
 	@codesign --verify --strict dist/pb-darwin-arm64
@@ -155,7 +155,6 @@ preflight:
 	@$(MAKE) check
 	@$(MAKE) race
 	@$(MAKE) cross-build
-	@./packaging/windows/scripts/validate-release-pipeline.sh
 	@command -v actionlint >/dev/null 2>&1 || { echo 'actionlint is required for preflight; install it before running make preflight' >&2; exit 1; }
 	@actionlint .github/workflows/*.yml
 
