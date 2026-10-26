@@ -79,8 +79,8 @@ func routeAddCommand() *cobra.Command {
 		if !validTunnelCLIName(name, 80) {
 			return errors.New("route name is invalid")
 		}
-		if protocol != "http" && protocol != "tcp" && protocol != "tcp_private" {
-			return errors.New("protocol must be http, tcp, or tcp_private")
+		if protocol != "http" && protocol != "tcp" && protocol != "tls" && protocol != "tcp_private" {
+			return errors.New("protocol must be http, tcp, tls, or tcp_private")
 		}
 		pathPrefix, _ := command.Flags().GetString("path")
 		var pathValue *string
@@ -126,8 +126,9 @@ func routeAddCommand() *cobra.Command {
 		if protocol == "tcp_private" && (host != "" || pathValue != nil || scheme != "tcp") {
 			return errors.New("tcp_private routes require tcp:// origin without domain or path matching")
 		}
-		if protocol == "tcp" && (host != "" || pathValue != nil || scheme != "tcp") {
-			return errors.New("public tcp routes use the tunnel managed hostname and require tcp:// origin without --domain or --path")
+		// A TLS passthrough route is public TCP whose edge picks it by SNI: same managed hostname rule.
+		if (protocol == "tcp" || protocol == "tls") && (host != "" || pathValue != nil || scheme != "tcp") {
+			return errors.New("public tcp and tls routes use the tunnel managed hostname and require tcp:// origin without --domain or --path")
 		}
 		if protocol == "http" && scheme == "tcp" {
 			return errors.New("HTTP routes cannot target a tcp origin")
@@ -152,12 +153,12 @@ func routeAddCommand() *cobra.Command {
 		// Public routes answer on the tunnel's own hostname unless --domain names
 		// another; the edge cannot serve a public catch-all. Private HTTP routes
 		// keep catch_all.
-		if protocol == "tcp" || protocol == "http" && host == "" {
+		if protocol == "tcp" || protocol == "tls" || protocol == "http" && host == "" {
 			tunnel, getErr := c.GetTunnelV1(ctx, tunnelID)
 			if getErr != nil {
 				return getErr
 			}
-			if protocol == "tcp" || tunnel.AccessMode == "public" {
+			if protocol == "tcp" || protocol == "tls" || tunnel.AccessMode == "public" {
 				if tunnel.StableEndpoint == "" {
 					return fmt.Errorf("public %s routes require a verified customer domain; list routes with `pb tunnel route list %s`, add a domain with `pb tunnel domain add %s HOSTNAME --route ROUTE_ID`, then retry", strings.ToUpper(protocol), tunnelID, tunnelID)
 				}
@@ -186,7 +187,7 @@ func routeAddCommand() *cobra.Command {
 	}
 	command.Flags().String("domain", "", "exact hostname or one-label wildcard match")
 	command.Flags().String("path", "", "HTTP path prefix, optionally ending in *")
-	command.Flags().String("protocol", "http", "route protocol (http, tcp, or tcp_private)")
+	command.Flags().String("protocol", "http", "route protocol (http, tcp, tls passthrough, or tcp_private)")
 	tunnelRouteOriginFlags(command, true)
 	command.Flags().Int32("priority", 0, "route priority")
 	command.Flags().Duration("connect-timeout", 10*time.Second, "origin connect timeout")
