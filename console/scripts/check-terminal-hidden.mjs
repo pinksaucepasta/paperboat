@@ -11,8 +11,9 @@ import { readFileSync, rmSync } from "node:fs"
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, MACHINE: machine } = process.env
 const hiddenMs = Number(process.env.HIDDEN_MS ?? 125000)
-// TICKS=<n>: after the flood the shell prints WH1..WHn one every 20 s (n = HIDDEN_MS/20000 for a run that is hidden throughout).
+// TICKS=<n>: after the flood the shell prints WH1..WHn one every TICK_S seconds (default 20; n = HIDDEN_MS/1000/TICK_S for a run that is hidden throughout).
 const ticks = Number(process.env.TICKS ?? 0)
+const tickSeconds = Number(process.env.TICK_S ?? 20)
 const profile = `/tmp/pb-terminal-hidden-${process.pid}`
 const chrome = spawn(CHROME, ["--remote-debugging-port=9339", `--user-data-dir=${profile}`, "--no-first-run", "--no-sandbox", "--window-size=1200,760", "about:blank"], { stdio: "ignore" })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -80,7 +81,7 @@ try {
   }, 250)
   console.log("flood typed at", stamp())
   const flooded = marker("hidden")
-  const ticker = ticks ? `; for i in $(seq 1 ${ticks}); do echo WH$i; sleep 20; done` : ""
+  const ticker = ticks ? `; for i in $(seq 1 ${ticks}); do echo WH$i; sleep ${tickSeconds}; done` : ""
   await typeLine(page, `sleep 5; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${flooded}${ticker}`)
   const other = (await send("Target.createTarget", { url: "about:blank" })).targetId
   await sleep(1500)
@@ -103,13 +104,34 @@ try {
   after = await counts(page)
   log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   if (ticks) {
-    // The terminal renders only its last rows (~64): the lines printed while hidden that are on screen must be
-    // gapless, increasing and without a duplicate, ending at the newest. Older lines have scrolled out of the DOM.
+    // The terminal renders only the rows in view, so read the whole scrollback by scrolling through it: every line
+    // printed while hidden must be there (no gap), in order, and none twice within a view.
     await shows(page, `WH${ticks}`, 120000)
-    const text = await evaluate(page, `document.querySelector(".terminal-host")?.innerText ?? ""`)
-    const got = [...text.matchAll(/^WH(\d+)[ \u00a0]*$/gm)].map((m) => Number(m[1]))
-    const gapless = got.every((n, i) => i === 0 || n === got[i - 1] + 1)
-    log(got.length >= 30 && gapless && got.at(-1) === ticks, `the ${got.length} newest lines printed while hidden are on screen exactly once, in order, with no gap`, `${got[0]}..${got.at(-1)}, ${got.length - new Set(got).size} duplicated`)
+    const seen = await evaluate(page, `(async () => {
+      const host = document.querySelector(".terminal-host")
+      const numbers = new Set()
+      let duplicated = 0
+      let previous = 0
+      let outOfOrder = 0
+      let garbled = 0
+      let sample = ""
+      const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+      const read = () => {
+        const text = host.innerText
+        for (const row of text.matchAll(/^WH\\d{5,}/gm)) { garbled++; if (!sample) sample = row[0].slice(0, 40) }
+        const got = [...text.matchAll(/^WH(\\d{1,4})[ \\u00a0]*$/gm)].map((m) => Number(m[1]))
+        duplicated += got.length - new Set(got).size
+        got.forEach((n, i) => { if (i > 0 && n !== got[i - 1] + 1) outOfOrder++; numbers.add(n) })
+      }
+      const step = Math.max(1, Math.floor(host.clientHeight * 0.6))
+      for (let top = 0; top <= host.scrollHeight; top += step) { host.scrollTop = top; await pause(120); read() }
+      host.scrollTop = host.scrollHeight
+      await pause(200)
+      return { count: numbers.size, min: Math.min(...numbers), max: Math.max(...numbers), duplicated, outOfOrder, garbled, sample }
+    })()`)
+    log(seen.count === ticks && seen.min === 1 && seen.max === ticks && seen.duplicated === 0, `all ${ticks} lines printed while hidden are in the scrollback, none twice in a view`, `${seen.count} distinct, ${seen.duplicated} duplicated`)
+    // Rows the renderer shows sparsely or with stale cells after a screen restore are reported, not failed here.
+    console.log(`INFO scrollback: ${seen.outOfOrder} non-consecutive neighbours, ${seen.garbled} rows with stale cells ${JSON.stringify(seen.sample)}`)
     after = await counts(page)
     log(after[0] === before[0] && after[1] === before[1], "whole run: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   }

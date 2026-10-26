@@ -31,10 +31,10 @@ await p.getByRole("button", { name: "Add", exact: true }).first().click()
 await p.locator("#hostname-service").fill("3000")
 await p.getByRole("button", { name: "Add hostname" }).click()
 const alert = p.getByRole("alert").filter({ hasText: "public TCP" })
-log(await alert.isVisible({ timeout: 15000 }).catch(() => false), "route add: the server's sentence is shown", "alert")
+log(await alert.waitFor({ timeout: 15000 }).then(() => true, () => false), "route add: the server's sentence is shown", "alert")
 log(((await alert.innerText().catch(() => "")) || "").includes("run your own tunnel edge"), "...with its self-host option in the words")
-log((await alert.getByRole("link", { name: "Upgrade" }).getAttribute("href").catch(() => null)) === "/billing", "...an Upgrade action to Billing")
-log((await alert.getByRole("link", { name: "Use your own edge" }).getAttribute("href").catch(() => null)) === "/network", "...and 'Use your own edge'")
+log((await alert.locator('a:has-text("Upgrade")').first().getAttribute("href").catch(() => null)) === "/billing", "...an Upgrade action to Billing")
+log((await alert.locator('a:has-text("Use your own edge")').first().getAttribute("href").catch(() => null)) === "/network", "...and 'Use your own edge'")
 await p.screenshot({ path: "/tmp/public-tcp-limit-route.png" })
 
 // Billing overview: the line from the server's numbers (stubbed workspace billing with limits.public_tcp).
