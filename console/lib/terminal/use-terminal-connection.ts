@@ -27,6 +27,7 @@ import {
   type MobileKey,
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
+import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 
 /**
@@ -161,9 +162,12 @@ export function useTerminalConnection({
   )
   const [notice, setNotice] = useState("")
   const [role, setRole] = useState<TerminalRole>(session.role)
-  const [catchingUp, setCatchingUp] = useState(false)
   const [mobileModifiers, setMobileModifiers] = useState<MobileModifiers>(noMobileModifiers)
   const [ready, setReady] = useState(false)
+  // Transports opened after the first one; checks read it to prove a tab switch cost none.
+  const [reconnects, setReconnects] = useState(0)
+  // Output frames the host sent again that were already on screen.
+  const [replays, setReplays] = useState(0)
   const [connectedEdge, setConnectedEdge] = useState("")
   // The window title the shell sets (OSC 0/2), seen as it happens; the server's copy lags.
   const [title, setTitle] = useState("")
@@ -196,19 +200,13 @@ export function useTerminalConnection({
   const pendingAckRef = useRef<{ connectionID: string; next: string; sending: boolean } | null>(null)
   const displaySequenceRef = useRef<string | null>(null)
   const resizeControlRef = useRef(false)
-  const syncingRef = useRef(false)
-  const catchingUpRef = useRef(false)
-  const visibilityEpochRef = useRef(0)
-  const catchupBoundaryRef = useRef<string | null>(null)
-  const catchupRequestRef = useRef("")
-  const finishVisibilitySyncRef = useRef<(() => void) | null>(null)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
-  const catchupTimerRef = useRef<number | undefined>(undefined)
   const resizeTimerRef = useRef<number | undefined>(undefined)
   const ticketAbortRef = useRef<AbortController | null>(null)
   const retryDelayRef = useRef(1000)
   const disposedRef = useRef(false)
   const busyRef = useRef(false)
+  const startedOnceRef = useRef(false)
   const startConnectionRef = useRef<((retry?: boolean) => Promise<void>) | null>(null)
 
   // Polled session details (title, participants) must not restart the terminal.
@@ -226,7 +224,7 @@ export function useTerminalConnection({
   }, [])
 
   const inputLocked = () =>
-    filePasteBusyRef.current || phaseRef.current !== "attached" || catchingUpRef.current || roleRef.current === "viewer"
+    filePasteBusyRef.current || phaseRef.current !== "attached" || roleRef.current === "viewer"
 
   const syncInputLock = useCallback(() => {
     const input = terminalRef.current?.element.querySelector("textarea")
@@ -241,8 +239,7 @@ export function useTerminalConnection({
         !browser ||
         !connectionID ||
         roleRef.current !== "owner" ||
-        phaseRef.current !== "attached" ||
-        catchingUpRef.current
+        phaseRef.current !== "attached"
       )
         return null
       return { api: browser, connectionID }
@@ -259,15 +256,6 @@ export function useTerminalConnection({
       phaseRef.current = next
       setPhase(next)
       if (next !== "attached") setConnectedEdge("")
-      syncInputLock()
-    },
-    [syncInputLock],
-  )
-
-  const setCatchupValue = useCallback(
-    (value: boolean) => {
-      catchingUpRef.current = value
-      setCatchingUp(value)
       syncInputLock()
     },
     [syncInputLock],
@@ -301,7 +289,7 @@ export function useTerminalConnection({
         showFilePasteNotice(filePasteMessage("owner_only"))
         return
       }
-      if (phaseRef.current !== "attached" || catchingUpRef.current || !connectionIDRef.current) {
+      if (phaseRef.current !== "attached" || !connectionIDRef.current) {
         showFilePasteNotice(filePasteMessage("not_connected"))
         return
       }
@@ -320,7 +308,7 @@ export function useTerminalConnection({
           )
           return
         }
-        if (phaseRef.current !== "attached" || catchingUpRef.current || !connectionIDRef.current) {
+        if (phaseRef.current !== "attached" || !connectionIDRef.current) {
           showFilePasteNotice(
             "Files uploaded, but the terminal disconnected before their paths could be pasted. Find them in Paperboat Inbox.",
           )
@@ -380,15 +368,19 @@ export function useTerminalConnection({
     }
   }, [setFilePasteBusy, showFilePasteNotice])
 
-  const scheduleReconnect = useCallback(() => {
-    setPhaseValue("reconnecting")
-    const wait = retryDelayRef.current
-    retryDelayRef.current = Math.min(wait * 2, 15000)
-    window.clearTimeout(reconnectTimerRef.current)
-    reconnectTimerRef.current = window.setTimeout(() => {
-      void startConnectionRef.current?.(true)
-    }, wait)
-  }, [setPhaseValue])
+  // `waitMs` is the server's Retry-After; otherwise the backoff doubles up to 15 s.
+  const scheduleReconnect = useCallback(
+    (waitMs?: number) => {
+      setPhaseValue("reconnecting")
+      const wait = waitMs ?? retryDelayRef.current
+      if (waitMs === undefined) retryDelayRef.current = Math.min(wait * 2, 15000)
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = window.setTimeout(() => {
+        void startConnectionRef.current?.(true)
+      }, wait)
+    },
+    [setPhaseValue],
+  )
 
   // Renderer: one Ghostty core and wterm per session.
   useEffect(() => {
@@ -408,7 +400,6 @@ export function useTerminalConnection({
       if (
         roleRef.current === "viewer" ||
         phaseRef.current !== "attached" ||
-        catchingUpRef.current ||
         !connectionIDRef.current ||
         !apiRef.current
       ) {
@@ -441,72 +432,6 @@ export function useTerminalConnection({
         terminal.resize(columns, rows)
       } finally {
         fittingRef.current = false
-      }
-    }
-    const onVisibility = async () => {
-      const epoch = ++visibilityEpochRef.current
-      if (document.hidden) {
-        syncingRef.current = false
-        catchupRequestRef.current = ""
-        catchupBoundaryRef.current = null
-        finishVisibilitySyncRef.current = null
-        window.clearTimeout(catchupTimerRef.current)
-        return
-      }
-      if (phaseRef.current !== "attached" || !connectionIDRef.current || !apiRef.current) return
-      syncingRef.current = true
-      setCatchupValue(true)
-      window.clearTimeout(catchupTimerRef.current)
-      catchupTimerRef.current = window.setTimeout(() => {
-        if (visibilityEpochRef.current !== epoch || !syncingRef.current) return
-        syncingRef.current = false
-        setCatchupValue(false)
-        const connectionID = connectionIDRef.current
-        connectionIDRef.current = ""
-        if (connectionID) apiRef.current?.leave(connectionID)
-        scheduleReconnect()
-      }, 10000)
-      finishVisibilitySyncRef.current = () => {
-        const boundary = catchupBoundaryRef.current
-        if (!boundary || compareSequence(ackSequenceRef.current, boundary) < 0) return
-        finishVisibilitySyncRef.current = null
-        catchupBoundaryRef.current = null
-        // Keep the recovery deadline active until the paint barrier completes; occluded
-        // windows can suspend animation frames without setting `hidden`.
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            if (visibilityEpochRef.current !== epoch || document.hidden) return
-            syncingRef.current = false
-            window.clearTimeout(catchupTimerRef.current)
-            setCatchupValue(false)
-          }),
-        )
-      }
-      try {
-        const result = await apiRef.current.cursor(connectionIDRef.current)
-        if (visibilityEpochRef.current !== epoch || disposed || !syncingRef.current) return
-        if ("request_id" in result) {
-          catchupRequestRef.current = result.request_id
-          return
-        }
-      } catch {
-        // The recovery below handles a failed cursor request.
-      }
-      syncingRef.current = false
-      window.clearTimeout(catchupTimerRef.current)
-      setCatchupValue(false)
-      setError("The terminal could not synchronize its screen. Reconnecting.")
-      const connectionID = connectionIDRef.current
-      connectionIDRef.current = ""
-      if (connectionID) apiRef.current?.leave(connectionID)
-      scheduleReconnect()
-    }
-    const onPageHide = () => {
-      if (!document.hidden) {
-        visibilityEpochRef.current++
-        syncingRef.current = false
-        finishVisibilitySyncRef.current = null
-        window.clearTimeout(catchupTimerRef.current)
       }
     }
     const onPasteCapture = (event: ClipboardEvent) => {
@@ -567,7 +492,7 @@ export function useTerminalConnection({
               setNotice("Terminal input is paused while files upload.")
               return
             }
-            if (catchingUpRef.current || phaseRef.current !== "attached") return
+            if (phaseRef.current !== "attached") return
             const receiptInsertion = insertingReceiptRef.current !== null
             const modifiers = receiptInsertion ? noMobileModifiers : mobileModifiersRef.current
             if (!receiptInsertion && (modifiers.ctrl || modifiers.alt)) {
@@ -619,9 +544,6 @@ export function useTerminalConnection({
           if (resizeControlRef.current && roleRef.current === "owner" && phaseRef.current === "attached") fit()
         })
         observer.observe(host)
-        document.addEventListener("visibilitychange", onVisibility)
-        window.addEventListener("pagehide", onPageHide)
-        window.addEventListener("pageshow", onVisibility)
         host.addEventListener("paste", onPasteCapture, true)
         host.addEventListener("dragenter", onDragEnter, true)
         host.addEventListener("dragover", onDragOver, true)
@@ -644,23 +566,19 @@ export function useTerminalConnection({
       disposed = true
       setReady(false)
       observer?.disconnect()
-      document.removeEventListener("visibilitychange", onVisibility)
-      window.removeEventListener("pagehide", onPageHide)
-      window.removeEventListener("pageshow", onVisibility)
       host.removeEventListener("paste", onPasteCapture, true)
       host.removeEventListener("dragenter", onDragEnter, true)
       host.removeEventListener("dragover", onDragOver, true)
       host.removeEventListener("dragleave", onDragLeave, true)
       host.removeEventListener("drop", onDrop, true)
       window.clearTimeout(resizeTimerRef.current)
-      window.clearTimeout(catchupTimerRef.current)
       terminal?.destroy()
       core?.dispose()
       terminalRef.current = null
       coreRef.current = null
       fitRef.current = null
     }
-  }, [sessionID, hostRef, uploadFiles, scheduleReconnect, setPhaseValue, setCatchupValue, showFilePasteNotice])
+  }, [sessionID, hostRef, uploadFiles, setPhaseValue, showFilePasteNotice])
 
   const acknowledge = useCallback((connectionID: string, next: string) => {
     if (
@@ -686,7 +604,6 @@ export function useTerminalConnection({
           checkResult(await apiRef.current!.ack(connectionID, cursor))
           if (connectionIDRef.current !== connectionID) return
           if (compareSequence(cursor, ackSequenceRef.current) > 0) ackSequenceRef.current = normalizeSequence(cursor)
-          finishVisibilitySyncRef.current?.()
           if (active.next === cursor) return
         }
       } catch {
@@ -725,75 +642,29 @@ export function useTerminalConnection({
         }
         return
       }
-      if (event.type === "cursor" && event.request_id === catchupRequestRef.current && event.latest_sequence) {
-        catchupBoundaryRef.current = normalizeSequence(event.latest_sequence)
-        catchupRequestRef.current = ""
-        finishVisibilitySyncRef.current?.()
-        return
-      }
-      if (event.type === "cursor-error" && event.request_id === catchupRequestRef.current) {
-        catchupRequestRef.current = ""
-        syncingRef.current = false
-        setCatchupValue(false)
-        setError("The terminal could not synchronize its screen. Reconnecting.")
-        dropConnection(connectionID)
-        scheduleReconnect()
-        return
-      }
       if (event.type === "state") {
         if (event.state === "connecting") {
           setPhaseValue("connecting")
           return
         }
-        const resetSync = () => {
-          connectionIDRef.current = ""
-          syncingRef.current = false
-          setCatchupValue(false)
-          catchupRequestRef.current = ""
-          catchupBoundaryRef.current = null
-        }
-        // The edge refuses a terminal at the bandwidth cap (and ends an open one) with this code.
-        if (event.code === "bandwidth_quota_exhausted") {
-          resetSync()
-          window.clearTimeout(reconnectTimerRef.current)
-          setPhaseValue("quota")
-          return
-        }
-        if (event.state === "reconnecting") {
-          resetSync()
-          setError("")
+        if (!["reconnecting", "denied", "closed", "transport-error"].includes(event.state ?? "")) return
+        // Every end of a connection is one typed outcome (close-codes.ts): the words and the next step.
+        const outcome = terminalCloseCodes[workerCloseCode(event) ?? "edge_unavailable"]
+        connectionIDRef.current = ""
+        if (outcome.phase === "reconnect") {
+          setError(outcome.message)
           scheduleReconnect()
           return
         }
-        if (event.state === "denied") {
-          void filePasteUploaderRef.current?.cancel()
-          resetSync()
-          setPhaseValue("denied")
-          setError(
-            accessMethod === "code"
-              ? "Your code has stopped working. It may have expired or been replaced; ask for a new one."
-              : event.message || "Your access to this terminal was removed. Ask its owner to restore it.",
-          )
-          return
-        }
-        if (event.state === "closed") {
-          void filePasteUploaderRef.current?.cancel()
-          resetSync()
-          setPhaseValue("closed")
-          setError(event.message || "This terminal has closed.")
-          return
-        }
-        if (event.state === "transport-error") {
-          resetSync()
-          if (event.code === "connection_failed") {
-            setError("The connection was interrupted. Reconnecting.")
-            scheduleReconnect()
-            return
-          }
-          setPhaseValue("transport-error")
-          setError(event.message || "The encrypted connection failed. You can retry.")
-          return
-        }
+        window.clearTimeout(reconnectTimerRef.current)
+        if (outcome.phase !== "transport-error") void filePasteUploaderRef.current?.cancel()
+        setPhaseValue(outcome.phase)
+        setError(
+          outcome.phase === "denied" && accessMethod === "code"
+            ? "Your code has stopped working. It may have expired or been replaced; ask for a new one."
+            : outcome.message,
+        )
+        return
       }
       if (event.type === "attached") {
         const core = coreRef.current
@@ -826,14 +697,6 @@ export function useTerminalConnection({
         resizeControlRef.current = nextRole === "owner" && !!event.first_attachment
         const screenSequence = normalizeSequence(event.screen_sequence)
         try {
-          // A fresh authenticated checkpoint supersedes any cursor request from the prior
-          // connection; clear that synchronization before accepting input from the new screen.
-          syncingRef.current = false
-          catchupRequestRef.current = ""
-          catchupBoundaryRef.current = null
-          finishVisibilitySyncRef.current = null
-          window.clearTimeout(catchupTimerRef.current)
-          setCatchupValue(true)
           // The host's screen is authoritative on every attach. Reset through wterm so partial
           // escape sequences and stale scrollback cannot leak across attachments.
           writeTerminal("\x1bc")
@@ -843,7 +706,6 @@ export function useTerminalConnection({
           writeTerminal(event.screen)
           displaySequenceRef.current = screenSequence
           ackSequenceRef.current = screenSequence
-          if (!document.hidden) setCatchupValue(false)
         } catch {
           setPhaseValue("transport-error")
           setError("The terminal screen could not be restored. Reconnect and try again.")
@@ -860,6 +722,7 @@ export function useTerminalConnection({
         const next = normalizeSequence(event.next_sequence)
         const current = displaySequenceRef.current
         if (current !== null && compareSequence(next, current) <= 0) {
+          setReplays((count) => count + 1)
           acknowledge(connectionID, current)
           return
         }
@@ -896,7 +759,6 @@ export function useTerminalConnection({
       dropConnection,
       scheduleReconnect,
       setPhaseValue,
-      setCatchupValue,
       syncInputLock,
       writeTerminal,
     ],
@@ -984,6 +846,8 @@ export function useTerminalConnection({
         }
         let startedID = ""
         ticketEdgeRef.current = ticket.edge_node_id
+        if (startedOnceRef.current) setReconnects((count) => count + 1)
+        startedOnceRef.current = true
         const started = await browser.connect(identity.id, config, (event) => handleEvent(startedID, pin, event))
         if (!started.id) throw new Error(started.message || "The encrypted connection could not be started.")
         startedID = started.id
@@ -996,21 +860,23 @@ export function useTerminalConnection({
       } catch (reason) {
         if (identityID) apiRef.current?.discardIdentity(identityID)
         if (disposedRef.current) return
-        setError(apiErrorMessage(reason))
-        if (reason instanceof ApiError && reason.code === "bandwidth_quota_exhausted") {
-          setPhaseValue("quota")
-        } else if (reason instanceof ApiError && reason.code === "browser_terminal_limit_reached") {
-          // Retrying can't help until a browser terminal is closed or the plan changes.
-          setLimit(reason)
-          setPhaseValue("limit")
-        } else if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) {
-          if (accessMethod === "code")
-            setError("Your code has stopped working. It may have expired or been replaced; ask for a new one.")
-          setPhaseValue("denied")
+        const code = ticketCloseCode(reason)
+        const outcome = code && terminalCloseCodes[code]
+        if (outcome) {
+          setError(outcome.message)
+          if (outcome.phase === "reconnect") {
+            scheduleReconnect(outcome.silent ? 0 : reason instanceof ApiError ? reason.retryAfterMs : undefined)
+          } else {
+            if (code === "limit") setLimit(reason as ApiError)
+            setPhaseValue(outcome.phase)
+            if (outcome.phase === "denied" && accessMethod === "code")
+              setError("Your code has stopped working. It may have expired or been replaced; ask for a new one.")
+          }
         } else if (retry) {
           setError("The terminal service could not be reached. Retrying with a fresh key and ticket.")
           scheduleReconnect()
         } else {
+          setError(apiErrorMessage(reason))
           setPhaseValue("transport-error")
         }
       } finally {
@@ -1090,7 +956,8 @@ export function useTerminalConnection({
   return {
     phase,
     role,
-    catchingUp,
+    reconnects,
+    replays,
     error,
     notice,
     connectedEdge,

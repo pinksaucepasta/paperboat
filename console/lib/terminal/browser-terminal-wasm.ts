@@ -12,11 +12,8 @@ export type BrowserTerminalEvent = {
   rows?: number
   first_attachment?: boolean
   from_sequence?: string
-  earliest_sequence?: string
-  latest_sequence?: string
   start_sequence?: string
   next_sequence?: string
-  request_id?: string
   data?: Uint8Array
   channel?: number
   screen?: Uint8Array
@@ -39,7 +36,6 @@ export type BrowserTerminalAPI = {
   sendInput(id: string, data: Uint8Array): Promise<void | { error: string; message: string }>
   resize(id: string, columns: number, rows: number): Promise<void | { error: string; message: string }>
   ack(id: string, nextSequence: string): Promise<void | { error: string; message: string }>
-  cursor(id: string): Promise<{ request_id: string } | { error: string; message: string }>
   hashFile(file: File): Promise<{ sha256: string } | { error: string; message: string }>
   fileRequest(
     id: string,
@@ -58,6 +54,19 @@ export type BrowserTerminalAPI = {
 // Keep private keys, TLS, broadcast verification and socket congestion off the UI
 // thread. Only authenticated terminal bytes cross this boundary.
 let runtimePromise: Promise<BrowserTerminalAPI> | undefined
+
+// When the page last woke from a freeze (Page Lifecycle `resume`).
+let resumedAt = 0
+if (typeof document !== "undefined") document.addEventListener("resume", () => (resumedAt = performance.now()))
+
+function nextTask(run: () => void) {
+  const { port1, port2 } = new MessageChannel()
+  port1.onmessage = () => {
+    port1.close()
+    run()
+  }
+  port2.postMessage(null)
+}
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
   const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261022-inspector1`, {
@@ -108,7 +117,19 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
       return Promise.reject(new Error("Terminal input is congested. Wait before sending more input."))
     const id = ++sequence
     return new Promise<T>((resolve, reject) => {
-      const timer = window.setTimeout(fail, timeoutMs)
+      let started = performance.now()
+      // A frozen page wakes with every timer due while the worker's answers still wait in the
+      // queue; only a call that stayed unanswered while the page ran has failed.
+      const expire = () => {
+        if (resumedAt > started) {
+          started = performance.now()
+          timer = window.setTimeout(expire, timeoutMs)
+          pending.get(id)!.timer = timer
+          return
+        }
+        fail()
+      }
+      let timer = window.setTimeout(expire, timeoutMs)
       pending.set(id, { resolve: (value) => resolve(value as T), reject, timer, bytes })
       pendingBytes += bytes
       try {
@@ -140,8 +161,10 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
     if (data.type === "events") {
       // The worker permits a bounded window in flight. Return each credit only
       // after Ghostty has parsed it, including while this page is hidden.
-      // A task boundary lets connect/cursor RPC promises settle before events.
-      window.setTimeout(() => {
+      // A task boundary lets connect RPC promises settle before events. A message
+      // task, not a timer: Chrome delays timers in a hidden tab to once a second or
+      // minute, which would starve the credit and cut the connection for backpressure.
+      nextTask(() => {
         if (stopped) return
         try {
           for (const event of data.batch.events as BrowserTerminalEvent[]) {
@@ -158,7 +181,7 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
           return
         }
         worker.postMessage({ type: "consumed", callbackID: data.callbackID, id: data.batch.id })
-      }, 0)
+      })
     }
   }
   const api: BrowserTerminalAPI = {
@@ -194,7 +217,6 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
     },
     resize: (id, columns, rows) => call("resize", [id, columns, rows]),
     ack: (id, next) => call("ack", [id, next]),
-    cursor: (id) => call("cursor", [id]),
     hashFile: (file) => call("hashFile", [file]),
     fileRequest: (id, request) => {
       const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength

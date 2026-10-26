@@ -47,8 +47,8 @@ export function TerminalSurface({
   onLeave?: { label: string; action: () => void }
   className?: string
 }) {
-  const { phase, catchingUp, error, upload, role, mobile } = connection
-  const busy = phase === "connecting" || phase === "reconnecting" || (phase === "attached" && catchingUp)
+  const { phase, error, upload, role, mobile } = connection
+  const busy = phase === "connecting" || phase === "reconnecting"
   const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota" || phase === "limit"
   // Overlays take the theme's colours, so they belong to the terminal rather than the page.
   const overlay = {
@@ -59,7 +59,14 @@ export function TerminalSurface({
   const muted = { color: `color-mix(in oklab, ${theme.foreground} 62%, transparent)` }
 
   return (
-    <div className={cn("relative flex min-h-0 flex-col", className)} style={{ background: theme.background }}>
+    <div
+      className={cn("relative flex min-h-0 flex-col", className)}
+      style={{ background: theme.background }}
+      data-terminal-phase={phase}
+      data-terminal-role={role}
+      data-terminal-reconnects={connection.reconnects}
+      data-terminal-replays={connection.replays}
+    >
       <div className="relative min-h-0 flex-1 px-3 pt-2 pb-1">
         <div
           ref={hostRef}
@@ -79,7 +86,7 @@ export function TerminalSurface({
               style={overlay}
             >
               <CircleNotchIcon className="size-3.5 animate-spin" />
-              {phase === "reconnecting" ? "Reconnecting" : phase === "connecting" ? "Connecting" : "Catching up"}
+              {phase === "reconnecting" ? (error ? `Reconnecting: ${error}` : "Reconnecting") : "Connecting"}
             </div>
           </div>
         )}
@@ -210,7 +217,7 @@ export function TerminalSurface({
                 type="button"
                 aria-label={description}
                 aria-pressed={pressed}
-                disabled={phase !== "attached" || catchingUp || upload.busy}
+                disabled={phase !== "attached" || upload.busy}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() =>
                   key === "CTRL" || key === "ALT" ? mobile.toggle(key === "CTRL" ? "ctrl" : "alt") : mobile.send(key)

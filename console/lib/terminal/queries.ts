@@ -1,7 +1,7 @@
 "use client"
 
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
-import { api, apiAction, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
+import { api, apiAction, ApiError, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
 export type AccessPolicy = Data<"/v1/terminal-sessions/{session_id}/browser-access-policy">
@@ -174,6 +174,8 @@ export async function guestApi<T>(path: string, init?: RequestInit): Promise<T> 
       response.status,
       body?.error?.code ?? "unavailable",
       body?.error?.message ?? "Paperboat is temporarily unavailable.",
+      undefined,
+      retryAfterMs(response),
     )
   }
   return body.data

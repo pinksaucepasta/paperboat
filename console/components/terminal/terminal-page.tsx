@@ -329,8 +329,8 @@ function StatusLine({
   connection: TerminalConnection
   theme: TerminalTheme
 }) {
-  const { phase, catchingUp, role, connectedEdge, title } = connection
-  const live = phase === "attached" && !catchingUp
+  const { phase, role, connectedEdge, title } = connection
+  const live = phase === "attached"
   const problem =
     phase === "reconnecting"
       ? "Reconnecting"

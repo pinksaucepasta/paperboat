@@ -19,9 +19,19 @@ export class ApiError extends Error {
     message: string,
     /** The error's `details`, for errors whose next step needs them (e.g. sso_review_required). */
     readonly details?: unknown,
+    /** The server's Retry-After, in milliseconds, when it sent one (e.g. 429). */
+    readonly retryAfterMs?: number,
   ) {
     super(message)
   }
+}
+
+/** Retry-After in milliseconds (seconds or an HTTP date), bounded to 10 minutes. */
+export function retryAfterMs(response: Response, now = Date.now()): number | undefined {
+  const value = response.headers.get("retry-after")?.trim()
+  if (!value) return undefined
+  const ms = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - now
+  return Number.isFinite(ms) ? Math.min(Math.max(ms, 0), 600_000) : undefined
 }
 
 /** How long a read may take before it fails as unanswered. */
@@ -85,6 +95,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       code,
       sentences[code] ?? body?.error?.message ?? "Paperboat is temporarily unavailable.",
       body?.error?.details,
+      retryAfterMs(response),
     )
   }
   return body.data
