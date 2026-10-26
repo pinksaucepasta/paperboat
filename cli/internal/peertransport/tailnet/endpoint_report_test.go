@@ -128,3 +128,16 @@ func (m membershipOffer) PeerNetworkConfiguration(_ context.Context, r api.PeerN
 	token, err := m.configuration()
 	return api.PeerNetworkConfigurationResult{Configuration: token, MembershipGrants: *m.offer}, err
 }
+
+// The first report after endpoint_reports goes out even with no candidate, so the server marks this client
+// as accepting delivered peer endpoints.
+func TestTheFirstEndpointReportIsSentEvenWhenEmpty(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
+		t.Fatalf("first report %v, want an explicit empty set", due)
+	}
+	a.endpointsReported([]string{})
+	if due := a.endpointReportDue(); due != nil {
+		t.Fatalf("an unchanged empty set was reported again: %v", *due)
+	}
+}

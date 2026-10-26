@@ -56,9 +56,9 @@ func (a *Authority) endpointReportDue() *[]string {
 	if a.reported != nil && slices.Equal(*a.reported, current) {
 		return nil
 	}
-	if a.reported == nil && len(current) == 0 {
-		return nil // nothing reported yet and nothing to report
-	}
+	// The first report goes out even when empty: a request carrying `endpoints` is how the server learns
+	// this client accepts endpoints on delivered peer entries (agreed with Lane Q), and a machine with no
+	// candidate must still receive its peers'.
 	return &current
 }
 
