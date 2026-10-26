@@ -238,7 +238,8 @@ func (c *accessorDiscoveryClient) fetchSnapshot(ctx context.Context) ([]accessor
 		if admission.validate(time.Now().UTC()) != nil {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
-		key := admission.MachineID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID
+		// A route is admitted once per edge of the account's pair (primary and fallback).
+		key := admission.MachineID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID + "\x00" + admission.EdgeNodeID
 		if _, ok := seen[key]; ok {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}

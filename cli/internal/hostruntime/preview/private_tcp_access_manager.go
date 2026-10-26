@@ -205,10 +205,12 @@ func resolvePrivateTCPAdmission(admissions []accessorAdmission, selector string)
 		if !matchesPrivateTCPSelector(*a, selector) {
 			continue
 		}
-		if selected != nil {
+		if selected != nil && selected.RouteID != a.RouteID {
 			return accessorAdmission{}, ErrPrivateTCPAccessUnavailable
 		}
-		selected = a
+		if selected == nil {
+			selected = a // the same route on the other edge of the pair is the same answer
+		}
 	}
 	if selected == nil {
 		return accessorAdmission{}, ErrPrivateTCPAccessNotFound

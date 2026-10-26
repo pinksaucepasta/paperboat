@@ -385,6 +385,11 @@ func TestResolvePrivateTCPAdmissionRejectsNameCollidingWithAnotherRouteID(t *tes
 	if _, err := resolvePrivateTCPAdmission(admissions, "route_tcp_2"); !errors.Is(err, ErrPrivateTCPAccessUnavailable) {
 		t.Fatalf("name-to-ID collision error=%v", err)
 	}
+	sameRouteOtherEdge := admissions[1]
+	sameRouteOtherEdge.EdgeNodeID = "node_fallback"
+	if got, err := resolvePrivateTCPAdmission(append(admissions[1:], sameRouteOtherEdge), "postgres"); err != nil || got.RouteID != "route_tcp_2" {
+		t.Fatalf("route on both edges=%+v err=%v", got, err)
+	}
 	admissions[1].TunnelName = "payments"
 	if _, err := resolvePrivateTCPAdmission(admissions, "payments"); !errors.Is(err, ErrPrivateTCPAccessUnavailable) {
 		t.Fatalf("duplicate tunnel name error=%v", err)

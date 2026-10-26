@@ -167,7 +167,7 @@ func TestPrivateAccessGrantClientMapsStatusWithoutBrowserCredentials(t *testing.
 	}
 }
 
-func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPAC(t *testing.T) {
+func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPACAndTakesARouteOnBothEdges(t *testing.T) {
 	now := time.Now().UTC()
 	transport := privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) {
 		httpAdmission := validAccessorAdmission(t, now, "http")
@@ -176,13 +176,15 @@ func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPAC(t *testing.T) {
 		tcpAdmission.Hostname = ""
 		tcpAdmission.RouteID = "route_tcp_02"
 		tcpAdmission.AssignmentID = "assignment_10"
+		fallback := httpAdmission // the same route through the second edge of the account's pair
+		fallback.EdgeNodeID = "edge_02"
 		if err := httpAdmission.validate(now); err != nil {
 			t.Fatalf("http admission fixture: %v", err)
 		}
 		if err := tcpAdmission.validate(now); err != nil {
 			t.Fatalf("tcp admission fixture: %v", err)
 		}
-		body, err := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{httpAdmission, tcpAdmission}})
+		body, err := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{httpAdmission, fallback, tcpAdmission}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -326,14 +328,16 @@ func validAccessorAdmission(t *testing.T, now time.Time, protocol string) access
 	return a
 }
 
-func TestPrivateTCPAdmissionRejectsDuplicateStaleAndClosedSource(t *testing.T) {
+func TestPrivateTCPAdmissionTakesEitherEdgeAndRejectsStaleAndClosedSource(t *testing.T) {
 	now := time.Now().UTC()
 	valid := accessorAdmission{ResourceKind: "tunnel", Protocol: "private_tcp", RouteID: "route_tcp_01", ExpiresAt: now.Add(time.Minute)}
 	if got, err := privateTCPAdmission([]accessorAdmission{valid}, valid.RouteID, now); err != nil || got.RouteID != valid.RouteID {
 		t.Fatalf("valid admission=%+v err=%v", got, err)
 	}
-	if _, err := privateTCPAdmission([]accessorAdmission{valid, valid}, valid.RouteID, now); !errors.Is(err, privatepreviewproxy.ErrAccessTemporarilyUnavailable) {
-		t.Fatalf("duplicate error=%v", err)
+	other := valid
+	other.EdgeNodeID = "node_fallback"
+	if got, err := privateTCPAdmission([]accessorAdmission{valid, other}, valid.RouteID, now); err != nil || got.RouteID != valid.RouteID {
+		t.Fatalf("route on both edges=%+v err=%v", got, err)
 	}
 	stale := valid
 	stale.ExpiresAt = now

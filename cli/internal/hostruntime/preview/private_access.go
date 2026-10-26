@@ -314,7 +314,10 @@ func (s *PrivateAccessSource) Snapshot(ctx context.Context) ([]privatepreviewpro
 			if matchType == privatepreviewproxy.AccessMatchOneLabelWildcard {
 				key = "*." + host
 			}
-			if _, exists := next[key]; exists {
+			if existing, exists := next[key]; exists {
+				if existing.accessor.RouteID == a.RouteID {
+					continue // the same route through the other edge of the pair
+				}
 				return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 			}
 			next[key] = privateAccessRoute{accessor: &copy, matchType: matchType}
@@ -385,11 +388,10 @@ func privateTCPAdmission(admissions []accessorAdmission, routeID string, now tim
 	var selected *accessorAdmission
 	for i := range admissions {
 		a := &admissions[i]
+		// shortcut: the first edge of the pair wins, no failover to the other edge; add it when an edge outage shows up.
 		if a.RouteID == routeID && a.ResourceKind == "tunnel" && a.Protocol == "private_tcp" && a.ExpiresAt.After(now) {
-			if selected != nil {
-				return accessorAdmission{}, privatepreviewproxy.ErrAccessTemporarilyUnavailable
-			}
 			selected = a
+			break
 		}
 	}
 	if selected == nil {
