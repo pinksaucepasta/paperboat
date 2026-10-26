@@ -11,6 +11,14 @@ Launch target: **2026-10-20**. [PLAN.md](PLAN.md) says what to build and in whic
 command, per platform, with evidence). Post-launch ideas live in [WHITEBOARD.md](WHITEBOARD.md).
 Machine access and credentials are in `REMOTE_TESTING.md` (local only, never committed).
 
+**Zero users, zero compatibility (user rule, 2026-10-26).** Paperboat is pre-launch with no users. Only the
+current `main` must work. Never write, propose or wait for anything that exists only for older builds,
+releases or machine state: no migrations or cleanup of old on-machine state, no fallbacks or old protocol
+paths, no deprecation periods, no staged or ordered deploys for old clients, no keeping endpoints alive for
+released CLIs, no waiting for machines to update. Change producer and consumer together and deploy together.
+A test machine broken by old state is reinstalled. Regressions: diff the last good build against the first
+bad one on the paths the failing check touches, then fix.
+
 ## Repository
 
 | Path | What |
