@@ -26,7 +26,6 @@ type ListEdgeDNSPublicationResourcesV1Row struct {
 	Generation int64
 }
 
-// Paginate resources, not rows/addresses, so a batch cannot publish a partial set.
 // Owners whose DNS records are still to be withdrawn (managed names are covered by wildcards; nothing is published).
 func (q *Queries) ListEdgeDNSPublicationResourcesV1(ctx context.Context, arg ListEdgeDNSPublicationResourcesV1Params) ([]ListEdgeDNSPublicationResourcesV1Row, error) {
 	rows, err := q.db.Query(ctx, listEdgeDNSPublicationResourcesV1, arg.AfterID, arg.BatchSize)
