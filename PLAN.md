@@ -4940,3 +4940,5 @@ CLI CI 40315925420: all except tailnet authority/future PASS; that unchanged che
 2026-10-26 | SDK F24 exec | Empty argv entry wrongly refused by execprocess.Manager; existing real-process argv/CWD/streams test RED before fix, GREEN after; empty executable/NUL/bounds still rejected. | F24-02 waits for fixed-build device check; F24-00 destination-fault capture underway, SSH recovered.
 
 2026-10-26 | SDK F24 observer | Destination fault capture confirms exec launched; cancellation PID file was hidden by worker PrivateTmp. Probe now observes unique argv nonce in /proc before/after cancel, EOF and timeout; no acceptance weakened. | Both diagnostic pairs exact-ID revoked; F24-00/02 wait for fixed shared Linux build (Server/builds).
+
+2026-10-26 | SDK F24 gate | Exec empty-argument fix: full CLI vet/race CI 40327920695 PASS; nonce observer build/vet PASS. | Server/builds prepares the shared Linux build; SDK then reruns F24-00/02.
