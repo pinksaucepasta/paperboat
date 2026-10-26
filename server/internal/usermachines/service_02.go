@@ -881,10 +881,93 @@ type FileTransferDescriptor struct {
 	Policy               accessdescriptor.FileTransferPolicy `json:"policy"`
 }
 
-func (s *Service) FileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID string) (FileTransferDescriptor, error) {
-	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, "", "")
+// TransferIntent is the sender's mode and the declared total of its prepared batch (every file
+// summed). Only a sender that declares it gets the mode checks and claims (PLAN 3b step 1); an
+// undeclared send keeps today's credential exactly.
+type TransferIntent struct {
+	Mode          string
+	DeclaredBytes int64
 }
 
-func (s *Service) FileTransferDescriptorForRequest(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string) (FileTransferDescriptor, error) {
-	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest)
+// TransferTooLargeError refuses an Automatic transfer over the bound; Unlimited has none.
+type TransferTooLargeError struct{ TotalBytes, MaxBytes int64 }
+
+func (e *TransferTooLargeError) Error() string {
+	return fmt.Sprintf("transfer of %d bytes is over the automatic bound of %d bytes", e.TotalBytes, e.MaxBytes)
+}
+
+// DestinationUpdateRequiredError refuses a transfer the destination's pb cannot receive yet: an
+// Unlimited one, or one over today's caps, to a machine that does not observe file_transfer_modes.
+type DestinationUpdateRequiredError struct {
+	Machine string
+	// MaxBytes is the largest Automatic send the machine accepts as it is (today's batch cap);
+	// MinimumVersion is the first official pb that accepts more (config, set once released).
+	MaxBytes       int64
+	MinimumVersion string
+}
+
+func (e *DestinationUpdateRequiredError) Error() string {
+	if e.MinimumVersion == "" {
+		// Before the first official pb that receives per the claims is released.
+		return fmt.Sprintf("The receiving machine %s cannot accept files over %d bytes or unlimited transfers yet; a pb update will add it. Send less than that.", e.Machine, e.MaxBytes)
+	}
+	return fmt.Sprintf("The receiving machine %s needs pb %s or later to accept files over %d bytes or unlimited transfers. Update pb on it, or send less than that.", e.Machine, e.MinimumVersion, e.MaxBytes)
+}
+
+// CapabilityFileTransferModes is observed by destinations whose pb verifies transfer_mode and
+// max_bytes and takes max_bytes as the receive bound.
+const CapabilityFileTransferModes = "file_transfer_modes"
+
+func (s *Service) FileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, "", "", intent)
+}
+
+func (s *Service) FileTransferDescriptorForRequest(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+	return s.fileTransferDescriptor(ctx, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest, intent)
+}
+
+// declared reports whether the sender named a mode and size; released pb before the send-side
+// mode work does not.
+func (i TransferIntent) declared() bool { return i.Mode != "" || i.DeclaredBytes != 0 }
+
+// signedIntent is what the credential signs for a declared intent: the mode and its bound when
+// the destination understands them; nothing (today's credential) when it does not and the
+// transfer fits today's caps; otherwise the destination must update first.
+func (s *Service) signedIntent(intent TransferIntent, destinationAlias string, observed []string) (TransferIntent, error) {
+	if slices.Contains(observed, CapabilityFileTransferModes) {
+		return intent, nil
+	}
+	if intent.Mode == mint.TransferModeUnlimited || intent.DeclaredBytes > s.fileTransferPolicy.MaxBatchBytes {
+		return TransferIntent{}, &DestinationUpdateRequiredError{Machine: destinationAlias, MaxBytes: s.fileTransferPolicy.MaxBatchBytes, MinimumVersion: s.transferModesMinimumVersion}
+	}
+	return TransferIntent{}, nil
+}
+
+// checkTransferIntent validates the mode and refuses Automatic over the policy bound.
+func (s *Service) checkTransferIntent(intent TransferIntent) error {
+	switch intent.Mode {
+	case mint.TransferModeUnlimited:
+		if intent.DeclaredBytes < 0 {
+			return ErrInvalidTransferIntent
+		}
+		return nil
+	case mint.TransferModeAutomatic:
+		if intent.DeclaredBytes < 1 {
+			return ErrInvalidTransferIntent
+		}
+		if bound := s.automaticMaxBatchBytes; intent.DeclaredBytes > bound {
+			return &TransferTooLargeError{TotalBytes: intent.DeclaredBytes, MaxBytes: bound}
+		}
+		return nil
+	default:
+		return ErrInvalidTransferIntent
+	}
+}
+
+// signedMaxBytes is the max_bytes claim: the declared total for Automatic, none for Unlimited.
+func signedMaxBytes(intent TransferIntent) int64 {
+	if intent.Mode == mint.TransferModeAutomatic {
+		return intent.DeclaredBytes
+	}
+	return 0
 }

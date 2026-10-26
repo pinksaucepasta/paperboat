@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	"testing"
 	"time"
@@ -114,6 +115,8 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 	}
 	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	f.service.ConfigureTerminalSessions(signer, nil)
+	f.service.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20})
+	f.service.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
 	return f, source, signer
 }
 

@@ -1716,6 +1716,30 @@ workspace (the mode is the sender's choice of path, not a team policy).
 **Tests/rows.** CHECKLIST feature row F22-01 (two modes) and command rows for `pb send --unlimited`, `pb config set
 transfers.mode`: size boundary (2,000,000,000 ok, +1 refused, before any call), batch accounting (directory + files summed),
 unlimited never on hosted relay (failing-if-touched fake path), pause/resume on path loss, resume after daemon restart.
+**Rollout, in order (coordinator 2026-10-26; old clients fail only the new feature, never lose anything else).**
+Released pb validates the published transfer policy and the signed regional candidate set strictly, so a field or
+bound it does not know makes it refuse the whole connector admission or candidate set (f5628bae/8385e540 were
+reverted for this, c8163091).
+1. *Descriptor only (now, Lane O).* Policy and candidate sets keep today's shape. A send that declares
+   `transfer_mode`/`declared_bytes` is checked (409 `transfer_too_large` over 2,000,000,000) and its credential carries
+   `transfer_mode` + `max_bytes` only when the destination signals it understands them; to an older destination a
+   declared send within today's caps gets today's credential, and Unlimited or a larger one gets 409
+   `destination_update_required` naming the machine. An undeclared send (released pb) is exactly today's.
+   The destination signal is observed capability `file_transfer_modes` (server accepts it since 85afe804): Lane A's
+   pb release N accepts both host store schemas, N+1 lifts the 50 MiB per-file store CHECK, takes the claims as its
+   receive bound and reports the capability; config `access.file_transfer.modes_minimum_version` = first official
+   from N+1. The Team Inbox keeps today's 50 MiB / 500 MiB request caps until N+1 is that minimum.
+2. *Published bound and `hosting` (Lane O, measured).* `automatic_max_batch_bytes` in the descriptor and connector
+   admission policy (replacing max_file_bytes/max_batch_bytes, spool 2,000,000,000) and regional `hosting:
+   "self_hosted"` ship only when no machine on official <= 2026.10.25.0 was active in the last 7 days:
+   `SELECT reporter_version, count(*) FROM paperboat.user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL
+   AND last_seen_at > now()-interval '7 days' GROUP BY 1` (heartbeat-reported client version since server .84, migration
+   180; Lane B reads it on prod; dev builds older than 77d8a1bc / 07866f9f count as old).
+3. *Declaration required (Lane O, after Lane A's sender ships in an official release and step 2's query shows no older
+   sender).* The descriptor refuses an undeclared send (400 `invalid_transfer_intent`, "update pb to send files"); the
+   forged-size cut is then always at the declared total.
+Prevention: server CI decodes every signed artifact with the oldest supported official release's verifiers
+(tools/compat, Lane O + Lane B).
 *Prior art:* Taildrop (`~/ref/tailscale/feature/taildrop/resume.go`, `send.go`): no size cap, resumable `.partial` files
 with 64 KiB block checksums, sent over whatever path the tailnet has, DERP included; Tailscale peer relays
 (`feature/relayserver`) are user-run and chosen like any path. croc and magic-wormhole use a public relay by default

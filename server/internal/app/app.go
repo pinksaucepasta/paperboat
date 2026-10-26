@@ -291,6 +291,7 @@ func New(opts Options) (*App, error) {
 	}
 	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	userMachineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(opts.Config.Access.FileTransfer.Published()))
+	userMachineService.ConfigureTransferModes(opts.Config.Access.FileTransfer.AutomaticMaxBatchBytes, opts.Config.Access.FileTransfer.ModesMinimumVersion)
 	userMachineService.ConfigureTerminalSessions(mintKeys, &http.Client{Timeout: opts.Config.TerminalSessions.OperationTimeout})
 	userMachineService.ConfigureMachineControl(mintKeys, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	publicBaseURL := strings.TrimRight(config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), "/")

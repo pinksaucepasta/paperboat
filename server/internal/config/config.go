@@ -386,6 +386,12 @@ type FileTransferPolicy struct {
 	Retention              time.Duration `json:"retention"`
 	DeliveryTimeout        time.Duration `json:"delivery_timeout"`
 	MaxPendingSpoolBytes   int64         `json:"max_pending_spool_bytes"`
+	// AutomaticMaxBatchBytes bounds one declared Automatic `pb send` (every file summed). Server
+	// side only until PLAN 3b step 2 publishes it: released pb validates the published policy.
+	AutomaticMaxBatchBytes int64 `json:"automatic_max_batch_bytes"`
+	// ModesMinimumVersion is the first official pb whose destination accepts transfer_mode and
+	// max_bytes (named in destination_update_required).
+	ModesMinimumVersion string `json:"modes_minimum_version"`
 }
 
 type Diagnostics struct {
@@ -542,6 +548,7 @@ func Default() Config {
 				Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10,
 				MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, Retention: 7 * 24 * time.Hour,
 				DeliveryTimeout: 10 * time.Minute, MaxPendingSpoolBytes: 1 << 30,
+				AutomaticMaxBatchBytes: 2_000_000_000,
 			},
 			InboxList: InboxListPolicy{Machines: 50, Budget: 3 * time.Second, CacheFor: 30 * time.Second},
 		},
@@ -794,7 +801,7 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("access.connect_poll_interval must be positive and no greater than connect_ready_timeout"))
 	}
 	transfer := c.Access.FileTransfer
-	if strings.TrimSpace(transfer.Revision) == "" || transfer.MaxFileBytes < 1 || transfer.MaxFileBytes > 50<<20 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxBatchBytes < transfer.MaxFileBytes || transfer.MaxBatchBytes > 500<<20 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.MaxBatchBytes {
+	if strings.TrimSpace(transfer.Revision) == "" || transfer.MaxFileBytes < 1 || transfer.MaxFileBytes > 50<<20 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxBatchBytes < transfer.MaxFileBytes || transfer.MaxBatchBytes > 500<<20 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.MaxBatchBytes || transfer.AutomaticMaxBatchBytes < transfer.MaxBatchBytes || transfer.AutomaticMaxBatchBytes > 1<<40 {
 		errs = append(errs, fmt.Errorf("access.file_transfer policy is invalid"))
 	}
 	if inbox := c.Access.InboxList; inbox.Machines < 1 || inbox.Machines > 200 || inbox.Budget <= 0 || inbox.Budget > 10*time.Second || inbox.CacheFor < 0 || inbox.CacheFor > 5*time.Minute {

@@ -356,9 +356,14 @@ type CredentialInput struct {
 	AnnouncementGeneration int64
 	InitiatorEndpointID    string
 	ResponderEndpointID    string
-	RelayByteLimit         int64
-	RelayCarriers          []string
-	FileTransferPolicy     *FileTransferPolicy
+	// TransferMode and MaxBytes bind a file_transfer credential: automatic carries the declared
+	// total as MaxBytes (the destination cuts a stream past it); unlimited has no bound and is
+	// refused by the destination over a Paperboat-hosted relay path.
+	TransferMode       string
+	MaxBytes           int64
+	RelayByteLimit     int64
+	RelayCarriers      []string
+	FileTransferPolicy *FileTransferPolicy
 }
 
 type FileTransferPolicy struct {
@@ -459,6 +464,8 @@ type CredentialClaims struct {
 	AnnouncementGeneration int64               `json:"announcement_generation,omitempty"`
 	InitiatorEndpointID    string              `json:"initiator_endpoint_id,omitempty"`
 	ResponderEndpointID    string              `json:"responder_endpoint_id,omitempty"`
+	TransferMode           string              `json:"transfer_mode,omitempty"`
+	MaxBytes               int64               `json:"max_bytes,omitempty"`
 	RelayByteLimit         int64               `json:"relay_byte_limit,omitempty"`
 	RelayCarriers          []string            `json:"relay_carriers,omitempty"`
 	FileTransferPolicy     *FileTransferPolicy `json:"file_transfer_policy,omitempty"`
@@ -903,6 +910,16 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" {
 			return "", errors.New("machine transfer bindings are required")
 		}
+		// No mode is today's credential (an undeclared send, or a destination that predates modes).
+		if input.TransferMode != "" || input.MaxBytes != 0 {
+			if !validTransferMode(input.TransferMode, input.MaxBytes) {
+				return "", errors.New("file transfer mode bindings are invalid")
+			}
+			claims["transfer_mode"] = input.TransferMode
+			if input.MaxBytes > 0 {
+				claims["max_bytes"] = input.MaxBytes
+			}
+		}
 		claims["machine_id"], claims["source_machine_id"], claims["user_id"], claims["cli_client_session_id"] = input.MachineID, input.SourceMachineID, input.UserID, input.CLIClientSessionID
 		if input.AssignmentID != "" {
 			claims["assignment_id"] = input.AssignmentID
@@ -1066,12 +1083,33 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
+		if (claims.TransferMode != "" || claims.MaxBytes != 0) && !validTransferMode(claims.TransferMode, claims.MaxBytes) {
+			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
+		}
 	}
 	return claims, nil
 }
 
 // Approval is absent for own-machine transfers. Team transfers bind the exact
 // Inbox request, native batch ID and canonical manifest SHA-256 together.
+// TransferModeAutomatic sends any path, hosted relays included, bounded by MaxBytes;
+// TransferModeUnlimited has no bound and never uses a Paperboat-hosted relay.
+const (
+	TransferModeAutomatic = "automatic"
+	TransferModeUnlimited = "unlimited"
+)
+
+func validTransferMode(mode string, maxBytes int64) bool {
+	switch mode {
+	case TransferModeAutomatic:
+		return maxBytes > 0
+	case TransferModeUnlimited:
+		return maxBytes == 0
+	default:
+		return false
+	}
+}
+
 func validFileTransferApproval(requestID, batchID, digest string) bool {
 	if requestID == "" && batchID == "" && digest == "" {
 		return true

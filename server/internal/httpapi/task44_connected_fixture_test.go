@@ -123,6 +123,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	machines.ConfigureAccess(nil, "https://task44.invalid")
 	machines.ConfigureTerminalSessions(signer, nil)
 	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "task44", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
+	machines.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
 	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +359,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", request.RequestID, request.ManifestDigest)
+	fileDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", request.RequestID, request.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(request.Files)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +393,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil || automatic.Status != "approved" {
 		t.Fatalf("automatic acceptance: %v", err)
 	}
-	autoDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", automatic.RequestID, automatic.ManifestDigest)
+	autoDescriptor, err := machines.FileTransferDescriptorForRequest(ctx, member.id, source, machine, member.cli, "", automatic.RequestID, automatic.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(automatic.Files)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +408,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil || own.Status != "not_required" {
 		t.Fatalf("own-machine acceptance bypass: %v", err)
 	}
-	ownDescriptor, err := machines.FileTransferDescriptor(ctx, owner.id, ownSource, machine, owner.cli, "")
+	ownDescriptor, err := machines.FileTransferDescriptor(ctx, owner.id, ownSource, machine, owner.cli, "", usermachines.TransferIntent{})
 	if err != nil {
 		t.Fatal(err)
 	}

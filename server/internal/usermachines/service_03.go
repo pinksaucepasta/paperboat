@@ -21,9 +21,15 @@ import (
 	"time"
 )
 
-func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string) (FileTransferDescriptor, error) {
+func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
 	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
+	}
+	declared := intent.declared()
+	if declared {
+		if err := s.checkTransferIntent(intent); err != nil {
+			return FileTransferDescriptor{}, err
+		}
 	}
 	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return FileTransferDescriptor{}, err
@@ -71,6 +77,10 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		if accepted.SourceMachineID != sourceMachineID || accepted.DestinationMachineID != destinationMachineID {
 			return FileTransferDescriptor{}, teaminbox.ErrConflict
 		}
+		// The signed bound is the accepted manifest's total, not a number the sender picks later.
+		if declared && teaminbox.ManifestTotal(accepted.Files) != intent.DeclaredBytes {
+			return FileTransferDescriptor{}, ErrInvalidTransferIntent
+		}
 		acceptedRequest = &accepted
 	}
 	routeMachine := destination
@@ -104,6 +114,13 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		IssuedAt: s.now().UTC(), ExpiresAt: expiresAt, CredentialClass: "file_transfer", Scopes: []string{"file:transfer"},
 		EnvironmentID: routeMachine.EnvironmentID, MachineID: routeMachine.ID, SourceMachineID: sourceMachineID,
 		UserID: userID, CLIClientSessionID: cliClientSessionID, SessionID: sessionID, OperationID: operationID, AssignmentID: accessSessionID,
+	}
+	if declared {
+		signed, err := s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
+		if err != nil {
+			return FileTransferDescriptor{}, err
+		}
+		credentialInput.TransferMode, credentialInput.MaxBytes = signed.Mode, signedMaxBytes(signed)
 	}
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest

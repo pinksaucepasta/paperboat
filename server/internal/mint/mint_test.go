@@ -585,7 +585,7 @@ func TestSignHealthUsesDedicatedTypeAndScope(t *testing.T) {
 func TestFileTransferCredentialIsSessionAndClientBound(t *testing.T) {
 	provider, _ := New([]Key{{ID: "transfer-key", PrivateKey: testKey(10)}}, "transfer-key", time.Minute)
 	now := time.Unix(1_700_000_000, 0)
-	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_transfer_1", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", Scopes: []string{"file:transfer"}, EnvironmentID: "env_1", MachineID: "machine_1", SourceMachineID: "machine_source", UserID: "usr_1", CLIClientSessionID: "cli_1", SessionID: "ses_1"}
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_transfer_1", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", TransferMode: TransferModeAutomatic, MaxBytes: 1, Scopes: []string{"file:transfer"}, EnvironmentID: "env_1", MachineID: "machine_1", SourceMachineID: "machine_source", UserID: "usr_1", CLIClientSessionID: "cli_1", SessionID: "ses_1"}
 	token, err := provider.SignCredential(input)
 	if err != nil {
 		t.Fatal(err)
@@ -609,7 +609,7 @@ func TestFileTransferCredentialAllowsNoTerminalSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_transfer_2", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", Scopes: []string{"file:transfer"}, EnvironmentID: "env_1", MachineID: "machine_1", SourceMachineID: "machine_source", UserID: "usr_1", CLIClientSessionID: "cli_1"}
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_transfer_2", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", TransferMode: TransferModeAutomatic, MaxBytes: 1, Scopes: []string{"file:transfer"}, EnvironmentID: "env_1", MachineID: "machine_1", SourceMachineID: "machine_source", UserID: "usr_1", CLIClientSessionID: "cli_1"}
 	token, err := provider.SignCredential(input)
 	if err != nil {
 		t.Fatal(err)
@@ -644,7 +644,7 @@ func TestFileTransferCredentialApprovalBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "member", JTI: "file-approval-credential", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", Scopes: []string{"file:transfer"}, EnvironmentID: "environment", MachineID: "destination", SourceMachineID: "source", UserID: "member", CLIClientSessionID: "member-client", RequestID: "inbox_request", IdempotencyKey: "approved_batch", RequestHash: strings.Repeat("a", 64)}
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "member", JTI: "file-approval-credential", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "file_transfer", TransferMode: TransferModeAutomatic, MaxBytes: 1, Scopes: []string{"file:transfer"}, EnvironmentID: "environment", MachineID: "destination", SourceMachineID: "source", UserID: "member", CLIClientSessionID: "member-client", RequestID: "inbox_request", IdempotencyKey: "approved_batch", RequestHash: strings.Repeat("a", 64)}
 	t.Run("roundtrip", func(t *testing.T) {
 		for _, binding := range []struct{ request, batch, digest string }{{input.RequestID, input.IdempotencyKey, input.RequestHash}, {"r", "b", input.RequestHash}, {strings.Repeat("r", 256), strings.Repeat("b", 128), input.RequestHash}, {"", "", ""}} {
 			current := input

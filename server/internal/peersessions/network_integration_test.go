@@ -345,6 +345,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machineService.ConfigureAccess(nil, "https://api.example.test")
 	machineService.ConfigureTerminalSessions(provider, nil)
 	machineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "shared-native-v1", MaxFileBytes: 1 << 20, MaxBatchFiles: 2, MaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
+	machineService.ConfigureTransferModes(2_000_000_000, "2026.10.27.0")
 	execOperationID := "operation_shared_exec_" + suffix
 	refreshRuntimeCarrier()
 	hostPeerNetwork := func() (generation int64) {
@@ -634,7 +635,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	machineService.ConfigureTeamInbox(inbox)
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, teaminbox.ErrPending) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{}); !errors.Is(err, teaminbox.ErrPending) {
 		t.Fatalf("cross-account descriptor without acceptance error=%v", err)
 	}
 	filePayload := []byte("server-issued-native-file")
@@ -651,7 +652,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("manual Inbox request status=%q error=%v", fileRequest.Status, err)
 	}
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest); !errors.Is(err, teaminbox.ErrPending) {
+	if _, err = machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(fileRequest.Files)}); !errors.Is(err, teaminbox.ErrPending) {
 		t.Fatalf("pending Inbox descriptor error=%v", err)
 	}
 	if _, err = inbox.Decide(ctx, userID, fileRequest.RequestID, "approved", fileRequest.DecisionGeneration); err != nil {
@@ -667,11 +668,17 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("own-machine Inbox status=%q error=%v", ownRequest.Status, err)
 	}
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, ""); err != nil {
+	if _, err = machineService.FileTransferDescriptor(ctx, userID, "network_owner_source_"+suffix, machineID, cliID, "", usermachines.TransferIntent{}); err != nil {
 		t.Fatalf("own-machine descriptor without acceptance: %v", err)
 	}
 	refreshRuntimeCarrier()
-	fileDescriptor, err := machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest)
+	// The signed bound is the accepted manifest's total: another declared size is refused, and
+	// the refusal does not use up the approval.
+	if _, err := machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(fileRequest.Files) + 1}); !errors.Is(err, usermachines.ErrInvalidTransferIntent) {
+		t.Fatalf("declared size other than the manifest total: %v", err)
+	}
+	refreshRuntimeCarrier()
+	fileDescriptor, err := machineService.FileTransferDescriptorForRequest(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", fileRequest.RequestID, fileRequest.ManifestDigest, usermachines.TransferIntent{Mode: "automatic", DeclaredBytes: teaminbox.ManifestTotal(fileRequest.Files)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +754,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	assertNoNetworkCapability(t, sharedMachineDisabled.Configuration, "file_transfer")
 	refreshRuntimeCarrier()
-	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, ""); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
+	if _, err = machineService.FileTransferDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "", usermachines.TransferIntent{}); !errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
 		t.Fatalf("disabled file receive descriptor error=%v", err)
 	}
 	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser)
