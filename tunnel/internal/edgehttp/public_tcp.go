@@ -57,15 +57,19 @@ func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connect
 		r.mu.RUnlock()
 		return ErrDataCarrierRouteUnavailable
 	}
-	server := entry.server
+	server, engine := entry.server, entry.state.Engine
 	r.mu.RUnlock()
 	stream, err := server.OpenStreamWithLifetime(ctx, ctx, open)
 	if err != nil {
 		return errors.Join(ErrDataCarrierRouteTransport, err)
 	}
 	defer stream.Close()
-	if err := connectorprotocol.WriteIngressDecision(stream, authority, time.Now().UTC()); err != nil {
-		return errors.Join(ErrDataCarrierRouteTransport, err)
+	// A public stream on an agent's runtime carrier carries no decision preface (PLAN 3a 4.4):
+	// the edge authorized it above and keeps checking its authority while it runs.
+	if !engine {
+		if err := connectorprotocol.WriteIngressDecision(stream, authority, time.Now().UTC()); err != nil {
+			return errors.Join(ErrDataCarrierRouteTransport, err)
+		}
 	}
 	applicationStream := lease.Wrap(ctx, stream)
 	defer applicationStream.Close()

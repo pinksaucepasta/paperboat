@@ -269,3 +269,59 @@ func TestPublicTCPIdleTimeoutClosesQuietStreamsCleanly(t *testing.T) {
 		t.Fatal("bridge kept an idle stream")
 	}
 }
+
+// PLAN 3a 4.4: a public TCP stream on an agent's runtime carrier (an engine replica) starts with the
+// client's bytes; the edge authorized it and the agent has no authority to check a preface against.
+func TestForwardPublicTCPOnAnEngineCarrierSendsNoDecisionPreface(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	accepted, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3)
+	carrier, connector := testEdgePreviewCarrierPair(t, identity)
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	if err := registry.Attach(carrier); err != nil {
+		t.Fatal(err)
+	}
+	registry.mu.Lock()
+	for _, entry := range registry.byKey {
+		entry.state.Engine = true
+	}
+	registry.mu.Unlock()
+	decision := publicTCPDecision(time.Now().UTC(), port)
+	current := func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		return decision, nil
+	}
+	go func() { _ = registry.ForwardPublicTCP(context.Background(), accepted, decision, current) }()
+	stream, open, err := connector.AcceptStream(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if open.Kind != "tcp_public" {
+		t.Fatalf("open=%+v", open)
+	}
+	if _, err := client.Write([]byte("SSH-2.0-client\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 8)
+	_ = stream.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(stream, head); err != nil || string(head) != "SSH-2.0-" {
+		t.Fatalf("engine stream starts with %q (%v), not the client's bytes", head, err)
+	}
+}
