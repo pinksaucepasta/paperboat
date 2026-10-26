@@ -59,7 +59,7 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 	}
 	probe.Close()
 	_ = probeLease.Close()
-	var admissions atomic.Int32
+	var admissions, detached atomic.Int32
 	closed := make(chan struct{})
 	gotInputs := make(chan string, 2)
 	hostDone := make(chan struct{})
@@ -105,7 +105,7 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 				t.Fatal("wrong browser admission binding")
 			}
 			id := admissions.Add(1)
-			return control.BrowserTerminalAdmission{Credential: "host-credential-" + strconv.Itoa(int(id)), TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(int(id)), Closed: closed, Close: func() {}}, nil
+			return control.BrowserTerminalAdmission{Credential: "host-credential-" + strconv.Itoa(int(id)), TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(int(id)), Closed: closed, Close: func() { detached.Add(1) }}, nil
 		}),
 	}, http.NotFoundHandler())
 	if err != nil {
@@ -179,6 +179,20 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 		if err != nil || kind != websocket.MessageBinary || string(payload) != "\x01opaque-cose-record" {
 			t.Fatalf("shared terminal output = %q kind=%v err=%v", payload, kind, err)
 		}
+	}
+	// Closing the browser ends its control connection (admission.Close), which the server reads as a
+	// detach: the terminal stops counting toward the plan's open browser terminals at once.
+	if detached.Load() != 0 {
+		t.Fatalf("an attached browser terminal already closed its admission (%d)", detached.Load())
+	}
+	_ = first.Close(websocket.StatusNormalClosure, "")
+	_ = second.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(3 * time.Second)
+	for detached.Load() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("closing the browsers closed %d of 2 admissions", detached.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
