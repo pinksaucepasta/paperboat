@@ -69,12 +69,21 @@ try {
   log(attached && (await shows(page, ready, 15000)), "attached and echoes its marker", `phase=${await attr(page, "data-terminal-phase")} close=${await attr(page, "data-terminal-close")}`)
 
   const before = await counts(page)
+  // Wall-clock times of each step and of the first reconnect, so the edge and server logs can be matched.
+  const stamp = () => new Date().toISOString().slice(11, 23) + "Z"
+  let seen = ""
+  const sampler = setInterval(async () => {
+    const [reconnects] = await counts(page).catch(() => [before[0]])
+    if (!seen && reconnects > before[0]) seen = stamp()
+  }, 250)
+  console.log("flood typed at", stamp())
   const flooded = marker("hidden")
   await typeLine(page, `sleep 5; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${flooded}`)
   const other = (await send("Target.createTarget", { url: "about:blank" })).targetId
   await sleep(1500)
   log((await evaluate(page, "document.visibilityState")) === "hidden", "the terminal tab is hidden", await evaluate(page, "document.visibilityState"))
   await sleep(hiddenMs)
+  console.log("returning at", stamp(), "first reconnect seen:", seen || "none yet")
   await send("Target.activateTarget", { targetId: first.targetId })
   const back = Date.now()
   log(await shows(page, flooded, 2000), "output made while hidden is on screen within 2 s of return", `${Date.now() - back} ms`)
@@ -84,6 +93,8 @@ try {
   for (let i = 0; i < 200; i++) await send("Target.activateTarget", { targetId: i % 2 ? first.targetId : other })
   await send("Target.activateTarget", { targetId: first.targetId })
   await sleep(6000)
+  clearInterval(sampler)
+  console.log("switches done at", stamp(), "first reconnect seen:", seen || "none")
   after = await counts(page)
   log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   const echoed = marker("after")
@@ -91,6 +102,7 @@ try {
   log((await attr(page, "data-terminal-phase")) === "attached" && (await shows(page, echoed, 15000)), "still attached and echoes its marker")
 
   const closeButton = `[...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || b.textContent).trim() === "Close terminal")`
+  console.log("closing the terminal at", stamp())
   await evaluate(page, `${closeButton}?.click()`)
   await sleep(1000)
   await evaluate(page, `[...document.querySelectorAll("[role=alertdialog] button")].find((b) => (b.getAttribute("aria-label") || b.textContent).trim() === "Close terminal")?.click()`)
