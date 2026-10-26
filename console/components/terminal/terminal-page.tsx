@@ -63,8 +63,10 @@ export function TerminalPage({ id }: { id: string }) {
       </Frame>
     )
   }
-  if (query.isError) {
-    const missing = query.error instanceof ApiError && [403, 404].includes(query.error.status)
+  // A failed refresh (console API down, server restart) keeps the open terminal: only a first load that failed, or a
+  // terminal that is gone or no longer shared with you (403/404), replaces it.
+  const missing = query.isError && query.error instanceof ApiError && [403, 404].includes(query.error.status)
+  if (!query.data || missing) {
     return (
       <Frame>
         <TopBar />
