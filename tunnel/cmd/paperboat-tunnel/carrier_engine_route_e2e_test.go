@@ -118,10 +118,11 @@ func TestEngineRouteGoesReadyThroughTheRealEdgeCarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtimeRoutes.Close()
-	// As in production (main.go): the durable route registry has an ingress authority.
+	// As in production (main.go): the durable route registry has an ingress authority, which
+	// issues the public decision for the engine route.
 	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8,
-		IngressAuthority: func(context.Context, route.RouteRule) (connectorprotocol.IngressDecision, error) {
-			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		IngressAuthority: func(_ context.Context, rule route.RouteRule) (connectorprotocol.IngressDecision, error) {
+			return engineRoutePublicDecision(rule, identity, node, epoch), nil
 		}})
 	if err != nil {
 		t.Fatal(err)
@@ -172,6 +173,37 @@ func TestEngineRouteGoesReadyThroughTheRealEdgeCarrier(t *testing.T) {
 	if open.Kind != "connector_ready" || open.RouteID != assignment.RouteID {
 		t.Fatalf("probe = %+v", open)
 	}
+	// A public request stream reaches the agent as plain HTTP: no ingress decision preface, which
+	// the engine agent has no authority to check (staging 2026-10-26: every request was 502,
+	// truncated_stream, while readiness passed).
+	request := make(chan []byte, 1)
+	go func() {
+		stream, _, err := agent.AcceptStream(ctx)
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		head := make([]byte, 4)
+		if _, err := io.ReadFull(stream, head); err == nil {
+			request <- head
+		}
+	}()
+	stream, err := routes.OpenRouteStream(ctx, rules[0], "request_engine_e2e")
+	if err != nil {
+		t.Fatalf("public stream on the engine route: %v", err)
+	}
+	defer stream.Close()
+	if _, err := io.WriteString(stream, "GET / HTTP/1.1\r\nHost: "+rules[0].Hostname+"\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case head := <-request:
+		if string(head) != "GET " {
+			t.Fatalf("the agent's request stream starts with %q, not the request", head)
+		}
+	case <-ctx.Done():
+		t.Fatal("no request stream reached the agent")
+	}
 	if dir := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); dir != "" {
 		encoded, _ := json.MarshalIndent(map[string]string{"kind": open.Kind, "route_id": open.RouteID}, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "engine_probe_open.json"), append(encoded, '\n'), 0o644); err != nil {
@@ -220,4 +252,17 @@ func dialEngineAgent(t *testing.T, ctx context.Context, address string, public e
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	return client
+}
+
+// engineRoutePublicDecision is the public decision the server's ingress authority issues for the
+// engine route rule on the agent's runtime carrier identity.
+func engineRoutePublicDecision(rule route.RouteRule, identity datacarrier.Identity, node, epoch string) connectorprotocol.IngressDecision {
+	now := time.Now().UTC()
+	return connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{EnvironmentID: "environment_engine_e2e", AccountID: identity.AccountID, TunnelID: identity.TunnelID,
+		Lifecycle: connectorprotocol.TunnelDurable, ResourceGeneration: 1, RouteID: rule.RouteID, RouteGeneration: rule.RouteGeneration, TargetID: rule.RouteID, TargetGeneration: rule.RouteGeneration,
+		HostID: identity.HostID, InstallationGeneration: 1, Audience: "public", ConnectionMethod: "edge", Protocol: "http", Hostname: rule.Hostname, PathPrefix: "/",
+		OriginScheme: "http", OriginAddress: "127.0.0.1:3000", TLSVerification: "not_applicable", PublicationID: rule.RouteID, PublicationGeneration: 1},
+		DecisionID: "decision_engine_e2e", PolicyGeneration: rule.ViewerPolicyGeneration, EdgeNodeID: node, EdgeProcessEpoch: epoch,
+		ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation,
+		AssignmentGeneration: rule.AssignmentGeneration, Action: "view", IssuedAt: now.Add(-time.Second), ExpiresAt: now.Add(9 * time.Second)}
 }

@@ -77,6 +77,10 @@ type ReplicaState struct {
 	FailureDomain string
 	Latency       time.Duration
 	Capacity      uint32
+	// Engine marks an agent's runtime carrier serving its tunnel routes (PLAN 3a step 4). Like a
+	// public endpoint (preview) stream, a public tunnel stream on it carries no ingress decision
+	// preface: the agent has no connector bootstrap authority to check one against.
+	Engine bool
 }
 
 // ReplicaRouteBinding retains the immutable server assignment tuple for one
@@ -251,6 +255,11 @@ func validateReplicaState(server *datacarrier.Server, state ReplicaState) error 
 		bindingSeen[binding.RouteID] = true
 	}
 	return nil
+}
+
+// writesIngressDecision reports whether a stream opened on entry starts with the decision preface.
+func writesIngressDecision(entry *dataCarrierRouteEntry, decision *connectorprotocol.IngressDecision) bool {
+	return decision != nil && !(entry.state.Engine && decision.Binding.Audience == "public")
 }
 
 func normalizeReplicaState(state ReplicaState) ReplicaState {
@@ -509,7 +518,7 @@ func (r *DataCarrierRouteRegistry) OpenRouteStream(ctx context.Context, rule rou
 	if err != nil {
 		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
 	}
-	if decision != nil {
+	if writesIngressDecision(entry, decision) {
 		if err := connectorprotocol.WriteIngressDecision(stream, *decision, time.Now().UTC()); err != nil {
 			_ = stream.Close()
 			return nil, err
@@ -858,7 +867,7 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 	if err != nil {
 		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
 	}
-	if decision != nil {
+	if writesIngressDecision(entry, decision) {
 		if err := connectorprotocol.WriteIngressDecision(stream, *decision, time.Now().UTC()); err != nil {
 			_ = stream.Close()
 			return nil, err

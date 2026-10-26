@@ -116,7 +116,7 @@ func newCarrierComponentWithTelemetry(
 	handle := func(ctx context.Context, server *datacarrier.Server) error {
 		identity := server.Identity()
 		durableRegistered := false
-		syncDurable := func(now time.Time) error {
+		syncDurable := func(now time.Time, engine bool) error {
 			if durableExpected == nil || !durableExpected.HasIdentity(identity, now) {
 				if durableRegistered {
 					_ = durableRoutes.Detach(server)
@@ -140,7 +140,7 @@ func newCarrierComponentWithTelemetry(
 			if len(routeIDs) == 0 {
 				return datacarrier.ErrDurableAdmissionMissing
 			}
-			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: deployment.NodeCapacity}
+			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: deployment.NodeCapacity, Engine: engine}
 			if durableRegistered {
 				if err := durableRoutes.UpdateReplicaState(server, state); err != nil {
 					return fmt.Errorf("refresh durable carrier: %w", err)
@@ -163,7 +163,7 @@ func newCarrierComponentWithTelemetry(
 		// both ephemeral preview and durable routes.
 		durableLifecycle := durableAuthorized || accessorAttached
 		if durableLifecycle {
-			if err := syncDurable(time.Now().UTC()); err != nil {
+			if err := syncDurable(time.Now().UTC(), false); err != nil {
 				return err
 			}
 		}
@@ -198,7 +198,7 @@ func newCarrierComponentWithTelemetry(
 						results <- handlerCtx.Err()
 						return
 					case now := <-ticker.C:
-						if err := syncDurable(now.UTC()); err != nil {
+						if err := syncDurable(now.UTC(), false); err != nil {
 							results <- err
 							return
 						}
@@ -217,7 +217,7 @@ func newCarrierComponentWithTelemetry(
 				for {
 					// Taken before the sync so a Replace during it is not missed.
 					changed := durableExpected.Changed()
-					err := syncDurable(time.Now().UTC())
+					err := syncDurable(time.Now().UTC(), true)
 					if errors.Is(err, datacarrier.ErrDurableAdmissionMissing) {
 						// No active or staged route names this carrier (yet, or any more).
 						if durableRegistered {
