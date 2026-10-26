@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 var (
@@ -179,7 +180,8 @@ func NewControlClient(config ControlClientConfig) (*ControlClient, error) {
 		return nil, ErrControlClientInvalid
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		// Credentials and leases expire on the server's clock (F21-02).
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	repositoryHosts := make(map[string]bool, len(config.RepositoryHosts))
 	for _, host := range config.RepositoryHosts {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 )
 
 type RenewingTokenConfig struct {
@@ -58,7 +59,8 @@ func NewRenewingTokenSource(config RenewingTokenConfig) (*RenewingTokenSource, e
 		config.Timeout = 15 * time.Second
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		// Expiry and the renewal proof are judged by the server, so they use its clock (F21-02).
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	if config.RenewBefore <= 0 || config.RenewBefore >= time.Hour || config.Timeout <= 0 || config.Timeout > 30*time.Second {
 		return nil, ErrInvalid
