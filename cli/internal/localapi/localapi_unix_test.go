@@ -1326,3 +1326,39 @@ func TestInspectorRequestGoesThroughTheDaemon(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// A peer stream that fails on a machine the control plane has just revoked says the machine is signed
+// out (pb: "session is no longer valid"), not that the target is unreachable (C036).
+func TestPeerStreamFailureOnASignedOutMachineSaysAuthenticationRequired(t *testing.T) {
+	for _, signedOut := range []bool{true, false} {
+		server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "unused.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+			Source:      snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+			PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) { return nil, errors.New("no descriptor") }),
+			SignedOut:   func(context.Context) bool { return signedOut }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := NewPeerStreamRequest("machine_1", "environment_1", 2, "exec", "operation_1", "credential", time.Now().Add(time.Minute), 1024, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(value)
+		request := httptest.NewRequest(http.MethodPost, "/v1/peer-stream", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		server.peerStream(response, request, "request_1", Peer{UID: os.Geteuid(), GID: os.Getegid(), PID: os.Getpid()})
+		var envelope struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		want, status := "peer_stream_unavailable", 503
+		if signedOut {
+			want, status = AuthenticationRequiredCode, 401
+		}
+		if response.Code != status || envelope.Code != want {
+			t.Fatalf("signed out=%v: status=%d code=%s", signedOut, response.Code, envelope.Code)
+		}
+	}
+}

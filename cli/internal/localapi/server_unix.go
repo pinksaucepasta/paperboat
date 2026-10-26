@@ -81,11 +81,14 @@ type ServerConfig struct {
 	// OwnerSID is the enrolled Windows owner. Windows uses it in the named-pipe
 	// DACL and verifies every accepted client process token against it.
 	// Unix callers leave it empty and use OwnerUID/OwnerGID.
-	OwnerSID             string
-	Source               SnapshotSource
-	Completions          CompletionSource
-	Observations         ObservationSink
-	PeerStreams          PeerStreamBroker
+	OwnerSID     string
+	Source       SnapshotSource
+	Completions  CompletionSource
+	Observations ObservationSink
+	PeerStreams  PeerStreamBroker
+	// SignedOut asks the control plane again and reports whether this machine is signed out (revoked or
+	// never added): a peer stream that failed then says so, not that the target is unreachable.
+	SignedOut            func(context.Context) bool
 	PeerProbes           PeerProbeBroker
 	InspectorRequests    InspectorBroker
 	RelayInventory       func(context.Context) (RelayInventory, error)
@@ -587,6 +590,10 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
 		s.recordCause(request.Context(), "peer_stream", err)
 		if writeServerRefusal(writer, requestID, err) {
+			return
+		}
+		if s.config.SignedOut != nil && s.config.SignedOut(request.Context()) {
+			writeError(writer, http.StatusUnauthorized, requestID, AuthenticationRequiredCode, "this machine is signed out of Paperboat")
 			return
 		}
 		message := "peer stream could not open; refresh the target and check connectivity with pb doctor"

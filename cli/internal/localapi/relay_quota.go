@@ -32,6 +32,9 @@ func (e *NoEligiblePathError) Error() string {
 
 // Refusal reports whether a local API code is a refusal whose message is shown as it is: the
 // connection was refused before anything was sent or started, and retrying does not help.
+// AuthenticationRequiredCode answers a request the daemon cannot serve because this machine is signed out.
+const AuthenticationRequiredCode = "authentication_required"
+
 func Refusal(code string) bool { return code == RelayQuotaCode || code == TokenScopeCode }
 
 // writeServerRefusal answers a failed peer operation with the refusal its error carries (the

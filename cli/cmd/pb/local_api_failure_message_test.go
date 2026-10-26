@@ -48,3 +48,13 @@ func TestLocalAPIFailureJSONCarriesTheDaemonsCode(t *testing.T) {
 		t.Errorf("an unlisted code must keep the generic classification: %#v", encoded)
 	}
 }
+
+// The daemon found this machine signed out while opening a peer stream (revoked a moment ago): pb says the
+// session is no longer valid and how to sign in, not that the target is unreachable (C036).
+func TestLocalAPIAuthenticationRequiredSaysTheSessionIsNoLongerValid(t *testing.T) {
+	err := &localapi.RemoteError{StatusCode: http.StatusUnauthorized, Code: localapi.AuthenticationRequiredCode, Message: "private detail"}
+	got := commandFailureMessage(err, classifyCommandFailure(err))
+	if !strings.Contains(got, "session is no longer valid") || strings.Contains(got, "private detail") {
+		t.Fatalf("message = %q", got)
+	}
+}

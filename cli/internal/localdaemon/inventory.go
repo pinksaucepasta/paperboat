@@ -150,6 +150,16 @@ func (i *Inventory) RequestRefresh() {
 	}
 }
 
+// SignedOut refreshes from the control plane now and reports whether it found this machine signed out.
+// A machine revoked a moment ago learns it here, before its periodic refresh.
+func (i *Inventory) SignedOut(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_ = i.Refresh(ctx)
+	snapshot, err := i.store.Snapshot(ctx)
+	return err == nil && snapshot.DaemonState == "awaiting_enrollment"
+}
+
 func (i *Inventory) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
 	return i.store.Snapshot(ctx)
 }

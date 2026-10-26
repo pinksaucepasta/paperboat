@@ -162,6 +162,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.UID == config.OwnerUID },
 		Observations:         observations,
 		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, issue: config.IssuePeerStream},
+		SignedOut:            inventory.SignedOut,
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
 		InspectorRequests:    inspectorBroker(config.InspectorRequest),
 		RelayInventory:       config.RelayInventory,

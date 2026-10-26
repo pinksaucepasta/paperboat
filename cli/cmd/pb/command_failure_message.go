@@ -242,6 +242,9 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 	case *envCommandFailure:
 		return owner.Error()
 	case *localapi.RemoteError:
+		if owner.Code == localapi.AuthenticationRequiredCode {
+			return "Your Paperboat session is no longer valid. " + dashboardEnrollmentGuidance + " Then retry."
+		}
 		if owner.Code == "environment_unavailable" {
 			return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 		}
