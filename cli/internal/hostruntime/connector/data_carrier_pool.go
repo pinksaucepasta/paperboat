@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"math/rand/v2"
 	"slices"
@@ -324,6 +325,7 @@ func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout
 		}
 		misses++
 		if misses >= 3 || !time.Now().Before(staleAt) {
+			diagnosticlog.TryInfo("data carrier closed: health pings missed", "misses", misses, "since_last_response_ms", time.Since(lastResponse).Milliseconds())
 			_ = carrier.closeFor(CloseHealthPingMissed)
 			p.removeClosed()
 			return

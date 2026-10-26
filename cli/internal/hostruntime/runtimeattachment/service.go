@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	jitterrand "math/rand/v2"
@@ -368,6 +369,7 @@ func (s *Service) run(ctx context.Context) {
 			for key, item := range lives {
 				if !wanted[key] || item.active.Pool().State() != connector.DataCarrierPoolReady {
 					if publisherKey == key && s.broadcaster != nil {
+						diagnosticlog.TryInfo("browser output publisher stopped: carrier unwanted or pool not ready", "wanted", wanted[key], "pool_state", string(item.active.Pool().State()))
 						s.broadcaster.SetPublisher(nil)
 						publisherKey = ""
 					}
@@ -427,11 +429,13 @@ func (s *Service) run(ctx context.Context) {
 			}
 			if chosen == nil || response.ActiveEdgeNodeID != chosenAdmission.Binding.EdgeNodeID || response.ActiveEdgeProcessEpoch != chosenAdmission.Binding.EdgeProcessEpoch {
 				if publisherKey != "" && s.broadcaster != nil {
+					diagnosticlog.TryInfo("browser output publisher stopped: no live carrier for the active edge", "chosen", chosen != nil)
 					s.broadcaster.SetPublisher(nil)
 					publisherKey = ""
 				}
 			} else if publisherKey != chosen.key {
 				if s.broadcaster != nil {
+					diagnosticlog.TryInfo("browser output publisher moved to another carrier", "had_publisher", publisherKey != "")
 					s.broadcaster.SetPublisher(chosen.open)
 				}
 				publisherKey = chosen.key
@@ -445,6 +449,7 @@ func (s *Service) run(ctx context.Context) {
 				continue
 			}
 			if publisherKey == key && s.broadcaster != nil {
+				diagnosticlog.TryInfo("browser output publisher stopped: its carrier pool is not ready", "pool_state", string(item.active.Pool().State()))
 				s.broadcaster.SetPublisher(nil)
 				publisherKey = ""
 			}
