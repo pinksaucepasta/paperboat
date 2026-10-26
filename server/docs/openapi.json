@@ -16552,6 +16552,129 @@
             }
           }
         }
+      },
+      "WorkspaceInboxFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "size",
+          "received_at",
+          "machine"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "machine": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "alias"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "alias": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "WorkspaceInboxResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items",
+              "machines_checked",
+              "files_on_checked_machines",
+              "truncated",
+              "unavailable"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceInboxFile"
+                },
+                "description": "Files of the machines checked by this request, newest first; q filters them."
+              },
+              "machines_checked": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "How many machines this request covered (at most the server's bound)."
+              },
+              "files_on_checked_machines": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Files on the machines checked by this request, as they counted them. Not a total of the workspace."
+              },
+              "truncated": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Machines whose listing held only their newest files."
+              },
+              "unavailable": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "machine_id",
+                    "alias",
+                    "reason"
+                  ],
+                  "properties": {
+                    "machine_id": {
+                      "type": "string"
+                    },
+                    "alias": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "machine_offline",
+                        "machine_update_required",
+                        "inbox_unavailable",
+                        "machine_unreachable",
+                        "timeout"
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_machine_cursor": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Present when more machines follow; pass it as machine_cursor for the next batch."
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -50404,6 +50527,69 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspaceDomainPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query."
+          }
+        }
+      }
+    },
+    "/v1/inbox": {
+      "get": {
+        "operationId": "get_v1_inbox",
+        "summary": "List received files across the selected workspace's machines",
+        "description": "Read live from the machines (the server stores no file names), at most a bounded number of machines per request in machine id order. Totals are of the machines checked so far.",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          },
+          {
+            "name": "machine_cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Only this machine's Inbox."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "description": "File name substring."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A batch of machines' Inboxes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInboxResponse"
                 }
               }
             }
