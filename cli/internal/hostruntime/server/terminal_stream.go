@@ -38,6 +38,8 @@ type terminalOutputStream struct {
 	participantsCheckedAt time.Time
 	// idleWait is how long the next wait for output lasts before the stream checks the session again.
 	idleWait time.Duration
+	// liveCheckedAt is when the stream last confirmed its session (liveChecked).
+	liveCheckedAt time.Time
 }
 
 // participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.

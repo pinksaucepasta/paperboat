@@ -467,7 +467,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			}
 		}
 	}
-	if _, err := s.snapshot(); err != nil {
+	if !s.liveChecked(time.Now()) {
 		return protocol.BinaryFrame{}, ErrStreamClosed
 	}
 	for {
@@ -478,7 +478,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID)
 		cancel()
 		if err == nil {
-			if _, err := s.snapshot(); err != nil {
+			if !s.liveChecked(time.Now()) {
 				event.Release()
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
@@ -536,6 +536,22 @@ func (s *terminalOutputStream) loadScreen() error {
 	s.checkpoint, s.checkpointSequence, s.checkpointOffset, s.checkpointSent = checkpoint, boundary, 0, false
 	return nil
 }
+
+// liveChecked confirms the session still runs this stream's generation at most once per liveCheckInterval while
+// output flows. A snapshot is an owner round trip that takes the output lock and reads the foreground process;
+// one per event held a flood to about one event a second. WaitNext itself fails once the attachment goes.
+func (s *terminalOutputStream) liveChecked(now time.Time) bool {
+	if now.Sub(s.liveCheckedAt) < liveCheckInterval {
+		return true
+	}
+	if _, err := s.snapshot(); err != nil {
+		return false
+	}
+	s.liveCheckedAt = now
+	return true
+}
+
+const liveCheckInterval = time.Second
 
 func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {
 	if s.expectedGeneration != 0 {

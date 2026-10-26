@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,5 +113,60 @@ func TestBrowserTerminalStreamSendsAScreenOnRequest(t *testing.T) {
 	frame, err := stream.Next(ctx)
 	if err != nil || frame.Channel != protocol.TerminalScreenCheckpoint || len(frame.Data) < 2 || frame.Data[0] != 1 || !bytes.Contains(frame.Data[1:], []byte("screen-marker")) || frame.StartSequence < uint64(len("screen-marker")) {
 		t.Fatalf("screen on request: channel=%d start=%d err=%v", frame.Channel, frame.StartSequence, err)
+	}
+}
+
+type countingSnapshots struct {
+	session.Service
+	calls atomic.Int64
+}
+
+func (c *countingSnapshots) Snapshot(id string) (session.Snapshot, error) {
+	c.calls.Add(1)
+	return c.Service.Snapshot(id)
+}
+
+func (c *countingSnapshots) SnapshotAtGeneration(id string, generation uint64) (session.Snapshot, error) {
+	c.calls.Add(1)
+	return c.Service.SnapshotAtGeneration(id, generation)
+}
+
+// A flood must not cost a session snapshot per output event: each is an owner round trip that takes the output
+// lock, and one per event held terminal output to about one event a second on a device.
+func TestFloodingStreamChecksTheSessionAtMostOncePerInterval(t *testing.T) {
+	root := t.TempDir()
+	adapter, err := pty.NewAdapter(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := session.NewManager(session.ManagerConfig{Launch: func(command pty.Command) (session.PTYProcess, error) { return adapter.Start(command) }, MaxSessions: 2, AttachmentBytes: 1 << 20, HistoryBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sessions.Shutdown(context.Background())
+	created, err := sessions.Create(context.Background(), session.CreateRequest{Name: "flood", Command: pty.Command{Path: "/bin/sh", Args: []string{"-c", "head -c 2000000 /dev/zero | tr '\\\\0' x; exec sleep 30"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Attach(created.ID, "att_flood", 0); err != nil {
+		t.Fatal(err)
+	}
+	counting := &countingSnapshots{Service: sessions}
+	stream := &terminalOutputStream{manager: counting, sessionID: created.ID, attachmentID: "att_flood", checkpointSent: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	events := 0
+	for received := 0; received < 2_000_000; events++ {
+		frame, err := stream.Next(ctx)
+		if err != nil {
+			t.Fatalf("after %d bytes: %v", received, err)
+		}
+		received += len(frame.Data)
+		if frame.Release != nil {
+			frame.Release()
+		}
+	}
+	if calls := counting.calls.Load(); calls > 3 {
+		t.Fatalf("%d snapshots for %d output events", calls, events)
 	}
 }
