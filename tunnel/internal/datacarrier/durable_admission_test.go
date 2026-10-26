@@ -141,3 +141,41 @@ func TestComposedCarrierAuthoritiesPreserveAllFailureCausesAndSuccess(t *testing
 		t.Fatal("valid alternate authority did not recover")
 	}
 }
+
+// Prod 2026-10-26: a tunnel moving from its connector onto the agent's runtime carrier gets an
+// engine assignment (its own generations, starting at 1) for the same route while the edge still
+// holds the connector assignment (generation 7) as last-known-good. Both must install; only an
+// older generation of the same assignment is a stale replay.
+func TestDurableAdmissionFenceIsPerAssignment(t *testing.T) {
+	public := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range public {
+		public[i] = byte(i + 31)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(public)
+	thumbprint, err := connectorprotocol.IdentityThumbprint(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	registry, err := NewDurableAdmissionRegistry(DurableAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := DurableAdmission{Identity: Identity{AccountID: "account_1", HostID: "machine_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_c", ProcessGeneration: 1, Generation: 3},
+		EdgeNodeID: "edge_1", EdgeProcessEpoch: "_epoch123", AssignmentID: "assignment_connector", RouteID: "route_1", AssignmentGeneration: 7, RouteGeneration: 2,
+		ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", MachineIdentityPublicKey: encoded, MachineIdentityThumbprint: thumbprint, State: "active"}
+	if err := registry.Replace([]DurableAdmission{connector}, now); err != nil {
+		t.Fatal(err)
+	}
+	engine := connector
+	engine.Identity = Identity{AccountID: "account_1", HostID: "machine_1", TunnelID: "machine_1", ConnectorID: "machine_1", SessionID: "session_r", ProcessGeneration: 1, Generation: 1}
+	engine.AssignmentID, engine.AssignmentGeneration = "epa_route_1", 1
+	if err := registry.Replace([]DurableAdmission{connector, engine}, now); err != nil {
+		t.Fatalf("engine assignment next to the connector's last-known-good: %v", err)
+	}
+	stale := connector
+	stale.AssignmentGeneration = 6
+	if err := registry.Replace([]DurableAdmission{stale, engine}, now); !errors.Is(err, ErrDurableAdmissionConflict) {
+		t.Fatalf("older replay of the same assignment: %v, want conflict", err)
+	}
+}

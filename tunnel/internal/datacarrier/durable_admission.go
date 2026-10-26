@@ -178,7 +178,7 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 	for _, entry := range r.byID {
 		for _, admission := range entry.byRoute {
 			currentAdmissions[admission] = true
-			key := admission.Identity.AccountID + "\x00" + admission.Identity.HostID + "\x00" + admission.RouteID
+			key := assignmentFenceKey(admission)
 			if admission.AssignmentGeneration > currentGenerations[key] {
 				currentGenerations[key] = admission.AssignmentGeneration
 			}
@@ -189,7 +189,7 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 		if err := admission.Validate(r.nodeID, r.processEpoch, now); err != nil {
 			return err
 		}
-		if admission.AssignmentGeneration < currentGenerations[admission.Identity.AccountID+"\x00"+admission.Identity.HostID+"\x00"+admission.RouteID] && !currentAdmissions[admission] {
+		if admission.AssignmentGeneration < currentGenerations[assignmentFenceKey(admission)] && !currentAdmissions[admission] {
 			return ErrDurableAdmissionConflict
 		}
 		key := durableIdentityKey(admission.Identity)
@@ -455,3 +455,12 @@ func AnyAuthorizer(authorizers ...Authorizer) Authorizer {
 }
 
 var _ Authorizer = (*DurableAdmissionRegistry)(nil)
+
+// assignmentFenceKey scopes the assignment-generation fence to one assignment of a route: a replay
+// of an older generation of that assignment is refused, while a different assignment of the same
+// route (a tunnel moving from its connector onto the agent's runtime carrier, whose engine
+// assignment counts its own generations) is not compared with it (prod 2026-10-26: every
+// reconcile failed on an edge that held the connector assignment as last-known-good).
+func assignmentFenceKey(a DurableAdmission) string {
+	return a.Identity.AccountID + "\x00" + a.Identity.HostID + "\x00" + a.RouteID + "\x00" + a.AssignmentID
+}
