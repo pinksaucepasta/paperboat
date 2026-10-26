@@ -9,15 +9,18 @@ configuration generations, and the authenticated edge node/process epoch.
 
 ## Grant issuance
 
-`POST /v1/native/private-access/grants` is the machine-authenticated native
-transport boundary. A CLI session may supply either one exact resource/route
-binding or a bounded same-account tunnel/route selector. The server resolves
-that selector without enumerating misses or ambiguous names, binds the grant
-to the current machine access session and exact resource, route, target and
-installation generations, and returns the exact origin only inside that
-short-lived grant response. Native peers reauthorize the access session and
-binding before origin dial; a new grant and native stream are required for
-every raw TCP connection.
+`POST /v1/native-private-access/grants` is the CLI-authenticated native transport
+boundary: a CLI access token with `machines:connect`, not a machine credential. The strict
+body is `operation_id`, `resource_kind` (`machine_service`), `resource_id` (the machine ID),
+`route_id` (`tcp:<port>`) and `protocol` (`tcp`). The server authorizes that exact machine
+service for the account (a team's private-access setting can refuse it with 403
+`team_private_access_off`) and requires the port in the machine's current service
+announcement; otherwise it returns 409 `service_not_announced` with `Retry-After`. It binds
+the grant to a capability-only access session of the calling CLI session and to the exact
+installation, boot, policy and announcement generations, and returns `target`, `credential`
+and `expires_at` with `Cache-Control: no-store`. The loopback origin address appears only
+inside that short-lived response. Native peers reauthorize the access session and binding
+before origin dial; a new grant and native stream are required for every raw TCP connection.
 
 Native HTTP uses the same grant and exact binding in one HTTP/3 extended
 CONNECT request on a dedicated preview-class Paperboat QUIC session. That
@@ -85,9 +88,9 @@ exact host plus path-segment boundary match. TCP uses the same authorization
 flow with the `paperboat-tunnel-tcp` audience and has no HTTP fields.
 
 Private HTTP failures use one stable status mapping. `401 Unauthorized` means
-the local host runtime did not supply a valid current machine-session grant.
+the grant, machine identity or machine session is missing, invalid, expired or revoked.
 `403 Forbidden` means the authenticated machine is not allowed to use the
-resolved route, including revocation and account or route mismatch. `503 Service
+resolved route (account or route mismatch, wrong route or protocol, expired request or binding). `503 Service
 Unavailable` means hostd, the edge binding, or the authorization
 authority is temporarily unavailable or generation state is uncertain. These
 responses never disclose whether a different account owns the hostname or

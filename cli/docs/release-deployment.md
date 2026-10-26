@@ -1,23 +1,22 @@
 # Signed release deployment
 
-Official builds require the `SENTRY_DSN` repository variable. The native and shared
-service release workflows validate it before building and embed it together with the
-exact release identity. Missing or malformed configuration fails the build; the API
-read/write token is never embedded. Source code contains no default ingestion DSN,
+The native release build requires the `SENTRY_DSN` repository variable: `tools/build-release-asset.sh`
+validates it and embeds it together with the exact release identity (`paperboat:<version>`).
+Missing or malformed configuration fails the build; the API read/write token is never
+embedded. The service container images take per-service variables (`SENTRY_DSN_SERVER`,
+`SENTRY_DSN_RELAY`, `SENTRY_DSN_TUNNEL`); a malformed value fails the image build and an empty one
+leaves reporting disabled. Source code contains no default ingestion DSN,
 and ordinary builds remain disabled until explicitly configured for their own Sentry.
 The release DSN is public in shipped binaries, so these are distribution defaults,
 not authentication of the executable sending an event. Explicit runtime disable and
 custom destination overrides remain supported. Previously published artifacts do not
 change until a new release is built and installed.
 
-When `SENTRY_ORG` and `SENTRY_PROJECT` repository or organization variables and
-the `SENTRY_AUTH_TOKEN` secret are configured, the release workflow creates and
-finalizes `paperboat:<version>` in Sentry only after the GitHub assets and TUF
-origin have been published successfully. It associates the full GitHub repository
-and exact source commit. Production telemetry must use that exact identifier as
-`PAPERBOAT_SENTRY_RELEASE`. The token needs Sentry `org:ci` (or
-`project:releases`) access. Configure all three values or none; a partial
-configuration fails the workflow.
+The release workflow does not talk to the Sentry API. After the release is published, an
+operator may run `tools/sentry-release.py release` (with `SENTRY_ORG`, `SENTRY_PROJECT` and
+`SENTRY_AUTH_TOKEN` or `SENTRY_AUTH_TOKEN_FILE`, plus `--release`, `--repository`, `--commit` and
+`--source-url`) to create and finalize the release in Sentry and associate the repository and exact
+source commit. Use the identifier the binaries embed (`paperboat:<version>` for `pb`).
 
 Artifact publication does not create a Sentry deploy. A rollout owner may run
 `tools/sentry-release.py deploy` only after the rollout's own checks succeed. The
@@ -32,13 +31,13 @@ publication, the copy in signed TUF target metadata is authoritative.
 
 ## Publication inputs
 
-Build the selected qualified canonical native assets in a clean absolute directory. Omitted platform targets retain their existing signed versions and policies:
+Build the selected canonical native assets (`pb-linux-amd64`, `pb-linux-arm64`, `pb-darwin-arm64`) in a clean absolute directory. Omitted platform targets retain their existing signed versions and policies:
 
 ```sh
 go run ./tools/release-plan manifest \
   -version 2026.08.31.1 \
   -source-commit 0123456789abcdef0123456789abcdef01234567 \
-  -toolchain go1.27.1 \
+  -toolchain go1.27.2 \
   -artifacts /absolute/path/to/qualified-assets \
   -output /absolute/path/to/manifest.json
 
@@ -64,7 +63,6 @@ go run ./tools/tuf-repository publish \
   -artifacts /absolute/path/to/qualified-assets \
   -manifest /absolute/path/to/manifest.json \
   -deployment-plan /absolute/path/to/deployment-plan.json \
-  -windows-amd64-native-evidence /absolute/path/to/windows-amd64-native-qualification.json \
   -rollout-revision 7 \
   -severity routine
 
@@ -75,9 +73,7 @@ go run ./tools/tuf-repository verify-published \
 Publication embeds `manifest_sha256`, `deployment_plan_sha256`, and the static
 deployment policy in every signed release-index target. The publisher checks
 that targets from the same release carry consistent policy bytes and that the
-selected artifact manifest matches each TUF length and SHA-256. Every selected
-Windows architecture requires its own native qualification evidence; the example
-selects windows-amd64 and omits windows-arm64. Changing a policy or artifact
+selected artifact manifest matches each TUF length and SHA-256. Changing a policy or artifact
 after signing invalidates the TUF role signatures and is rejected by
 `verify-published`.
 
@@ -120,10 +116,13 @@ The updater must reject an input whose target tuple changes between phases. A
 reconnect, route replacement, or configuration replacement therefore obtains a
 fresh provider input rather than reusing a stale one.
 
-Standalone updates notify users and require approval of the exact verified download.
+Manual updates require approval of the exact verified download.
 `pb update check` reads signed metadata. `pb update download` stages the candidate
 without executing it; `pb update --approve <candidate-id>` starts installation after
-review. Interactive `pb update` shows the downloaded version, platform, size and digest
+review. Official installations also have scheduled automatic updates on by default
+(`pb update settings`): the verified candidate is downloaded ahead of the daily
+maintenance time (04:00 machine-local) and installed then without a prompt. Custom
+builds can neither check nor install. Interactive `pb update` shows the downloaded version, platform, size and digest
 before its default-no confirmation. Changed signed metadata or staged bytes invalidate
 approval. Ordinary updater restart preserves the download without activating it.
 

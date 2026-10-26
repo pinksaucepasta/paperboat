@@ -39,6 +39,7 @@ Error responses:
     "message": "Machine is not ready for connection.",
     "support_reference": "support_550e8400-e29b-41d4-a716-446655440000",
     "request_id": "req_...",
+    "correlation_id": "...",
     "details": {}
   }
 }
@@ -50,7 +51,7 @@ Requests:
 
 - `Authorization: Bearer <token>` for non-browser clients where approved.
 - Cookie session plus CSRF header for dashboard browser writes.
-- `Idempotency-Key` where the operation contract requires it, including machine setup,
+- `Idempotency-Key` where the operation contract requires it, including machine enrollment (`POST /v1/machine-enrollments`),
   checkout/customer portal, configuration repository provisioning and resource mutations.
 - Resource ETags or explicit expected versions/generations for optimistic concurrency,
   as defined by each operation in [OpenAPI](../openapi.json).
@@ -58,7 +59,7 @@ Requests:
 Responses:
 
 - `Request-Id` on every response.
-- Rate limit headers where limits apply.
+- `Retry-After` (seconds) on `429 rate_limited` responses.
 
 ## Endpoint List
 
@@ -72,11 +73,13 @@ Responses:
 ### Auth and Session
 
 - `GET /v1/me`
+- `GET /v1/auth/workos/state`
 - `POST /v1/auth/workos/callback`
 - `POST /v1/auth/logout`
 - `GET /v1/auth/csrf`
 - `POST /v1/auth/device/authorize`
 - `POST /v1/auth/device/token`
+- `POST /v1/auth/device/cancel`
 - `GET /v1/auth/device/requests/{user_code}`
 - `POST /v1/auth/device/requests/{user_code}/approve`
 - `POST /v1/auth/device/requests/{user_code}/deny`
@@ -91,8 +94,8 @@ CLI machine reads and connects use scoped Paperboat bearer access tokens. Revoki
 
 ### Selected workspace
 
-`GET /v1/workspaces` returns `{items:[{id,name,kind,role}]}` in the normal data
-envelope: Personal first (`id: "personal"`), then active, nonsuspended team memberships.
+`GET /v1/workspaces` returns `{items:[{id,name,kind,role,approve_new_machines?}]}` in the
+normal data envelope: Personal first (`id: "personal"`), then active, nonsuspended team memberships.
 `personal` is reserved and cannot be a team ID. Selection uses one identity; it never
 changes credentials, enrolls a machine again, or transfers existing resources.
 
@@ -123,9 +126,9 @@ it when present, and shared viewer/controller descriptors cannot include it. Per
 descriptors retain their existing explicitly eligible bundled capabilities.
 
 ENV scope inventories and explicit key-management targets follow the selected workspace;
-a conflicting explicit target returns `409 workspace_target_conflict`. Machine-bound ENV
-host configuration retains its complete, explicitly granted multi-source selection, so
-changing a workspace never filters and replaces another source implicitly. Configuration
+a conflicting explicit target returns `409 workspace_target_conflict`. Host ENV
+layers are kept per workspace, so publishing a layer for one workspace never replaces
+another workspace's layer for the same machine. Configuration
 status and adoption management follow the assignment's existing `adopted_team_id`; team
 default operations require that exact selected team. Repository credentials and GitHub
 inventory remain owned by the authenticated identity. Selecting a team does not share
@@ -137,10 +140,12 @@ those credentials, adopt a default, or apply configuration to a host.
 - `GET /v1/billing/workspaces/personal/products`
 - `POST /v1/billing/workspaces/personal/checkout`
 - `POST /v1/billing/workspaces/personal/portal`
+- `POST /v1/billing/workspaces/personal/topups`
 - `GET /v1/billing/workspaces/teams/{team_id}`
 - `GET /v1/billing/workspaces/teams/{team_id}/products`
 - `POST /v1/billing/workspaces/teams/{team_id}/checkout`
 - `POST /v1/billing/workspaces/teams/{team_id}/portal`
+- `POST /v1/billing/workspaces/teams/{team_id}/topups`
 - `GET /v1/billing/workspaces/teams/{team_id}/seats/preview?quantity=N`
 - `POST /v1/billing/workspaces/teams/{team_id}/seats`
 
@@ -155,7 +160,9 @@ Checkout requires `product_version` alongside the selected product code and
 rejects a changed catalog entry with `409 product_changed` before a provider
 operation, so the client reloads prices for review. Taxes and the final total
 are confirmed by the provider. Return URLs do not establish payment success;
-only the verified workspace subscription projection does.
+only the verified workspace subscription projection does. Top-ups take the same body plus
+`quantity` (a whole number up to the configured maximum) and need a paid workspace plan
+(`409 paid_plan_required`).
 
 See [provider contracts](provider-contracts.md) for ownership, quantities and recovery.
 
@@ -164,7 +171,7 @@ See [provider contracts](provider-contracts.md) for ownership, quantities and re
 Removing a device revokes that device and stops all future ENV delivery to it, including already-connected sessions. It does not require ENV key rotation or change the personal or Team key epoch. The removed device may keep the old key and any ENV it already downloaded. Rotating ENV keys is an optional Owner/Admin action for lost or compromised devices. Member removal and ENV grant revocation still require rotation.
 
 - `GET /v1/teams/{team_id}` returns the current team state, including `env_status` as
-  `not_initialized`, `ready`, `rotation_pending`, or `deleted`. A role never grants ENV
+  `not_initialized`, `ready`, `rotation_pending`, `suspended`, or `deleted`. A role never grants ENV
   decryption by itself. Member removal and ENV grant revocation can set `rotation_pending`; device removal cannot.
 - `GET /v1/teams/{team_id}/activity?cursor={opaque}&limit={integer}` returns
   `{items,next_cursor}`. Each item contains `id`, `actor_account`, `action`, `created_at`,
@@ -195,8 +202,8 @@ assignment, approval, and runtime API bodies remain JSON.
   probes. Custom credentials remain on machines; GitHub connection behavior is unchanged.
   Repository access grants expose `transport`; custom grants have no provider password.
 
-- `GET /v1/config-sync/status` requires an authenticated account with an active entitlement and
-  returns the authoritative policy plus bounded environment, assignment, consent, helper,
+- `GET /v1/config-sync/status` requires an authenticated account (Personal workspace unless
+  another is selected) and returns the authoritative policy plus bounded environment, assignment, consent, helper,
   repository, revision, conflict, and recovery state. Stale helper observations are `offline`;
   unassigned environments are `disabled`. Policy reports the server rollout mode
   (`disabled`, `read_only`, or `leased_writes`) for every machine.
@@ -215,53 +222,41 @@ assignment, approval, and runtime API bodies remain JSON.
   exposes the current account's single explicit adoption. Adoption succeeds only when the
   active member has independently connected the same provider repository. Defaults never
   contain credentials or push targets, and PB membership changes do not revoke provider access.
-- `GET|PUT|DELETE /v1/config-sync/overrides` lists and changes exact account-path overrides.
-  Mandatory exclusions return `mandatory_exclusion` and cannot be weakened.
-- `POST /v1/config-sync/recovery-key/export` and `/rotate` require CSRF plus a short-lived,
-  purpose-bound WorkOS reauthentication proof. Export responses are non-cacheable and audited.
-- `POST /v1/config/classify` requires helper proof plus a current assignment-bound config
-  credential and accepts only the versioned, bounded relative-path metadata schema. Provider API
-  keys, contents, absolute paths, identities, repository coordinates, and workspace names are
-  never accepted from or returned to a helper.
 - `POST /v1/config-sync/environments/{environment_id}/conflict-resolutions` accepts
   native user bearer authentication with `machines:connect`; browser sessions still
   require a trusted Origin and CSRF. The adjacent `/force` route uses the same
-  authentication boundary and requires explicit force confirmation. Resolution records an
-  explicit `keep_local`, `keep_remote`, or `externally_resolved` action against the current
-  assignment version, remote revision, relative path, and deterministic conflict revision.
-  Stale or ambiguous actions return a conflict.
+  authentication boundary and takes `scope` (`path` or `config`) and a `force_pull` or
+  `force_push` action with its exact confirmation text. Resolution records an explicit
+  `keep_local` or `keep_remote` action (`keep_local` is refused with `409 mode_forbids_publication`
+  on a pull-only assignment) against the current assignment version, remote revision, relative
+  path, and deterministic conflict revision. Stale actions return `409`
+  (`conflict_resolution_stale`, or `force_request_stale` on `/force`).
 - `POST /v1/config/conflict-resolutions/pending` and
   `/v1/config/conflict-resolutions/acknowledge` require helper proof and the current
   assignment-bound config credential. A helper sees only its active binding and acknowledges
   only after the selected result lands.
-- `POST /v1/runtime-observations` accepts authenticated runtime availability and diagnostics
-  plus an optional validated `config_sync` object. Its required `updated_at` timestamp tracks the
-  freshness of the sync daemon independently. A status timestamp newer
-  than its enclosing sample is persisted as a sanitized `status_clock_invalid` error at sample time,
-  allowing later clock-corrected status to replace it. Paths and errors are sanitized and bounded;
-  file contents, credentials, and raw command output are never accepted or persisted.
+- `POST /v1/runtime-observations` accepts authenticated runtime presence: `environment_id`,
+  `resource_id` and `sampled_at` are required, and the native runtime also sends its
+  `reporter_version`. It may carry the optional objects `runtime_diagnostics`, `availability`,
+  `machine_capabilities`, `machine_services`, `lazy_runtime` and `update`. The body is strict
+  (unknown fields return 400) and at most 1 MiB. It requires the current signed machine
+  proof. Success returns HTTP 202 with `{data:{accepted:true,update_observation_recorded,...}}`
+  plus the machine's current `machine_capabilities`, `machine_services_policy` and
+  `file_transfer_policy` when they apply.
 - The same endpoint accepts a join-only `terminal_join` observation containing
   `access_session_id`, `terminal_session_id`, and `attachment_id` alongside the required
-  `environment_id`, `resource_id`, `reporter_version`, and `sampled_at` envelope fields.
-  `environment_id`, `resource_id`, and `sampled_at` are required; the native runtime also
-  sends its `reporter_version`. The observation requires
-  the current signed machine proof and exact current team, membership, binding, grant, access,
-  and terminal-role generations. Success returns HTTP 202 with `{data:{recorded:true}}`.
+  `environment_id`, `resource_id`, and `sampled_at` fields. It requires the current signed
+  machine proof and exact current team, membership, binding, grant, access, and terminal-role
+  generations. Success returns HTTP 202 with `{data:{recorded:true}}`.
   Malformed or mixed observations return 400, invalid current terminal access returns 403,
   and unavailable durable audit recording returns 503. This metadata-only event is distinct
   from `terminal_session_access_authorized` and never records terminal contents.
-- An initial environment observation may accompany runtime diagnostics before
-  `environment_injection` is advertised. It must be `pending` with null authority,
-  global, and machine cursors and every required observation member. Normal machine
-  proof and environment binding validation still apply; the capability is advertised
-  only after the host verifies its encrypted bundle.
 
 ### Signed Updates and Maintenance
 
-- The native installation and signed-release matrix is exactly macOS (`darwin`) ARM64,
-  Linux AMD64 and ARM64, and Windows AMD64 and ARM64. Darwin AMD64 descriptors,
-  release indexes, and release-authority requests are rejected. Machine setup has only
-  `host` and `client` modes; `client` is the receive-side runtime.
+- The native installation and signed-release matrix is exactly macOS (`darwin`) ARM64 and
+  Linux AMD64 and ARM64. Darwin AMD64 and Windows descriptors, release indexes, and
+  release-authority requests are rejected.
 - First installation and update decisions use a TUF-verified
   `paperboat.release-index/v1` target. The signed index carries the artifact digest and length,
   platform and architecture, worker/supervisor compatibility bounds, minimum version, revocation,
@@ -280,7 +275,7 @@ assignment, approval, and runtime API bodies remain JSON.
   never makes a live runtime appear offline.
 - `GET /v1/machines/{machine_id}/update-status` returns the latest durable update observation.
 - `GET /v1/machines/{machine_id}/network-latency` lists the fresh (under one hour) connect times the machine measured to the edges and relays it can use; `PUT` (machine manager, `machines:connect`) lets its signed-in daemon report relay times. Edge times travel on the runtime attachment (`edge_latency`) and count only for candidates the server issued. Display data only.
-- `GET /v1/machines/update-summary` returns a fleet page for the selected `workspace` (Personal by default) and complete filtered state counts. It accepts `limit` (1–200, default50), `offset`, literal case-insensitive `q`, and update `state` (including `not_reporting`); `pagination` supplies `total` and nullable `next_offset`. Team selection uses current membership and the same machine management/capability visibility as machine inventory; Personal excludes team-owned and foreign machines. Machines that have
+- `GET /v1/machines/update-summary` returns a fleet page for the selected `workspace` (Personal by default) and complete filtered state counts. It accepts `limit` (1–200, default 50), `offset`, literal case-insensitive `q`, and update `state` (including `not_reporting`); `pagination` supplies `total` and nullable `next_offset`. Team selection uses current membership and the same machine management/capability visibility as machine inventory; Personal excludes team-owned and foreign machines. Machines that have
   not reported update state are explicitly counted as `not_reporting`; they are never folded into
   healthy or idle results.
 - `GET|POST /v1/machines/{machine_id}/maintenance-approvals` lists or requests an explicit,
@@ -288,7 +283,7 @@ assignment, approval, and runtime API bodies remain JSON.
   action, and expire within 24 hours. `POST .../{approval_id}/approve` and `/reject` are
   optimistic, audited state transitions. Approval never bypasses TUF verification or local
   compatibility checks.
-  GET accepts `limit` (1–200, default50), `offset`, literal `q`, and `state` (pending/approved/rejected/expired/consumed). The response includes `approvals` and `pagination` with complete filtered `total` and nullable `next_offset`, ordered by creation time and ID descending. Due pending approvals expire before counts and page reads; exact machine management authority is checked before this transition.
+  GET accepts `limit` (1–200, default 50), `offset`, literal `q`, and `state` (pending/approved/rejected/expired/consumed). The response includes `approvals` and `pagination` with complete filtered `total` and nullable `next_offset`, ordered by creation time and ID descending. Due pending approvals expire before counts and page reads; exact machine management authority is checked before this transition.
 
 ### GitHub
 
@@ -320,8 +315,8 @@ of at most 1024 UTF-8 bytes. Omission uses the enrolled root. Idempotent replay 
 changes the original session or directory, and launch failure never falls back.
 
 Every enrolled machine can initiate authorized access and serve its enabled capabilities.
-Incoming terminal/exec, managed SSH, file receiving and preview/tunnel serving default
-on; peer relay is opt-in. Disabling an incoming capability does not disable outgoing
+Incoming terminal/exec, managed SSH, file receiving, preview/tunnel serving, keep-awake and
+ENV injection default on. Disabling an incoming capability does not disable outgoing
 access. Capabilities never replace exact-resource authorization, revocation or readiness.
 
 ### Preview Leases
@@ -344,7 +339,7 @@ access. Capabilities never replace exact-resource authorization, revocation or r
   contain at most eight normalized exact, apex, or one-label wildcard hostnames.
   An account selecting a self-hosted-only tunnel pool must supply a custom domain;
   an empty domain list returns `400 preview_domain_required`, changes no state,
-  and directs the caller to `configure_preview_domain`.
+  and directs the caller to `configure_preview_domain_or_pool`.
   Domain rows are created in the same transaction as the lease. The managed
   Paperboat preview endpoint remains immediately usable while DNS and TLS for
   custom aliases reconcile independently.
@@ -425,7 +420,7 @@ Every operation requires current operator authority and an audit record.
 
 ## Canonical Error Codes
 
-Initial contract:
+Cross-cutting codes (endpoints also return resource-specific codes):
 
 - `unauthenticated`
 - `forbidden`
@@ -433,18 +428,9 @@ Initial contract:
 - `github_required`
 - `validation_failed`
 - `idempotency_conflict`
-- `quota_exceeded`
 - `machine_not_ready`
 - `provider_unavailable`
 - `provider_outcome_unknown`
-- `provider_conflict`
-- `tunnel_unavailable`
-- `credential_issuer_unavailable`
-- `github_config_not_ready`
-- `invalid_pagination`
-- `invalid_sort`
-- `invalid_version`
-- `version_required`
 - `version_conflict`
 - `rate_limited`
 - `authorization_pending`
@@ -502,13 +488,15 @@ CLI APIs:
   The bearer is a short-lived, single-use `preview_launch` credential bound to the
   exact request hash and every identity field. Hosts return only the matching
   `accepted|ready|failed` outcome; acceptance never completes the create operation.
-- `POST /v1/machine-installation-failures` accepts an active helper identity,
-  its exact Ed25519 request proof, and only `pairing_id` plus the bounded stage
-  `service_install|service_readiness`. It transitions the matching `installing|connecting`
-  pairing installation to `failed_retryable`; its stage is `artifact_verification`, `service_install`,
-  or `service_readiness`; it carries no local paths, error output, credentials,
-  artifact URLs, or process data. Retry preserves the existing machine, environment,
-  helper identity, and seat while rotating bootstrap generation and material.
+- `POST /v1/machine-installation-failures` accepts an active helper identity with its exact
+  Ed25519 request proof (or the helper enrollment credential) and a strict body of
+  `pairing_id`, `helper_id`, `helper_enrollment_id` and the bounded stage
+  `artifact_verification|service_install|service_readiness`. It transitions the matching
+  `installing|connecting` pairing installation to `failed_retryable`, releases the machine's
+  seat and revokes that helper identity and its enrollment grants; it carries no local paths,
+  error output, credentials, artifact URLs, or process data. Success returns HTTP 202. A retry
+  (`POST /v1/machine-enrollments/{enrollment_id}/retry`) issues new bootstrap material under a
+  new generation.
 - `GET /v1/trust/revocations` requires the edge-control bearer credential and returns the
   bounded revocation document consumed by tunnel trust snapshots (`jtis`, `environments`,
   `connector_generations`, and `key_ids`).
@@ -552,14 +540,16 @@ for diagnostics. The response
 is `{data: {schema: "paperboat.runtime-carrier/v1", binding, attachment_generation,
 config_content_hash, edge_endpoints, hostname, route_kind, route_revision,
 expires_at, backup, edge_candidates, active_edge_node_id,
-active_edge_process_epoch}}`. `backup` is a second complete admission when a
+active_edge_process_epoch}}` (plus `endpoints_served` and `tunnel_endpoints_served` when every
+edge of the attachment serves endpoint and tunnel routes on these carriers). `backup` is a second complete admission when a
 separate eligible failure domain exists. Candidates are bounded to 32 and
 carry probe addresses only; the carrier still authenticates its exact edge.
 `binding` carries the account/machine, carrier identity,
 installation/process/config/route generations, current edge process, pinned edge
 certificate and current machine public key/thumbprint. Existing wire fields
 `machine_identity_public_key` and `machine_identity_thumbprint` remain explicit.
-The host renews before the 60-second admission expiry; unchanged bindings retain
+The host renews before the admission expires (`cli_auth.mint_proof_lifetime`, 2 minutes by
+default); unchanged bindings retain
 their carrier sessions. It connects both admitted edges but opens terminal output
 only on the server-confirmed active edge. An active change requires a fresh ready
 observation for the requested exact node and process epoch. The previous output
@@ -615,7 +605,8 @@ and `confirm_interactive_access`. Activation/reset returns a random 12-character
 code once; GET never returns it. Only a terminal-bound hash is stored. Control requires
 explicit confirmation; code guests never receive owner authority. Reset, stop, or
 expiry invalidates old guest sessions and tickets without changing account policy.
-Owner GET also lists at most 64 admitted guest sessions (display name and expiry),
+Owner GET also lists the admitted guest sessions (display name and expiry, at most the
+shared-terminal viewer cap),
 which is not live participant presence. Rotation/stop deletes these sessions and their
 tickets; expired identities fail authorization immediately and are removed on the
 next join/reset or terminal deletion.
@@ -645,8 +636,9 @@ reauthorizes active connections every two seconds and fails closed on failed/exp
 checks; edge watchdog/check latency also bounds withdrawal. Existing account ticket
 authentication and CSRF are unchanged. Native shared-terminal joins remain account-only.
 
-Code admission is bounded to 120 attempts/minute and 64 unexpired guest identities
-per terminal, serialized in PostgreSQL across server processes. Rate limits return
+Code admission is bounded to 120 attempts/minute and the shared-terminal viewer cap of
+unexpired guest identities per terminal (`billing.limits.viewers_per_shared_terminal`,
+default 50), serialized in PostgreSQL across server processes. Rate limits return
 429 with `Retry-After: 60`; capacity returns 409 with guidance to reset access.
 Normal code expiry choices support a small collaboration session through a full
 workday, with an explicit 24-hour maximum rather than permanent guest authority.
@@ -673,8 +665,11 @@ with `invalid_inventory_query` rather than being silently ignored.
 
 Preview and tunnel inventories retain `items,next_cursor`; cursors bind account, workspace,
 and `q/state/owner` filters. Preview state uses `allocating`, `connecting`, `ready`,
-`owner_disconnected`, `expired`, `stopped`; `active` groups only `allocating`,
-`connecting`, and `ready`. `owner_disconnected` is terminal after the owner reconnect
+`origin_unavailable` (attached with a ready edge, but the local app is not running),
+`owner_disconnected`, `expired`, `stopped`. The `state` filter accepts every value except
+`origin_unavailable` and also `active` (every preview that has not ended: `allocating`,
+`connecting`, `ready`, `origin_unavailable`) and `ended` (`owner_disconnected`, `expired`,
+`stopped`); `machine_id` filters to one owner machine. `owner_disconnected` is terminal after the owner reconnect
 grace expires: its allocation and edge are released, renewal is refused, and it remains
 available in history or via its explicit state filter. A still-owned lease awaiting
 allocation or reconnect remains active. Tunnel state
@@ -724,7 +719,7 @@ installation model does not expose an independent pairing detach operation.
 `path_pagination` in the same shape; `path_limit` defaults to and cannot exceed 32, and
 `path_offset` continues its paths. Totals and series cover all matching measurements,
 independently of both pages. Group ordering is kind, ID, route ID, then machine ID; paths
-order by mode, hosting, then node ID. Filters include `resource_kind`, `resource_id`,
+order by mode, hosting, then node ID. Filters include `actor_account_id`, `resource_kind`, `resource_id`,
 `mode`, and `hosting`. An absent `resource_route_id` or `machine_id` includes all values;
 an explicitly empty value selects the empty value exactly. Invalid, unsupported, or
 repeated query parameters are rejected. Exhausted path pages preserve the resource and
@@ -740,33 +735,30 @@ revision, remote revision, machine installation, and exact CLI client identity. 
 terminal is created. The endpoint never returns or persists private file payloads; the
 host sends the comparison through the native encrypted transport.
 
-`GET /v1/environment/hosts` discovers only the account's active ENV-capable registered
-machines that have already received an owner-authorized projection. It returns
-`{items:[{machine_id,selection_generation,projection_revision,fence_generation,state}],
-pagination:{limit,offset,total,next_offset}}`, ordered by machine ID. `limit` defaults
-to 50 and is bounded to 1–200; `offset` is nonnegative. Optional `state` accepts only
-`pending` or `ready`, filtered before paging. Only the Personal workspace is applicable;
-invalid, unsupported, and repeated query parameters are rejected. It excludes newly
-registered recipients with no prior projection and never expands selection or grants.
-Exact `GET /v1/environment/hosts/{machine_id}` supplies the owner's current selection
-and cryptographic binding for automatic refresh through the existing signed projection
-PUT. `ready` means current-generation ciphertext is published with the current fence;
-it does not assert that an offline host has applied it. Scope changes fence the old
-projection and leave it `pending` until an unlocked authorized owner publishes a successor.
-No plaintext values, recipient keys, selection names, or ciphertext are returned by the
-collection. Revoked, deleted, foreign-owned, and ENV-disabled hosts are excluded.
+`GET /v1/environment/layers` discovers the account's ENV-capable registered machines that
+need a host layer for the selected workspace. It returns `{items:[{recipient_account,
+machine_id,installation_generation,host_key_generation,host_public,delivery_generation,
+document_id,fence_generation}],pagination:{limit,offset,total,next_offset}}`. `limit` defaults
+to 50 and is bounded to 1–200; `offset` is nonnegative. Optional `state` accepts `pending`
+(the default) or `ready`, and `owner_kind`, `owner_id` and `machine_id` narrow the source
+layer; filters apply before paging. `workspace_id`, when sent, must equal the selected
+workspace. Invalid, unsupported, and repeated query parameters are rejected with
+`invalid_inventory_query`. No plaintext values, selection names, or ciphertext are returned by
+the collection. `PUT /v1/environment/layers/{machine_id}` publishes one signed encrypted layer
+envelope (`operation_id`, `envelope`; at most 512 KiB of JSON) for that machine, and
+`GET /v1/environment/layers/{machine_id}` returns the machine's layer context (recipient,
+`workspace_id`, `actor_account_id`, and `layers`).
 
-Exact owner `GET /v1/environment/hosts/{machine_id}` also returns
-`observation:null|{schema,observation_seq,host_recipient_key_id,
-projection:null|{revision,document_id},fence_generation,state,error_code,observed_at}`
-and `applied:boolean`. Observation states are `pending`, `applied`, `failed`, and
-`revoked`; only failure includes a bounded public error code. The stored report is
-strictly parsed and bounded to 4096 bytes. `applied` is true only for a published current
-installation binding whose observation reports `applied` with the exact current recipient
-key, projection revision, document ID, and fence. An old applied report remains visible
-with `applied:false` after publication or authority changes. Missing observations return
-null and false. These fields contain no ENV values or file payloads. Bundle `ready`
-continues to mean published and deliverable, independently of host application.
+Each layer delivery carries `state` (`ready` means current-generation ciphertext is published
+with the current fence; it does not assert that an offline host has applied it),
+`observation:null|{...,
+host_recipient_key_id,observation_seq,state,error_code,observed_at}` and `applied:boolean`.
+The host reports its observations with `POST /v1/environment/hosts/{machine_id}/layer-observations`
+(machine-control identity and request proof only; at most 128 observations of at most 4096
+bytes each). `applied` is true only when the stored observation has state `applied` and
+matches the exact current recipient key, delivery generation, document ID, and fence. An old
+applied report remains visible with `applied:false` after publication or authority changes.
+These fields contain no ENV values or file payloads.
 
 After a Personal vault total-loss reset, an active Team owner can still read the
 signed encrypted Team predecessor and its persisted historical writer public key

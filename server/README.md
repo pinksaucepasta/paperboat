@@ -19,7 +19,10 @@ verification is available only in tests.
 Paperboat lowercases email addresses and removes the local part's first `+` suffix
 for every domain. Dots and domain names are preserved. Verified provider identities
 for these aliases sign into one account; invitations and contact addresses use the
-same canonical email. Refresh and logout remain bound to each provider session.
+same canonical email. Refresh and logout remain bound to each provider session. A new
+sign-up with an alias of an existing account's address is refused by the WorkOS
+registration action (`POST /v1/webhooks/workos/registration`), which names the address to
+sign in with.
 
 Apply Postgres migrations:
 
@@ -30,7 +33,7 @@ PAPERBOAT_DATABASE_DSN='postgres://...' go run ./cmd/paperboat-server migrate -c
 Useful checks:
 
 Install Go and `ripgrep`; the Makefile selects the pinned Go toolchain and `sqlc`
-generator. Run these commands from the repository root.
+generator. Run these commands from `server/`.
 
 ```sh
 curl -i http://127.0.0.1:8080/healthz
@@ -184,10 +187,10 @@ times and does not roll back or duplicate the completed file transfer.
 
 
 Postgres tables live in the dedicated `paperboat` schema. The migration policy is
-forward-only for production releases. Pre-release databases start from the single
-`001_baseline.sql` migration. The runner refuses an older, nonempty schema; create a
-fresh database before using this migration set. The former dev database was backed
-up before its authorized reset, and the release-readiness plan records recovery.
+forward-only for production releases. Pre-release databases start from
+`001_baseline.sql`, followed by the later forward-only migrations. The runner refuses an
+older, nonempty schema that predates the baseline; create a fresh database before using
+this migration set.
 
 ## License
 

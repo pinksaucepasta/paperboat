@@ -24,8 +24,9 @@ usable only in `active` state with current authorization and scoped-access capab
 
 Custom `provider=git` registrations accept HTTPS, HTTP, SSH (`ssh://` or scp-like),
 and explicit absolute local/file URLs, with a selected branch (default `main`).
-Their external repository identity is an opaque control-plane value; endpoint aliases
-are transport coordinates, never new writer-lease identities. The server does not probe
+They have no `external_repository_id`: the registered endpoint is the `external_ref` and the
+control-plane repository ID is the identity; endpoint aliases are transport coordinates,
+never new writer-lease identities. The server does not probe
 private endpoints or collect custom credentials. Reconnecting the same owner/endpoint
 preserves the registered identity. An active custom connection cannot change its branch;
 disconnect first to revoke its assignments and grants before selecting a new branch. Embedded URL passwords, HTTP userinfo, queries,
@@ -66,8 +67,8 @@ Canonical repository IDs still own writer leases across aliases. Changing rules 
 bindings increments assignment version, creates a new assignment identity, clears prior
 approval/consent and revokes old credentials, access operations and leases. Runtime
 `assignment_version`, rules and bindings let the worker fence baseline and crash-journal
-work. Each approved rule also carries `source` (`shared`, `os`, or `machine`), with explicit
-priority machine > matching OS > shared. Cross-source repository ancestry is permitted;
+work. Each approved rule also carries `source` (`shared`, `os`, `machine_section`, or `machine`),
+with explicit priority machine > machine_section > matching OS > shared. Cross-source repository ancestry is permitted;
 same-source ancestry and destination aliases are rejected. Cross-source nested
 destinations are allowed only when the descendant repository suffix maps exactly
 to the same relative suffix under the ancestor directory destination. Priority is
@@ -83,8 +84,9 @@ configuration and accept current consent again.
 
 Both user-edited source files use TOML. Shared `.paperboat/config-sync.toml`
 defaults and the machine configuration file reported by `pb config sync path` own
-repositories, operating mode, update preferences, and path rules. Machine fields override
-matching OS fields, which override shared defaults. Empty or comment-only TOML machine
+repositories, operating mode, update preferences, and path rules. The machine file overrides the shared file's `[machine.<name>]` section for this
+machine's Paperboat name, which overrides the matching `[os.<os>]` section, which overrides
+shared defaults. Empty or comment-only TOML machine
 files inherit; no server form reconstructs or edits these source files. Repository eligibility exclusions
 and mandatory secret exclusions can only narrow the effective selection; they never
 supply a destination. Configuration content remains ordinary Git plaintext.
@@ -126,13 +128,15 @@ background diff goroutines.
 
 An unresolved same-path three-way change stops automated work for that path while
 unrelated clean paths continue. Conflict revision is
-SHA-256 over repository, assignment, remote head, relative path, and base/local/remote
-content digests. Both exact sides are retained only in private, permission-protected local
+SHA-256 over repository, assignment, relative path, and the local and remote content digests
+(`deleted` for an absent side); it does not change when the remote head moves. Both exact sides are retained only in private, permission-protected local
 runtime state; server metadata contains only bindings, relative path, byte count, reason,
 revisions, and digests.
 
-Resolution is one of `keep_local`, `keep_remote`, or `externally_resolved`, bound to the
-current assignment version, remote revision, path, and conflict revision. Stale actions
+Resolution is `keep_local` or `keep_remote` (`keep_local` is refused for a pull-only
+assignment), bound to the current assignment version, remote revision, path, and conflict
+revision. `force_pull` and `force_push` are separate actions that need a typed confirmation
+and may apply to the whole configuration. Stale actions
 are rejected. Baseline advancement, landed-resolution acknowledgement, and artifact
 cleanup are crash-journaled.
 

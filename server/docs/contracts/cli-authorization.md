@@ -32,8 +32,10 @@ list. Unknown clients return `invalid_client`; a non-exact or malformed scope se
 ## Device Authorization
 
 `POST /v1/auth/device/authorize` is unauthenticated. It accepts `client_id`,
-`client_label`, `device_type`, `os`, and `scopes`. `client_label` is presentation-only,
-trimmed, and length-limited. `device_type` is one of `desktop`, `server`, or `container`.
+`client_label`, `device_type`, `os`, and `scopes`, plus the optional `enroll`, `workspace`
+and `enrolled_machine_id` for a device that joins the account as a machine (`enroll` and
+`enrolled_machine_id` are mutually exclusive; `workspace` requires `enroll`). `client_label`
+is presentation-only, trimmed, and length-limited. `device_type` is one of `desktop`, `server`, or `container`.
 The response contains `device_code`, `user_code`, `verification_uri`,
 `verification_uri_complete`, `expires_in`, and `interval`.
 
@@ -57,7 +59,8 @@ Approval atomically transitions the grant from `pending` to `approved`; it does 
 the grant or issue tokens. One token issuance atomically transitions the
 grant from `approved` to `consumed` while returning
 `access_token`, `refresh_token`, `token_type: "Bearer"`, `expires_in`, `scope`, and
-`cli_client_session_id`. Access-token lifetime is dynamically configured; the initial production
+`cli_client_session_id`, plus `enrollment` (`bootstrap_token`, `server_url`, `expires_at`,
+`workspace_id`, `admission`) when the grant was created with `enroll`. Access-token lifetime is dynamically configured; the initial production
 default is 900 seconds. Poll responses and token responses use `Cache-Control: no-store` and
 `Pragma: no-cache`.
 
@@ -86,7 +89,13 @@ the cookie; POST additionally requires the CSRF header and cookie pair.
 - `POST /v1/auth/device/requests/{user_code}/deny`
 
 Lookup returns client label, device type, OS, requested scopes, issue time, expiry, user
-code, and state. It never returns the device code or any token. Approval is bound to the
+code, state, the issuer, the signed-in account, and the device's `enroll`,
+`requested_workspace` and `workspace_id` (plus `admission` and `enrolled_machine` when they
+apply). An unknown code returns HTTP 404 `device_request_not_found`. It never returns the
+device code or any token. Approve and deny take an optional body `{"workspace_id"}`; approving
+an `enroll` grant requires it (`personal` or a team the account may add machines to), otherwise
+HTTP 400 `workspace_required` or HTTP 403 `workspace_forbidden`, and a grant without `enroll`
+rejects it with `validation_failed`. Approval is bound to the
 currently authenticated user. Denial and expiry are terminal; approval is an intermediate
 state that only the successful token poll may transition to `consumed`. Retrying the same
 approve/deny action returns HTTP 200 with the current state and never issues a token set.
@@ -128,10 +137,8 @@ calling CLI client-session family. Browser logout also tears down active downstr
 sessions, but it does not revoke independent CLI installations. Account suspension and
 administrative account revocation revoke every CLI client-session family. Refresh replay
 and explicit client deletion revoke the affected Paperboat family and mark its linked local
-access-session records revoked immediately. Invalidating the actual terminal and file bearer
-sessions inside helper requires the signed control-plane revocation endpoint tracked in
-downstream integration; until that lands, those short-lived downstream credentials remain usable
-until expiry. This capability must remain `Implemented`, not `Complete`, while this dependency is open.
+access-session records revoked immediately. The server's `DownstreamSessionRevoker`
+hook has no production implementation, so revocation is the database state change above.
 
 `GET /v1/auth/cli-client-sessions` accepts `limit` (1-200, default 50), `offset` (default 0), and an
 optional `state=active|revoked`. Its `data` contains `items` and `pagination`. Every item
@@ -145,6 +152,7 @@ contains `cli_client_session_id`, `client_id`, `client_label`, `device_type`, `o
 Paperboat clients share only a versioned profile contract: issuer/server identity, account
 metadata, client-session id, access expiry, and opaque operating-system credential-store
 references. Access and refresh values live in macOS Keychain, Windows Credential Manager,
-or Linux Secret Service. A plaintext file fallback is disabled by default; explicit headless
-fallback requires mode `0600` and a visible warning. Profiles are namespaced by normalized
+or Linux Secret Service. A plaintext file fallback (`auth.allow_file_fallback`) is off by default; `pb login` turns it
+on when no OS credential store is available and no credentials are saved, and the Account
+settings can toggle it. Fallback files must be owner-owned regular files with mode `0600`. Profiles are namespaced by normalized
 issuer and updated atomically under an inter-process refresh lock.

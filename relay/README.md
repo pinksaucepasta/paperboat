@@ -22,7 +22,7 @@ The command requires these flags, supplied from registered relay configuration:
 | Flag | Value |
 | --- | --- |
 | `-listen` | Explicit UDP address and port |
-| `-wss-listen` | Explicit TLS/WebSocket address and port |
+| `-wss-listen` | Explicit TLS/WebSocket address and port, distinct from `-listen`; the same port also serves STUN over UDP |
 | `-tls-cert` | PEM certificate file |
 | `-tls-key` | PEM private key file |
 | `-jwks` | Trusted issuer Ed25519 JWKS file |
@@ -65,10 +65,12 @@ Ordinary lease expiry denies further traffic but permits reconnection with fresh
 authority (QUIC application error 4, WSS close 4004). It does not permanently disable
 the carrier. Revocation, invalid credentials and protocol violations remain fatal.
 
-Relay capacity is bounded at 256 concurrent connections globally and 16 per account.
-The peer-relay packet shaper's 4,096 packets/second rate and 128-packet burst are fixed
-workload budgets. These limits define admission fairness and bounded resource use, so
-installation does not expose separate tuning knobs for them.
+Relay connection capacity is the node's registered `capacity_limit` (at most 16,384); one
+account may hold all but a tenth of those slots. The UDP peer-relay role allows 128
+allocations, 16 per account, and shapes forwarding to 49,152 packets/second with a
+4,096-packet burst per account. These peer-relay limits are fixed workload budgets that
+define admission fairness and bounded resource use, so installation does not expose
+separate tuning knobs for them.
 
 Focused verification:
 

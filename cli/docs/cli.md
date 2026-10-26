@@ -19,7 +19,7 @@ pb tunnel create --help --json
 
 The checked-in [man pages](man/man1) use section 1. Spaces in command names become
 hyphens: `pb tunnel create` is `pb-tunnel-create(1)`. On systems with a man reader,
-from the repository root:
+from the `cli/` directory of the repository:
 
 ```sh
 man -l docs/man/man1/pb.1
@@ -31,9 +31,9 @@ man -M "$HOME/.local/share/man" pb-tunnel-create
 ```
 
 The normal Linux installer installs bundled manuals automatically beside its binary
-prefix: the default is `~/.local/share/man/man1`. The macOS bootstrap extracts its
-verified PKG and the public `pb install` command installs manuals for the owner-scoped
-canonical service path; it does not run the package installer. A custom Linux
+prefix: the default is `~/.local/share/man/man1`. On macOS the installer runs the
+verified executable's `pb install`, which installs the manuals under
+`/usr/local/share/man`. A custom Linux
 prefix may need `man -M PREFIX/share/man pb` if it is outside the system's manual
 search path. The pages come from the verified executable; no additional download
 is needed. Re-running the installer repairs and refreshes installed pages.
@@ -49,7 +49,6 @@ Linux uses the enrolled user's `~/.local/share/man`; macOS uses
 commit. If extraction fails after commit, the healthy runtime remains active and
 the update stays pending while recovery retries; correct directory permissions or
 free disk space, then retry `pb update`. Partial page writes are repaired on retry.
-Older macOS updaters need an installer rerun once to adopt the expanded PKG format.
 
 ## Interactive use
 
@@ -187,13 +186,13 @@ There is no shell selector. An installer run without an enrollment token finishe
 running `pb login`, which adds the computer to your account.
 
 Run `pb login` (alias for `pb auth login`) to sign in through WorkOS and explicitly
-approve this CLI. The command prints a short-lived approval link (with a code when the
-computer has no browser) and opens it when possible. On a headless or remote machine,
+approve this CLI. The command prints a short-lived approval link and its code, and opens
+the link when possible. On a headless or remote machine,
 open that link on another device, sign in, choose the workspace (`--workspace`
 preselects it) and approve; there is no localhost callback listener or token to paste.
 A computer that is not on your account yet is added to the chosen workspace; one that
-already is only signs in again. `--no-browser` prints the same link without trying to
-launch a browser. `--json` emits approval and completion states. `pb login --fresh`
+already is only signs in again. `--no-browser` does not try to launch a browser.
+`--json` emits approval and completion states (and never opens a browser). `pb login --fresh`
 removes this computer's local setup and its machine record, then adds it again.
 
 If already signed in, choose to keep the current account, authenticate it again, or
@@ -253,7 +252,8 @@ proof for offline installation; `--force` allows interrupting work that cannot b
 preserved (artifact verification and rollback protection still apply).
 
 Official installations have scheduled updates enabled by default. Custom builds
-require a fresh official installation before they can use updates. Scheduled
+cannot check, download or schedule official updates; `pb update --force` or an official
+`.pb-update` bundle (`pb update --from`) switches them to an official build. Scheduled
 updates check for a release and download and verify it ahead of the maintenance window, then install it
 at 04:00 in the machine's local time zone. Configure or inspect this machine-level
 schedule with `pb update settings`:

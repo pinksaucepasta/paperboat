@@ -16,6 +16,8 @@ specific provider values in dynamic configuration and database catalogs.
   refresh rotation, and client revocation.
 - [private-access.md](private-access.md) - stable-host machine proof, route-bound
   grants, edge authorization, generation fencing, and fail-closed HTTP behavior.
+- [config-sync.md](config-sync.md) - configuration repository connections, machine
+  assignment, writer leases, conflict actions, and status revisions.
 
 ## Approval Rule
 

@@ -36,6 +36,9 @@ encrypted snapshot or previously disclosed keys and values.
 Unlocked client custody uses the OS credential boundary. On macOS, Keychain holds a small
 random wrapping key and an owner-only authenticated ciphertext file holds the bounded
 record. Linux uses Secret Service; Windows uses the existing owner-protected DPAPI store.
+Where no OS credential store is available (for example a headless Linux session), the unlocked
+record is held only in the local daemon's memory for 15 minutes after `pb env vault unlock` (or `init` or `recover`) and is
+never written to disk or a general file store.
 Lock removes unlocked payloads while preserving encrypted recovery and pending publication.
 Explicit removal is separate from logout and token cleanup. Hosts receive only selected
 materialized values encrypted to their own recipient identity, never personal/team keys.

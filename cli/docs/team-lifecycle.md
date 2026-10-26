@@ -33,6 +33,7 @@ Team ENV status appears in `pb team get` and the dashboard:
 - `ready`: the current epoch is available through authorized key delivery.
 - `rotation_pending`: member removal or ENV grant revocation has been applied, but rotation cannot finish until an
   authorized owner or admin supplies access to the current key material.
+- `suspended`: the team is suspended.
 - `deleted`: the team and its ENV are no longer usable.
 
 Rotation never bypasses the key requirement. Owners and admins can coordinate rotation only
@@ -48,17 +49,19 @@ returns the attach response or replays output. If durable recording fails, it de
 new participant and asks the client to retry. These events contain attachment and
 authorization metadata only, never terminal output or input.
 
-Current owners and admins can inspect bounded administrative metadata with:
+Current owners, admins and auditors can search the team audit log with:
 
 ```text
 pb team activity TEAM [--limit N] [--cursor CURSOR] [--json]
 ```
 
 The default page size is 50 and the maximum is 200. Pass the opaque `next_cursor` into
-`--cursor` for the next page. Authorization is checked again for every page, so removal or
-team deletion stops later reads. Activity is retained for 90 days and physically purged in
-up to 200-row batches once per minute. A transient cleanup failure is retried on the next
-interval without stopping other workers. Actions omit the internal `team.` prefix. Activity excludes terminal
-contents, keystrokes, file contents, filenames, file digests, manifests, and ENV secrets.
-The dashboard uses the same owner/admin-only activity feed and displays pending ENV status
-with the required recovery action.
+`--cursor` for the next page; `--actor`, `--action`, `--target`, `--result`, `--since`,
+`--until` and `--search` narrow the events, and `pb team activity export` downloads them as CSV
+or JSON. Authorization is checked again for every page, so removal or team deletion stops later
+reads. Events are kept for the workspace plan's audit retention (server defaults: 30 days Free,
+90 days Pro, 365 days Team) and a server worker purges older events in batches of 500 every
+minute. A transient cleanup failure is retried on the next interval without stopping other
+workers. Activity excludes terminal contents, keystrokes, file contents, filenames, file
+digests, manifests, and ENV secrets. The dashboard reads the same activity feed and displays
+pending ENV status with the required recovery action.

@@ -37,7 +37,7 @@ Dashboard instrumentation is outside this milestone.
 ## APIs and authority
 
 `GET /v1/admin/support/{reference}?owner_id=<user ID>` requires a current authenticated
-operator session with `support` or `admin` role. Customer browser sessions, team roles and paired CLI credentials
+operator session with `support`, `billing` or `admin` role. Customer browser sessions, team roles and paired CLI credentials
 do not grant this authority. An optional owner qualifies the lookup. With only the reference, staff receive matching
 records grouped by authenticated owner, including a separate unattributed group.
 Client-supplied reference collisions never merge ownership; the response flags truncation. A reference never grants access. The response
@@ -217,7 +217,7 @@ The mounted server background workers report actual reconciliation iterations,
 including successfully checked empty batches. Merely running a goroutine or
 receiving a timer tick never advances progress. Registration happens before
 workers start, so a worker that never enters its loop remains unknown and then
-stale. The registry has 20 fixed worker names and a hard 32-entry bound; optional
+stale. The registry has 21 fixed worker names and a hard 32-entry bound; optional
 unmounted jobs are absent. Retriable loop errors remain failed until an actual
 successful iteration, and cancellation never becomes success.
 
@@ -249,7 +249,7 @@ fake OK during warming. Configure that monitor's startup/missed-check-in margin
 to cover this allowance. Once warming completes or exceeds the allowance, runs
 report OK only when every worker is healthy and both backup/restore states are
 current. Known worker failures are not suppressed by another warming worker.
-This uses one monitor, not one paid schedule per worker. At most 44 health metric
+This uses one monitor, not one paid schedule per worker. At most 46 health metric
 observations are produced per minute alongside the independently bounded metric
 snapshot collector. The progress wrapper covers lifecycle exits/panics, while
 actual loop hooks cover machines, configuration, previews, connector rotation

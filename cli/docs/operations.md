@@ -12,7 +12,8 @@ retry.
 - For a stolen machine, revoke its client session in the dashboard, then run `pb auth logout`.
 - A machine revoked with `pb machine revoke <machine>` or in the dashboard loses access at once.
   On that machine a command fails with "Your Paperboat session is no longer valid. Run `pb login`
-  ...", `pb status` says the same and `pb doctor` reports "signed out: its sign-in was revoked".
+  ...", `pb status` reports that Paperboat is signed out on this computer and to run `pb login`,
+  and `pb doctor` reports "This computer is signed out of Paperboat: its sign-in was revoked".
   The machine stops retrying (credential refresh and private-access polling back off, then stop at
   that signed-out state) instead of looping; run `pb login` to add it again.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
@@ -62,8 +63,9 @@ SBOM/provenance, and revocation propagation evidence remain release work in the
 owning repositories.
 
 Pushing a validated `YYYY.MM.DD.X` tag runs `.github/workflows/release.yml`. It builds the
-five native assets, verifies their GitHub API-reported size and digest, signs the five TUF
-asset targets, and atomically publishes installers and TUF metadata. The
+three native assets (Linux amd64 and arm64, macOS arm64), verifies their GitHub API-reported
+size and digest, signs the three TUF asset targets, and atomically publishes the installer and
+TUF metadata. The
 server publishes metadata only; installers and runtime updates download executable bytes from
 the immutable GitHub release URLs recorded in the signed metadata.
 
@@ -100,7 +102,7 @@ already healthy, commands only read the local API. If the socket is absent or re
 connections, the CLI atomically installs and starts `paperboatd.service` under
 the Linux user systemd manager or
 `com.pinksaucepasta.paperboatd` under the macOS GUI launchd domain, then waits
-up to five seconds for a validated snapshot. Permission, protocol-version, and invalid-state
+up to 30 seconds for a validated snapshot. Permission, protocol-version, and invalid-state
 failures never trigger service replacement. The service resolves the installed executable itself
 and runs it with `daemon`, preserves an explicit config/server selection, uses the
 canonical user state/runtime paths, and holds the process lock that authorizes stale-socket
@@ -109,8 +111,10 @@ user state.
 
 Active peer clients publish metadata-only `paperboat.transport-observation/v1` records to
 the owner-only local API. Records contain a random process source ID, monotonic sequence,
-machine ID, selected path category, the signed descriptor's relay region for relay-backed
-paths, active lease count, and a maximum 30-second expiry; they never contain relay URLs,
+machine ID, selected path category, standby path, the signed descriptor's relay region for
+relay-backed paths, active lease count, coarse network-condition categories (NAT mapping,
+captive portal, path MTU, router protocol and mapping, mapping lifetime), and a maximum
+30-second expiry; they never contain relay URLs,
 endpoints, candidates, network fingerprints, credentials, or payloads.
 The daemon rejects stale or replayed records, caps publishers and consumer counts,
 aggregates concurrent processes, and expires crashed publishers. Closing a peer connection
@@ -169,7 +173,7 @@ The setup flow is:
    error, stop and run `pb ssh doctor`; never enable `StrictHostKeyChecking=no`, replace
    `KnownHostsCommand`, copy the managed private key, or expose the machine's SSH port.
 
-`pb ssh doctor` checks prerequisites. Task 16's user-refined acceptance verifies the SSH
+`pb ssh doctor` checks prerequisites. The acceptance suite below verifies the SSH
 operations used by VS Code Remote-SSH directly through the native adapter. This establishes
 the SSH compatibility boundary; it is not a claim that every editor lifecycle or deployed
 account workflow has been qualified.
@@ -197,7 +201,7 @@ Run the focused operation suite with `go test ./internal/peertransport/native -r
 '^TestSystemOpenSSHOverNativeTailnet$' -count=1 -timeout=60s`; its `-race` run uses
 `-timeout=90s`. The checks use real OpenSSH/sshd and authenticated native streams with
 generated fixture identities. Production enrollment, managed-agent integration and
-generation-bound `KnownHostsCommand` cutover remain separate Task 20 evidence.
+the generation-bound `KnownHostsCommand` are not covered by this suite.
 
 | Editor/client | Intended first qualification | Status | Limitation |
 | --- | --- | --- | --- |
@@ -300,13 +304,14 @@ local. These snapshots preserve cumulative evidence across missed deliveries.
 operation samples; duration is in seconds. References and trace IDs are excluded
 from metric dimensions.
 
-Each process limits operational logs to 120/minute, operation metric observations
-to 600/minute, trace starts to 120/minute, and errors to 3/minute. Registry sampling
-has its own budget of 100 observations per flush (one SDK metric batch), independent
-of the operation budget. At most four registries and 8,192 candidate samples per
-registry are considered. Sorted series rotate across flushes so large registries
-do not permanently hide later series; cumulative values are never converted into
-sampled increments. `Reporter.SnapshotDropped()` counts omitted snapshot
+Each process limits operational logs to 120/minute, operation metric items
+to 32/minute, trace starts to 120/minute, and errors to 3/minute. Registry sampling
+has its own budget per flush (one SDK metric batch): 64 rotating series plus the four
+diagnostic health gauges, independent of the operation budget. Between 15-minute full
+refreshes only series whose value changed are sent. At most four registries and 8,192
+candidate samples per registry are considered. Sorted series rotate across flushes so
+large registries do not permanently hide later series; cumulative values are never
+converted into sampled increments. `Reporter.SnapshotDropped()` counts omitted snapshot
 observations, including budget overflow; a later rotation can export their newer
 cumulative value. The SDK transport queue holds eight envelopes; overflow and provider
 outages can lose exported telemetry. `Reporter.Dropped()` exposes local signal

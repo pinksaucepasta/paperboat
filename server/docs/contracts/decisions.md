@@ -1,6 +1,6 @@
 # Contract Decisions
 
-Status: current v1 decisions; implementation and deployment evidence live in TRACKER.md.
+Status: current v1 decisions; implementation and deployment evidence live in CHECKLIST.md.
 
 ## Authority
 
@@ -11,8 +11,7 @@ evidence recorded in [CHECKLIST.md](../../../CHECKLIST.md) define the implemente
 
 ### Identifiers and Naming
 
-Status: approved convention; rollout evidence and remaining identity consolidations
-are recorded in TRACKER.md.
+Status: approved convention; rollout evidence is recorded in CHECKLIST.md.
 
 - Ordinary generated resource, operation, request, and credential-instance IDs use
   one format: `noun_UUID`, with a full singular lowercase noun and canonical
@@ -129,7 +128,8 @@ Decision:
   authorized against the WorkOS access-token deadline; expired tokens are refreshed
   through WorkOS before the request proceeds. Confirmed provider revocation ends the
   Paperboat session. Sessions without refresh credentials require a new sign-in.
-- Core feature APIs require both authenticated session and active entitlement.
+- Core feature APIs require an authenticated session. Publishing in a team workspace and
+  team ENV scopes additionally require that team's active subscription.
 - Allowed dashboard origins are environment-specific dynamic config values.
 - WorkOS redirect and callback URLs are environment-specific provider configuration.
 - Startup `browser_sessions` configuration controls the Paperboat cookie lifetime and renewal
@@ -150,8 +150,12 @@ Decision:
 
 Status: approved model; commercial values unset.
 
-Free and Pro have identical personal features. Optional allowances, usage accounting
-and quota enforcement are implemented with unset values imposing no limits. Team
+Free and Pro have identical personal features and differ only in the count limits in
+`billing.limits` (machines, concurrently active previews and tunnels, console browser
+terminals; defaults 100/100/10 on Free and 1000/1000/100 on Pro). Team workspaces are
+advertised as unlimited and meet only a hidden per-team ceiling. Optional byte allowances
+(`personal_allowance_bytes`, initially 5 GB; `team_allowance_bytes`, initially unset) seed
+the operator policy once; an unset allowance imposes no limit. Team
 subscriptions are billed per active member and apply only to that team's authorized
 resources. They do not upgrade personal subscriptions or grant permissions.
 
@@ -186,7 +190,7 @@ Decision:
 
 One installation initiates authorized operations and serves its enabled capabilities.
 Fresh enrollment defaults incoming terminal/exec, managed SSH, file receiving and
-preview/tunnel serving on; peer relay is opt-in. Machine capability controls govern
+preview/tunnel serving on. Machine capability controls govern
 incoming behavior without removing outgoing access.
 
 The server authorizes the exact resource and current installation generation before

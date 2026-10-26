@@ -51,22 +51,24 @@ Signed webhooks trigger a fresh provider read, rather than applying arrival orde
 as subscription order. Duplicate receipts do not mutate another subscription.
 
 The adapter pins Stripe API `2026-09-30.endive`. Configure test credentials through
-`PAPERBOAT_STRIPE_API_KEY_FILE` and `PAPERBOAT_STRIPE_WEBHOOK_SECRET_FILE`; the default
-endpoint is `https://api.stripe.com`. Live keys are rejected before an HTTP request.
+`PAPERBOAT_STRIPE_API_KEY_FILE` and `PAPERBOAT_STRIPE_WEBHOOK_SECRET_FILE`; the endpoint is
+`PAPERBOAT_STRIPE_BASE_URL` (there is no default; with none set Stripe calls fail as unavailable).
+Live keys are rejected before an HTTP request.
 Portal sessions require `PAPERBOAT_STRIPE_PERSONAL_PORTAL_CONFIGURATION_ID` and
 `PAPERBOAT_STRIPE_TEAM_PORTAL_CONFIGURATION_ID`. Each scope uses its own product
 and monthly/yearly prices, immediate proration, and no portal quantity changes.
 Retries retain the original configuration from the encrypted operation request.
 The webhook is `POST /v1/webhooks/stripe`. Prices come from configured Stripe price
 IDs; the example catalog is inactive until configured. Free and Pro have the same personal features. Allowance checks, usage accounting
-and quota enforcement remain implemented. Configure optional nonnegative
-`billing.personal_allowance_bytes`, `billing.team_allowance_bytes`, and
-`billing.personal_machine_limit` through the server config; omission is unlimited,
-not zero. An optional catalog `allowance_bytes` overrides the default for a paid
+and quota enforcement remain implemented. Optional nonnegative
+`billing.personal_allowance_bytes` (default 5,000,000,000) and `billing.team_allowance_bytes`
+in the server config seed the stored operator policy once, when it does not exist yet; the
+operator policy API owns it afterwards. A null allowance is unlimited, not zero (the team
+default). An optional catalog `allowance_bytes` overrides the default for a paid
 product. Period allowance snapshots apply to each new accounting period; changing
 configuration does not rewrite already recorded period allowances. Admission creates
-the period before checking it, so an explicit zero blocks the first request. Personal
-machine quota checks serialize concurrent enrollment. Bandwidth exhaustion stops new
+the period before checking it, so an explicit zero blocks the first request. Machine, publication and
+browser-terminal counts are limited per plan by `billing.limits`. Bandwidth exhaustion stops new
 admissions and closes affected active streams when signed usage receipts confirm it;
 asynchronous reporting permits in-flight overshoot, not an exact byte ceiling. Usage
 still records all observed bytes, and a new period permits fresh admission. Real Stripe
@@ -108,9 +110,8 @@ Implementation constraints:
 
 These catalogs contain environment-specific product and provider data:
 
-- `regions`
+- `operator_regions`
 - `billing_products`
-- `feature_flags`
 
 Billing products are managed in Postgres through the operator API. The API
 verifies Stripe prices before activation; deployment files must not rewrite

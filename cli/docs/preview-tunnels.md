@@ -104,8 +104,10 @@ pb tunnel logs api --follow
 ```
 
 When a tunnel is not serving, `pb tunnel status`, `pb tunnel logs` and `pb tunnel doctor`
-name the failing step and what to do about it; `--json` carries the same code in
-`overall_code`. The codes are:
+name the failing step and what to do about it; `--json` carries the code in
+`overall_code`. For an unreachable app `overall_code` is `origin_unreachable` and the reason
+(`origin_refused`, `origin_timeout`, `origin_unreachable` or `origin_tls`) is
+`dimensions.origin.code`. The codes are:
 
 | Code | Meaning | What to do |
 |---|---|---|
@@ -119,6 +121,7 @@ name the failing step and what to do about it; `--json` carries the same code in
 | `origin_unreachable` | The host cannot reach the route's address | Check the address with `pb tunnel route list` |
 | `origin_tls` | The app's TLS certificate was not accepted | Trust it with the route's custom CA setting, or use an http origin |
 | `route_unavailable` | The edge rejected the route | Fix the origin address with `pb tunnel route update` |
+| `bandwidth_exhausted` | The workspace has used its bandwidth allowance, so traffic is not forwarded | Add bandwidth or change plan on the Billing page; traffic resumes when the allowance is available |
 
 An empty `pb tunnel logs` is not left unexplained: it prints the tunnel's current state and
 what to do about it.

@@ -19,8 +19,8 @@ an authenticated machine. If Paperboat is already installed, `pb login` signs in
 adds the computer to your account if it is not on it yet) through browser approval.
 
 See the [CLI guide](docs/cli.md), [complete command reference](docs/cli/README.md),
-and [man pages](docs/man/man1) for all public commands. The Linux installer and
-macOS PKG install bundled manuals automatically. For source installs, use
+and [man pages](docs/man/man1) for all public commands. The Linux and macOS installers
+install bundled manuals automatically. For source installs, use
 `make install` or `make install-man`; see the guide for custom manual paths.
 
 ```sh
@@ -37,7 +37,7 @@ pb exec Studio --cwd /src -- make test
 pb config path|show          # inspect the local config
 pb preview 3000              # publish a local port
 pb preview unix:///tmp/app.sock # publish a local Unix socket
-pb preview 3000 --private    # require the local Paperboat runtime
+pb preview 3000 --private    # limit the preview to this account
 ```
 
 Flags may appear before or after the environment name.
@@ -158,7 +158,7 @@ lists current command capabilities, and command help is available in JSON as wel
 JSON mode never opens a TUI or asks for confirmation. Supply explicit arguments and
 confirmation flags; otherwise the command returns a structured error before the action.
 Foreground preview domain changes emit JSON Lines after the initial lease projection.
-Login emits JSON Lines with the approval URL/code and final account result without
+Login emits JSON Lines with the approval URL and final account result without
 opening a browser. Execution and other documented streaming commands also use JSON Lines.
 Vault commands accept `--password-file` (an absolute, owner-only file) or
 `--password-stdin` in JSON mode. Passwords are bounded to 1024 bytes and preserved
@@ -334,7 +334,7 @@ The initial migration from an older runtime requires its existing work to stop.
 A machine can initiate
 authorized operations and can receive the incoming services enabled in its capability
 settings. Terminal, managed SSH, native file receiving, and preview/tunnel serving are
-enabled by default; account peer relay is opt-in.
+enabled by default.
 
 `pb pair` performs the same unified-machine enrollment when invoked by a dashboard-issued
 one-shot install command. It does not select a permanent host or client role.
@@ -347,13 +347,13 @@ truncated at `diagnostics.max_event_log_bytes` rather than growing without limit
 ## Build
 
 Install Go and `ripgrep` before running development checks. The Makefile selects the
-pinned Go toolchain and runs the pinned `sqlc` generator. Run commands from this
-repository's root:
+pinned Go toolchain and runs the pinned `sqlc` generator. Run these from the
+`cli/` directory (the repository root `Makefile` has its own `build`, `test` and `gate` targets):
 
 ```sh
 make build      # -> bin/pb
-make check      # formatting, generated code, vet, tests, and build
-make release-assets   # the five native release assets in dist/
+make check      # dependency and source policy, formatting, generated code, vet, tests, and build
+make release-assets   # Linux amd64/arm64 and macOS arm64 release assets in dist/ (macOS arm64 host only)
 make install    # install pb
 make test       # Go test suite
 ```
@@ -361,13 +361,13 @@ make test       # Go test suite
 Release packaging additionally needs the platform signing and publishing credentials.
 It is not required for a local development build.
 
-`YYYY.MM.DD.X` tags build and publish the five native assets after their platform checks and
+`YYYY.MM.DD.X` tags build and publish the three native assets after their platform checks and
 GitHub API digest verification. Use `tools/release-version.sh next` to generate the next tag;
 tags have no `v` prefix.
 
-Releases contain one complete `pb` asset per supported platform and architecture:
-Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one
-macOS arm64 installer package. Users install through
+Releases contain one complete `pb` asset per released platform and architecture:
+Linux amd64/arm64 raw ELF executables and one ad-hoc-signed macOS arm64 executable.
+Windows is not part of the release yet. Users install through
 [`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The trusted HTTPS
 installer pins the selected product's exact URL, version, SHA-256, and length before
 execution. First installation does not locally verify a TUF signature; the installed
@@ -375,18 +375,18 @@ updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 
-Go - distributed as native static binaries for Windows, macOS, and Linux (Cobra, Go 1.27.2).
-Windows amd64 and arm64 are stable after native release qualification.
+Go (Cobra, Go 1.27.2) - released as native static binaries for Linux and macOS.
+Windows builds from source but is not released yet.
 
 ## Layout
 
 - `cmd/pb` — CLI entrypoint (commands, flags, wiring).
 - `internal/config` — local policy and secure, versioned credential profiles.
 - `internal/resolver` — paginated environment resolution and validated connect descriptors.
-- `internal/tunnel` — native QUIC-first and WSS terminal-v1 transports with bounded reconnect supervision.
+- `internal/tunnel` — terminal attach over authorized native peer streams, with bounded reconnect supervision.
 - `internal/session` — transparent PTY wrapper (raw mode, resize, exit-code passthrough).
 - `internal/paste` — bracketed-paste interceptor and atomic file-path batch rewriter.
-- `internal/filetransfer` — resumable HTTP/3-first, HTTP/2-fallback file transport.
+- `internal/filetransfer` — resumable HTTP file transfer carried over authenticated native peer streams.
 - `internal/inbox` — durable Paperboat Inbox download and receipt handling.
 
 ## License
@@ -419,8 +419,9 @@ pb team machine grant research MACHINE_ID --all-members \
 pb team machine unshare research MACHINE_ID --generation CURRENT_GENERATION
 ```
 
-The six exact capabilities are `terminal`, `exec`, `managed_ssh` (including SCP, SFTP and
-rsync), `files`, `preview_manage`, and `tunnel_manage`. All-member grants apply to current
+The seven exact capabilities are `terminal`, `exec`, `managed_ssh` (including SCP, SFTP and
+rsync), `files`, `preview_manage`, `tunnel_manage`, and `private_access` (private access to
+the machine's authorized ports, available only while the team allows private access). All-member grants apply to current
 and future accepted members; selected-member grants apply to one accepted account.
 Their capabilities combine. Saving a grant replaces that audience's capability list;
 `--active=false` revokes it. Machine incoming toggles must also allow the requested operation.

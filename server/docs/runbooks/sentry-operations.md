@@ -183,7 +183,7 @@ configured definitions as successful backups or healthy workers.
 The operator API exposes monitors and check-ins, metric detectors, and ingestion
 outcomes under `/v1/admin/sentry`. Ingestion outcomes distinguish accepted,
 filtered, invalid and rate-limited categories; they are not billing usage.
-`region` plus `instance` selects a bounded hosted slot for metric queries.
+`region` plus `instance` selects a bounded deployment slot for metric queries.
 Population maxima, interval maxima and observed timestamps are explicit; absent
 samples are unknown, never manufactured zeroes or current health.
 

@@ -7,7 +7,8 @@ request headers. Retry a mutation only with its original idempotency key.
 
 ## Preview does not become ready
 
-Managed publication has a two-minute client wait budget. DNS queueing or outages
+Managed publication has a two-minute client wait budget (15 minutes with `--domain`,
+which waits for DNS and certificate checks). DNS queueing or outages
 can exhaust it; this is not a publication SLA. Canceling, a terminal lease, or
 the requested TTL can end startup earlier. Waiting never extends `--ttl`.
 
@@ -95,8 +96,8 @@ the requested TTL can end startup earlier. Waiting never extends `--ttl`.
    route-generation, origin, edge-canary, or certificate checks fail.
 2. Keep the previous signed release and last-known-good connector active while
    the update journal restores it.
-3. Confirm rollback begins within 30 seconds of the qualifying failure and the
-   known-good connector returns within 120 seconds on a supported system.
+3. Confirm rollback completes within the signed policy's rollback timeout (60 seconds in
+   the default plan, at most 120 seconds) and the known-good connector returns.
 4. Keep the failed version quarantined. Do not edit the release selector or
    bypass TUF verification.
 5. Reopen rollout only after the signed manifest and deployment plan, runtime

@@ -265,8 +265,9 @@ review its redaction manifest before upload.
 ### Lazy private/team port sharing
 
 `PUT /v1/lazy-policies` reserves an exact loopback HTTP, HTTPS or h2c target for an
-owned machine. Supply `machine_id`, `target`, `access_mode` (`private` or `team`),
-and `expires_at`; `expected_generation: 0` creates a policy. Updates supply its
+owned machine. Supply `machine_id`, `target` (`scheme` of `http`, `https` or `h2c`, and a loopback `address`),
+`access_mode` (`private` or `team`), `ownership_mode` (`persistent_port`) and `expires_at`;
+`expected_generation: 0` creates a policy. Updates supply its
 `id` and current `expected_generation`. Port sharing follows replacement listeners
 at the same approved address. It does not start applications or wake machines.
 
@@ -312,11 +313,3 @@ bindings contain `public_tcp_listener_id: listener_tls_443` and `public_tcp_port
 raw TCP keeps its allocated port range. Origins own pass-through certificates and
 application authentication. Publish a hostname in only one mode, including preview
 and custom-domain aliases and overlapping one-label wildcard HTTP names.
-
-Migration 195 checks existing publications before changing any TLS binding. If it
-reports conflicting HTTP/TLS hostnames, remove the unwanted publication or choose
-another hostname, then rerun the migration. It never picks a winning publication.
-Successful migration increments existing TLS route generations and drops the former
-TLS port reservation; deploy the matching shared443 server and edge together. Old
-separate-port clients must reconnect to port443. The migration cannot be downgraded;
-operational rollback requires a compatible release and database backup.

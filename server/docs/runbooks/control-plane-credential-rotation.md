@@ -20,9 +20,10 @@ requests, or the workspace.
 
 1. Stop issuing with the affected key by activating an uncompromised configured key and
    deploying the server.
-2. As an authenticated administrator with a current CSRF token, send
-   `POST /v1/admin/mint/signing-keys/{key_id}/revoke` with an `Idempotency-Key` header and
-   JSON body `{"reason":"<bounded operator reason>"}`.
+2. As an admin operator with a current operator session and CSRF token, send
+   `POST /v1/admin/mint/signing-keys/{key_id}/revoke` with `Operator-Target` (the key ID),
+   an opaque `Operator-Reason`, an `Idempotency-Key` header and
+   JSON body `{"reason":"<bounded operator reason>"}`; success is 204.
 3. Verify `GET /v1/trust/revocations` through the private edge-control identity contains
    the key ID in `key_ids`. Do not expose the edge-control credential in command history.
 4. Confirm tunnel instances refresh within one control interval. New use fails closed after

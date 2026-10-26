@@ -20,11 +20,12 @@ must not bypass them.
 
 ## Administrator recovery
 
-Use an active administrator account with normal authentication and CSRF protection.
-Each endpoint is under
+Use an active billing or admin operator account with its operator session and CSRF
+token. Each endpoint is under
 `POST /v1/admin/billing/workspace-operations/{operation_id}/`, where operation_id
-is the original operation key. Supply a new `Idempotency-Key` for the recovery and
-reuse it for exact retries. The service rechecks current administrator authority.
+is the original operation key. Send `Operator-Target` (the operation ID), an opaque
+`Operator-Reason` and a new `Idempotency-Key` for the recovery (8-128 characters), and
+reuse the key for exact retries; success is 204. The service rechecks current operator authority.
 Evidence references are opaque incident/provider references; only their hashes
 are stored and audited. Conflicting requests are rejected.
 

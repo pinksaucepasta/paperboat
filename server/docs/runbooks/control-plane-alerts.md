@@ -12,14 +12,6 @@ collectors; never expose or route either endpoint publicly.
 | `control_operation_dead_letter_depth` | greater than 0 | greater than 5 | Inspect the operation and use the authenticated recovery workflow only after resolving the cause. |
 | `control_reconciliation_oldest_age_seconds` | 60 seconds | 180 seconds | Check database contention, stale desired versions, and tunnel health. |
 | `control_stale_node_depth` | greater than 0 for two control intervals | greater than 0 for five intervals | Confirm heartbeat loss, connector fencing, and route reassignment. |
-| `hosted_orchestration_queue_depth` | above 10 for 5 minutes | above 50 for 5 minutes | Check orchestrator worker health and database lock/latency; inspect expired leases before restarting workers. |
-| `hosted_orchestration_expired_lease_depth` | greater than 0 for 2 minutes | above 5 for 5 minutes | Confirm workers are progressing; expired jobs are reclaimable, but investigate repeated expiry and fencing failures. |
-| `hosted_orchestration_oldest_age_seconds` | 120 seconds | 600 seconds | Correlate with queue depth, provider latency, and worker logs. |
-| `hosted_provider_uncertain_depth` | greater than 0 | increasing for 10 minutes | Observe provider state using the preserved request ID; for non-observable secret deletion use the admin recovery workflow. |
-| `hosted_provider_retryable_depth` | greater than 10 for 5 minutes | greater than 50 for 10 minutes | Check provider capacity/rate limits and allow queued retries to drain; do not manually duplicate mutations. |
-| `hosted_provider_oldest_age_seconds` | 120 seconds | 600 seconds | Inspect the provider operation journal and orchestration lease before retrying. |
-| `hosted_readiness_failure_depth` | greater than 0 in 15 minutes | greater than 5 in 15 minutes | Inspect the stage (`workspace`, `config_restore`, `helper_health`, `connector_admission`, or `runtime_dependencies`) and routed helper evidence. |
-| `hosted_orphan_review_depth` | greater than 0 | greater than 5 | Review the orphan finding and provider inventory; adoption/deletion requires explicit operator approval. |
 | `billing_*_uncertain_depth` | greater than 0 | increasing for 15 minutes | Follow `billing-uncertain-operations.md`; verify provider state before retrying. |
 | `provider_*_errors_total` | error ratio above 2% for 5 minutes | above 10% for 5 minutes | Check provider status, request latency, credentials, and rate limits. |
 | `provider_*_latency_ms_max` | above configured request timeout's 75% | reaches configured timeout | Correlate with errors and operation uncertainty before changing retry policy. |
@@ -31,6 +23,7 @@ collectors; never expose or route either endpoint publicly.
 | `paperboat_runtime_restart_total` | repeated restarts within 5 minutes | sustained restart loop | Inspect boot ID/generation, service exit status, and bounded logs. |
 | `paperboat_runtime_renewal_failures_total` | increasing for two credential refresh attempts | credential expiry without recovery | Check proof freshness, active helper key, revocation, and server signing-key health. |
 | `paperboat_runtime_connector_recovery_seconds` | above 60 seconds | sustained unavailability after network restoration | Check interface/DNS wakeups, admission, QUIC, and TCP/TLS fallback. |
+| `paperboat_runtime_update_rollbacks_total` | greater than 0 | repeated for the same release | Stop rollout and inspect paired signatures, journal stage, worker health, and preserved previous versions. |
 
 Connector incidents are scoped by `(machine_id, connector_id, connector_generation)`.
 `runtime` is the terminal-host connector; each preview uses its preview key as connector
@@ -42,7 +35,6 @@ For preview restart loops, compare the local absolute expiry with the server pre
 record. Expired, removed, or mismatched records must not be re-registered. A matching
 active record may resume with only its remaining lifetime. Do not delete connector rows
 or manufacture a new preview key as incident recovery.
-| `paperboat_runtime_update_rollbacks_total` | greater than 0 | repeated for the same release | Stop rollout and inspect paired signatures, journal stage, worker health, and preserved previous versions. |
 
 Every alert record must include the deployment, request or operation ID when
 available, first observation time, current depth/age, and recovery decision.

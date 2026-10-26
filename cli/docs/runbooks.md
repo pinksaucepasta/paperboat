@@ -29,7 +29,7 @@ an unknown key or signature error.
 Detection: control-plane authorization succeeds but route readiness or WSS/HTTPS
 dialing fails across projects.
 
-1. Use `pb doctor <environment>` to distinguish route readiness from host-runtime health.
+1. Use `pb doctor [machine]` to distinguish route readiness from host-runtime health.
 2. Stop reconnect storms and honor configured retry bounds.
 3. Do not expose a machine port or bypass Paperboat with raw SSH. `pb ssh` is valid only when
    its byte stream succeeds through the same direct/relay/WSS transport policy.
@@ -52,16 +52,6 @@ lazy-start attempt.
    ownership or upgrading `pb`, not repeated reinstall attempts.
 5. Verify one snapshot read, one watch transition, service restart, stale-socket recovery,
    and `pb uninstall` unloading the service before state removal.
-
-## Fly start or machine failure
-
-Detection: readiness remains in a machine-starting state, reports machine failure,
-or times out before route/runtime checks.
-
-1. Correlate the project and machine lifecycle event in the control plane.
-2. Confirm entitlement, credits, volume attachment, image identity, and runtime health.
-3. Avoid repeated replacement while volume ownership is uncertain.
-4. After recovery, run `pb doctor <project>`, attach once, and verify the persistent workspace.
 
 ## Host-runtime authorization mismatch
 
@@ -160,13 +150,14 @@ and sanitized code frames. Expected cancellations, input and authorization outco
 filtered. Reporting has an eight-event queue, three-event/minute process budget and a
 two-second send/flush bound. Flush is not proof of Sentry acceptance.
 
-With reporting disabled or the network offline, unexpected CLI failures/panics make a
-best-effort, 250 ms local diagnostic-marker request to the running daemon. Its existing
-50 MiB, seven-day diagnostic ring retains the same reference and the standard safe
-bugreport export includes it. If the daemon/local IPC is also unavailable, the terminal
-or JSON error remains available but the reference has no guaranteed local retained
-record. Keep that output and reproduction details; do not infer that a report was sent.
-The CLI does not write concurrently into the daemon-owned ring or silently upload raw logs.
+With reporting disabled or the network offline, an unexpected CLI failure still shows its
+support reference in the terminal or JSON error. The CLI also keeps the cause text of the
+latest unexpected failure, with the operation and reference, in the owner-only (`0600`)
+`last-unexpected-failure.txt` in the `diagnostics` directory under the local state root. It
+is never uploaded and is not part of the bugreport export, which holds only the daemon's
+diagnostic ring (50 MiB, seven days) and status. Keep the output and reproduction details; do
+not infer that a report was sent. The CLI does not write into the daemon-owned ring or silently
+upload raw logs.
 
 PB staff can look up the one reference through the server's audited support API. Sentry
 project access, retention and deletion are deployment/operator responsibilities. Enabling

@@ -116,13 +116,15 @@ recognition of existing subscriptions. This is not an automatic customer plan
 migration, refund or provider invoice adjustment.
 
 `GET/PUT /v1/admin/config/billing` manages the authoritative shared policy for
-personal/team bandwidth allowances and personal machine limits. `null` means
-unlimited; zero means no allowance. Deployment defaults seed it only once.
-Changes apply to new accounting periods and machine admission; recorded usage
-periods retain their committed allowance. Existing enrollment and checkout use
-these same authorities. Secrets, provider accounts, signing trust roots and
-network listener configuration remain deployment-owned, not arbitrary editable
-JSON in the admin API.
+personal/team bandwidth allowances. `null` means unlimited; zero means no
+allowance. Deployment defaults seed it only once. Changes apply to new accounting
+periods; recorded usage periods retain their committed allowance. Per-plan count
+limits are not part of this policy: they are deployment configuration
+(`billing.limits`): machines and concurrent previews plus tunnels 100 Free, 1000 Pro,
+Teams advertised as unlimited with hidden ceilings of 10000; console browser
+terminals 10, 100 and a hidden Teams ceiling of 1000. Secrets, provider accounts,
+signing trust roots and network listener configuration remain deployment-owned, not
+arbitrary editable JSON in the admin API.
 
 ## Activation and evidence
 
@@ -247,7 +249,7 @@ includes the project slug in every issue;
 allowlisted diagnostic tags. `GET /v1/admin/sentry/references/{reference}?owner_id=...`
 resolves the latest locally recorded event for the exact selected owner and verifies
 its reference tag. Use an explicitly empty `owner_id` for unattributed evidence.
-These support views require a current support, billing, operations, or admin role.
+These support views require a current support, billing, or admin role.
 
 Operational investigation uses only fixed queries and safe projections:
 

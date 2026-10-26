@@ -99,10 +99,7 @@ Other stale-generation or owner changes also return `409` and require reloading 
 Each terminal-capable user machine has durable terminal sessions. Automatic names use
 three independently random words from the shared disjoint 64-word lists and skip
 retained names across the owner’s machines. Names and opaque session IDs are stable
-identifiers. A session owner may set or clear an
-optional 128-character title; viewers and interactive participants can read it but cannot
-change it. Titles reject terminal control characters and never replace the stable name.
-
+identifiers. 
 `POST /v1/machines/{machine_id}/connection-descriptor` accepts
 `source_machine_id` plus either `terminal_session_id` or
 `create_session: {name, idempotency_key, cwd?}`. Create-and-connect returns the
@@ -178,7 +175,7 @@ ENV access, SSH, or native terminal access.
 View is the default role. `interactive_emails` grants terminal input only to those exact verified
 addresses; it cannot be granted to a whole email domain. Adding an interactive address requires
 `confirm_interactive_access: true`. A browser policy generation advances on changes so gateways
-can revoke existing attachments; the browser gateway rechecks authorization every five seconds.
+can revoke existing attachments; the browser gateway rechecks authorization every two seconds.
 
 `GET /v1/terminal-sessions` and the exact session detail include terminals shared through
 current browser email, domain, or team policy. `browser_only: true` means the reported role
@@ -240,7 +237,6 @@ Documented public codes currently emitted by the handlers include:
 - `invalid_request`
 - `idempotency_key_required`
 - `idempotency_key_conflict`
-- `quota_exceeded`
 - `machine_not_ready`
 - `terminal_session_not_found`
 - `terminal_session_name_conflict`
@@ -250,18 +246,10 @@ Documented public codes currently emitted by the handlers include:
 - `invalid_terminal_access_policy`
 - `interactive_confirmation_required`
 - `terminal_access_policy_changed`
-- `terminal_runtime_unavailable`
 - `provider_unavailable`
 - `provider_outcome_unknown`
-- `tunnel_unavailable`
-- `tunnel_not_ready`
-- `credential_issuer_unavailable`
-- `github_config_not_ready`
-- `invalid_pagination`
-- `invalid_sort`
-- `invalid_version`
-- `version_required`
 - `version_conflict`
+- `machine_limit_reached`, `preview_limit_reached`, `browser_terminal_limit_reached` (409)
 - `internal_error`
 
 Adding, removing, or renaming public error codes requires contract approval.
@@ -276,7 +264,7 @@ lifetime.
 
 The strict JSON request contains `operation_id`, `environment_id`, `machine_id`, `connector_id`, `edge_pool`,
 and `protocol_version: "1.0"`. A successful response follows the canonical
-`contracts/schemas/edge/admission.schema.json` shape and includes one assigned endpoint,
+`testdata/contracts/schemas/edge/admission.schema.json` shape and includes one assigned endpoint,
 at least one revisioned route handoff, and a short-lived connector credential. Alternate
 node ports, credential expiry internals, provider values, and reusable edge-control secrets
 are never returned.
@@ -323,13 +311,14 @@ entitlements keep their existing behavior. The operator pays its infrastructure 
 
 `GET /v1/billing/workspaces/personal` returns your personal subscription.
 `GET /v1/billing/workspaces/teams/{team_id}` returns a current team's subscription;
-membership is required. Each workspace exposes `/products`, `/checkout`, and
+membership is required. Each workspace exposes `/products`, `/topups`, `/checkout`, and
 `/portal`. Checkout and portal require browser authentication, CSRF protection and
-an `Idempotency-Key`; team mutations additionally require current Owner role.
+an `Idempotency-Key`; team mutations additionally require the owner or a billing admin
+(`billing.manage`).
 Return URLs must use a configured dashboard origin.
 
 Team billing exposes `seats_bought` and `seats_used` (active members including the
-owner plus pending, unexpired invitations). Only the owner manages billing.
+owner plus pending, unexpired invitations). Only the owner and billing admins manage billing.
 `GET /v1/billing/workspaces/teams/{team_id}/seats/preview?quantity=N` previews a
 quantity change; `POST /v1/billing/workspaces/teams/{team_id}/seats` with
 `{"quantity":N}`, CSRF and `Idempotency-Key` commits it. Both return
@@ -348,16 +337,16 @@ the same key (`409 billing_pending` / `503 provider_outcome_unknown`); membershi
 reconciliation never changes purchased quantity. Other role, resource and
 personal subscription boundaries remain independent of seats.
 
-Stripe test setup is pending. Free and Pro provide identical personal features. Allowance checks and quotas
-remain configurable, with unset values imposing no limits. Prices remain unset. An uncertain checkout must retain its operation ID; a
+Stripe test setup is pending. Free and Pro provide the same personal features and differ in count limits
+(`billing.limits`): machines and concurrent previews plus tunnels 100 and 1000, console browser
+terminals 10 and 100; Teams are advertised as unlimited, with hidden ceilings of 10000, 10000 and
+1000. A new resource past its limit is refused and existing ones keep working. Bandwidth allowances
+remain configurable, with unset values imposing no limit. Prices remain unset. An uncertain checkout must retain its operation ID; a
 successful overview refresh does not prove that a purchase failed. Superseded Polar runtime, routes and configuration have been removed; historical migrations remain.
 
 Machine metadata uses `alias` as its only name and selector. Machine setup accepts
-`alias` and optional `description`; `PATCH /v1/machines/{machine_id}` replaces those
-fields (omitting description clears it). Descriptions are trimmed, limited to 160
-Unicode characters, and reject control characters. They are never selectors.
-Machine IDs and existing aliases survive migration; useful former display names
-become descriptions. Shared environment descriptors and configuration status expose the same `alias`.
+`alias`; `PATCH /v1/machines/{machine_id}` replaces it. Machines have no description.
+Machine IDs and existing aliases survive migration. Shared environment descriptors and configuration status expose the same `alias`.
 Aliases are unique within a personal owner or owning team. Sharing does not rename
 machines; consumers reject ambiguous aliases across visible machines. Existing team
 collisions remain diagnosable; new conflicting renames and ownership transfers fail.
@@ -458,18 +447,19 @@ environment, or target payloads. See [OpenAPI](openapi.json) for the response sc
 ### Workspace activity
 
 `GET /v1/activity?workspace=personal` returns `{data:{items,next_cursor?}}`.
-Cookie sessions or `account:read` bearer access are accepted; team administrative
-activity requires the current owner/admin. Optional `machine_id`, comma-separated
-`area`, substring `q` (200 bytes), opaque `cursor` and `limit` (1–200, default50)
+Cookie sessions or `account:read` bearer access are accepted; team activity
+requires a member holding `audit.read` (owner, admin or auditor). Optional `machine_id`, comma-separated
+`area`, substring `q` (200 bytes), opaque `cursor` and `limit` (1–200, default 50)
 filter the newest-first page. Events include `id`, `occurred_at`, `action`,
 `actor:{kind,id}`, `target:{kind,id,name?}` and optional `machine:{id,name}`.
 Names and exact workspace ownership are retained at audit insertion, never inferred
 from a resource's later owner. Raw metadata is never returned. Earlier events with
 no retained scope and unsupported/internal resource kinds are omitted. The feed
 covers scoped machine, terminal, preview, tunnel, team, user and machine-environment
-audits from the past90 days. Empty matches return an empty array. Invalid filters
-or cursor return400 `invalid_activity_query`, missing auth401, unavailable workspace
-or insufficient team role403, and storage failure500 `activity_unavailable`.
+audits within the workspace plan's retention (Free 30, Pro 90, Team 365 days). Empty matches
+return an empty array. Invalid filters or cursor return 400 `invalid_activity_query`, missing
+auth 401, unavailable workspace or insufficient team role 403, and storage failure 500
+`activity_unavailable`.
 
 `totals.by_path` and each series point's `by_path` contain
 `{mode, hosting, upload_bytes, download_bytes}` aggregates over all matching
