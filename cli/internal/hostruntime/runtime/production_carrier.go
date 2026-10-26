@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -78,6 +79,16 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 		return nil, err
 	}
 	machineIdentity := renewingMachineIdentity{tokens: tokens, proofs: enrollment.ProofSource{StateRoot: config.StateRoot}}
+	// The carrier serves SSH under the signed network, so a revoked peer must reach it at once (F5-10): the same
+	// machine-events wait as the host runtime wakes its renewal; the 30 s wait gets its own identity source.
+	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID})
+	if err != nil {
+		return nil, err
+	}
+	events, err := machineevents.New(machineevents.Config{ControlURL: controlURL.String(), Tokens: eventTokens, Proofs: enrollment.ProofSource{StateRoot: config.StateRoot}, OperationID: operationID, Transport: transport})
+	if err != nil {
+		return nil, err
+	}
 	peerEnrollment, err := peeridentityenrollment.New(peeridentityenrollment.Config{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, Timeout: 15 * time.Second}, machineIdentity)
 	if err != nil {
 		return nil, err
@@ -118,11 +129,12 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
 		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(registration.InstallationGeneration),
 		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
+		networkEvents: events.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &ProductionCarrier{peer: peer, authorization: serviceGroup{&jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh}, nil
+	return &ProductionCarrier{peer: peer, authorization: serviceGroup{events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh}, nil
 }
 
 // auditCarrierSSH queues the SSH sessions the carrier serves (F5-12) in its own backlog file, as for the JWKS cache.
