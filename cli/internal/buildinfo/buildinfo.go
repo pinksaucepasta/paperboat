@@ -33,9 +33,3 @@ var DefaultServerURL = ""
 // DefaultReleaseURL is the independent official release host, set by release
 // builds. Source builds have no update origin.
 var DefaultReleaseURL = ""
-
-// OldestSupportedOfficial is the oldest official release this service supports (user decision
-// 2026-10-26). Its one definition is tools/compat/OLDEST_OFFICIAL, which the compatibility suite reads;
-// TestOldestSupportedOfficialMatchesTheCompatibilityBaseline keeps the two equal. An older build
-// cannot decode what the service sends to a machine that ever ran a newer one.
-const OldestSupportedOfficial = "2026.10.26.0"

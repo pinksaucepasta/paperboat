@@ -2057,8 +2057,7 @@ reverted for this, c8163091).
 3. *Declaration required (Lane O, after Lane A's sender ships in an official release and step 2's query shows no older
    sender).* The descriptor refuses an undeclared send (400 `invalid_transfer_intent`, "update pb to send files"); the
    forged-size cut is then always at the declared total.
-Prevention: server CI decodes every signed artifact with the oldest supported official release's verifiers
-(tools/compat, Lane O + Lane B).
+Prevention: removed 2026-10-26 (no released users before launch): no compat suite against old official releases.
 *Prior art:* Taildrop (`~/ref/tailscale/feature/taildrop/resume.go`, `send.go`): no size cap, resumable `.partial` files
 with 64 KiB block checksums, sent over whatever path the tailnet has, DERP included; Tailscale peer relays
 (`feature/relayserver`) are user-run and chosen like any path. croc and magic-wormhole use a public relay by default

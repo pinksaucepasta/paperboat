@@ -229,7 +229,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
 			}
 			continue
-		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal, updateVersionUnsupportedError:
+		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal:
 			set(commandRejected, current)
 			continue
 		case *inspectorDaemonError:

@@ -35,9 +35,6 @@ python3 tools/check_doc_links.py && python3 tools/check_doc_envvars.py && (cd to
 step "migrations: expand/contract and index locks (F21-04)"
 python3 tools/check_migrations.py && (cd tools && python3 -m unittest test_check_migrations) || { echo "FAIL: migration lint"; fail=1; }
 
-step "signed artifacts decode with the oldest supported official pb (tools/compat)"
-sh tools/compat/run.sh || { echo "FAIL: compat with official $(cat tools/compat/OLDEST_OFFICIAL)"; fail=1; }
-
 step "server-first check tests"
 (cd tools && python3 -m unittest test_check_server_deployed) || { echo "FAIL: server-first check"; fail=1; }
 

@@ -15,7 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
-	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
 	"github.com/spf13/cobra"
 )
 
@@ -58,27 +57,6 @@ func updateOpenConnectionsFromFile(ctx context.Context) error {
 	return updateOpenConnectionsRefusal{message: (&autoupdate.ActiveTerminalSessionsError{SSH: open.SSH, Forwards: open.Forwards}).Error()}
 }
 
-// updateVersionUnsupportedError names an official build older than the oldest release this service
-// supports. Installed over a newer one, it fails at startup: the service keeps sending a machine what it
-// reported it could take (peer endpoints), and the older build rejects the signed network configuration
-// that carries it, so the native carrier restarts until the newer version returns.
-type updateVersionUnsupportedError struct{ version, oldest string }
-
-func (e updateVersionUnsupportedError) Error() string {
-	return "Paperboat " + e.version + " is older than " + e.oldest + ", the oldest release this service supports; installed here it would stop this computer's private connections. Nothing was changed. Install " + e.oldest + " or newer. To use " + e.version + " anyway, run `pb uninstall`, then install it again and pair this computer as new."
-}
-
-// refuseUnsupportedUpdateTarget refuses an official build older than the oldest supported release before
-// anything is installed. Builds without a release version (development and custom builds) cannot be
-// compared and are not refused.
-func refuseUnsupportedUpdateTarget(version string) error {
-	comparison, err := selfupdate.CompareVersions(version, buildinfo.OldestSupportedOfficial)
-	if err != nil || comparison >= 0 {
-		return nil
-	}
-	return commandRejection{reason: commandRejectUpdateUnsupported, cause: updateVersionUnsupportedError{version: version, oldest: buildinfo.OldestSupportedOfficial}}
-}
-
 // updateCompletionFailure reports a step that failed after the update was installed.
 type updateCompletionFailure struct {
 	stage string
@@ -102,9 +80,6 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 		}
 		source, err = inspectUpdateCandidate(ctx, executable)
 		if err != nil {
-			return err
-		}
-		if err = refuseUnsupportedUpdateTarget(source.Version); err != nil {
 			return err
 		}
 	}
