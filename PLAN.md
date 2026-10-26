@@ -4954,3 +4954,6 @@ Waits for Server lane: ONE joint deploy of edge + server (migration 201) + CLI d
 2026-10-26 | SDK lane tunnel verification | C098–C105, C107–C113, C115–C123, C242 L PASS (25 main+error paths), dev-5a9c82c5/server .111 on fresh pbvm3; result tools/device-smoke/results/tunnel-command-rows-20261026.json.
 C106 inspector_unavailable sent to Merger; C114 valid replay blocked by capture. Wait for overload clearance and BOTH server/client replay fix 09eb362d, then one focused C106/C114 rerun; no product edits.
 Exact machine_b2b6cfd1-63b1-45f6-bc59-e74f07f1440b revoked; container/tunnel/policy/DNS/token removed. One post-run SSH inventory probe timed out; exact cleanup then passed. M/W skipped.
+
+2026-10-27 | SDK lane tunnel rerun | C106/C114 L PASS main+error on dev-9525ef32/server .112, retained pbvm3 pair lanesdktunnel-a/b; result tools/device-smoke/results/tunnel-command-focused-20261027.json.
+Capture listing/detail and replay/purge/disable passed; test tunnel/captures/probe files removed, paired identities retained per user rule. All 27 assigned tunnel command L rows now ticked; M/W skipped.
