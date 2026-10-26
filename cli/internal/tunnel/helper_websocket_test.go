@@ -892,3 +892,23 @@ func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
 		t.Fatalf("decided %d, still queued %v; want 0 and [2 3 4]", len(decided), pending)
 	}
 }
+
+// N13 (F3-15): a black hole sends no reset, so a host that goes silent must count as lost within the silence timeout;
+// the terminal then reconnects visibly instead of freezing until TCP gives up.
+func TestHelperTerminalSilentHostIsTransportLost(t *testing.T) {
+	previous := helperSilenceTimeout
+	helperSilenceTimeout = 50 * time.Millisecond
+	defer func() { helperSilenceTimeout = previous }()
+	connection := newHelperTerminalConn(&capturedHelperMessageConnection{}, &resolver.TerminalTarget{SessionID: "ses_silent"}, 1)
+	go connection.readLoop()
+	result := make(chan error, 1)
+	go func() { _, err := connection.Wait(); result <- err }()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrTransportLost) {
+			t.Fatalf("err=%v, want ErrTransportLost", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a silent host was not noticed")
+	}
+}

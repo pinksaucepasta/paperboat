@@ -537,6 +537,11 @@ func (c *helperTerminalConn) nextWrite() (helperWrite, bool) {
 	}
 }
 
+// helperSilenceTimeout is how long the host may send nothing before the link counts as lost. The host sends a
+// heartbeat every 15 s (hostruntime config DefaultLimits), so a black hole is noticed within about 20 s and the
+// terminal shows that it is reconnecting instead of freezing until TCP gives up.
+var helperSilenceTimeout = 22 * time.Second
+
 func (c *helperTerminalConn) readLoop() {
 	defer close(c.out)
 	firstOutput := true
@@ -552,7 +557,9 @@ func (c *helperTerminalConn) readLoop() {
 		}
 	}
 	for {
-		messageType, data, err := c.message.ReadMessage(context.Background())
+		readCtx, cancelRead := context.WithTimeout(context.Background(), helperSilenceTimeout)
+		messageType, data, err := c.message.ReadMessage(readCtx)
+		cancelRead()
 		if err != nil {
 			if c.closing.Load() {
 				c.finish(0, nil)
