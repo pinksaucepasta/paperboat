@@ -174,6 +174,11 @@ func (s *Service) RecordUpdateObservation(ctx context.Context, environmentID, us
 		if current.InstallationGeneration > int64(observation.InstallationGeneration) || current.InstallationGeneration == int64(observation.InstallationGeneration) && (observation.ObservedAt.Before(current.ObservedAt) || observation.ObservedAt.Equal(current.ObservedAt) && observation.WorkerGeneration < uint64(current.WorkerGeneration)) {
 			return ErrUpdateObservationStale
 		}
+		// Every heartbeat reports the update state under a new operation; the same state is rewritten only
+		// once the stored report is older than half the offline cutoff.
+		if current.Schema == observation.Schema && current.State == observation.State && current.CurrentVersion == observation.CurrentVersion && current.TargetVersion.String == observation.TargetVersion && current.Channel == observation.Channel && current.ErrorCode.String == observation.ErrorCode && current.InstallationGeneration == int64(observation.InstallationGeneration) && current.WorkerGeneration == int64(observation.WorkerGeneration) && current.OsBootID == observation.OSBootID && current.RollbackCount == int64(observation.RollbackCount) && observation.ObservedAt.Before(current.ObservedAt.Add(s.policy.OfflineAfter/2)) {
+			return nil
+		}
 		_, err = tx.Queries().UpdateUserMachineUpdateObservation(ctx, dbsqlc.UpdateUserMachineUpdateObservationParams{
 			UserMachineID: userMachineID, ExpectedEnvironmentID: environmentID, EnvironmentID: environmentID,
 			Schema: observation.Schema, CurrentVersion: observation.CurrentVersion, TargetVersion: observation.TargetVersion,

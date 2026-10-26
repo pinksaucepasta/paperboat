@@ -191,7 +191,7 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
  ON status.machine_id=machine.id AND status.installation_generation=machine.installation_generation
  AND status.workspace_id=$1
  WHERE coalesce('team:'||machine.owner_team_id,'personal:'||machine.user_id)=$1
- AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL`, ws, now.Add(-time.Minute)).Scan(&reported, &expected, &unrecorded, &expired, &rejected, &stale, &incomplete); err != nil {
+ AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL`, ws, now.Add(-ReportingFreshness)).Scan(&reported, &expected, &unrecorded, &expired, &rejected, &stale, &incomplete); err != nil {
 			return err
 		}
 		out.Coverage.Edge = !q.Start.Before(now.Add(-MaxWindow))
