@@ -276,6 +276,26 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, machines[1]); err != nil {
 		t.Fatal(err)
 	}
+	// F21-01: a peer revoked while this host is offline (no refresh in between) is absent from the host's first
+	// answer after it reconnects. The peer is back first, then its machine record is revoked as pb machine revoke does.
+	peerIDs := func(token string) []string {
+		t.Helper()
+		var ids []string
+		for _, raw := range networkClaims(t, token)["peers"].([]any) {
+			ids = append(ids, raw.(map[string]any)["identity"].(map[string]any)["endpoint_id"].(string))
+		}
+		return ids
+	}
+	if got := peerIDs(configuration(machines[0]).Configuration); len(got) != 1 || got[0] != machines[1] {
+		t.Fatalf("peers before the revoke = %v, want %s", got, machines[1])
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now() WHERE id=$1`, machines[1]); err != nil {
+		t.Fatal(err)
+	}
+	assertNetworkConfig(t, configuration(machines[0]).Configuration, machines[0], "", "", 0)
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='online',revoked_at=NULL WHERE id=$1`, machines[1]); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET revoked_at=now() WHERE endpoint_id=$1`, machines[1]); err != nil {
 		t.Fatal(err)
 	}
