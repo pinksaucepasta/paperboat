@@ -331,11 +331,13 @@ func (t PrivateAccessHTTPTarget) OpenPrivateAccessTarget(ctx context.Context, re
 var _ PrivateAccessTarget = PrivateAccessHTTPTarget{}
 
 // PrivateAccessRouteTarget keeps HTTP on the private TLS listener and sends raw
-// TCP only to the exact authenticated durable private_tcp carrier route.
+// TCP only to the exact authenticated durable private_tcp carrier route. The HTTP
+// matcher never holds private TCP rules, so the exact assignment comes from the
+// durable admissions this edge serves.
 type PrivateAccessRouteTarget struct {
-	HTTP   PrivateAccessTarget
-	Routes interface {
-		CanonicalSnapshot() (uint64, []route.RouteRule, bool)
+	HTTP       PrivateAccessTarget
+	Admissions interface {
+		Snapshot() []datacarrier.DurableAdmission
 	}
 	Carriers *DataCarrierRouteRegistry
 }
@@ -351,18 +353,31 @@ func (t PrivateAccessRouteTarget) OpenPrivateAccessTargetWithLifetime(openCtx, l
 		}
 		return t.HTTP.OpenPrivateAccessTarget(openCtx, request)
 	}
-	if request.Protocol != "tcp" || request.ResourceKind != "tunnel" || request.Audience != "paperboat-tunnel-tcp" || t.Routes == nil || t.Carriers == nil {
+	if request.Protocol != "tcp" || request.ResourceKind != "tunnel" || request.Audience != "paperboat-tunnel-tcp" || t.Admissions == nil || t.Carriers == nil {
 		return nil, ErrPrivateAccessStreamInvalid
 	}
-	_, rules, ok := t.Routes.CanonicalSnapshot()
-	if !ok {
-		return nil, ErrPrivateAccessStreamInvalid
-	}
-	matched, err := privateTCPRule(rules, request)
+	matched, err := privateTCPRule(privateTCPAdmissionRules(t.Admissions.Snapshot(), request.RouteID), request)
 	if err != nil {
 		return nil, err
 	}
 	return t.Carriers.openExactAssignmentWithTimeout(openCtx, lifetimeCtx, matched, request.RequestID)
+}
+
+// privateTCPAdmissionRules turns the active admissions of one route into exact carrier rules. The
+// server authorized the grant for a private TCP route, so kind and access mode are that route's.
+func privateTCPAdmissionRules(admissions []datacarrier.DurableAdmission, routeID string) []route.RouteRule {
+	var rules []route.RouteRule
+	for _, a := range admissions {
+		if a.RouteID != routeID || a.State != "active" {
+			continue
+		}
+		rules = append(rules, route.RouteRule{ID: a.RouteID, RouteID: a.RouteID, AssignmentID: a.AssignmentID, AssignmentGeneration: a.AssignmentGeneration,
+			RouteGeneration: a.RouteGeneration, ConfigContentHash: a.ConfigContentHash, AccountID: a.Identity.AccountID, HostID: a.Identity.HostID,
+			TunnelID: a.Identity.TunnelID, ConnectorID: a.Identity.ConnectorID, ConnectorSessionID: a.Identity.SessionID,
+			ConnectorProcessGeneration: a.Identity.ProcessGeneration, ConfigGeneration: a.Identity.Generation, Node: a.EdgeNodeID,
+			EdgeProcessEpoch: a.EdgeProcessEpoch, Kind: route.TunnelPrivateTCP, Protocol: "private_tcp", AccessMode: "private"})
+	}
+	return rules
 }
 
 func privateTCPRule(rules []route.RouteRule, request connectorprotocol.PrivateAccessRequest) (route.RouteRule, error) {

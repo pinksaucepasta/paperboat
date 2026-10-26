@@ -569,8 +569,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		},
 		Authorizer: privateAccessAuthorizer,
 		Target: edgehttp.PrivateAccessRouteTarget{
-			HTTP:   edgehttp.PrivateAccessHTTPTarget{Address: deployment.PrivateHTTPSListenAddress, Connections: privateConnections},
-			Routes: canonicalRoutes, Carriers: durableRoutes,
+			HTTP:       edgehttp.PrivateAccessHTTPTarget{Address: deployment.PrivateHTTPSListenAddress, Connections: privateConnections},
+			Admissions: durableAdmissions, Carriers: durableRoutes,
 		},
 		MaximumStreams: int(deployment.NodeCapacity), AuthorizeTimeout: deployment.ControlTimeout, OpenTimeout: deployment.ControlTimeout,
 	})

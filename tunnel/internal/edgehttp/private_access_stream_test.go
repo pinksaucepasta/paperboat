@@ -35,8 +35,14 @@ func (f privateAccessGrantAuthorizerFunc) RevalidatePrivateAccessGrant(ctx conte
 
 type privateTCPRouteSnapshot struct{ rules []route.RouteRule }
 
-func (s privateTCPRouteSnapshot) CanonicalSnapshot() (uint64, []route.RouteRule, bool) {
-	return 1, append([]route.RouteRule(nil), s.rules...), true
+// Snapshot serves the rules as the durable admissions the route worker installs.
+func (s privateTCPRouteSnapshot) Snapshot() []datacarrier.DurableAdmission {
+	admissions := make([]datacarrier.DurableAdmission, 0, len(s.rules))
+	for _, r := range s.rules {
+		admissions = append(admissions, datacarrier.DurableAdmission{Identity: datacarrier.Identity{AccountID: r.AccountID, HostID: r.HostID, TunnelID: r.TunnelID, ConnectorID: r.ConnectorID, SessionID: r.ConnectorSessionID, ProcessGeneration: r.ConnectorProcessGeneration, Generation: r.ConfigGeneration},
+			EdgeNodeID: r.Node, EdgeProcessEpoch: r.EdgeProcessEpoch, AssignmentID: r.AssignmentID, RouteID: r.RouteID, AssignmentGeneration: r.AssignmentGeneration, RouteGeneration: r.RouteGeneration, ConfigContentHash: r.ConfigContentHash, State: "active"})
+	}
+	return admissions
 }
 
 func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
@@ -68,7 +74,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 		routeTarget := PrivateAccessRouteTarget{HTTP: PrivateAccessTargetFunc(func(context.Context, connectorprotocol.PrivateAccessRequest) (io.ReadWriteCloser, error) {
 			t.Fatal("TCP reached Caddy target")
 			return nil, nil
-		}), Routes: privateTCPRouteSnapshot{rules: []route.RouteRule{rule}}, Carriers: registry}
+		}), Admissions: privateTCPRouteSnapshot{rules: []route.RouteRule{rule}}, Carriers: registry}
 		var revoked atomic.Bool
 		bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{Authorizer: privateAccessGrantAuthorizerFunc(func(context.Context, string, connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
 			if revoked.Load() {
@@ -196,7 +202,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 				}
 				return control.PrivateAccessGrantDecision{Allowed: true, ExpiresAt: now.Add(30 * time.Second)}, nil
 			}), Target: PrivateAccessTargetFunc(func(ctx context.Context, got connectorprotocol.PrivateAccessRequest) (io.ReadWriteCloser, error) {
-				return (PrivateAccessRouteTarget{Routes: targetRules, Carriers: registry}).OpenPrivateAccessTarget(ctx, got)
+				return (PrivateAccessRouteTarget{Admissions: targetRules, Carriers: registry}).OpenPrivateAccessTarget(ctx, got)
 			}), Clock: func() time.Time { return now }})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -760,5 +766,23 @@ func TestPrivateAccessShutdownJoinsBlockedOpenEnvelope(t *testing.T) {
 	}
 	if server.ActiveStreams() != 0 {
 		t.Fatal("accepted stream permit leaked")
+	}
+}
+
+// The exact private TCP assignment comes from the route's active durable admission (the HTTP matcher
+// never holds private TCP rules); staged admissions and other routes are not candidates.
+func TestPrivateTCPAdmissionRulesUseTheRoutesActiveAdmission(t *testing.T) {
+	identity := datacarrier.Identity{AccountID: "account_1", HostID: "owner_1", TunnelID: "route_runtime_1", ConnectorID: "owner_1", SessionID: "session_1", ProcessGeneration: 3, Generation: 1}
+	active := datacarrier.DurableAdmission{Identity: identity, EdgeNodeID: "node_1", EdgeProcessEpoch: "epoch_1", AssignmentID: "epa_route_tcp", RouteID: "route_tcp", AssignmentGeneration: 2, RouteGeneration: 1, ConfigContentHash: "sha256:aa", State: "active"}
+	staged, other := active, active
+	staged.State, staged.AssignmentGeneration = "staged", 3
+	other.RouteID, other.AssignmentID = "route_http", "epa_route_http"
+	rules := privateTCPAdmissionRules([]datacarrier.DurableAdmission{other, staged, active}, "route_tcp")
+	if len(rules) != 1 {
+		t.Fatalf("rules=%+v", rules)
+	}
+	r := rules[0]
+	if r.Kind != route.TunnelPrivateTCP || r.ConnectorSessionID != "session_1" || r.TunnelID != "route_runtime_1" || r.AssignmentGeneration != 2 || r.ConfigGeneration != 1 || r.Node != "node_1" {
+		t.Fatalf("rule=%+v", r)
 	}
 }
