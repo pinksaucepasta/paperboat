@@ -78,19 +78,24 @@ class Api:
         return {'billing': billing['usage_bytes'], 'charged': charged, 'kinds': kinds}
 
     def quiet_snapshot(self, start, before=None):
-        """Identical reads 20 s apart (and, after a drive, every category reached): nothing is mid-flight.
+        """Reads unchanged for SETTLE seconds (and, after a drive, every category reached): nothing is mid-flight.
 
-        The daemon reports relay usage once a minute, so a driven flow shows up a minute or so later."""
-        previous = None
-        for _ in range(30):
+        A recorder batches changed counters to one report per 5 minutes, so a driven flow shows up up to 5 minutes
+        later and only reads unchanged for longer than that prove nothing is pending."""
+        previous, since = None, time.monotonic()
+        for _ in range(60):
             current = self.snapshot(start)
             reached = before is None or all(current['kinds'].get(k, 0) - before['kinds'].get(k, 0) >= floor
                                             for k, floor in FLOORS.items())
-            if reached and current == previous:
+            if current != previous:
+                previous, since = current, time.monotonic()
+            elif reached and time.monotonic() - since >= SETTLE:
                 return current
-            previous = current
             time.sleep(20)
         raise RuntimeError('usage did not settle: another workload is using this account or a category was not recorded')
+
+
+SETTLE = 330  # the recorder batch interval (5 min) plus a margin
 
 
 def block_udp():
