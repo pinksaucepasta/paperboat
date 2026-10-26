@@ -180,27 +180,23 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		}
 		var reported, expected int64
 		var unrecorded, expired, rejected int64
-		var stale, incomplete bool
+		var incomplete bool
 		if err := tx.QueryRow(ctx, `SELECT count(status.machine_id),count(machine.id),
  coalesce(sum(status.unrecorded_bytes),0)::bigint,
  coalesce(sum(status.expired_bytes),0)::bigint,
  coalesce(sum(status.rejected_reports),0)::bigint,
- coalesce(bool_or(status.last_seen<$2),false),
  coalesce(bool_or(status.recording_incomplete),false)
  FROM user_machines machine LEFT JOIN native_usage_reporting_status status
  ON status.machine_id=machine.id AND status.installation_generation=machine.installation_generation
  AND status.workspace_id=$1
  WHERE coalesce('team:'||machine.owner_team_id,'personal:'||machine.user_id)=$1
- AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL`, ws, now.Add(-ReportingFreshness)).Scan(&reported, &expected, &unrecorded, &expired, &rejected, &stale, &incomplete); err != nil {
+ AND machine.deleted_at IS NULL AND machine.revoked_at IS NULL`, ws).Scan(&reported, &expected, &unrecorded, &expired, &rejected, &incomplete); err != nil {
 			return err
 		}
 		out.Coverage.Edge = !q.Start.Before(now.Add(-MaxWindow))
-		out.Coverage.Native = !q.Start.Before(now.Add(-MaxWindow)) && reported > 0 && reported >= expected && unrecorded == 0 && expired == 0 && rejected == 0 && !stale && !incomplete
+		out.Coverage.Native = !q.Start.Before(now.Add(-MaxWindow)) && reported > 0 && reported >= expected && unrecorded == 0 && expired == 0 && rejected == 0 && !incomplete
 		if !out.Coverage.Native {
 			out.Coverage.Note += fmt.Sprintf(" Reporting %d of %d machines; %d bytes were not recorded and %d bytes expired before reporting.", reported, expected, unrecorded, expired)
-			if stale {
-				out.Coverage.Note += " Some machines have not reported recently."
-			}
 			if incomplete {
 				out.Coverage.Note += " Recording was interrupted; some traffic may be missing."
 			}

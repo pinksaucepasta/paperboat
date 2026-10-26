@@ -20,11 +20,11 @@ const maxCounters = 8192
 const maxStateBytes = 8 << 20
 const retention = 7 * 24 * time.Hour
 
-// Pending bytes are delivered every flushInterval. With nothing new, a report
-// still goes out every idleReportInterval: the server marks a machine's usage
-// coverage stale after a minute without one.
+// The recorder reports once when it starts, so the server knows this installation reports usage, and
+// then only when something changed, batched to at most one report per batchInterval. An idle machine
+// sends nothing (PR-03; prior art: an idle Tailscale node makes almost no control requests).
 const flushInterval = 10 * time.Second
-const idleReportInterval = 30 * time.Second
+const batchInterval = 5 * time.Minute
 
 type Sink interface {
 	ReportNativeUsage(context.Context, []api.NativeUsageReport, int64, int64, bool) error
@@ -134,11 +134,15 @@ func Open(path string, sink Sink, observeError func(error)) (*Recorder, error) {
 	return r, nil
 }
 
-// idle reports whether a periodic flush has nothing to deliver yet.
+// idle reports whether a periodic flush has nothing to deliver yet: nothing changed since the last
+// report, or the last report was less than batchInterval ago.
 func (r *Recorder) idle(now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.revision == r.delivered && now.Sub(r.reported) < idleReportInterval
+	if r.reported.IsZero() {
+		return false
+	}
+	return r.revision == r.delivered || now.Sub(r.reported) < batchInterval
 }
 
 func key(report api.NativeUsageReport) string {

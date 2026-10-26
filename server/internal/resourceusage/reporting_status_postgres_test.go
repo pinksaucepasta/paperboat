@@ -70,8 +70,8 @@ func TestUnchangedNativeReportingStatusWritesNoRowOnPostgres(t *testing.T) {
 	if lost == stored {
 		t.Fatal("a new loss was not written")
 	}
-	record(NativeBatch{UnrecordedBytes: 7}, now.Add(ReportingFreshness))
-	if after := xmin(); after == lost {
-		t.Fatal("a half-stale status was not refreshed")
+	record(NativeBatch{UnrecordedBytes: 7}, now.Add(time.Hour))
+	if after := xmin(); after != lost {
+		t.Fatal("an unchanged report an hour later rewrote the status; idle machines send no heartbeat (PR-03)")
 	}
 }

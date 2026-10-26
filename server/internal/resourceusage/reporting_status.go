@@ -28,15 +28,11 @@ func recordNativeReportingStatus(ctx context.Context, tx *db.Tx, machine string,
  recording_incomplete=CASE WHEN status.installation_generation=EXCLUDED.installation_generation
  AND status.workspace_id=EXCLUDED.workspace_id
  THEN status.recording_incomplete OR EXCLUDED.recording_incomplete ELSE EXCLUDED.recording_incomplete END
- -- Every usage report repeats the status: write a change, or refresh last_seen once it is half stale.
+ -- Write only a change: an idle machine sends no usage reports (PR-03), so last_seen is when the status
+ -- last changed, not a heartbeat.
  WHERE status.installation_generation<>EXCLUDED.installation_generation OR status.workspace_id<>EXCLUDED.workspace_id
  OR EXCLUDED.unrecorded_bytes>status.unrecorded_bytes OR EXCLUDED.expired_bytes>status.expired_bytes
- OR EXCLUDED.rejected_reports>0 OR (EXCLUDED.recording_incomplete AND NOT status.recording_incomplete)
- OR status.last_seen<$8`,
-		machine, generation, now, batch.UnrecordedBytes, batch.ExpiredBytes, int64(rejected), batch.RecordingIncomplete, now.Add(-ReportingFreshness/2))
+ OR EXCLUDED.rejected_reports>0 OR (EXCLUDED.recording_incomplete AND NOT status.recording_incomplete)`,
+		machine, generation, now, batch.UnrecordedBytes, batch.ExpiredBytes, int64(rejected), batch.RecordingIncomplete)
 	return err
 }
-
-// ReportingFreshness is how long a machine's native usage reporting status counts as current (the machine
-// offline cutoff); an unchanged report refreshes it once half of that has passed.
-const ReportingFreshness = 2 * time.Minute

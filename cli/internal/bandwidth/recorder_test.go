@@ -285,7 +285,9 @@ func TestFlushPreservesPrivateStorageAndDeliveryCauses(t *testing.T) {
 	}
 }
 
-func TestIdleRecorderReportsOnlyForCoverage(t *testing.T) {
+// PR-03: one report at start, then only changes, at most one per batchInterval; an idle recorder
+// sends nothing however long it runs.
+func TestIdleRecorderReportsOnceThenOnlyChangesBatched(t *testing.T) {
 	sink := &testSink{}
 	r := newTestRecorder(t, sink)
 	now := time.Now()
@@ -295,16 +297,16 @@ func TestIdleRecorderReportsOnlyForCoverage(t *testing.T) {
 	if err := r.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !r.idle(now.Add(flushInterval)) {
-		t.Fatal("an idle recorder reported again within the coverage interval")
-	}
-	if r.idle(now.Add(idleReportInterval + time.Second)) {
-		t.Fatal("an idle recorder let coverage go stale")
+	if !r.idle(now.Add(24 * time.Hour)) {
+		t.Fatal("an idle recorder with unchanged counters reported again")
 	}
 	b := Binding{AccessSessionID: "access", StreamID: "stream", Consumer: "terminal"}
 	r.add(b, Path{Mode: "direct"}, 100, true, now)
-	if r.idle(now.Add(flushInterval)) {
-		t.Fatal("recorded bytes waited for the coverage interval")
+	if !r.idle(now.Add(flushInterval)) {
+		t.Fatal("recorded bytes were reported before the batch interval")
+	}
+	if r.idle(now.Add(batchInterval + time.Second)) {
+		t.Fatal("recorded bytes were not reported after the batch interval")
 	}
 	sink.mu.Lock()
 	sink.fail = true
@@ -312,7 +314,7 @@ func TestIdleRecorderReportsOnlyForCoverage(t *testing.T) {
 	if err := r.Flush(context.Background()); err == nil {
 		t.Fatal("offline delivery failure hidden")
 	}
-	if r.idle(now.Add(flushInterval)) {
+	if r.idle(now.Add(batchInterval + 2*time.Second)) {
 		t.Fatal("undelivered bytes were not retried on the next flush")
 	}
 	sink.mu.Lock()
@@ -321,7 +323,7 @@ func TestIdleRecorderReportsOnlyForCoverage(t *testing.T) {
 	if err := r.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !r.idle(time.Now().Add(flushInterval)) {
+	if !r.idle(time.Now().Add(24 * time.Hour)) {
 		t.Fatal("delivered bytes were reported again")
 	}
 }
