@@ -629,6 +629,13 @@ func transitionTx(ctx context.Context, tx *db.Tx, input StateRecord, now time.Ti
 		}); err != nil {
 		return result, err
 	}
+	if changed {
+		// The tunnel's own log says who stopped, paused or resumed it (pb tunnel logs).
+		if err := insertResourceLog(ctx, queries, resourceAuditInput{AuditEventID: input.AuditEventID, AccountID: input.AccountID, TunnelID: current.ID,
+			EventType: eventType, CorrelationID: input.CorrelationID, Now: now, Message: "The tunnel was " + stateOperationName(input.DesiredState) + "."}); err != nil {
+			return result, err
+		}
+	}
 	result = MutationRecord{Tunnel: current, Operation: operation, Changed: changed}
 	return result, nil
 }
