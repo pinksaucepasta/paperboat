@@ -5,8 +5,12 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -135,5 +139,64 @@ func acceptWithin(listener net.Listener, wait time.Duration) (net.Conn, error) {
 			}
 		}()
 		return nil, io.ErrNoProgress
+	}
+}
+
+// F23-01 on a device: as root with PB_TWO_USER_UIDS=<a>,<b> (the pbvm2 two-user container), each OS user's own
+// process connects to one shared gateway listener on 127.100.0.1 and the kernel-attributed handoff must reach
+// only that user's daemon end, 20 rounds each.
+func TestGatewayRoutesTwoOSUsersOnDevice(t *testing.T) {
+	uids := strings.Split(os.Getenv("PB_TWO_USER_UIDS"), ",")
+	if os.Geteuid() != 0 || len(uids) != 2 {
+		t.Skip("needs root and PB_TWO_USER_UIDS=<uid>,<uid>")
+	}
+	listener, err := listenProtected(t.Context(), "127.100.0.1:0", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := &sharedGateway{port: 0, listener: listener, routes: map[uint32]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), lookup: lookupOwnersINETDiag, release: func(*sharedGateway) {}}
+	go gateway.serve()
+	defer listener.Close()
+	daemons := map[uint32]net.Listener{}
+	for _, value := range uids {
+		uid, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		route, err := gateway.addRoute(uint32(uid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer route.Close()
+		file, _ := route.File()
+		daemon, err := newHandoffListener(file, netip.MustParseAddr("127.100.0.1"), 0)
+		file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer daemon.Close()
+		daemons[uint32(uid)] = daemon
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	for round := 0; round < 20; round++ {
+		for uid, daemon := range daemons {
+			value := strconv.FormatUint(uint64(uid), 10)
+			client := exec.Command("bash", "-c", "exec 3<>/dev/tcp/127.100.0.1/"+port+" && echo "+value+" >&3 && sleep 2")
+			client.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid}}
+			if err := client.Start(); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := acceptWithin(daemon, 5*time.Second)
+			if err != nil {
+				t.Fatalf("round %d: uid %d's daemon got no connection: %v", round, uid, err)
+			}
+			line, err := bufio.NewReader(accepted).ReadString('\n')
+			if err != nil || strings.TrimSpace(line) != value {
+				t.Fatalf("round %d: uid %d's daemon read %q (%v)", round, uid, line, err)
+			}
+			_ = client.Process.Kill()
+			_ = client.Wait()
+			_ = accepted.Close()
+		}
 	}
 }
