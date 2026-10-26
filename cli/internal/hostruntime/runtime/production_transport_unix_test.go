@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 func TestProductionTransportAdministratorProxyTakesPrecedence(t *testing.T) {

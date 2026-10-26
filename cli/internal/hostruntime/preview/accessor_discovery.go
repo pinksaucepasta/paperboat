@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 const (

@@ -50,10 +50,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 

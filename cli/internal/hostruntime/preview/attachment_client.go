@@ -15,7 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 // AttachmentClient is the authenticated host-side HTTP boundary for the

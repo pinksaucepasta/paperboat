@@ -10,7 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 // In production the server holds a wait for 30 s and the shared transport's response-header timeout

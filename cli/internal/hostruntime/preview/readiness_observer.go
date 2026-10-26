@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 const maxPreviewReadinessResponseBytes = 64 << 10

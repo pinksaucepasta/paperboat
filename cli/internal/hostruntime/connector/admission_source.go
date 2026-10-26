@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 )
