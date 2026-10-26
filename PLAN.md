@@ -3159,13 +3159,19 @@ xterm.js.
    - Prior art: tmux `window-size latest` (`~/ref/tmux/options-table.c:1929`, `resize.c`).
    - Replaces today's mix: native last-resize-wins, browser first-owner-only, and an interactive joiner's first resize
      changing the owner's PTY (K6).
-5. **Liveness: both ends, every hop.**
-   - Application heartbeat every 10 s in both directions, on native and browser. A peer silent for 25 s is dead, and the
-     client reconnects at once.
-   - The edge pings the browser WS and has read and write deadlines (C1, V4). Writes have deadlines everywhere, including
-     host output writes, which have none today (K3).
+5. **Liveness that never fires because a tab was hidden.** Browsers throttle background page timers (Chrome to about
+   one per minute after 5 min hidden), so no liveness may depend on page or worker JS timers.
+   - Browser: the edge sends WebSocket protocol pings, which the browser answers itself, and treats a missing pong as
+     dead. The edge and server tolerate application silence for at least 10 min. Nothing in the console or WASM
+     declares a socket stale from elapsed time.
+   - On visibility, focus or `online`, the client sends one probe. Its deadline (5 s) starts at that moment, so time
+     spent hidden never counts, and an open socket is never torn down because a timer fired late.
+   - Native (`pb` and every hop under it): application heartbeat every 10 s in both directions; a peer silent for 25 s
+     is dead and the client reconnects at once.
+   - Writes have deadlines on every hop, including host output writes, which have none today (K3).
    - Prior art: Teleport pings with a write deadline (`~/ref/teleport/lib/web/ws_io.go:74-95`); VS Code 5 s heartbeat
      with a two-stage warning (`~/ref/vscode/src/vs/platform/terminal/common/terminal.ts:476-493`).
+   - Lane C's proposed rolling read deadline in the WASM (C top-1) is replaced by this.
 6. **Reconnect: one state machine, written once in Go, used by `pb` and by the WASM** (the WASM is Go already).
    - States: connecting, attached, reconnecting (reason, attempt, next retry), failed (reason, action).
    - Backoff 0.5 s doubling to 15 s per outage, reset on success (today a 6-attempt budget for the life of the terminal,
@@ -3252,16 +3258,29 @@ xterm.js.
 - The size rule.
 - Observability (ticket issued/consumed, admission outcome, refusal reasons).
 
+**Acceptance bar (user, 2026-10-26).** The world's best terminal experience: the user almost never feels a reconnect or
+slowness, whether switching browser tabs, OS windows or anything else. No cheating: no hidden reconnects, no "only
+reconnect if gone N seconds".
+1. A tab hidden or a window switched for any length of time causes zero transport reconnects.
+2. The backlog on return is drawn at once. Output arrives while hidden, and only rendering waits, so there is no
+   replay round trip while the socket stayed up.
+3. Sleep or a network change resumes with no lost or duplicated bytes and no visible reset, as fast as the network
+   allows.
+4. Measured, not assumed:
+   - every check counts transport reconnects (web: `data-terminal-reconnects`; native: the daemon's stream opens);
+   - N hours with a hidden tab and repeated tab and window switches show 0;
+   - input-to-echo latency is reported as p50/p99, idle and under an output flood.
+
 **Slices, in order.** Each slice is one or more commits that change producers and consumers together. Each is ticked
 only when its checks pass on L (later M). Owners: cli/ with Lane A review; console with Lane C; server/edge with
 Lane V/B/M.
 | # | Slice | Owner | Acceptance (matrix rows; new rows are added to the scripts first) |
 |---|---|---|---|
 | 0 | Prod browser-terminal outage: drained carrier and unredeemed tickets | Lane M/B (now) | W2 W5 W6 W7 W10 W11 W12 attach on prod; tickets redeemed ≥ 95 % |
-| 1 | Input never waits for output: input off the output lock; no state lock held across a PTY write; bounded input chunks and queues; acks, input results and heartbeats ahead of output on every writer | K (+A review) | N6: Ctrl-C under `yes`, together with a 256 KiB paste and a stalled viewer, stops output < 1 s and the shell answers; workspace test TestInputReachesThePTYWhileOutputFloods |
+| 1 | Input never waits for output (latency acceptance: input-to-echo p50/p99 under a flood): input off the output lock; no state lock held across a PTY write; bounded input chunks and queues; acks, input results and heartbeats ahead of output on every writer | K (+A review) | N6: Ctrl-C under `yes`, together with a 256 KiB paste and a stalled viewer, stops output < 1 s and the shell answers; workspace test TestInputReachesThePTYWhileOutputFloods |
 | 2 | Delete the input result channel; rejected/uncertain input → visible notice | K (+A) | N11: 2 000 single keystrokes, 0 reopens |
 | 3 | Input queue in the client process, resend from the host cursor (replaces 03990d13), journal GC on detach | K (+A) | N3, N4 with keys typed during the gap run exactly once; N12: daemon restart mid-typing loses and repeats nothing; 10 000+ keys in one attachment |
-| 4 | Liveness and the shared reconnect state machine (Go, used by `pb` and the WASM), per-outage backoff, typed reasons shown | K + C | N4, N5, W4, W4b, W6; N13/W14: a 60 s black hole is detected < 30 s and recovers on its own; never "Reconnecting" for more than 2 min without a reason and a Reconnect action |
+| 4 | Liveness (protocol pings in the browser, heartbeats native) and the shared reconnect state machine (Go, used by `pb` and the WASM), per-outage backoff, typed reasons shown | K + C (+ edge ping: M/B) | W4, W4b, W16: 4 h hidden plus 200 tab and window switches give 0 reconnects and the backlog drawn on return; N4, N5, W6; N13/W14: a 60 s black hole is detected < 30 s on a visible tab and recovers on its own; never "Reconnecting" for more than 2 min without a reason and a Reconnect action |
 | 5 | Output: display acks, 1 MiB ring, lag → resync instead of eviction, atomic browser checkpoint+join | K | N6 (stalled window recovers), W9, N2/W2 replay exactly once |
 | 6 | Size rule | K + C | N1, W1, W5: PTY size follows the last active controller; viewers never resize; the rule survives reconnects |
 | 7 | Browser admission and errors: live-carrier tickets, edge failover, 409/429 codes, pre-upgrade status endpoint, close reasons, edge keepalive, lifetime ends, limit reservation, logging | V/B/M + C | W1–W13 on prod; W15: a drained carrier shows "machine unavailable" in < 5 s and recovers when it returns |
@@ -4883,4 +4902,5 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 
 2026-10-26 | SDK leaves await Lane A review (session limit resets 13:30 IST) | serverclock aa481a6b, supportref 9c874eec, backoff c39e94c0, machinename 7cce9047, remotepath 6c4d9f81; separate local branches.
 2026-10-26 | Lane K terminal | PLAN 3b updated with GPT's review: input identity contract, checkpoint resync, no live credential re-checks, writer fairness, owner drain; size rule decided (latest active controller); order: containment first. | —
+2026-10-26 | Lane K terminal | User acceptance bar added to PLAN 3b and F3-11/13/14/15: 0 reconnects for hidden tabs and switches (counted), backlog drawn at once, no lost bytes on resume, p50/p99 echo latency; browser liveness by protocol pings, never page timers. | —
 Full shared/CLI CI PASS: 40280973537, 40281027602, 40281077634, 40281114219, 40281173829 respectively; package race/vet PASS. Cross-build each approved slice before push.
