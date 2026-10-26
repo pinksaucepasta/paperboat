@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -109,6 +110,10 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 			resultErr = errors.Join(resultErr, usageService.Shutdown(context.WithoutCancel(ctx)))
 		}
 	}()
+	audit, err := auditCarrierSSH(config.StateRoot, ssh)
+	if err != nil {
+		return nil, errors.Join(ErrProductionInvalid, err)
+	}
 	peer, err := newProductionNativePeerService(productionNativePeerConfig{
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
 		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(registration.InstallationGeneration),
@@ -117,7 +122,17 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
-	return &ProductionCarrier{peer: peer, authorization: serviceGroup{&jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second)}, usage: usageService, ssh: ssh}, nil
+	return &ProductionCarrier{peer: peer, authorization: serviceGroup{&jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh}, nil
+}
+
+// auditCarrierSSH queues the SSH sessions the carrier serves (F5-12) in its own backlog file, as for the JWKS cache.
+func auditCarrierSSH(stateRoot string, ssh *managedssh.Host) (*offlineaudit.Queue, error) {
+	audit, err := offlineaudit.Open(filepath.Join(stateRoot, "carrier-offline-audit.json"), nil)
+	if err != nil {
+		return nil, err
+	}
+	ssh.SetAudit(SSHSessionAudit(audit))
+	return audit, nil
 }
 
 func (c *ProductionCarrier) Start(ctx context.Context) error {

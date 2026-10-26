@@ -73,7 +73,7 @@ func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
 			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
 		}
 	}()
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: sshSessionAudit(queue)})
+	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: SSHSessionAudit(queue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,5 +128,52 @@ func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
 	}
 	if r := events[4]; r.Reason != managedssh.RefusedNoAccess || r.Origin != offlineaudit.OriginOffline || r.OperationID != "op_denied" || r.PeerEndpointID != "cli_2" {
 		t.Fatalf("refusal = %+v", r)
+	}
+}
+
+// F5-12: the carrier serves real `pb ssh` streams on its own Host, so its sessions reach its persisted backlog.
+func TestCarrierSSHSessionsAreQueuedInTheCarrierBacklog(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			connection, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
+		}
+	}()
+	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if _, err := auditCarrierSSH(root, host); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.ReconcileTarget(context.Background(), 5, uint16(listener.Addr().(*net.TCPAddr).Port)); err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		_, _ = host.Serve(managedssh.WithPeer(context.Background(), managedssh.Peer{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_1"}), 5, server)
+		close(done)
+	}()
+	_, _ = client.Write([]byte("abc"))
+	_, _ = io.ReadFull(client, make([]byte, 3))
+	_ = client.Close()
+	<-done
+	reopened, err := offlineaudit.Open(filepath.Join(root, "carrier-offline-audit.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := reopened.Oldest(10)
+	if len(events) != 2 || events[0].Kind != offlineaudit.KindSSHStarted || events[1].Kind != offlineaudit.KindSSHEnded || events[1].BytesIn != 3 {
+		t.Fatalf("carrier backlog = %+v", events)
 	}
 }

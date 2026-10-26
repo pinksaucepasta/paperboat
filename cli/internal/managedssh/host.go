@@ -44,6 +44,10 @@ type Host struct {
 	flows          map[*hostFlow]struct{}
 }
 
+// SetAudit installs the audit for a Host built before its queue exists (the carrier's). Call it before the
+// host serves a stream.
+func (h *Host) SetAudit(audit SessionAudit) { h.config.Audit = audit }
+
 type hostFlow struct {
 	cancel context.CancelFunc
 	// revoked is set when Disable cancels the flow, so the session ends as revoked, not closed.

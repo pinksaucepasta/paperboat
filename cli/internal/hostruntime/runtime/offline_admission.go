@@ -3,7 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
+	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -39,6 +44,13 @@ func offlineAdmission(queue *offlineaudit.Queue, dispatching bool) func(context.
 		}
 		return errors.Join(refusal, err)
 	}
+}
+
+// newOfflineAuditService uploads queue to POST /v1/machines/{id}/audit-backlog with the machine's own credential.
+func newOfflineAuditService(queue *offlineaudit.Queue, controlURL *url.URL, machineID, stateRoot string, transport http.RoundTripper, tokens *enrollment.RenewingTokenSource, operationID func() (string, error)) *offlineAuditService {
+	return &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: queue, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID,
+		Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect},
+		Tokens: tokens, Proofs: enrollment.ProofSource{StateRoot: stateRoot}, OperationID: operationID, MinInterval: offlineaudit.UploadInterval}}
 }
 
 // offlineAuditService uploads the offline session backlog whenever events are queued.
@@ -90,8 +102,8 @@ func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission,
 	return errors.Join(refusal, err)
 }
 
-// sshSessionAudit queues the start, refusal and end of every managed SSH session for upload (F5-12).
-func sshSessionAudit(queue *offlineaudit.Queue) managedssh.SessionAudit {
+// SSHSessionAudit queues the start, refusal and end of every managed SSH session for upload (F5-12).
+func SSHSessionAudit(queue *offlineaudit.Queue) managedssh.SessionAudit {
 	if queue == nil {
 		return nil
 	}
