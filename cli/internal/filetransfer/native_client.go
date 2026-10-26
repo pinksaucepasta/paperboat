@@ -72,6 +72,9 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 			if err == nil {
 				requestCancel()
 				previous = offset
+				if c.Committed != nil {
+					c.Committed(manifest.TransferID, committed)
+				}
 				continue
 			}
 			committed = -1

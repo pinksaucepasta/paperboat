@@ -245,16 +245,30 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			if nativeErr != nil {
 				return errors.Join(nativeErr, initialGrant.Lease.Close())
 			}
-			if !jsonOutput {
-				lastWait := ""
-				nativeClient.Waiting = func(message string) {
-					if message != lastWait {
-						lastWait = message
-						fmt.Fprintln(cobraCommand.ErrOrStderr(), message)
-					}
+			var progress *transferProgress
+			if acceptance.Status == "approved" && acceptance.RequestID != "" {
+				progress = newTransferProgress(client, acceptance.RequestID, declared.Mode)
+				nativeClient.Committed = progress.Committed
+				progress.set("sending", "")
+			}
+			lastWait := ""
+			nativeClient.Waiting = func(message string) {
+				if progress != nil {
+					progress.Waiting(message)
+				}
+				if !jsonOutput && message != lastWait {
+					lastWait = message
+					fmt.Fprintln(cobraCommand.ErrOrStderr(), message)
 				}
 			}
 			batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
+			if progress != nil {
+				if err != nil {
+					progress.finish("failed", 0)
+				} else {
+					progress.finish("done", declared.Bytes)
+				}
+			}
 			err = destinationBusy(destination.Alias, destinationStorageFull(destination.Alias, err))
 			if closeErr := nativeClient.Close(); closeErr != nil {
 				err = errors.Join(err, closeErr)

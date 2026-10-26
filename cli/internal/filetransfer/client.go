@@ -142,7 +142,9 @@ type Client struct {
 	MaxConcurrent   int
 	DeliveryTimeout time.Duration
 	// Waiting is told when an Unlimited transfer pauses for a direct connection or the account's own relay.
-	Waiting   func(message string)
+	Waiting func(message string)
+	// Committed is told each file's committed offset as the receiver confirms it.
+	Committed func(transferID string, offset int64)
 	retryWait func(context.Context, int) error
 	authMu    sync.RWMutex
 	refreshMu sync.Mutex

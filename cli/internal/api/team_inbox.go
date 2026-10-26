@@ -77,3 +77,16 @@ func (c *Client) DecideTeamInboxRequest(ctx context.Context, requestID, action s
 func (c *Client) CompleteTeamInboxRequest(ctx context.Context, requestID, digest string) error {
 	return c.do(ctx, http.MethodPost, "/v1/team-inbox/requests/"+url.PathEscape(requestID)+"/complete", map[string]string{"manifest_digest": digest}, &TeamInboxRequest{})
 }
+
+// TransferProgress is the sender's report on a transfer it started from an approved request (PLAN 3b File
+// transfer modes): its mode, state (sending, paused, done, failed), the pause reason and committed bytes.
+type TransferProgress struct {
+	TransferMode   string `json:"transfer_mode"`
+	TransferState  string `json:"transfer_state"`
+	PauseReason    string `json:"pause_reason,omitempty"`
+	CommittedBytes int64  `json:"committed_bytes"`
+}
+
+func (c *Client) ReportTransferProgress(ctx context.Context, requestID string, progress TransferProgress) error {
+	return c.do(ctx, http.MethodPost, "/v1/team-inbox/requests/"+url.PathEscape(requestID)+"/progress", progress, &TeamInboxRequest{})
+}
