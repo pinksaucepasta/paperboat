@@ -1,0 +1,196 @@
+package peersessions
+
+import (
+	"crypto/ed25519"
+	"errors"
+	"crypto/rand"
+	"fmt"
+	"os"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+)
+
+// F21-11 (PLAN 3b offline-capable authority): a host's document carries, for a daemon that asks for
+// AuthorityUntilRevoked, one machine_access "accept" scope per capability each peer's account may start on it, and
+// those scopes equal the online descriptor decision (machine_capability_allowed) for every (account, capability).
+// Its mesh scopes are until revoked (expires_at 0, F21-01). A daemon that does not ask gets the earlier shape.
+func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL DSN required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := t.Context()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	owner, member, outsider := "offline_owner_"+suffix, "offline_member_"+suffix, "offline_outsider_"+suffix
+	revokedMember, suspendedMember := "offline_revoked_"+suffix, "offline_suspended_"+suffix
+	host, team := "offline_host_"+suffix, "offline-team-"+suffix
+	_, signer, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := mint.New([]mint.Key{{ID: "offline-access", PrivateKey: signer}}, "offline-access", mint.MaxProofTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewNetworkService(store, provider, "https://api.example.test", NetworkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember} {
+		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
+	}
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+host, owner)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, host, owner, "env_"+host)
+	exec(`SELECT paperboat.ensure_control_sync_lease($1)`, host)
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, team, owner, member, revokedMember, suspendedMember)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
+	for _, account := range []string{member, revokedMember, suspendedMember} {
+		teamstest.SetMachineAccess(t, store, team, host, account, "terminal")
+	}
+
+	register := func(account, endpoint string, role wire.Role) {
+		name := map[wire.Role]string{wire.RoleCLI: "cli", wire.RoleMachine: "machine"}[role]
+		t.Helper()
+		_, _, quic := networkEndpointTLS(t, endpoint, now)
+		certificate, fingerprint := networkCertificateWithKeys(t, signer, account, role, endpoint, 1, 1, quic, now, now.Add(time.Hour))
+		exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,$4,1,1,$5,$6,$7,$8,'offline-access',$9)`, fingerprint[:], account, endpoint, name, certificate, quic[:], now, now.Add(time.Hour), signer.Public().(ed25519.PublicKey))
+		private, public := networkX25519Key(t)
+		request := NetworkRegistration{OperationID: "register_" + endpoint, UserID: account, EndpointID: endpoint, Role: name, EndpointGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}
+		if role == wire.RoleMachine {
+			request.MachineID, request.MachineGeneration = endpoint, 1
+		}
+		if _, err := service.Register(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register(owner, host, wire.RoleMachine)
+	clis := map[string]string{}
+	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember} {
+		cli := "offline_cli_" + account
+		clis[cli] = account
+		exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'offline test','desktop','test',ARRAY['machines:connect'],'active',$3,$3)`, cli, account, now)
+		register(account, cli, wire.RoleCLI)
+	}
+
+	// scopes returns peer endpoint -> sorted offline capabilities, and the mesh scopes' expiries, of one document.
+	read := func(authority string) (map[string][]string, []float64) {
+		t.Helper()
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix + authority, UserID: owner, EndpointID: host, Authority: authority})
+		if err != nil {
+			t.Fatal(err)
+		}
+		offline, mesh := map[string][]string{}, []float64{}
+		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
+			peer := raw.(map[string]any)
+			endpoint := peer["identity"].(map[string]any)["endpoint_id"].(string)
+			for _, rawScope := range peer["scopes"].([]any) {
+				scope := rawScope.(map[string]any)
+				switch {
+				case scope["resource_kind"] == "machine_access" && scope["resource_id"] == host:
+					if scope["direction"] != "accept" || scope["expires_at"].(float64) != 0 || scope["resource_generation"].(float64) < 1 {
+						t.Fatalf("offline scope shape: %v", scope)
+					}
+					offline[endpoint] = append(offline[endpoint], scope["capability"].(string))
+				case scope["resource_kind"] == "machine_network":
+					mesh = append(mesh, scope["expires_at"].(float64))
+				}
+			}
+			slices.Sort(offline[endpoint])
+		}
+		return offline, mesh
+	}
+
+	offline, mesh := read(AuthorityUntilRevoked)
+	for cli, account := range clis {
+		var want []string
+		for _, c := range offlineCapabilities {
+			var allowed bool
+			if err := store.SQL().QueryRowContext(ctx, `SELECT paperboat.machine_capability_allowed($1,$2,$3)`, account, host, c[0]).Scan(&allowed); err != nil {
+				t.Fatal(err)
+			}
+			if allowed {
+				want = append(want, c[1])
+			}
+		}
+		slices.Sort(want)
+		if !slices.Equal(offline[cli], want) {
+			t.Errorf("%s (%s): offline scopes %v, descriptor decision %v", cli, account, offline[cli], want)
+		}
+	}
+	if len(offline["offline_cli_"+member]) != 1 || offline["offline_cli_"+member][0] != "terminal" {
+		t.Errorf("member granted terminal only has %v", offline["offline_cli_"+member])
+	}
+	if len(offline["offline_cli_"+outsider]) != 0 {
+		t.Errorf("an account without access has offline scopes %v", offline["offline_cli_"+outsider])
+	}
+	if len(mesh) == 0 || slices.ContainsFunc(mesh, func(expiry float64) bool { return expiry != 0 }) {
+		t.Errorf("mesh scopes for an until-revoked daemon %v, want all 0", mesh)
+	}
+
+	// Each refusal uses its own member: disabling an account or suspending a team also fires revoke triggers.
+	for _, account := range []string{member, revokedMember, suspendedMember} {
+		if got := offline["offline_cli_"+account]; len(got) != 1 || got[0] != "terminal" {
+			t.Fatalf("%s granted terminal only has %v", account, got)
+		}
+	}
+	// A disabled account has no offline rights (online, its sessions are refused).
+	exec(`UPDATE paperboat.users SET status='disabled' WHERE id=$1`, member)
+	// A revoked grant leaves the member's next document without the scope.
+	teamstest.SetMachineAccess(t, store, team, host, revokedMember)
+	after, _ := read(AuthorityUntilRevoked)
+	if got := after["offline_cli_"+member]; len(got) != 0 {
+		t.Errorf("a disabled member still has offline scopes %v", got)
+	}
+	if got := after["offline_cli_"+revokedMember]; len(got) != 0 {
+		t.Errorf("member scopes after the grant was revoked: %v", got)
+	}
+	if got := after["offline_cli_"+suspendedMember]; len(got) != 1 {
+		t.Fatalf("an unaffected member lost its scopes: %v", got)
+	}
+	// A suspended team gives none (no trigger stands behind an offline right).
+	exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
+	if after, _ := read(AuthorityUntilRevoked); len(after["offline_cli_"+suspendedMember]) != 0 {
+		t.Errorf("a suspended team's member still has offline scopes %v", after["offline_cli_"+suspendedMember])
+	}
+
+	// An earlier daemon gets no offline scopes and expiring mesh scopes.
+	legacy, legacyMesh := read("")
+	if len(legacy) != 0 || slices.Contains(legacyMesh, 0) {
+		t.Errorf("earlier daemon: offline %v, mesh expiries %v", legacy, legacyMesh)
+	}
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_unknown_" + suffix, UserID: owner, EndpointID: host, Authority: "until_revoked_v9"}); err != ErrInvalid {
+		t.Errorf("unknown authority: %v, want ErrInvalid", err)
+	}
+	// A host whose environment is revoked gets no document at all, so no offline rights.
+	exec(`UPDATE paperboat.control_environments SET revoked_at=now() WHERE id=$1`, "env_"+host)
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_revoked_env_" + suffix, UserID: owner, EndpointID: host, Authority: AuthorityUntilRevoked}); !errors.Is(err, ErrDenied) {
+		t.Errorf("a host with a revoked environment: %v, want ErrDenied", err)
+	}
+}

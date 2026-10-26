@@ -50,7 +50,17 @@ type NetworkConfigRequest struct {
 	AdmittedCertificates            []AdmittedCertificate
 	// Endpoints are the engine's own candidate endpoints (ip:port); nil when the request reports none.
 	Endpoints []string
+	// Authority is AuthorityUntilRevoked when the daemon keeps verified peer state until it is revoked; empty for
+	// daemons that let every scope end with the document.
+	Authority string
 }
+
+// AuthorityUntilRevoked is the peer-state contract of PLAN 3b "offline-capable authority". A daemon that asks for it
+// receives machine_network scopes without an expiry (expires_at 0: until a newer state removes the peer, the host
+// revocation document or the peer certificate's own expiry ends it, F21-01) and, on a host, one machine_access
+// "accept" scope per capability each peer's account may start offline, with expires_at 0, resource_id the host's
+// machine id and resource_generation the deciding policy version (F21-11). Other daemons get the earlier shape.
+const AuthorityUntilRevoked = "until_revoked_v1"
 type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
 	CandidateSet  string   `json:"candidate_set"`
@@ -271,9 +281,10 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 }
 
 func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
-	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) {
+	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || in.Authority != "" && in.Authority != AuthorityUntilRevoked {
 		return NetworkConfigResult{}, ErrInvalid
 	}
+	untilRevoked := in.Authority == AuthorityUntilRevoked
 	if err := validateAdmittedCertificates(in.AdmittedCertificates, len(in.AdmittedScopes) > 0); err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -514,8 +525,38 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		if scopes >= peernetwork.MaxScopes {
 			return NetworkConfigResult{}, ErrResourceLimit
 		}
-		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, expiry))
+		meshExpiry := expiry.Unix()
+		if untilRevoked {
+			meshExpiry = 0
+		}
+		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, meshExpiry))
 		scopes++
+	}
+	if untilRevoked && self.Role == "machine" {
+		offline, err := offlineAccessPeers(ctx, tx, self, now)
+		if err != nil {
+			return NetworkConfigResult{}, err
+		}
+		for _, o := range offline {
+			p := byPeer[o.binding.EndpointID]
+			if p == nil {
+				if len(byPeer) >= maximumAccountEndpoints {
+					break
+				}
+				p = &networkPeer{Identity: o.binding}
+				byPeer[o.binding.EndpointID] = p
+				if o.certExpiry.After(now) && o.certExpiry.Before(expiry) {
+					expiry = o.certExpiry
+				}
+			}
+			for _, capability := range o.capabilities {
+				if scopes >= peernetwork.MaxScopes {
+					return NetworkConfigResult{}, ErrResourceLimit
+				}
+				p.Scopes = append(p.Scopes, networkScope{"machine_access", self.EndpointID, o.generation, capability, "accept", 443, 0})
+				scopes++
+			}
+		}
 	}
 	if err := retainAdmittedCertificates(ctx, tx, &self, byPeer, in.AdmittedCertificates, now); err != nil {
 		return NetworkConfigResult{}, err
@@ -579,12 +620,13 @@ func personalNetworkScopeID(self, peer networkBinding) string {
 	return "network_" + hex.EncodeToString(hash[:])
 }
 
-func personalNetworkScope(self, peer networkBinding, expiry time.Time) networkScope {
+// personalNetworkScope is a mesh scope ending at expiresAt (a Unix time; 0 means until revoked).
+func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkScope {
 	direction := "dial"
 	if self.Role == "machine" && (peer.Role == "cli" || self.EndpointID > peer.EndpointID) {
 		direction = "accept"
 	}
-	return networkScope{"machine_network", personalNetworkScopeID(self, peer), 1, "connect", direction, 443, expiry.Unix()}
+	return networkScope{"machine_network", personalNetworkScopeID(self, peer), 1, "connect", direction, 443, expiresAt}
 }
 
 func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
