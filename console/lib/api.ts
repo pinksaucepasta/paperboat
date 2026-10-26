@@ -204,6 +204,8 @@ export type Machine = {
   runtime_diagnostics?: { connector_state: string; observed_at?: string }
   /** `tag:<name>` from the selected workspace's policy (absent on servers before machine tags). */
   tags?: string[]
+  /** The machine's last update report (Lane Q, C4); null when it has reported none. */
+  update?: UpdateObservation | null
 }
 
 export type MachineOverview = Data<"/v1/machines/overview">
@@ -346,24 +348,6 @@ export function trafficBreakdown(byPath: PathTotal[], source: TrafficSource): Tr
 
 export type UpdateObservation = Schemas["UpdateObservation"]
 export type UpdateState = UpdateObservation["state"]
-
-/** The workspace's update reports, keyed by machine id. */
-export const updateSummaryQuery = (workspace: string) =>
-  queryOptions({
-    queryKey: ["machines", "updates", workspace],
-    queryFn: async () => {
-      const params = new URLSearchParams({ limit: "200", workspace })
-      const summary = await api<Data<"/v1/machines/update-summary">>(`machines/update-summary?${params}`)
-      return new Map(summary.items.flatMap((item) => (item.observation ? [[item.machine_id, item.observation]] : [])))
-    },
-    refetchInterval: 30_000,
-  })
-
-export function useUpdate(machineId: string): UpdateObservation | undefined {
-  const workspace = useWorkspace()
-  const { data } = useApiQuery({ ...updateSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
-  return data?.get(machineId)
-}
 
 /**
  * Starting an update is a maintenance approval the owner requests and then approves, the same

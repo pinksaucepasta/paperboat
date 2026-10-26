@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ArrowCircleUpIcon, WarningCircleIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { useState } from "react"
-import { approveUpdate, updateSummaryQuery, useUpdate, useWorkspace, type Machine } from "@/lib/api"
+import { approveUpdate, useWorkspace, type Machine } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -23,7 +23,8 @@ const inProgress = new Set(["checking", "downloading", "staged", "activating"])
  * offers Update; one that is updating or failed says so. Up-to-date machines show nothing.
  */
 export function MachineUpdate({ machine }: { machine: Machine }) {
-  const update = useUpdate(machine.id)
+  // The machine list and the machine page carry each machine's last update report.
+  const update = machine.update
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
   const workspace = useWorkspace()?.id ?? ""
@@ -31,7 +32,7 @@ export function MachineUpdate({ machine }: { machine: Machine }) {
     mutationFn: () => approveUpdate(workspace, machine.id, update!.target_version!),
     onSuccess: () => {
       setOpen(false)
-      return queryClient.invalidateQueries({ queryKey: updateSummaryQuery(workspace).queryKey })
+      return queryClient.invalidateQueries({ queryKey: ["machines"] })
     },
   })
 
