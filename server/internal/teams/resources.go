@@ -74,9 +74,12 @@ func (s *Service) Attach(ctx context.Context, account, team string, r AttachRequ
 		if owner != account {
 			return ErrForbidden
 		}
-		var count int
 		var exists bool
-		if err = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE active),coalesce(bool_or(resource_kind=$2 AND resource_id=$3),false) FROM team_resource_bindings WHERE team_id=$1`, team, r.ResourceKind, r.ResourceID).Scan(&count, &exists); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_resource_bindings WHERE team_id=$1 AND resource_kind=$2 AND resource_id=$3)`, team, r.ResourceKind, r.ResourceID).Scan(&exists); err != nil {
+			return err
+		}
+		count, err := HeldBindingCount(ctx, tx, team)
+		if err != nil {
 			return err
 		}
 		if !exists && count >= MaximumResources {

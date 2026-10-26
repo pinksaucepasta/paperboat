@@ -330,15 +330,18 @@ func ShareEnrolledMachineTx(ctx context.Context, tx *db.Tx, account, team, machi
 	return admission, AuditTx(ctx, tx, account, team, kind, "enroll:"+machine, map[string]any{"machine_id": machine})
 }
 func bindMachineTx(ctx context.Context, tx *db.Tx, team, machine, owner string) error {
-	var count int
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE active),coalesce(bool_or(resource_kind='machine' AND resource_id=$2),false) FROM team_resource_bindings WHERE team_id=$1`, team, machine).Scan(&count, &exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_resource_bindings WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2)`, team, machine).Scan(&exists); err != nil {
+		return err
+	}
+	count, err := HeldBindingCount(ctx, tx, team)
+	if err != nil {
 		return err
 	}
 	if !exists && count >= MaximumResources {
 		return &LimitError{Kind: "machine", Used: count, Limit: MaximumResources}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,true,1) ON CONFLICT(team_id,resource_kind,resource_id) DO UPDATE SET active=true,generation=team_resource_bindings.generation+1`, team, machine, owner)
+	_, err = tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,true,1) ON CONFLICT(team_id,resource_kind,resource_id) DO UPDATE SET active=true,generation=team_resource_bindings.generation+1`, team, machine, owner)
 	return err
 }
 func unbindMachineTx(ctx context.Context, tx *db.Tx, team, machine string) error {

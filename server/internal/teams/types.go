@@ -3,10 +3,13 @@
 package teams
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
 var (
@@ -38,6 +41,17 @@ func (e *LimitError) Error() string {
 	return fmt.Sprintf("team capacity reached: %d of %d active entries", e.Used, e.Limit)
 }
 func (e *LimitError) Unwrap() error { return ErrLimit }
+
+// HeldBindingCount is how many of the team's bindings still hold a resource, the number the
+// MaximumResources cap limits. Ended terminal sessions are inactive; an ended preview or deleted
+// tunnel keeps an active binding, so they are excluded here.
+func HeldBindingCount(ctx context.Context, tx *db.Tx, team string) (int, error) {
+	var count int
+	err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b WHERE b.team_id=$1 AND b.active
+		AND NOT (b.resource_kind='preview' AND NOT EXISTS(SELECT 1 FROM preview_leases p WHERE p.id=b.resource_id AND p.terminal_state='active'))
+		AND NOT (b.resource_kind='tunnel' AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=b.resource_id AND t.deleted_at IS NULL))`, team).Scan(&count)
+	return count, err
+}
 
 // MaximumOperationReceipts bounds exact stored-result/digest reconciliation to 4096 operations
 // per account. Older requests still cannot repeat effects: team generations,

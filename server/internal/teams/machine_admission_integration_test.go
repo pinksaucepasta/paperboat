@@ -179,6 +179,8 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	// sessions still takes a new machine (paperboat-smoke-paid refused every share at 128 rows,
 	// 92 of them inactive).
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources)
+	// An ended preview keeps an active binding; it holds no capacity either.
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources)
 	m7 := machine("ma_m7", owner)
 	if _, err = act(owner, MachineRequest{MachineID: m7, Action: "share"}); err != nil || !bound(m7) {
 		t.Fatalf("a team full of ended entries refused a machine: %v", err)
@@ -204,6 +206,7 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	if _, err = act(owner, MachineRequest{MachineID: "ma_never_" + suffix, Action: "unshare"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unsharing a machine that never was in the team: %v", err)
 	}
+	exec(`DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_kind='preview'`, team)
 	// At the cap the refusal names the count, so pb can say "N of N".
 	var active int
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1 AND active`, team).Scan(&active); err != nil {

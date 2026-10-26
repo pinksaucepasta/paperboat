@@ -41,7 +41,7 @@ func (s *Service) GrantTerminalSession(ctx context.Context, account, team string
 		err = tx.QueryRow(ctx, `SELECT owner_account,active,terminal_process_generation FROM team_resource_bindings WHERE team_id=$1 AND resource_kind='terminal_session' AND resource_id=$2`, team, r.TerminalSessionID).Scan(&existingOwner, &existingActive, &existingProcess)
 		if err == pgx.ErrNoRows {
 			var count int
-			if err = tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings WHERE team_id=$1 AND active`, team).Scan(&count); err != nil {
+			if count, err = HeldBindingCount(ctx, tx, team); err != nil {
 				return err
 			}
 			if count >= MaximumResources {
