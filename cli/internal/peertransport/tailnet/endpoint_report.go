@@ -29,8 +29,10 @@ func (a *Authority) localEndpointReport() []string {
 	}
 	var endpoints []netip.AddrPort
 	for _, ep := range engine.LocalEndpoints() {
-		ip := ep.Addr()
-		if ep.Port() == 0 || !ip.IsValid() || ip.Zone() != "" || ip.IsUnspecified() || ip.IsMulticast() {
+		// The server refuses the whole request for one entry it would not store (Lane Q, 917095b6), so
+		// keep only what it keeps: IPv4-mapped unwrapped, no loopback, unspecified, multicast or zoned address.
+		ep = netip.AddrPortFrom(ep.Addr().Unmap(), ep.Port())
+		if !reportableEndpoint(ep) {
 			continue
 		}
 		endpoints = append(endpoints, ep)

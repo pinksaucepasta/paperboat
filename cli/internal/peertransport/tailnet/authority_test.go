@@ -1232,6 +1232,8 @@ func TestPeerEntriesMayCarryCandidateEndpoints(t *testing.T) {
 		"hostname":       {[]string{"relay.example.test:41641"}, false},
 		"unspecified":    {[]string{"0.0.0.0:41641"}, false},
 		"multicast":      {[]string{"224.0.0.251:5353"}, false},
+		"loopback":       {[]string{"127.0.0.1:41641"}, false},
+		"ipv4-mapped":    {[]string{"[::ffff:192.168.1.20]:41641"}, false},
 	} {
 		a, cfg, signer, _ := networkTestAuthority(t)
 		cfg.Peers[0].Endpoints = c.endpoints

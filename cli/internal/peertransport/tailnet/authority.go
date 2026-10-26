@@ -89,13 +89,19 @@ func validPeerEndpoints(endpoints []string) bool {
 	seen := make(map[netip.AddrPort]bool, len(endpoints))
 	for _, raw := range endpoints {
 		addr, err := netip.ParseAddrPort(raw)
-		ip := addr.Addr()
-		if err != nil || addr.Port() == 0 || !ip.IsValid() || ip.Zone() != "" || ip.IsUnspecified() || ip.IsMulticast() || addr.String() != raw || seen[addr] {
+		if err != nil || !reportableEndpoint(addr) || addr.String() != raw || seen[addr] {
 			return false
 		}
 		seen[addr] = true
 	}
 	return true
+}
+
+// reportableEndpoint is the server's rule for a stored endpoint: a unicast address that is not loopback,
+// unspecified, multicast, zoned or IPv4-mapped, with a port.
+func reportableEndpoint(addr netip.AddrPort) bool {
+	ip := addr.Addr()
+	return addr.Port() != 0 && ip.IsValid() && ip.Zone() == "" && !ip.Is4In6() && !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsMulticast()
 }
 
 type NetworkConfiguration struct {
