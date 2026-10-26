@@ -45,6 +45,7 @@ const (
 	commandRejectInsufficientSpace
 	commandRejectUpdateNotReady
 	commandRejectApproval
+	commandRejectUpdateUnsupported
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -56,7 +57,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectApproval
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateUnsupported
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -97,6 +98,11 @@ func (e commandRejection) Error() string {
 		var refusal *daemoncmd.ApprovalRefusal
 		if errors.As(e.cause, &refusal) {
 			return refusal.Error()
+		}
+	case commandRejectUpdateUnsupported:
+		var unsupported updateVersionUnsupportedError
+		if errors.As(e.cause, &unsupported) {
+			return unsupported.Error()
 		}
 	case commandRejectResetRetire:
 		return "The old machine record could not be removed, so nothing was reset. Check your connection and run `pb reset` again."

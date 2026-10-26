@@ -257,6 +257,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				result.Code, result.StateChanged, result.Retryable = "insufficient_disk_space", false, false
 				result.Recovery = "Free disk space on the disk that holds the Paperboat installation, then retry."
 			}
+			if typed.reason == commandRejectUpdateUnsupported {
+				result.Code, result.StateChanged, result.Retryable = "update_version_unsupported", false, false
+				result.Recovery = "Install the oldest supported release or newer. To use an older one, run `pb uninstall`, then install it again and pair this computer as new."
+			}
 			if typed.reason == commandRejectUpdateBusy {
 				result.Code, result.StateChanged, result.Retryable = "update_busy", false, true
 				result.Recovery = "Wait for active work or another update to finish, then retry."
