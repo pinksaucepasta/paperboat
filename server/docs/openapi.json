@@ -16423,6 +16423,14 @@
             "type": "string",
             "maxLength": 512,
             "description": "Keyset position of the next page (cursor); absent on the last page."
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Rows of the filtered list per state (states with none are absent)."
           }
         },
         "required": [
@@ -24899,6 +24907,9 @@
             "schema": {
               "type": "string",
               "enum": [
+                "configured",
+                "attention",
+                "settled",
                 "disabled",
                 "revoked",
                 "consent_required",
@@ -24913,7 +24924,8 @@
                 "warning",
                 "sync_uncertain"
               ]
-            }
+            },
+            "description": "One state, or a group: configured (every state but disabled), attention (error, conflict, warning, consent_required, sync_uncertain), settled (configured without attention)."
           },
           {
             "name": "owner",

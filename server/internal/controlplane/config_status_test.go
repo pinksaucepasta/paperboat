@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -176,7 +177,7 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 	for _, test := range []struct {
 		state string
 		total int
-	}{{"", 2}, {"healthy", 1}, {"consent_required", 1}, {"conflict", 0}} {
+	}{{"", 2}, {"healthy", 1}, {"consent_required", 1}, {"conflict", 0}, {"configured", 2}, {"attention", 1}, {"settled", 1}} {
 		page, err := service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 1, State: test.state})
 		if err != nil || page.Pagination["total"] != test.total || len(page.Environments) > 1 {
 			t.Fatalf("status page state=%s total=%v err=%v", test.state, page.Pagination, err)
@@ -184,7 +185,13 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 		if test.total > 1 && page.Pagination["next_offset"] != 1 {
 			t.Fatal("status continuation missing")
 		}
-		if len(page.Environments) > 0 && test.state != "" && page.Environments[0].State != test.state {
+		if group := map[string]string{"attention": "consent_required", "settled": "healthy"}[test.state]; group != "" && page.Environments[0].State != group {
+			t.Fatalf("state=%s listed %s", test.state, page.Environments[0].State)
+		}
+		if counts := page.Pagination["counts"].(map[string]int); test.state == "configured" && (counts["healthy"] != 1 || counts["consent_required"] != 1) {
+			t.Fatalf("configured counts %v", counts)
+		}
+		if len(page.Environments) > 0 && slices.Contains(ConfigStatusStates, test.state) && page.Environments[0].State != test.state {
 			t.Fatal("filter applied after limit")
 		}
 	}

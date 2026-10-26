@@ -15,7 +15,7 @@ func configSyncStatus(service *controlplane.ConfigStatusService) http.Handler {
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		query, after, ok := readKeysetInventoryQuery(w, r, []string{"disabled", "revoked", "consent_required", "pending", "offline", "conflict", "error", "syncing", "healthy", "watching", "restoring", "warning", "sync_uncertain"})
+		query, after, ok := readKeysetInventoryQuery(w, r, controlplane.ConfigStatusFilters)
 		if !ok {
 			return
 		}

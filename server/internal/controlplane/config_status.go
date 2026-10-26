@@ -251,7 +251,7 @@ func (s *ConfigStatusService) account(ctx context.Context, userID string, opts *
 				next = opts.Offset + opts.Limit
 			}
 		}
-		result.Pagination = map[string]any{"limit": opts.Limit, "offset": opts.Offset, "total": page.total, "next_offset": next}
+		result.Pagination = map[string]any{"limit": opts.Limit, "offset": opts.Offset, "total": page.total, "next_offset": next, "counts": page.counts}
 		result.State = page.summary
 	}
 	return result, nil

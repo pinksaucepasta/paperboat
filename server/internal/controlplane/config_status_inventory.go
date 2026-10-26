@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"slices"
 )
 
 const configInventoryStatusQuery = `-- name: ListOwnedControlConfigSyncStatus :many
@@ -63,12 +64,44 @@ LEFT JOIN user_machines machine
 WHERE environment.owner_user_id = $1
   AND environment.desired_state <> 'revoked'`
 
+// ConfigStatusStates are the states one machine's config sync can be in.
+var ConfigStatusStates = []string{"disabled", "revoked", "consent_required", "pending", "offline", "conflict", "error", "syncing", "healthy", "watching", "restoring", "warning", "sync_uncertain"}
+
+// configStatusAttention are the states the Config sync page shows first ("needs attention").
+var configStatusAttention = []string{"error", "conflict", "warning", "consent_required", "sync_uncertain"}
+
+// ConfigStatusFilters are the state filter's values: one state, or a group. configured is every state but
+// disabled (machines that sync config), attention is configStatusAttention, settled is configured without it.
+var ConfigStatusFilters = append([]string{"configured", "attention", "settled"}, ConfigStatusStates...)
+
+// configStatusFilter is the states a state filter selects; nil selects all.
+func configStatusFilter(filter string) ([]string, error) {
+	switch {
+	case filter == "":
+		return nil, nil
+	case filter == "attention":
+		return configStatusAttention, nil
+	case filter == "configured" || filter == "settled":
+		var out []string
+		for _, state := range ConfigStatusStates {
+			if state != "disabled" && (filter == "configured" || !slices.Contains(configStatusAttention, state)) {
+				out = append(out, state)
+			}
+		}
+		return out, nil
+	case slices.Contains(ConfigStatusStates, filter):
+		return []string{filter}, nil
+	}
+	return nil, ErrConfigStatusInvalid
+}
+
 // configStatusPage is one page of the status list: its rows (one past the limit when another follows) with each
 // row's sort key (PostgreSQL's lower(alias), the cursor's key), the filtered total and the highest state.
 type configStatusPage struct {
 	rows    []dbsqlc.ListOwnedControlConfigSyncStatusRow
 	keys    []string
 	total   int
+	counts  map[string]int
 	summary string
 }
 
@@ -97,15 +130,20 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
  ELSE sync_state END inventory_state FROM raw)
  SELECT * FROM projected WHERE (NOT $2::boolean OR ($3::text IS NULL AND adopted_team_id IS NULL) OR adopted_team_id=$3)
  AND ($4='' OR position(lower($4) in lower(alias||' '||environment_id||' '||coalesce(repository_name,'')))>0)
- AND ($5='' OR inventory_state=$5)
+ AND ($5::text[] IS NULL OR inventory_state=ANY($5::text[]))
  AND ($6='' OR $6='mine' OR $6=$1) AND ($10='' OR environment_id=$10)`
-	args := []any{account, scoped, team, opts.Q, opts.State, opts.Owner, s.policy.Mode == "disabled", int64(s.policy.StaleHeartbeatAfter), s.clock().Add(-s.policy.StaleHeartbeatAfter), opts.EnvironmentID}
+	states, err := configStatusFilter(opts.State)
+	if err != nil {
+		return configStatusPage{}, err
+	}
+	args := []any{account, scoped, team, opts.Q, states, opts.Owner, s.policy.Mode == "disabled", int64(s.policy.StaleHeartbeatAfter), s.clock().Add(-s.policy.StaleHeartbeatAfter), opts.EnvironmentID}
 	summaryRows, err := s.store.SQL().QueryContext(ctx, "SELECT inventory_state,count(*) FROM ("+query+") states GROUP BY inventory_state", args...)
 	if err != nil {
 		return configStatusPage{}, err
 	}
 	total := 0
 	summary := "disabled"
+	counts := map[string]int{}
 	for summaryRows.Next() {
 		var state string
 		var count int
@@ -114,6 +152,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 			return configStatusPage{}, err
 		}
 		total += count
+		counts[state] = count
 		summary = higherConfigAccountState(summary, state)
 	}
 	err = summaryRows.Err()
@@ -188,5 +227,5 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 		out = append(out, item)
 		keys = append(keys, key)
 	}
-	return configStatusPage{rows: out, keys: keys, total: total, summary: summary}, rows.Err()
+	return configStatusPage{rows: out, keys: keys, total: total, counts: counts, summary: summary}, rows.Err()
 }
