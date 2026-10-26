@@ -33,6 +33,7 @@ func sendCommand() *cobra.Command {
 	command.Flags().String("to", "", "destination machine name or ID")
 	command.Flags().String("session", "", "terminal session ID for destination context")
 	command.Flags().Bool("json", false, "print JSON")
+	command.Flags().Bool("unlimited", false, "send any size, only directly or through your own relay; waits while neither is available (default: your account's transfer mode)")
 	addSendManagementCommands(command)
 	return command
 }
@@ -224,7 +225,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(serverclock.Now()) {
 					return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
 				}
-				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: transferLeaseBytes(current.Policy, declared)})
+				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: transferLeaseBytes(current.Policy, declared), TransferMode: declared.Mode})
 				if leaseErr != nil {
 					return filetransfer.NativeGrant{}, leaseErr
 				}
@@ -243,6 +244,15 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			})
 			if nativeErr != nil {
 				return errors.Join(nativeErr, initialGrant.Lease.Close())
+			}
+			if !jsonOutput {
+				lastWait := ""
+				nativeClient.Waiting = func(message string) {
+					if message != lastWait {
+						lastWait = message
+						fmt.Fprintln(cobraCommand.ErrOrStderr(), message)
+					}
+				}
 			}
 			batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
 			err = destinationBusy(destination.Alias, destinationStorageFull(destination.Alias, err))
@@ -287,4 +297,30 @@ func batchTotal(sources []filetransfer.Source) int64 {
 func transferLeaseBytes(policy api.FileTransferPolicy, declared api.TransferDeclaration) uint64 {
 	limit, _ := policy.Bounds()
 	return uint64(max(limit, declared.Bytes)) + 1<<20
+}
+
+// unlimitedTransferLimits bound an Unlimited send only by file count: no Paperboat size limit applies.
+var unlimitedTransferLimits = filetransfer.Limits{MaxFileBytes: 1 << 40, MaxBatchFiles: 10, MaxBatchBytes: 1 << 40}
+
+// sendTransferMode is --unlimited, else the account's preference, else Automatic.
+func sendTransferMode(ctx context.Context, command *cobra.Command, client *api.Client) string {
+	if unlimited, _ := command.Flags().GetBool("unlimited"); unlimited {
+		return "unlimited"
+	}
+	if mode, err := client.FileTransferMode(ctx); err == nil {
+		return mode
+	}
+	return "automatic"
+}
+
+// declaredTransferLimits widens the descriptor policy's size bounds to what the server signed for this
+// declared send (its total for Automatic, none for Unlimited); the policy still carries today's 50 MiB caps.
+func declaredTransferLimits(policy filetransfer.Limits, declared api.TransferDeclaration) filetransfer.Limits {
+	switch {
+	case declared.Mode == "unlimited":
+		policy.MaxFileBytes, policy.MaxBatchBytes = unlimitedTransferLimits.MaxFileBytes, unlimitedTransferLimits.MaxBatchBytes
+	case declared.Bytes > 0:
+		policy.MaxFileBytes, policy.MaxBatchBytes = max(policy.MaxFileBytes, declared.Bytes), max(policy.MaxBatchBytes, declared.Bytes)
+	}
+	return policy
 }

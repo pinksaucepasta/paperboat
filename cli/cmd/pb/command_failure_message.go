@@ -276,7 +276,7 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 // transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
 func transferLimitMessage(limit *filetransfer.LimitError) string {
 	if limit.Scope != filetransfer.LimitBatchFiles && limit.Limit == api.AutomaticTransferLimit {
-		return fmt.Sprintf("This transfer is %s. Automatic sends up to 2 GB. Nothing was sent.", transferGigabytes(limit.Value))
+		return fmt.Sprintf("This transfer is %s. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent.", transferGigabytes(limit.Value))
 	}
 	switch limit.Scope {
 	case filetransfer.LimitBatchFiles:

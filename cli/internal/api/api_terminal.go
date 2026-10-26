@@ -437,3 +437,17 @@ func (c *Client) DeleteUserMachineTerminalSession(ctx context.Context, machineID
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID)
 	return c.do(ctx, http.MethodDelete, path, nil, &struct{}{})
 }
+
+// FileTransferMode is the account's default transfer mode, "automatic" or "unlimited" (GET /v1/me/preferences).
+func (c *Client) FileTransferMode(ctx context.Context) (string, error) {
+	var out struct {
+		FileTransferMode string `json:"file_transfer_mode"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/me/preferences", nil, &out); err != nil {
+		return "", err
+	}
+	if out.FileTransferMode != "automatic" && out.FileTransferMode != "unlimited" {
+		return "", errors.New("server returned an unknown file transfer mode")
+	}
+	return out.FileTransferMode, nil
+}

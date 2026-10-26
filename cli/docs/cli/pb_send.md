@@ -21,6 +21,7 @@ pb send <path>... --to <machine> [flags]
       --json             print JSON
       --session string   terminal session ID for destination context
       --to string        destination machine name or ID
+      --unlimited        send any size, only directly or through your own relay; waits while neither is available (default: your account's transfer mode)
 ```
 
 ### Options inherited from parent commands
