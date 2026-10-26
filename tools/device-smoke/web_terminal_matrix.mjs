@@ -220,7 +220,7 @@ const rows = {
     const colsOf = (size) => Number((size ?? "0x0").split("x")[1])
     row("W5 typing in the smaller window 2 makes the shell its size", colsOf(second) > 0 && colsOf(second) < colsOf(first), `${first} → ${second}`)
     const back = await sttySize(a)
-    row("W5 typing in window 1 gives its size back", back === first, `${second} → ${back}`)
+    row("W5 typing in window 1 gives its size back", back !== null && back === first, `${second} → ${back}`)
     await b.close()
     await a.close()
     await closeTerminal(ctx, id)
