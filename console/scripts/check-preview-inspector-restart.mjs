@@ -46,7 +46,18 @@ pass("a request after the restart arrives", !!got, `${Date.now() - t0} ms after 
 const now = await page.evaluate(ids)
 pass("rows kept and no duplicates", new Set(now).size === now.length && before.every((x) => now.includes(x)), `${before.length} -> ${now.length}`)
 execSync(process.env.STOP_CMD.replaceAll("<id>", id), { stdio: "inherit" })
-const stopped = await until(() => document.querySelector("[data-inspector-state]")?.getAttribute("data-inspector-state") === "Preview stopped" ? "Preview stopped" : null, 90000)
-pass("after pb preview stop the page says so", stopped === "Preview stopped", `${stopped}; phases ${JSON.stringify(await page.evaluate(() => window.__ph))}`)
+const stop = await page.evaluate(async () => {
+  const state = () => document.querySelector("[data-inspector-state]")?.getAttribute("data-inspector-state")
+  const start = Date.now()
+  let deniedAt = 0
+  while (Date.now() - start < 90000) {
+    if (state() === "Not allowed" && !deniedAt) deniedAt = Date.now()
+    if (state() === "Preview stopped") return { stopped: true, deniedMs: deniedAt ? Date.now() - deniedAt : 0, afterMs: Date.now() - start }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return { stopped: false, deniedMs: deniedAt ? Date.now() - deniedAt : 0, afterMs: 90000 }
+})
+pass("after pb preview stop the page says Preview stopped", stop.stopped, `${stop.afterMs} ms after the stop`)
+pass("a refused grant after the stop does not show Not allowed for long", stop.deniedMs < 3000, `Not allowed shown ${stop.deniedMs} ms`)
 await browser.close()
 process.exit(steps.every(Boolean) ? 0 : 1)

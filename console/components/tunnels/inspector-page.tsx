@@ -2,7 +2,7 @@
 
 import { CaretDownIcon, PauseIcon, PlayIcon, TrashIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery } from "@/lib/api"
 import { useInspectorChannel, type ChannelPhase } from "@/lib/inspector/channel"
@@ -48,7 +48,7 @@ export function InspectorPage({ id }: { id: string }) {
         ) : ended(preview, now) ? (
           <State title="Preview stopped" detail="Captures end with the preview. Start a new preview to inspect it." />
         ) : (
-          <Inspector preview={preview} />
+          <Inspector preview={preview} onDenied={query.refetch} />
         )}
       </main>
     </>
@@ -79,11 +79,15 @@ const phaseText: Record<Exclude<ChannelPhase, "ready">, [string, string]> = {
   gone: ["Preview not found", "This preview no longer exists."],
 }
 
-function Inspector({ preview }: { preview: Preview }) {
+function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => unknown }) {
   // The server grants inspection only while the preview routes. While it starts or its machine
   // reconnects, a refusal means 'wait', not 'not allowed'; the list collected so far stays.
   const routing = preview.state === "ready"
   const channel = useInspectorChannel(preview.id, preview.owner_machine_id, true, routing)
+  // A refusal right after the owner stops the preview is the stop, not a lost right: re-read the preview now.
+  useEffect(() => {
+    if (channel.phase === "denied") void onDenied()
+  }, [channel.phase, onDenied])
   const [paused, setPaused] = useState(false)
   const feed = useCaptureFeed(channel, preview.id, paused)
   const [selected, setSelected] = useState("")
