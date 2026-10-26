@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,9 +11,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 )
 
 type peerNetworkRegisterBody struct {
@@ -107,12 +111,16 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 }
 
 func machinePeerNetworkRegister(s peerNetworkService, v machineEndpointProofVerifier) http.HandlerFunc {
-	return machinePeerNetwork(s, v, true)
+	return machinePeerNetwork(s, v, true, nil)
 }
-func machinePeerNetworkConfig(s peerNetworkService, v machineEndpointProofVerifier) http.HandlerFunc {
-	return machinePeerNetwork(s, v, false)
+
+// machinePeerNetworkConfig answers a machine's configuration refresh. limiter bounds refreshes per machine credential,
+// before any database work: a client that loops (2-6 requests a second per machine, 2026-10-26) gets 429 with
+// Retry-After instead of loading the control plane.
+func machinePeerNetworkConfig(s peerNetworkService, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) http.HandlerFunc {
+	return machinePeerNetwork(s, v, false, limiter)
 }
-func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, register bool) http.HandlerFunc {
+func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, register bool, limiter *ratelimit.Limiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(io.LimitReader(r.Body, maxMachineControlRequest+1))
 		if err != nil || len(raw) > maxMachineControlRequest {
@@ -130,6 +138,12 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 		scheme, credential, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
 		if e1 != nil || len(proof) == 0 || !found || !strings.EqualFold(scheme, "Bearer") {
 			writeError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "Machine identity proof was rejected.")
+			return
+		}
+		sum := sha256.Sum256([]byte(strings.TrimSpace(credential)))
+		if allowed, wait := limiter.Allow(hex.EncodeToString(sum[:])); !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+			writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Peer network configuration is requested too often. Retry after the delay.")
 			return
 		}
 		claims, e2 := v.VerifyMachineRequest(r.Context(), strings.TrimSpace(credential), proof, r.Method, r.URL.Path, raw)

@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 )
 
 type peerNetworkStub struct {
@@ -60,7 +61,7 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer machine-token")
 	r.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
 	w := httptest.NewRecorder()
-	machinePeerNetworkConfig(stub, verifier).ServeHTTP(w, r)
+	machinePeerNetworkConfig(stub, verifier, nil).ServeHTTP(w, r)
 	if w.Code != http.StatusOK || stub.config.UserID != "account_1" || stub.config.EndpointID != "machine_1" || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatalf("status=%d config=%+v", w.Code, stub.config)
 	}
@@ -101,5 +102,37 @@ func TestPeerNetworkRegistrationRejectsUnknownFields(t *testing.T) {
 				t.Fatalf("status=%d registration=%+v body=%s", w.Code, stub.register, w.Body.String())
 			}
 		})
+	}
+}
+
+// A machine that refreshes its configuration in a loop (2-6 requests a second per machine overloaded prod on
+// 2026-10-26) is answered 429 with Retry-After before any proof or database work; another machine is unaffected.
+func TestMachinePeerNetworkConfigIsRateLimitedPerMachineCredential(t *testing.T) {
+	body := []byte(`{"operation_id":"operation_123"}`)
+	verified := 0
+	verifier := machineProofVerifierFunc(func(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error) {
+		verified++
+		return controlplane.MachineRequestClaims{UserID: "account_1", MachineID: "machine_1", InstallationGeneration: 1, OperationID: "operation_123"}, nil
+	})
+	handler := machinePeerNetworkConfig(&peerNetworkStub{}, verifier, ratelimit.New(60, 2, 1000))
+	request := func(token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/v1/machine-peer-network/config", bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	for i := 0; i < 2; i++ {
+		if w := request("machine-a"); w.Code != http.StatusOK {
+			t.Fatalf("request %d within the burst: status %d", i, w.Code)
+		}
+	}
+	limited := request("machine-a")
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") == "" || verified != 2 {
+		t.Fatalf("looping machine: status=%d retry-after=%q verified=%d, want 429 before verification", limited.Code, limited.Header().Get("Retry-After"), verified)
+	}
+	if w := request("machine-b"); w.Code != http.StatusOK {
+		t.Fatalf("another machine was limited: status %d", w.Code)
 	}
 }
