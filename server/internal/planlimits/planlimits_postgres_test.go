@@ -289,6 +289,21 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 	}
 	tunnelTCP("")
 	refused(t, check(t, store, personal, PublicTCP), Pro, 10)
+	usage := func(scope Scope) Usage {
+		t.Helper()
+		var out map[Kind]Usage
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			var err error
+			out, err = UsageTx(ctx, tx, scope)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return out[PublicTCP]
+	}
+	if u := usage(personal); u.Used != 10 || u.Limit == nil || *u.Limit != 10 {
+		t.Fatalf("Pro usage %+v, want 10 of 10", u)
+	}
 	// Team: 10 per paid seat, pooled; the personal tunnels above are not the team's.
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, user)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "bw_t_"+x, team)
@@ -301,4 +316,12 @@ func TestPublicTCPLimitsPostgres(t *testing.T) {
 	}
 	tunnelTCP(team)
 	refused(t, check(t, store, teamScope, PublicTCP), Team, 20)
+	if u := usage(Scope{Team: team}); u.Used != 20 || u.Limit == nil || *u.Limit != 20 {
+		t.Fatalf("team usage %+v, want 20 of 20 (10 per paid seat)", u)
+	}
+	exec(`INSERT INTO paperboat.selfhost_pool_policies(capability,mode,scope_kind,scope_id,installation_ids) VALUES('tunnel','self-hosted-only','team',$1,'{}')`, team)
+	if u := usage(Scope{Team: team}); u.Limit != nil {
+		t.Fatalf("a self-hosted team is not limited, usage %+v", u)
+	}
+	exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id=$1`, team)
 }

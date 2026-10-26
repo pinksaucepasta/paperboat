@@ -9225,11 +9225,12 @@
           "limits": {
             "type": "object",
             "additionalProperties": false,
-            "description": "Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge.",
+            "description": "Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge. public_tcp: concurrent public raw-TCP tunnels.",
             "required": [
               "machines",
               "publications",
-              "browser_terminals"
+              "browser_terminals",
+              "public_tcp"
             ],
             "properties": {
               "machines": {
@@ -9301,6 +9302,30 @@
                       }
                     ],
                     "description": "Plan limit; null for Teams (advertised unlimited)."
+                  }
+                }
+              },
+              "public_tcp": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "used",
+                  "limit"
+                ],
+                "properties": {
+                  "used": {
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Plan limit on concurrent public TCP tunnels (per seat, pooled, for a team); null when the workspace's tunnel edge is self-hosted (not limited)."
                   }
                 }
               }

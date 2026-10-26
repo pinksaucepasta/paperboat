@@ -95,7 +95,8 @@ func (s Scope) workspaceID() string {
 	return "personal:" + s.Account
 }
 
-// Usage is one kind's count against its limit; Limit is nil for Teams (advertised unlimited).
+// Usage is one kind's count against its limit; Limit is nil for Teams (advertised unlimited) and, for
+// public TCP tunnels, for a workspace on a self-hosted edge.
 type Usage struct {
 	Used  int  `json:"used"`
 	Limit *int `json:"limit"`
@@ -150,7 +151,7 @@ func CheckBrowserTerminalTx(ctx context.Context, tx *db.Tx, scope Scope, termina
 // UsageTx reports every kind for the scope, for the billing overview.
 func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error) {
 	set := current.Load()
-	kinds := []Kind{Machines, Publications, BrowserTerminals}
+	kinds := []Kind{Machines, Publications, BrowserTerminals, PublicTCP}
 	// One statement for the billing overview: the plan and every count.
 	query := `SELECT CASE WHEN $2::text<>'' THEN '' ELSE coalesce((SELECT w.product_code FROM billing_workspaces w
  WHERE w.user_id=$1 AND w.team_id IS NULL AND billing_workspace_paid_until(w)>now()),'') END`
@@ -163,14 +164,24 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 	}
 	var product string
 	used := make([]int, len(kinds))
-	if err := tx.QueryRow(ctx, query, scope.Account, scope.Team, scope.workspaceID()).Scan(&product, &used[0], &used[1], &used[2]); err != nil {
+	if err := tx.QueryRow(ctx, query, scope.Account, scope.Team, scope.workspaceID()).Scan(&product, &used[0], &used[1], &used[2], &used[3]); err != nil {
 		return nil, err
 	}
 	plan := planOf(scope, product)
 	out := make(map[Kind]Usage, len(kinds))
 	for i, kind := range kinds {
 		u := Usage{Used: used[i]}
-		if plan != Team {
+		switch {
+		case kind == PublicTCP:
+			// Per plan, and per paid seat for a team; nil when the workspace's tunnel edge is self-hosted.
+			limit, exempt, err := publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan)
+			if err != nil {
+				return nil, err
+			}
+			if !exempt {
+				u.Limit = &limit
+			}
+		case plan != Team:
 			limit := limitFor(set.limits, kind, plan)
 			u.Limit = &limit
 		}
