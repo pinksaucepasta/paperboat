@@ -66,6 +66,7 @@ func TestEndpointPullTakesDeltasBetweenFullSets(t *testing.T) {
 		Interval: time.Minute, EndpointInterval: 5 * time.Millisecond, EndpointFullInterval: 300 * time.Millisecond, Timeout: time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	workerStarted := time.Now()
 	if err := w.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -76,24 +77,35 @@ func TestEndpointPullTakesDeltasBetweenFullSets(t *testing.T) {
 			t.Fatalf("full endpoint set not installed: %d admissions", len(expected.Snapshot()))
 		}
 	}
-	time.Sleep(700 * time.Millisecond)
-	source.mu.Lock()
-	full, deltas := 0, 0
-	for _, since := range source.endpointPulls {
-		if since == "" {
-			full++
-		} else {
-			deltas++
+	// Wait for 20 deltas (a loaded host is slow), then require only the full sets the elapsed time
+	// allows: one to start and one per full interval, so deltas carry the rest.
+	count := func() (full, deltas int) {
+		for _, since := range source.endpointPulls {
+			if since == "" {
+				full++
+			} else {
+				deltas++
+			}
 		}
+		return full, deltas
+	}
+	var full, deltas int
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		source.mu.Lock()
+		full, deltas = count()
+		if deltas >= 20 || time.Now().After(deadline) {
+			break
+		}
+		source.mu.Unlock()
 	}
 	extra := endpoint(1000)
 	added = &extra
 	source.mu.Unlock()
-	// One full set to start, then one per full interval (700 ms / 300 ms); deltas in between.
-	if full > 4 || deltas < 20 {
-		t.Fatalf("endpoint pulls: %d full, %d deltas", full, deltas)
+	allowed := 2 + int(time.Since(workerStarted)/w.EndpointFullInterval)
+	if full > allowed || deltas < 20 {
+		t.Fatalf("endpoint pulls: %d full (at most %d), %d deltas", full, allowed, deltas)
 	}
 	started := time.Now()
 	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1002 })
-	t.Logf("%d full sets and %d deltas in ~0.7 s; a new route installed after %v", full, deltas, time.Since(started))
+	t.Logf("%d full sets and %d deltas; a new route installed after %v", full, deltas, time.Since(started))
 }
