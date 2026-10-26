@@ -7,6 +7,10 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -156,4 +160,48 @@ func TestGatewayAttributesOnlyIPv4Loopback(t *testing.T) {
 	if _, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, errAttributionUnsupported) {
 		t.Fatalf("IPv6 connection = %v, want unsupported", err)
 	}
+}
+
+// Device check (F23-02, pbvm2 two-user container): run the test binary as root with PB_TWO_USER_UIDS=<a>,<b>.
+// Each client connects as its own OS user; every accepted connection is attributed to exactly that user.
+func TestGatewayAttributesTwoOSUsers(t *testing.T) {
+	uids := strings.Split(os.Getenv("PB_TWO_USER_UIDS"), ",")
+	if os.Geteuid() != 0 || len(uids) != 2 {
+		t.Skip("needs root and PB_TWO_USER_UIDS=<uid>,<uid>")
+	}
+	listener := gatewayListener(t)
+	for round := 0; round < 50; round++ {
+		for _, value := range uids {
+			uid, err := strconv.ParseUint(value, 10, 32)
+			if err != nil {
+				t.Fatal(err)
+			}
+			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+			client := exec.Command("bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/"+port+" && sleep 2")
+			client.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(uid)}}
+			if err := client.Start(); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := listener.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := attributeOwner(mustClientTuple(t, accepted), lookupOwnersINETDiag)
+			if err != nil || got != uint32(uid) {
+				t.Fatalf("round %d: connection of uid %d attributed to %d (%v)", round, uid, got, err)
+			}
+			_ = client.Process.Kill()
+			_ = client.Wait()
+			_ = accepted.Close()
+		}
+	}
+}
+
+func mustClientTuple(t *testing.T, accepted net.Conn) socketTuple {
+	t.Helper()
+	tuple, err := clientTuple(accepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tuple
 }
