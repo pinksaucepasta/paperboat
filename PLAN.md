@@ -1266,12 +1266,59 @@ section P. A client loop that costs the server is fixed in the client by Lane R;
 #### Go SDK v1 (design; coordinator 2026-10-26; moves await Lane A/R sign-off)
 
 **Contract.** `sdk/go/` is its own module, added to `go.work`; reusable code lives in the
-existing top-level `shared/` module. V1: API-token login → paginated machine inventory → native
-exec with streamed stdin/stdout/stderr, deadline/cancel, typed errors and `Close`. No subprocess
+existing top-level `shared/` module. V1: API-token login, machine discovery by name/ID, native
+exec, private TCP/HTTP access and file send/receive, with streaming, deadlines, typed errors
+and `Close`. Exec is the differentiator; networking makes the client useful inside ordinary
+applications (database drivers, HTTP clients and build tools) as well as agents. No subprocess
 `pb`, installed daemon, machine enrollment, OS network changes or edge-decrypted fallback.
 Relay fallback carries the same encrypted native connection. Server/service addresses come
 from explicit server configuration and discovery. SDK imports no `cli/internal` package.
 This section is design only; implementation and acceptance rows go in CHECKLIST before code.
+
+**Product phases (each has its own CHECKLIST acceptance rows before implementation).**
+0. `pb mcp`: stdio MCP server inside the existing CLI, pending Lane A's agreement; SDK lane
+   implements and A reviews CLI changes. Expose `list_machines`, `exec` (exact argv, bounded
+   output, timeout), bounded `read_file`/`write_file`, and `send_file`; `create_preview` comes
+   later. Claude Code, Codex and Cursor can use these tools through their MCP configuration.
+   Reuse Go command services and the user's pb login or an explicitly supplied API token,
+   never shell out to pb. Read API tokens from an explicit secret file/configuration, not MCP
+   stdin or command-line token arguments. Calls retain scopes and token-attributed audit. Stdio
+   stdout is protocol only; diagnostics go to stderr. Bound tool arguments, output bytes,
+   concurrent calls and execution time; report truncation and uncertain execution explicitly,
+   honor MCP cancellation and close on EOF. Local files used by send are explicitly selected
+   local inputs; read/write tools name a remote machine and remote path, never an implicit
+   local path. Local path access is constrained by caller-configured roots; remote filesystem
+   access follows remote permissions and explicit file capability. No implicit exec fallback
+   to implement file-only tools. Until phase 1, MCP has the CLI's existing enrolled-source
+   requirements; MCP does not make standalone API-token exec magically work. Qualification,
+   not a promised number of days, determines which tools ship first.
+1. Lane B deploys one session-bound source model for exec, native private-access grants and
+   file descriptors, with destination admission enforced by Lane R. Each capability is a
+   separate explicit scope granted by the token creator; no widening scopes to make an SDK
+   call succeed. Creator access and workspace policy remain upper bounds.
+2. Extract the shared owners in the agreed A/R move order below, preserving CLI behavior.
+3. Ship one Go Client with Machines/Machine, Exec, Dial/HTTPClient and Send/Receive. Runnable
+   examples cover an agent build, a private database connection, an HTTP request and artifacts.
+4. V2 `Expose(ctx, localAddr or http.Handler, ExposeOptions)` returns an owned endpoint with
+   public preview/tunnel URL and Close. Closing removes its lease and local serving workers.
+   Public HTTP terminates TLS at the edge; describe that trust boundary explicitly. This is
+   not the native private-access E2EE promise. Server/edge lifecycle and quotas remain owners.
+5. Python and TypeScript bindings reuse the Go core through a C shared-library ABI (the
+   libtailscale approach) or a native binding distribution like ngrok-python/javascript.
+   Choose packaging/ABI during that phase; do not build bindings or reimplement transport now.
+
+**Network SDK prior art (local source paths; references, not code to copy).** Under `~/ref/`:
+`tailscale/tsnet/tsnet.go`: Dial, Listen, ListenTLS, ListenFunnel, HTTPClient, Up, Close;
+`netbird/client/embed/embed.go`: New/Start/Stop, Dial/DialContext, ListenTCP/UDP,
+NewHTTPClient, Expose, Status; `ngrok-go/agent.go`: Listen/Forward, with listener lifecycle in
+`ngrok-go/listener.go` and forwarding in `ngrok-go/forwarder.go`;
+`zrok/sdk/golang/sdk/{share,listener,dialer}.go`: CreateShare/NewListener/NewDialer, alongside
+`zrok/sdk/python/` and `zrok/sdk/nodejs/`. These establish private dial/listen and public
+exposure as useful primitives. Paperboat v1 offers outbound private Dial, not an unrestricted
+Listen that turns an SDK process into a managed host. Teleport's local
+`teleport/lib/auth/bot.go` records bot-instance renewal generations and mismatch locking;
+the sparse reference lacks api/client and tbot implementations, so the linked tbot architecture
+below is the source for its client credential lifecycle, not an uninspected local path.
 
 **Extraction boundary (exact destination packages).** Moving whole `api`, `config`, `resolver`
 or `tunnel` packages is rejected: their transitive imports include host runtime, local API,
@@ -1293,7 +1340,8 @@ Paths below are relative to `cli/internal/` unless prefixed `shared/`:
   `client.go`, `http.go`, `errors.go`, `api_errors.go`, `issuance_retry.go`, `response_lost.go`;
   session exchange/refresh/revoke from `device.go`; discovery from `client_configuration.go`;
   inventory/pagination from `api_machines.go`, `inventory_pages.go`; identity/network calls from
-  `api_e2ee.go`, `peer_network.go`; exec descriptor/types from `api_terminal.go`; workspace
+  `api_e2ee.go`, `peer_network.go`; exec/file descriptor/types from `api_terminal.go`; private
+  grants from `native_private.go` and announced-port discovery from `machine_services.go`; workspace
   selection from `workspaces.go`. Split mixed files by declaration, retaining other endpoints
   in CLI. Inject credentials, product/version headers, clock and observation callbacks: no
   `buildinfo`, global `errorreport`, host config or self-update dependency in shared code.
@@ -1314,16 +1362,34 @@ Paths below are relative to `cli/internal/` unless prefixed `shared/`:
   dialing, terminal/SSH APIs, local-daemon transport or host config. Runtime receives state,
   credentials, JWKS and connection authority explicitly. Exec receives a narrow dial/descriptor
   interface; it does not import runtime. Existing `shared/reattach` remains the retry owner.
+- Private access → `shared/nativeprivate` (whole `nativeprivate/binding.go` and its tests),
+  `shared/client/access` (TCP private-stream opening and target validation split from
+  `tunnel/native_private.go`, `hostruntime/preview` native private session interfaces and
+  machine-service adapters; API call owner above). OS proxy/PAC, DNS, listeners and host
+  announcement services stay CLI. A net.Conn adapter carries the existing authenticated
+  private stream; HTTPClient uses that same adapter, not a separate networking stack.
+- File transfer → `shared/client/files`: prepare/manifest, native transfer, committed-offset
+  recovery and receipts from `filetransfer/{source,client,native_client,native_transport,
+  native_grant}.go` plus platform source helpers. Split protocol types used from
+  `hostruntime/protocol` into `shared/client/files/protocol`, consumed by both endpoints;
+  this protocol package does not import files. Inject diagnostics, lease renewal and retry
+  classification instead of importing local-daemon restart detection. CLI owns its transfer
+  queue, Inbox UX and preferences; SDK owns its instance's transfers. `cmd/pb/send_command.go`
+  and receive/Inbox orchestration split in place before moving reusable orchestration.
+  Bind mode enforcement to Lane R's path-kind API; no copied policy constants or native stack.
 
 Import graph (arrows mean imports; external libraries omitted):
 
 ```text
-sdk/go → shared/client/{api,session,discovery,runtime,exec,state}
+sdk/go → shared/client/{api,session,discovery,runtime,exec,access,files,state}
 cli/{cmd,internal adapters} → those same shared packages
 client/session → client/{api,state}, peertransport/identitybootstrap
 client/discovery → client/api
 client/runtime → client/{api,state,discovery}, peertransport/{clientauthority,native,tailnet,jwks}
 client/exec → client/discovery, peertransport/streamauth, shared/reattach
+client/access → client/{api,discovery}, shared/nativeprivate, peertransport/streamauth
+client/files → client/{api,discovery,files/protocol}, shared/{reattach,httptransport,serverclock}
+client/{exec,access,files} → injected stream/lease interfaces implemented by client/runtime
 peertransport/{identitybootstrap,clientauthority,trustedkeys,tailnet} → client/{api,state}, peer leaves
 peertransport/native → peertransport/{mesh,peerquic,streamauth,tailnet}
 client/api → client/state, shared/{wirejson,httptransport,serverclock,supportref,machinename}
@@ -1339,7 +1405,9 @@ then peerquic; (3) A splits state, then API (including its mixed endpoint types)
 and discovery, moving each only after its dependencies are shared; (4) A extracts JWKS and
 R moves identitybootstrap/trustedkeys/clientauthority, tailnet, native in dependency order;
 (5) A/R split runtime and exec framing, then mechanically move each; (6) A extracts exec
-recovery out of cmd/pb and switches CLI to that single owner; (7) add SDK facade and examples.
+recovery out of cmd/pb and switches CLI to that single owner; (7) A/R move nativeprivate,
+prepare/split private-stream interfaces and access adapter, then file protocol/transfer core
+and reusable send/receive orchestration, one owner per commit; (8) add SDK facade and examples.
 Boundary preparation is a separate no-behavior-change commit; each mechanical commit is only
 `git mv`, package/import rewrites and module metadata, never a fix or protocol change. Move
 existing owning tests with code, preserve downstream integration tests, and verify the full
@@ -1371,16 +1439,48 @@ closes transports. Memory mode best-effort revokes its session; failure is retur
 bounds server leftovers. Persistent mode retains its session for explicit reopen; provide
 `Logout(ctx)` to revoke it and erase its state. No telemetry or command contents sent implicitly.
 
-**Public API (proposed signatures).** `New(ctx, Config) (*Client, error)`,
-`Machines(ctx, ListOptions) (MachinePage, error)`, `Exec(ctx, machineID, ExecOptions)
-(ExecResult, error)`, `Close() error`, `Logout(ctx) error`. Inventory returns IDs and pagination;
-exec takes an exact ID, avoiding ambiguous names. ExecOptions contains Argv, Dir, Env, Stdin
-(io.Reader), Stdout/Stderr (io.Writer) and Timeout. Argv is exact, no implicit shell; PTY is
+**Public API (proposed signatures; one Client).** `New(ctx, Config) (*Client, error)`,
+`Machines(ctx, ListOptions) (MachinePage, error)`, `Machine(ctx, nameOrID) (Machine, error)`,
+`Exec(ctx, machine, ExecOptions) (ExecResult, error)`,
+`Dial(ctx, machine, network, address) (net.Conn, error)`, `HTTPClient(machine) *http.Client`,
+`Send(ctx, machine, Source, SendOptions) (TransferResult, error)`,
+`Receive(ctx, machine, RemoteSource, Destination, ReceiveOptions) (TransferResult, error)`,
+`Close() error`, `Logout(ctx) error`. Machine resolves a name to exactly one authorized ID,
+otherwise `*AmbiguousMachineError` or a non-disclosing not-found/denied error. All operations
+accept name or ID, resolve once and pin the resulting ID across retries (never re-resolve an
+alias after an operation has started). Machines returns inventory IDs and pagination.
+
+`Dial(ctx, "database", "tcp", ":5432")` opens a private port on that machine, using the same
+workspace access switch, target/port grants and token scope as `pb access machine`. V1 accepts
+TCP and a numeric port only; it cannot dial an arbitrary host through the target. Every
+connection obtains an exact target/port grant and binds the authenticated endpoint. Return a
+net.Conn with deadlines; reconnecting transport does not replay arbitrary application bytes.
+HTTPClient takes a resolved Machine handle from Machine(ctx, nameOrID), binding its transport
+to that exact ID: request scheme/port selects the authorized
+port, normal HTTPS certificate verification remains enabled, and redirects cannot escape to
+another machine or the public Internet. The caller owns response bodies; Client.Close also
+closes idle HTTP transports and active connections. No system DNS/PAC or proxy changes.
+
+Source/Destination are explicit path or reader/writer forms; remote paths never mean local
+paths. Send and Receive retain transfer IDs, committed offsets and verifiable receipts; no
+silent overwrite, path traversal or symlink escape. Transfer mode is explicit: Automatic
+(default, currently ≤2 GB, P2P then any relay) or Unlimited (direct/self-hosted relays only).
+Use server FileTransfer.AutomaticMaxBatchBytes from discovery/descriptor, not an SDK constant;
+reuse the transfer-mode section's path-switch pause/resume rules on both endpoints. A reader
+must supply length/hash and a replayable source, or opt into bounded caller-configured spooling
+before issuance; do not hide unlimited buffering or invent a manifest after streaming starts.
+Receive names its remote source explicitly: distinguish an offered Inbox artifact from a
+request to read an arbitrary remote path. The latter and MCP read/write need an authorized
+filesystem protocol; existing send/Inbox operations alone do not establish that capability.
+Add that product contract and its owning acceptance rows before implementing these forms.
+
+ExecOptions contains Argv, Dir, Env, Stdin (io.Reader), Stdout/Stderr (io.Writer) and Timeout. Argv is exact, no implicit shell; PTY is
 outside v1. ExecResult contains OperationID, ExitCode, Signal and ExitedAt; nonzero remote
 exit is a result, not a transport error. Errors support errors.Is/As: `*APIError` exposes
 safe Code/Status/RetryAfter, `*AuthError`, `*AccessDeniedError`, `*MachineUnavailableError`,
 `*StartUncertainError{OperationID}`, `*ResultUnavailableError{OperationID}` and
-`*TransportError`; context cancellation/deadline causes remain unwrap-able. Do not reveal
+`*TransportError`; transfer errors expose typed size/path-policy/paused-state details.
+Context cancellation/deadline causes remain unwrap-able. Do not reveal
 whether an unauthorized machine exists. Client generates one operation ID before issuance;
 all retries attach that ID with replay cursors. Lost start response never authorizes a new
 start. Output has bounded queues/backpressure; writer failures cancel the operation and keep
@@ -1398,14 +1498,24 @@ remain within that allowlist: use existing bootstrap enrollment, not a blanket e
 exception. SDK identifies itself with ClientLabel and a versioned SDK User-Agent; existing
 supported device_type (server/container/desktop) describes its host, not a new SDK identity.
 
-Exec is NOT currently standalone: `usermachines/service_02.go:operationDescriptor` requires
-nonempty sourceMachineID and sourceMachineAllowed; the handler alone accepting a session is
-insufficient. Lane B must first implement and deploy a session-bound source: descriptor and
+Scoped-token private access needs a Lane B change: `scopedTokenRoute` currently omits
+`POST /v1/native-private-access/grants`; admit only that exact action after enforcing its
+explicit access capability and port restrictions. Do not permit generic mutations or borrow
+exec authority. `native_private_handlers.go` already derives the source client session;
+reuse it and align descriptor/claim/admission source semantics with exec and files.
+
+Exec and file transfers are NOT currently standalone:
+`usermachines/service_02.go:operationDescriptor` requires nonempty sourceMachineID and sourceMachineAllowed; the handler alone accepting a session is
+insufficient. `usermachines/service_03.go:fileTransferDescriptor` likewise requires an enrolled
+source and checks sourceMachineAllowed. Phase 1 covers both plus native private grants.
+Lane B must first implement and deploy one session-bound source model: descriptor and
 signed operation claim name source kind=client_session and the authenticated token-backed
 session ID, with no fake machine ID. Derive source server-side; validate account/workspace,
-active session/token/expiry, a role/grant explicitly permitting exec from a session source,
-creator's current target access AND token scope, target and operation. Machine-sourced requests retain their actual machine-source checks. Destination
-admission binds the signed session source to the authenticated peer endpoint, target runtime
+active session/token/expiry, a role/grant permitting the requested capability from a session
+source, creator's current target access AND the token's separately granted exec/access/files
+scope (and port/direction restriction where applicable), target and operation. Never turn an
+exec-only token into a file/private-network token. Machine-sourced requests retain their actual
+machine-source checks. Destination admission binds the signed session source to the authenticated peer endpoint, target runtime
 generation, workspace and operation; no client-supplied source substitution. Update producer,
 shared exact signed-claim schema, persistence/audit and destination consumer together in
 server-first order; check every validator expecting source_machine_id (including host native
@@ -1428,7 +1538,21 @@ Before v1 is accepted, named workspace tests cover isolation between two clients
 refresh/revocation, scope denial, spoofed source/peer mismatch, direct/relay exec, exact argv,
 stream separation/backpressure, deadlines, cancellation acknowledgement loss, lost-start and
 reattach without rerun, replay gaps, shutdown leaks and directory-lock conflicts; Lane A then
-runs the same SDK example against L/M. No SDK capability is marked complete by this design.
+runs SDK exec/private-TCP/HTTP/send/receive examples against L/M. Add separate MCP framing,
+byte limits, cancellation, remote/local path separation and file-only-token checks; TCP port
+scope denial, redirect containment, connection deadlines, file mode/path-switch/size/receipt
+and offered-artifact versus remote-path checks. No SDK capability is marked complete by this
+design.
+
+**Strongest objection.** MCP-first is useful, but a safe read_file/write_file/Receive(remote
+path) is new filesystem authority, not a wrapper around existing send/Inbox. Implementing
+these tools as shell commands would require exec authority and defeat file-only scopes;
+names on MCP tools cannot enforce least privilege. An exec grant already allows the remote
+OS user's filesystem access; file-only grants must not silently acquire that power. Ship only
+tools backed by the corresponding real capability, and treat remote filesystem operations as
+explicit product work with Lane A/B/R contracts and tests. Do not promise the full MCP surface in days or hold useful
+list/exec/send tools hostage to it. Dial belongs in v1, provided phase 1's port-scoped grants
+and transport admission are complete; it is not just exporting a Dial method.
 
 #### Data plane (Lane R, measured 2026-10-22/23)
 
