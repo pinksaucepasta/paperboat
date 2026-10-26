@@ -53,7 +53,7 @@ func (r *RuntimeRepository) RecordRuntimeObservation(ctx context.Context, observ
 				return ErrDuplicateMachineIdentity
 			}
 		}
-		updated, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities})
+		updated, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities, ReporterVersion: observation.ReporterVersion})
 		if err != nil || updated != 1 {
 			return err
 		}

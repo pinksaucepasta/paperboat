@@ -2404,6 +2404,11 @@ type TeamInboxRequest struct {
 	CompletedAt          sql.NullTime
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	TransferMode         sql.NullString
+	TransferState        sql.NullString
+	PauseReason          sql.NullString
+	CommittedBytes       int64
+	ProgressAt           sql.NullTime
 }
 
 type TeamInboxSenderPolicy struct {
@@ -3032,6 +3037,7 @@ type UserMachine struct {
 	PersonalAutoEnabled            bool
 	MachineServicePolicyGeneration int64
 	CapabilitiesApplied            []string
+	ReporterVersion                sql.NullString
 }
 
 type UserMachineAccessSession struct {

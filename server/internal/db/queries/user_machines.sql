@@ -612,7 +612,7 @@ WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND deleted_at IS NULL
 
 -- name: MarkUserMachineOnlineFromHelper :execrows
 UPDATE user_machines
-SET state = 'online', online = true, observed_capabilities = paperboat.machine_observed_capabilities(COALESCE(sqlc.narg(observed_capabilities), '{}'::text[]), capabilities_applied), last_seen_at = now(), updated_at = now(), version = version + 1
+SET state = 'online', online = true, observed_capabilities = paperboat.machine_observed_capabilities(COALESCE(sqlc.narg(observed_capabilities), '{}'::text[]), capabilities_applied), reporter_version = COALESCE(NULLIF(sqlc.arg(reporter_version)::text, ''), reporter_version), last_seen_at = now(), updated_at = now(), version = version + 1
 WHERE id = sqlc.arg(id) AND environment_id = sqlc.arg(environment_id)
   AND seat_state = 'occupied' AND deleted_at IS NULL AND state IN ('pending','offline','online');
 
