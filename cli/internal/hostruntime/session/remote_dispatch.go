@@ -550,9 +550,9 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 	}
 }
 
+// decodeRemoteRequest ignores unknown fields: an owner keeps running across updates, so a newer worker's calls reach it.
 func decodeRemoteRequest(body []byte, out any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return err
 	}

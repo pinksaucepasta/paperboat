@@ -34,3 +34,18 @@ func TestRemoteDispatchPreservesReadFailureAndCancellation(t *testing.T) {
 		})
 	}
 }
+
+// An owner outlives an update, so it serves calls from a newer worker that carry fields it does not know: rejecting
+// them failed the attach and the user got a new shell after an official→dev update.
+func TestRemoteDispatchAcceptsNewerWorkerFields(t *testing.T) {
+	proxy, err := NewRemoteManager(func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"V0":{},"V1":false}`), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := json.RawMessage(`{"Sessionid":"s","Attachmentid":"a","Addedbyanewerbuild":7}`)
+	if _, err := ServeRemoteCall(context.Background(), proxy, "Next", body); err != nil {
+		t.Fatalf("owner refused a newer worker's call: %v", err)
+	}
+}
