@@ -4948,3 +4948,4 @@ M/W remain unticked; Go SDK waits for Lane B session-bound source and owner-sche
 
 2026-10-26 | Lane MERGER S5 server+edge | 3a step 5 server/edge deletion: connector HTTP/tables/previewattachment gone, migration 201, edge preview worker gone; origin health now POST /v1/runtime/endpoint-tunnels/origin-health. CI 40345779983 (pre-rebase).
 Waits for Server lane: ONE joint deploy of edge + server (migration 201) + CLI dev build of that main; then Lane M/F20 checks (F7/F8/F17).
+2026-10-26 | Lane MERGER | In-place upgrade of long-lived machines 1af31cfe→c916d0c8 left them degraded/rolled back (hostd component start_failed, guard unreachable); fresh-pair upgrades pass, reinstall heals; repro dropped by user decision (0 users). support_d294af87-7097-4111-a1e8-01265d30cbe7, support_5058ed34-337d-4599-9ff3-e3822871102f.
