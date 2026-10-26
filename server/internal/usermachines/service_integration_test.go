@@ -3210,7 +3210,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if claims.MachineID != host.id || claims.SourceMachineID != source.id || claims.SessionID != sessionID || claims.UserID != userID || claims.AssignmentID == "" || session.Auth["access_session_id"] != claims.AssignmentID {
 		t.Fatalf("session credential bindings = %+v", claims)
 	}
-	if _, err := service.FileTransferDescriptor(ctx, userID, foreign.id, destination.id, "cli_1", "", TransferIntent{}); !errors.Is(err, ErrNotFound) {
+	if _, err := service.FileTransferDescriptor(ctx, userID, foreign.id, destination.id, "cli_1", "", TransferIntent{Mode: "automatic", DeclaredBytes: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign source error = %v", err)
 	}
 
