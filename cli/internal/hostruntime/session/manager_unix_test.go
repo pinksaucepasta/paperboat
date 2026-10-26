@@ -707,3 +707,38 @@ func collectUntil(t *testing.T, manager *Manager, sessionID, attachmentID, marke
 		}
 	}
 }
+
+// Ctrl-C under an output flood. Output capture takes opMu for every PTY chunk, so under `yes` the
+// mutex is effectively always held; keyed input used to try-lock it every 5 ms and the interrupt
+// never reached the PTY (round-31 device repro). Input must not need opMu at all: hold it here
+// for the whole write, as a flooding capture loop does, and the Ctrl-C must still land.
+func TestInputReachesThePTYWhileOutputHoldsTheSessionLock(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "flood", Command: shellCommand(shell, root, "exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	if _, err := manager.Attach(created.ID, "att_flood", 0); err != nil {
+		t.Fatal(err)
+	}
+	session, err := manager.get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.opMu.Lock()
+	inputCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	key := InputKey{ClientID: "cli", AttachmentID: "att_flood", Generation: created.Generation, InputSequence: 1}
+	decision, err := manager.WriteContext(inputCtx, created.ID, key, []byte{3})
+	elapsed := time.Since(started)
+	session.opMu.Unlock()
+	if err != nil || decision.Status != InputAccepted {
+		t.Fatalf("Ctrl-C while output holds the session lock: decision=%#v err=%v after %s", decision, err, elapsed)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("Ctrl-C took %s to reach the PTY", elapsed)
+	}
+	waitState(t, manager, created.ID, Exited)
+}

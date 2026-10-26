@@ -22,20 +22,26 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if err != nil {
 		return InputDecision{}, err
 	}
-	if err := pty.LockInput(ctx, &session.opMu); err != nil {
+	// Input orders only against other input. It never takes opMu, which output capture holds for
+	// every PTY chunk: under a flood (yes) a keystroke or Ctrl-C would never get it. The live
+	// process is published atomically and cleared before Closing, so a running generation is all
+	// input needs; the journal and fanout have their own locks.
+	if err := pty.LockInput(ctx, &session.inputMu); err != nil {
 		return InputDecision{}, err
 	}
-	defer session.opMu.Unlock()
-	state, generation := session.lifecycle.Snapshot()
-	if state != Running || session.process == nil || key.Generation != generation {
+	defer session.inputMu.Unlock()
+	live := session.liveProcess.Load()
+	if live == nil || key.Generation != live.generation {
+		_, generation := session.lifecycle.Snapshot()
 		return InputDecision{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
+	process := live.process
 	if attachmentState, _, err := session.fanout.Status(key.AttachmentID); err != nil || attachmentState != Attached {
 		return InputDecision{}, ErrInvalidInput
 	}
 	key, _ = normalizeInputKey(key)
 	if _, queryErr := session.inputs.Query(key); queryErr == nil {
-		return session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
+		return session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: process})
 	} else if !errors.Is(queryErr, ErrInputUnknown) {
 		return InputDecision{}, queryErr
 	}
@@ -53,7 +59,7 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 			return InputDecision{}, ErrInputConflict
 		}
 	}
-	decision, err := session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
+	decision, err := session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: process})
 	if err != nil {
 		return decision, err
 	}
