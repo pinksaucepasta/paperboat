@@ -172,7 +172,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 			t.Fatalf("%s granted terminal only has %v", account, got)
 		}
 	}
-	// Each change that decides an offline right moves the host's peer_network topic (migration 193), so the host
+	// Each change that decides an offline right moves the host's peer_network topic (migration 196), so the host
 	// refreshes its document; an update that leaves the deciding column as it was moves nothing (no flapping).
 	topic := func() int64 {
 		t.Helper()
