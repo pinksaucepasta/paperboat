@@ -445,8 +445,10 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				return protocol.BinaryFrame{}, ctx.Err()
 			case <-s.screenRequests:
 				if err := s.loadScreen(); err != nil {
+					diagnosticlog.TryInfo("browser screen could not be loaded")
 					return protocol.BinaryFrame{}, err
 				}
+				diagnosticlog.TryInfo("browser screen loaded")
 				return s.Next(ctx)
 			case epoch, ok := <-s.keyUpdates:
 				if !ok {
@@ -802,7 +804,9 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		select {
 		case requests.(chan struct{}) <- struct{}{}:
+			diagnosticlog.TryInfo("browser screen requested")
 		default: // one is already pending; it will reflect everything up to when it is taken
+			diagnosticlog.TryInfo("browser screen request joined a pending one")
 		}
 		return result(struct{}{})
 	case "resize":
