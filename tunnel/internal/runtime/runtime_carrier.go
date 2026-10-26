@@ -392,18 +392,24 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 		case <-server.Draining():
 			// The host is going away (T10): its routes leave this edge now, so new requests get
 			// the route-unavailable answer instead of a carrier that is closing; open streams
-			// finish until the host closes the carrier.
+			// finish. A carrier still open when the goaway ends is in service again and its
+			// routes come back on the next pass.
 			timer.Stop()
 			for key, a := range attached {
 				w.detachAdmission(a)
 				delete(attached, key)
 			}
 			w.changed()
+			drained := time.NewTimer(max(time.Until(server.DrainUntil()), 0))
 			select {
 			case <-ctx.Done():
+				drained.Stop()
 				return ctx.Err()
 			case <-server.Done():
+				drained.Stop()
 				return nil
+			case <-drained.C:
+				server.EndDrain(time.Now())
 			}
 		case err := <-outputErrors:
 			timer.Stop()

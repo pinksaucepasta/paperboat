@@ -114,8 +114,9 @@ func (s *Server) readGoaway(raw StreamLink, deadline time.Time) {
 	if raw.SetReadDeadline(deadline) != nil {
 		return
 	}
-	if notice, err := connectorprotocol.ReadGoawayNotice(raw); err != nil || notice.Reason != connectorprotocol.GoawayHostDraining {
+	notice, err := connectorprotocol.ReadGoawayNotice(raw)
+	if err != nil || notice.Reason != connectorprotocol.GoawayHostDraining {
 		return
 	}
-	s.drainOnce.Do(func() { close(s.draining) })
+	s.drain(time.Unix(notice.DrainDeadline, 0), time.Now())
 }

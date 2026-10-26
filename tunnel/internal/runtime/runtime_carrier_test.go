@@ -216,7 +216,9 @@ func TestRuntimeCarrierRoutesLeaveOnHostGoaway(t *testing.T) {
 	if err := connectorprotocol.WriteStreamOpen(hostEnd, open); err != nil {
 		t.Fatal(err)
 	}
-	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(5*time.Second)); err != nil {
+	// A short goaway (whole seconds on the wire): the carrier stays open past it, as a shared
+	// carrier the agent keeps using does (audit T10, prod 2026-10-26).
+	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	_ = hostEnd.Close()
@@ -225,6 +227,12 @@ func TestRuntimeCarrierRoutesLeaveOnHostGoaway(t *testing.T) {
 	case err := <-done:
 		t.Fatalf("handler left before the host closed its carrier: %v", err)
 	case <-time.After(100 * time.Millisecond):
+	}
+	// The goaway ends while the carrier is still open: it is in service again with its routes.
+	for deadline := time.Now().Add(6 * time.Second); routes.Len() != 1; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("routes stayed detached after the goaway ended on a carrier that is still open")
+		}
 	}
 	_ = server.Close()
 	select {

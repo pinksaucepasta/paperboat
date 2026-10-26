@@ -84,3 +84,33 @@ func TestHostGoawayDrainsTheCarrierAndKeepsOpenStreams(t *testing.T) {
 		t.Fatalf("stream permit leaked: edge=%d connector=%d", edge.ActiveStreams(), connector.ActiveStreams())
 	}
 }
+
+// Audit T10 (prod 2026-10-26): a goaway is never permanent. A carrier the host keeps open past the
+// goaway's deadline accepts new streams again; the deadline is capped at maximumHostDrain.
+func TestHostGoawayEndsAtItsDeadline(t *testing.T) {
+	edge, _ := dataCarrierPair(t, testCarrierConfig(4))
+	now := time.Now()
+	edge.drain(now.Add(time.Hour), now)
+	if until := edge.DrainUntil(); until.After(now.Add(maximumHostDrain)) {
+		t.Fatalf("goaway lasts until %v, beyond the %v cap", until, maximumHostDrain)
+	}
+	if !edge.drainingNow(now.Add(time.Second)) {
+		t.Fatal("carrier not draining during its goaway")
+	}
+	if edge.EndDrain(now.Add(time.Second)) {
+		t.Fatal("goaway ended before its deadline")
+	}
+	end := edge.DrainUntil()
+	if !edge.EndDrain(end) || edge.drainingNow(end) {
+		t.Fatal("goaway did not end at its deadline")
+	}
+	select {
+	case <-edge.Draining():
+		t.Fatal("a fresh Draining channel is already closed")
+	default:
+	}
+	edge.drain(now.Add(-time.Second), now)
+	if edge.drainingNow(now) {
+		t.Fatal("a goaway already past its deadline drained the carrier")
+	}
+}

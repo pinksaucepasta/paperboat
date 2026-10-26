@@ -233,8 +233,11 @@ type Server struct {
 	closeErr       error
 	active         atomic.Int64
 	dataAcceptOnce sync.Once
+	// drainMu guards draining and drainUntil: a host goaway drains the carrier until drainUntil,
+	// never longer; draining is closed while that lasts.
+	drainMu        sync.Mutex
 	draining       chan struct{}
-	drainOnce      sync.Once
+	drainUntil     time.Time
 	dataAccess     chan acceptResult
 	dataTerminal   chan acceptResult
 	controlMu      sync.Mutex
@@ -303,10 +306,8 @@ func (s *Server) OpenStreamWithLifetime(openCtx, lifetimeCtx context.Context, op
 	if !s.config.Identity.matches(open) {
 		return nil, ErrIdentityMismatch
 	}
-	select {
-	case <-s.draining:
+	if s.drainingNow(time.Now()) {
 		return nil, ErrCarrierDraining
-	default:
 	}
 	if err := s.config.Authorize.AuthorizeStream(openCtx, s.config.Identity, open); err != nil {
 		return nil, carrierFailure{sentinel: ErrRouteDenied, cause: err}
@@ -570,12 +571,62 @@ func (s *Server) ActiveStreams() int {
 	return int(active)
 }
 
-// Draining is closed when the host sends a goaway: it opens no new streams on this carrier, and
-// the open ones finish until the carrier closes. Calling it starts the carrier's inbound stream
-// loop, which is where the goaway arrives.
+// maximumHostDrain bounds one host goaway: a carrier that is still open after it is in service
+// again (audit T10: a shared carrier the agent kept using must not stay drained).
+const maximumHostDrain = 30 * time.Second
+
+// Draining is closed when the host sends a goaway: until DrainUntil the carrier opens no new
+// streams and the open ones finish. Calling it starts the carrier's inbound stream loop, which is
+// where the goaway arrives.
 func (s *Server) Draining() <-chan struct{} {
 	s.dataAcceptOnce.Do(func() { go s.acceptDataStreams() })
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
 	return s.draining
+}
+
+// DrainUntil is when the current goaway ends; zero when there is none.
+func (s *Server) DrainUntil() time.Time {
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
+	return s.drainUntil
+}
+
+// EndDrain puts a carrier that outlived its goaway back in service, with a fresh Draining channel.
+func (s *Server) EndDrain(now time.Time) bool {
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
+	if s.drainUntil.IsZero() || now.Before(s.drainUntil) {
+		return false
+	}
+	s.drainUntil, s.draining = time.Time{}, make(chan struct{})
+	return true
+}
+
+func (s *Server) drainingNow(now time.Time) bool {
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
+	return now.Before(s.drainUntil)
+}
+
+// drain starts or extends a goaway until deadline, capped at maximumHostDrain from now.
+func (s *Server) drain(deadline, now time.Time) {
+	if limit := now.Add(maximumHostDrain); deadline.After(limit) {
+		deadline = limit
+	}
+	if !deadline.After(now) {
+		return
+	}
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
+	if deadline.After(s.drainUntil) {
+		s.drainUntil = deadline
+	}
+	select {
+	case <-s.draining:
+	default:
+		close(s.draining)
+	}
 }
 
 func (s *Server) Done() <-chan struct{} {
