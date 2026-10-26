@@ -49,12 +49,12 @@ func TestPeerNetworkAPIPathsAndStrictResponses(t *testing.T) {
 	if r, err := c.RegisterPeerNetwork(context.Background(), PeerNetworkRegistration{OperationID: "network_operation_test"}); err != nil || r.KeyGeneration != 1 {
 		t.Fatal("registration response failed", err)
 	}
-	if result, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test", []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
+	if result, err := c.PeerNetworkConfiguration(context.Background(), PeerNetworkConfigurationRequest{OperationID: "network_operation_test", AdmittedScopes: []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}}); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
 		t.Fatal("config response failed", err)
 	}
 	unknown.Store(true)
 	// A newer server may add response fields; they are ignored, and what the client relies on is intact.
-	if result, err := c.PeerNetworkConfiguration(context.Background(), "network_operation_test", []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
+	if result, err := c.PeerNetworkConfiguration(context.Background(), PeerNetworkConfigurationRequest{OperationID: "network_operation_test", AdmittedScopes: []AdmittedNetworkScope{{ResourceKind: "machine_access", ResourceID: "live_access"}}}); err != nil || result.Configuration != "signed-config" || result.CandidateSet != "signed-candidates" {
 		t.Fatal("response with an added field was refused", err)
 	}
 }

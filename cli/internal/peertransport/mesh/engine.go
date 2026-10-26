@@ -53,7 +53,10 @@ type Server struct {
 	// PeerContacts are the allowed peers' direct contacts from the signed configuration, applied at Start
 	// (SetPeerContacts replaces them later).
 	PeerContacts map[key.NodePublic]PeerContact
-	Logf         logger.Logf
+	// OnLocalEndpoints, when set, is called (on its own goroutine) each time the engine's own candidate
+	// addresses change, so they can be reported.
+	OnLocalEndpoints func()
+	Logf             logger.Logf
 	// Region is an explicitly supplied bootstrap relay. Nil permits direct-only startup.
 	Region *tailcfg.DERPRegion
 	// OnUDP dispatches local datagram flows. Nil rejects all new inbound flows,
@@ -98,6 +101,7 @@ func (s *Server) Start() error {
 	lb.testOnlyPacketListener = s.TestOnlyPacketListener
 	lb.addr, lb.addrPrefix = s.LocalAddr, pfxOf(s.LocalAddr)
 	lb.allowedPeers = maps.Clone(s.AllowedPeers)
+	lb.onLocalEndpoints = s.OnLocalEndpoints
 	if err := lb.setPeerRelayNodes(s.PeerRelayNodes); err != nil {
 		return err
 	}

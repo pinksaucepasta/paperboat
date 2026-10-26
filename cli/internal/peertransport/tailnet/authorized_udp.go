@@ -198,7 +198,7 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 		a.server = nil
 	}
 	peers, admitted := a.peersLocked()
-	server := &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
+	server := &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, PeerContacts: a.peerContactsLocked(), OnLocalEndpoints: a.endpointsChanged, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
 	var err error
 	a.server, err = listenUDP(server, NetworkPort, admitted, a.peerAdmissionExpiriesLocked(), &a.expiresAt)
 	return a.server, err
@@ -328,7 +328,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 			if len(regions) != 0 {
 				firstRegion = regions[0]
 			}
-			a.clientEngine = &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
+			a.clientEngine = &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, PeerContacts: a.peerContactsLocked(), OnLocalEndpoints: a.endpointsChanged, Region: firstRegion, Logf: func(string, ...any) {}}
 			if err := a.clientEngine.Start(); err != nil {
 				a.clientEngine = nil
 				return nil, err

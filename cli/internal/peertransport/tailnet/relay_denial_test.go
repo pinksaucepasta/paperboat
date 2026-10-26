@@ -16,7 +16,7 @@ func (deniedNetworkAPI) RegisterPeerNetwork(context.Context, api.PeerNetworkRegi
 	return api.PeerNetworkRegistrationResult{}, nil
 }
 
-func (d deniedNetworkAPI) PeerNetworkConfiguration(context.Context, string, []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error) {
+func (d deniedNetworkAPI) PeerNetworkConfiguration(context.Context, api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error) {
 	result := *d.result
 	result.Configuration = d.token
 	return result, nil

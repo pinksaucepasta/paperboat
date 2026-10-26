@@ -132,19 +132,25 @@ type Authority struct {
 	scopeChanges chan struct{}
 	admitted     map[api.AdmittedNetworkScope]int
 	// expiresAt gates new flows; admitted flows are fenced by revocation.
-	expiresAt       atomic.Int64
-	mu              sync.Mutex
-	updateMu        sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
-	options         AuthorityOptions
-	current         *NetworkConfiguration
-	private         key.NodePrivate
-	stunTimer       *time.Timer
-	closed          bool
-	expired         bool
-	relayDenied     *api.APIError
-	done            chan struct{}
-	server          *UDPServer
-	clientEngine    *mesh.Server
+	expiresAt    atomic.Int64
+	mu           sync.Mutex
+	updateMu     sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
+	options      AuthorityOptions
+	current      *NetworkConfiguration
+	private      key.NodePrivate
+	stunTimer    *time.Timer
+	closed       bool
+	expired      bool
+	relayDenied  *api.APIError
+	done         chan struct{}
+	server       *UDPServer
+	clientEngine *mesh.Server
+	// endpointReports is the server's last endpoint_reports answer; reportMu guards the report schedule
+	// (endpoint_report.go).
+	endpointReports atomic.Bool
+	reportMu        sync.Mutex
+	reportTimer     *time.Timer
+	lastReport      time.Time
 	clients         map[string]authorizedClient
 	clientSlots     chan struct{}
 	regional        *RegionalCandidates

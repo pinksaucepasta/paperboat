@@ -47,7 +47,7 @@ func TestCLINativeNetworkAPIUsesCurrentCredential(t *testing.T) {
 	auth.mu.Lock()
 	auth.token = "second"
 	auth.mu.Unlock()
-	if _, err := network.PeerNetworkConfiguration(t.Context(), "operation_2", nil); err != nil {
+	if _, err := network.PeerNetworkConfiguration(t.Context(), api.PeerNetworkConfigurationRequest{OperationID: "operation_2"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(seen) != 2 || seen[0] != "Bearer first" || seen[1] != "Bearer second" {

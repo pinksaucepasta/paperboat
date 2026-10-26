@@ -52,9 +52,11 @@ type locoBackend struct {
 	logf                   logger.Logf
 	allowedPeers           map[key.NodePublic]netip.Addr
 	// contacts are the allowed peers' direct contacts from the signed configuration (peer_contacts.go).
-	contacts     map[key.NodePublic]PeerContact
-	policyMu     sync.Mutex // serializes policy replacement through machine synchronization
-	nextClientID tailcfg.NodeID
+	contacts map[key.NodePublic]PeerContact
+	// onLocalEndpoints is Server.OnLocalEndpoints.
+	onLocalEndpoints func()
+	policyMu         sync.Mutex // serializes policy replacement through machine synchronization
+	nextClientID     tailcfg.NodeID
 
 	// discoPublic returns the node's disco public key, memoized to
 	// avoid redoing the curve25519 derivation for every client that
@@ -229,6 +231,9 @@ func (b *locoBackend) onEngineStatus(st *wgengine.Status, err error) {
 	b.mu.Unlock()
 	if changed && len(eps) > 0 {
 		go b.advertiseEndpoints()
+	}
+	if changed && b.onLocalEndpoints != nil {
+		go b.onLocalEndpoints()
 	}
 }
 

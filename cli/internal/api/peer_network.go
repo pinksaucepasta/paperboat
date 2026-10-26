@@ -31,6 +31,17 @@ type PeerNetworkConfigurationResult struct {
 	// BillingURL is the console page for adding bandwidth. Direct connections are unaffected.
 	RelayDenied string `json:"relay_denied"`
 	BillingURL  string `json:"billing_url"`
+	// EndpointReports says the server stores the endpoints a request reports (PLAN 3b "Direct paths without
+	// a relay"); request bodies decode strictly, so a client reports them only after this is true.
+	EndpointReports bool `json:"endpoint_reports"`
+}
+
+// PeerNetworkConfigurationRequest asks for the signed peer-network configuration. Endpoints are the engine's
+// own candidate addresses, sent only once the server announced EndpointReports.
+type PeerNetworkConfigurationRequest struct {
+	OperationID    string                 `json:"operation_id"`
+	AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
+	Endpoints      []string               `json:"endpoints,omitempty"`
 }
 
 // RelayDenial is the typed error for a refresh that withheld hosted relays, or nil.
@@ -49,12 +60,9 @@ type AdmittedNetworkScope struct {
 	ResourceID   string `json:"resource_id"`
 }
 
-func (c *Client) PeerNetworkConfiguration(ctx context.Context, operationID string, scopes []AdmittedNetworkScope) (PeerNetworkConfigurationResult, error) {
+func (c *Client) PeerNetworkConfiguration(ctx context.Context, request PeerNetworkConfigurationRequest) (PeerNetworkConfigurationResult, error) {
 	var result PeerNetworkConfigurationResult
-	err := c.doRequest(ctx, http.MethodPost, c.peerNetworkPath("config"), struct {
-		OperationID    string                 `json:"operation_id"`
-		AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
-	}{operationID, scopes}, &result, http.Header{"Idempotency-Key": {operationID}}, true)
+	err := c.doRequest(ctx, http.MethodPost, c.peerNetworkPath("config"), request, &result, http.Header{"Idempotency-Key": {request.OperationID}}, true)
 	return result, err
 }
 func (c *Client) peerNetworkPath(action string) string {

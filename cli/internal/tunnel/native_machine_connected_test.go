@@ -128,7 +128,7 @@ func (d *connectedMachineAccess) control(r *http.Request, identity clientauthori
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			return nil, err
 		}
-		data, err = network.PeerNetworkConfiguration(r.Context(), "", body.AdmittedScopes)
+		data, err = network.PeerNetworkConfiguration(r.Context(), api.PeerNetworkConfigurationRequest{AdmittedScopes: body.AdmittedScopes})
 		if err != nil {
 			return nil, err
 		}

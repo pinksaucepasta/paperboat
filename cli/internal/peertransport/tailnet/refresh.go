@@ -19,7 +19,7 @@ import (
 
 type NetworkAPI interface {
 	RegisterPeerNetwork(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error)
-	PeerNetworkConfiguration(context.Context, string, []api.AdmittedNetworkScope) (api.PeerNetworkConfigurationResult, error)
+	PeerNetworkConfiguration(context.Context, api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error)
 }
 
 // Register persists a proposed key before sending its public half. Deterministic
@@ -66,7 +66,11 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if err != nil {
 		return err
 	}
-	result, err := client.PeerNetworkConfiguration(ctx, "operation_"+operation.String(), a.AdmittedScopes())
+	request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
+	if a.endpointReports.Load() {
+		request.Endpoints = a.localEndpointReport()
+	}
+	result, err := client.PeerNetworkConfiguration(ctx, request)
 	if err != nil {
 		var apiErr *api.APIError
 		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {
@@ -86,6 +90,9 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		return err
 	}
 	a.setRelayDenial(result.RelayDenial())
+	if a.endpointReports.Swap(result.EndpointReports) != result.EndpointReports && result.EndpointReports {
+		a.endpointsChanged() // the server takes reports from now on: send ours with the next renewal
+	}
 	if result.CandidateSet == "" {
 		a.relay.mu.Lock()
 		a.relay.tokens = nil
