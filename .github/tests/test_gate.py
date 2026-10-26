@@ -20,7 +20,7 @@ class SmokePrerequisiteTest(unittest.TestCase):
             (root / "cli").mkdir()
             (root / "bin").mkdir()
             (root / "deploy").mkdir()
-            for name in ("check_domains", "check_doc_links", "check_server_deployed"):
+            for name in ("check_domains", "check_doc_links", "check_doc_envvars", "check_migrations", "check_server_deployed"):
                 (root / f"tools/{name}.py").write_text("")
                 (root / f"tools/test_{name}.py").write_text(
                     "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
