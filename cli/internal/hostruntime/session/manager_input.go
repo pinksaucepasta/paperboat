@@ -26,8 +26,16 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	// every PTY chunk: under a flood (yes) a keystroke or Ctrl-C would never get it. The live
 	// process is published atomically and cleared before Closing, so a running generation is all
 	// input needs; the journal and fanout have their own locks.
-	if err := pty.LockInput(ctx, &session.inputMu); err != nil {
-		return InputDecision{}, err
+	// A lone interrupt key that finds input busy (a paste the program never reads) is delivered the way the line
+	// discipline would, ahead of the stuck write; it keeps its journal entry but its byte is not written again.
+	interrupted := false
+	if !session.inputMu.TryLock() {
+		if len(data) == 1 {
+			interrupted = interruptStuckInput(session, data[0])
+		}
+		if err := pty.LockInput(ctx, &session.inputMu); err != nil {
+			return InputDecision{}, err
+		}
 	}
 	defer session.inputMu.Unlock()
 	live := session.liveProcess.Load()
@@ -35,7 +43,10 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 		_, generation := session.lifecycle.Snapshot()
 		return InputDecision{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
-	process := live.process
+	var process io.Writer = live.process
+	if interrupted {
+		process = deliveredInput{}
+	}
 	if attachmentState, _, err := session.fanout.Status(key.AttachmentID); err != nil || attachmentState != Attached {
 		return InputDecision{}, ErrInvalidInput
 	}
@@ -80,6 +91,29 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	}
 	return decision, nil
 }
+
+type interrupter interface{ Interrupt(byte) (bool, error) }
+
+func interruptStuckInput(session *managedSession, key byte) bool {
+	live := session.liveProcess.Load()
+	if live == nil {
+		return false
+	}
+	process, ok := live.process.(interrupter)
+	if !ok {
+		return false
+	}
+	handled, err := process.Interrupt(key)
+	if err != nil {
+		observeSessionFailure(session, "input", classifySessionFailure("input", err))
+	}
+	return handled
+}
+
+// deliveredInput stands in for the PTY once Interrupt has delivered the byte.
+type deliveredInput struct{}
+
+func (deliveredInput) Write(data []byte) (int, error) { return len(data), nil }
 
 // inputPruneBatch is how many sequenced writes pass between deletions of durable decisions that left
 // the window.

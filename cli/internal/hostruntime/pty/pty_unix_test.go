@@ -4,6 +4,7 @@ package pty
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -225,5 +226,51 @@ func TestTerminateRetainsOwnedCleanupFailureAndRecovers(t *testing.T) {
 	}
 	if result, err := fresh.Terminate(ctx, 0); err != nil || result.ExitedAt.IsZero() {
 		t.Fatal("fresh healthy cleanup did not recover")
+	}
+}
+
+// A paste into a program that never reads stdin fills the tty queue and blocks; Ctrl-C must still stop the program
+// at once, and the paste left in the queue must never reach the shell as commands (F3-11).
+func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
+	// The shell survives SIGINT (a handler, so sleep keeps the default) and then reads what is left in the queue.
+	process, root := startShell(t, `trap : INT; sleep 30; dd iflag=nonblock bs=4096 count=1 of=got 2>/dev/null; echo done > ran`)
+	paste := bytes.Repeat([]byte("echo pasted > pasted\n"), 256<<10/21)
+	written := make(chan error, 1)
+	go func() { _, err := process.Write(paste); written <- err }()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	handled, err := process.Interrupt(0x03)
+	if err != nil || !handled {
+		t.Fatalf("interrupt: handled=%v err=%v", handled, err)
+	}
+	select {
+	case err := <-written:
+		if !errors.Is(err, ErrInterrupted) {
+			t.Fatalf("paste write: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("paste write still blocked after the interrupt")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := process.Wait(ctx)
+	if err != nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("shell did not stop after interrupt: %+v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err != nil {
+		t.Fatalf("the shell did not continue after the interrupt: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "got")); len(got) != 0 {
+		t.Fatalf("%d bytes of the paste were still queued after the interrupt", len(got))
+	}
+}
+
+// In raw mode the interrupt key is ordinary data for the program; Interrupt must leave it alone.
+func TestInterruptLeavesRawModeInputAlone(t *testing.T) {
+	process, _ := startShell(t, `stty raw -isig; sleep 30`)
+	defer process.Terminate(context.Background(), time.Second)
+	time.Sleep(300 * time.Millisecond)
+	if handled, err := process.Interrupt(0x03); handled || err != nil {
+		t.Fatalf("raw mode interrupt: handled=%v err=%v", handled, err)
 	}
 }

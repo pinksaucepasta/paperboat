@@ -4,10 +4,14 @@ package pty
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"time"
 )
+
+// ErrInterrupted ends a write the user's interrupt key cut short (Process.Interrupt).
+var ErrInterrupted = errors.New("PTY input stopped by an interrupt")
 
 // LockInput makes queued input honor cancellation instead of holding an owner
 // admission after the feature connection has gone away.

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 )
 
 type InputStatus string
@@ -174,7 +175,10 @@ func (j *InputJournal) Write(key InputKey, data []byte, writer InputWriter) (Inp
 	default:
 		decision.Status = InputUncertain
 	}
-	if err != nil {
+	if errors.Is(err, pty.ErrInterrupted) {
+		// The user's interrupt discarded the rest, as the line discipline does: final, never to be resent.
+		decision.Status, decision.WriteError = InputAccepted, "interrupted"
+	} else if err != nil {
 		decision.WriteError = "pty_write_failed"
 		if n > 0 && n < len(data) {
 			decision.Status = InputUncertain

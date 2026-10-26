@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -121,15 +122,16 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 }
 
 type Process struct {
-	writeMu   sync.Mutex
-	file      *os.File
-	cmd       *exec.Cmd
-	done      chan struct{}
-	mu        sync.RWMutex
-	result    ExitResult
-	waitErr   error
-	closeOnce sync.Once
-	closeErr  error
+	writeMu    sync.Mutex
+	interrupts atomic.Uint64 // bumped by Interrupt; a write that sees it change stops
+	file       *os.File
+	cmd        *exec.Cmd
+	done       chan struct{}
+	mu         sync.RWMutex
+	result     ExitResult
+	waitErr    error
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func (p *Process) Read(buffer []byte) (int, error) {
@@ -148,7 +150,84 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 		return 0, err
 	}
 	defer p.writeMu.Unlock()
-	return writeInput(p.file, data, inputTimeout(ctx))
+	return p.writeInterruptible(data, time.Now().Add(inputTimeout(ctx)))
+}
+
+// inputChunk bounds how much of a paste can still land after an interrupt: none, because the queue is flushed after
+// the write stops, but a chunked write lets Interrupt stop a long paste between chunks as well as inside one.
+const inputChunk = 4096
+
+// writeInterruptible sets its deadline before checking for an interrupt, so an Interrupt that bumps the counter after
+// the check also moves the deadline after this write's own and aborts it.
+func (p *Process) writeInterruptible(data []byte, deadline time.Time) (int, error) {
+	defer p.file.SetWriteDeadline(time.Time{})
+	start := p.interrupts.Load()
+	written := 0
+	for written < len(data) {
+		if err := p.file.SetWriteDeadline(deadline); err != nil {
+			return written, err
+		}
+		if p.interrupts.Load() != start {
+			return written, ErrInterrupted
+		}
+		n, err := p.file.Write(data[written:min(written+inputChunk, len(data))])
+		written += n
+		if err != nil {
+			if p.interrupts.Load() != start {
+				return written, ErrInterrupted
+			}
+			return written, err
+		}
+	}
+	return written, nil
+}
+
+// Interrupt acts as the line discipline would on key when input is stuck: a paste the foreground program never
+// reads fills the tty queue and the interrupt key would wait behind it forever. With ISIG on and key the VINTR
+// character it stops the pending write, discards the queued input (unless NOFLSH) and sends SIGINT to the
+// foreground process group. It reports false, changing nothing, when the terminal would not treat key as an
+// interrupt (raw mode, another VINTR), so the caller writes the byte normally.
+func (p *Process) Interrupt(key byte) (bool, error) {
+	raw, err := p.file.SyscallConn()
+	if err != nil {
+		return false, err
+	}
+	var termios *unix.Termios
+	var termiosErr error
+	if err := raw.Control(func(fd uintptr) { termios, termiosErr = unix.IoctlGetTermios(int(fd), ioctlGetTermios) }); err != nil {
+		return false, err
+	}
+	if termiosErr != nil {
+		return false, termiosErr
+	}
+	if termios.Lflag&unix.ISIG == 0 || termios.Cc[unix.VINTR] != key {
+		return false, nil
+	}
+	p.interrupts.Add(1)
+	if err := p.file.SetWriteDeadline(time.Now()); err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := LockInput(ctx, &p.writeMu); err != nil {
+		return false, err
+	}
+	defer p.writeMu.Unlock()
+	var signalErr error
+	if err := raw.Control(func(fd uintptr) {
+		if termios.Lflag&unix.NOFLSH == 0 {
+			flushPendingInput(int(fd))
+		}
+		group, err := unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
+		if err != nil || group <= 0 {
+			signalErr = fmt.Errorf("read foreground process group: %w", err)
+			return
+		}
+		signalErr = syscall.Kill(-group, syscall.SIGINT)
+	}); err != nil {
+		return true, err
+	}
+	return true, signalErr
 }
 
 func (p *Process) Resize(dimensions Dimensions) error {
@@ -230,6 +309,7 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 	}
 	return result, err
 }
+
 // processGone reports a signal that found no process: it has exited (its group may already be gone
 // before Wait observes the exit), so terminating it only has to wait for the result.
 func processGone(err error) bool {
