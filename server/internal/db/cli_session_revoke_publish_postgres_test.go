@@ -12,7 +12,7 @@ import (
 
 // Revoking a CLI session wakes the peer_network refresh of exactly the hosts that list it as a peer: the account's own
 // live machines and the machines its access sessions name; no other machine, and no later update of the revoked row.
-func TestCLISessionRevokePublishesPeerNetworkToItsHostsOnPostgres(t *testing.T) {
+func TestCLISessionRevokePublishesPeerNetworkAndMachineAccessToItsHostsOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("requires isolated PostgreSQL")
@@ -38,10 +38,11 @@ func TestCLISessionRevokePublishesPeerNetworkToItsHostsOnPostgres(t *testing.T) 
 			t.Fatalf("%v\n%s", err, query)
 		}
 	}
+	topic := "peer_network"
 	generation := func(machine string) int64 {
 		t.Helper()
 		var n int64
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'`, machine).Scan(&n); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2`, machine, topic).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -61,19 +62,43 @@ helper_terminal_session_id,expires_at,capabilities,operation_id)
 VALUES('external_issuer',$1||'_access',$2,$3,$4,$5,'https://invalid.test','jti_'||$1,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1)`, s, teamHost, owner, other+"_env_0", cli)
 
 	own1, own2, host1, un1 := owner+"_m_1", revoked, teamHost, unrelated
-	before := map[string]int64{own: generation(own), own1: generation(own1), own2: generation(own2), host1: generation(host1), un1: generation(un1)}
+	machines := []string{own, own1, own2, host1, un1}
+	snapshot := func(name string) map[string]int64 {
+		topic = name
+		out := map[string]int64{}
+		for _, m := range machines {
+			out[m] = generation(m)
+		}
+		return out
+	}
+	topics := []string{"peer_network", "machine_access"}
+	before := map[string]map[string]int64{}
+	for _, name := range topics {
+		before[name] = snapshot(name)
+	}
 	// A different session's revoke publishes to the same account's hosts only.
 	exec(`UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=now() WHERE id=$1`, cli)
-	for machine, want := range map[string]bool{own: true, own1: true, host1: true, own2: false, un1: false} {
-		if moved := generation(machine) > before[machine]; moved != want {
-			t.Errorf("peer_network of %s moved=%v, want %v", machine, moved, want)
+	for _, name := range topics {
+		topic = name
+		for machine, want := range map[string]bool{own: true, own1: true, host1: true, own2: false, un1: false} {
+			if moved := generation(machine) > before[name][machine]; moved != want {
+				t.Errorf("%s of %s moved=%v, want %v", name, machine, moved, want)
+			}
 		}
 	}
 	// The revoked row changing again publishes nothing, and neither does another session being used.
-	after := map[string]int64{own: generation(own), host1: generation(host1)}
+	after := map[string]map[string]int64{}
+	for _, name := range topics {
+		after[name] = snapshot(name)
+	}
 	exec(`UPDATE paperboat.cli_client_sessions SET revoked_at=now() WHERE id=$1`, cli)
 	exec(`UPDATE paperboat.cli_client_sessions SET last_used_at=now() WHERE id=$1`, cli2)
-	if generation(own) != after[own] || generation(host1) != after[host1] {
-		t.Error("a later update of a revoked session, or the use of another session, published peer_network")
+	for _, name := range topics {
+		topic = name
+		for _, m := range machines {
+			if generation(m) != after[name][m] {
+				t.Errorf("a later update of a revoked session, or the use of another session, published %s on %s", name, m)
+			}
+		}
 	}
 }
