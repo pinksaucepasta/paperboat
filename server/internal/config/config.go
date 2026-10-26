@@ -360,16 +360,6 @@ type Access struct {
 	ConnectReadyTimeout  time.Duration      `json:"connect_ready_timeout,omitempty"`
 	ConnectPollInterval  time.Duration      `json:"connect_poll_interval,omitempty"`
 	FileTransfer         FileTransferPolicy `json:"file_transfer"`
-	InboxList            InboxListPolicy    `json:"inbox_list"`
-}
-
-// InboxListPolicy bounds GET /v1/inbox, which lists the workspace's machine Inboxes live (the server stores no
-// file names): at most Machines machines per request, all within Budget, and the merged batch is reused for
-// CacheFor so paging through it does not ask the machines again.
-type InboxListPolicy struct {
-	Machines int           `json:"machines"`
-	Budget   time.Duration `json:"budget"`
-	CacheFor time.Duration `json:"cache_for"`
 }
 
 type FileTransferPolicy struct {
@@ -544,7 +534,6 @@ func Default() Config {
 				MaxConcurrentTransfers: 2, Retention: 7 * 24 * time.Hour,
 				DeliveryTimeout: 10 * time.Minute, MaxPendingSpoolBytes: 2_000_000_000,
 			},
-			InboxList: InboxListPolicy{Machines: 50, Budget: 3 * time.Second, CacheFor: 30 * time.Second},
 		},
 		Diagnostics: Diagnostics{Retention: 7 * 24 * time.Hour},
 		Retention:   defaultRetention(),
@@ -797,9 +786,6 @@ func (c Config) Validate() error {
 	transfer := c.Access.FileTransfer
 	if strings.TrimSpace(transfer.Revision) == "" || transfer.AutomaticMaxBatchBytes < 1 || transfer.AutomaticMaxBatchBytes > 1<<40 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchFiles > 10 || transfer.MaxConcurrentTransfers < 1 || transfer.MaxConcurrentTransfers > 2 || transfer.Retention <= 0 || transfer.DeliveryTimeout <= 0 || transfer.MaxPendingSpoolBytes < transfer.AutomaticMaxBatchBytes {
 		errs = append(errs, fmt.Errorf("access.file_transfer policy is invalid"))
-	}
-	if inbox := c.Access.InboxList; inbox.Machines < 1 || inbox.Machines > 200 || inbox.Budget <= 0 || inbox.Budget > 10*time.Second || inbox.CacheFor < 0 || inbox.CacheFor > 5*time.Minute {
-		errs = append(errs, fmt.Errorf("access.inbox_list policy is invalid"))
 	}
 	diagnosticsConfigured := strings.TrimSpace(c.Diagnostics.ObjectEndpoint) != "" || strings.TrimSpace(c.Diagnostics.ObjectRegion) != "" || strings.TrimSpace(c.Diagnostics.ObjectBucket) != "" || strings.TrimSpace(c.Secrets.DiagnosticsAccessKey) != "" || strings.TrimSpace(c.Secrets.DiagnosticsSecretKey) != ""
 	if diagnosticsConfigured {
