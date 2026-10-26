@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,8 @@ type HostConfig struct {
 	MaxStreams   int
 	ProbeTimeout time.Duration
 	DialTimeout  time.Duration
+	// Audit records the sessions the host serves, refuses and ends (F5-12). Optional.
+	Audit SessionAudit
 }
 
 // Host owns the bounded runtime boundary between an authorized Paperboat SSH
@@ -41,7 +44,11 @@ type Host struct {
 	flows          map[*hostFlow]struct{}
 }
 
-type hostFlow struct{ cancel context.CancelFunc }
+type hostFlow struct {
+	cancel context.CancelFunc
+	// revoked is set when Disable cancels the flow, so the session ends as revoked, not closed.
+	revoked atomic.Bool
+}
 
 func NewHost(config HostConfig) (*Host, error) {
 	if config.MaxStreams < 1 || config.MaxStreams > 1024 || config.ProbeTimeout <= 0 || config.ProbeTimeout > 30*time.Second || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
@@ -162,6 +169,7 @@ func (h *Host) Disable(ctx context.Context) error {
 	h.mu.Lock()
 	h.disabled = true
 	for flow := range h.flows {
+		flow.revoked.Store(true)
 		flow.cancel()
 	}
 	h.mu.Unlock()
@@ -221,6 +229,7 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 	target := h.target
 	if h.retired || h.disabled || target.Generation == 0 || target.Generation != generation {
 		h.mu.Unlock()
+		h.Refused(ctx, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
 	}
 	select {
@@ -229,6 +238,7 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.activeBySource[target.SourceSHA256]++
 	default:
 		h.mu.Unlock()
+		h.Refused(ctx, generation, RefusedBusy)
 		return BridgeResult{}, ErrSSHHostBusy
 	}
 	bridgeCtx, cancel := context.WithCancel(ctx)
@@ -250,5 +260,26 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		}
 		<-h.capacity
 	}()
-	return BridgeSSH(bridgeCtx, stream, target.Readiness.Target, h.config.DialTimeout)
+	sessionID, peer, audited, err := h.begin(ctx, generation)
+	if err != nil {
+		return BridgeResult{}, err
+	}
+	result, bridgeErr := BridgeSSH(bridgeCtx, stream, target.Readiness.Target, h.config.DialTimeout)
+	if audited {
+		h.end(peer, generation, sessionID, sessionOutcome(flow, bridgeCtx, bridgeErr), result)
+	}
+	return result, bridgeErr
+}
+
+// sessionOutcome says how a served session ended: revoked when Disable cut it, closed when it ran to its end or
+// its caller went away, failed when the bridge broke.
+func sessionOutcome(flow *hostFlow, bridgeCtx context.Context, bridgeErr error) string {
+	switch {
+	case flow.revoked.Load():
+		return EndedRevoked
+	case bridgeErr == nil || bridgeCtx.Err() != nil:
+		return EndedClosed
+	default:
+		return EndedFailed
+	}
 }

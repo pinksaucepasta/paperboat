@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 )
 
@@ -17,6 +18,9 @@ func offlineAdmission(queue *offlineaudit.Queue, dispatching bool) func(context.
 		return nil
 	}
 	return func(_ context.Context, request native.OfflineAdmission) error {
+		if request.Capability == sshCapability {
+			return admitOfflineSSH(queue, request, dispatching)
+		}
 		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
 		var refusal error
 		switch {
@@ -64,5 +68,49 @@ func (s *offlineAuditService) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+const sshCapability = "managed_ssh"
+
+// admitOfflineSSH is the offline decision for a managed SSH stream. A refusal is recorded as an
+// ssh_session_refused (origin offline); an admitted session is recorded by managedssh.Host.Serve, which audits
+// every SSH session online or offline and refuses an offline one whose start cannot be recorded.
+func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission, dispatching bool) error {
+	var refusal error
+	switch {
+	case dispatching:
+		refusal = errors.New("this host does not start offline sessions")
+	case !request.Allowed:
+		refusal = errors.New("no signed scope allows this session")
+	default:
+		return nil
+	}
+	err := queue.Record(offlineaudit.Event{Kind: offlineaudit.KindSSHRefused, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: offlineaudit.OriginOffline, Reason: managedssh.RefusedNoAccess})
+	return errors.Join(refusal, err)
+}
+
+// sshSessionAudit queues the start, refusal and end of every managed SSH session for upload (F5-12).
+func sshSessionAudit(queue *offlineaudit.Queue) managedssh.SessionAudit {
+	if queue == nil {
+		return nil
+	}
+	return func(session managedssh.SessionEvent) error {
+		origin := offlineaudit.OriginOnline
+		if session.Peer.Offline {
+			origin = offlineaudit.OriginOffline
+		}
+		event := offlineaudit.Event{PeerEndpointID: session.Peer.EndpointID, PeerAccountID: session.Peer.AccountID, OperationID: session.Peer.OperationID, Origin: origin, Generation: session.Generation}
+		switch session.Kind {
+		case managedssh.SessionStarted:
+			event.Kind, event.EventID = offlineaudit.KindSSHStarted, session.SessionID
+		case managedssh.SessionRefused:
+			event.Kind, event.Reason = offlineaudit.KindSSHRefused, session.Reason
+		case managedssh.SessionEnded:
+			event.Kind, event.SessionID, event.Outcome, event.BytesIn, event.BytesOut = offlineaudit.KindSSHEnded, session.SessionID, session.Outcome, session.BytesIn, session.BytesOut
+		default:
+			return errors.New("unknown managed SSH session event")
+		}
+		return queue.Record(event)
 	}
 }

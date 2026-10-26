@@ -59,6 +59,7 @@ func (s *Service) Serve(ctx context.Context, session *native.Session) error {
 		}
 		return s.config.ServeHTTP3(ctx, session, s.config.Authorize)
 	}
+	ctx = native.ContextWithPeer(ctx, session)
 	for {
 		var authorizationResource string
 		connection, header, err := session.AcceptAuthorized(ctx, func(authorizeCtx context.Context, value streamauth.Header) (string, error) {

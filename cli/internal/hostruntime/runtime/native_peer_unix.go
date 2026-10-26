@@ -652,8 +652,12 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 		if s.config.ssh == nil {
 			return ErrProductionInvalid
 		}
+		if peer, ok := native.PeerFromContext(ctx); ok {
+			ctx = managedssh.WithPeer(ctx, managedssh.Peer{AccountID: peer.AccountID, EndpointID: peer.EndpointID, OperationID: header.OperationID, Offline: header.Offline})
+		}
 		target, ok := s.config.ssh.Target()
 		if !ok {
+			s.config.ssh.Refused(ctx, 0, managedssh.RefusedNotSetUp)
 			return managedssh.ErrSSHHostStale
 		}
 		_, err := s.config.ssh.Serve(ctx, target.Generation, stream)

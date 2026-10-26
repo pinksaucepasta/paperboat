@@ -1,6 +1,8 @@
 // Package offlineaudit records the sessions a host starts or refuses while Paperboat is
 // unreachable (F21-11) and uploads them on reconnect. Audit fails closed: an event is on disk
-// before the session starts, and a full backlog refuses new offline sessions.
+// before the session starts, and a full backlog refuses new offline sessions. It also queues the
+// start, refusal and end of every managed SSH session, online or offline (F5-12), because SSH has
+// no server-side admission; the host's upload cadence is bounded (Uploader.MinInterval).
 package offlineaudit
 
 import (
@@ -24,6 +26,13 @@ const (
 	KindStarted = "offline_session_started"
 	KindRefused = "offline_session_refused"
 
+	KindSSHStarted = "ssh_session_started"
+	KindSSHRefused = "ssh_session_refused"
+	KindSSHEnded   = "ssh_session_ended"
+
+	OriginOnline  = "online"
+	OriginOffline = "offline"
+
 	ReasonNoScope     = "no_scope"
 	ReasonBacklogFull = "backlog_full"
 	ReasonPeerUnknown = "peer_unknown"
@@ -41,6 +50,14 @@ type Event struct {
 	OperationID    string    `json:"operation_id"`
 	OccurredAt     time.Time `json:"occurred_at"`
 	Reason         string    `json:"reason,omitempty"`
+	// The fields below belong to the ssh_session_* kinds: Origin says whether Paperboat was
+	// reachable, SessionID (an end's) is the started event's EventID.
+	Origin     string `json:"origin,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Outcome    string `json:"outcome,omitempty"`
+	BytesIn    int64  `json:"bytes_in,omitempty"`
+	BytesOut   int64  `json:"bytes_out,omitempty"`
 }
 
 // Queue is the one owner of the backlog file.
@@ -75,6 +92,7 @@ func Open(path string, now func() time.Time) (*Queue, error) {
 
 // Record stores one decision before the caller acts on it. A started session that cannot be
 // recorded is refused (ErrFull, or the write error); a refusal is recorded when there is room.
+// An event that names its own EventID keeps it, so a later end can refer to its start.
 func (q *Queue) Record(event Event) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -82,11 +100,14 @@ func (q *Queue) Record(event Event) error {
 	if len(q.events) >= MaxEvents || len(q.events) > 0 && now.Sub(q.events[0].OccurredAt) >= MaxAge {
 		return ErrFull
 	}
-	id, err := uuid.NewRandom()
-	if err != nil {
-		return err
+	if event.EventID == "" {
+		id, err := uuid.NewRandom()
+		if err != nil {
+			return err
+		}
+		event.EventID = id.String()
 	}
-	event.EventID, event.OccurredAt = id.String(), now.Truncate(time.Second)
+	event.OccurredAt = now.Truncate(time.Second)
 	next := append(q.events[:len(q.events):len(q.events)], event)
 	if err := writeAtomic(q.path, next); err != nil {
 		return fmt.Errorf("record the offline session for audit: %w", err)

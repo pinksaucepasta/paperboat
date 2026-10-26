@@ -126,6 +126,22 @@ func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, ses
 }
 func (s *Session) PeerID() string { return s.peerID }
 
+// Peer is the account and endpoint a native session proved.
+type Peer struct{ AccountID, EndpointID string }
+
+type peerContextKey struct{}
+
+// ContextWithPeer names the session's peer in ctx, for the host application that serves its streams.
+func ContextWithPeer(ctx context.Context, s *Session) context.Context {
+	return context.WithValue(ctx, peerContextKey{}, Peer{AccountID: s.binding.AccountID, EndpointID: s.binding.EndpointID})
+}
+
+// PeerFromContext returns the peer ContextWithPeer named.
+func PeerFromContext(ctx context.Context) (Peer, bool) {
+	peer, ok := ctx.Value(peerContextKey{}).(Peer)
+	return peer, ok
+}
+
 func (s *Session) Open(ctx context.Context) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

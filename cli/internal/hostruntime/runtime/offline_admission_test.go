@@ -4,10 +4,14 @@ package runtime
 
 import (
 	"context"
+	"io"
+	"net"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -44,5 +48,85 @@ func TestOfflineAdmissionRecordsEveryDecisionFirst(t *testing.T) {
 		if events[i].Kind != w.kind || events[i].Reason != w.reason || events[i].PeerAccountID != "acct" || events[i].OperationID != "op_1" {
 			t.Fatalf("event %d = %+v, want %s/%s", i, events[i], w.kind, w.reason)
 		}
+	}
+}
+
+// F5-12: a managed SSH session is queued for the workspace audit log whether or not Paperboat was reachable:
+// the host's own audit queues the start, refusal and end (with bytes and the start's id), origin online or offline;
+// the offline admission records no offline_session_* for SSH, only a refusal as ssh_session_refused.
+func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
+	queue, err := offlineaudit.Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			connection, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
+		}
+	}()
+	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: sshSessionAudit(queue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.ReconcileTarget(context.Background(), 5, uint16(listener.Addr().(*net.TCPAddr).Port)); err != nil {
+		t.Fatal(err)
+	}
+	serve := func(peer managedssh.Peer) {
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { _, _ = host.Serve(managedssh.WithPeer(context.Background(), peer), 5, server); close(done) }()
+		_, _ = client.Write([]byte("0123456789"))
+		_, _ = io.ReadFull(client, make([]byte, 10))
+		_ = client.Close()
+		<-done
+	}
+	serve(managedssh.Peer{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_online"})
+	serve(managedssh.Peer{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_offline", Offline: true})
+	admission := native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_2"}, Header: streamauth.Header{OperationID: "op_denied"}, Capability: "managed_ssh"}
+	if err := offlineAdmission(queue, false)(context.Background(), admission); err == nil {
+		t.Fatal("an offline SSH start without a scope was admitted")
+	}
+	admission.Allowed = true
+	if err := offlineAdmission(queue, false)(context.Background(), admission); err != nil {
+		t.Fatalf("a scoped offline SSH start was refused: %v", err)
+	}
+
+	events := queue.Oldest(20)
+	kinds := []string{}
+	for _, e := range events {
+		kinds = append(kinds, e.Kind)
+	}
+	want := []string{offlineaudit.KindSSHStarted, offlineaudit.KindSSHEnded, offlineaudit.KindSSHStarted, offlineaudit.KindSSHEnded, offlineaudit.KindSSHRefused}
+	if len(events) != len(want) {
+		t.Fatalf("queued %v", kinds)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("queued %v, want %v", kinds, want)
+		}
+	}
+	for i, origin := range map[int]string{0: offlineaudit.OriginOnline, 2: offlineaudit.OriginOffline} {
+		started, ended := events[i], events[i+1]
+		if started.Origin != origin || ended.Origin != origin || started.Generation != 5 || started.PeerAccountID != "acct" || started.PeerEndpointID != "cli_1" {
+			t.Fatalf("session at %d: %+v %+v", i, started, ended)
+		}
+		if ended.SessionID != started.EventID || ended.Outcome != managedssh.EndedClosed || ended.BytesIn != 10 || ended.BytesOut != 10 {
+			t.Fatalf("end at %d: %+v (start %s)", i+1, ended, started.EventID)
+		}
+	}
+	if events[0].OperationID != "op_online" || events[2].OperationID != "op_offline" {
+		t.Fatalf("operation ids: %q %q", events[0].OperationID, events[2].OperationID)
+	}
+	if r := events[4]; r.Reason != managedssh.RefusedNoAccess || r.Origin != offlineaudit.OriginOffline || r.OperationID != "op_denied" || r.PeerEndpointID != "cli_2" {
+		t.Fatalf("refusal = %+v", r)
 	}
 }

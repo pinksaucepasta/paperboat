@@ -354,7 +354,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	offlineAuditUploads := &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: offlineAudit, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID, Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect}, Tokens: renewingTokens, Proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, OperationID: operationID}}
+	offlineAuditUploads := &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: offlineAudit, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID, Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect}, Tokens: renewingTokens, Proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, OperationID: operationID, MinInterval: offlineaudit.UploadInterval}}
 	runtimeService := serviceGroup{availabilityService, runtimeObservation, offlineAuditUploads}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID, OSBootID: bootState.OSBootID,
@@ -364,7 +364,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController, machineEvents.Subscribe(machineevents.TopicMachineAccess))
+	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), nativeWorkerEpoch, capabilityController, machineEvents.Subscribe(machineevents.TopicMachineAccess), sshSessionAudit(offlineAudit))
 	if err != nil {
 		return nil, err
 	}

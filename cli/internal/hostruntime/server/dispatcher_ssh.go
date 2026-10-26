@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
 type sshRequest struct {
@@ -51,8 +52,9 @@ func (d *Dispatcher) openSSHStream(ctx context.Context, authorization Authorizat
 		_ = stream.Close()
 		return nil, false, errors.New("SSH operation is already attached")
 	}
+	serveCtx := managedssh.WithPeer(ctx, managedssh.Peer{AccountID: authorization.AccountID, EndpointID: authorization.ClientID, OperationID: request.OperationID})
 	go func() {
-		_, err := d.config.SSH.Serve(ctx, request.Generation, stream.host)
+		_, err := d.config.SSH.Serve(serveCtx, request.Generation, stream.host)
 		stream.finish(err)
 	}()
 	return stream, true, nil

@@ -39,12 +39,19 @@ type Uploader struct {
 		Proof(context.Context, string, string, string, []byte) ([]byte, error)
 	}
 	OperationID func() (string, error)
+	// MinInterval spaces the uploads: while sessions run, the backlog goes up at most once per
+	// interval and nothing is sent when idle. Zero sends as soon as an event is queued.
+	MinInterval time.Duration
 }
+
+// UploadInterval is the host's cadence for the audit backlog (F5-12).
+const UploadInterval = 30 * time.Second
 
 // Run uploads whenever events are queued, retrying failures with doubling waits.
 func (u *Uploader) Run(ctx context.Context) {
 	retry := firstRetry
 	var wait <-chan time.Time
+	var last time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -53,7 +60,16 @@ func (u *Uploader) Run(ctx context.Context) {
 		case <-wait:
 		}
 		wait = nil
-		if err := u.Flush(ctx); err != nil {
+		if pause := u.MinInterval - time.Since(last); !last.IsZero() && pause > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pause):
+			}
+		}
+		err := u.Flush(ctx)
+		last = time.Now()
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}

@@ -126,3 +126,79 @@ func TestUploaderSendsBatchesAndKeepsEventsOnFailure(t *testing.T) {
 		t.Fatalf("proof signed path %q", proofs.paths[0])
 	}
 }
+
+// F5-12: a recorded event keeps the id it names (an end refers to its start), the ssh fields reach the wire in
+// the agreed shape, and the uploader spaces its uploads: a burst of events goes up in one request, and idle sends nothing.
+func TestSSHEventsKeepTheirIDsAndUploadAtMostOncePerInterval(t *testing.T) {
+	var mu sync.Mutex
+	var uploads []time.Time
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request struct {
+			Events []json.RawMessage `json:"events"`
+		}
+		_ = json.Unmarshal(body, &request)
+		mu.Lock()
+		uploads = append(uploads, time.Now())
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(request.Events)})
+	}))
+	defer server.Close()
+	q, err := Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploader := &Uploader{Queue: q, ServerURL: server.URL, MachineID: "machine_1", Client: server.Client(), Tokens: fixedTokens{}, Proofs: &recordingProofs{}, OperationID: func() (string, error) { return "operation_test", nil }, MinInterval: 300 * time.Millisecond}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go uploader.Run(ctx)
+
+	record := func(e Event) {
+		t.Helper()
+		if err := q.Record(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(Event{EventID: "session_1", Kind: KindSSHStarted, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOnline, Generation: 3})
+	waitFor := func(count int) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			n := len(uploads)
+			mu.Unlock()
+			if n >= count {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("waited for %d uploads", count)
+	}
+	waitFor(1)
+	// Three more events arrive right after the first upload: they go up together, one interval later.
+	record(Event{Kind: KindSSHEnded, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOnline, SessionID: "session_1", Outcome: "closed", BytesIn: 7, BytesOut: 9})
+	record(Event{Kind: KindSSHRefused, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOffline, Reason: "busy"})
+	record(Event{Kind: KindSSHRefused, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOnline, Reason: "not_set_up"})
+	waitFor(2)
+	time.Sleep(600 * time.Millisecond) // idle: nothing more is sent
+	mu.Lock()
+	defer mu.Unlock()
+	if len(uploads) != 2 || uploads[1].Sub(uploads[0]) < 250*time.Millisecond {
+		t.Fatalf("%d uploads, second %v after the first", len(uploads), uploads[len(uploads)-1].Sub(uploads[0]))
+	}
+	var first, second struct {
+		Events []map[string]any `json:"events"`
+	}
+	_ = json.Unmarshal([]byte(bodies[0]), &first)
+	_ = json.Unmarshal([]byte(bodies[1]), &second)
+	start := first.Events[0]
+	if start["event_id"] != "session_1" || start["kind"] != KindSSHStarted || start["origin"] != "online" || start["generation"] != float64(3) {
+		t.Fatalf("start on the wire: %v", start)
+	}
+	end := second.Events[0]
+	if len(second.Events) != 3 || end["session_id"] != "session_1" || end["outcome"] != "closed" || end["bytes_in"] != float64(7) || end["bytes_out"] != float64(9) || end["event_id"] == "" || end["event_id"] == "session_1" {
+		t.Fatalf("end on the wire: %v (%d events)", end, len(second.Events))
+	}
+}

@@ -33,7 +33,7 @@ type managedSSHService struct {
 	shutdownErr       error
 }
 
-func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription) (*managedssh.Host, Service, error) {
+func newProductionManagedSSH(controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64, workerEpoch uint64, gate server.CapabilityGate, keyEvents *machineevents.Subscription, audit managedssh.SessionAudit) (*managedssh.Host, Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil || generation == 0 || gate == nil {
 		return nil, nil, ErrProductionInvalid
 	}
@@ -43,7 +43,7 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 	if registration.SSHUser == "" || registration.SSHPort == 0 {
 		return nil, nil, ErrManagedSSHUnavailable
 	}
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 32, ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second})
+	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 32, ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second, Audit: audit})
 	if err != nil {
 		return nil, nil, err
 	}
