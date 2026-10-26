@@ -47,7 +47,8 @@ def ssh_blocks_update(target, candidate, password):
     import re
     import select
     version = p.invoke(PB, '--version', raw=True)
-    ssh = subprocess.Popen([str(PB), 'ssh', target, '--', 'sh', '-c', 'echo PB_SSH_UP; sleep 600'],
+    # OpenSSH joins remote arguments with spaces, so the remote command is one string.
+    ssh = subprocess.Popen([str(PB), 'ssh', target, '--', 'echo PB_SSH_UP; sleep 600'],
                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:
         deadline = time.monotonic() + 90
