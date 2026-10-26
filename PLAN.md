@@ -3120,31 +3120,45 @@ xterm.js.
    - `Manager.Create` no longer holds the global lock across spawn and store writes (K1).
    - Prior art: tmux reads the pane and writes input on separate events (`~/ref/tmux/server-client.c`); VS Code's pty host
      serialises only state (`~/ref/vscode/src/vs/platform/terminal/node/ptyService.ts`).
-2. **Output: sequence, ack at display, resync on lag.**
+2. **Output: sequence, display acks, checkpoint resync on lag.**
    - Every output byte has a session sequence. The client acks what it has displayed, not what it has read ahead
      (K5: today's cursor advances at read-ahead).
-   - The host keeps a 1 MiB ring per session, one value in hostruntime config (today 64 KiB).
-   - A viewer that falls behind (unacked > window) is no longer evicted. Its queue is dropped and it gets a fresh screen
-     checkpoint plus the live tail on the same stream, so a slow or stalled viewer never disconnects itself or anyone else.
-   - The browser checkpoint and publication start are one atomic step (K4 M1).
-   - Prior art: mosh sends only the newest screen state to a lagging client (`~/ref/mosh/src/network/transportsender-impl.h`);
-     VS Code flow control at 100 000/5 000 chars (`~/ref/vscode/src/vs/platform/terminal/common/terminal.ts`).
-3. **Input: one queue per terminal in the client process, sequence numbers, resend from the host cursor.**
-   - The queue lives in the `pb` process (CLI) or the WASM terminal (browser), not per daemon stream (K5), so it survives
-     every hop restarting.
-   - On attach the host reports its last applied sequence. The client resends that one (answered from the journal) and
-     every later one, in order, before new input. Exactly once, no sticky state.
-   - No per-keystroke result events to the client; only rejected or uncertain input produces a visible notice.
-   - The journal of a detached attachment is freed on detach (K1: today it fills the 10 000 cap).
-   - Prior art: Eternal Terminal BackedWriter resend from the peer's sequence (`~/ref/EternalTerminal/src/base/BackedWriter.cpp`).
-4. **Size: one rule everywhere.**
-   - The PTY follows the most recently active controlling attachment (owner or interactive; typing or focus counts as
-     activity). Viewers never resize.
-   - The rule is kept across reconnects, and every attachment is told the size and who set it.
+   - Replay from the history ring only serves a gap that is still inside the ring; a byte ring cannot rebuild screen state.
+   - A viewer that falls behind, or whose gap left the ring, gets an atomic checkpoint at sequence S, cut under the
+     same lock that appends output, then only bytes after S on the same stream. Stale queued output for that viewer is
+     fenced (dropped by sequence), so nothing before S arrives after the checkpoint.
+     - The checkpoint holds the screen, cursor, modes, alternate buffer, parser state and size.
+     - Scrollback above the checkpoint's 200 lines is lost and is not redrawn.
+   - A permanently slow viewer gets at most one checkpoint per 5 s. In between its output is dropped, never queued
+     without bound, and it is never disconnected for lag.
+   - The browser checkpoint and publication start are the same atomic step (K4 M1).
+   - Prior art: mosh state sync, the newest screen state to a lagging client (`~/ref/mosh/src/statesync/complete.cc`,
+     `~/ref/mosh/src/network/transportsender-impl.h`); VS Code flow control at 100 000/5 000 chars
+     (`~/ref/vscode/src/vs/platform/terminal/common/terminal.ts`).
+3. **Input: stable ids, fenced connections, one cumulative cursor.** Settled before slice 3.
+   - Every input chunk has a stable id: the attachment id plus a sequence. The attachment id is stable for the life of
+     the client terminal, across transport loss.
+   - Ids are scoped by the session generation and by a connection epoch that the host bumps on each attach. Frames
+     carrying an older epoch are refused, so a half-dead connection can never write after its replacement attached.
+   - The host keeps one cumulative applied cursor per attachment id and generation, and acks it cumulatively. The client
+     resends everything above the acked cursor in order, before new input; the host drops what it has already applied.
+     The cursor and its dedupe state survive transport loss and detach. The acked prefix is reclaimed; only the
+     cursor stays until the session generation ends.
+   - A PTY write and a journal update cannot be atomic. After an owner crash with a chunk in flight, that chunk is
+     reported as uncertain ("the last keys may not have reached the shell") and never replayed blindly.
+   - The queue lives in the `pb` process or the WASM terminal, not per daemon stream (K5). Input is chunked at 4 KiB
+     with a bounded queue (1 MiB), and a full queue is visible backpressure, not a transport loss.
+   - No per-keystroke result events: the cumulative ack replaces them (the unread result channel is deleted in slice 2).
+   - Prior art: Eternal Terminal sequence reconnect (`~/ref/EternalTerminal/src/base/BackedWriter.cpp`,
+     `BackedReader.cpp`).
+4. **Size: latest active controller (decided 2026-10-26).**
+   - The PTY follows the controlling attachment (owner or interactive) with the most recent activity, ordered by the
+     host's clock. Typing counts, and so does focus, debounced 500 ms.
+   - Activity is tracked per stable attachment id; a reconnect alone never steals control. Viewers never resize.
+   - Every attachment is told the size and which attachment set it.
    - Prior art: tmux `window-size latest` (`~/ref/tmux/options-table.c:1929`, `resize.c`).
-   - Today native is last-resize-wins (any non-viewer), the browser lets only the first owner attachment resize, and an
-     interactive joiner's first resize changes the owner's PTY (K6). **Decision needed (coordinator/user):** "latest active"
-     (recommended, tmux default) or "owner wins".
+   - Replaces today's mix: native last-resize-wins, browser first-owner-only, and an interactive joiner's first resize
+     changing the owner's PTY (K6).
 5. **Liveness: both ends, every hop.**
    - Application heartbeat every 10 s in both directions, on native and browser. A peer silent for 25 s is dead, and the
      client reconnects at once.
@@ -3168,11 +3182,18 @@ xterm.js.
    - Host → server → edge → browser and host → daemon → `pb` carry the code and a reason (WS close 4xxx with reason; the
      native end event). No 1006, no status-only mapping, no string parsing.
    - The console and `pb` branch on the code (C, V7).
-8. **Admission (server + edge).**
+8. **Admission and lifetime (server + edge).**
+   - Admission credentials (tickets, attach credentials) expire only before admission. A live stream is never cut for
+     credential expiry, which would bring back periodic disconnects.
+   - Session lifetime (a guest code ending, a browser session ending) and revocation are separate events, pushed to the
+     live stream as typed ends.
    - A ticket is issued only for a live carrier: 409 `machine_edge_unavailable`, with the other edge of the account pair
      tried first.
+   - A carrier lost between ticket and redemption is tolerated: the edge retries the other carrier, then ends with
+     `machine_unavailable`.
    - The pending-ticket cap returns 429 `too_many_pending_tickets`.
-   - Live streams re-check session, guest-code and credential expiry; today only bind-time checks for some (K3, V6).
+   - Browser JS cannot read a failed WebSocket handshake. An authenticated status endpoint
+     (`GET …/terminal-sessions/{id}/browser-status`) explains a pre-upgrade refusal and when to retry.
    - Plan-limit counting reserves at admission instead of counting closed after 2 min (V5).
    - Edge and control-socket refusals are logged and counted (V8).
 9. **One wire framing.**
@@ -3192,7 +3213,7 @@ xterm.js.
 | native transport (`tunnel/*`, `resolver` queue, `localdaemon/peer_stream`) | rewrite | three framings and three retry policies for one byte stream; queue in the wrong process; dead tailnet/WSS/unified paths |
 | `cmd/pb` connect/session/exec | fix | one attach path (no argv re-entry or hidden `--session`), reconnect status always shown, deletes (K6 §5) |
 | WASM connection + `use-terminal-connection.ts` | rewrite | becomes the shared state machine (6) plus a thin view; Lane C's parked state machine (962dccb8) is folded in |
-| server tickets, admission, error mapping | fix | typed codes, live-carrier check, expiry re-checks, limit reservation |
+| server tickets, admission, error mapping | fix | typed codes, live-carrier check, pre-upgrade status endpoint, lifetime ends, limit reservation |
 | edge browser-terminal bridge | fix | keepalive and deadlines, close reasons, failover, logs |
 | server terminal op queue | fix | V F3 |
 
@@ -3223,7 +3244,8 @@ xterm.js.
 - The shared reconnect state machine.
 - Typed end and refusal codes.
 - Live-carrier ticket check and edge failover.
-- Expiry re-checks on live streams.
+- Session-lifetime and revocation ends pushed to live streams (no credential re-check).
+- Browser status endpoint for refusals before the WebSocket upgrade.
 - Plan-limit reservation.
 - Journal GC.
 - Owner graceful stop that keeps shells.
@@ -3236,18 +3258,27 @@ Lane V/B/M.
 | # | Slice | Owner | Acceptance (matrix rows; new rows are added to the scripts first) |
 |---|---|---|---|
 | 0 | Prod browser-terminal outage: drained carrier and unredeemed tickets | Lane M/B (now) | W2 W5 W6 W7 W10 W11 W12 attach on prod; tickets redeemed ≥ 95 % |
-| 1 | Input never waits for output: lock split, blocking admission, stream loop applies input on its own path with write deadlines | K (+A review) | N6: Ctrl-C under `yes` stops output < 1 s and the shell answers; workspace test: input latency under a flood < 100 ms |
+| 1 | Input never waits for output: input off the output lock; no state lock held across a PTY write; bounded input chunks and queues; acks, input results and heartbeats ahead of output on every writer | K (+A review) | N6: Ctrl-C under `yes`, together with a 256 KiB paste and a stalled viewer, stops output < 1 s and the shell answers; workspace test TestInputReachesThePTYWhileOutputFloods |
 | 2 | Delete the input result channel; rejected/uncertain input → visible notice | K (+A) | N11: 2 000 single keystrokes, 0 reopens |
 | 3 | Input queue in the client process, resend from the host cursor (replaces 03990d13), journal GC on detach | K (+A) | N3, N4 with keys typed during the gap run exactly once; N12: daemon restart mid-typing loses and repeats nothing; 10 000+ keys in one attachment |
 | 4 | Liveness and the shared reconnect state machine (Go, used by `pb` and the WASM), per-outage backoff, typed reasons shown | K + C | N4, N5, W4, W4b, W6; N13/W14: a 60 s black hole is detected < 30 s and recovers on its own; never "Reconnecting" for more than 2 min without a reason and a Reconnect action |
 | 5 | Output: display acks, 1 MiB ring, lag → resync instead of eviction, atomic browser checkpoint+join | K | N6 (stalled window recovers), W9, N2/W2 replay exactly once |
 | 6 | Size rule | K + C | N1, W1, W5: PTY size follows the last active controller; viewers never resize; the rule survives reconnects |
-| 7 | Browser admission and errors: live-carrier tickets, edge failover, 409/429 codes, close reasons, edge keepalive, expiry re-checks, limit reservation, logging | V/B/M + C | W1–W13 on prod; W15: a drained carrier shows "machine unavailable" in < 5 s and recovers when it returns |
-| 8 | Server op queue | V/B | worker reports no terminal_session_operation failures for 24 h; the 133 rows resolved |
-| 9 | Session owner: graceful stop keeps shells; no machine-wide 256/1024 cliffs; one bridge deadline | K (+A) | N14: owner restart keeps the shell and its scrollback; list works with 2 000 closed sessions |
+| 7 | Browser admission and errors: live-carrier tickets, edge failover, 409/429 codes, pre-upgrade status endpoint, close reasons, edge keepalive, lifetime ends, limit reservation, logging | V/B/M + C | W1–W13 on prod; W15: a drained carrier shows "machine unavailable" in < 5 s and recovers when it returns |
+| 8 | Server op queue: revoked or deleted machines are a terminal outcome; attempt and age bounds for transient failures; one report per op; retention | V (in progress) | no terminal_session_operation failures for 24 h; the 133 rows resolved; an idempotent completion test (completing twice changes nothing) |
+| 9 | Session owner: an owner is replaced only by draining (new sessions go to the new owner; the old one exits when its last PTY ends), because nothing else can hold its PTYs; no machine-wide 256/1024 cliffs; one bridge deadline | K (+A) | N14: a runtime, worker or hostd restart and an update keep the shell and its scrollback; an owner crash ends its shells with a typed `owner_restarted` end; listing works with 2 000 closed sessions |
 | 10 | Native transport collapse (rewrite): one framing, one reconnect owner, dead paths deleted | K (+A, R) | full native matrix N1–N14 before and after; switch-over deletes the old stack |
 | 11 | Command layer deletes and one attach path | K (+A) | CLI reference/man drift checks; N1–N10 |
 | 12 | Wire framing unified (browser on PBT1, one JSON envelope) | K + C | full matrix on L |
+
+**Order (coordinator + GPT review, 2026-10-26).**
+1. Containment: slice 0 (prod outage, Lane M/B) and slice 8 (server queue repair, Lane V).
+2. Pure bug fixes with device repros: slices 1 and 2.
+3. Typed errors and writer fairness early (slice 7 and the writer part of slice 1).
+4. The identity/ack, expiry, checkpoint and lifecycle contracts above are settled before slices 3, 5 and 9.
+5. Transport collapse (10), command deletions (11) and wire unification (12) come last.
+
+Linux is validated per slice now; macOS validation per slice starts when macOS starts.
 
 The matrix scripts are the gate. A slice that changes shared code reruns the whole matrix (native and web) on a build
 of HEAD.
@@ -4851,4 +4882,5 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 2026-10-26 | SDK leaves | diagnosticlog 27dbaf6d, decoder guard 3de4805f, wirejson e5f234a9, httptransport 4a0c98c9 pushed; full shared/CLI + Darwin/Windows PASS. | MCP runs 40272424859/40272394965 failed only broadcast rotation test; main fix 4dc95990 included, full MCP run 40280917817 PASS.
 
 2026-10-26 | SDK leaves await Lane A review (session limit resets 13:30 IST) | serverclock aa481a6b, supportref 9c874eec, backoff c39e94c0, machinename 7cce9047, remotepath 6c4d9f81; separate local branches.
+2026-10-26 | Lane K terminal | PLAN 3b updated with GPT's review: input identity contract, checkpoint resync, no live credential re-checks, writer fairness, owner drain; size rule decided (latest active controller); order: containment first. | —
 Full shared/CLI CI PASS: 40280973537, 40281027602, 40281077634, 40281114219, 40281173829 respectively; package race/vet PASS. Cross-build each approved slice before push.
