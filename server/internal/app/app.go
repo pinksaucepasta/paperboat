@@ -815,11 +815,13 @@ func New(opts Options) (*App, error) {
 			}
 			return resourceUsageService.RecordBrowserAdmission(ctx, attachment, machine, terminal, node, actor, expires)
 		},
-		Tickets:        browserterminal.TicketStore{DB: store},
-		Authorizer:     browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
-		Signer:         mintKeys,
-		Issuer:         normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
-		AllowedOrigins: append([]string(nil), opts.Config.HTTP.AllowedOrigins...),
+		RecordUsageAttached: resourceUsageService.RecordBrowserAttached,
+		RecordUsageDetached: resourceUsageService.RecordBrowserDetached,
+		Tickets:             browserterminal.TicketStore{DB: store},
+		Authorizer:          browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
+		Signer:              mintKeys,
+		Issuer:              normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
+		AllowedOrigins:      append([]string(nil), opts.Config.HTTP.AllowedOrigins...),
 	}
 	if edgeControlService != nil {
 		edgeControlService.SetBrowserTerminalGateway(browserTerminalGateway)

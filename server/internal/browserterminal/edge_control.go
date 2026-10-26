@@ -175,6 +175,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 		return
 	}
 	defer release()
+	defer g.detachUsage(admission.AttachmentID)
 	response, err := json.Marshal(struct {
 		Credential        string `json:"credential"`
 		TerminalSessionID string `json:"terminal_session_id"`
@@ -192,6 +193,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	var outageSince time.Time
+	renewedAt := time.Now()
 	for {
 		select {
 		case <-r.Context().Done():
@@ -226,6 +228,15 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 				return
 			} else {
 				outageSince = time.Time{}
+			}
+			if time.Since(renewedAt) >= attachedRenewInterval && g.RecordUsageAttached != nil {
+				renewCtx, done := context.WithTimeout(r.Context(), 2*time.Second)
+				if err := g.RecordUsageAttached(renewCtx, admission.AttachmentID, time.Now().Add(g.AdmissionLifetime)); err != nil {
+					reportEdgeAdmissionFailure(r.Context(), err)
+				} else {
+					renewedAt = time.Now()
+				}
+				done()
 			}
 			heartbeatCtx, stop := context.WithTimeout(r.Context(), 2*time.Second)
 			err = connection.Write(heartbeatCtx, websocket.MessageText, []byte("ok"))
@@ -320,4 +331,21 @@ func edgeHubKey(a edgeAdmission) string {
 		return a.AttachmentID
 	}
 	return a.Ticket.TerminalSessionID
+}
+
+// attachedRenewInterval keeps a live attachment's attached_until ahead of now; it is well inside the
+// admission lifetime that bounds it when the server goes away.
+const attachedRenewInterval = 30 * time.Second
+
+// detachUsage ends the attachment's count as an open browser terminal, on any exit of its control
+// connection (browser close, edge crash, access revoked).
+func (g *Gateway) detachUsage(attachment string) {
+	if g.RecordUsageDetached == nil || attachment == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := g.RecordUsageDetached(ctx, attachment); err != nil {
+		reportEdgeAdmissionFailure(ctx, err)
+	}
 }

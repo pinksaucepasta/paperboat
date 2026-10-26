@@ -193,8 +193,20 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 
 // RecordBrowserAdmission snapshots the exact issued browser attachment. A
 // revoked/deleted grant can still report earlier bytes but cannot grant access.
+// RecordBrowserAttached keeps a browser terminal attachment counted until until (it is still attached);
+// RecordBrowserDetached ends it now. Neither changes the authority's expires_at.
+func (s *Service) RecordBrowserAttached(ctx context.Context, attachment string, until time.Time) error {
+	_, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=$2 WHERE access_session_id=$1 AND resource_kind='terminal' AND attached_until>now()`, attachment, until)
+	return err
+}
+
+func (s *Service) RecordBrowserDetached(ctx context.Context, attachment string) error {
+	_, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=least(attached_until,now()) WHERE access_session_id=$1 AND resource_kind='terminal'`, attachment)
+	return err
+}
+
 func (s *Service) RecordBrowserAdmission(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
-	result, err := s.Store.SQL().ExecContext(ctx, `INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,actor_account_id) SELECT $1,m.id,m.installation_generation,coalesce('team:'||t.owner_team_id,'personal:'||t.owner_account),'terminal',t.id,coalesce(t.title,t.name),m.alias,ARRAY['terminal'],now(),$4::timestamptz,$4::timestamptz+interval '7 days',$5,coalesce(nullif($6,''),t.owner_account) FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$3 AND m.id=$2 ON CONFLICT(access_session_id) DO NOTHING`, attachment, machine, terminal, expires, node, actor)
+	result, err := s.Store.SQL().ExecContext(ctx, `INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,actor_account_id,attached_until) SELECT $1,m.id,m.installation_generation,coalesce('team:'||t.owner_team_id,'personal:'||t.owner_account),'terminal',t.id,coalesce(t.title,t.name),m.alias,ARRAY['terminal'],now(),$4::timestamptz,$4::timestamptz+interval '7 days',$5,coalesce(nullif($6,''),t.owner_account),$4::timestamptz FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$3 AND m.id=$2 ON CONFLICT(access_session_id) DO NOTHING`, attachment, machine, terminal, expires, node, actor)
 	if err != nil {
 		return err
 	}

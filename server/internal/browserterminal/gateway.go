@@ -74,14 +74,18 @@ type TicketAuthority interface {
 type Gateway struct {
 	AdmissionLifetime    time.Duration
 	RecordUsageAdmission func(context.Context, string, string, string, string, string, time.Time) error
-	Tickets              TicketAuthority
-	Authorizer           Authorizer
-	Signer               *mint.Provider
-	Issuer               string
-	AllowedOrigins       []string
-	mu                   sync.Mutex
-	active               map[string]int
-	activeTotal          int
+	// RecordUsageAttached keeps an attachment counted as an open browser terminal until the given time;
+	// RecordUsageDetached ends it when the edge's control connection closes (plan limit: attached only).
+	RecordUsageAttached func(ctx context.Context, attachment string, until time.Time) error
+	RecordUsageDetached func(ctx context.Context, attachment string) error
+	Tickets             TicketAuthority
+	Authorizer          Authorizer
+	Signer              *mint.Provider
+	Issuer              string
+	AllowedOrigins      []string
+	mu                  sync.Mutex
+	active              map[string]int
+	activeTotal         int
 }
 
 func (g *Gateway) Issue(ctx context.Context, userID, browserSessionID, terminalSessionID, origin, browserPublicKeySHA256 string) (Ticket, string, Decision, error) {

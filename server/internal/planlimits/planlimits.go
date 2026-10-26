@@ -126,7 +126,7 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 func CheckBrowserTerminalTx(ctx context.Context, tx *db.Tx, scope Scope, terminalSessionID string) error {
 	var open bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_usage_authorities WHERE workspace_id=$1 AND resource_kind='terminal'
- AND resource_id=$2 AND edge_node_id IS NOT NULL AND expires_at>now())`, scope.workspaceID(), terminalSessionID).Scan(&open); err != nil {
+ AND resource_id=$2 AND edge_node_id IS NOT NULL AND coalesce(attached_until,expires_at)>now())`, scope.workspaceID(), terminalSessionID).Scan(&open); err != nil {
 		return err
 	}
 	if open {
@@ -230,8 +230,9 @@ func countSQL(kind Kind) (string, error) {
 	case BrowserTerminals:
 		// Open console terminals: distinct terminal sessions with a live edge admission, so a
 		// reconnect or a shared terminal's viewers never count twice.
+		// Attached right now: the edge's control connection renews attached_until and ends it on close.
 		return `(SELECT count(DISTINCT resource_id) FROM native_usage_authorities WHERE workspace_id=$3
- AND resource_kind='terminal' AND edge_node_id IS NOT NULL AND expires_at>now())`, nil
+ AND resource_kind='terminal' AND edge_node_id IS NOT NULL AND coalesce(attached_until,expires_at)>now())`, nil
 	default:
 		return "", fmt.Errorf("unknown plan limit kind %q", kind)
 	}
