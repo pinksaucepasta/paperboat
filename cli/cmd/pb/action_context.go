@@ -26,7 +26,7 @@ func actionContext(cobraCommand *cobra.Command, args []string) *command.Context 
 	})
 	set.Bool("duration-set", cobraCommand.Flags().Changed("duration"), "")
 	_ = set.Parse(args)
-	result := command.NewContext(set)
+	result := command.NewContext(set, cobraCommand.InOrStdin())
 	result.Context = cobraCommand.Context()
 	result.Writer = cobraCommand.OutOrStdout()
 	result.ErrWriter = cobraCommand.ErrOrStderr()

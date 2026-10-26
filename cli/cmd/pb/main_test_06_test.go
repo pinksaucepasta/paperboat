@@ -164,7 +164,7 @@ func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
 	set.String("config", configPath, "")
 	set.String("server", "", "")
-	commandContext := command.NewContext(set)
+	commandContext := command.NewContext(set, strings.NewReader(""))
 
 	client, machine, target, err := resolveSSHCommandTargetFast(commandContext, "machine-ready")
 	if err != nil {
@@ -296,7 +296,7 @@ func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
 	set.String("config", configPath, "")
 	set.String("server", "", "")
-	commandContext := command.NewContext(set)
+	commandContext := command.NewContext(set, strings.NewReader(""))
 
 	// No daemon socket exists: the fast path must fall back to the canonical
 	// live resolution instead of failing.

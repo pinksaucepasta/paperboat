@@ -57,7 +57,7 @@ func TestLogoutFailedRevocationIsUnconfirmedThenFreshSessionCompletes(t *testing
 		t.Helper()
 		set := flag.NewFlagSet("logout", flag.ContinueOnError)
 		set.Bool("json", true, "")
-		action := command.NewContext(set)
+		action := command.NewContext(set, strings.NewReader(""))
 		action.Context = supportref.WithContext(t.Context(), reference)
 		var stdout, stderr bytes.Buffer
 		action.Writer = &stdout
@@ -128,7 +128,7 @@ func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing
 	}
 	set := flag.NewFlagSet("logout", flag.ContinueOnError)
 	set.Bool("json", true, "")
-	action := command.NewContext(set)
+	action := command.NewContext(set, strings.NewReader(""))
 	// Exercise the production revocation deadline, which starts after local
 	// credential removal, rather than expiring before a request can start.
 	action.Context = t.Context()

@@ -12,6 +12,17 @@ Paperboat fork or binary distribution does not lose the upstream attribution bou
 These notices cover the upstream source boundary. Transitive Go module licenses remain
 subject to the owning repository's license check after the modules are integrated.
 
+The MCP client/server dependency is pinned to `github.com/modelcontextprotocol/go-sdk`
+`v1.8.0` (`3f3b699b2b67e1ed033a63d6651671dab53c2d32`). Its license is transitioning
+from MIT to Apache-2.0; code retains the applicable original MIT or Apache-2.0 terms.
+Both are permissive, with notices retained independently of Paperboat's license; see
+`licenses/mcp-go-sdk-LICENSE.txt`. No documentation from that dependency is copied.
+
+The MCP dependency also brings `github.com/segmentio/asm` `v1.2.1`, licensed under
+MIT No Attribution (MIT-0); see `licenses/segmentio-asm-LICENSE.txt`. The pinned
+legacy license classifier does not recognize MIT-0; this notice does not exempt
+that dependency from the repository license policy.
+
 Reviewed classifier exceptions live in [license-exceptions.json](license-exceptions.json).
 The verifier checks the selected module version and both the recorded and downloaded
 license SHA256 before excluding classification; upgrades and replacements require review.

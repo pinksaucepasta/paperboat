@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -314,7 +315,7 @@ func TestRememberWorkspaceEnvironmentPersistsOnlyInSelectedWorkspace(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandContext := &command.Context{Context: context.WithValue(context.Background(), workspaceInvocationKey{}, "team-a")}
+	commandContext := &command.Context{Reader: strings.NewReader(""), Context: context.WithValue(context.Background(), workspaceInvocationKey{}, "team-a")}
 	if err := rememberWorkspaceEnvironment(commandContext, loaded, "machine-team-a"); err != nil {
 		t.Fatal(err)
 	}

@@ -42,7 +42,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	jsonOutput, _ := cobraCommand.Flags().GetBool("json")
 	destinationRef, _ := cobraCommand.Flags().GetString("to")
 	sessionID, _ := cobraCommand.Flags().GetString("session")
-	if sessionID == "" {
+	if sessionID == "" && !cobraCommand.Flags().Changed("session") {
 		sessionID = strings.TrimSpace(os.Getenv("PAPERBOAT_TERMINAL_SESSION_ID"))
 	}
 	ctx := actionContext(cobraCommand, paths)

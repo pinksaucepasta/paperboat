@@ -1,0 +1,55 @@
+.nh
+.TH "PB-MCP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-mcp - Serve Paperboat tools over MCP stdio
+
+
+.SH SYNOPSIS
+\fBpb mcp [flags]\fP
+
+
+.SH DESCRIPTION
+Serve list_machines, exec and send_file using your existing Paperboat login.
+For automation, first sign in with pb login --api-token-file.
+Exec uses argv without a shell, bounded output and a maximum five-minute deadline.
+send_file requires --allow-send-dir and delivers to the receiving machine's Inbox.
+This uses existing CLI access; the local Paperboat daemon and enrolled source are still required.
+Standard input/output are reserved for MCP; configure your MCP client to launch pb mcp.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--allow-send-dir\fP=[]
+	allow sending files within this local directory (repeatable; symlinks cannot escape)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for mcp
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

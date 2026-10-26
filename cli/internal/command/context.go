@@ -12,13 +12,14 @@ type Action func(*Context) error
 
 type Context struct {
 	Context   context.Context
+	Reader    io.Reader
 	Writer    io.Writer
 	ErrWriter io.Writer
 	set       *flag.FlagSet
 }
 
-func NewContext(set *flag.FlagSet) *Context {
-	return &Context{Context: context.Background(), set: set}
+func NewContext(set *flag.FlagSet, reader io.Reader) *Context {
+	return &Context{Context: context.Background(), Reader: reader, set: set}
 }
 
 func (c *Context) String(name string) string {

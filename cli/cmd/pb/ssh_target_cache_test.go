@@ -215,7 +215,7 @@ func TestResolveSSHCommandTargetReportsAndRepairsCorruptCache(t *testing.T) {
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
 	set.String("config", configPath, "")
 	set.String("server", "", "")
-	commandContext := command.NewContext(set)
+	commandContext := command.NewContext(set, strings.NewReader(""))
 	commandContext.Context = supportref.WithContext(context.Background(), reference)
 
 	client, selected, target, err := resolveSSHCommandTargetFast(commandContext, "machine-ready")

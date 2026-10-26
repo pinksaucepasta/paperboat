@@ -5,7 +5,6 @@ go 1.27.2
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264
 
 require (
-	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/adrg/xdg v0.5.3
@@ -36,8 +35,10 @@ require (
 	github.com/junegunn/fzf v0.73.1
 	github.com/klauspost/compress v1.20.0
 	github.com/libp2p/go-yamux/v5 v5.1.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/miekg/dns v1.1.73
 	github.com/muesli/termenv v0.16.0
+	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/quic-go/quic-go v0.61.0
 	github.com/sethvargo/go-retry v0.3.0
@@ -118,6 +119,7 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/nftables v0.3.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
@@ -160,6 +162,8 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/safchain/ethtool v0.7.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
+	github.com/segmentio/asm v1.2.1 // indirect
+	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
@@ -177,11 +181,13 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f // indirect
 	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

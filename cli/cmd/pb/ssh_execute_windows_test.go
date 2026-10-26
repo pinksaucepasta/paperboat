@@ -128,7 +128,7 @@ func TestWindowsManagedSSHDependenciesRequiresLocalDaemonBeforeDial(t *testing.T
 		return want
 	}
 	set := flag.NewFlagSet("ssh", flag.ContinueOnError)
-	ctx := command.NewContext(set)
+	ctx := command.NewContext(set, strings.NewReader(""))
 	ctx.Context = context.Background()
 	if _, err := windowsManagedSSHDependencies(ctx); !errors.Is(err, want) {
 		t.Fatalf("dependencies error=%v", err)

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/command"
@@ -12,7 +13,7 @@ import (
 const managedToolTestDomain = "machines.example.test"
 
 func managedToolTestContext() *command.Context {
-	return command.NewContext(flag.NewFlagSet("managed-tool", flag.ContinueOnError))
+	return command.NewContext(flag.NewFlagSet("managed-tool", flag.ContinueOnError), strings.NewReader(""))
 }
 
 func managedToolTestResolver(calls *[]string) managedToolTargetResolver {

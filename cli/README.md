@@ -187,6 +187,48 @@ attempted and failed; `pb env host show` shows the machine's delivery state. Val
 applied only when a process launches, so `pb env host show` reports a delivery as applied
 after the next command or terminal starts, not before.
 
+## Agent tools over MCP
+
+Configure your MCP client to launch `pb mcp` with stdio transport. It offers
+`list_machines`, `exec` and `send_file` using your existing Paperboat login and
+workspace permissions. For a token-backed login, first run
+`pb login --api-token-file /path/to/token`; the MCP server inherits that session's
+scope and revocation. Never put the token in MCP tool arguments.
+
+```json
+{
+  "mcpServers": {
+    "paperboat": {
+      "command": "pb",
+      "args": ["mcp", "--allow-send-dir", "/absolute/path/to/artifacts"]
+    }
+  }
+}
+```
+
+`--config`, `--server` and `--workspace` select the same CLI profile and workspace.
+The current daemon and enrolled-source requirements of exec/send still apply.
+No SDK extraction or standalone client identity is required for this entry point.
+
+`list_machines` returns at most 100 machines, the total and a truncation flag.
+`exec` takes a machine name/ID, exact `argv`, optional `stdin`, `directory` and
+`timeout_seconds` (default 30, maximum 300). Its combined stdout/stderr capture is
+limited to 64 KiB. Output is UTF-8 text; invalid bytes become U+FFFD, so use file
+transfer for binary artifacts. It continues draining output and retains the final operation ID
+and exit status. Inspect `outcome`: `not_started` means the command did not start;
+`unknown` means it may have run. Do not retry an unknown outcome automatically.
+Cancellation uses the existing remote-cancel path. Tools run one at a time.
+
+`send_file` takes a receiving machine and an absolute **local** file path. It uses
+Automatic mode, existing approval policy and the recipient's Inbox. Grant local
+send access with repeatable `--allow-send-dir`; no local directories are allowed
+by default. External symlinks are refused, and a bounded private snapshot prevents
+path swaps while approval is pending. A timeout or missing receipt does not prove
+nothing was delivered; check the receiving Inbox before retrying.
+
+There are no arbitrary remote read/write tools or Inbox-fetch tools in this phase.
+Standard input/output carry MCP messages only; startup errors go to stderr.
+
 ## Preview a local target
 
 `pb preview <port|url|path>` exposes a local service through a

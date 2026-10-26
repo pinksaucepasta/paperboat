@@ -454,6 +454,7 @@ recovery instructions before retrying an operation that may have created resourc
 	root.AddCommand(teamCobraCommand())
 	root.AddCommand(accountCobraCommand())
 	root.AddCommand(versionCommand())
+	root.AddCommand(mcpCommand())
 	root.AddCommand(desktopCommand())
 
 	root.AddCommand(doctorCommandV1())

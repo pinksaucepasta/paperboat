@@ -52,7 +52,7 @@ func TestNativeF1PairingTokenRejections(t *testing.T) {
 	flags.String("config", "", "")
 	flags.String("server", "", "")
 	flags.String("workspace", "personal", "")
-	actor := commandpkg.NewContext(flags)
+	actor := commandpkg.NewContext(flags, strings.NewReader(""))
 	actor.Context = ctx
 	actor.Writer = io.Discard
 	actor.ErrWriter = io.Discard

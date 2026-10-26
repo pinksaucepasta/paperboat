@@ -83,6 +83,7 @@ pb [environment] [new] [flags]
 * [pb login](pb_login.md)	 - Add this computer to your account, or sign in again, through browser approval
 * [pb logout](pb_logout.md)	 - Revoke and remove the active client session
 * [pb machine](pb_machine.md)	 - Manage machines
+* [pb mcp](pb_mcp.md)	 - Serve Paperboat tools over MCP stdio
 * [pb new](pb_new.md)	 - Open a fresh terminal on this device in the current directory
 * [pb pair](pb_pair.md)	 - Enroll this machine with a one-shot token
 * [pb ping](pb_ping.md)	 - Measure authenticated connectivity to a machine

@@ -13,7 +13,7 @@ import (
 func TestExecStartedEventShowsOnePendingEnvironmentLine(t *testing.T) {
 	event := tunnel.ExecEvent{OperationID: "operation_1", State: "started", Warnings: []string{"environment_pending"}}
 	var out, errOut bytes.Buffer
-	ctx := &command.Context{Writer: &out, ErrWriter: &errOut}
+	ctx := &command.Context{Reader: strings.NewReader(""), Writer: &out, ErrWriter: &errOut}
 	if err := writeExecEvent(ctx, nil, event, false, false); err != nil {
 		t.Fatal(err)
 	}

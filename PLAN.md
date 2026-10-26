@@ -1275,7 +1275,7 @@ One section, two owners: **data plane** (Lane R: `pb` CLI, daemon/hostd/carriers
 data path) and **API/DB** (Lane Q: server handlers, queries, pagination, retention). Rows: CHECKLIST
 section P. A client loop that costs the server is fixed in the client by Lane R; a slow endpoint by Lane Q.
 
-#### Go SDK v1 (design; coordinator 2026-10-26; moves await Lane A/R sign-off)
+#### Go SDK v1 (coordinator 2026-10-26; move order approved by Lane A/R)
 
 **Contract.** `sdk/go/` is its own module, added to `go.work`; reusable code lives in the
 existing top-level `shared/` module. V1: API-token login, machine discovery by name/ID, native
@@ -1288,19 +1288,21 @@ from explicit server configuration and discovery. SDK imports no `cli/internal` 
 This section is design only; implementation and acceptance rows go in CHECKLIST before code.
 
 **Product phases (each has its own CHECKLIST acceptance rows before implementation).**
-0. `pb mcp`: stdio MCP server inside the existing CLI, pending Lane A's agreement; SDK lane
+0. `pb mcp`: stdio MCP server inside the existing CLI (Lane A approved 2026-10-26); SDK lane
    implements and A reviews CLI changes. Expose `list_machines`, `exec` (exact argv, bounded
-   output, timeout), bounded `read_file`/`write_file`, and `send_file`; `create_preview` comes
-   later. Claude Code, Codex and Cursor can use these tools through their MCP configuration.
+   output, timeout) and `send_file`. Inbox listing/fetching is included only if an existing
+   authorized offered-artifact API supports it; request approvals alone are not artifact fetch.
+   `read_file`/`write_file` and `create_preview` come later. Acceptance: CHECKLIST F24-00–03.
+   Claude Code, Codex and Cursor can use these tools through their MCP configuration.
    Reuse Go command services and the user's pb login or an explicitly supplied API token,
    never shell out to pb. Read API tokens from an explicit secret file/configuration, not MCP
    stdin or command-line token arguments. Calls retain scopes and token-attributed audit. Stdio
    stdout is protocol only; diagnostics go to stderr. Bound tool arguments, output bytes,
    concurrent calls and execution time; report truncation and uncertain execution explicitly,
    honor MCP cancellation and close on EOF. Local files used by send are explicitly selected
-   local inputs; read/write tools name a remote machine and remote path, never an implicit
-   local path. Local path access is constrained by caller-configured roots; remote filesystem
-   access follows remote permissions and explicit file capability. No implicit exec fallback
+   local inputs, constrained by caller-configured roots and snapshotted safely before approval.
+   Later read/write tools name a remote machine and remote path, never an implicit local path;
+   remote filesystem access follows remote permissions and explicit file capability. No exec fallback
    to implement file-only tools. Until phase 1, MCP has the CLI's existing enrolled-source
    requirements; MCP does not make standalone API-token exec magically work. Qualification,
    not a promised number of days, determines which tools ship first.
@@ -1315,7 +1317,10 @@ This section is design only; implementation and acceptance rows go in CHECKLIST 
    public preview/tunnel URL and Close. Closing removes its lease and local serving workers.
    Public HTTP terminates TLS at the edge; describe that trust boundary explicitly. This is
    not the native private-access E2EE promise. Server/edge lifecycle and quotas remain owners.
-5. Python and TypeScript bindings reuse the Go core through a C shared-library ABI (the
+5. Remote filesystem phase: read_file/write_file and Receive(arbitrary remote path) require
+   their own explicit scope, protocol, path/overwrite rules and A/B/R tests before shipping.
+   Offered Inbox artifacts remain distinct; no implementation through an exec-only shortcut.
+6. Python and TypeScript bindings reuse the Go core through a C shared-library ABI (the
    libtailscale approach) or a native binding distribution like ngrok-python/javascript.
    Choose packaging/ABI during that phase; do not build bindings or reimplement transport now.
 
@@ -1363,8 +1368,12 @@ Paths below are relative to `cli/internal/` unless prefixed `shared/`:
 - `hostruntime/auth/jwks.go` → `shared/peertransport/jwks`: network JWKS fetch/cache only,
   splitting file-cache helpers and reporting hooks first. Host credential verification/replay
   policy remains host-owned. `peertransport/tailnet` → `shared/peertransport/tailnet`, replacing
-  its `api`/`config` imports with the extracted contracts. Existing `relay/derpquic` dependency
-  remains explicit; it imports no CLI code. No copied relay or cryptographic implementation.
+  its `api`/`config` imports with the extracted contracts. Lane R first splits relay client
+  contracts out of `relay/derpquic`: `shared/peertransport/relaygrant` owns Grant/Peer/Scope,
+  Verifier, key/disco parse/format, membership and grant bounds; `relayclient` owns NewClient,
+  NewWSSClient, NewFallbackCarrier and their client configs; `relay/nodetls` moves whole to
+  `shared/peertransport/nodetls`. Mesh/tailnet then import shared, never relay; relay remains a
+  consumer of shared. No copied relay or cryptographic implementation.
 - `resolver` → `shared/client/discovery`: inventory selection and connection descriptor types;
   split terminal queues and CLI telemetry away. `tunnel` → `shared/client/runtime` (native
   authority/runtime ownership from `peer_terminal.go`, `native_runtime.go`) and
@@ -1404,6 +1413,8 @@ client/files → client/{api,discovery,files/protocol}, shared/{reattach,httptra
 client/{exec,access,files} → injected stream/lease interfaces implemented by client/runtime
 peertransport/{identitybootstrap,clientauthority,trustedkeys,tailnet} → client/{api,state}, peer leaves
 peertransport/native → peertransport/{mesh,peerquic,streamauth,tailnet}
+peertransport/{mesh,tailnet} → peertransport/{relaygrant,relayclient,nodetls}
+relay → shared/peertransport/{relaygrant,relayclient,nodetls}; shared NEVER imports relay
 client/api → client/state, shared/{wirejson,httptransport,serverclock,supportref,machinename}
 peer leaves / client/state / JWKS → shared leaf helpers and existing shared wire packages
 shared/* → NEVER cli/* (including tests); CLI acceptance tests remain downstream
@@ -1411,11 +1422,17 @@ shared/* → NEVER cli/* (including tests); CLI acceptance tests remain downstre
 
 **Move sequence and coordination.** Coordinator obtains A/R sign-off on each source slice and a
 short edit freeze for that slice, not a blanket CLI freeze. One commit per package boundary:
-(1) A splits leaf dependencies and CLI callbacks in place, then mechanically moves each leaf;
-(2) R moves peer leaves in dependency order: endpointidentity/fixedpacket/mesh/streamauth,
-then peerquic; (3) A splits state, then API (including its mixed endpoint types), then session
-and discovery, moving each only after its dependencies are shared; (4) A extracts JWKS and
-R moves identitybootstrap/trustedkeys/clientauthority, tailnet, native in dependency order;
+(1) SDK lane takes A's eight leaf moves with A review, diagnosticlog first (A approved
+2026-10-26), then the other leaves, each with darwin/windows cross-builds;
+(2) R1 endpointidentity/fixedpacket/streamauth (coordinator go), R2 peerquic after diagnosticlog,
+R3 relay contract/client/nodetls preparation then mesh; (3) A coordinates API after Lane B's
+shared/apiroutes change and its current error/descriptor edits, then config/state, session and
+discovery; dependency-preparation declarations land before either consumer moves. Keep the
+optional machine-source CredentialRejected hook from dcb4d920. (4) A extracts JWKS; R4 moves
+identitybootstrap/trustedkeys/clientauthority after API/state, R5 tailnet then native after the
+relay split. R freezes mesh/tailnet only after N5 verification/follow-ups; each slice has an
+announced approximately one-hour window. A/R sign-off received 2026-10-26; active source slices
+still require the owner's individual freeze;
 (5) A/R split runtime and exec framing, then mechanically move each; (6) A extracts exec
 recovery out of cmd/pb and switches CLI to that single owner; (7) A/R move nativeprivate,
 prepare/split private-stream interfaces and access adapter, then file protocol/transfer core
@@ -4829,3 +4846,6 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 2026-10-26 | Lane U S3-05 | Docs read against code, S3-05 ticked. Code leftovers found (not docs): openapi.json lists 15 env-authority/variables ops with no route and misses edge/ingress, inspector access, team machines; tuf-repository + install.ps1 + Makefile release-binaries keep dead Windows/.pkg paths; unused billing.personal_machine_limit column/config; preview state filter cannot select origin_unavailable | Lane B: openapi + migrations/config; Lane A: cli/tools Windows/.pkg leftovers
 2026-10-26 | Lane K F18 | Round 31 dev-8910ed61 on pbvm3 (guard pass on lanek-c, fresh lanek-h31 revoked and removed): machine_tags.py 9/9, policy_token.py 15/15, policy_cli.sh 13/13. | policy_team.py waits for hp.
 2026-10-26 | Lane K terminal | PLAN 3b "Terminal: review and fixes": 9 reviews merged, 13 slices with matrix checks. | Waits for coordinator + GPT review; slice 0 is Lane M/B's prod outage.
+
+2026-10-26 | SDK F24-00–03 | Lane A approved MCP; full CLI race/vet CI 40269295986 PASS, post-main MCP focused race + license scan PASS; scanner 136014e5. | Waits for Lane A: L/M MCP checks; Lane B: session-bound exec/private-access/file source.
+2026-10-26 | SDK leaves | diagnosticlog 27dbaf6d, decoder guard 3de4805f, wirejson e5f234a9, httptransport 4a0c98c9 pushed; full shared/CLI + Darwin/Windows PASS. | MCP runs 40272424859/40272394965 failed only broadcast rotation test; main fix 4dc95990 included, requalifying.

@@ -22,6 +22,9 @@ import (
 )
 
 func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecRequest, jsonOutput bool) (returnErr error) {
+	if c.Reader == nil {
+		return errors.New("remote execution requires an explicit input reader")
+	}
 	if len(request.Argv) == 0 || request.Timeout < 0 || request.Timeout > 24*time.Hour {
 		return invocationError(errors.New("exec timeout must be between zero and 24h and argv must not be empty"))
 	}
@@ -263,7 +266,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	}
 	inputResult := make(chan error, 1)
 	workers.Add(1)
-	go func() { defer workers.Done(); inputResult <- forwardExecInput(inputCtx, os.Stdin, connectionRef) }()
+	go func() { defer workers.Done(); inputResult <- forwardExecInput(inputCtx, c.Reader, connectionRef) }()
 	encoder := json.NewEncoder(c.Writer)
 	sawTerminalEvent := false
 	emittedStarted := false
