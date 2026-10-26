@@ -95,10 +95,13 @@ def connect(target, name, rows=24, cols=80):
     return c
 
 
-def attach(target, session, rows=24, cols=80):
+def attach(target, session, rows=24, cols=80, typing=True):
     c = Client([PB, 'connect', target, '--session', session, '--status-bar', 'off'])
     c.resize(rows, cols)
-    c.ready()
+    if typing:
+        c.ready()
+    else:  # ready() types its marker, which is activity; a silent reconnect only waits for the replayed prompt
+        c.expect(b'\x1b[?2004h', 90)
     return c
 
 
@@ -204,7 +207,7 @@ def reconnect_keeps_control(a, sessions):
             tty = session_tty(c1)  # window 1 is in use
             before = settled_size(a.target, tty, (30, 100))
             c2.close()
-            c2 = attach(a.target, s['id'], 24, 80)  # window 2 reconnects without typing
+            c2 = attach(a.target, s['id'], 24, 80, typing=False)  # window 2 reconnects without typing
             time.sleep(3)
             after = pty_size(a.target, tty)
             row('N15 a reconnecting window never takes control', before == (30, 100) and after == (30, 100), f'{before} -> {after}')
