@@ -400,9 +400,11 @@ def fast_output(a, sessions):
         except RuntimeError:
             row('N6 50 MB output finishes with a stalled second window', False, 'not done in 300 s')
         c1.pending.clear()
-        c1.send('yes\r')
+        # The hardest real case at once: the foreground job floods output (yes) while it also reads a
+        # 256 KiB paste (cat), and the second viewer (c2) is stalled. (A paste into a program that never
+        # reads stdin blocks in the tty itself, in any terminal; Ctrl-C cannot pass it there either.)
+        c1.send("sh -c 'yes & exec cat > /dev/null'\r")
         time.sleep(3)
-        # The hardest case at once: the flood, a 256 KiB paste in flight and a stalled viewer (c2).
         c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
         # The tty discards input typed before the interrupt lands, so wait for yes to stop
