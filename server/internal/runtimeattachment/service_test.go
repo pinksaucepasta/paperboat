@@ -507,6 +507,10 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if back, err := service.Attach(ctx, proof, request); err != nil || back.ActiveEdgeNodeID != backupNode {
 		t.Fatalf("ready named edge not reactivated: active=%q err=%v", back.ActiveEdgeNodeID, err)
 	}
+	observation.Ready = false // the old edge is down again, as before this step
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
+		t.Fatal(err)
+	}
 	ready(true)
 	// Keep registry liveness independent of the admission-expiry scenario.
 	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, node, backupNode)
