@@ -353,9 +353,13 @@ func TestDaemonSurfacesManagedSSHStartupFailureWithoutStopping(t *testing.T) {
 	if machine.SSHReadiness != "degraded" || len(machine.Health) != 1 || machine.Health[0].Code != "ssh_target_not_ready" || machine.Health[0].Recovery != managedSSHDoctorRecovery {
 		t.Fatalf("managed SSH failure was not surfaced: %#v", machine)
 	}
-	diagnostics, err := client.Diagnostics(context.Background())
-	if err != nil || len(diagnostics.Recent) < 2 {
-		t.Fatalf("diagnostics=%#v err=%v", diagnostics, err)
+	// The startup runs after the first refresh and the degraded state shows from the start (the fixture is
+	// not ready until told so), so the snapshot above can precede the startup event: wait for the event.
+	var diagnostics localapi.DiagnosticSnapshot
+	for deadline := time.Now().Add(10 * time.Second); len(diagnostics.Recent) < 2; time.Sleep(10 * time.Millisecond) {
+		if diagnostics, err = client.Diagnostics(context.Background()); err != nil || time.Now().After(deadline) {
+			t.Fatalf("no managed SSH startup diagnostic: diagnostics=%#v err=%v", diagnostics, err)
+		}
 	}
 	startup := diagnostics.Recent[1]
 	if startup.Category != "ssh" || startup.Code != "managed_startup" || startup.Severity != "warning" || startup.Fields["outcome"] != "degraded" || startup.Fields["reason"] != "ssh_target_not_ready" {
