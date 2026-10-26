@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -80,6 +81,9 @@ func (s *EdgeService) CanonicalRouteSnapshot(ctx context.Context, nodeID, proces
 	if _, err := s.store.Pool().Exec(ctx, `UPDATE paperboat.control_tunnel_nodes SET tunnel_snapshot_at=$3 WHERE id=$1 AND process_epoch=$2`, nodeID, processEpoch, started); err != nil {
 		return nil, err
 	}
+	// The operations this fetch completes are projected now; a failure here must not fail the edge's
+	// snapshot, and the next fetch retries it.
+	_ = tunnelv1.RefreshPendingStateOperations(ctx, s.store.Pool(), s.clock().UTC())
 	return items, nil
 }
 

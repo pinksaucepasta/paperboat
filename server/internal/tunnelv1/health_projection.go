@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -70,4 +71,38 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND (n.tunnel_snapshot_at IS NULL OR n.tunnel_snapshot_at<o.updated_at+interval '1 second')))
  )`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
 	return err
+}
+
+// RefreshPendingStateOperations settles the pause and deletion operations still waiting for the
+// edges to drop the route. An edge calls it after each route snapshot fetch: that fetch is what
+// completes them, and nothing else would project the tunnel before the next scheduled refresh.
+func RefreshPendingStateOperations(ctx context.Context, q interface {
+	healthExecutor
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, now time.Time) error {
+	rows, err := q.Query(ctx, `SELECT account_id, resource_id FROM operations WHERE state IN ('pending','running') AND resource_kind='tunnel'
+ AND operation_type IN ($1,$2) AND resource_id IS NOT NULL ORDER BY updated_at LIMIT 100`,
+		"tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted))
+	if err != nil {
+		return err
+	}
+	byAccount := map[string][]string{}
+	for rows.Next() {
+		var account, tunnel string
+		if err := rows.Scan(&account, &tunnel); err != nil {
+			rows.Close()
+			return err
+		}
+		byAccount[account] = append(byAccount[account], tunnel)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for account, tunnels := range byAccount {
+		if err := RefreshHealth(ctx, q, account, tunnels, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }

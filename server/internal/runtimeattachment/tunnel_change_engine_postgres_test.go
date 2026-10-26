@@ -88,9 +88,6 @@ func TestTunnelPauseCompletesOnlyAfterEveryLiveEdgeFetchedTheSnapshotOnPostgres(
 	}
 	state := func(want string) {
 		t.Helper()
-		if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
-			t.Fatal(err)
-		}
 		var got string
 		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state FROM operations WHERE id=$1`, result.Operation.ID).Scan(&got); err != nil || got != want {
 			t.Fatalf("pause operation = %q, %v; want %q", got, err, want)
@@ -107,5 +104,5 @@ func TestTunnelPauseCompletesOnlyAfterEveryLiveEdgeFetchedTheSnapshotOnPostgres(
 	fetch(f.node, f.edge)
 	state("running") // the other edge still serves the route
 	fetch(f.backupNode, f.backupEdge)
-	state("succeeded")
+	state("succeeded") // the second fetch itself completed it: no scheduled refresh in between
 }

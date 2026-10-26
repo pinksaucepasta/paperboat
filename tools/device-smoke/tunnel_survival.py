@@ -61,7 +61,12 @@ def survive(endpoint, identifier, what, action):
     action()
     time.sleep(3)
     wait_status(endpoint, 200, 'after ' + what)
-    assert run('tunnel', 'status', identifier)['overall_code'] == 'ready', 'not ready after ' + what
+    # The first edge serving does not make the tunnel ready: status waits for the other edge too (measured
+    # 2-3 s later after a host-service restart), so give it a bounded window instead of one read.
+    deadline = time.monotonic() + 30
+    while run('tunnel', 'status', identifier)['overall_code'] != 'ready':
+        assert time.monotonic() < deadline, 'not ready 30 s after ' + what
+        time.sleep(1)
 
 
 def main():
