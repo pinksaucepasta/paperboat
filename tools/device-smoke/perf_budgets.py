@@ -10,10 +10,17 @@ BUDGETS = {
     # perf_idle.py: one machine, 10 min idle, all pb processes (PR-03). Round 16 dev-3f068585 on a
     # pbvm2 container measured 3.4% CPU, 417 wakeups/s and 6.6 MB/h on TCP 443 (control plane and
     # edge); before the idle fixes 17-20%, ~1,680/s and 147-172 MB/h.
+    # Approved budget 2026-10-26 (coordinator, PR-03): per idle machine <= 1% of one core across all pb
+    # processes and <= 5 MB/h of API bytes; requests are budgeted under 'idle_server'.
     'idle': {
-        'cpu_percent': ('max', 5),
+        'cpu_percent': ('max', 1),
         'wakeups_per_s': ('max', 600),
-        'tls_mb_per_hour': ('max', 15),
+        'tls_mb_per_hour': ('max', 5),
+    },
+    # tools/loadtest/idle_api_requests.sh: the machine's requests in the server's log over the same idle
+    # interval (staging only; the machine cannot count its own API calls). PR-03: <= 0.1 req/s.
+    'idle_server': {
+        'api_requests_per_s': ('max', 0.1),
     },
     # Checked on every path: local commands answer from the binary and the daemon snapshot
     # (PR-07; hp: --version 32 ms, status 960 ms before it stopped listing machines on the server).
