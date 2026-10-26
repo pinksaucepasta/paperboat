@@ -4942,3 +4942,7 @@ CLI CI 40315925420: all except tailnet authority/future PASS; that unchanged che
 
 2026-10-26 | SDK F24 gate | Exec empty-argument fix: full CLI vet/race CI 40327920695 PASS; nonce observer build/vet PASS. | Server/builds prepares the shared Linux build; SDK then reruns F24-00/02.
 2026-10-26 | Lane MERGER | private TCP on the engine + pb tunnel create without connector enrollment; connector/credentials commands, F8-04, C090-C097 removed (CI 40327034604, 40328620525; runtime flake TestLayerObservationFlush... passed 3/3 alone, 40330388996). | Server lane: CLI device build from this main for the device + check-tunnels gate.
+
+2026-10-26 | SDK F24 Linux | F24-00–03 PASS on dev-c9ab1c14/server .102: argv/stdin/bounds/deadline, cancel/EOF/frame limits, inventory total, actual Inbox hash and symlink refusal; result tools/device-smoke/results/f24-mcp-20261026-fixed.json.
+Exact-ID cleanup: machine_03bd8102-1813-4638-9f4a-3028ca454a9b, machine_738851b3-76d5-4bea-bee7-514f41a56b8c revoked; both containers removed. One initial setup-copy timeout created no machines; verified remote build reused.
+M/W remain unticked; Go SDK waits for Lane B session-bound source and owner-scheduled core extraction (PLAN 3b).
