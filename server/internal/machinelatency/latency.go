@@ -20,6 +20,9 @@ const MaxItems = 64
 // Fresh is how long a measurement is shown; an older one is stale and hidden.
 const Fresh = time.Hour
 
+// Refresh is how old a stored sample may get before a similar one (within 5 ms or 20 %) replaces it.
+const Refresh = 10 * time.Minute
+
 var ErrInvalid = errors.New("invalid machine latency report")
 
 // Item is one listed measurement with the node's public inventory fields.
@@ -54,8 +57,11 @@ func SaveEdgesTx(ctx context.Context, tx *db.Tx, machineID string, samples []run
 		if !issued[sample.NodeID+"\x00"+sample.ProcessEpoch] || !validRTT(sample.RTTMilliseconds) {
 			continue
 		}
+		// Every attachment repeats its samples; a similar one is kept until it is Refresh old.
 		if _, err := tx.Exec(ctx, `INSERT INTO machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,$4)
-ON CONFLICT(machine_id,node_id) DO UPDATE SET role='edge',rtt_ms=EXCLUDED.rtt_ms,measured_at=EXCLUDED.measured_at`, machineID, sample.NodeID, sample.RTTMilliseconds, now); err != nil {
+ON CONFLICT(machine_id,node_id) DO UPDATE SET role='edge',rtt_ms=EXCLUDED.rtt_ms,measured_at=EXCLUDED.measured_at
+WHERE machine_node_latency.role<>'edge' OR machine_node_latency.measured_at<$5
+ OR (abs(machine_node_latency.rtt_ms-EXCLUDED.rtt_ms)>=5 AND abs(machine_node_latency.rtt_ms-EXCLUDED.rtt_ms)*5>=greatest(machine_node_latency.rtt_ms,1))`, machineID, sample.NodeID, sample.RTTMilliseconds, now, now.Add(-Refresh)); err != nil {
 			return err
 		}
 	}

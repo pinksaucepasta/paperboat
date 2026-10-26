@@ -64,6 +64,10 @@ ORDER BY n.id LIMIT $3`, accountID, now, runtimewire.MaximumEdgeCandidates, team
 	return result, nil
 }
 
+// Refresh is how stale an unchanged placement may get before an attachment rewrites it: attachment honors a
+// placement observed in the last 2 minutes (runtimeattachment), and every attachment repeats the preference.
+const Refresh = time.Minute
+
 // Save accepts only a pair from the current server-issued candidate set. A
 // stale report is ignored so a network change cannot strand the machine.
 func Save(ctx context.Context, tx *db.Tx, accountID, machineID string, installationGeneration, workerGeneration uint64, preference runtimewire.EdgePreference, candidates []runtimewire.EdgeCandidate, now time.Time) (bool, error) {
@@ -86,6 +90,9 @@ func Save(ctx context.Context, tx *db.Tx, accountID, machineID string, installat
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at)
 VALUES($1,$2,$3,$4,$5,$6,nullif($7,''),nullif($8,''),$9)
-ON CONFLICT(machine_id) DO UPDATE SET account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,primary_node_id=EXCLUDED.primary_node_id,primary_process_epoch=EXCLUDED.primary_process_epoch,secondary_node_id=EXCLUDED.secondary_node_id,secondary_process_epoch=EXCLUDED.secondary_process_epoch,observed_at=EXCLUDED.observed_at`, machineID, accountID, installationGeneration, workerGeneration, preference.PrimaryNodeID, preference.PrimaryProcessEpoch, preference.SecondaryNodeID, preference.SecondaryProcessEpoch, now)
+ON CONFLICT(machine_id) DO UPDATE SET account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,primary_node_id=EXCLUDED.primary_node_id,primary_process_epoch=EXCLUDED.primary_process_epoch,secondary_node_id=EXCLUDED.secondary_node_id,secondary_process_epoch=EXCLUDED.secondary_process_epoch,observed_at=EXCLUDED.observed_at
+WHERE (machine_edge_placements.account_id,machine_edge_placements.installation_generation,machine_edge_placements.worker_generation,machine_edge_placements.primary_node_id,machine_edge_placements.primary_process_epoch,machine_edge_placements.secondary_node_id,machine_edge_placements.secondary_process_epoch)
+ IS DISTINCT FROM (EXCLUDED.account_id,EXCLUDED.installation_generation,EXCLUDED.worker_generation,EXCLUDED.primary_node_id,EXCLUDED.primary_process_epoch,EXCLUDED.secondary_node_id,EXCLUDED.secondary_process_epoch)
+ OR machine_edge_placements.observed_at<$10`, machineID, accountID, installationGeneration, workerGeneration, preference.PrimaryNodeID, preference.PrimaryProcessEpoch, preference.SecondaryNodeID, preference.SecondaryProcessEpoch, now, now.Add(-Refresh))
 	return err == nil, err
 }

@@ -4,6 +4,7 @@
 package runtimeattachment
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -18,6 +19,7 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +54,14 @@ type Service struct {
 
 func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool {
 	return p.Validate() == nil && runtimewire.ValidCapabilities(r.Capabilities) && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
+}
+
+// admissionLifetime is the signed admission's lifetime, as admission.Deadline applies it.
+func (s *Service) admissionLifetime() time.Duration {
+	if s.AdmissionLifetime == 0 {
+		return admission.DefaultLifetime
+	}
+	return s.AdmissionLifetime
 }
 
 func (s *Service) Attach(ctx context.Context, proof previewattachment.MachineProof, request runtimewire.Request) (runtimewire.HostAdmission, error) {
@@ -90,10 +100,11 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 			return staticFailure{message: ErrUnavailable.Error(), cause: errors.Join(ErrUnavailable, errInvalidMachineIdentityKeySize)}
 		}
 		previous := map[string]runtimewire.Admission{}
+		previousCapabilities := map[string][]string{}
 		previewSessions := map[string]string{}
 		var generation uint64
 		var activeNode, activeEpoch string
-		previousRows, err := tx.Query(ctx, `SELECT edge_node_id,admission,process_id,generation,active,preview_session_id FROM runtime_carrier_attachments WHERE route_id=$1 FOR UPDATE`, route)
+		previousRows, err := tx.Query(ctx, `SELECT edge_node_id,admission,process_id,generation,active,preview_session_id,agent_capabilities FROM runtime_carrier_attachments WHERE route_id=$1 FOR UPDATE`, route)
 		if err != nil {
 			return err
 		}
@@ -102,7 +113,8 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 			var raw []byte
 			var priorGeneration uint64
 			var active bool
-			if err = previousRows.Scan(&nodeID, &raw, &processID, &priorGeneration, &active, &previewSessionID); err != nil {
+			var priorCapabilities []string
+			if err = previousRows.Scan(&nodeID, &raw, &processID, &priorGeneration, &active, &previewSessionID, &priorCapabilities); err != nil {
 				break
 			}
 			var a runtimewire.Admission
@@ -114,6 +126,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 				break
 			}
 			previous[nodeID] = a
+			previousCapabilities[nodeID] = priorCapabilities
 			previewSessions[nodeID] = previewSessionID
 			if priorGeneration > generation {
 				generation = priorGeneration
@@ -255,6 +268,23 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			encoded, err = json.Marshal(admission)
 			if err != nil {
 				return err
+			}
+			// A machine re-attaches every ~25 s. While the stored admission is the same apart from its deadline
+			// and has more than half its lifetime left, return it and write nothing.
+			if same && slices.Equal(previousCapabilities[edge.node], capabilities) && prior.ExpiresAt.After(time.Now().Add(s.admissionLifetime()/2)) {
+				kept := admission
+				kept.ExpiresAt = prior.ExpiresAt
+				keptJSON, keptErr := json.Marshal(kept)
+				priorJSON, priorErr := json.Marshal(prior)
+				if keptErr == nil && priorErr == nil && bytes.Equal(keptJSON, priorJSON) {
+					if i == 0 {
+						out.Admission = prior
+					} else {
+						kept := prior
+						out.Backup = &kept
+					}
+					continue
+				}
 			}
 			_, err = tx.Exec(ctx, `INSERT INTO runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,agent_capabilities)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)

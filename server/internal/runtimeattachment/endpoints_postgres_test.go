@@ -235,6 +235,28 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := assignments(); got[node] != "active/true" || got[backupNode] != "active/false" {
 		t.Fatalf("assignments after the edge observed the route = %v", got)
 	}
+	// Edges repeat observations every few seconds and agents re-attach every ~25 s: unchanged ones leave the
+	// assignments untouched (PLAN 3b idle writes).
+	assignmentVersions := func() string {
+		t.Helper()
+		var v string
+		if err := database.SQL().QueryRowContext(ctx, `SELECT string_agg(edge_node_id||'='||xmin::text, ',' ORDER BY edge_node_id) FROM endpoint_edge_assignments WHERE endpoint_id=$1`, lease).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	observedVersions := assignmentVersions()
+	for range 3 {
+		if err := service.Observe(ctx, edge, []runtimewire.Observation{runtimeObservation, observation}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Attach(ctx, proof, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := assignmentVersions(); after != observedVersions {
+		t.Fatalf("unchanged observations and attachments rewrote the assignments: %s -> %s", observedVersions, after)
+	}
 	// Served only where observed: DNS and browser access can never name the unobserved edge.
 	if got := served(); len(got) != 1 || got[0] != node+"/edge_ready" {
 		t.Fatalf("preview_routes = %v, want only %s/edge_ready", got, node)

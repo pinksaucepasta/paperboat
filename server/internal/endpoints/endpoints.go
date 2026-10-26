@@ -81,13 +81,14 @@ ORDER BY r.id,a.edge_node_id,a.active DESC
 INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)
 SELECT route_id,endpoint_id,edge_node_id,edge_process_epoch,session_id FROM desired
 ON CONFLICT(route_id,edge_node_id) DO UPDATE SET
- generation=CASE WHEN x.desired='active' AND x.edge_process_epoch=EXCLUDED.edge_process_epoch AND x.carrier_session_id=EXCLUDED.carrier_session_id THEN x.generation ELSE x.generation+1 END,
- observed_ready=x.observed_ready AND x.desired='active' AND x.edge_process_epoch=EXCLUDED.edge_process_epoch AND x.carrier_session_id=EXCLUDED.carrier_session_id,
+ generation=x.generation+1,observed_ready=false,
  edge_process_epoch=EXCLUDED.edge_process_epoch,carrier_session_id=EXCLUDED.carrier_session_id,desired='active'
-RETURNING x.route_id,x.edge_node_id
+ -- Every attach and tunnel sync reconciles; an assignment that already matches is left untouched.
+ WHERE x.desired<>'active' OR x.edge_process_epoch<>EXCLUDED.edge_process_epoch OR x.carrier_session_id<>EXCLUDED.carrier_session_id
+RETURNING x.route_id
 )
 UPDATE endpoint_edge_assignments x SET desired='removed',observed_ready=false
 FROM endpoints e WHERE e.id=x.endpoint_id AND e.agent_machine_id=$1 AND x.desired='active'
-AND NOT EXISTS(SELECT 1 FROM upserted u WHERE u.route_id=x.route_id AND u.edge_node_id=x.edge_node_id)`, machineID)
+AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.route_id=x.route_id AND d.edge_node_id=x.edge_node_id)`, machineID)
 	return err
 }

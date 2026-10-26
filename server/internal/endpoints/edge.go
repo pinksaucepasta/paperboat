@@ -143,15 +143,28 @@ func scanEdgeAdmissionsWithRemovals(rows pgx.Rows, expiresAt time.Time) ([]runti
 // observation is not for a current endpoint assignment (for example one removed since the edge's
 // last pull); such observations are dropped, never an error, so they cannot fail the observations
 // of other routes in the same report.
+//
+// Edges repeat every observation every few seconds; an unchanged one is written only to refresh observed_at
+// once it is older than ObservationRefresh, otherwise it is only read.
 func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewire.Observation) (bool, error) {
-	tag, err := tx.Exec(ctx, `UPDATE endpoint_edge_assignments SET observed_ready=$6 AND desired='active',observed_at=now()
-WHERE route_id=$1 AND edge_node_id=$2 AND edge_process_epoch=$3 AND carrier_session_id=$4 AND generation=$5`,
-		o.RouteID, nodeID, epoch, o.SessionID, int64(o.AttachmentGeneration), o.Ready)
-	if err != nil {
-		return false, err
-	}
-	return tag.RowsAffected() == 1, nil
+	var current bool
+	err := tx.QueryRow(ctx, `WITH assignment AS (
+SELECT route_id,edge_node_id,(observed_ready IS DISTINCT FROM ($6 AND desired='active') OR observed_at IS NULL OR observed_at<now()-$7::interval) AS due
+FROM endpoint_edge_assignments
+WHERE route_id=$1 AND edge_node_id=$2 AND edge_process_epoch=$3 AND carrier_session_id=$4 AND generation=$5
+), written AS (
+UPDATE endpoint_edge_assignments x SET observed_ready=$6 AND x.desired='active',observed_at=now()
+FROM assignment a WHERE a.due AND x.route_id=a.route_id AND x.edge_node_id=a.edge_node_id
+RETURNING x.route_id
+)
+SELECT EXISTS(SELECT 1 FROM assignment)`,
+		o.RouteID, nodeID, epoch, o.SessionID, int64(o.AttachmentGeneration), o.Ready, ObservationRefresh.String()).Scan(&current)
+	return current, err
 }
+
+// ObservationRefresh is how stale an unchanged edge observation may get before it is written again; readers
+// treat an observation as current for at least 15 s (tunnelv1 health projection).
+const ObservationRefresh = 10 * time.Second
 
 // IsRouteTx reports whether a route id names an endpoint route (as opposed to a runtime route).
 func IsRouteTx(ctx context.Context, tx *db.Tx, routeID string) (bool, error) {
