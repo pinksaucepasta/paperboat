@@ -68,9 +68,12 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	}
 	request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
 	if a.endpointReports.Load() {
-		request.Endpoints = a.localEndpointReport()
+		request.Endpoints = a.endpointReportDue()
 	}
 	result, err := client.PeerNetworkConfiguration(ctx, request)
+	if err == nil && request.Endpoints != nil {
+		a.endpointsReported(*request.Endpoints)
+	}
 	if err != nil {
 		var apiErr *api.APIError
 		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {

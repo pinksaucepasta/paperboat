@@ -43,10 +43,31 @@ func (a *Authority) localEndpointReport() []string {
 	for _, ep := range endpoints[:min(len(endpoints), MaxPeerEndpoints)] {
 		report = append(report, ep.String())
 	}
-	a.reportMu.Lock()
-	a.lastReport = time.Now()
-	a.reportMu.Unlock()
 	return report
+}
+
+// endpointReportDue is the endpoints this renewal reports: nil (field omitted) while they equal the last
+// accepted report, else the current set, which may be empty: a machine whose candidates are gone says so,
+// so peers stop dialing stale ones (Lane Q: [] stores "no candidates").
+func (a *Authority) endpointReportDue() *[]string {
+	current := a.localEndpointReport()
+	a.reportMu.Lock()
+	defer a.reportMu.Unlock()
+	if a.reported != nil && slices.Equal(*a.reported, current) {
+		return nil
+	}
+	if a.reported == nil && len(current) == 0 {
+		return nil // nothing reported yet and nothing to report
+	}
+	return &current
+}
+
+// endpointsReported records the set the server accepted.
+func (a *Authority) endpointsReported(endpoints []string) {
+	a.reportMu.Lock()
+	defer a.reportMu.Unlock()
+	a.reported = &endpoints
+	a.lastReport = time.Now()
 }
 
 // endpointsChanged schedules one renewal that carries the new endpoints: endpointReportDebounce after the

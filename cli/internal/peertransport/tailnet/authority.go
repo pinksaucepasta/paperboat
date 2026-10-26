@@ -157,6 +157,7 @@ type Authority struct {
 	reportMu        sync.Mutex
 	reportTimer     *time.Timer
 	lastReport      time.Time
+	reported        *[]string // the last endpoint set the server accepted; nil before the first
 	clients         map[string]authorizedClient
 	clientSlots     chan struct{}
 	regional        *RegionalCandidates

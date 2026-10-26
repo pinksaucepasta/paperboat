@@ -46,19 +46,28 @@ func TestEndpointsAreReportedOnlyAfterTheServerTakesThem(t *testing.T) {
 		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
 		return networkToken(t, signer, c), nil
 	}}
-	for range 2 {
+	for range 3 {
 		if err := a.Refresh(t.Context(), client); err != nil {
 			t.Fatal(err)
 		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen[0].Endpoints) != 0 {
-		t.Fatalf("the first request reported %v before the server said it takes reports", seen[0].Endpoints)
+	if seen[0].Endpoints != nil {
+		t.Fatalf("the first request reported %v before the server said it takes reports", *seen[0].Endpoints)
 	}
-	report := seen[1].Endpoints
-	if len(report) == 0 || len(report) > MaxPeerEndpoints || !validPeerEndpoints(report) {
-		t.Fatalf("the second request reported %v, want the engine's normalized candidates", report)
+	if seen[1].Endpoints == nil || len(*seen[1].Endpoints) == 0 || !validPeerEndpoints(*seen[1].Endpoints) {
+		t.Fatalf("the second request reported %v, want the engine's normalized candidates", seen[1].Endpoints)
+	}
+	if seen[2].Endpoints != nil {
+		t.Fatalf("an unchanged set was reported again: %v", *seen[2].Endpoints)
+	}
+	// The engine's candidates are gone: say so explicitly, so peers stop dialing the stale ones.
+	a.mu.Lock()
+	a.clientEngine = nil
+	a.mu.Unlock()
+	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
+		t.Fatalf("a machine without candidates reports %v, want an explicit empty set", due)
 	}
 }
 

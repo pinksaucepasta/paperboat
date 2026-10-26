@@ -37,11 +37,12 @@ type PeerNetworkConfigurationResult struct {
 }
 
 // PeerNetworkConfigurationRequest asks for the signed peer-network configuration. Endpoints are the engine's
-// own candidate addresses, sent only once the server announced EndpointReports.
+// own candidate addresses, sent only once the server announced EndpointReports and only when they changed:
+// nil omits the field (the server keeps its stored set), an empty slice clears it.
 type PeerNetworkConfigurationRequest struct {
 	OperationID    string                 `json:"operation_id"`
 	AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
-	Endpoints      []string               `json:"endpoints,omitempty"`
+	Endpoints      *[]string              `json:"endpoints,omitempty"`
 }
 
 // RelayDenial is the typed error for a refresh that withheld hosted relays, or nil.
