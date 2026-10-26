@@ -94,11 +94,7 @@ func (p *SupervisedProcess) supervise(ctx context.Context) {
 		restarts++
 		p.mu.Unlock()
 
-		wait := p.spec.RestartBackoff << (restarts - 1)
-		if wait > p.spec.RestartMaxWait {
-			wait = p.spec.RestartMaxWait
-		}
-		timer := time.NewTimer(wait)
+		timer := time.NewTimer(restartDelay(p.spec.RestartBackoff, p.spec.RestartMaxWait, restarts))
 		select {
 		case <-timer.C:
 		case <-p.wake:
@@ -185,3 +181,16 @@ func (p *SupervisedProcess) Shutdown(ctx context.Context) error {
 }
 
 var _ Component = (*SupervisedProcess)(nil)
+
+// restartDelay is backoff doubled per earlier restart, capped at maximum. It doubles only while
+// below the cap, so a long run of restarts never overflows to zero or a negative delay.
+func restartDelay(backoff, maximum time.Duration, restart int) time.Duration {
+	wait := min(backoff, maximum)
+	for i := 1; i < restart && wait < maximum; i++ {
+		if wait > maximum/2 {
+			return maximum
+		}
+		wait *= 2
+	}
+	return wait
+}

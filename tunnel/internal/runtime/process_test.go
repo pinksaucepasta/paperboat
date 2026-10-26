@@ -126,3 +126,24 @@ func TestProcessStartHonorsCancellation(t *testing.T) {
 		t.Fatal("canceled child not reaped")
 	}
 }
+
+// Code review (supervised_process.go:97): the restart delay grows by doubling up to its cap and
+// never wraps to zero or a negative value however many restarts came before.
+func TestRestartDelaySaturatesAtItsCap(t *testing.T) {
+	for _, c := range []struct {
+		backoff, maximum time.Duration
+		restart          int
+		want             time.Duration
+	}{
+		{time.Second, time.Minute, 1, time.Second},
+		{time.Second, time.Minute, 3, 4 * time.Second},
+		{time.Second, time.Minute, 7, time.Minute},
+		{time.Second, time.Minute, 64, time.Minute},
+		{time.Second, time.Minute, 1000, time.Minute},
+		{time.Hour, 1<<63 - 1, 70, 1<<63 - 1},
+	} {
+		if got := restartDelay(c.backoff, c.maximum, c.restart); got != c.want {
+			t.Fatalf("restartDelay(%v, %v, %d) = %v, want %v", c.backoff, c.maximum, c.restart, got, c.want)
+		}
+	}
+}
