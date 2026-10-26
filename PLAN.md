@@ -4966,3 +4966,7 @@ Capture tools/device-smoke/results/tunnel-private-access-hp-20261027.json sent t
 
 2026-10-27 | SDK lane C126 fix verification | dev-8f6a24c4 amd64 SHA62170556: hp in-place install/identity preservation PASS both; tunnel-manage/preview-manage PASS, C126 still refuses before listener.
 Exact output/result tunnel-private-access-8f6a24c4-20261027.json sent to Merger; C126 stays unticked. Recreating a ready fixture for their server discovery diagnosis; no product edits.
+
+2026-10-27 | SDK lane C126/F20-03 verification | hp dev-3468410e SHA dd950c78 installed both/preserved identities; server .114/edge .26.10: private access still refuses, public TCP create fails, TLS initial create waits then fails partial. Rows unticked; exact outputs sent to Merger.
+Same-pair tunnel-manage/preview-manage now FAIL creation (prior8f6a24c4/.112/.26.9 PASS); status tunnel_pending/logs3 captured before deletion. Results tunnel-private-access-, tunnel-public-protocols-, tunnel-preview-manage-3468410e-20261027.json under tools/device-smoke/results/.
+Test tunnels/origins/certificates/probes removed, failed preview is stopped, paired machines retained; no product edits. Waits for Merger fixes; echo/TLS handshake/M/W not reached.
