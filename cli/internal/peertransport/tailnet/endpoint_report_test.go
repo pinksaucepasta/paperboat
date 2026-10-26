@@ -141,3 +141,34 @@ func TestTheFirstEndpointReportIsSentEvenWhenEmpty(t *testing.T) {
 		t.Fatalf("an unchanged empty set was reported again: %v", *due)
 	}
 }
+
+// A freshly started engine is marked as accepting peer endpoints only once it sends `endpoints`; until then its
+// configuration carries none and a dial with no usable relay fails. Once the server offers endpoint_reports,
+// the next request goes out at once (on-demand spacing), not after the change debounce.
+func TestTheFirstEndpointReportFollowsTheOfferAtOnce(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	requests := make(chan api.PeerNetworkConfigurationRequest, 8)
+	client := networkAPIFunc{reports: true, requests: func(r api.PeerNetworkConfigurationRequest) { requests <- r }, configuration: func(context.Context, string) (string, error) {
+		c.Generation++
+		c.IssuedAt = time.Now().Unix()
+		c.ExpiresAt = c.IssuedAt + 60
+		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, client, nil) }()
+	defer func() { cancel(); <-done }()
+	first := <-requests
+	if first.Endpoints != nil {
+		t.Fatal("the first request reported before the offer")
+	}
+	select {
+	case second := <-requests:
+		if second.Endpoints == nil {
+			t.Fatal("the request after the offer carried no endpoints")
+		}
+	case <-time.After(2500 * time.Millisecond):
+		t.Fatal("no report within 2.5 s of the offer")
+	}
+}

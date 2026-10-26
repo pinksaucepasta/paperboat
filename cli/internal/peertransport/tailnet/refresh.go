@@ -98,7 +98,11 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		a.RequestRefresh() // ask for membership grants on the next renewal
 	}
 	if a.endpointReports.Swap(result.EndpointReports) != result.EndpointReports && result.EndpointReports {
-		a.endpointsChanged() // the server takes reports from now on: send ours with the next renewal
+		// The server takes reports from now on: report at once, not after the change debounce. Until this
+		// endpoint has sent `endpoints` the server does not mark it as accepting peer endpoints, so its
+		// configuration has none and a dial with no usable relay fails (pbvm2: 30 s ping timeout and a
+		// 16.7 s first exec from a daemon whose engine had just started).
+		a.RequestRefresh()
 	}
 	if result.CandidateSet == "" {
 		a.relay.mu.Lock()
