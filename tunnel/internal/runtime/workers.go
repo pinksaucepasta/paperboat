@@ -995,7 +995,7 @@ func canonicalPrivateRouteRules(assignments []control.RouteAssignment) []route.R
 			continue
 		}
 		rules = append(rules, route.RouteRule{
-			ID: assignment.RouteID, Revision: assignment.Revision,
+			ID: assignment.RouteID, RouteID: assignment.RouteID, Revision: assignment.Revision, RouteGeneration: assignment.Revision,
 			AssignmentID: assignment.AssignmentID, AssignmentGeneration: assignment.AssignmentGeneration,
 			AccountID: assignment.AccountID, HostID: assignment.HostID, TunnelID: assignment.TunnelID,
 			ConnectorID: assignment.ConnectorID, ConnectorSessionID: assignment.ConnectorSessionID,
