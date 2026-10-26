@@ -53,6 +53,7 @@ async function phase(page) {
     const overlay = document.querySelector(".terminal-host ~ div p.font-medium")?.textContent ?? ""
     if (overlay) return `overlay:${overlay.trim()}`
     if (new RegExp(busy).test(status)) return "busy"
+    if (/Connection lost|No access|Terminal closed|Disconnected|limit reached/.test(document.body.innerText)) return "failed"
     return document.querySelector(".terminal-host textarea, textarea") ? "attached" : "loading"
   }, BUSY.source)
 }

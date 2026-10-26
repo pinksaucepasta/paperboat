@@ -41,6 +41,8 @@ class Client(Terminal):
     """One attached pb client. ready() waits for a shell that answers a marker."""
 
     def ready(self, timeout=90):
+        # Keys typed before the shell enables bracketed paste are lost by its line editor.
+        self.expect(b'\x1b[?2004h', timeout)
         self.expect(self.marker('READY', 'stty -echo; '), timeout)
 
     def run(self, command, timeout=60):
@@ -156,8 +158,12 @@ def leave_rejoin(a, sessions):
         c2.run("seq -f 'LR%g' 1 2000", 60)
         c1 = attach(a.target, s['id'])
         c1.settle(2)
-        ok, why = exactly_once(bytes(c1.output), b'LR', 1, 2000)
-        row('N2 rejoin: output made while away is replayed exactly once', ok, why)
+        # A fresh client joins at the live edge with a redraw and recent scrollback (as tmux does),
+        # so the replay is a tail: it must be contiguous, end at the newest line and repeat nothing.
+        got = [int(n) for n in lines(bytes(c1.output), b'LR')]
+        ok = bool(got) and got[-1] == 2000 and got == list(range(got[0], 2001))
+        row('N2 rejoin: replay is a contiguous tail ending at the newest line, nothing repeated', ok,
+            f'{len(got)} of 2000 lines shown' if got else 'no lines')
         c1.run('true')
         row('N2 rejoin: the rejoined window types again', True)
     finally:
@@ -312,7 +318,8 @@ def resize_storm(a, sessions):
 
 
 def large_paste(a, sessions):
-    """W11: a 256 KiB paste (bracketed) reaches the program byte for byte."""
+    """W11: a 256 KiB paste reaches the program byte for byte; a bracketed paste at the shell
+    prompt is inserted as one edit and runs only on Enter."""
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
@@ -321,11 +328,24 @@ def large_paste(a, sessions):
         path = '/tmp/' + name + '.paste'
         c1.send('stty raw -echo; head -c ' + str(len(body)) + ' > ' + path + '; stty sane -echo\r')
         time.sleep(1)
-        c1.send('\x1b[200~')
         c1.send(body)
-        c1.send('\x1b[201~')
         out = c1.run('sha256sum ' + path + '; rm -f ' + path, 120)
         row('N8 256 KiB paste arrives byte for byte', want.encode() in out)
+        c1.send('stty echo\r')
+        c1.settle(1)
+        one, two = uuid.uuid4().hex, uuid.uuid4().hex
+        c1.send("\x1b[200~printf '%s_%s\\n' PB_P1 " + one + "\nprintf '%s_%s\\n' PB_P2 " + two + "\x1b[201~")
+        c1.settle(2)
+        early = b'PB_P1_' + one.encode() in bytes(c1.output)
+        c1.send('\r')
+        try:
+            c1.expect('PB_P2_' + two, 30)
+            ran = bytes(c1.output).count(b'PB_P1_' + one.encode()) == 1
+        except RuntimeError:
+            ran = False
+        row('N8b bracketed paste at the prompt waits for Enter, then runs each line once', not early and ran,
+            'ran before Enter' if early else ('' if ran else 'did not run once after Enter'))
+        c1.send('stty -echo\r')
     finally:
         c1.close()
 
