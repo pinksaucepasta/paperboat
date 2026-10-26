@@ -125,7 +125,9 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	// platform ran one at a time (Lane A: 10 concurrent setups ~430 ms apart). Lane X S2.
 	// Prior art: NetBird management locks per account (GetAccountWithLock), Tailscale control per node;
 	// neither serializes unrelated nodes' session setup.
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	wakePeers := false
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		wakePeers = false
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
 			if err := workspace.ValidateTx(ctx, tx, in.UserID, scope); err != nil {
@@ -215,10 +217,18 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		if !in.TeamID.Valid {
 			return nil // the account's own machines are always in each other's peer network
 		}
-		// Team access can come from another account, new to the host's signed peer network: wake
-		// its refresh now instead of leaving the connection to wait for the periodic one.
-		return machineevents.Publish(ctx, tx, []string{in.UserMachineID}, machineevents.TopicPeerNetwork)
+		wakePeers = true
+		return nil
 	})
+	if err != nil || !wakePeers {
+		return err
+	}
+	// Team access can come from another account, new to the host's signed peer network: wake its refresh now
+	// instead of leaving the connection to wait for the periodic one. Published after the commit, not inside it:
+	// every team session of one machine updates the same topic row, which under SERIALIZABLE made concurrent
+	// sessions conflict until their retries ran out (40001 to the caller). A crash between commit and publish
+	// leaves the host to its periodic refresh.
+	return machineevents.Publish(ctx, s.db.Pool(), []string{in.UserMachineID}, machineevents.TopicPeerNetwork)
 }
 
 func workspaceTeamArgument(ctx context.Context) (bool, sql.NullString) {
