@@ -67,6 +67,23 @@ func TestCustomInstallationPreservesScheduleWithoutOfficialUpdateOperations(t *t
 	if _, err := s.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "settings", Settings: &settings}); !errors.Is(err, ErrCustomInstallation) {
 		t.Fatalf("custom build enabled automatic updates: %v", err)
 	}
+	// An automatic check holds controlMu while it downloads; reading or changing settings must not wait behind it
+	// (`pb update settings` timed out as "unreachable" during a download).
+	s.controlMu.Lock()
+	read := make(chan error, 1)
+	go func() {
+		_, err := s.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "settings"})
+		read <- err
+	}()
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatalf("settings read failed: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("a settings request waited behind a running check")
+	}
+	s.controlMu.Unlock()
 	response, err := s.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "settings"})
 	if err != nil || response.Settings == nil || response.Settings.Enabled || response.Settings.LocalTime != "04:30" || !response.NextMaintenanceAt.IsZero() {
 		t.Fatalf("custom settings report enabled updates: %+v %v", response, err)

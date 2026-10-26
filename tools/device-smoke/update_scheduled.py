@@ -3,7 +3,8 @@
 
 Usage: update_scheduled.py [--lead-minutes N]
 Run on a paired, healthy official install that is older than the newest official release (`pb update
-check` says an update is available). Nothing here runs `pb update`: the machine must do it on its own.
+check` says an update is available). Nothing here installs: the machine must do that on its own (the release is only
+downloaded ahead).
   1. disabled: `--auto=false --time T1` persists (settings and status agree, no next maintenance); the
      machine stays on its version past T1 (disabling keeps manual updates only)
   2. enabled: `--auto=true --time T2` persists with the next maintenance at T2; before T2 the machine is
@@ -143,6 +144,9 @@ def main():
     assert check['update_available'] and check['installed_version'] == before, \
         'needs an official install older than the newest release: %r' % check
     latest = check['latest_version']
+    # Only the download happens here, never the install: an installed updater older than 2026.10.26.4 blocks settings
+    # reads while its automatic check downloads, which failed the schedule step below.
+    run('update', 'download', timeout=300)
     try:
         disabled_time = disabled_phase(before)
         time_set, seconds_after, next_run = scheduled_phase(args.lead_minutes, before, latest)

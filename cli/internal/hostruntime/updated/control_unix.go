@@ -194,8 +194,8 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 	}
 	switch request.Operation {
 	case "settings":
-		s.controlMu.Lock()
-		defer s.controlMu.Unlock()
+		// No controlMu: settings are one atomic file, and the automatic check re-reads them before it installs.
+		// Behind the lock, a settings read or change timed out ("unreachable") while a check downloaded a release.
 		settings, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, request.Settings)
 		if err != nil {
 			return ControlResponse{}, err

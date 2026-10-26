@@ -59,7 +59,11 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	if candidate.ID != "" {
 		result.Version = candidate.Version
 	}
-	if !due {
+	// The download can take a while and settings change meanwhile: decide on the settings as they are now.
+	if settings, err = machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil); err != nil {
+		return result, err
+	}
+	if due = settings.MaintenanceDue(time.Now(), state); !due {
 		return result, nil
 	}
 	if candidate.ID == "" {
