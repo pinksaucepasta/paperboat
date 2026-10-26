@@ -3818,3 +3818,19 @@ func TestPairedMachineHasALocalAddressLease(t *testing.T) {
 		t.Fatalf("machine list after pairing: %+v, %v; want the machine with its address", items, err)
 	}
 }
+
+func TestObservedFileTransferModesIsAcceptedPostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID, machineID := "usr_ftm_"+suffix, "um_ftm_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$1,$1||'@example.test','active')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,observed_capabilities) VALUES ($1,$2,$1,'linux','amd64','/w','online','occupied',true,ARRAY['file_receive','file_transfer_modes'])`, machineID, userID); err != nil {
+		t.Fatalf("a destination observing file_transfer_modes was refused: %v", err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['file_receive','unknown_capability'] WHERE id=$1`, machineID); err == nil {
+		t.Fatal("an unknown observed capability was accepted")
+	}
+}
