@@ -2695,6 +2695,13 @@ WHERE NOT EXISTS (
     AND prior.edge_node_id = $2
     AND prior.edge_process_epoch <> $3
     AND prior.edge_assignment_generation >= $4
+    -- An engine assignment keeps its generation across an edge restart: the node's current process
+    -- epoch supersedes an older epoch's row at the same generation.
+    AND NOT EXISTS (
+      SELECT 1 FROM control_tunnel_nodes AS node
+      WHERE node.id = $2 AND node.process_epoch = $3
+        AND prior.edge_assignment_generation = $4
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM tunnel_certificate_records AS platform
