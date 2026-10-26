@@ -125,7 +125,7 @@ async function closeTerminal(context, id) {
 }
 const sttySize = async (page) => {
   const out = await run(page, "stty size")
-  const m = out && [...out.matchAll(/^(\d+) (\d+)$/gm)].pop()
+  const m = out && [...out.matchAll(/^(\d+)[ \u00a0](\d+)$/gm)].pop()
   return m ? `${m[1]}x${m[2]}` : null
 }
 
