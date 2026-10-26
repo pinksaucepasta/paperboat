@@ -1748,8 +1748,13 @@ same membership is not enough; two viewers of one share stay unpaired). Mesh and
 directions, so they keep a full mesh. One index lookup per pair. Relay-control peers become "same account and
 both hold the account's network membership". Disco keys come from each grant's own signed field. Memory per
 grant becomes O(memberships) (a mesh endpoint: one entry), independent of the account's size.
-Contract order: relay accepts `memberships` (the relay ignores per-peer lists when present) → CLI accepts and
-forwards it → server signs it (Lane B) → per-peer lists and MaxMergedPeers removed. Test: 10,000 endpoints of
+Rollout (agreed with Lane B 2026-10-26): a grant has one shape, so the server chooses per endpoint and the relay
+pairs a per-peer grant with a membership grant. Order: (1) every relay node on ≥ 37b5b38f (accepts memberships);
+(2) the server accepts the request field `membership_grants`; (3) its configuration answer offers
+`membership_grants: true`; (4) clients ≥ b1e33786 then ask with `"membership_grants": true`, verify every
+membership against their signed configuration and take relay-control peers from the mesh membership; (5) the
+server issues membership-only grants to identities that asked, per-peer grants to the rest; (6) once no
+per-peer client remains, per-peer lists, MaxMergedPeers and the client's relay-control cap are removed. Test: 10,000 endpoints of
 one account registered on one relay, heap per grant and pair-check time (budget: < 1 KiB per mesh grant,
 < 1 µs for a pair's first check with grants spread over memory, < 100 ns per datagram after it, as the
 connection remembers its pair until a grant changes), plus the existing revocation, quota and cross-account refusal tests.
