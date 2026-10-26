@@ -50,6 +50,8 @@ export type BrowserTerminalAPI = {
     id: string,
     payload: Record<string, unknown>,
   ): Promise<{ result?: unknown; error?: string; message?: string }>
+  /** This window gained focus: the machine sizes the shell to the typing window that was last active. */
+  activity(id: string): Promise<void | { error: string; message: string }>
   leave(id: string): void
   dispose(): void
 }
@@ -73,7 +75,7 @@ function nextTask(run: () => void) {
 }
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
-  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261022-inspector1`, {
+  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261026-activity1`, {
     type: "module",
     name: "paperboat-terminal",
   })
@@ -220,6 +222,7 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
       return call("sendInput", [id, copy], copy.byteLength)
     },
     resize: (id, columns, rows) => call("resize", [id, columns, rows]),
+    activity: (id) => call("activity", [id]),
     ack: (id, next) => call("ack", [id, next]),
     hashFile: (file) => call("hashFile", [file]),
     fileRequest: (id, request) => {

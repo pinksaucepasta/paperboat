@@ -205,7 +205,6 @@ export function useTerminalConnection({
   const ackSequenceRef = useRef("0")
   const pendingAckRef = useRef<{ connectionID: string; next: string; sending: boolean } | null>(null)
   const displaySequenceRef = useRef<string | null>(null)
-  const resizeControlRef = useRef(false)
   const reconnectTimerRef = useRef<number | undefined>(undefined)
   const resizeTimerRef = useRef<number | undefined>(undefined)
   const ticketAbortRef = useRef<AbortController | null>(null)
@@ -224,6 +223,14 @@ export function useTerminalConnection({
     // Recolours what's already on screen too: the core re-resolves its cells.
     terminalRef.current?.write(paletteSequence(theme))
   }, [theme])
+
+  // The machine sizes the shell to the typing window that was last active; focusing counts, typing
+  // does on its own. Viewers have no say.
+  const markActive = useCallback(() => {
+    const browser = apiRef.current
+    if (!browser || !connectionIDRef.current || phaseRef.current !== "attached" || roleRef.current === "viewer") return
+    void browser.activity(connectionIDRef.current).catch(() => undefined)
+  }, [])
 
   const writeTerminal = useCallback((data: Uint8Array | string) => {
     terminalRef.current?.write(data)
@@ -440,6 +447,9 @@ export function useTerminalConnection({
         fittingRef.current = false
       }
     }
+    const onActive = () => {
+      if (document.visibilityState === "visible") markActive()
+    }
     const onPasteCapture = (event: ClipboardEvent) => {
       const selection = classifyFilePaste(event.clipboardData)
       if (selection.kind === "text") return
@@ -512,8 +522,7 @@ export function useTerminalConnection({
           onResize: (columns, rows) => {
             if (
               !fittingRef.current ||
-              !resizeControlRef.current ||
-              roleRef.current !== "owner" ||
+              roleRef.current === "viewer" ||
               phaseRef.current !== "attached" ||
               !connectionIDRef.current ||
               !apiRef.current
@@ -547,9 +556,12 @@ export function useTerminalConnection({
         coreRef.current = core
         fitRef.current = fit
         observer = new ResizeObserver(() => {
-          if (resizeControlRef.current && roleRef.current === "owner" && phaseRef.current === "attached") fit()
+          // The machine decides whose size wins (the window last active); every typing window offers its own.
+          if (roleRef.current !== "viewer" && phaseRef.current === "attached") fit()
         })
         observer.observe(host)
+        window.addEventListener("focus", onActive)
+        document.addEventListener("visibilitychange", onActive)
         host.addEventListener("paste", onPasteCapture, true)
         host.addEventListener("dragenter", onDragEnter, true)
         host.addEventListener("dragover", onDragOver, true)
@@ -572,6 +584,8 @@ export function useTerminalConnection({
       disposed = true
       setReady(false)
       observer?.disconnect()
+      window.removeEventListener("focus", onActive)
+      document.removeEventListener("visibilitychange", onActive)
       host.removeEventListener("paste", onPasteCapture, true)
       host.removeEventListener("dragenter", onDragEnter, true)
       host.removeEventListener("dragover", onDragOver, true)
@@ -584,7 +598,7 @@ export function useTerminalConnection({
       coreRef.current = null
       fitRef.current = null
     }
-  }, [sessionID, hostRef, uploadFiles, setPhaseValue, showFilePasteNotice])
+  }, [sessionID, hostRef, uploadFiles, setPhaseValue, showFilePasteNotice, markActive])
 
   const acknowledge = useCallback((connectionID: string, next: string) => {
     if (
@@ -704,8 +718,6 @@ export function useTerminalConnection({
           mobileModifiersRef.current = noMobileModifiers
           setMobileModifiers(noMobileModifiers)
         }
-        // A resync is the same attachment: it keeps the size control it had.
-        if (!resync) resizeControlRef.current = nextRole === "owner" && !!event.first_attachment
         const screenSequence = normalizeSequence(event.screen_sequence)
         try {
           // The host's screen is authoritative on every attach. Reset through wterm so partial
@@ -724,7 +736,7 @@ export function useTerminalConnection({
           return
         }
         requestAnimationFrame(() => {
-          if (connectionIDRef.current === connectionID && resizeControlRef.current) fitRef.current?.()
+          if (connectionIDRef.current === connectionID && roleRef.current !== "viewer") fitRef.current?.()
         })
         return
       }
@@ -932,11 +944,11 @@ export function useTerminalConnection({
     else window.location.reload()
   }, [startConnection])
 
-  /** Owner only: size the remote terminal to this window. */
+  /** Size the remote terminal to this window: using the window makes it the one the size follows. */
   const fitToWindow = useCallback(() => {
-    resizeControlRef.current = true
+    markActive()
     fitRef.current?.()
-  }, [])
+  }, [markActive])
 
   const toggleMobileModifier = useCallback((modifier: "ctrl" | "alt") => {
     if (inputLocked()) return

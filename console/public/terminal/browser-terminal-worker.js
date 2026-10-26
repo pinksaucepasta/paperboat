@@ -82,7 +82,7 @@ self.onmessage = async ({ data }) => {
         flow.close()
         flows.delete(callbackID)
       }
-    } else if (["createIdentity", "inspectRoot", "discardIdentity", "sendInput", "resize", "ack", "cursor", "hashFile", "fileRequest", "inspectorRequest"].includes(data.method)) {
+    } else if (["createIdentity", "inspectRoot", "discardIdentity", "sendInput", "resize", "activity", "ack", "cursor", "hashFile", "fileRequest", "inspectorRequest"].includes(data.method)) {
       value = await api[data.method](...data.args)
     } else throw new Error("invalid method")
     self.postMessage({ type: "result", id: data.id, value })

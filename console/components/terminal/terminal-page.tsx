@@ -205,7 +205,7 @@ export function TerminalRoom({
                 <UploadSimpleIcon />
               </Action>
             )}
-            {isOwner && (
+            {connection.role !== "viewer" && (
               <Action
                 label="Use my window size"
                 disabled={connection.phase !== "attached"}
