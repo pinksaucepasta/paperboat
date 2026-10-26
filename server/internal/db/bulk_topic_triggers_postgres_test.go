@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
-// Bulk changes publish once per statement, not once per row (F21-10, migration 191): 1,000 access sessions of one
+// Bulk changes publish once per statement, not once per row (F21-10, migration 193): 1,000 access sessions of one
 // machine inserted or revoked in one statement move the machine's machine_access topic once and its endpoint
 // identities' generations once; deactivating 1,000 team members moves each member's inventory topic once in one
 // upsert; replacing 100 machines' service snapshots moves the owner's machine_services topic once. A statement
