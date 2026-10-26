@@ -44,7 +44,8 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 		if i%10 == 0 {
 			account = "other" // a team peer of another account: named, never a control peer
 		}
-		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}})
+		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)},
+			Scopes: []networkScope{{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "dial", 443, 1}}})
 	}
 	for _, size := range []int{maximumRelayControlPeers, maximumRelayGrantPeers} {
 		chunks := relayGrantChunks(self, peers, size, 1)
@@ -100,6 +101,49 @@ func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *t
 	}
 	if peers[0].Scopes[0].ExpiresAt != 0 {
 		t.Fatal("the document's scope was changed in place")
+	}
+}
+
+// P0 2026-10-26: under until_revoked_v1 every CLI peer of a host also carried its offline session rights
+// (machine_access, expires_at 0), so a 64-peer grant went past the relay's 128-scope bound and pairing failed. Session
+// rights authorize no relay pair and stay out of grants; a peer with nothing else is left out; mesh scopes remain.
+func TestRelayGrantsLeaveSessionRightsOutAndStayWithinTheRelayScopeBound(t *testing.T) {
+	self := networkBinding{AccountID: "account", EndpointID: "host"}
+	var peers []networkPeer
+	for i := range 130 {
+		scopes := []networkScope{
+			{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "dial", 443, 0},
+			{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "accept", 443, 0},
+		}
+		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer"} {
+			scopes = append(scopes, networkScope{"machine_access", "host", 7, capability, "accept", 443, 0})
+		}
+		identity := networkBinding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}
+		peers = append(peers, networkPeer{Identity: identity, Scopes: scopes})
+	}
+	// A team member's CLI holds only session rights on this host: no relay pair, so no entry.
+	peers = append(peers, networkPeer{Identity: networkBinding{AccountID: "other", EndpointID: "cli_member", WireGuardPublicKey: "key_member"},
+		Scopes: []networkScope{{"machine_access", "host", 7, "terminal", "accept", 443, 0}}})
+	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, 1234)
+	named := 0
+	for _, chunk := range chunks {
+		total := 0
+		for _, entry := range chunk.peers {
+			named++
+			scopes := entry["scopes"].([]networkScope)
+			total += len(scopes)
+			for _, scope := range scopes {
+				if scope.ResourceKind != "machine_network" || scope.ExpiresAt != 1234 {
+					t.Fatalf("grant scope %+v: want a machine_network scope ending with the grant", scope)
+				}
+			}
+		}
+		if total > 128 || len(chunk.peers) > maximumRelayGrantPeers {
+			t.Fatalf("a grant holds %d scopes for %d peers, the relay accepts 128 scopes", total, len(chunk.peers))
+		}
+	}
+	if named != 130 {
+		t.Fatalf("%d peers named, want the 130 account peers only", named)
 	}
 }
 

@@ -822,16 +822,14 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 			slog.Warn("relay grant omits a peer without a WireGuard key", "site", "network.go:relayGrantChunks")
 			continue
 		}
+		scopes := relayGrantScopes(peer.Scopes, grantExpiry)
+		if len(scopes) == 0 {
+			continue
+		}
 		last := &chunks[len(chunks)-1]
 		if len(last.peers) == size {
 			chunks = append(chunks, relayGrantChunk{})
 			last = &chunks[len(chunks)-1]
-		}
-		scopes := slices.Clone(peer.Scopes)
-		for i := range scopes {
-			if scopes[i].ExpiresAt == 0 {
-				scopes[i].ExpiresAt = grantExpiry
-			}
 		}
 		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": scopes}
 		if peer.Identity.DiscoPublicKey != "" {
@@ -844,6 +842,25 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 		last.control = append(last.control, peer.Identity.WireGuardPublicKey)
 	}
 	return chunks
+}
+
+// relayGrantScopes is the part of a peer's document scopes a relay grant carries. An until-revoked scope that is not a
+// machine_network scope is a session right (offline machine_access): it authorizes no relay pair, the relay pairs on
+// reciprocal machine_network dial and accept scopes, so it stays out; they would also push a grant past the relay's
+// 128-scope bound (P0 2026-10-26: pairing failed with 64 CLI peers x 4 session rights). A machine_network scope with
+// no expiry ends with the grant. The CLI builds the same set to compare a grant with its configuration.
+func relayGrantScopes(scopes []networkScope, grantExpiry int64) []networkScope {
+	out := make([]networkScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.ExpiresAt == 0 {
+			if scope.ResourceKind != "machine_network" {
+				continue
+			}
+			scope.ExpiresAt = grantExpiry
+		}
+		out = append(out, scope)
+	}
+	return out
 }
 
 func peersHaveDiscoKeys(peers []networkPeer) bool {
