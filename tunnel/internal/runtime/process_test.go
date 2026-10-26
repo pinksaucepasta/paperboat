@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -91,4 +92,37 @@ func TestProcessHelper(t *testing.T) {
 		}
 	}
 	select {}
+}
+
+// Code review (process.go:48): a canceled Start spawns no child, and a cancel during the startup
+// grace kills and reaps the child instead of reporting it started.
+func TestProcessStartHonorsCancellation(t *testing.T) {
+	spec := ProcessSpec{Name: "test", Path: os.Args[0], Args: []string{"-test.run=TestProcessHelper", "--", "ignore"}, Env: append(os.Environ(), "PAPERBOAT_PROCESS_HELPER=1"), MaxOutputBytes: 1024, StartupGrace: 10 * time.Second}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	process, err := NewProcess(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Start(canceled); !errors.Is(err, context.Canceled) || process.cmd != nil {
+		t.Fatalf("canceled start = %v, spawned %v", err, process.cmd != nil)
+	}
+	process, err = NewProcess(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	started := time.Now()
+	if err := process.Start(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("start canceled during the grace = %v", err)
+	}
+	if time.Since(started) > 5*time.Second || process.Running() {
+		t.Fatalf("child left running after a canceled start (took %v)", time.Since(started))
+	}
+	select {
+	case <-process.Done():
+	default:
+		t.Fatal("canceled child not reaped")
+	}
 }

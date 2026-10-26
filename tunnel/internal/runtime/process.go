@@ -45,11 +45,18 @@ func NewProcess(spec ProcessSpec) (*Process, error) {
 	return &Process{spec: spec}, nil
 }
 
-func (p *Process) Start(context.Context) error {
+func (p *Process) Start(ctx context.Context) error {
+	if ctx == nil {
+		return ErrProcessInvalid
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.started || p.closed {
 		return ErrProcessInvalid
+	}
+	// A canceled start spawns nothing.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	command := exec.Command(p.spec.Path, p.spec.Args...)
 	command.Env = append([]string(nil), p.spec.Env...)
@@ -78,6 +85,14 @@ func (p *Process) Start(context.Context) error {
 			p.closed = true
 			return fmt.Errorf("child exited during startup: %w", p.waitError())
 		case <-timer.C:
+		case <-ctx.Done():
+			// Canceled during the startup grace: kill the child's group and reap it, never
+			// report a started child.
+			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+			_ = command.Process.Kill()
+			<-p.done
+			p.closed = true
+			return ctx.Err()
 		}
 	}
 	return nil
