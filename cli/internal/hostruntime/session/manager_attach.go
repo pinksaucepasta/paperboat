@@ -339,6 +339,9 @@ func (m *Manager) acknowledgeAtGeneration(sessionID, attachmentID string, nextSe
 	if err != nil || state != Attached {
 		return ErrInvalidInput
 	}
+	if acked, ok := session.history.Acknowledged(attachmentID); ok && nextSequence < acked {
+		return nil // sent before a screen moved this window past it (F3-13); stale, not wrong
+	}
 	return session.history.Acknowledge(attachmentID, nextSequence)
 }
 

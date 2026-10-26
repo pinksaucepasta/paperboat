@@ -952,4 +952,8 @@ func TestBrowserScreenRepeatsUnderAFlood(t *testing.T) {
 		}
 		previous = boundary
 	}
+	// An acknowledgement the browser sent before the last screen arrives after it: stale, and the stream lives on.
+	if err := manager.AcknowledgeAtGeneration(created.ID, "att_browser", previous/2, created.Generation); err != nil {
+		t.Fatalf("an acknowledgement from before the screen: %v", err)
+	}
 }
