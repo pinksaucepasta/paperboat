@@ -136,7 +136,6 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	}
 	setString("PAPERBOAT_ENV", (*string)(&c.Environment))
 	setString("PAPERBOAT_HTTP_ADDRESS", &c.HTTP.Address)
-	setString("PAPERBOAT_SYNC_ADDRESS", &c.Sync.Address)
 	setString("PAPERBOAT_PUBLIC_BASE_URL", &c.HTTP.PublicBaseURL)
 	setString("PAPERBOAT_BROWSER_LOGIN_ORIGIN", &c.HTTP.BrowserLoginOrigin)
 	setString("PAPERBOAT_DATABASE_DRIVER", &c.Database.Driver)

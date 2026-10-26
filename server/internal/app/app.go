@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +66,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
-	syncpkg "github.com/pinksaucepasta/paperboat/server/internal/sync"
 	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -1063,27 +1061,6 @@ func New(opts Options) (*App, error) {
 	if certificateRuntime != nil && certificateRuntime.PlatformWorker != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_platform_certificates", certificateRuntime.PlatformWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 3), progress))
 	}
-	var syncServer *syncpkg.Server
-	if opts.Config.Sync.Address != "" {
-		var syncErr error
-		certificate, certErr := tls.LoadX509KeyPair(opts.Config.Sync.TLSCertFile, opts.Config.Sync.TLSKeyFile)
-		if certErr != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("load sync TLS certificate: %w", certErr)
-		}
-		syncService, serviceErr := syncpkg.NewService(deviceAuthService, &syncpkg.SQLAuthority{DB: store, Services: machineServices})
-		if serviceErr != nil {
-			_ = store.Close()
-			return nil, serviceErr
-		}
-		syncService.SetSupportReporter(supportService)
-		syncServer, syncErr = syncpkg.StartServer(opts.Config.Sync.Address, syncService, certificate)
-		if syncErr != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("start control sync server on %s: %w", opts.Config.Sync.Address, syncErr)
-		}
-	}
-
 	application := &App{
 		supportReports: supportService,
 		selfhost:       selfhostService,
@@ -1091,7 +1068,6 @@ func New(opts Options) (*App, error) {
 		cfg:            opts.Config,
 		logger:         opts.Logger,
 		db:             store,
-		syncServer:     syncServer,
 		server: &http.Server{
 			Addr:              opts.Config.HTTP.Address,
 			Handler:           router,

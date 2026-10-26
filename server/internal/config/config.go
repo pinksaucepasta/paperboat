@@ -80,7 +80,6 @@ type Config struct {
 	CLIAuth               CLIAuth                  `json:"cli_auth"`
 	GitHub                GitHub                   `json:"github"`
 	Access                Access                   `json:"access"`
-	Sync                  SyncConfig               `json:"sync"`
 	Diagnostics           Diagnostics              `json:"diagnostics"`
 	Retention             Retention                `json:"retention"`
 	Notifications         Notifications            `json:"notifications"`
@@ -352,12 +351,6 @@ type Providers struct {
 
 type ProviderConfig struct {
 	BaseURL string `json:"base_url"`
-}
-
-type SyncConfig struct {
-	Address     string `json:"address"`
-	TLSCertFile string `json:"tls_cert_file"`
-	TLSKeyFile  string `json:"tls_key_file"`
 }
 
 type Access struct {
@@ -728,9 +721,6 @@ func (c Config) Validate() error {
 	}
 	if c.TerminalSessions.OperationTimeout <= 0 || c.TerminalSessions.RetryBackoff <= 0 || c.TerminalSessions.WorkerInterval <= 0 || c.TerminalSessions.MaxAttemptsBeforeAlert <= 0 {
 		errs = append(errs, fmt.Errorf("terminal_sessions limits and timings must be positive"))
-	}
-	if c.Sync.Address != "" && (c.Sync.TLSCertFile == "" || c.Sync.TLSKeyFile == "") {
-		return errors.New("sync listener requires TLS certificate and key files")
 	}
 
 	if c.ConfigSync.MaxFileBytes < 1 || c.ConfigSync.MaxFileBytes > 100<<20 ||

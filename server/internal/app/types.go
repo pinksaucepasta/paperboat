@@ -6,7 +6,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/jobmonitor"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
-	syncpkg "github.com/pinksaucepasta/paperboat/server/internal/sync"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -47,7 +46,6 @@ type App struct {
 	logger               *slog.Logger
 	db                   *db.DB
 	server               *http.Server
-	syncServer           *syncpkg.Server
 	worker               *workers.Supervisor
 	certificateRuntime   *tunnelv1.CertificateRuntime
 	telemetryEvents      *telemetry.EventLog

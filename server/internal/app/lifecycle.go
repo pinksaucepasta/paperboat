@@ -128,9 +128,6 @@ func (a *App) Run(ctx context.Context) error {
 	if a.telemetryMetrics != nil {
 		_ = a.telemetryMetrics.IncCounter(telemetry.MetricServiceRestarts, telemetry.MetricLabels{"outcome": "success"})
 	}
-	if a.syncServer != nil {
-		defer a.syncServer.GracefulStop()
-	}
 	a.updateServiceTelemetry(telemetry.StatusReady, "running", "Control-plane service is running.", "", telemetry.RetryNone, time.Time{})
 	serverErrors := make(chan error, 1)
 	workerErrors := make(chan error, 1)
@@ -169,10 +166,6 @@ func (a *App) Run(ctx context.Context) error {
 		workerErrors <- err
 	}()
 
-	var syncErrors <-chan error
-	if a.syncServer != nil {
-		syncErrors = a.syncServer.Done()
-	}
 	var runErr error
 	failureCode := "service_failure"
 	var workerErr error
@@ -180,12 +173,6 @@ func (a *App) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		runErr = ctx.Err()
-	case err := <-syncErrors:
-		failureCode = "control_sync_failed"
-		runErr = errors.New("control sync listener stopped unexpectedly")
-		if err != nil {
-			runErr = fmt.Errorf("control sync listener: %w", err)
-		}
 	case err := <-serverErrors:
 		failureCode = "http_server_failed"
 		if err != nil {
@@ -204,10 +191,6 @@ func (a *App) Run(ctx context.Context) error {
 
 	if runErr != nil && supportreport.ProjectFault(ctx, "paperboat-server", "service_lifecycle", "service_error", "service_failed", runErr).Cause != "context_canceled" && failureCode != "worker_failed" && a.supportReports != nil {
 		captureLifecycleFailure(a.supportReports, "service_error", failureCode, runErr)
-	}
-
-	if a.syncServer != nil {
-		a.syncServer.GracefulStop()
 	}
 
 	// Stop and join workers before closing the certificate hub or database. A

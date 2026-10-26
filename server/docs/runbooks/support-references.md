@@ -57,7 +57,7 @@ does not claim to establish MFA assurance.
 ## What is recorded
 
 The server captures 5xx failure codes and panic source stacks at the failure boundary,
-plus unexpected HTTP/control-sync listener and required-worker failures.
+plus unexpected HTTP listener and required-worker failures.
 Expected 4xx rejections are not error events; operational logs/metrics record their rejected outcome. Panics retain their original goroutine stack;
 raw panic values are not logged or reported. The SDK event is reconstructed from approved
 reference/component/stage/code/release fields and code frame identity, removing absolute
