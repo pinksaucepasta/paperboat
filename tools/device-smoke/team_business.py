@@ -15,6 +15,7 @@ Usage: team_business.py --team paperboat-smoke-paid \
          --s3-origin 10.0.0.12:7070 --s3-list-cmd 'ssh hp docker exec -i lanes-s3'
 """
 import argparse
+import os
 import csv
 import io
 import json
@@ -436,7 +437,7 @@ def main():
     p.add_argument('--cmd', required=True)
     p.add_argument('--pb', default='/home/tester/.local/bin/pb')
     p.add_argument('--s3-root', default='/tmp/vgw', help='the store\'s data directory in --s3-list-cmd')
-    p.add_argument('--api', default='https://api.pprbt.dev')
+    p.add_argument('--api', default=os.environ.get('PB_API'), required='PB_API' not in os.environ, help='the API origin, e.g. https://api.example.test (or PB_API)')
     p.add_argument('--member', default='', help='the member whose role changes (not directory-managed)')
     p.add_argument('--identity-commands', action='store_true', help='also run sso setup/enforce/exempt and scim setup/map (C255-C260); only on a team the check owns')
     p.add_argument('--alias', default='', help='this machine\'s name, for the F19-07 access steps')

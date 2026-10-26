@@ -13,7 +13,7 @@ Users alice and bob (@DOMAIN), groups eng (alice) and finance (bob). Commands:
   touch U              change U's family name (any change makes WorkOS send an event)
   users | groups       list them
 
-Usage: scim_idp.py [--dir ~/lanes-scim] [--domain sso-test.pprbt.dev] COMMAND [USER]
+Usage: scim_idp.py [--dir ~/lanes-scim] --domain sso-test.example.test COMMAND [USER]   (or PB_SCIM_DOMAIN)
 """
 import argparse
 import json
@@ -55,7 +55,7 @@ class Directory:
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--dir', default=os.path.expanduser('~/lanes-scim'))
-    p.add_argument('--domain', default='sso-test.pprbt.dev')
+    p.add_argument('--domain', default=os.environ.get('PB_SCIM_DOMAIN'), required='PB_SCIM_DOMAIN' not in os.environ, help='the test IdP domain, e.g. sso-test.example.test (or PB_SCIM_DOMAIN)')
     p.add_argument('command')
     p.add_argument('user', nargs='?')
     a = p.parse_args()
