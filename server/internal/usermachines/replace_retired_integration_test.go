@@ -65,7 +65,7 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 	}
 	slotOf := func(id string) (slot int) {
 		t.Helper()
-		if err := store.SQL().QueryRowContext(ctx, `SELECT address_slot FROM paperboat.ensure_control_sync_lease($1)`, id).Scan(&slot); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT leased_slot FROM paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, id).Scan(&slot); err != nil {
 			t.Fatal(err)
 		}
 		return

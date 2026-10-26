@@ -39,8 +39,8 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 		}
 		return items, time.Since(started)
 	}
-	// Each machine's control sync connection allocates its local address lease (listing only reads it).
-	if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_control_sync_lease(id) FROM paperboat.user_machines WHERE user_id=$1`, owner); err != nil {
+	// Pairing allocates each machine's local address lease (listing only reads it).
+	if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_machine_address_leases($1, ARRAY(SELECT id FROM paperboat.user_machines WHERE user_id=$1))`, owner); err != nil {
 		t.Fatal(err)
 	}
 	list()

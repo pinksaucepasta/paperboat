@@ -67,7 +67,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	}
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+host, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, host, owner, "env_"+host)
-	exec(`SELECT paperboat.ensure_control_sync_lease($1)`, host)
+	exec(`SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, host)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, team, owner, member, revokedMember, suspendedMember)

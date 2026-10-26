@@ -862,12 +862,11 @@ func replaceInstallationClientSession(material []byte, session installationClien
 	return json.Marshal(fields)
 }
 
-// ensureMachineAddressLease gives a machine its local-address lease when its seat is occupied, in the same
-// transaction. Since 05862b9b machine lists only read leases (allocating there took a table lock per list), so
-// pairing is where a new machine gets one; without it the daemon cannot bind the machine's local address and
-// private access fails (prod 2026-10-25: 14 machines had none).
+// ensureMachineAddressLease gives a machine its owner's local-address lease when its seat is occupied, in the same
+// transaction, so pairing leaves no machine without an address (prod 2026-10-25: 14 machines had none). Other accounts
+// that can see the machine get theirs on first sight (ensureViewerLeases).
 func ensureMachineAddressLease(ctx context.Context, tx *db.Tx, machineID string) error {
-	_, err := tx.Exec(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machineID)
+	_, err := tx.Exec(ctx, `SELECT paperboat.ensure_machine_address_leases(m.user_id, ARRAY[m.id]) FROM paperboat.user_machines m WHERE m.id=$1`, machineID)
 	return err
 }
 

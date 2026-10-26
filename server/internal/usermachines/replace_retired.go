@@ -86,7 +86,7 @@ func adoptControlSyncLease(ctx context.Context, tx *db.Tx, retiredID, replacemen
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.control_sync_leases r WHERE r.machine_id=$2
- AND EXISTS(SELECT 1 FROM paperboat.control_sync_leases o WHERE o.machine_id=$1 AND o.account_id IS NOT DISTINCT FROM r.account_id)`, retiredID, replacementID); err != nil {
+ AND EXISTS(SELECT 1 FROM paperboat.control_sync_leases o WHERE o.machine_id=$1 AND o.account_id=r.account_id)`, retiredID, replacementID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE paperboat.control_sync_leases SET machine_id=$2 WHERE machine_id=$1`, retiredID, replacementID)

@@ -169,7 +169,7 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The machine's control sync connection allocates its canonical address (the inventory only reads it).
-		if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_control_sync_lease($1)`, machine); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, machine); err != nil {
 			t.Fatal(err)
 		}
 		_, _, quic := networkEndpointTLS(t, machine, now)

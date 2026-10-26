@@ -49,7 +49,8 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 	if scoped && scope.TeamID != "" {
 		teamID = scope.TeamID
 	}
-	// The local address lease is read, never allocated here: a machine gets one when it connects to control sync.
+	// The viewer's own local address lease is read here, never allocated by this query (allocating inside the list
+	// took a table lock per list: 29 s for a 100-machine account).
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,
  CASE WHEN NOT $3::boolean THEN (m.owner_team_id IS NULL AND m.user_id=$1 AND m.deleted_at IS NULL) OR machine_management_allowed($1,m.id)
       WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL
@@ -60,11 +61,11 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
         WHEN $4::text IS NULL THEN m.user_id=$1 AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL
         ELSE team_machine_capability_allowed($1,$4,m.id,capability) END),'[]'::json),
  coalesce(l.address_slot, 0), EXISTS(SELECT 1 FROM paperboat.peer_network_identities n JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.revoked_at IS NULL AND c.expires_at>now() WHERE n.machine_id=m.id AND n.machine_generation=m.installation_generation AND n.revoked_at IS NULL)
- FROM user_machines m LEFT JOIN LATERAL (SELECT x.address_slot FROM paperboat.control_sync_leases x WHERE x.machine_id=m.id
-  ORDER BY x.account_id=$1 DESC LIMIT 1) l ON true WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
+ FROM user_machines m LEFT JOIN paperboat.control_sync_leases l ON l.account_id=$1 AND l.machine_id=m.id WHERE m.id=ANY($2::text[])`, account, ids, scoped, teamID)
 	if err != nil {
 		return err
 	}
+	var unleased []string
 	for rows.Next() {
 		var id string
 		var manage, shared bool
@@ -79,6 +80,8 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 		machine.NetworkApproved = machineApproved
 		if slot > 0 {
 			machine.AssignedIP = machineaddress.FromSlot(slot).String()
+		} else if machineApproved {
+			unleased = append(unleased, id)
 		}
 		if err := json.Unmarshal(permissions, &machine.Permissions); err != nil {
 			return errors.Join(err, rows.Close())
@@ -87,7 +90,35 @@ func (s *Service) describeMachineAccess(ctx context.Context, account string, mac
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
+	if err := s.ensureViewerLeases(ctx, account, unleased, byID); err != nil {
+		return err
+	}
 	return s.describeTags(ctx, account, teamID, ids, byID)
+}
+
+// ensureViewerLeases gives the viewer its own local-address lease for each network-approved machine it sees without one
+// (a team machine on first sight; an owner's machine always has its lease from pairing) and sets the machines' addresses.
+// It is a separate statement after the list query, set-based and serialized per account by an advisory lock: it runs
+// once per viewer and machine, never on a list of machines that already have their leases, and takes no table lock.
+func (s *Service) ensureViewerLeases(ctx context.Context, account string, machineIDs []string, byID map[string]*UserMachine) error {
+	if len(machineIDs) == 0 {
+		return nil
+	}
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT leased_machine,leased_slot FROM paperboat.ensure_machine_address_leases($1,$2::text[])`, account, machineIDs)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var slot int
+		if err := rows.Scan(&id, &slot); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		if machine := byID[id]; machine != nil && slot > 0 {
+			machine.AssignedIP = machineaddress.FromSlot(slot).String()
+		}
+	}
+	return errors.Join(rows.Err(), rows.Close())
 }
 
 // describeTags sets each machine's tags from the selected workspace's policy file (the team's,

@@ -247,7 +247,7 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions,
  OR ($2::boolean AND $3::text IS NOT NULL AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=$3 AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=$1 AND member.active)
  AND ((m.owner_team_id=$3 AND machine_management_allowed($1,m.id)) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE team_machine_capability_allowed($1,$3,m.id,cap)))))
  AND ($4='' OR position(lower($4) in lower(m.alias||' '||m.id||' '||coalesce((SELECT '127.100.'||(l.address_slot/256)||'.'||(l.address_slot%256)
-  FROM control_sync_leases l WHERE l.machine_id=m.id ORDER BY l.account_id=$1 DESC LIMIT 1),'')))>0 OR lower(m.alias)=split_part(lower($4),'.',1))
+  FROM control_sync_leases l WHERE l.account_id=$1 AND l.machine_id=m.id),'')))>0 OR lower(m.alias)=split_part(lower($4),'.',1))
  AND ($5='' OR ($5='revoked' AND (m.revoked_at IS NOT NULL OR m.state IN ('revoked','disconnected'))) OR ($5<>'revoked' AND m.state=$5))`
 	if !withRevoked {
 		// Without a state filter the list is the machines in use: revoked and disconnected ones (revoked_at set)

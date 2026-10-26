@@ -1896,7 +1896,7 @@ addresses shared by all users of one host (stated, not a platform cap).
 **1. Addresses (server, Lane Q, agreed).** Lease per (viewer account, machine): unique (account_id, machine_id) and
 (account_id, slot), lowest free slot in 127.100/16; existing rows keep their slot under the owner account; other viewers
 of a team machine get their own slot on first sight; no quarantine (the guard keys by machine, see 2); 54000 per account
-past 64,770. Team machines: one slot per viewer (stable for the viewer; a raw IP is not shareable between teammates).
+past 65,023. Team machines: one slot per viewer (stable for the viewer; a raw IP is not shareable between teammates).
 **2. Guard state per (uid, account, machine), with lifetimes.** The guard derives the uid from the kernel (SO_PEERCRED on
 its unix socket; never from the request) and reserves atomically under its registry lock. `claims[(uid, account_id,
 machine_id)] = {ip, port set}`; account_id is the immutable server id, never a handle. The first claimant of an address keeps
