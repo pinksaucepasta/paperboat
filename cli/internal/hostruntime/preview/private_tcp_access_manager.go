@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"io"
 	"net"
 	"net/http"
@@ -281,6 +282,7 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	}()
 	routeID, tunnelID, err := m.resolve(r.Context(), document.Selector)
 	if err != nil {
+		logPrivateTCPAccessFailure(r.Context(), "resolve", err)
 		writeMappedPrivateTCPAccessError(w, err)
 		return
 	}
@@ -288,12 +290,14 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	if m.validate != nil {
 		verifiedUntil, err = m.validate(r.Context(), tunnelID, routeID)
 		if err != nil || !verifiedUntil.After(time.Now().UTC()) {
+			logPrivateTCPAccessFailure(r.Context(), "validate", err)
 			writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
 			return
 		}
 	}
 	lease, err := admission.Admit(m.runContext, verifiedUntil, nil)
 	if err != nil {
+		logPrivateTCPAccessFailure(r.Context(), "admit", err)
 		writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
 		return
 	}
@@ -307,6 +311,7 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	// The post-start closed check below cleans up a concurrent shutdown.
 	proxy, err := m.start(lease.Context(), PrivateTCPAccessRequest{RouteID: routeID, ListenPort: listenPort, ListenAddress: strings.TrimSpace(document.ListenAddress), MaximumConnections: 128})
 	if err != nil {
+		logPrivateTCPAccessFailure(r.Context(), "start", err)
 		writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
 		return
 	}
@@ -453,6 +458,12 @@ func mapPrivateTCPAccessError(err error) error {
 		return ErrPrivateTCPAccessUnavailable
 	}
 }
+
+// The local caller only sees a mapped code; the cause stays in the hostd log.
+func logPrivateTCPAccessFailure(ctx context.Context, step string, err error) {
+	errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "private_tcp_access", step, "access_refused", err)
+}
+
 func writeMappedPrivateTCPAccessError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrPrivateTCPAccessAuthentication):
