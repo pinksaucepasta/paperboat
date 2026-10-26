@@ -200,12 +200,12 @@ func (w *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if w.decided {
 		return nil, nil, errors.New("hijack after the response started")
 	}
-	h, ok := w.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, http.ErrNotSupported
+	// ResponseController follows Unwrap through the wrappers below (statusRecorder has no Hijack of its own).
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.decided = true // the connection is the handler's now; finish must not write
 	}
-	w.decided = true // the connection is the handler's now; finish must not write
-	return h.Hijack()
+	return conn, rw, err
 }
 
 func (w *compressWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

@@ -105,8 +105,8 @@ func isReleaseDownload(r *http.Request) bool {
 }
 
 // streamingRoutePath matches the GET routes that hold a response or socket open by design: the preview and
-// tunnel event streams and the connector control socket. Each one bounds its own lifetime.
-var streamingRoutePath = regexp.MustCompile(`^/v1/(previews/[^/]+/events|tunnels/[^/]+/events|tunnels/[^/]+/connectors/[^/]+/control)$`)
+// tunnel event streams and the connector control socket and the edge's browser-terminal control socket. Each one bounds its own lifetime.
+var streamingRoutePath = regexp.MustCompile(`^/v1/(previews/[^/]+/events|tunnels/[^/]+/events|tunnels/[^/]+/connectors/[^/]+/control|edge/browser-terminal/control)$`)
 
 // isStreamingRoute reports whether r is on the streaming allow-list, the only routes that skip the request
 // timeout. Request headers never decide it: an ordinary route asked for text/event-stream or an upgrade is

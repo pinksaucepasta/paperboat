@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
@@ -102,5 +104,46 @@ func TestEventRouteJSONKeepsTheRequestTimeout(t *testing.T) {
 		if got := isStreamingRoute(req); got != c.streaming {
 			t.Fatalf("events with Accept %q: streaming=%v, want %v", c.accept, got, c.streaming)
 		}
+	}
+}
+
+// The edge's browser-terminal control socket is a websocket that outlives the request timeout: behind the timeout
+// and gzip wrappers (the edge sends a bearer credential) its upgrade wrote 101 and then failed to hijack, so every browser attach died within a millisecond.
+func TestEdgeBrowserTerminalControlUpgradesPastTheRequestTimeout(t *testing.T) {
+	cfg := config.Default()
+	cfg.HTTP.RequestTimeout = 20 * time.Millisecond
+	router := NewRouter(Options{
+		Config: cfg,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OverrideHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			connection, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer connection.CloseNow()
+			kind, message, err := connection.Read(r.Context())
+			if err == nil {
+				time.Sleep(60 * time.Millisecond) // past the request timeout
+				if r.Context().Err() != nil {
+					return
+				}
+				_ = connection.Write(r.Context(), kind, message)
+			}
+		}),
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/edge/browser-terminal/control", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer edge"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	if err := connection.Write(ctx, websocket.MessageText, []byte("ticket")); err != nil {
+		t.Fatal(err)
+	}
+	if _, message, err := connection.Read(ctx); err != nil || string(message) != "ticket" {
+		t.Fatalf("echo = %q, %v; want the socket to outlive the request timeout", message, err)
 	}
 }
