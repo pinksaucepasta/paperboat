@@ -2,8 +2,8 @@ package peersessions
 
 import (
 	"crypto/ed25519"
-	"errors"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"slices"

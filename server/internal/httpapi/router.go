@@ -377,6 +377,7 @@ func NewRouter(opts Options) http.Handler {
 
 		if opts.ResourceUsage != nil {
 			mux.HandleFunc("POST /v1/usage/native", resourceUsageNative(opts.RuntimeIdentity, opts.ResourceUsage))
+			mux.HandleFunc("POST /v1/machines/{id}/audit-backlog", machineAuditBacklog(opts.RuntimeIdentity, opts.Machines))
 			mux.Handle("GET /v1/usage", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", resourceUsageGet(opts.ResourceUsage))))
 		}
 		if opts.Selfhost != nil {

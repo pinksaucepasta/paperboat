@@ -61,6 +61,7 @@ type NetworkConfigRequest struct {
 // "accept" scope per capability each peer's account may start offline, with expires_at 0, resource_id the host's
 // machine id and resource_generation the deciding policy version (F21-11). Other daemons get the earlier shape.
 const AuthorityUntilRevoked = "until_revoked_v1"
+
 type NetworkConfigResult struct {
 	Configuration string   `json:"configuration"`
 	CandidateSet  string   `json:"candidate_set"`

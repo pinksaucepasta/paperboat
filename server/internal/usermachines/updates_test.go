@@ -1,8 +1,8 @@
 package usermachines
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )

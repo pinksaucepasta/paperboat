@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"io"
 	"net/http"
 	"strconv"
@@ -128,6 +129,56 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 			writeError(w, r, 400, "invalid_usage_report", "Bandwidth report is invalid or outside the delivery window.")
 		case err != nil:
 			writeError(w, r, 503, "usage_unavailable", "Bandwidth reporting is temporarily unavailable.", err)
+		default:
+			writeJSON(w, 200, SuccessResponse{Data: receipt})
+		}
+	}
+}
+
+// machineAuditBacklog accepts a host's offline session events (PLAN 3b offline-capable authority, F21-11). The
+// machine proof signs the whole body; the path names the same machine.
+func machineAuditBacklog(identities machineRequestVerifier, machines *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+		if err != nil {
+			if expectedHTTPErrorOnly(err, context.Canceled) {
+				return
+			}
+			writeError(w, r, 503, "audit_unavailable", "The audit backlog could not be received; retry.", err)
+			return
+		}
+		var request struct {
+			Events []usermachines.OfflineAuditEvent `json:"events"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if len(body) > 1<<20 || decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeError(w, r, 400, "invalid_request", "Audit backlog is invalid.")
+			return
+		}
+		proof, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
+		if err != nil || len(proof) == 0 || identities == nil || machines == nil {
+			writeError(w, r, 401, "unauthenticated", "Current signed runtime identity is required.")
+			return
+		}
+		identity, err := identities.VerifyMachineRequest(r.Context(), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), proof, r.Method, r.URL.Path, body)
+		if err != nil {
+			writeMachineProofFailure(w, r, err, "unauthenticated", "Current signed runtime identity is required.")
+			return
+		}
+		if r.PathValue("id") != identity.MachineID {
+			writeError(w, r, 403, "forbidden", "A machine uploads only its own audit backlog.")
+			return
+		}
+		receipt, err := machines.RecordOfflineAuditBacklog(r.Context(), identity.MachineID, int64(identity.InstallationGeneration), request.Events)
+		switch {
+		case errors.Is(err, usermachines.ErrOfflineAuditInvalid):
+			writeError(w, r, 400, "invalid_request", "Audit backlog is invalid: 1 to 500 events of the last 7 days.")
+		case errors.Is(err, usermachines.ErrNotFound):
+			writeError(w, r, 403, "machine_identity_invalid", "This machine identity is no longer current.")
+		case err != nil:
+			writeError(w, r, 503, "audit_unavailable", "The audit backlog could not be stored; retry.", err)
 		default:
 			writeJSON(w, 200, SuccessResponse{Data: receipt})
 		}
