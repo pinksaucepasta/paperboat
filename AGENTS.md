@@ -19,6 +19,11 @@ released CLIs, no waiting for machines to update. Change producer and consumer t
 A test machine broken by old state is reinstalled. Regressions: diff the last good build against the first
 bad one on the paths the failing check touches, then fix.
 
+**Fast loop (user rule, 2026-10-26).** Before a push, CI runs only the packages the commit touches
+(`tools/ci-test.sh <module> -run '<their tests>'`, minutes); the full all-module run is the CI health lane's job
+after each push batch. Each lane keeps one paired pair of test machines and installs every new build over it
+(`pb install` of the new binary); a fresh pair only for rows about install, pairing or enrollment.
+
 ## Repository
 
 | Path | What |
