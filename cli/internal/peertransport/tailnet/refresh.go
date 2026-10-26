@@ -70,6 +70,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if a.endpointReports.Load() {
 		request.Endpoints = a.endpointReportDue()
 	}
+	request.MembershipGrants = a.membershipGrants.Load()
 	result, err := client.PeerNetworkConfiguration(ctx, request)
 	if err == nil && request.Endpoints != nil {
 		a.endpointsReported(*request.Endpoints)
@@ -93,6 +94,9 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		return err
 	}
 	a.setRelayDenial(result.RelayDenial())
+	if a.membershipGrants.Swap(result.MembershipGrants) != result.MembershipGrants && result.MembershipGrants {
+		a.RequestRefresh() // ask for membership grants on the next renewal
+	}
 	if a.endpointReports.Swap(result.EndpointReports) != result.EndpointReports && result.EndpointReports {
 		a.endpointsChanged() // the server takes reports from now on: send ours with the next renewal
 	}

@@ -172,6 +172,27 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			seenControl[peerKey] = true
 			controlSet[peer] = true
 		}
+		// A membership grant names no peers: each membership must be a scope this configuration gives the
+		// endpoint (same resource and direction), and its account mesh membership makes every configured peer
+		// of the account a relay-control peer, as the relay itself decides (derpquic membership.go).
+		if len(g.Memberships) > 0 {
+			if len(g.Peers)+len(g.RelayControlPeers) > 0 || !membershipsConfigured(g.Memberships, cfg) {
+				next = nil
+				grants = nil
+				return ErrAuthority
+			}
+			for _, m := range g.Memberships {
+				if m.ResourceKind != "machine_network" {
+					continue
+				}
+				for _, p := range cfg.Peers {
+					if peer, err := publicKey(p.Identity.WireGuardPublicKey); err == nil && p.Identity.AccountID == cfg.Self.AccountID {
+						controlSet[peer] = true
+					}
+				}
+				break
+			}
+		}
 		// An endpoint with more peers than one grant names gets one grant per chunk of peers for a node;
 		// together they name each configured peer at most once.
 		earlier, chunk := grants[g.NodeID], next[g.NodeID] != ""
@@ -205,6 +226,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			merged := earlier
 			merged.Peers = append(append([]derpquic.Peer(nil), earlier.Peers...), g.Peers...)
 			merged.RelayControlPeers = append(append([]string(nil), earlier.RelayControlPeers...), g.RelayControlPeers...)
+			merged.Memberships = append(append([]derpquic.Scope(nil), earlier.Memberships...), g.Memberships...)
 			if merged.PeerRelay == nil {
 				merged.PeerRelay = g.PeerRelay
 			}
@@ -434,4 +456,26 @@ func (a *Authority) discoveryPublicKey(expected string) (string, error) {
 		return nil
 	})
 	return result, err
+}
+
+// membershipsConfigured reports whether every membership of a relay grant is a scope the signed configuration
+// gives this endpoint toward some peer: the same resource kind, id, generation, capability, port and direction.
+func membershipsConfigured(memberships []derpquic.Scope, cfg NetworkConfiguration) bool {
+	type tuple struct {
+		kind, id, capability, direction string
+		generation                      uint64
+		port                            uint16
+	}
+	configured := make(map[tuple]bool)
+	for _, p := range cfg.Peers {
+		for _, s := range p.Scopes {
+			configured[tuple{s.ResourceKind, s.ResourceID, s.Capability, s.Direction, s.ResourceGeneration, s.Port}] = true
+		}
+	}
+	for _, m := range memberships {
+		if !configured[tuple{m.ResourceKind, m.ResourceID, m.Capability, m.Direction, m.ResourceGeneration, m.Port}] {
+			return false
+		}
+	}
+	return true
 }

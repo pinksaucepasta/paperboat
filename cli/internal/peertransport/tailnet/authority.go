@@ -154,18 +154,20 @@ type Authority struct {
 	// endpointReports is the server's last endpoint_reports answer; reportMu guards the report schedule
 	// (endpoint_report.go).
 	endpointReports atomic.Bool
-	reportMu        sync.Mutex
-	reportTimer     *time.Timer
-	lastReport      time.Time
-	reported        *[]string // the last endpoint set the server accepted; nil before the first
-	clients         map[string]authorizedClient
-	clientSlots     chan struct{}
-	regional        *RegionalCandidates
-	relay           relayAuthority
-	recoveryWorkers sync.WaitGroup
-	refreshSlot     chan struct{}
-	refreshWake     chan struct{}
-	refreshNow      chan struct{}
+	// membershipGrants is the server's last membership_grants answer: renewals then ask for them.
+	membershipGrants atomic.Bool
+	reportMu         sync.Mutex
+	reportTimer      *time.Timer
+	lastReport       time.Time
+	reported         *[]string // the last endpoint set the server accepted; nil before the first
+	clients          map[string]authorizedClient
+	clientSlots      chan struct{}
+	regional         *RegionalCandidates
+	relay            relayAuthority
+	recoveryWorkers  sync.WaitGroup
+	refreshSlot      chan struct{}
+	refreshWake      chan struct{}
+	refreshNow       chan struct{}
 }
 
 type authorizedClient struct {

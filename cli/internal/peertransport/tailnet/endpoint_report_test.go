@@ -87,3 +87,44 @@ func TestEndpointChangesScheduleOneReport(t *testing.T) {
 	}
 	first.Stop()
 }
+
+// Membership grants are asked for only after the server says it can issue them, so a server that cannot
+// never receives the field (request bodies decode strictly) and an older client never gets grants it cannot
+// verify.
+func TestMembershipGrantsAreAskedForOnlyAfterTheServerOffersThem(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	var seen []api.PeerNetworkConfigurationRequest
+	offer := false
+	client := membershipOffer{offer: &offer, seen: &seen, configuration: func() (string, error) {
+		c.Generation++
+		c.IssuedAt = time.Now().Unix()
+		c.ExpiresAt = c.IssuedAt + 60
+		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
+		return networkToken(t, signer, c), nil
+	}}
+	for _, o := range []bool{false, true, true} {
+		offer = o
+		if err := a.Refresh(t.Context(), client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if seen[0].MembershipGrants || seen[1].MembershipGrants || !seen[2].MembershipGrants {
+		t.Fatalf("asked %v %v %v, want only after the offer", seen[0].MembershipGrants, seen[1].MembershipGrants, seen[2].MembershipGrants)
+	}
+}
+
+type membershipOffer struct {
+	offer         *bool
+	seen          *[]api.PeerNetworkConfigurationRequest
+	configuration func() (string, error)
+}
+
+func (m membershipOffer) RegisterPeerNetwork(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+	return api.PeerNetworkRegistrationResult{}, nil
+}
+
+func (m membershipOffer) PeerNetworkConfiguration(_ context.Context, r api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error) {
+	*m.seen = append(*m.seen, r)
+	token, err := m.configuration()
+	return api.PeerNetworkConfigurationResult{Configuration: token, MembershipGrants: *m.offer}, err
+}

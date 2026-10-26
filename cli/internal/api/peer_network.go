@@ -34,6 +34,9 @@ type PeerNetworkConfigurationResult struct {
 	// EndpointReports says the server stores the endpoints a request reports (PLAN 3b "Direct paths without
 	// a relay"); request bodies decode strictly, so a client reports them only after this is true.
 	EndpointReports bool `json:"endpoint_reports"`
+	// MembershipGrants says the server can issue relay grants with memberships instead of per-peer lists
+	// (PLAN 3b "Relay pair authorization by membership"); a client asks for them only after this is true.
+	MembershipGrants bool `json:"membership_grants"`
 }
 
 // PeerNetworkConfigurationRequest asks for the signed peer-network configuration. Endpoints are the engine's
@@ -43,6 +46,8 @@ type PeerNetworkConfigurationRequest struct {
 	OperationID    string                 `json:"operation_id"`
 	AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
 	Endpoints      *[]string              `json:"endpoints,omitempty"`
+	// MembershipGrants asks for relay grants with memberships; this client verifies and uses them.
+	MembershipGrants bool `json:"membership_grants,omitempty"`
 }
 
 // RelayDenial is the typed error for a refresh that withheld hosted relays, or nil.
