@@ -425,7 +425,7 @@ recovery instructions before retrying an operation that may have created resourc
 	execCommand.Flags().StringArray("env", nil, "remote environment name=value")
 	execCommand.Flags().Bool("json", false, "emit paperboat.exec-event/v1 JSON Lines")
 	root.AddCommand(execCommand)
-	sshCommand := &cobra.Command{Use: "ssh [user@]<machine> [-- <OpenSSH arguments...>]", Short: "Connect to a machine with OpenSSH", Args: commandArgs(cobra.ArbitraryArgs), RunE: actionSSH}
+	sshCommand := &cobra.Command{Use: "ssh [user@]<machine> [-- <OpenSSH arguments...>]", Short: "Connect to a machine with OpenSSH", Long: "Connect to a machine with OpenSSH over Paperboat.\n\nForwarding follows the machine's sshd: port and agent forwarding work as it allows; pb never requests X11 and does not strip -X/-Y.", Args: commandArgs(cobra.ArbitraryArgs), RunE: actionSSH}
 	sshCommand.Flags().String("user", "", "remote operating-system user")
 	sshTrustHost := &cobra.Command{Use: "trust-host <machine>", Short: "Approve a changed SSH host identity", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionSSHTrustHost}
 	sshTrustHost.Flags().String("fingerprint", "", "exact pending SHA256 fingerprint")
