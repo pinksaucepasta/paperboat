@@ -188,7 +188,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		if acceptance.Status == "not_required" {
 			descriptorRequestID, descriptorDigest = "", ""
 		}
-		declared := api.TransferDeclaration{Mode: "automatic", Bytes: batchTotal(prepared.Sources)}
+		declared := api.TransferDeclaration{Mode: sendTransferMode(ctx.Context, cobraCommand, client), Bytes: batchTotal(prepared.Sources)}
 		descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
 		if err != nil {
 			return friendlyCommandError(err)
