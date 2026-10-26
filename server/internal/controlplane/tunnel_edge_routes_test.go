@@ -87,9 +87,12 @@ func TestTunnelEdgeRouteJSONPrivateTCPCarriesNoMatchOrPriority(t *testing.T) {
 		// The engine's assignment query names a catch-all route's host as the tunnel host
 		// (prod 2026-10-26: the edge refused such private TCP assignments, never observing them).
 		PublicHost: "fast-dusty-port-3544.tunnels.example.test",
+		// Stored routes keep the create default preserve_host=true (prod 2026-10-26: route_invalid on
+		// every edge reconcile for a private TCP route).
+		PreserveHost: true,
 	}
 	value := tunnelEdgeRouteJSON(row)
-	if value["match_type"] != "" || value["priority"] != 0 || value["public_host"] != "" || value["path_prefix"] != nil {
+	if value["match_type"] != "" || value["priority"] != 0 || value["public_host"] != "" || value["path_prefix"] != nil || value["preserve_host"] != false {
 		t.Fatalf("private tcp binding = match=%#v priority=%#v host=%#v path=%#v", value["match_type"], value["priority"], value["public_host"], value["path_prefix"])
 	}
 	row.Protocol, row.Kind = "http", "tunnel_http_wss"
