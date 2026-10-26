@@ -577,6 +577,12 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 					return err
 				}
 			}
+			if !o.Ready {
+				// The carrier to this edge is down: no endpoint route rides on it until it is back.
+				if _, err = tx.Exec(ctx, `UPDATE endpoint_edge_assignments SET observed_ready=false,observed_at=now() WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND carrier_session_id=$3 AND observed_ready`, edge.NodeID, edge.ProcessEpoch, o.SessionID); err != nil {
+					return err
+				}
+			}
 			if !active {
 				continue
 			}

@@ -48,6 +48,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		t.Fatalf("private engine route on the edge: %+v %v", rows, err)
 	}
 	row := rows[0]
+	f.exec(t, `UPDATE runtime_carrier_attachments SET ready=true WHERE machine_id=$1`, f.machine)
 	if err := control.ObserveRoutes(f.ctx, f.node, []controlplane.RouteObservation{{
 		RouteID: route, AssignmentID: row.AssignmentID, AssignmentGeneration: row.AssignmentGeneration, RouteRevision: row.RouteRevision,
 		EdgeNodeID: f.node, EdgeProcessEpoch: f.edge.ProcessEpoch, ConnectorID: row.ConnectorID, HostID: row.HostID,

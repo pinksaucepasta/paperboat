@@ -192,6 +192,9 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		t.Fatalf("another process epoch of the edge got the route: %d %v", len(other), err)
 	}
 	// The edge's ready observation marks the assignment ready; a stale one is dropped.
+	// The edge reports the agent's carriers up (as it does before their routes); a route is ready on
+	// an edge only while that carrier is.
+	f.exec(t, `UPDATE runtime_carrier_attachments SET ready=true WHERE machine_id=$1`, f.machine)
 	observe := func(generation int64, session string) error {
 		return control.ObserveRoutes(f.ctx, f.node, []controlplane.RouteObservation{{
 			RouteID: route, AssignmentID: row.AssignmentID, AssignmentGeneration: generation, RouteRevision: row.RouteRevision,

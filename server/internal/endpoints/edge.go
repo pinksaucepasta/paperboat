@@ -148,23 +148,29 @@ func scanEdgeAdmissionsWithRemovals(rows pgx.Rows, expiresAt time.Time) ([]runti
 // once it is older than ObservationRefresh, otherwise it is only read.
 func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewire.Observation) (bool, error) {
 	var current bool
+	// A route is ready on an edge only while the agent's carrier session there is ready too: after a
+	// host restart an edge kept reporting its routes on a carrier that was gone (ready=false), and
+	// DNS, health and private access kept sending traffic to that edge (pbvm2 lanemg-s1, 2026-10-26).
 	err := tx.QueryRow(ctx, `WITH assignment AS (
-SELECT route_id,edge_node_id,observed_ready AS was,desired,(observed_ready IS DISTINCT FROM ($6 AND desired='active') OR observed_at IS NULL OR observed_at<now()-$7::interval) AS due
-FROM endpoint_edge_assignments
-WHERE route_id=$1 AND edge_node_id=$2 AND edge_process_epoch=$3 AND carrier_session_id=$4 AND generation=$5
+SELECT x.route_id,x.edge_node_id,x.observed_ready AS was,x.observed_ready,x.observed_at,
+ ($6 AND x.desired='active' AND EXISTS(SELECT 1 FROM runtime_carrier_attachments ra WHERE ra.edge_node_id=x.edge_node_id
+  AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id AND ra.ready)) AS want
+FROM endpoint_edge_assignments x
+WHERE x.route_id=$1 AND x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.carrier_session_id=$4 AND x.generation=$5
 ), written AS (
-UPDATE endpoint_edge_assignments x SET observed_ready=$6 AND x.desired='active',observed_at=now()
-FROM assignment a WHERE a.due AND x.route_id=a.route_id AND x.edge_node_id=a.edge_node_id
+UPDATE endpoint_edge_assignments x SET observed_ready=a.want,observed_at=now()
+FROM assignment a WHERE (a.observed_ready IS DISTINCT FROM a.want OR a.observed_at IS NULL OR a.observed_at<now()-$7::interval)
+ AND x.route_id=a.route_id AND x.edge_node_id=a.edge_node_id
 RETURNING x.route_id
 ), logged AS (
 INSERT INTO tunnel_log_entries(id,account_id,tunnel_id,route_id,level,component,code,message,metadata,correlation_id,occurred_at)
 SELECT 'log_edge_'||gen_random_uuid()::text,e.account_id,e.tunnel_id,r.tunnel_route_id,
- CASE WHEN $6 AND a.desired='active' THEN 'info' ELSE 'warn' END,'edge',
- CASE WHEN $6 AND a.desired='active' THEN 'tunnel_edge_ready' ELSE 'tunnel_edge_not_ready' END,
- CASE WHEN $6 AND a.desired='active' THEN 'The edge is serving this route.' ELSE 'The edge is not serving this route.' END,
+ CASE WHEN a.want THEN 'info' ELSE 'warn' END,'edge',
+ CASE WHEN a.want THEN 'tunnel_edge_ready' ELSE 'tunnel_edge_not_ready' END,
+ CASE WHEN a.want THEN 'The edge is serving this route.' ELSE 'The edge is not serving this route.' END,
  '{}'::jsonb,$4,now()
 FROM assignment a JOIN written w ON w.route_id=a.route_id JOIN endpoint_routes r ON r.id=a.route_id JOIN endpoints e ON e.id=r.endpoint_id
-WHERE e.kind='tunnel' AND r.tunnel_route_id IS NOT NULL AND coalesce(a.was,false) IS DISTINCT FROM ($6 AND a.desired='active')
+WHERE e.kind='tunnel' AND r.tunnel_route_id IS NOT NULL AND coalesce(a.was,false) IS DISTINCT FROM a.want
 )
 SELECT EXISTS(SELECT 1 FROM assignment)`,
 		o.RouteID, nodeID, epoch, o.SessionID, int64(o.AttachmentGeneration), o.Ready, ObservationRefresh.String()).Scan(&current)
