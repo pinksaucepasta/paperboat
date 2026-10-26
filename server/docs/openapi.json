@@ -49256,6 +49256,72 @@
           }
         }
       }
+    },
+    "/v1/machines/{id}/audit-backlog": {
+      "post": {
+        "summary": "Upload a host's offline audit backlog",
+        "description": "A host uploads the session starts and refusals it decided while Paperboat was unreachable (F21-11). Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine uploads only its own backlog. 1 to 500 events of the last 7 days per request; each event lands once (deduplicated by event id) in the deciding workspace's audit log with origin offline.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "events"
+                ],
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Backlog stored; the receipt names the events recorded and those already recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_machines_id_audit_backlog"
+      }
     }
   }
 }
