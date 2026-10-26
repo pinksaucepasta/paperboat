@@ -137,8 +137,14 @@ const screenText = (p) => p.evaluate(() => document.querySelector(".terminal-hos
 const sttyCols = async (p) => {
   const m = marker("size")
   await type(p, `printf '${m}%s\\n' "$(stty size)"`)
-  await shows(p, m, 15000)
-  return Number([...(await screenText(p)).matchAll(new RegExp(`${m}(\\d+)[ \\u00a0](\\d+)`, "g"))].pop()?.[2])
+  const answer = new RegExp(`${m}(\\d+)[ \\u00a0](\\d+)`, "g")
+  // The typed command contains the marker too: wait for the answer itself.
+  for (let i = 0; i < 50; i++) {
+    const found = [...(await screenText(p)).matchAll(answer)].pop()
+    if (found) return Number(found[2])
+    await p.waitForTimeout(300)
+  }
+  return NaN
 }
 
 // F3-07: open, type, resize, reconnect, close, from the console.
