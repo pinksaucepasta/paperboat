@@ -86,7 +86,7 @@ func (s *offlineAuditService) Shutdown(ctx context.Context) error {
 const sshCapability = "managed_ssh"
 
 // admitOfflineSSH decides a managed SSH stream from the host's signed rules, which admit every SSH stream (D1). A
-// refusal is recorded as an ssh_session_refused (origin offline while the host hears nothing from Paperboat); an
+// refusal is recorded as an ssh_session_refused (origin offline once Paperboat has not answered past the signed network's refresh hint); an
 // admitted session is recorded by managedssh.Host.Serve, which refuses an offline one whose start cannot be recorded.
 func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission, online bool) error {
 	if request.Allowed {

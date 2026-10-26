@@ -300,7 +300,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.config.networkEvents.Healthy), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -587,6 +587,15 @@ func (s *productionNativePeerService) LastError() error {
 	return s.lastErr
 }
 
+// paperboatAnswering reports whether the signed network in force is current: false once Paperboat has not
+// answered past its refresh hint (the host then runs offline on its last verified rules).
+func (s *productionNativePeerService) paperboatAnswering() bool {
+	s.mu.Lock()
+	generation := s.current
+	s.mu.Unlock()
+	return generation != nil && generation.authority != nil && !generation.authority.OutOfSync()
+}
+
 // PathEligibility reports which kind of path carries the peer endpointID's traffic to this host and a
 // channel closed once it changes or ctx ends (tailnet.Authority.PathEligibility). A receiver refuses an
 // Unlimited file transfer while it is a hosted relay (PLAN 3b "File transfer modes").
@@ -654,8 +663,8 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 		}
 		if peer, ok := native.PeerFromContext(ctx); ok {
 			// Every SSH stream is admitted from the host's signed rules (D1); it is offline only while the host
-			// hears nothing from Paperboat.
-			offline := header.Offline && !s.config.networkEvents.Healthy()
+			// has not heard from Paperboat past its signed network's refresh hint.
+			offline := header.Offline && !s.paperboatAnswering()
 			ctx = managedssh.WithPeer(ctx, managedssh.Peer{AccountID: peer.AccountID, EndpointID: peer.EndpointID, OperationID: header.OperationID, Offline: offline})
 		}
 		target, ok := s.config.ssh.Target()
