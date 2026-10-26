@@ -172,36 +172,51 @@ func TestOnePublisherServesOneHundredParticipantsAndRotatesOnDeparture(t *testin
 	if _, err := manager.Write(created.ID, session.InputKey{ClientID: "browser_ab", AttachmentID: "browser_ab", Generation: created.Generation, InputSequence: 2}, []byte("<after-revoke>\n")); err != nil {
 		t.Fatal(err)
 	}
-	nextRecord := make(chan []byte, 1)
+	// Output produced before the departure may still be in the stream under the old key (the pty can
+	// hand the tail of a line over as its own record). What matters: nothing produced after the
+	// departure opens with the departed key, and the remaining participants read it with the new one.
+	afterRevoke := make(chan error, 1)
 	go func() {
-		var header [4]byte
-		if _, err := io.ReadFull(reader, header[:]); err != nil {
-			nextRecord <- nil
-			return
+		rotatedSeen := false
+		for {
+			var header [4]byte
+			if _, err := io.ReadFull(reader, header[:]); err != nil {
+				afterRevoke <- fmt.Errorf("missing output after revocation: %w", err)
+				return
+			}
+			n := binary.BigEndian.Uint32(header[:])
+			if n == 0 || n > browserbroadcast.MaxRecordBytes {
+				afterRevoke <- errors.New("invalid record length")
+				return
+			}
+			raw := make([]byte, n)
+			if _, err := io.ReadFull(reader, raw); err != nil {
+				afterRevoke <- err
+				return
+			}
+			if old, err := browserbroadcast.Open(raw, epoch, public); err == nil {
+				if rotatedSeen || strings.Contains(string(old.Data), "<after-revoke>") {
+					afterRevoke <- errors.New("departed participant's key decrypted future output")
+					return
+				}
+				continue
+			}
+			record, err := browserbroadcast.Open(raw, rotated, public)
+			if err != nil {
+				afterRevoke <- fmt.Errorf("remaining participant could not decrypt future output: %w", err)
+				return
+			}
+			rotatedSeen = true
+			if strings.Contains(string(record.Data), "<after-revoke>") {
+				afterRevoke <- nil
+				return
+			}
 		}
-		n := binary.BigEndian.Uint32(header[:])
-		if n == 0 || n > browserbroadcast.MaxRecordBytes {
-			nextRecord <- nil
-			return
-		}
-		raw := make([]byte, n)
-		if _, err := io.ReadFull(reader, raw); err != nil {
-			nextRecord <- nil
-			return
-		}
-		nextRecord <- raw
 	}()
 	select {
-	case raw := <-nextRecord:
-		if raw == nil {
-			t.Fatal("missing output after revocation")
-		}
-		if _, err := browserbroadcast.Open(raw, epoch, public); err == nil {
-			t.Fatal("departed participant's key decrypted future output")
-		}
-		record, err := browserbroadcast.Open(raw, rotated, public)
-		if err != nil || !strings.Contains(string(record.Data), "<after-revoke>") {
-			t.Fatalf("remaining participant could not decrypt future output: %v", err)
+	case err := <-afterRevoke:
+		if err != nil {
+			t.Fatal(err)
 		}
 	case <-ctx.Done():
 		t.Fatal("output after revocation did not arrive")
