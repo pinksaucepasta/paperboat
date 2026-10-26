@@ -21,6 +21,8 @@ var ErrUnavailable = errors.New("browser terminal broadcast unavailable")
 
 // OpenPublisher opens one authenticated host-to-edge stream on the machine's
 // existing runtime carrier. The stream carries only opaque COSE output records.
+// The context is the stream's whole lifetime: the carrier resets the stream when
+// it ends, so never pass a request- or deadline-scoped context.
 type OpenPublisher func(context.Context, string) (io.WriteCloser, error)
 
 type Registry struct {
