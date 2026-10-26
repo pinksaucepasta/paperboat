@@ -100,6 +100,11 @@ func (c *sessionCarrier) Run(ctx context.Context, lease Lease, ready func(Lease)
 	c.runLease = append(c.runLease, lease)
 	run := c.run
 	c.mu.Unlock()
+	if run == nil {
+		// A test that never gives the carrier a run still starts the session's carrier goroutine.
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return run(ctx, lease, ready)
 }
 
@@ -393,7 +398,8 @@ func TestSessionRenewalLossStopsTheCarrier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.WaitReady(context.Background()); err != nil {
+	// Renewal fails every millisecond, so the loss can land before the ready lease is observed.
+	if _, err := session.WaitReady(context.Background()); err != nil && !errors.Is(err, ErrLeaseLost) {
 		t.Fatal(err)
 	}
 	err = session.Wait()
@@ -559,11 +565,12 @@ func TestSessionExpiryRevokesOnceAfterRenewalRetriesReachDeadline(t *testing.T) 
 		<-ctx.Done()
 		return ctx.Err()
 	}}
-	deadline := time.Now().UTC().Add(120 * time.Millisecond)
+	// Several renewals fit before the deadline even when the host is slow to schedule the first one.
+	deadline := time.Now().UTC().Add(600 * time.Millisecond)
 	session, err := Start(context.Background(), SessionConfig{
 		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, UserDeadline: &deadline,
-		RenewInterval: 60 * time.Millisecond, ReconnectBackoff: 10 * time.Millisecond, MaxReconnectBackoff: 10 * time.Millisecond,
+		RenewInterval: 30 * time.Millisecond, ReconnectBackoff: 10 * time.Millisecond, MaxReconnectBackoff: 10 * time.Millisecond,
 		ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
 	if err != nil {
@@ -695,6 +702,7 @@ func TestObservedSessionDelegatesRenewAndStopToStableRuntime(t *testing.T) {
 // renewal that returns it ends the session (ErrLeaseLost); "ended" with a live state is refused.
 func TestSessionAcceptsEndedLeaseAsTerminal(t *testing.T) {
 	session, _, _ := newSessionTest(t, nil)
+	defer session.Stop(context.Background())
 	session.mu.Lock()
 	current := session.lease
 	session.mu.Unlock()
