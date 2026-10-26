@@ -47,10 +47,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}})
 	}
 	for _, size := range []int{maximumRelayControlPeers, maximumRelayGrantPeers} {
-		chunks, err := relayGrantChunks(self, peers, size)
-		if err != nil {
-			t.Fatal(err)
-		}
+		chunks := relayGrantChunks(self, peers, size, 1)
 		if want := (len(peers) + size - 1) / size; len(chunks) != want {
 			t.Fatalf("size %d: chunks = %d, want %d", size, len(chunks), want)
 		}
@@ -78,8 +75,31 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 			t.Fatalf("size %d: named %d of 100 peers, %d of 90 control keys", size, len(named), len(control))
 		}
 	}
-	if empty, _ := relayGrantChunks(self, nil, maximumRelayGrantPeers); len(empty) != 1 || len(empty[0].peers) != 0 {
+	if empty := relayGrantChunks(self, nil, maximumRelayGrantPeers, 1); len(empty) != 1 || len(empty[0].peers) != 0 {
 		t.Fatal("an endpoint without peers still gets one grant per node")
+	}
+}
+
+// A daemon holding peers until revoked gets scopes with expires_at 0; a relay grant (and mint, and released relays)
+// requires an expiry, so inside a grant such a scope ends with the grant. A peer without a WireGuard key is left out
+// instead of failing every other peer's grant (P0 2026-10-26: one bad peer made every until_revoked_v1 config 503).
+func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *testing.T) {
+	self := networkBinding{AccountID: "account", EndpointID: "self"}
+	untilRevoked := networkScope{"machine_network", "network_x", 1, "connect", "dial", 443, 0}
+	peers := []networkPeer{
+		{Identity: networkBinding{AccountID: "account", EndpointID: "keyed", WireGuardPublicKey: "key_a"}, Scopes: []networkScope{untilRevoked}},
+		{Identity: networkBinding{AccountID: "account", EndpointID: "keyless"}, Scopes: []networkScope{untilRevoked}},
+	}
+	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, 1234)
+	if len(chunks) != 1 || len(chunks[0].peers) != 1 || len(chunks[0].control) != 1 || chunks[0].control[0] != "key_a" {
+		t.Fatalf("chunks %+v: want the keyed peer only", chunks)
+	}
+	scopes := chunks[0].peers[0]["scopes"].([]networkScope)
+	if len(scopes) != 1 || scopes[0].ExpiresAt != 1234 {
+		t.Fatalf("grant scopes %+v: want expires_at = grant expiry", scopes)
+	}
+	if peers[0].Scopes[0].ExpiresAt != 0 {
+		t.Fatal("the document's scope was changed in place")
 	}
 }
 

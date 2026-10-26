@@ -744,20 +744,17 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		if peerRelayReady {
 			size = maximumRelayControlPeers
 		}
-		chunks, err := relayGrantChunks(self, nodePeers, size)
-		if err != nil {
-			return nil, err
-		}
-		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
-			slog.Warn("peer network authority unavailable", "site", "network.go:620")
-			return nil, ErrUnavailable
-		}
 		expires := now.Add(time.Minute)
 		if authorityExpiry.Before(expires) {
 			expires = authorityExpiry
 		}
 		if nodeExpiry.Before(expires) {
 			expires = nodeExpiry
+		}
+		chunks := relayGrantChunks(self, nodePeers, size, expires.Unix())
+		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
+			slog.Warn("peer network authority unavailable", "site", "network.go:620")
+			return nil, ErrUnavailable
 		}
 		// One grant per chunk of at most maximumRelayGrantPeers peers, all with
 		// identical identity, iat, exp and generation; the relay and the CLI merge
@@ -810,20 +807,33 @@ type relayGrantChunk struct {
 }
 
 // relayGrantChunks splits every peer into grants of at most size peers, sorted by key. Each chunk carries the
-// control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer).
-func relayGrantChunks(self networkBinding, peers []networkPeer, size int) ([]relayGrantChunk, error) {
+// control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer). A grant lives
+// at most a minute, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
+// (grantExpiry); relays and mint refuse a scope without an expiry. A peer without a WireGuard key cannot be relayed
+// and is left out: one such peer never fails the grants of every other.
+func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantExpiry int64) []relayGrantChunk {
 	ordered := slices.Clone(peers)
 	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
 		return strings.Compare(a.Identity.WireGuardPublicKey, b.Identity.WireGuardPublicKey)
 	})
 	chunks := []relayGrantChunk{{peers: []map[string]any{}}}
 	for _, peer := range ordered {
+		if peer.Identity.WireGuardPublicKey == "" {
+			slog.Warn("relay grant omits a peer without a WireGuard key", "site", "network.go:relayGrantChunks")
+			continue
+		}
 		last := &chunks[len(chunks)-1]
 		if len(last.peers) == size {
 			chunks = append(chunks, relayGrantChunk{})
 			last = &chunks[len(chunks)-1]
 		}
-		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": peer.Scopes}
+		scopes := slices.Clone(peer.Scopes)
+		for i := range scopes {
+			if scopes[i].ExpiresAt == 0 {
+				scopes[i].ExpiresAt = grantExpiry
+			}
+		}
+		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": scopes}
 		if peer.Identity.DiscoPublicKey != "" {
 			entry["disco_public_key"] = peer.Identity.DiscoPublicKey
 		}
@@ -831,13 +841,9 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int) ([]rel
 		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
 			continue
 		}
-		if peer.Identity.WireGuardPublicKey == "" {
-			slog.Warn("peer network authority unavailable", "site", "network.go:relayGrantChunks")
-			return nil, ErrUnavailable
-		}
 		last.control = append(last.control, peer.Identity.WireGuardPublicKey)
 	}
-	return chunks, nil
+	return chunks
 }
 
 func peersHaveDiscoKeys(peers []networkPeer) bool {

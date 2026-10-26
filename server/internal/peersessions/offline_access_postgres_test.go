@@ -1,6 +1,7 @@
 package peersessions
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -90,6 +91,13 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
+	// An eligible relay: the configuration carries relay grants, which embed the peers' scopes.
+	relayNode := "offline_relay_" + suffix
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids)
+ VALUES($1,'offline','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,1,now(),now()+interval '1 hour',ARRAY[$2])`, relayNode, owner)
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, relayNode)
+	})
 	register(owner, host, wire.RoleMachine)
 	clis := map[string]string{}
 	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember} {
@@ -105,6 +113,10 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix + authority, UserID: owner, EndpointID: host, Authority: authority})
 		if err != nil {
 			t.Fatal(err)
+		}
+		// The relay grants were signed (mint refuses a scope without an expiry): until-revoked scopes end with the grant.
+		if len(result.RelayGrants) == 0 {
+			t.Fatalf("authority %q: no relay grants", authority)
 		}
 		offline, mesh := map[string][]string{}, []float64{}
 		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
