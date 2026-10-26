@@ -41,7 +41,7 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err := sshTargetHealth(command.Context(), machine.ID, machine.Alias); err != nil {
 		return err
 	}
-	domain, err := managedSSHDomain(command.Context(), client)
+	domain, err := configuredManagedSSHDomain(ctx)
 	if err != nil {
 		return err
 	}
