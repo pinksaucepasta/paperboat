@@ -89,7 +89,9 @@ try {
   console.log("returning at", stamp(), "first reconnect seen:", seen || "none yet")
   await send("Target.activateTarget", { targetId: first.targetId })
   const back = Date.now()
-  log(await shows(page, flooded, 2000), "output made while hidden is on screen within 2 s of return", `${Date.now() - back} ms`)
+  // A long run scrolls the flood far above the rendered rows: then the newest line printed while hidden is the proof.
+  const newest = ticks ? `WH${ticks}` : flooded
+  log(await shows(page, newest, 2000), "output made while hidden is on screen within 2 s of return", `${Date.now() - back} ms`)
   let after = await counts(page)
   log(after[0] === before[0] && after[1] === before[1], "hidden: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)} close=${await attr(page, "data-terminal-close")}`)
 
@@ -101,12 +103,13 @@ try {
   after = await counts(page)
   log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   if (ticks) {
-    // Output made over the whole hidden time is on screen exactly once, in order, with no gap.
+    // The terminal renders only its last rows (~64): the lines printed while hidden that are on screen must be
+    // gapless, increasing and without a duplicate, ending at the newest. Older lines have scrolled out of the DOM.
     await shows(page, `WH${ticks}`, 120000)
     const text = await evaluate(page, `document.querySelector(".terminal-host")?.innerText ?? ""`)
     const got = [...text.matchAll(/^WH(\d+)[ \u00a0]*$/gm)].map((m) => Number(m[1]))
-    const missing = Array.from({ length: ticks }, (_, i) => i + 1).filter((n) => !got.includes(n)).length
-    log(missing === 0 && got.length === new Set(got).size, `${ticks} lines printed while hidden are on screen exactly once`, `${got.length} lines, ${got.length - new Set(got).size} duplicated, ${missing} missing`)
+    const gapless = got.every((n, i) => i === 0 || n === got[i - 1] + 1)
+    log(got.length >= 30 && gapless && got.at(-1) === ticks, `the ${got.length} newest lines printed while hidden are on screen exactly once, in order, with no gap`, `${got[0]}..${got.at(-1)}, ${got.length - new Set(got).size} duplicated`)
     after = await counts(page)
     log(after[0] === before[0] && after[1] === before[1], "whole run: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   }

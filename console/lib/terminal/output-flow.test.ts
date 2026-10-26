@@ -80,12 +80,46 @@ describe("worker output flow", () => {
     expect(types.at(-1)).toBe("attached")
   })
 
-  test("a consumer that never answers still overflows once, so memory stays bounded", () => {
+  test("a consumer that cannot keep up lags: output is dropped until the next screen, which is delivered", () => {
+    const sent: { events: Event[] }[] = []
     let overflowed = 0
-    const flow = new TerminalOutputFlow({ send: () => undefined, overflow: () => overflowed++, schedule: () => 0 as unknown as ReturnType<typeof setTimeout>, cancel: () => undefined })
-    let accepted = 0
-    for (let n = 0; n < 100000 && flow.push(output(n)); n++) accepted++
+    const flow = new TerminalOutputFlow({
+      send: (batch: { events: Event[] }) => sent.push(batch), // never consumed: the credit window fills
+      overflow: () => overflowed++,
+      schedule: () => 0 as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => undefined,
+      setTimer: (() => 1) as unknown as typeof setTimeout,
+      clearTimer: () => undefined,
+    })
+    for (let n = 0; n < 5000; n++) expect(flow.push({ ...output(n), channel: n % 2 === 0 ? 1 : 3, data: new Uint8Array(40 << 10) })).toBe(true)
+    expect(overflowed).toBe(0)
+    expect(flow.lagging).toBe(true)
+    const before = sent.flatMap((batch) => batch.events).length
+    expect(flow.push(output(9999))).toBe(true) // dropped while lagging
+    expect(flow.push({ type: "attached", connection_id: "c", screen: new Uint8Array(100) })).toBe(true)
+    expect(flow.lagging).toBe(false)
+    expect(flow.pending.at(-1).event.type).toBe("attached")
+    expect(sent.flatMap((batch) => batch.events).length).toBe(before)
+  })
+
+  test("a lag that no screen ever ends overflows once, so the connection is replaced", () => {
+    let overflowed = 0
+    let timer: (() => void) | null = null
+    const flow = new TerminalOutputFlow({
+      send: () => undefined,
+      overflow: () => overflowed++,
+      schedule: () => 0 as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => undefined,
+      setTimer: ((callback: () => void) => {
+        timer = callback
+        return 1
+      }) as unknown as typeof setTimeout,
+      clearTimer: () => undefined,
+    })
+    for (let n = 0; n < 5000 && !timer; n++) flow.push({ ...output(n), channel: n % 2 === 0 ? 1 : 3, data: new Uint8Array(40 << 10) })
+    expect(overflowed).toBe(0)
+    timer!()
     expect(overflowed).toBe(1)
-    expect(accepted).toBeLessThan(100000)
+    expect(flow.closed).toBe(true)
   })
 })

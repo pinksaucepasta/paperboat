@@ -75,7 +75,7 @@ function nextTask(run: () => void) {
 }
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
-  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261027-flow2`, {
+  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261027-flow3`, {
     type: "module",
     name: "paperboat-terminal",
   })
