@@ -2,11 +2,12 @@
 // keeps its rows without duplicates and shows the next request; then the preview is stopped and the page says so.
 // usage: ORIGIN=<console origin> STATE=<playwright storage state of the owner> RESTART_CMD='<restarts the runtime on the machine>'
 //        STOP_CMD='<pb preview stop <id> on the machine>' node check-preview-inspector-restart.mjs <previewId> <previewHost>
-import { chromium } from "playwright-core"
+// ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
+const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 import { execSync } from "node:child_process"
 const [id, host] = process.argv.slice(2)
 const origin = process.env.ORIGIN
-const exe = `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
+const exe = process.env.PW_CHROMIUM ?? `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
 const browser = await chromium.launch({ executablePath: exe })
 const page = await (await browser.newContext({ storageState: process.env.STATE })).newPage()
 const steps = []

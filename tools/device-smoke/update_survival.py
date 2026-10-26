@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """F14-02: during an update, a running file transfer finishes byte-identical and a preview and a tunnel come back on the same URL.
 
-Usage: update_survival.py TARGET PEER (--approve | --from FILE) (sudo password on stdin).
+Usage: update_survival.py TARGET PEER (--approve | --from FILE) [--terminal] (sudo password on stdin).
+With --terminal a shell is also held open in a real PTY (`pb connect`) and, after the update, the SAME shell must answer.
 Runs on TARGET (the machine that is updated). PEER is another machine of the same account that receives;
 TARGET sends two 40 MiB files to PEER. While the transfer runs, the update is started
 (`pb update --approve <downloaded candidate> --force`, or `pb update --from FILE --force`).
@@ -30,6 +31,8 @@ from pairing_lifecycle import command_result, invoke
 from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 import terminal_command
+from session_cleanup import cleanup
+from terminal_lifecycle import Terminal
 
 PB = Path.home() / '.local/bin/pb'
 FILES = 2
@@ -73,6 +76,7 @@ def main():
     parser.add_argument('peer')
     parser.add_argument('--mib', type=int, default=40, help='size of each of the two transferred files')
     parser.add_argument('--transfer-only', action='store_true', help='skip the preview and tunnel checks')
+    parser.add_argument('--terminal', action='store_true', help='hold a terminal on TARGET across the update; the same shell must answer after it')
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--approve', action='store_true')
     mode.add_argument('--from', dest='source')
@@ -85,6 +89,9 @@ def main():
     name = 'smoke-usurvive-' + uuid.uuid4().hex[:8]
     prefix = 'paperboat-usurvive-' + uuid.uuid4().hex[:10]
     preview_id = tunnel_id = None
+    held = None
+    terminal_error = ''
+    session_name = 'smoke-usurvive-term-' + uuid.uuid4().hex[:8]
     result = {'check': 'update-survival', 'target': args.target, 'peer': args.peer}
     error = None
     with tempfile.TemporaryDirectory(prefix='paperboat-update-survive-') as directory:
@@ -100,6 +107,17 @@ def main():
                 tunnel_id, tunnel_url = created['tunnel']['id'], created['tunnel']['stable_endpoint']
                 wait_for(lambda: marker in body(preview_url), 'the preview to serve', 120)
                 wait_for(lambda: marker in body(tunnel_url), 'the tunnel to serve', 120)
+            if args.terminal:
+                # the official build being updated from may predate --status-bar
+                quiet = ['--status-bar', 'off'] if '--status-bar' in command_result(PB, 'connect', '--help', timeout=60).stdout else []
+                held = Terminal([str(PB), 'connect', args.target, '--name', session_name, *quiet])
+                held.expect(b'\x1b[?2004h')
+                held.expect(held.marker('READY', 'stty -echo; '))
+                held.send("printf '\\nPB_SHELL_%s\\n' \"$$\"\r")
+                held.expect('PB_SHELL_')
+                shell_pid = held.expect('\n').decode().strip()
+                if not shell_pid.isdigit():
+                    raise RuntimeError('could not read the held shell identity')
             # TARGET creates two random files and starts sending them to PEER; the update restarts TARGET's runtime meanwhile.
             hashes = {}
             send_files = []
@@ -129,6 +147,14 @@ def main():
             if update_result.returncode:
                 raise RuntimeError('update failed rc=%s: %s' % (update_result.returncode, text[-400:]))
             result['update_started'] = True
+            if held is not None:
+                held.send("printf '\\nPB_AGAIN_%s\\n' \"$$\"\r")
+                held.expect('PB_AGAIN_', timeout=180)
+                # judged with the rest: a lost shell must not hide whether the preview, tunnel and transfer survived
+                if held.expect('\n', timeout=10).decode().strip() == shell_pid:
+                    result['same_shell_after_update'] = True
+                else:
+                    terminal_error = 'the held terminal reconnected to a different shell after the update'
             if not args.transfer_only:
                 wait_for(lambda: marker in body(preview_url), 'the preview URL to serve again after the update')
                 result['preview_same_url'] = True
@@ -153,6 +179,8 @@ def main():
             if received != hashes:
                 raise RuntimeError('received files differ from the sent ones: %r vs %r' % (sorted(received), sorted(hashes)))
             result['transfer_byte_identical'] = True
+            if terminal_error:
+                raise RuntimeError(terminal_error + ' (preview, tunnel and transfer survived: %s)' % {k: v for k, v in result.items() if k.endswith(('same_url', 'identical'))})
         except BaseException as caught:
             error = caught
             raise
@@ -174,6 +202,17 @@ def main():
                         command_result(PB, 'tunnel', 'delete', tunnel_id, '--json', '--confirm', token, timeout=120)
             except BaseException:
                 pass
+            if held is not None:
+                try:
+                    held.send('exit\r')
+                    held.wait_exit(30)
+                except BaseException:
+                    pass
+                held.close()
+                try:
+                    cleanup(str(PB), args.target, session_name)
+                except BaseException:
+                    pass
             server.shutdown()
             server.server_close()
     assert registration() == before, 'enrollment changed'

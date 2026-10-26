@@ -1,7 +1,8 @@
 // F8-02 driver: runs check-domain-binding.js on a tunnel page and creates/deletes the DNS records it asks for in Cloudflare.
 // usage: ORIGIN=<console origin> STATE=<storage state of the owner> CF_TOKEN_FILE=<dns token file> CHECK=console/scripts/check-domain-binding.js node check-domain-binding-driver.mjs <tunnelId> <fresh hostname> <zone>
 // (the tunnel needs its service up; removed hostnames are held for a week, so use a new hostname each run)
-import { chromium } from "playwright-core"
+// ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
+const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 import { readFileSync } from "node:fs"
 const [tunnelId, domain, zoneName] = process.argv.slice(2)
 const origin = process.env.ORIGIN
@@ -14,7 +15,7 @@ const cf = async (method, path, body) => {
 }
 const zone = (await cf("GET", `/zones?name=${zoneName}`))[0].id
 const created = []
-const exe = `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
+const exe = process.env.PW_CHROMIUM ?? `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
 const browser = await chromium.launch({ executablePath: exe })
 let failed = 1
 try {

@@ -1,11 +1,12 @@
 // Browser check: an inspector page left open for HOLD seconds (default 300, past several grant renewals) never reconnects:
 // one ticket, phase Ready throughout, and a request sent at the end is listed.
 // usage: ORIGIN=<console origin> STATE=<playwright storage state of the owner> HOLD=300 node check-preview-inspector-hold.mjs <previewId> <previewHost>
-import { chromium } from "playwright-core"
+// ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
+const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 const [id, host] = process.argv.slice(2)
 const origin = process.env.ORIGIN
 const hold = Number(process.env.HOLD ?? 300)
-const exe = `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
+const exe = process.env.PW_CHROMIUM ?? `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
 const browser = await chromium.launch({ executablePath: exe })
 const page = await (await browser.newContext({ storageState: process.env.STATE })).newPage()
 let tickets = 0

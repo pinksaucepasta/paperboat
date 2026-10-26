@@ -1,0 +1,18 @@
+# Checks that need their own command line. Columns (tab separated): check, kind, rows, spec.
+#   kind  device: runs inside container A from ~/ds (python3 ..., sudo password on stdin from HP_SUDO_PASS)
+#         console: <script in console/scripts> <page path> [globals JSON], on the live console (ORIGIN, STATE, PW_CHROMIUM, NODE_PATH)
+#         cmd: a shell command on the machine running this runner
+#   rows  comma list of row ids, or @script.py for every row whose Linux evidence names that script; EXTRA for the final extras
+#   spec  placeholders {build} {binary} {release} {origin} {state} {host} {self} {peer} (machine names of containers a and b)
+# A script not listed here is not run by the final re-check: `final_recheck.py inventory` lists the [x] rows that depend on it.
+# command_rows.py needs the ENV vault of the machine's account unlocked (rows C143/C144 fail on a locked vault)
+command-rows	device	@command_rows.py	python3 command_rows.py {self} --peer {peer}
+console-previews	console	F7-06	check-previews.js /previews '{{"__port":"8080","__machine":"{self}"}}'
+extra-exec-after-pair	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh exec {host} {binary}
+extra-update-history	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh history {host} {binary}
+extra-published-install	cmd	EXTRA	tar czf - -C tools/device-smoke $(cd tools/device-smoke && ls *.py) | ssh {host} 'rm -rf /tmp/pbds && mkdir /tmp/pbds && tar xzf - -C /tmp/pbds' && echo "$HP_SUDO_PASS" | ssh {host} 'cd /tmp/pbds && python3 published_install.py --expect-release {release} --keep-official'
+status-bar	device	@status_bar_lifecycle.py	python3 status_bar_lifecycle.py {peer}
+terminal-entry	device	@terminal_entry.py	python3 terminal_entry.py {peer}
+completion	device	@completion_lifecycle.py	python3 completion_lifecycle.py {peer}
+bugreport	device	@bugreport_lifecycle.py	python3 bugreport_lifecycle.py {peer}
+console-inspector	cmd	@check-preview-inspector.js,@check-preview-inspector-hold.mjs,@check-preview-inspector-restart.mjs	tools/device-smoke/final_console_inspector.sh {host} {ct_a}
