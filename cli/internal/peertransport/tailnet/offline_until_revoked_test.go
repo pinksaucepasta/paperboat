@@ -173,3 +173,18 @@ func TestConfigurationRequestsAskForUntilRevokedAuthority(t *testing.T) {
 		t.Fatalf("authority asked = %q, want until_revoked_v1", asked)
 	}
 }
+
+// Prod 2026-10-27: an engine refused (429) before its first configuration retried every second forever, because
+// the 1 s first-configuration cadence also capped the failure backoff (2 req/s per carrier install). Failures
+// before the first configuration back off like any other.
+func TestRefusalsBeforeTheFirstConfigurationBackOff(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	requests, elapsed := 0, time.Duration(0)
+	for failures := 1; elapsed < 10*time.Minute; failures++ {
+		requests++
+		elapsed += a.nextRefresh(errors.New("429 rate limited"), failures, 0)
+	}
+	if limit := int(10*time.Minute/(24*time.Second)) + 7; requests > limit {
+		t.Fatalf("%d refresh requests in 10 minutes of refusals before a first configuration, want at most %d", requests, limit)
+	}
+}

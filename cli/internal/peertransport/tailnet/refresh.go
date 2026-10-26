@@ -287,6 +287,11 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	// request is pending.
 	if err != nil {
 		delay = min(delay, refreshRetryDelay(failures))
+		if a.expiresAt.Load() == 0 {
+			// No configuration yet: refreshDelay would clamp to 1 s, so a 429 or an outage before the first
+			// configuration retried every second forever (2 req/s per carrier install, prod 2026-10-27).
+			return delay
+		}
 	}
 	return a.refreshDelay(delay)
 }
