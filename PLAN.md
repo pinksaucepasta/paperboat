@@ -1194,6 +1194,18 @@ UnregisterConnection) is the mirror: the agent tells the edge before closing a c
 shares reachable only through an authenticated `access` frontend (`zrok/controller/access.go`, share.go private token); our
 restricted routes keep the edge's signed browser decision plus the agent's own authority check, so they move only in 4.4.
 
+4.4 design (2026-10-26, Lane M). One rule for every engine stream: a public stream (HTTP, TCP, TLS passthrough) carries no
+ingress decision preface, the edge alone authorizes it and applies ingress limits (as public previews do, 0fe5072e/f60f7a53);
+a restricted stream (team/private HTTP) is opened with kind `http_browser` plus the edge's signed browser decision, and the
+agent re-checks it with the server's machine-authenticated browser authority (`/v1/browser-access/ingress/authorize`, the
+lookup restricted engine previews already use) before the origin is reached. Edge: engine replicas skip the preface in
+ForwardPublicTCP and open restricted HTTP as `http_browser`. Agent: the engine forwarder reads a preface only on
+`http_browser`, accepts `tcp_public` without one. Server (Lane B): the engine predicate takes tcp/tls and team/private
+routes; public TCP listener publication and the browser authorize endpoint accept the runtime carrier identity; private_tcp
+(accessor) moves last. Prior art: cloudflared authorizes public ingress at the edge and the connector serves it
+(no per-request re-check); zrok private shares are reachable only through an authenticated access frontend and the share
+checks the frontend's grant (`zrok/controller/access.go`, `share.go`): our restricted path keeps both checks.
+
 **Decided.** No headless connectors (tunnels run on enrolled machines only); 2 carriers per edge; the URL is returned when one
 edge is ready; no custom domains for previews. Timing: engine work starts after Linux is done, before macOS.
 
