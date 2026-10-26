@@ -168,6 +168,7 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 
 ## Code quality
 
+- **Ponytail (user decision 2026-10-26): use the ponytail skill (full) for every change.** The smallest complete change: reuse what exists, no options or abstractions nobody asked for, deletion beats addition, finish every caller/test the change touches, non-trivial logic leaves a test, never cut validation, data-loss handling, security or anything asked for. Replies end with one line on what was skipped or not checked.
 - Simple and small beats clever and defensive. Prefer deleting code to adding it. Remove
   duplicate paths instead of adding another one.
 - Functions under ~100 lines, files under ~1000 lines. Split when touching something larger.
