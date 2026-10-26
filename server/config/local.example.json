@@ -25,8 +25,7 @@
   },
   "billing": {
     "personal_allowance_bytes": null,
-    "team_allowance_bytes": null,
-    "personal_machine_limit": null
+    "team_allowance_bytes": null
   },
   "user_machines": {
     "pairing_lifetime": 600000000000,

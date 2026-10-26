@@ -191,7 +191,6 @@ type BillingOperatorPolicy struct {
 	Singleton              bool
 	PersonalAllowanceBytes sql.NullInt64
 	TeamAllowanceBytes     sql.NullInt64
-	PersonalMachineLimit   sql.NullInt32
 	Revision               int64
 	UpdatedAt              time.Time
 	RenewalGraceSeconds    int32

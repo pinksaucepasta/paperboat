@@ -116,24 +116,23 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 		t.Fatal(err)
 	}
 	var originalPersonal, originalTeam sql.NullInt64
-	var originalMachines sql.NullInt32
 	var originalRevision int64
-	if err := f.database.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalMachines, &originalRevision); err != nil {
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalRevision); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := f.database.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=$4,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalMachines, originalRevision); err != nil {
+		if _, err := f.database.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=$3,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalRevision); err != nil {
 			t.Error(err)
 		}
 	})
-	setPolicy := func(personal, team *int64, machines *int32) {
+	setPolicy := func(personal, team *int64) {
 		t.Helper()
-		if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=revision+1,updated_at=now() WHERE singleton`, personal, team, machines); err != nil {
+		if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=revision+1,updated_at=now() WHERE singleton`, personal, team); err != nil {
 			t.Fatal(err)
 		}
 	}
 	zero := int64(0)
-	setPolicy(&zero, nil, nil)
+	setPolicy(&zero, nil)
 	source.Quota = quota
 	// F13-03: a route withheld only for quota is named, so the edge can answer with the typed reason.
 	var denied []wire.IngressQuotaDenial
@@ -147,7 +146,7 @@ func testIngressProjectionPostgres(t *testing.T, onlyLKG bool) {
 			t.Fatalf("quota denial names %+v, want the withheld route", d)
 		}
 	}
-	setPolicy(nil, nil, nil)
+	setPolicy(nil, nil)
 	denied = nil
 	check(t, 1)
 	if len(denied) != 0 {

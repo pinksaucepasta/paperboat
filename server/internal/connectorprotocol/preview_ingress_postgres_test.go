@@ -73,17 +73,16 @@ func TestPublicPreviewIngressPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	var originalPersonal, originalTeam sql.NullInt64
-	var originalMachines sql.NullInt32
 	var originalRevision int64
-	if err := f.database.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,personal_machine_limit,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalMachines, &originalRevision); err != nil {
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT personal_allowance_bytes,team_allowance_bytes,revision FROM paperboat.billing_operator_policy WHERE singleton`).Scan(&originalPersonal, &originalTeam, &originalRevision); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = f.database.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,personal_machine_limit=$3,revision=$4,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalMachines, originalRevision)
+		_, _ = f.database.SQL().ExecContext(context.Background(), `UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=$2,revision=$3,updated_at=now() WHERE singleton`, originalPersonal, originalTeam, originalRevision)
 	})
 	setPolicy := func(personal *int64) {
 		t.Helper()
-		exec(`UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=NULL,personal_machine_limit=NULL,revision=revision+1,updated_at=now() WHERE singleton`, personal)
+		exec(`UPDATE paperboat.billing_operator_policy SET personal_allowance_bytes=$1,team_allowance_bytes=NULL,revision=revision+1,updated_at=now() WHERE singleton`, personal)
 	}
 	var denied []wire.IngressQuotaDenial
 	quotaSource := SQLIngressSource{DB: f.database, Clock: f.clock, Quota: quota, QuotaDenied: &denied}
