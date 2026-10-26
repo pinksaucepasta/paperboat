@@ -290,7 +290,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if scope != "system" && scope != "user" {
 			scope = "unknown"
 		}
-		capabilities := []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake"}
+		capabilities := []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake", "file_transfer_modes"}
 		// Presence must not queue behind the work-plane token source. Managed
 		// SSH, peer enrollment, and availability all share renewingTokens and a
 		// single renewal mutex; when one of those calls is slow, a liveness

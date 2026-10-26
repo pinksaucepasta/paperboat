@@ -848,3 +848,41 @@ func TestStoreOpensTheMigratedUnboundedFileTransferTable(t *testing.T) {
 	}
 	_ = reopened.Close()
 }
+
+// PLAN 3b File transfer modes: the 50 MiB per-file CHECK is lifted on demand, keeping every row, once.
+func TestLiftFileTransferSizeLimitKeepsRowsAndRunsOnce(t *testing.T) {
+	root := t.TempDir()
+	state, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	row := func(id string, size int64) FileTransfer {
+		return FileTransfer{ID: id, BatchID: "batch_" + id, SourceMachineID: "s", DestinationMachineID: "d", InitiatingUserID: "u", Basename: id + ".bin", Size: size, SHA256: strings.Repeat("a", 64), CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	}
+	if err := state.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("small", 10)}, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("big", 1_500_000_000)}, 0, 0); err == nil {
+		t.Fatal("the original table accepted a 1.5 GB file")
+	}
+	for range 2 {
+		if err := state.LiftFileTransferSizeLimit(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("big", 1_500_000_000)}, 0, 0); err != nil {
+		t.Fatalf("a 1.5 GB file after the lift: %v", err)
+	}
+	if _, err := state.FileTransfer(context.Background(), "small"); err != nil {
+		t.Fatalf("the existing row was lost: %v", err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatalf("the lifted store did not reopen: %v", err)
+	}
+	_ = reopened.Close()
+}

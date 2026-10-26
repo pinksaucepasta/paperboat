@@ -316,7 +316,7 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 	}
 	var createFailure error
 	outcome, replay, err := h.config.Journal.Execute(request.Context(), operationID, canonical, func(ctx context.Context) operation.Outcome {
-		create := filetransfer.CreateRequest{BatchID: input.BatchID, SourceMachineID: input.SourceMachineID, DestinationMachineID: input.DestinationMachineID, InitiatingUserID: input.InitiatingUserID, SessionID: input.SessionID, DeliveryClientID: clientID, Files: input.Files, MaxBytes: transferMaxBytes(authorization)}
+		create := filetransfer.CreateRequest{BatchID: input.BatchID, SourceMachineID: input.SourceMachineID, DestinationMachineID: input.DestinationMachineID, InitiatingUserID: input.InitiatingUserID, SessionID: input.SessionID, DeliveryClientID: clientID, Files: input.Files, MaxBytes: transferMaxBytes(authorization), TransferMode: transferMode(authorization)}
 		transfers, createErr := h.config.Service.Create(ctx, create)
 		if createErr != nil {
 			createFailure = createErr
@@ -708,6 +708,14 @@ func fileTransferHTTPStatus(code string) int {
 	default:
 		return http.StatusServiceUnavailable
 	}
+}
+
+// transferMode is the credential's signed transfer mode, "" when it carries none.
+func transferMode(authorization Authorization) string {
+	if claims, ok := authorization.Value.(auth.Claims); ok {
+		return claims.TransferMode
+	}
+	return ""
 }
 
 // transferMaxBytes is the signed bound of an Automatic credential (its declared batch total), 0 when none.

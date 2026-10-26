@@ -93,8 +93,11 @@ type CreateRequest struct {
 	SessionID            string
 	DeliveryClientID     string
 	Files                []File
-	// MaxBytes is the credential's signed bound on the batch total (Automatic), 0 when it carries none.
-	MaxBytes int64
+	// MaxBytes and TransferMode are the credential's signed transfer claims (PLAN 3b File transfer modes). When the
+	// credential carries them they replace the policy caps as this batch's bound: automatic is bounded by MaxBytes
+	// (its declared total), unlimited by nothing but the destination's free space.
+	MaxBytes     int64
+	TransferMode string
 }
 
 type Config struct {

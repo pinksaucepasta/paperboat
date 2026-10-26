@@ -1129,3 +1129,26 @@ func TestCreateHonorsTheSignedMaxBytes(t *testing.T) {
 		t.Fatalf("batch over the signed bound err=%v", err)
 	}
 }
+
+// PLAN 3b File transfer modes: the policy keeps today's caps; a credential that carries the transfer claims sets
+// this batch's bound, and a file over the store's original 50 MiB limit lifts that limit on demand.
+func TestTransferClaimsReplaceThePolicyCaps(t *testing.T) {
+	service, _, _ := newService(t)
+	create := func(id string, size, maxBytes int64, mode string) error {
+		files := []File{{Basename: "big.bin", Size: size, SHA256: digest(nil)}}
+		_, err := service.Create(context.Background(), CreateRequest{BatchID: id, SourceMachineID: "machine_source", DestinationMachineID: "machine_remote", InitiatingUserID: "user_1", SessionID: "ses", DeliveryClientID: "client_1", Files: files, MaxBytes: maxBytes, TransferMode: mode})
+		return err
+	}
+	if err := create("caps", MaxBatchBytes+1, 0, ""); !hasCode(err, InvalidSize) && !hasCode(err, BatchLimit) {
+		t.Fatalf("without claims the policy caps apply: %v", err)
+	}
+	if err := create("automatic", 1_500_000_000, 1_500_000_000, "automatic"); err != nil {
+		t.Fatalf("an automatic credential's declared total was refused: %v", err)
+	}
+	if err := create("automatic-over", 1_500_000_001, 1_500_000_000, "automatic"); !hasCode(err, InvalidSize) && !hasCode(err, BatchLimit) {
+		t.Fatalf("more than the declared total accepted: %v", err)
+	}
+	if err := create("unlimited", 3_000_000_000, 0, "unlimited"); err != nil {
+		t.Fatalf("an unlimited credential was bounded: %v", err)
+	}
+}

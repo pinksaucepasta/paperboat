@@ -529,7 +529,7 @@ func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, envi
 	}
 	capabilities := append([]string(nil), s.capabilities...)
 	if len(capabilities) == 0 {
-		capabilities = []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake"}
+		capabilities = []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake", "file_transfer_modes"}
 	}
 	if environmentEnabled && !slices.Contains(capabilities, "environment_injection") {
 		capabilities = append(capabilities, "environment_injection")

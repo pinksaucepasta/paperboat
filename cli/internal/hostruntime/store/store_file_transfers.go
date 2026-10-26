@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -432,4 +433,40 @@ func fileTransferFromSQLC(row storesqlc.FileTransfer) FileTransfer {
 		State: row.State, ResultCode: row.ResultCode.String, ReceiptPath: row.ReceiptPath.String,
 		CreatedAt: time.Unix(0, row.CreatedAt).UTC(), ExpiresAt: time.Unix(0, row.ExpiresAt).UTC(),
 	}
+}
+
+// fileTransferSizeCheck is the per-file CHECK of the original file_transfers table (50 MiB).
+const fileTransferSizeCheck = "CHECK(size BETWEEN 0 AND 52428800)"
+
+// LiftFileTransferSizeLimit rebuilds file_transfers without the 50 MiB per-file CHECK, once, the first time a
+// transfer needs it (PLAN 3b File transfer modes: Automatic up to 2,000,000,000 bytes, Unlimited unbounded).
+// It runs on demand, never at startup, so an update that rolls back to an older runtime finds the table that
+// runtime knows; schema validation accepts both tables.
+func (s *Store) LiftFileTransferSizeLimit(ctx context.Context) (resultErr error) {
+	defer protectStoreError(&resultErr)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer retainRollback(tx, &resultErr)
+	var table string
+	if err := tx.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='file_transfers'`).Scan(&table); err != nil {
+		return err
+	}
+	if !strings.Contains(table, fileTransferSizeCheck) {
+		return tx.Commit()
+	}
+	for _, statement := range []string{
+		`ALTER TABLE file_transfers RENAME TO file_transfers_old`,
+		strings.Replace(table, fileTransferSizeCheck, "CHECK(size >= 0)", 1),
+		`INSERT INTO file_transfers SELECT * FROM file_transfers_old`,
+		`DROP TABLE file_transfers_old`,
+		`CREATE INDEX file_transfers_pending ON file_transfers(delivery_client_id,session_id,created_at) WHERE state='pending'`,
+		`CREATE INDEX file_transfers_expiry ON file_transfers(expires_at)`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
