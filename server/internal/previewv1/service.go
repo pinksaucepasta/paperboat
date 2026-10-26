@@ -160,6 +160,8 @@ type EndpointState string
 const (
 	EndpointReady                EndpointState = "ready"
 	EndpointCustomDomainNotReady EndpointState = "custom_domain_not_ready"
+	// EndpointEnded is a lease that ended (stopped, expired or its owner disconnected): it has no endpoint.
+	EndpointEnded EndpointState = "ended"
 )
 
 type Preview struct {
@@ -1138,6 +1140,9 @@ func previewView(row previewtunnelstore.PreviewLeaseRecord) Preview {
 		default:
 			state = "ready"
 		}
+	}
+	if state == "owner_disconnected" || state == "expired" || state == "stopped" {
+		endpoint, endpointState = "", EndpointEnded
 	}
 	view := Preview{
 		Schema: Schema, Kind: Kind, ID: row.ID, AccountID: row.AccountID, ActorID: row.ActorID,

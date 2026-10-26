@@ -758,6 +758,12 @@ func TestObserveReadinessCompletesProjectionAndReconcileMapsTerminalStates(t *te
 	if reconciled.Expired[0].State != "expired" || reconciled.Expired[0].EdgeState != "down" || reconciled.OwnerLost[0].State != "owner_disconnected" || reconciled.OwnerLost[0].OriginState != "unavailable" {
 		t.Fatalf("reconciliation projection = %#v", reconciled)
 	}
+	// A terminal lease shows no endpoint: endpoint_state ended, endpoint empty (Lane G/M report: they said ready).
+	for _, ended := range []Preview{reconciled.Expired[0], reconciled.OwnerLost[0]} {
+		if ended.EndpointState != EndpointEnded || ended.Endpoint != "" {
+			t.Fatalf("terminal lease %s: endpoint_state %q, endpoint %q; want ended and none", ended.ID, ended.EndpointState, ended.Endpoint)
+		}
+	}
 }
 
 func TestObserveMachineReadinessRequiresOwnerAndReplaysAfterUncertainResponse(t *testing.T) {
