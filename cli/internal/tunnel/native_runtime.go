@@ -345,7 +345,7 @@ func nativeCapability(consumer string) string {
 }
 
 func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consumer string, application peerApplication, target *resolver.TerminalTarget, now func() time.Time) (Conn, error) {
-	if target == nil || target.Auth.ResourceID == "" || nativeCapability(consumer) == "" {
+	if target == nil || target.Auth.ResourceID == "" && !target.Auth.Offline || nativeCapability(consumer) == "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	session, err := r.Dial(ctx, machineID, peerquic.ClassInteractive)

@@ -187,7 +187,7 @@ func (c *connectedRawConn) Resize(uint16, uint16) error { return nil }
 func (c *connectedRawConn) Wait() (int, error)          { return 0, nil }
 
 func TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner(t *testing.T) {
-	for _, mode := range []string{"quic", "wss_fallback", "quic_sender_wss_receiver", "receiver_authority_refresh"} {
+	for _, mode := range []string{"quic", "wss_fallback", "quic_sender_wss_receiver", "receiver_authority_refresh", "host_rules"} {
 		t.Run(mode, func(t *testing.T) { connectedProductionRuntime(t, mode) })
 	}
 }
@@ -200,6 +200,8 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	forcedWSS := mode == "wss_fallback"
 	mixed := mode == "quic_sender_wss_receiver"
 	refresh := mode == "receiver_authority_refresh"
+	// host_rules: the stream carries no credential; the machine admits it from its own signed scope (SSH, D1).
+	hostRules := mode == "host_rules"
 	if testing.Short() {
 		t.Skip("real authenticated DERP/QUIC production-constructor integration")
 	}
@@ -295,6 +297,11 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 			clientConfig.Peers[0].Scopes[0].Capability = "private_access"
 			machineConfig.Peers[0].Scopes[0].Capability = "private_access"
 		}
+		if hostRules {
+			hostScope := machineConfig.Peers[0].Scopes[0]
+			hostScope.ResourceID = machineID
+			machineConfig.Peers[0].Scopes = append(machineConfig.Peers[0].Scopes, hostScope)
+		}
 		initialMachine := machineConfig
 		if refresh {
 			initialMachine.Peers = nil
@@ -334,7 +341,11 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
+	var admitOffline func(context.Context, native.OfflineAdmission) error
+	if hostRules {
+		admitOffline = func(context.Context, native.OfflineAdmission) error { return nil }
+	}
+	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, AdmitOffline: admitOffline, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,6 +447,9 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	}
 	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
 	target := &resolver.TerminalTarget{EnvironmentID: "env_connected", Auth: resolver.AuthTarget{Token: "credential_ssh", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "access_connected"}}
+	if hostRules {
+		target.Auth = resolver.AuthTarget{Offline: true, ExpiresAt: expires.Format(time.RFC3339)}
+	}
 	application := peerApplication{operationID: "operation_connected", stream: "ssh", raw: func(_ context.Context, stream io.ReadWriteCloser) (Conn, error) {
 		return &connectedRawConn{Conn: stream.(net.Conn)}, nil
 	}}
