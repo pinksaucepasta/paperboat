@@ -229,12 +229,12 @@ def containers(ct_map):
 
 
 def run_entry(entry, args, results):
-    """console, device and cmd entries. Placeholders: {build} {binary} {origin} {state} {host} {self} {peer} (machine names)."""
+    """console, device and cmd entries. Placeholders: {build} {binary} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
     devices = containers(args.ct_map)
     names = [machine_name(host, ct) for _, host, ct in devices]
     values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'binary': args.binary, 'release': args.release,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
-              'ct_a': devices[0][2] if devices else ''}
+              'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else ''}
     spec = entry['spec'].format(**values)
     env = {'ORIGIN': args.origin, 'STATE': args.state, 'HOST': args.host, 'BINARY': args.binary, 'BUILD': args.build}  # PW_CHROMIUM and PW_MODULE come from the caller
     if entry['kind'] == 'device':
