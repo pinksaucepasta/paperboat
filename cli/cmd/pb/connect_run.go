@@ -1,8 +1,6 @@
 package main
 
 import (
-	"github.com/google/uuid"
-
 	"context"
 	"errors"
 	"fmt"
@@ -286,7 +284,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	var info resolver.ConnectInfo
 	var conn tunnel.Conn
 	var lastTerminalSequence atomic.Int64
-	inputOwner := "owner_" + uuid.NewString() // one pb connect across redials: the daemon keeps its unanswered input
 	recordTerminalSequence := func(sequence int) {
 		for {
 			current := lastTerminalSequence.Load()
@@ -341,7 +338,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				info.Terminal.LaunchWarningSink = recordLaunchWarning
 				info.Terminal.Env = forwardedTerminalEnv(config.TerminalEnv)
 				info.Terminal.Cols, info.Terminal.Rows = remoteSize()
-				info.Terminal.InputOwner = inputOwner
 			}
 			if transferLease != nil {
 				observeTransferFailure(transferLease.Close())
@@ -516,7 +512,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			freshInfo.Terminal.ReplayGapSink = recordReplayGap
 			freshInfo.Terminal.Env = forwardedTerminalEnv(config.TerminalEnv)
 			freshInfo.Terminal.Cols, freshInfo.Terminal.Rows = remoteSize()
-			freshInfo.Terminal.InputOwner = inputOwner
 		}
 		freshConn, dialErr := d.tunnel.Dial(reconnectCtx, freshInfo)
 		if dialErr != nil {

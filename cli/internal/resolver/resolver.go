@@ -230,8 +230,6 @@ type TerminalTarget struct {
 	// stream identifier and is safe to reuse after a detached stream is closed.
 	InputAttachmentID string
 	InputQueue        *TerminalInputQueue
-	// InputOwner names one pb connect across redials (see localdaemon input owners); empty elsewhere.
-	InputOwner string
 }
 
 // Shared reports a role-scoped session attachment. Runtime authorization remains
