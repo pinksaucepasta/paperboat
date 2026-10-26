@@ -104,7 +104,7 @@ func (s *suite) execution() map[string]any {
 	literal, input := "space ; $(false) ' \\\n", "first\nsecond\x00tail\n"
 	code := `import json,sys; print(json.dumps({"args":sys.argv[1:],"stdin":sys.stdin.read()})); print("mcp-stderr",file=sys.stderr)`
 	result, out := call[mcpserver.ExecResult](s.ctx, session, "exec", mcpserver.ExecArgs{Machine: s.targetID, Argv: []string{"python3", "-c", code, literal, ""}, Stdin: input})
-	require(!result.IsError && out.ExitCode != nil && *out.ExitCode == 0 && out.Outcome == "exited", "MCP exec failed: "+out.ErrorCode)
+	require(!result.IsError && out.ExitCode != nil && *out.ExitCode == 0 && out.Outcome == "exited", "MCP exec failed: "+out.ErrorCode+": "+out.Detail)
 	var observed struct {
 		Args  []string
 		Stdin string
