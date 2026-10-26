@@ -271,6 +271,11 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	a.relay.mu.Lock()
 	recovering := a.relay.recovery != nil
 	a.relay.mu.Unlock()
+	// Relay health is only worth keeping fresh while a peer is reached through a regional relay. Otherwise the
+	// normal cadence applies, and recovery itself renews at once when it finds the observations stale
+	// (regional_recovery.go); renewing for freshness on every engine was ~22 requests a minute per carrier
+	// machine (two engines, prod 2026-10-27).
+	recovering = recovering && regionalRelayInUse(a)
 	// Signed health observations expire regionalObservationMaxAge after they were
 	// made, not after they were issued. Active regional recovery renews before the
 	// earliest one ends, so its relays are not withdrawn between renewals.
@@ -294,6 +299,16 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 		}
 	}
 	return a.refreshDelay(delay)
+}
+
+// regionalRelayInUse reports whether a peer of a is reached through a regional relay now.
+var regionalRelayInUse = func(a *Authority) bool {
+	for _, path := range a.PeerPaths() {
+		if path == "regional_relay" {
+			return true
+		}
+	}
+	return false
 }
 
 // regionalRenewBefore is how long before the earliest signed observation ends a renewal starts;
