@@ -2,7 +2,6 @@ package managedssh
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -87,11 +86,9 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 	if _, err := ResolveUsername("", "", "", "local", true); !errors.Is(err, ErrSSHUsernameMissing) {
 		t.Fatalf("registered-user absence error = %v", err)
 	}
-	// F5-11: managed keys live only in the registered user's authorized_keys, so another user is refused
-	// up front, naming the one that works.
-	var notAllowed *UsernameNotAllowedError
-	if _, err := ResolveUsername("root", "", "deploy", "local", true); !errors.Is(err, ErrSSHUsernameNotAllowed) || !errors.As(err, &notAllowed) || notAllowed.Registered != "deploy" || !strings.Contains(err.Error(), `"deploy"`) {
-		t.Fatalf("another user than the registered one = %v", err)
+	// Another OS user than the one who set pb up is not refused: they sign in with their own credentials.
+	if got, err := ResolveUsername("bob", "", "deploy", "local", true); err != nil || got != "bob" {
+		t.Fatalf("another user = %q, %v", got, err)
 	}
 	for _, value := range []string{"-oProxyCommand=x", "user@host", "bad user", "bad;user", "bad\nuser", ""} {
 		_, err := ResolveUsername(value, "", "", "", false)
@@ -124,8 +121,8 @@ func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
 	if err != nil || got != "Pujan" {
 		t.Fatalf("ResolveUsernameForPlatform() = %q, %v", got, err)
 	}
-	if _, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); !errors.Is(err, ErrSSHUsernameNotAllowed) {
-		t.Fatalf("Linux user names are case-sensitive: %v", err)
+	if got, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); err != nil || got != "pujan" {
+		t.Fatalf("Linux user names are case-sensitive, so this is another user: %q, %v", got, err)
 	}
 }
 
@@ -144,5 +141,21 @@ func TestResolveDestinationFencesPort(t *testing.T) {
 	}
 	if _, err := ValidateDestinationPort("22", 2222); !errors.Is(err, ErrSSHPortConflict) {
 		t.Fatalf("ValidateDestinationPort conflict error = %v", err)
+	}
+}
+
+// Only the OS user who set pb up on the machine is the managed user (gets the automatic key).
+func TestResolveDestinationMarksOnlyTheSetupUserAsManaged(t *testing.T) {
+	input := DestinationInput{AliasDomain: testAliasDomain, Alias: "homelab", RegisteredPort: 22, RegisteredUser: "pbt", HasRegisteredUser: true}
+	for requested, managed := range map[string]bool{"": true, "pbt": true, "bob": false, "PBT": false} {
+		input.RequestedUser = requested
+		got, err := ResolveDestination(input)
+		if err != nil || got.Managed != managed {
+			t.Fatalf("user %q: managed=%v err=%v, want managed=%v", requested, got.Managed, err, managed)
+		}
+	}
+	input.RequestedUser, input.Platform, input.RegisteredUser = "pujan", "windows", "Pujan"
+	if got, err := ResolveDestination(input); err != nil || !got.Managed || got.User != "Pujan" {
+		t.Fatalf("Windows user names are case-insensitive: %+v %v", got, err)
 	}
 }

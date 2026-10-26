@@ -2,18 +2,16 @@ package managedssh
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 )
 
 var (
-	ErrSSHAliasInvalid       = errors.New("managed SSH alias is invalid")
-	ErrSSHUsernameInvalid    = errors.New("managed SSH username is invalid")
-	ErrSSHUsernameConflict   = errors.New("OpenSSH username conflicts with the requested user")
-	ErrSSHUsernameNotAllowed = errors.New("OpenSSH username is not the registered Paperboat target user")
-	ErrSSHPortConflict       = errors.New("OpenSSH destination port differs from the registered SSH target")
-	ErrSSHUsernameMissing    = errors.New("managed SSH username is unavailable")
+	ErrSSHAliasInvalid     = errors.New("managed SSH alias is invalid")
+	ErrSSHUsernameInvalid  = errors.New("managed SSH username is invalid")
+	ErrSSHUsernameConflict = errors.New("OpenSSH username conflicts with the requested user")
+	ErrSSHPortConflict     = errors.New("OpenSSH destination port differs from the registered SSH target")
+	ErrSSHUsernameMissing  = errors.New("managed SSH username is unavailable")
 )
 
 // ParseMachineTarget separates an optional OpenSSH username while preserving
@@ -48,6 +46,10 @@ type Destination struct {
 	Host        string
 	Port        uint16
 	User        string
+	// Managed is true when User is the OS user who set pb up on the machine: only that user signs in
+	// with the automatic per-session key. Any other user goes through the same transport and
+	// authenticates with their own key, agent or password.
+	Managed bool
 }
 
 type DestinationInput struct {
@@ -80,7 +82,8 @@ func ResolveDestination(input DestinationInput) (Destination, error) {
 	if err != nil {
 		return Destination{}, err
 	}
-	return Destination{AliasDomain: input.AliasDomain, Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user}, nil
+	managed := input.HasRegisteredUser && usernamesEqual(user, input.RegisteredUser, input.Platform)
+	return Destination{AliasDomain: input.AliasDomain, Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user, Managed: managed}, nil
 }
 
 func AliasHost(alias, domain string) (string, error) {
@@ -142,22 +145,8 @@ func ResolveUsernameForPlatform(requested, openSSH, registered, local string, ha
 	if hasRegistered && equal(selected, registered) {
 		return registered, nil
 	}
-	if hasRegistered {
-		// Managed keys live only in the registered user's authorized_keys: refuse here, naming that
-		// user, instead of letting sshd answer "Permission denied (publickey)" (F5-11).
-		return "", &UsernameNotAllowedError{Requested: selected, Registered: registered}
-	}
 	return selected, nil
 }
-
-// UsernameNotAllowedError is a request to sign in as a user other than the machine's registered one.
-type UsernameNotAllowedError struct{ Requested, Registered string }
-
-func (e *UsernameNotAllowedError) Error() string {
-	return fmt.Sprintf("Paperboat SSH signs in to this machine as %q, not %q: leave the user out or use %s@<machine>", e.Registered, e.Requested, e.Registered)
-}
-
-func (e *UsernameNotAllowedError) Is(target error) bool { return target == ErrSSHUsernameNotAllowed }
 
 func ValidateDestinationPort(value string, registered uint16) (uint16, error) {
 	port, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
@@ -208,4 +197,11 @@ func validUnqualifiedSSHUsername(value string) bool {
 		}
 	}
 	return true
+}
+
+func usernamesEqual(left, right, platform string) bool {
+	if strings.EqualFold(strings.TrimSpace(platform), "windows") {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }

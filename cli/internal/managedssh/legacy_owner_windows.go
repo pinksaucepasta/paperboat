@@ -168,7 +168,7 @@ func migrateLegacyWindowsManagedSSHState(directory, sid string) error {
 		return ErrOpenSSHConfigConflict
 	}
 	includeLine := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if !validRecordedInclude(record.IncludeChunk, includeLine) || bytes.Count(main.file.value, []byte(record.IncludeChunk)) != 1 || !validOwnedOpenSSHContent(owned.file.value, record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned.file.value) || !isManagedIdentityPublicKey(identity.file.value, "") {
+	if !validRecordedInclude(record.IncludeChunk, includeLine) || bytes.Count(main.file.value, []byte(record.IncludeChunk)) != 1 || (!validOwnedOpenSSHContent(owned.file.value, record.AliasSuffix) && !validPreviousOwnedOpenSSHContent(owned.file.value, record.AliasSuffix)) || record.OwnedHash != hashOpenSSHBytes(owned.file.value) || !isManagedIdentityPublicKey(identity.file.value, "") {
 		return ErrOpenSSHConfigConflict
 	}
 	if main.admin {

@@ -200,7 +200,7 @@ func windowsManagedSSHDependencies(ctx *command.Context) (*deps, error) {
 
 func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port uint16, executable string, passthrough []string, includePassthrough bool) []string {
 	knownHostsCommand := quoteWindowsOpenSSHCommand(executable) + " __ssh-known-hosts --host " + destination.Host + " --port " + strconv.Itoa(int(destination.Port))
-	arguments := openSSHSecurityArguments()
+	arguments := openSSHSecurityArguments(destination)
 	arguments = append(arguments,
 		"-o", "ProxyCommand=none",
 		"-o", "Hostname=127.0.0.1",

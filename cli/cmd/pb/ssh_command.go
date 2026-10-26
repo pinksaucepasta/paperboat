@@ -90,7 +90,7 @@ func resolveSSHRequestedUser(targetUser, flagUser string) (string, error) {
 }
 
 func openSSHArguments(destination managedssh.Destination, passthrough []string, includePassthrough bool) []string {
-	arguments := openSSHSecurityArguments()
+	arguments := openSSHSecurityArguments(destination)
 	if destination.Port != 22 {
 		arguments = append(arguments, "-p", strconv.Itoa(int(destination.Port)))
 	}
@@ -101,7 +101,13 @@ func openSSHArguments(destination managedssh.Destination, passthrough []string, 
 	return arguments
 }
 
-func openSSHSecurityArguments() []string {
+// openSSHSecurityArguments pins the managed key (public key only, nothing to type) for the user who
+// set pb up. Any other user gets none of it: OpenSSH authenticates them as usual with their own
+// agent, keys or a password prompt, over the same Paperboat transport.
+func openSSHSecurityArguments(destination managedssh.Destination) []string {
+	if !destination.Managed {
+		return nil
+	}
 	return []string{
 		"-o", "BatchMode=yes",
 		"-o", "IdentitiesOnly=yes",

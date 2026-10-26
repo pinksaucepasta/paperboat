@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := openSSHTestConfig(home)
+	config.Targets = []OpenSSHAliasTarget{{Alias: "box", User: "pbt", Port: 22}}
 	installed, err := InstallOpenSSHConfig(config)
 	if err != nil || !installed.Changed {
 		t.Fatalf("installed=%+v error=%v", installed, err)
@@ -48,7 +50,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 		t.Fatalf("main config=%q", main)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")))
-	for _, required := range []string{"Host *.machines.example.test", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
+	for _, required := range []string{"Host *.machines.example.test", "Match host box.machines.example.test user \"pbt\"", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
 		if !strings.Contains(owned, required) {
 			t.Fatalf("owned config missing %q: %q", required, owned)
 		}
@@ -98,46 +100,6 @@ func TestOpenSSHConfigRendersCanonicalAliasPortWithoutUser(t *testing.T) {
 	}
 }
 
-func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testing.T) {
-	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home)
-	config.Targets = []OpenSSHAliasTarget{{Alias: "mac", User: "adam", Port: 22}}
-	if _, err := InstallOpenSSHConfig(config); err != nil {
-		t.Fatal(err)
-	}
-	directory := filepath.Join(home, ".ssh")
-	ownedPath := filepath.Join(directory, "paperboat_config")
-	owned := readOpenSSHTestFile(t, ownedPath)
-	oldOwned := bytes.Replace(owned, []byte("Host mac.machines.example.test\n    Port 22\n"), []byte("Host mac.machines.example.test\n    User adam\n    Port 22\n"), 1)
-	if bytes.Equal(oldOwned, owned) {
-		t.Fatal("failed to construct preceding owned format")
-	}
-	if err := os.WriteFile(ownedPath, oldOwned, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	recordPath := filepath.Join(directory, ".paperboat-config-install-v1.json")
-	var record openSSHInstallRecord
-	if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
-		t.Fatal(err)
-	}
-	record.OwnedHash = hashOpenSSHBytes(oldOwned)
-	recordJSON, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(recordPath, append(recordJSON, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	result, err := InstallOpenSSHConfig(config)
-	if err != nil || !result.Changed {
-		t.Fatalf("migrate target user: result=%+v error=%v", result, err)
-	}
-	migrated := readOpenSSHTestFile(t, ownedPath)
-	if bytes.Contains(migrated, []byte("\n    User ")) {
-		t.Fatalf("target user survived migration: %q", migrated)
-	}
-}
-
 func TestOpenSSHConfigRemovesCreatedMainConfigOnUninstall(t *testing.T) {
 	home := openSSHTestHome(t)
 	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
@@ -151,45 +113,51 @@ func TestOpenSSHConfigRemovesCreatedMainConfigOnUninstall(t *testing.T) {
 	}
 }
 
-func TestOpenSSHConfigAtomicallyUpgradesLegacyManagedFragment(t *testing.T) {
+// previousOpenSSHFormat renders the fragment as the build before the per-user managed key wrote it: one
+// wildcard block that forces the managed key on every user.
+func previousOpenSSHFormat(config OpenSSHConfig) []byte {
+	var out strings.Builder
+	out.WriteString(openSSHBeginMarker + "\n")
+	for _, target := range config.Targets {
+		out.WriteString("Host " + target.Alias + "." + config.AliasDomain + "\n    Port " + strconv.Itoa(int(target.Port)) + "\n")
+	}
+	out.WriteString("Host *." + config.AliasDomain + "\n    ProxyCommand " + config.ProxyCommand + "\n    KnownHostsCommand " + config.KnownHostsCommand +
+		"\n    IdentityAgent \"" + config.AgentSocket + "\"\n    IdentityFile \"" + config.IdentityFile + "\"\n" +
+		"    IdentitiesOnly yes\n    BatchMode yes\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n" +
+		ownedOpenSSHTransport + openSSHEndMarker + "\n")
+	return []byte(out.String())
+}
+
+func TestOpenSSHConfigAtomicallyUpgradesThePreviousManagedFragment(t *testing.T) {
 	home := openSSHTestHome(t)
 	config := openSSHTestConfig(home)
+	config.Targets = []OpenSSHAliasTarget{{Alias: "mac", User: "adam", Port: 22}}
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
 	directory := filepath.Join(home, ".ssh")
-	legacy := []byte(openSSHBeginMarker + "\n" +
-		"Host *.pprbt\n" +
-		"    ProxyCommand " + config.ProxyCommand + "\n" +
-		"    KnownHostsCommand " + config.KnownHostsCommand + "\n" +
-		"    IdentityAgent \"" + config.AgentSocket + "\"\n" +
-		"    IdentitiesOnly yes\n" +
-		"    BatchMode yes\n" +
-		"    PasswordAuthentication no\n" +
-		"    KbdInteractiveAuthentication no\n" +
-		"    StrictHostKeyChecking yes\n" +
-		"    CheckHostIP no\n" +
-		"    UserKnownHostsFile none\n" +
-		"    GlobalKnownHostsFile none\n" + openSSHEndMarker + "\n")
-	if !validLegacyOwnedOpenSSHContent(legacy, "pprbt") {
-		t.Fatal("test legacy fragment is invalid")
+	previous := previousOpenSSHFormat(config)
+	if !validPreviousOwnedOpenSSHContent(previous, config.AliasDomain) || validOwnedOpenSSHContent(previous, config.AliasDomain) {
+		t.Fatal("test previous-format fragment is not recognized as the previous format")
 	}
 	var record openSSHInstallRecord
 	recordPath := filepath.Join(directory, ".paperboat-config-install-v1.json")
 	if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
 		t.Fatal(err)
 	}
-	record.AliasSuffix = "pprbt"
-	record.OwnedHash = hashOpenSSHBytes(legacy)
+	record.OwnedHash = hashOpenSSHBytes(previous)
 	recordJSON, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "paperboat_config"), legacy, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "paperboat_config"), previous, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(recordPath, append(recordJSON, '\n'), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if ValidateOpenSSHConfig(config) == nil {
+		t.Fatal("readiness accepted the previous format before the upgrade")
 	}
 	upgraded, err := InstallOpenSSHConfig(config)
 	if err != nil || !upgraded.Changed {
@@ -198,8 +166,8 @@ func TestOpenSSHConfigAtomicallyUpgradesLegacyManagedFragment(t *testing.T) {
 	if err := ValidateOpenSSHConfig(config); err != nil {
 		t.Fatalf("validate upgraded config: %v", err)
 	}
-	if validLegacyOwnedOpenSSHContent(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")), "pprbt") {
-		t.Fatal("legacy fragment remains after upgrade")
+	if validPreviousOwnedOpenSSHContent(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")), config.AliasDomain) {
+		t.Fatal("previous format remains after the upgrade")
 	}
 }
 
@@ -209,10 +177,12 @@ func TestGeneratedOpenSSHConfigIsAcceptedByInstalledClient(t *testing.T) {
 		t.Skip("OpenSSH client is not installed")
 	}
 	home := openSSHTestHome(t)
-	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
+	config := openSSHTestConfig(home)
+	config.Targets = []OpenSSHAliasTarget{{Alias: "probe", User: "pbt", Port: 22}}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "probe.machines.example.test")
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "-l", "pbt", "probe.machines.example.test")
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
 	command.Stdout = &stdout
@@ -259,6 +229,54 @@ func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
 	}
 	if strings.Contains(effective, "user remote-user\n") {
 		t.Fatalf("plain OpenSSH unexpectedly inherited the target setup user:\n%s", stdout.String())
+	}
+}
+
+// The managed key (pb's agent, the public key file, no password, no prompt) is configured only for the
+// user who set pb up. Every other user connects through the same ProxyCommand and host-key trust and is
+// left to OpenSSH's normal authentication: their own agent and keys, a password, a prompt.
+func TestInstalledOpenSSHConfigOffersTheManagedKeyOnlyToTheSetupUser(t *testing.T) {
+	executable, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("OpenSSH client is not installed")
+	}
+	home := openSSHTestHome(t)
+	config := openSSHTestConfig(home)
+	config.Targets = []OpenSSHAliasTarget{{Alias: "homelab", User: "pbt", Port: 22}}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	effective := func(user string) string {
+		t.Helper()
+		command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "-l", user, "homelab.machines.example.test")
+		command.Env = openSSHTestEnvironment(home)
+		var stderr bytes.Buffer
+		var stdout bytes.Buffer
+		command.Stdout, command.Stderr = &stdout, &stderr
+		if err := command.Run(); err != nil {
+			t.Fatalf("OpenSSH rejected the installed target for %s: %v: %s", user, err, stderr.String())
+		}
+		return strings.ToLower(stdout.String())
+	}
+	managed := effective("pbt")
+	for _, required := range []string{"identitiesonly yes\n", "batchmode yes\n", "passwordauthentication no\n", "kbdinteractiveauthentication no\n", "identityagent " + strings.ToLower(config.AgentSocket) + "\n", "identityfile " + strings.ToLower(config.IdentityFile) + "\n", "port 22\n", "proxycommand \"/usr/local/bin/pb\" internal ssh-proxy"} {
+		if !strings.Contains(managed, required) {
+			t.Fatalf("setup user is missing %q:\n%s", required, managed)
+		}
+	}
+	other := effective("bob")
+	for _, required := range []string{"user bob\n", "port 22\n", "proxycommand \"/usr/local/bin/pb\" internal ssh-proxy", "knownhostscommand ", "stricthostkeychecking true\n"} {
+		if !strings.Contains(other, required) {
+			t.Fatalf("another user does not get Paperboat's transport and host-key trust, missing %q:\n%s", required, other)
+		}
+	}
+	for _, forbidden := range []string{"identitiesonly yes", "batchmode yes", "passwordauthentication no", "kbdinteractiveauthentication no", strings.ToLower(config.AgentSocket), strings.ToLower(config.IdentityFile)} {
+		if strings.Contains(other, forbidden) {
+			t.Fatalf("another user is forced into the managed key (%q):\n%s", forbidden, other)
+		}
+	}
+	if !strings.Contains(other, "passwordauthentication yes\n") || !strings.Contains(other, "batchmode no\n") {
+		t.Fatalf("another user cannot use a password or a prompt:\n%s", other)
 	}
 }
 

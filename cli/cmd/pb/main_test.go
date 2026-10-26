@@ -60,7 +60,7 @@ func TestDeliveredTransferKeyCleanupWarningIsBoundedAndPreservesSuccess(t *testi
 }
 
 func TestOpenSSHArgumentsPlacesRemoteCommandAfterDestination(t *testing.T) {
-	destination := managedssh.Destination{User: "root", Host: "machine.local.example.test", Port: 2222}
+	destination := managedssh.Destination{User: "root", Host: "machine.local.example.test", Port: 2222, Managed: true}
 	got := openSSHArguments(destination, []string{"printf ssh-ok"}, true)
 	want := []string{
 		"-o", "BatchMode=yes",
@@ -70,6 +70,17 @@ func TestOpenSSHArgumentsPlacesRemoteCommandAfterDestination(t *testing.T) {
 		"-o", "KbdInteractiveAuthentication=no",
 		"-p", "2222", "root@machine.local.example.test", "printf ssh-ok",
 	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("openSSHArguments() = %q, want %q", got, want)
+	}
+}
+
+// A user other than the one who set pb up gets no managed-key options: OpenSSH authenticates them with
+// their own agent, keys or a password prompt, over the same Paperboat transport (never refused by us).
+func TestOpenSSHArgumentsLeaveAuthenticationToOpenSSHForAnotherUser(t *testing.T) {
+	destination := managedssh.Destination{User: "bob", Host: "machine.local.example.test", Port: 22}
+	got := openSSHArguments(destination, []string{"id"}, true)
+	want := []string{"bob@machine.local.example.test", "id"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("openSSHArguments() = %q, want %q", got, want)
 	}
