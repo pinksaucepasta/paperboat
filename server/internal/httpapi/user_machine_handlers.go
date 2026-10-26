@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -860,23 +859,12 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			SessionID       string `json:"session_id"`
 			RequestID       string `json:"request_id"`
 			ManifestDigest  string `json:"manifest_digest"`
-			TransferMode    string `json:"transfer_mode"`
-			DeclaredBytes   int64  `json:"declared_bytes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
-		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest, usermachines.TransferIntent{Mode: body.TransferMode, DeclaredBytes: body.DeclaredBytes})
-		var tooLarge *usermachines.TransferTooLargeError
-		if errors.As(err, &tooLarge) {
-			writeErrorDetails(w, r, http.StatusConflict, "transfer_too_large", fmt.Sprintf("This transfer is %d bytes. Automatic sends up to %d bytes. Use --unlimited to send directly or through your own relay.", tooLarge.TotalBytes, tooLarge.MaxBytes), map[string]any{"total_bytes": tooLarge.TotalBytes, "max_bytes": tooLarge.MaxBytes})
-			return
-		}
-		if errors.Is(err, usermachines.ErrInvalidTransferIntent) {
-			writeError(w, r, http.StatusBadRequest, "invalid_transfer_intent", "transfer_mode must be automatic or unlimited, and declared_bytes must be the prepared batch's total (the accepted inbox request's total for team sends).")
-			return
-		}
+		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest)
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return

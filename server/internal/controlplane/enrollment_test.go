@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -426,7 +425,6 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 	edge := NewEdgeService(store, "edge-control-credential-01234567890123456789")
 	edge.SetClock(func() time.Time { return now })
 	edge.SetCredentialIssuer(signer, "https://api.example.test", "admission-encryption-key")
-	edge.SetFileTransferPolicy(serverconfig.Default().Access.FileTransfer.Published())
 	admission, err := edge.IssueConnectorAdmission(ctx, identity.Credential, proof, body, "default", "POST", "/v1/connectors/admission")
 	if err != nil || admission.OperationID != "admission-operation-01" || admission.EdgePool != "default" || admission.ProtocolVersion != "1.0" || admission.EdgeNodeID != "node_"+suffix || admission.EdgeEndpoint.Port != 26023 || len(admission.Routes) != 1 || admission.Routes[0].RouteID != "route_admission_"+suffix {
 		t.Fatalf("admission = %#v, %v", admission, err)

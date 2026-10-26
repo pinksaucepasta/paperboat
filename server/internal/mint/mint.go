@@ -356,25 +356,23 @@ type CredentialInput struct {
 	AnnouncementGeneration int64
 	InitiatorEndpointID    string
 	ResponderEndpointID    string
-	// TransferMode and MaxBytes bind a file_transfer credential: automatic carries the declared
-	// total as MaxBytes (the destination cuts a stream past it); unlimited has no bound and is
-	// refused by the destination over a Paperboat-hosted relay path.
-	TransferMode       string
-	MaxBytes           int64
-	RelayByteLimit     int64
-	RelayCarriers      []string
-	FileTransferPolicy *FileTransferPolicy
+	RelayByteLimit         int64
+	RelayCarriers          []string
+	FileTransferPolicy     *FileTransferPolicy
 }
 
 type FileTransferPolicy struct {
 	Revision               string `json:"revision"`
+	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	AutomaticMaxBatchBytes int64  `json:"automatic_max_batch_bytes"`
+	MaxBatchBytes          int64  `json:"max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
 	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
 }
+
+var DefaultFileTransferPolicy = FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 
 type CredentialClaims struct {
 	Issuer                 string              `json:"iss"`
@@ -461,8 +459,6 @@ type CredentialClaims struct {
 	AnnouncementGeneration int64               `json:"announcement_generation,omitempty"`
 	InitiatorEndpointID    string              `json:"initiator_endpoint_id,omitempty"`
 	ResponderEndpointID    string              `json:"responder_endpoint_id,omitempty"`
-	TransferMode           string              `json:"transfer_mode,omitempty"`
-	MaxBytes               int64               `json:"max_bytes,omitempty"`
 	RelayByteLimit         int64               `json:"relay_byte_limit,omitempty"`
 	RelayCarriers          []string            `json:"relay_carriers,omitempty"`
 	FileTransferPolicy     *FileTransferPolicy `json:"file_transfer_policy,omitempty"`
@@ -771,8 +767,8 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		}
 		claims["user_id"], claims["machine_id"], claims["key_thumbprint"], claims["installation_generation"], claims["session_generation"] = input.UserID, input.MachineID, input.KeyThumbprint, input.InstallationGeneration, input.SessionGeneration
 	case "connector_admission":
-		if input.FileTransferPolicy == nil || input.FileTransferPolicy.Revision == "" {
-			return "", errors.New("connector admission file transfer policy is required")
+		if input.FileTransferPolicy == nil {
+			input.FileTransferPolicy = &DefaultFileTransferPolicy
 		}
 		binding, bindingErr := base64.RawURLEncoding.Strict().DecodeString(input.RouteBinding)
 		if input.MachineID == "" || input.InstallationGeneration < 1 || input.ConnectorID == "" || input.ConnectorGeneration < 1 || input.EdgePool == "" || input.EdgeNodeID == "" || bindingErr != nil || len(binding) != 32 || base64.RawURLEncoding.EncodeToString(binding) != input.RouteBinding {
@@ -906,13 +902,6 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		}
 		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" {
 			return "", errors.New("machine transfer bindings are required")
-		}
-		if !validTransferMode(input.TransferMode, input.MaxBytes) {
-			return "", errors.New("file transfer mode bindings are invalid")
-		}
-		claims["transfer_mode"] = input.TransferMode
-		if input.MaxBytes > 0 {
-			claims["max_bytes"] = input.MaxBytes
 		}
 		claims["machine_id"], claims["source_machine_id"], claims["user_id"], claims["cli_client_session_id"] = input.MachineID, input.SourceMachineID, input.UserID, input.CLIClientSessionID
 		if input.AssignmentID != "" {
@@ -1077,33 +1066,12 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
-		if !validTransferMode(claims.TransferMode, claims.MaxBytes) {
-			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
-		}
 	}
 	return claims, nil
 }
 
 // Approval is absent for own-machine transfers. Team transfers bind the exact
 // Inbox request, native batch ID and canonical manifest SHA-256 together.
-// TransferModeAutomatic sends any path, hosted relays included, bounded by MaxBytes;
-// TransferModeUnlimited has no bound and never uses a Paperboat-hosted relay.
-const (
-	TransferModeAutomatic = "automatic"
-	TransferModeUnlimited = "unlimited"
-)
-
-func validTransferMode(mode string, maxBytes int64) bool {
-	switch mode {
-	case TransferModeAutomatic:
-		return maxBytes > 0
-	case TransferModeUnlimited:
-		return maxBytes == 0
-	default:
-		return false
-	}
-}
-
 func validFileTransferApproval(requestID, batchID, digest string) bool {
 	if requestID == "" && batchID == "" && digest == "" {
 		return true

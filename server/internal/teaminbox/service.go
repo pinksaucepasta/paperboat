@@ -102,7 +102,7 @@ type Policy struct {
 }
 
 func New(store *db.DB, transfer serverconfig.FileTransferPolicy) (*Service, error) {
-	if store == nil || transfer.MaxBatchFiles < 1 {
+	if store == nil || transfer.MaxFileBytes < 1 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchBytes < transfer.MaxFileBytes {
 		return nil, ErrInvalid
 	}
 	return &Service{db: store, transfer: transfer, now: func() time.Time { return time.Now().UTC() }, smtpFactory: func(config SMTPConfig) (ReceiptSender, error) { return NewSMTPReceiptSender(config) }}, nil
@@ -244,14 +244,14 @@ func canonicalFiles(files []File, transfer serverconfig.FileTransferPolicy) ([]b
 	if len(files) > transfer.MaxBatchFiles {
 		return nil, "", newManifestLimitError(transfer)
 	}
-	// Sizes are bounded at the descriptor by transfer mode (Automatic), not per request; the
-	// sanity bound only keeps the declared total from overflowing.
 	var total int64
 	for _, file := range files {
-		if file.Size > MaximumFileBytes || total > MaximumFileBytes*MaximumFiles-file.Size {
-			return nil, "", ErrInvalid
+		if file.Size >= 0 && (file.Size > transfer.MaxFileBytes || file.Size > transfer.MaxBatchBytes-total) {
+			return nil, "", newManifestLimitError(transfer)
 		}
-		total += file.Size
+		if file.Size >= 0 {
+			total += file.Size
+		}
 		if file.Basename == "" || file.Basename != strings.TrimSpace(file.Basename) || strings.ContainsAny(file.Basename, "/\\\x00\r\n") || len(file.Basename) > 255 || file.Size < 0 || len(file.SHA256) != 64 {
 			return nil, "", ErrInvalid
 		}

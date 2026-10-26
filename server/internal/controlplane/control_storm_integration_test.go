@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	serverconfig "github.com/pinksaucepasta/paperboat/server/internal/config"
 	"io"
 	"math/big"
 	"net/http"
@@ -162,7 +161,6 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 		t.Fatal(err)
 	}
 	service.SetCredentialIssuer(signer, "https://control-storm.paperboat.test", "paperboat-control-storm-encryption-key")
-	service.SetFileTransferPolicy(serverconfig.Default().Access.FileTransfer.Published())
 	server := httptest.NewTLSServer(service.Handler())
 	defer server.Close()
 	transport := server.Client().Transport.(*http.Transport).Clone()

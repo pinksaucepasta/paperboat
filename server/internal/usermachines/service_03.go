@@ -21,14 +21,9 @@ import (
 	"time"
 )
 
-func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string) (FileTransferDescriptor, error) {
 	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
-	}
-	declared := intent.declared()
-	intent = s.effectiveIntent(intent)
-	if err := s.checkTransferIntent(intent); err != nil {
-		return FileTransferDescriptor{}, err
 	}
 	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
 		return FileTransferDescriptor{}, err
@@ -76,10 +71,6 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		if accepted.SourceMachineID != sourceMachineID || accepted.DestinationMachineID != destinationMachineID {
 			return FileTransferDescriptor{}, teaminbox.ErrConflict
 		}
-		// The signed bound is the accepted manifest's total, not a number the sender picks later.
-		if declared && teaminbox.ManifestTotal(accepted.Files) != intent.DeclaredBytes {
-			return FileTransferDescriptor{}, ErrInvalidTransferIntent
-		}
 		acceptedRequest = &accepted
 	}
 	routeMachine := destination
@@ -113,7 +104,6 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		IssuedAt: s.now().UTC(), ExpiresAt: expiresAt, CredentialClass: "file_transfer", Scopes: []string{"file:transfer"},
 		EnvironmentID: routeMachine.EnvironmentID, MachineID: routeMachine.ID, SourceMachineID: sourceMachineID,
 		UserID: userID, CLIClientSessionID: cliClientSessionID, SessionID: sessionID, OperationID: operationID, AssignmentID: accessSessionID,
-		TransferMode: intent.Mode, MaxBytes: signedMaxBytes(intent),
 	}
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest
@@ -521,16 +511,11 @@ func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.
 	terminalJTI := newID("token")
 	transferJTI := newID("token")
 	sign := func(class string, scopes []string, jti string) (string, error) {
-		credential := mint.CredentialInput{
+		return s.signProcessCredential(ctx, mint.CredentialInput{
 			Issuer: s.issuer, Audience: "paperboat-machine", Subject: input.UserID, JTI: jti,
 			IssuedAt: issuedAt, ExpiresAt: input.ExpiresAt, CredentialClass: class, Scopes: scopes,
 			EnvironmentID: input.EnvironmentID, MachineID: input.MachineID, SourceMachineID: input.SourceMachineID, UserID: input.UserID, CLIClientSessionID: input.CLIClientSessionID, SessionID: terminalSessionID, AssignmentID: input.AccessSessionID,
-		}
-		if class == "file_transfer" {
-			// A terminal's transfers declare no batch up front: Automatic at the policy bound.
-			credential.TransferMode, credential.MaxBytes = mint.TransferModeAutomatic, s.fileTransferPolicy.AutomaticMaxBatchBytes
-		}
-		return s.signProcessCredential(ctx, credential)
+		})
 	}
 	terminalToken, err := sign("terminal_operation", []string{"terminal:operate"}, terminalJTI)
 	if err != nil {

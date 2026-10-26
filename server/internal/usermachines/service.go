@@ -70,7 +70,6 @@ var (
 	ErrTransferDestinationInvalid           = errors.New("transfer destination is unavailable")
 	ErrMachineCapabilityUnavailable         = errors.New("machine capability is unavailable")
 	ErrMachineOffline                       = errors.New("machine is offline")
-	ErrInvalidTransferIntent                = errors.New("file transfer mode or declared size is invalid")
 	ErrExecOperationInvalid                 = errors.New("exec operation id is invalid")
 	ErrSSHOperationInvalid                  = errors.New("ssh operation id is invalid")
 )

@@ -44,6 +44,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
@@ -290,7 +291,12 @@ func New(opts Options) (*App, error) {
 		userMachineService.ConfigureCLIAuth(opts.Config.CLIAuth.ClientID, opts.Config.CLIAuth.AllowedScopes, opts.Config.CLIAuth.AccessTokenLifetime, opts.Config.CLIAuth.RefreshTokenLifetime, opts.Config.Secrets.SessionKeys[0])
 	}
 	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
-	userMachineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(opts.Config.Access.FileTransfer.Published()))
+	userMachineService.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{
+		Revision: opts.Config.Access.FileTransfer.Revision, MaxFileBytes: opts.Config.Access.FileTransfer.MaxFileBytes,
+		MaxBatchFiles: opts.Config.Access.FileTransfer.MaxBatchFiles, MaxBatchBytes: opts.Config.Access.FileTransfer.MaxBatchBytes,
+		MaxConcurrentTransfers: opts.Config.Access.FileTransfer.MaxConcurrentTransfers, RetentionSeconds: int64(opts.Config.Access.FileTransfer.Retention / time.Second),
+		DeliveryTimeoutSeconds: int64(opts.Config.Access.FileTransfer.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: opts.Config.Access.FileTransfer.MaxPendingSpoolBytes,
+	})
 	userMachineService.ConfigureTerminalSessions(mintKeys, &http.Client{Timeout: opts.Config.TerminalSessions.OperationTimeout})
 	userMachineService.ConfigureMachineControl(mintKeys, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	publicBaseURL := strings.TrimRight(config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), "/")
@@ -580,7 +586,7 @@ func New(opts Options) (*App, error) {
 		edgeControlService.SetRelayQuotaGate(bandwidthgate.New(store))
 		edgeControlService.SetAuditWriter(auditWriter)
 		edgeControlService.SetCredentialIssuer(mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
-		edgeControlService.SetFileTransferPolicy(opts.Config.Access.FileTransfer.Published())
+		edgeControlService.SetFileTransferPolicy(mint.FileTransferPolicy{Revision: opts.Config.Access.FileTransfer.Revision, MaxFileBytes: opts.Config.Access.FileTransfer.MaxFileBytes, MaxBatchFiles: opts.Config.Access.FileTransfer.MaxBatchFiles, MaxBatchBytes: opts.Config.Access.FileTransfer.MaxBatchBytes, MaxConcurrentTransfers: opts.Config.Access.FileTransfer.MaxConcurrentTransfers, RetentionSeconds: int64(opts.Config.Access.FileTransfer.Retention / time.Second), DeliveryTimeoutSeconds: int64(opts.Config.Access.FileTransfer.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: opts.Config.Access.FileTransfer.MaxPendingSpoolBytes})
 		edgeControlHandler = edgeControlService.Handler()
 	}
 	previewAttachmentMachineVerifier, err := httpapi.NewPreviewAttachmentMachineProofVerifier(enrollmentService)

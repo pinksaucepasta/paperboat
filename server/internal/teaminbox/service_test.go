@@ -29,8 +29,8 @@ func TestManifestDigestBindsImmutableMetadata(t *testing.T) {
 	if first == third {
 		t.Fatal("substituted size retained the approval digest")
 	}
-	if _, err := ManifestDigest([]File{{Basename: "boundary", Size: serverconfig.Default().Access.FileTransfer.AutomaticMaxBatchBytes, SHA256: digest}}); err != nil {
-		t.Fatalf("a file at the automatic bound denied: %v", err)
+	if _, err := ManifestDigest([]File{{Basename: "boundary", Size: serverconfig.Default().Access.FileTransfer.MaxFileBytes, SHA256: digest}}); err != nil {
+		t.Fatalf("configured exact file limit denied: %v", err)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestManifestRejectsUnsafeOrUnboundedMetadata(t *testing.T) {
 		{{Basename: "../secret", Size: 1, SHA256: validDigest}},
 		{{Basename: "secret\nname", Size: 1, SHA256: validDigest}},
 		{{Basename: "secret", Size: -1, SHA256: validDigest}},
-		{{Basename: "oversized", Size: MaximumFileBytes + 1, SHA256: validDigest}},
+		{{Basename: "oversized", Size: serverconfig.Default().Access.FileTransfer.MaxFileBytes + 1, SHA256: validDigest}},
 		{{Basename: "overflow", Size: 1<<63 - 1, SHA256: validDigest}},
 		{{Basename: "secret", Size: 1, SHA256: "not-a-digest"}},
 	} {

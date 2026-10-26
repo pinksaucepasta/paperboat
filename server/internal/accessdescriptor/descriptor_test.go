@@ -14,7 +14,7 @@ func TestDescriptorUsesCanonicalNames(t *testing.T) {
 		Environment:  Environment{ID: "env_1", Kind: EnvironmentMachine, ResourceID: "machine_1", Alias: "demo", State: "ready", Root: "/workspace"},
 		Capabilities: []string{CapabilityTerminal, CapabilityFileTransfer},
 		Terminal:     &Terminal{Protocol: "paperboat.terminal.v1", Endpoints: TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}, SessionID: "session_1", CWD: "/workspace"},
-		FileTransfer: &FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers", Auth: Auth{Method: "bearer", Token: "token", ExpiresAt: expires, Scopes: []string{"file:transfer"}}, Policy: FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}},
+		FileTransfer: &FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers", Auth: Auth{Method: "bearer", Token: "token", ExpiresAt: expires, Scopes: []string{"file:transfer"}}, Policy: FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}},
 		Status:       "ready", Reason: "ready",
 	}
 	b, err := json.Marshal(d)
