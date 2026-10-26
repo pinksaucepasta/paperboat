@@ -113,6 +113,11 @@ VALUES($1,$2,$3,1,$4,'exact','dns:placement','verified','edge.example.test','man
 	if !slices.Equal(walked, want) {
 		t.Fatalf("walking the cursor listed %v, want %v", walked, want)
 	}
+	for _, item := range page.Items {
+		if (item.Kind == "tunnel" && item.OwnerName != "web") || (item.Kind == "preview" && item.Endpoint != "https://prv-live-"+s+".example.test") {
+			t.Fatalf("item %s carries owner %q / endpoint %q", item.Kind, item.OwnerName, item.Endpoint)
+		}
+	}
 	for _, c := range []struct {
 		name string
 		opts Options

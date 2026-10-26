@@ -16514,6 +16514,14 @@
               }
             ],
             "description": "The same view as GET /v1/tunnels/{tunnel_id}/domains (kind tunnel) or GET /v1/previews/{preview_id}/domains (kind preview)."
+          },
+          "owner_name": {
+            "type": "string",
+            "description": "kind tunnel: the tunnel's name."
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "kind preview: the preview's endpoint URL."
           }
         }
       },

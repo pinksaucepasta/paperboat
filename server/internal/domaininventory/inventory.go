@@ -30,10 +30,12 @@ type Options struct {
 
 // Item is one domain: kind "tunnel" with a tunnel domain binding, or "preview" with a preview custom domain.
 type Item struct {
-	Kind   string `json:"kind"`
-	Domain any    `json:"domain"`
-	key    string
-	id     string
+	Kind      string `json:"kind"`
+	Domain    any    `json:"domain"`
+	OwnerName string `json:"owner_name,omitempty"` // kind tunnel: the tunnel's name
+	Endpoint  string `json:"endpoint,omitempty"`   // kind preview: the preview's endpoint URL
+	key       string
+	id        string
 }
 
 type Page struct {
@@ -116,7 +118,7 @@ ORDER BY x.k, x.id LIMIT $8`, account, selected, team, opts.Kind, opts.Q, afterK
 			previewIDs = append(previewIDs, item.id)
 		}
 	}
-	views := map[string]any{}
+	views, owners := map[string]any{}, map[string]string{}
 	if len(tunnelIDs) > 0 {
 		found, err := s.db.Queries().ListTunnelDomainsByIDsV1(ctx, tunnelIDs)
 		if err != nil {
@@ -124,6 +126,7 @@ ORDER BY x.k, x.id LIMIT $8`, account, selected, team, opts.Kind, opts.Q, afterK
 		}
 		for _, row := range found {
 			views["tunnel/"+row.ID] = tunnelv1.DomainViewFromRow(row)
+			owners["tunnel/"+row.ID] = row.TunnelID
 		}
 	}
 	if len(previewIDs) > 0 {
@@ -133,14 +136,46 @@ ORDER BY x.k, x.id LIMIT $8`, account, selected, team, opts.Kind, opts.Q, afterK
 		}
 		for _, row := range found {
 			views["preview/"+row.ID] = previewdomain.DomainViewFromRow(row)
+			owners["preview/"+row.ID] = row.PreviewID
 		}
 	}
+	// The owners' names (tunnels) and addresses (previews) for the page, so a row links without a lookup.
+	var tunnels, previews []string
+	for _, item := range page.Items {
+		if item.Kind == "tunnel" {
+			tunnels = append(tunnels, owners["tunnel/"+item.id])
+		} else {
+			previews = append(previews, owners["preview/"+item.id])
+		}
+	}
+	labels := map[string]string{}
+	rows, err = s.db.SQL().QueryContext(ctx, `SELECT 'tunnel/'||id,name FROM paperboat.tunnels WHERE id=ANY($1)
+ UNION ALL SELECT 'preview/'||id,endpoint FROM paperboat.preview_leases WHERE id=ANY($2)`, tunnels, previews)
+	if err != nil {
+		return Page{}, err
+	}
+	for rows.Next() {
+		var key, label string
+		if err := rows.Scan(&key, &label); err != nil {
+			return Page{}, errors.Join(err, rows.Close())
+		}
+		labels[key] = label
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return Page{}, err
+	}
 	for i := range page.Items {
-		view, found := views[page.Items[i].Kind+"/"+page.Items[i].id]
+		key := page.Items[i].Kind + "/" + page.Items[i].id
+		view, found := views[key]
 		if !found {
 			return Page{}, sql.ErrNoRows // removed between the two reads; the caller retries
 		}
 		page.Items[i].Domain = view
+		if page.Items[i].Kind == "tunnel" {
+			page.Items[i].OwnerName = labels["tunnel/"+owners[key]]
+		} else {
+			page.Items[i].Endpoint = labels["preview/"+owners[key]]
+		}
 	}
 	if page.Items == nil {
 		page.Items = []Item{}
