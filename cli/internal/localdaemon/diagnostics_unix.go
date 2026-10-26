@@ -14,8 +14,11 @@ import (
 )
 
 type diagnosticService struct {
-	recorder  *diagnostics.Recorder
-	store     *localapi.SnapshotStore
+	recorder *diagnostics.Recorder
+	// snapshots is the daemon's snapshot source, so the bug report shows what pb status shows (F21-06).
+	snapshots interface {
+		Snapshot(context.Context) (localapi.Snapshot, error)
+	}
 	stateRoot string
 	ownerUID  int
 	clock     func() time.Time
@@ -34,7 +37,7 @@ func (s *diagnosticService) RecordBugreportMarker(ctx context.Context, phase str
 }
 
 func (s *diagnosticService) CreateBugreport(ctx context.Context) (diagnostics.Bundle, error) {
-	snapshot, err := s.store.Snapshot(ctx)
+	snapshot, err := s.snapshots.Snapshot(ctx)
 	if err != nil {
 		return diagnostics.Bundle{}, err
 	}

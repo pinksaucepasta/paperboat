@@ -101,6 +101,37 @@ func (a *Authority) PeerPath(endpointID string) (string, error) {
 	}
 	return "", ErrAdmission
 }
+
+// PeerPaths reports the current data path (direct, peer_relay or regional_relay) to every admitted peer
+// with an active connection, by endpoint ID, from one engine status (F21-06). Idle peers are left out.
+func (a *Authority) PeerPaths() map[string]string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	paths := map[string]string{}
+	if !a.usableLocked() {
+		return paths
+	}
+	engine := a.clientEngine
+	if engine == nil && a.server != nil {
+		engine = a.server.server
+	}
+	if engine == nil {
+		return paths
+	}
+	endpoints := make(map[key.NodePublic]string, len(a.current.Peers))
+	keys := make([]key.NodePublic, 0, len(a.current.Peers))
+	for _, peer := range a.current.Peers {
+		if public, err := publicKey(peer.Identity.WireGuardPublicKey); err == nil {
+			endpoints[public] = peer.Identity.EndpointID
+			keys = append(keys, public)
+		}
+	}
+	for public, path := range engine.PeerPaths(keys) {
+		paths[endpoints[public]] = path
+	}
+	return paths
+}
+
 func (a *Authority) replaceLocked() error {
 	a.relay.mu.Lock()
 	a.relay.updateUsagePeersLocked(a.current.Peers)

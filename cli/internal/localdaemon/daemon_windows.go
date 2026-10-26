@@ -102,7 +102,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	}
 	diagnosticAPI := &diagnosticService{
 		recorder:  recorder,
-		store:     store,
+		snapshots: store,
 		stateRoot: config.Paths.StateRoot,
 		ownerSID:  ownerSID,
 		clock:     diagnosticClock,
@@ -148,6 +148,8 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	if err != nil {
 		return err
 	}
+	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport}
+	diagnosticAPI.snapshots = source
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
 	server, err := localapi.NewServer(localapi.ServerConfig{
@@ -155,7 +157,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		OwnerUID:             -1,
 		OwnerGID:             -1,
 		OwnerSID:             ownerSID,
-		Source:               relayDenialSource{Inventory: inventory, denial: config.RelayDenial},
+		Source:               source,
 		Completions:          inventory,
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.SID == ownerSID },

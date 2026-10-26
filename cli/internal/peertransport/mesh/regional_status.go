@@ -110,31 +110,46 @@ func usagePathFromStatus(p *ipnstate.PeerStatus) UsagePath {
 // PeerPath reports the current data path for an admitted peer without exposing
 // its network address. An idle peer has no selected path.
 func (s *Server) PeerPath(peer key.NodePublic) string {
-	if s.lb == nil || peer.IsZero() {
-		return "unknown"
+	if path, ok := s.PeerPaths([]key.NodePublic{peer})[peer]; ok {
+		return path
+	}
+	return "unknown"
+}
+
+// PeerPaths reports the current data path (direct, peer_relay or regional_relay) of each admitted, active
+// peer from one magicsock status, so a caller with many peers reads the status once. Idle peers are left out.
+func (s *Server) PeerPaths(peers []key.NodePublic) map[key.NodePublic]string {
+	paths := make(map[key.NodePublic]string, len(peers))
+	if s.lb == nil || len(peers) == 0 {
+		return paths
 	}
 	s.lb.mu.Lock()
-	_, admitted := s.lb.allowedPeers[peer]
+	admitted := make([]key.NodePublic, 0, len(peers))
+	for _, peer := range peers {
+		if _, ok := s.lb.allowedPeers[peer]; ok && !peer.IsZero() {
+			admitted = append(admitted, peer)
+		}
+	}
 	s.lb.mu.Unlock()
-	if !admitted {
-		return "unknown"
+	if len(admitted) == 0 {
+		return paths
 	}
 	status := &ipnstate.StatusBuilder{WantPeers: true}
 	s.lb.sys.MagicSock.Get().UpdateStatus(status)
-	p := status.Status().Peer[peer]
-	if p == nil || !p.Active {
-		return "unknown"
+	all := status.Status().Peer
+	for _, peer := range admitted {
+		p := all[peer]
+		switch {
+		case p == nil || !p.Active:
+		case p.CurAddr != "":
+			paths[peer] = "direct"
+		case p.PeerRelay != "":
+			paths[peer] = "peer_relay"
+		case p.Relay != "":
+			paths[peer] = "regional_relay"
+		}
 	}
-	if p.CurAddr != "" {
-		return "direct"
-	}
-	if p.PeerRelay != "" {
-		return "peer_relay"
-	}
-	if p.Relay != "" {
-		return "regional_relay"
-	}
-	return "unknown"
+	return paths
 }
 
 // RelayTransport reports the concrete transport carrying a server region.

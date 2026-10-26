@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
 type ManagedSSHConfig struct {
@@ -26,20 +27,22 @@ type ManagedSSHConfig struct {
 }
 
 type DaemonConfig struct {
-	Paths                   localapi.Paths
-	Source                  MachineSource
-	OwnerUID                int
-	OwnerGID                int
-	OwnerSID                string
-	RefreshInterval         time.Duration
-	RequestTimeout          time.Duration
-	Clock                   func() time.Time
-	ManagedSSH              *ManagedSSHConfig
-	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
-	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
-	InspectorRequest        func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
-	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
-	RelayDenial             func() *api.APIError
+	Paths            localapi.Paths
+	Source           MachineSource
+	OwnerUID         int
+	OwnerGID         int
+	OwnerSID         string
+	RefreshInterval  time.Duration
+	RequestTimeout   time.Duration
+	Clock            func() time.Time
+	ManagedSSH       *ManagedSSHConfig
+	OpenPeerStream   func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
+	ProbePeer        func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+	InspectorRequest func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
+	RelayInventory   func(context.Context) (localapi.RelayInventory, error)
+	RelayDenial      func() *api.APIError
+	// NativeTransport reports the native runtime's paths and relay status for pb status (F21-06).
+	NativeTransport         func() tunnel.NativeTransport
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)

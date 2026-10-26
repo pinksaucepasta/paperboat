@@ -16,23 +16,26 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type DaemonConfig struct {
-	Paths                   localapi.Paths
-	Source                  MachineSource
-	OwnerUID                int
-	OwnerGID                int
-	RefreshInterval         time.Duration
-	RequestTimeout          time.Duration
-	Clock                   func() time.Time
-	ManagedSSH              *ManagedSSHConfig
-	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
-	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
-	InspectorRequest        func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
-	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
-	RelayDenial             func() *api.APIError
+	Paths            localapi.Paths
+	Source           MachineSource
+	OwnerUID         int
+	OwnerGID         int
+	RefreshInterval  time.Duration
+	RequestTimeout   time.Duration
+	Clock            func() time.Time
+	ManagedSSH       *ManagedSSHConfig
+	OpenPeerStream   func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
+	ProbePeer        func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+	InspectorRequest func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
+	RelayInventory   func(context.Context) (localapi.RelayInventory, error)
+	RelayDenial      func() *api.APIError
+	// NativeTransport reports the native runtime's paths and relay status for pb status (F21-06).
+	NativeTransport         func() tunnel.NativeTransport
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
@@ -109,7 +112,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	if err != nil {
 		return err
 	}
-	diagnosticAPI := &diagnosticService{recorder: recorder, store: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
+	diagnosticAPI := &diagnosticService{recorder: recorder, snapshots: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
 	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, Events: config.InventoryEvents, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		if config.OnMachines != nil {
 			config.OnMachines(refreshCtx, machines)
@@ -141,6 +144,8 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	if err != nil {
 		return err
 	}
+	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport}
+	diagnosticAPI.snapshots = source
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
 	server, err := localapi.NewServer(localapi.ServerConfig{
@@ -150,7 +155,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             config.OwnerUID,
 		OwnerGID:             config.OwnerGID,
-		Source:               relayDenialSource{Inventory: inventory, denial: config.RelayDenial},
+		Source:               source,
 		Completions:          inventory,
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.UID == config.OwnerUID },

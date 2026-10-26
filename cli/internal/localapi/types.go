@@ -465,6 +465,9 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
+// ValidRelayRegion reports whether a relay region may appear in a snapshot.
+func ValidRelayRegion(value string) bool { return safeValue(value) }
+
 func safeValue(value string) bool {
 	if value == "" || len(value) > 128 {
 		return false
