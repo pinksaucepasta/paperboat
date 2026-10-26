@@ -77,8 +77,11 @@ func testAdmittedNativeLifetime(t *testing.T, personal bool) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	done := make(chan struct{})
-	go func() { defer close(done); _ = so.Listen(ctx, dm.Regions[1], apps.Serve) }()
-	defer func() { cancel(); so.Close(); <-done; apps.Wait() }()
+	region := dm.Regions[1]
+	go func() { defer close(done); _ = so.Listen(ctx, region, apps.Serve) }()
+	// The Listen goroutine ends on cancel; closing the owner before it returned raced with its last reads (CI run
+	// 40243324248, macOS, race detector).
+	defer func() { cancel(); <-done; so.Close(); apps.Wait() }()
 	session, err := co.Dial(ctx, listener.Address(), "machine_test", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)
