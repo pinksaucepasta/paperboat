@@ -99,6 +99,9 @@ func TestSSHSessionEventsLandInTheAuditLogOfTheDecidingWorkspacePostgres(t *test
 		}
 		got = append(got, typ+"/"+result+"/"+origin+"/"+outcome+"/"+out)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	want := []string{accessDeniedEvent + "/denied/offline//", accessEndedEvent + "/success/online/revoked/20", accessStartedEvent + "/success/online//"}
 	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("audit rows %v, want %v", got, want)
