@@ -153,6 +153,9 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
       }
       if (event.state === "denied") {
         connection.current = ""
+        // The edge ends a channel with "revoked" when a grant it admitted is replaced, and this page swaps its
+        // grants while open. That is not a lost right: reconnect, and the fresh ticket decides.
+        if (event.code === "revoked") return retry("Reconnecting with refreshed access…")
         setPhase(event.code === "capability_required" ? "update" : "denied")
         setMessage(event.message ?? "")
         return

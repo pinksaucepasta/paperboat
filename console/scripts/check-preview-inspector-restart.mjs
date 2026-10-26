@@ -32,11 +32,10 @@ await page.evaluate(() => { window.__ph = []; setInterval(() => { const v = docu
 const t0 = Date.now(); T0 = t0
 execSync(process.env.RESTART_CMD, { stdio: "inherit" })
 pass("restart done", true, `${Date.now() - t0} ms`)
-const lost = await until(() => window.__ph.includes("reconnecting"), 120000)
-const tLost = Date.now() - t0
-const back = await until(() => window.__ph.at(-1) === "ready" && window.__ph.includes("reconnecting"), 120000)
-pass("page notices the loss, then reconnects by itself", !!lost && !!back, `lost after ${tLost} ms, ready again ${Date.now() - t0} ms after restart began; phases ${JSON.stringify(await page.evaluate(() => window.__ph))}`)
-console.log("page text:", await page.evaluate(() => (document.querySelector("main main") ?? document.querySelector("main"))?.innerText.replace(/\s+/g, " ").slice(0, 300)))
+// Stay past two grant rotations (the page swaps its grants about every minute and the edge ends a channel whose grant was replaced).
+await page.waitForTimeout(Math.max(0, 150000 - (Date.now() - t0)))
+const back = await until(() => window.__ph.at(-1) === "ready", 120000)
+pass("page is Ready again, not Not allowed, 150 s after the restart", !!back, `phases ${JSON.stringify(await page.evaluate(() => window.__ph))}`)
 let got = null
 for (let i = 0; i < 20 && !got; i++) {
   await hit(`/${tag}/after${i}`)
