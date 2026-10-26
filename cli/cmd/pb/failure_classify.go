@@ -457,11 +457,14 @@ func soleCommandOwner(err error) error {
 		if err == hostinstall.ErrInsufficientSpace {
 			return commandRejection{reason: commandRejectInsufficientSpace}
 		}
+		if err == managedssh.ErrSSHServerClosed {
+			return err
+		}
 		if err == hostinstall.ErrUpdateNotReady {
 			return commandRejection{reason: commandRejectUpdateNotReady}
 		}
 		switch err.(type) {
-		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
+		case *sessionauth.CredentialFailure, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationBusyError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, updateCompletionFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError, *sshDialError, *managedssh.RefusedError:
 			return err
 		}
 		wrapper, ok := err.(interface{ Unwrap() error })

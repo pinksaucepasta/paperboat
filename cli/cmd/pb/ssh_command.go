@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/processlifetime"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -187,12 +188,15 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor, workspace), operationID)
+	// Bounds only the stream setup: a dial to an offline target otherwise waits until OpenSSH gives up.
+	dialCtx, cancelDial := context.WithTimeout(command.Context(), sshDialTimeout)
+	connection, err := d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace), operationID)
+	cancelDial()
 	if err != nil {
 		if notReady := sshTargetHealth(command.Context(), machine.ID, machine.Alias); notReady != nil {
 			return notReady
 		}
-		return err
+		return explainSSHDial(machine.Alias, err)
 	}
 	halfCloser, ok := connection.(interface{ CloseWrite() error })
 	if !ok {
@@ -206,6 +210,35 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	}()
 	err = copySSHProxy(connection, halfCloser, command.InOrStdin(), command.OutOrStdout())
 	return err
+}
+
+// sshDialError names why pb's ProxyCommand could not open the SSH stream, in pb's words (F5-09).
+type sshDialError struct {
+	message string
+	cause   error
+}
+
+func (e *sshDialError) Error() string { return e.message }
+func (e *sshDialError) Unwrap() error { return e.cause }
+
+func explainSSHDial(alias string, err error) error {
+	var remote *localapi.RemoteError
+	switch {
+	case errors.Is(err, localapi.ErrTransportUnavailable):
+		return &sshDialError{"this computer's Paperboat service is not running; start it (`pb status` shows it), then retry", err}
+	case errors.As(err, &remote) && remote.Code == "peer_transport_unavailable", sshDialTimedOut(err):
+		return &sshDialError{"Paperboat could not reach " + alias + ": it may be offline, or its Paperboat service is not running; check it in `pb status`", err}
+	}
+	return err
+}
+
+// sshDialTimeout bounds opening the SSH stream to the target (a warm connection takes well under a second).
+const sshDialTimeout = 30 * time.Second
+
+// sshDialTimedOut is a dial to the target that got no answer in time: the target, not Paperboat, is unreachable.
+func sshDialTimedOut(err error) bool {
+	var timeout interface{ Timeout() bool }
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout()
 }
 
 func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrite() error }, input io.Reader, output io.Writer) error {

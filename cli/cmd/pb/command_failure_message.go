@@ -51,6 +51,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if err == nil {
 		return ""
 	}
+	if message := sshFailureMessage(err); message != "" {
+		return message
+	}
 	if preference, ok := soleCommandOwner(err).(preferenceLoadFailure); ok {
 		return preference.Error()
 	}
@@ -337,3 +340,15 @@ func transferSize(bytes int64) string {
 
 // responseLostRecovery is the next step after a change whose answer was lost.
 const responseLostRecovery = "Check the current state with the matching list or status command (for example `pb team list` or `pb machine list`) before retrying."
+
+// sshFailureMessage is an SSH refusal or dial failure in pb's own words (F5-09). soleCommandOwner bounds the walk.
+func sshFailureMessage(err error) string {
+	switch owner := soleCommandOwner(err).(type) {
+	case *managedssh.RefusedError, *sshDialError:
+		return owner.Error()
+	}
+	if soleCommandOwner(err) == managedssh.ErrSSHServerClosed {
+		return managedssh.ErrSSHServerClosed.Error()
+	}
+	return ""
+}
