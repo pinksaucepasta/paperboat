@@ -11,16 +11,18 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
-// Announced-service leases last only as long as a host keeps announcing (the server's snapshot
-// lifetime, 30 s), so the daemon renews them shortly before the earliest one ends, and refreshes at
-// once when the server's machine_services topic says a snapshot changed.
+// The announced-service list is fetched when the server's machine_services topic says a snapshot
+// changed (a port opened or closed), on a local nudge, and otherwise rarely. The server's 30 s
+// snapshot lease is not renewed from here: a host renews it by announcing, a content-identical
+// renewal moves no topic, and a host that goes away leaves the inventory, which withdraws its
+// ports. Renewing before the earliest lease of every machine in the account cost one GET every
+// ~7 s per idle daemon (Lane W, F21-19).
 const (
-	machineServicesRenewBefore    = 10 * time.Second
-	machineServicesMinimumRefresh = 2 * time.Second
-	// machineServicesIdleRefresh bounds the wait when no lease is held: a missed topic still
-	// shows up within it.
+	// machineServicesIdleRefresh bounds the wait between topics: a missed topic still shows up
+	// within it.
 	machineServicesIdleRefresh  = 5 * time.Minute
 	machineServicesTimeout      = 10 * time.Second
+	machineServicesFirstRetry   = 2 * time.Second
 	machineServicesMaximumRetry = 30 * time.Second
 )
 
@@ -28,58 +30,57 @@ type serviceApplier interface {
 	ApplyServices(context.Context, []api.MachineServicesMachine) error
 }
 
-// nextMachineServicesRefresh is how long to wait before renewing the listed leases.
-func nextMachineServicesRefresh(services []api.MachineServicesMachine, now time.Time) time.Duration {
-	wait := machineServicesIdleRefresh
-	for _, service := range services {
-		wait = min(wait, service.ExpiresAt.Sub(now)-machineServicesRenewBefore)
+type machineServicesFetch func(context.Context) ([]api.MachineServicesMachine, error)
+
+func machineServicesFetcher(serverURL string, auth *sessionauth.Source, transport http.RoundTripper) machineServicesFetch {
+	return func(ctx context.Context) ([]api.MachineServicesMachine, error) {
+		credential, err := auth.WithContext(ctx).Credential()
+		if err != nil {
+			return nil, err
+		}
+		return api.New(serverURL, credential, &http.Client{Transport: transport}).MachineServices(ctx)
 	}
-	return max(wait, machineServicesMinimumRefresh)
 }
 
-func refreshMachineServices(ctx context.Context, coordinator serviceApplier, serverURL string, auth *sessionauth.Source, transport http.RoundTripper, changed, nudge <-chan struct{}) {
+func refreshMachineServices(ctx context.Context, coordinator serviceApplier, fetch machineServicesFetch, changed, nudge <-chan struct{}) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
-	retry := machineServicesMinimumRefresh
+	retry := machineServicesFirstRetry
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
 		case <-nudge:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
 		case <-changed:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
 		}
 		stepCtx, cancel := context.WithTimeout(ctx, machineServicesTimeout)
-		credential, err := auth.WithContext(stepCtx).Credential()
-		var services []api.MachineServicesMachine
+		services, err := fetch(stepCtx)
 		if err == nil {
-			if services, err = api.New(serverURL, credential, &http.Client{Transport: transport}).MachineServices(stepCtx); err == nil {
-				err = coordinator.ApplyServices(stepCtx, services)
-			}
+			err = coordinator.ApplyServices(stepCtx, services)
 		}
 		cancel()
-		wait := nextMachineServicesRefresh(services, time.Now())
+		wait := machineServicesIdleRefresh
 		if err == nil {
-			retry = machineServicesMinimumRefresh
+			retry = machineServicesFirstRetry
 		} else {
-			// A failing server is retried with doubling waits, not at the renewal cadence.
+			// A failing server is retried with doubling waits.
 			wait, retry = backoff.Jitter(retry), min(retry*2, machineServicesMaximumRetry)
 			if ctx.Err() == nil {
-				diagnosticlog.TryWarn("could not renew the announced-service leases; the next attempt follows", "error", err)
+				diagnosticlog.TryWarn("could not refresh the announced services; the next attempt follows", "error", err)
 			}
 		}
 		timer.Reset(wait)
+	}
+}
+
+func stopTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
 	}
 }

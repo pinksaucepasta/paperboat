@@ -380,7 +380,7 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 	}
 }
 
-func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *testing.T) {
+func TestCoordinatorInventoryUsesAuthorizedDiscoveredPorts(t *testing.T) {
 	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -406,29 +406,12 @@ func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *
 	if !discovered || hardcoded {
 		t.Fatal("inventory did not use actual authorized service discovery")
 	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		names.mu.Lock()
-		remaining := len(names.names)
-		names.mu.Unlock()
-		if remaining == 0 {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	names.mu.Lock()
-	remaining := len(names.names)
-	names.mu.Unlock()
-	if remaining != 0 {
-		t.Fatal("expired discovery retained usable names")
-	}
-	services[0].ExpiresAt = time.Now().Add(time.Hour)
 	machines[0].NetworkApproved = false
 	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
 		t.Fatal(err)
 	}
 	names.mu.Lock()
-	remaining = len(names.names)
+	remaining := len(names.names)
 	names.mu.Unlock()
 	if remaining != 0 {
 		t.Fatal("unapproved machine regained local routes")
@@ -796,7 +779,9 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 	}
 }
 
-func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
+// A forwarded port stays up past the server's short snapshot lease: the host renews the lease by
+// announcing, and a change reaches the daemon through the topic, not through a local expiry.
+func TestCoordinatorKeepsForwardedPortsPastTheServerLease(t *testing.T) {
 	dir := shorttemp.Dir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -815,19 +800,21 @@ func TestCoordinatorServiceLeaseRenewalKeepsTheForwardedPortsUp(t *testing.T) {
 	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
 		t.Fatal(err)
 	}
-	// Renew the lease before it ends, as the daemon's own short cadence does, and wait past the
-	// first lease: the forwarded port must not have been withdrawn.
-	renewed := []api.MachineServicesMachine{services[0]}
-	renewed[0].ExpiresAt = time.Now().Add(time.Hour)
-	if err := c.ApplyServices(t.Context(), renewed); err != nil {
-		t.Fatal(err)
-	}
 	time.Sleep(300 * time.Millisecond)
 	names.mu.Lock()
-	_, kept := names.addresses[45678]
+	kept := len(names.names) != 0
 	names.mu.Unlock()
 	if !kept {
-		t.Fatal("a renewed lease still withdrew the forwarded port when the first one ended")
+		t.Fatal("the forwarded port was withdrawn when the server lease ended, with no new list")
+	}
+	if err := c.ApplyServices(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	names.mu.Lock()
+	remaining := len(names.names)
+	names.mu.Unlock()
+	if remaining != 0 {
+		t.Fatal("a list without the service kept its forwarded port")
 	}
 }
 

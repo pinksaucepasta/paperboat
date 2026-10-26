@@ -383,7 +383,7 @@ func localDaemonCommand() *cobra.Command {
 					}
 					defer func() { _ = events.Shutdown(context.WithoutCancel(ctx)) }()
 				}
-				go refreshMachineServices(ctx, coordinator, cfg.ServerURL, authSource, controlTransport, servicesEvents.Changed(), coordinator.ServicesNudge())
+				go refreshMachineServices(ctx, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents,

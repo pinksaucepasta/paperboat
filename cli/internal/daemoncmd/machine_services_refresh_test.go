@@ -1,31 +1,55 @@
 package daemoncmd
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
-// Leases are renewed shortly before the earliest one ends instead of every 8 s; changes arrive
-// through the machine_services topic, so with no lease the daemon waits long.
-func TestMachineServicesRenewBeforeTheEarliestLeaseEnds(t *testing.T) {
-	now := time.Now()
-	lease := func(remaining time.Duration) api.MachineServicesMachine {
-		return api.MachineServicesMachine{ExpiresAt: now.Add(remaining)}
+type countingServiceApplier struct{ applied atomic.Int32 }
+
+func (a *countingServiceApplier) ApplyServices(context.Context, []api.MachineServicesMachine) error {
+	a.applied.Add(1)
+	return nil
+}
+
+// An idle daemon fetches the service list once and then only on the machine_services topic or a
+// nudge, not before every short server lease ends (Lane W: one GET every ~7 s per idle machine).
+func TestMachineServicesAreFetchedOnlyOnTopicOrNudge(t *testing.T) {
+	var fetches atomic.Int32
+	fetch := func(context.Context) ([]api.MachineServicesMachine, error) {
+		fetches.Add(1)
+		// Leases far shorter than the test: the old loop renewed them every 2 s minimum.
+		return []api.MachineServicesMachine{{MachineID: "m", ExpiresAt: time.Now().Add(50 * time.Millisecond)}}, nil
 	}
-	for name, test := range map[string]struct {
-		services []api.MachineServicesMachine
-		want     time.Duration
-	}{
-		"no lease":            {nil, machineServicesIdleRefresh},
-		"fresh 30 s lease":    {[]api.MachineServicesMachine{lease(30 * time.Second)}, 20 * time.Second},
-		"earliest of several": {[]api.MachineServicesMachine{lease(30 * time.Second), lease(18 * time.Second)}, 8 * time.Second},
-		"about to end":        {[]api.MachineServicesMachine{lease(5 * time.Second)}, machineServicesMinimumRefresh},
-		"already ended":       {[]api.MachineServicesMachine{lease(-time.Second)}, machineServicesMinimumRefresh},
-	} {
-		if got := nextMachineServicesRefresh(test.services, now); got != test.want {
-			t.Errorf("%s: next refresh in %v, want %v", name, got, test.want)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	changed, nudge := make(chan struct{}), make(chan struct{})
+	applier := &countingServiceApplier{}
+	done := make(chan struct{})
+	go func() { refreshMachineServices(ctx, applier, fetch, changed, nudge); close(done) }()
+	waitFor := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for applier.applied.Load() < want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if got := applier.applied.Load(); got != want {
+			t.Fatalf("applied %d lists, want %d", got, want)
 		}
 	}
+	waitFor(1)
+	time.Sleep(2500 * time.Millisecond)
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("an idle daemon fetched machine services %d times in 2.5 s, want 1", got)
+	}
+	changed <- struct{}{}
+	waitFor(2)
+	nudge <- struct{}{}
+	waitFor(3)
+	cancel()
+	<-done
 }

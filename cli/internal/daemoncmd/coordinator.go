@@ -45,12 +45,10 @@ type Coordinator struct {
 	inventoryMachines []api.UserMachine
 	// claimMachines is every machine of the last complete inventory read, online or not (guarded by mu);
 	// the guard releases claims only against it. Nil until the first complete read.
-	claimMachines      []string
-	inventoryTimer     *time.Timer
-	stopInventoryTimer func() bool
-	cleanups           []*generationCleanup
-	reportMu           sync.Mutex
-	reconcileFailed    bool
+	claimMachines   []string
+	cleanups        []*generationCleanup
+	reportMu        sync.Mutex
+	reconcileFailed bool
 	// browserTrustReported is set once a browser certificate failure has been recorded.
 	browserTrustReported bool
 	domain               atomic.Pointer[string] // the local access domain, as the machine guard reports it
@@ -163,10 +161,7 @@ func (c *Coordinator) Start(parent context.Context) (err error) {
 	return nil
 }
 
-// ApplyServices renews the announced-service leases against the machines of the last inventory.
-// A lease lasts only a few seconds, so it is refreshed on its own short cadence: waiting for the
-// next full inventory refresh left every forwarded port withdrawn between a lease's end and the
-// refresh that renewed it, which looked like a listener that came and went every half minute.
+// ApplyServices projects a fresh announced-service list onto the machines of the last inventory.
 func (c *Coordinator) ApplyServices(ctx context.Context, services []api.MachineServicesMachine) error {
 	if c == nil {
 		return errors.New("local access coordinator is unavailable")
@@ -200,12 +195,6 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c.inventoryTimer != nil {
-		c.inventoryTimer.Stop()
-	}
-	if c.stopInventoryTimer != nil {
-		c.stopInventoryTimer()
-	}
 	c.inventoryMachines = slices.Clone(machines)
 	claimMachines := make([]string, 0, len(machines))
 	for _, m := range machines {
@@ -217,13 +206,11 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	c.claimMachines = claimMachines
 	c.mu.Unlock()
 	byID := make(map[string]api.MachineServicesMachine, len(services))
-	var expiry time.Time
+	// A listed service stays forwarded until the next list (topic, nudge or idle refresh) or until
+	// its machine leaves the inventory; the server's short lease is the host's to renew.
 	for _, service := range services {
 		if service.ExpiresAt.After(serverclock.Now()) {
 			byID[service.MachineID] = service
-			if expiry.IsZero() || service.ExpiresAt.Before(expiry) {
-				expiry = service.ExpiresAt
-			}
 		}
 	}
 	peers := make([]*daemonrpc.PeerUpdate, 0, len(machines))
@@ -245,22 +232,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 	}
 	c.inventoryRevision++
 	revision := c.inventoryRevision
-	if err := c.reconcileSnapshot(ctx, peers, revision); err != nil {
-		return err
-	}
-	if expiry.IsZero() {
-		return nil
-	}
-	c.inventoryTimer = time.AfterFunc(time.Until(expiry), func() {
-		c.inventoryMu.Lock()
-		defer c.inventoryMu.Unlock()
-		if c.inventoryRevision == revision && parent.Err() == nil {
-			c.applySnapshot(nil, revision)
-		}
-	})
-	timer := c.inventoryTimer
-	c.stopInventoryTimer = context.AfterFunc(parent, func() { timer.Stop() })
-	return nil
+	return c.reconcileSnapshot(ctx, peers, revision)
 }
 
 func (c *Coordinator) reportReconcileError(err error) {
