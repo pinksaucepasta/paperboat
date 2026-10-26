@@ -172,7 +172,8 @@ func TestResolveSSHCommandTargetWarmAsksTheServerNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("warm resolve: %v", err)
 	}
-	if client == nil || machine.ID != "mch_1" || machine.Alias != "machine-ready" || target.Port != 22 || target.OSUser != "root" || target.MachineGeneration != 4 || len(machine.SSHHostKeys) != 1 {
+	// No client either: a helper needs no credential unless it must ask the server.
+	if client != nil || machine.ID != "mch_1" || machine.Alias != "machine-ready" || target.Port != 22 || target.OSUser != "root" || target.MachineGeneration != 4 || len(machine.SSHHostKeys) != 1 {
 		t.Fatalf("client=%v machine=%+v target=%+v", client != nil, machine, target)
 	}
 	if domain, err := configuredManagedSSHDomain(commandContext); err != nil || domain != "example.test" {

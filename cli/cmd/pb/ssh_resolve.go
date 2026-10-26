@@ -54,11 +54,21 @@ func resolveSSHCommandTargetWarm(ctx *command.Context, requested string) (*api.C
 	if !ok || machine.SSHUser == "" || machine.SSHPort == 0 {
 		return resolveSSHCommandTarget(ctx, requested)
 	}
-	client, err := sshAPIClient(ctx, d)
-	if err != nil {
-		return nil, api.UserMachine{}, api.ManagedSSHTarget{}, err
+	// No client: the helpers run per connection and need no credential unless they must ask the server
+	// (sshClientFor).
+	return nil, machine, api.ManagedSSHTarget{MachineID: machine.ID, MachineGeneration: uint64(machine.InstallationGeneration), OSUser: machine.SSHUser, Port: machine.SSHPort}, nil
+}
+
+// sshClientFor returns client, or builds one when the target came from the daemon and the server is needed.
+func sshClientFor(ctx *command.Context, client *api.Client) (*api.Client, error) {
+	if client != nil {
+		return client, nil
 	}
-	return client, machine, api.ManagedSSHTarget{MachineID: machine.ID, MachineGeneration: uint64(machine.InstallationGeneration), OSUser: machine.SSHUser, Port: machine.SSHPort}, nil
+	d, err := buildDeps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sshAPIClient(ctx, d)
 }
 
 func sshAPIClient(ctx *command.Context, d *deps) (*api.Client, error) {

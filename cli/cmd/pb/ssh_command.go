@@ -55,8 +55,12 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return err
 	}
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
-	if !explainRevokedSSHAccess(command, client, machine, err) {
-		explainChangedSSHHostIdentity(command, client, machine, err)
+	var exit managedssh.NativeExitError
+	if errors.As(err, &exit) && exit.Code == 255 {
+		// Only a failed connection needs the server; the warm path built no client (sshClientFor).
+		if client, clientErr := sshClientFor(ctx, client); clientErr == nil && !explainRevokedSSHAccess(command, client, machine, err) {
+			explainChangedSSHHostIdentity(command, client, machine, err)
+		}
 	}
 	return err
 }
@@ -160,7 +164,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	client, machine, target, err := resolveSSHCommandTargetWarm(ctx, alias)
+	_, machine, target, err := resolveSSHCommandTargetWarm(ctx, alias)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -179,7 +183,11 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	}
 	operationID := newSSHOperationID()
 	descriptor := pendingSSHDescriptor(machine, operationID)
-	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor, client.Workspace()), operationID)
+	workspace, err := workspaceForCommandContext(ctx)
+	if err != nil {
+		return err
+	}
+	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor, workspace), operationID)
 	if err != nil {
 		if notReady := sshTargetHealth(command.Context(), machine.ID, machine.Alias); notReady != nil {
 			return notReady
@@ -261,6 +269,9 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	}
 	hostKeys := machine.SSHHostKeys // from the daemon's inventory (F5-07)
 	if len(hostKeys) == 0 {
+		if client, err = sshClientFor(ctx, client); err != nil {
+			return err
+		}
 		set, err := client.ManagedSSHHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
 		if err != nil {
 			return friendlyCommandError(err)
