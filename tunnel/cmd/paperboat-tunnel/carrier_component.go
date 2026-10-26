@@ -178,7 +178,10 @@ func newCarrierComponentWithTelemetry(
 		defer cancel()
 		results := make(chan error, 4)
 		workers := 0
-		if runtimeAttached {
+		// An engine carrier accepted on its tunnel admissions also carries the machine's runtime route:
+		// the runtime worker waits for that admission, which a restarted machine's new session can reach
+		// this edge after the tunnel admission did.
+		if runtimeWorker != nil && (runtimeAttached || durableAuthorized) {
 			workers++
 			go func() { results <- runtimeWorker.Handle(handlerCtx, server) }()
 		}
