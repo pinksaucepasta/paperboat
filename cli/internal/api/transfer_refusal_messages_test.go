@@ -8,6 +8,11 @@ func TestTransferRefusalsRenderFromTheirDetails(t *testing.T) {
 	if update != "hp needs pb 2026.10.27.0 or later to receive files over 500 MB (or unlimited). Update pb on hp (pb update), or send less than 500 MB." {
 		t.Fatalf("destination_update_required = %q", update)
 	}
+	// The server may not know the minimum version yet; the refusal must still name the machine and the size.
+	noVersion := apiErrorMessageFor("destination_update_required", 409, map[string]any{"machine": "hp", "max_bytes": float64(524288000)})
+	if noVersion != "hp cannot receive files over 500 MB or unlimited yet. Update pb on hp (pb update), or send less than 500 MB." {
+		t.Fatalf("destination_update_required without a version = %q", noVersion)
+	}
 	large := apiErrorMessageFor("transfer_too_large", 409, map[string]any{"total_bytes": float64(3_400_000_000), "max_bytes": float64(2_000_000_000)})
 	if large != "This transfer is 3.4 GB. Automatic sends up to 2 GB. Send less than 2 GB." {
 		t.Fatalf("transfer_too_large = %q", large)

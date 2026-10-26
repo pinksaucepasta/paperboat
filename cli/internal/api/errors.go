@@ -104,10 +104,13 @@ func destinationUpdateMessage(details map[string]any) string {
 	alias, _ := details["machine"].(string)
 	version, _ := details["minimum_version"].(string)
 	limit, _ := details["max_bytes"].(float64)
-	if !safeDetailLabel(alias) || !safeDetailLabel(version) || limit <= 0 {
+	if !safeDetailLabel(alias) || limit <= 0 || version != "" && !safeDetailLabel(version) {
 		return ""
 	}
 	size := transferBytes(int64(limit))
+	if version == "" {
+		return alias + " cannot receive files over " + size + " or unlimited yet. Update pb on " + alias + " (pb update), or send less than " + size + "."
+	}
 	return alias + " needs pb " + version + " or later to receive files over " + size + " (or unlimited). Update pb on " + alias + " (pb update), or send less than " + size + "."
 }
 
