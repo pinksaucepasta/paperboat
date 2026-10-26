@@ -4932,3 +4932,7 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 2026-10-26 | SDK merge-up cleanup | 14 redundant sdk-* branch names removed; prior WIP/candidate histories committed locally on sdk-remainder (a8533c90, merged-main tree); sdk-design clean. | Remaining: session-source acceptance, frozen core extraction, SDK facade/examples and device checks.
 2026-10-26 | Lane MERGER 3a 4.4 | 496cfab9: team/private HTTP, public TCP and TLS tunnels on the agent carrier (CI server PG 40311605567, tunnel+cli 40311642042 green). | Lane B: deploy edge, then CLI build, then server (older agents refuse restricted engine streams). Private TCP next.
 2026-10-26 | Lane MERGER 4.4 readers | private access discovery/resolver, tunnel inspector and viewer-policy serving state read engine assignments (CI 40315577948 green). | Lane B: server with 496cfab9 + these is safe to deploy (edge first).
+
+2026-10-26 | SDK F24 device | L F24-01/03 PASS twice: bounded inventory/total, actual Inbox hash and symlink refusal on fresh pbvm2 pairs; all eight throwaway IDs revoked across four runs.
+F24-00/02 [!]: MCP exec reports transport_unavailable/not_started, while plain exec true/python passes; daemon-diagnostic follow-up blocked by pbvm2 SSH banner timeout (no fifth fixture created).
+CLI CI 40315925420: all except tailnet authority/future PASS; that unchanged check passed one focused race rerun (clock-boundary flake, Lane R notified); earlier preview panic fixed upstream d85ed057.
