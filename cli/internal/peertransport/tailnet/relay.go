@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"net/netip"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
 	"tailscale.com/tailcfg"
@@ -319,31 +320,21 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 		if !ok || g.ExpiresAt <= time.Now().Unix() {
 			continue
 		}
+		// A grant the relay would refuse makes only that relay unusable: the engine still starts with the
+		// others, or direct-only, instead of failing the whole runtime (a refused grant once stopped pairing).
+		if e := a.verifyRelayGrantsLocked(node, cert); e != nil {
+			if only != "" {
+				return nil, e
+			}
+			diagnosticlog.TryWarn("a relay grant would be refused; that relay is not used until the next grant", "node", node.NodeID, "error", e)
+			continue
+		}
 		for _, value := range g.RelayControlPeers {
 			peer, parseErr := publicKey(value)
 			if parseErr != nil {
 				return nil, parseErr
 			}
 			controlSet[peer] = true
-		}
-		for _, token := range strings.Split(a.relay.tokens[node.NodeID], "\n") {
-			parts := strings.Split(token, ".")
-			if len(parts) != 3 {
-				return nil, ErrAuthority
-			}
-			header, _ := base64.RawURLEncoding.DecodeString(parts[0])
-			var h struct {
-				KeyID string `json:"kid"`
-			}
-			_ = json.Unmarshal(header, &h)
-			pub, found, e := a.options.Keys.Lookup(context.Background(), h.KeyID)
-			if e != nil || !found {
-				return nil, ErrAuthority
-			}
-			verifier := derpquic.Verifier{Issuer: a.options.Issuer, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Keys: map[string]ed25519.PublicKey{h.KeyID: pub}}
-			if _, e = verifier.Verify(token, tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, time.Now()); e != nil {
-				return nil, e
-			}
 		}
 		id := regionalID(node.NodeID)
 		if _, exists := selected[id]; exists {
@@ -496,4 +487,28 @@ func membershipsConfigured(memberships []derpquic.Scope, cfg NetworkConfiguratio
 		}
 	}
 	return true
+}
+
+// verifyRelayGrantsLocked checks every grant part of node exactly as the relay will.
+func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certificate) error {
+	for _, token := range strings.Split(a.relay.tokens[node.NodeID], "\n") {
+		parts := strings.Split(token, ".")
+		if len(parts) != 3 {
+			return ErrAuthority
+		}
+		header, _ := base64.RawURLEncoding.DecodeString(parts[0])
+		var h struct {
+			KeyID string `json:"kid"`
+		}
+		_ = json.Unmarshal(header, &h)
+		pub, found, err := a.options.Keys.Lookup(context.Background(), h.KeyID)
+		if err != nil || !found {
+			return ErrAuthority
+		}
+		verifier := derpquic.Verifier{Issuer: a.options.Issuer, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Keys: map[string]ed25519.PublicKey{h.KeyID: pub}}
+		if _, err := verifier.Verify(token, tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, time.Now()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
