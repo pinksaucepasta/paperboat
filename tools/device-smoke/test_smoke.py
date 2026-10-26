@@ -560,6 +560,81 @@ test_team_checks
                     for device in expected_devices:
                         self.assertRegex(result.stdout, group + ':' + device + r'\s+PASS')
 
+    def run_new_check(self, function, env, payload, devices='boxa boxb'):
+        """Run one smoke function (test_env_scopes / test_update_scheduled) with a fake `on` that logs its commands."""
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        body = prefix + r"""
+stage_terminal_fixtures() { return 0; }
+on() {
+  device=$1; shift
+  printf '%s %s\n' "$device" "$*" >> "$CALLS"
+  case "$*" in *python3*) printf '%s' "$PAYLOAD" ;; esac
+}
+TLIST=($DEVICES)
+""" + function + "\n"
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'smoke.sh'
+            self.write_script(script, body)
+            calls = pathlib.Path(directory) / 'calls'
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                    env=dict(os.environ, CALLS=str(calls), PAYLOAD=payload, DEVICES=devices, **env),
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result.stdout, calls.read_text() if calls.exists() else ''
+
+    def test_env_scopes_runs_with_a_vault_file_against_the_other_device_and_needs_every_assertion(self):
+        good = json.dumps({'check': 'env-scopes', 'status': 'PASS', 'personal_in_exec_and_terminal': True,
+                           'override_isolated_to_machine': True, 'unset_restores_and_removes': True,
+                           'never_in_output_or_diagnostics': True})
+        with tempfile.TemporaryDirectory() as directory:
+            vault = pathlib.Path(directory) / 'vault.pw'
+            vault.write_text('x')
+            out, calls = self.run_new_check('test_env_scopes', {'SMOKE_ENV_VAULT_FILE': str(vault)}, good)
+            self.assertRegex(out, r'env-scopes:boxa\s+PASS')
+            self.assertRegex(out, r'env-scopes:boxb\s+PASS')
+            self.assertIn('env_scopes.py boxb --password-file', calls)
+            self.assertIn('env_scopes.py boxa --password-file', calls)
+            partial = json.dumps(dict(json.loads(good), never_in_output_or_diagnostics=False))
+            out, _ = self.run_new_check('test_env_scopes', {'SMOKE_ENV_VAULT_FILE': str(vault)}, partial)
+            self.assertRegex(out, r'env-scopes:boxa\s+FAIL')
+            out, _ = self.run_new_check('test_env_scopes', {'SMOKE_ENV_VAULT_FILE': str(vault)}, good, devices='boxa')
+            self.assertRegex(out, r'env-scopes:boxa\s+FAIL.*second machine')
+            out, calls = self.run_new_check('test_env_scopes', {}, good)
+            self.assertNotIn('env-scopes', out)
+            self.assertEqual(calls, '')
+
+    def test_update_scheduled_runs_only_when_asked_and_reports_where_the_machine_went(self):
+        good = json.dumps({'check': 'update-scheduled', 'status': 'PASS', 'from': '2026.10.25.1', 'to': '2026.10.26.0',
+                           'disabled_stayed_put': True, 'settings_restored': True})
+        out, calls = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, good)
+        self.assertRegex(out, r'update-scheduled:boxa\s+PASS')
+        self.assertIn('2026.10.26.0', out)
+        self.assertIn('update_scheduled.py', calls)
+        stayed = json.dumps(dict(json.loads(good), disabled_stayed_put=False))
+        out, _ = self.run_new_check('test_update_scheduled', {'SMOKE_SCHEDULED_UPDATE': '1'}, stayed)
+        self.assertRegex(out, r'update-scheduled:boxa\s+FAIL')
+        out, calls = self.run_new_check('test_update_scheduled', {}, good)
+        self.assertNotIn('update-scheduled', out)
+
+    def test_update_floor_runs_against_staging_only_when_configured_and_needs_every_assertion(self):
+        good = {'check': 'update-floor', 'status': 'PASS', 'refused': ['machine list', 'session list', 'exec'],
+                'custom_unaffected': True, 'floor_cleared': True}
+        env = {'SMOKE_STAGING_FLOOR_CRED': '/cred', 'SMOKE_STAGING_OFFICIAL': 'off', 'SMOKE_STAGING_CUSTOM': 'dev'}
+        with tempfile.TemporaryDirectory() as directory:
+            fake = pathlib.Path(directory) / 'floor.sh'
+            fake.write_text('#!/bin/sh\necho "$@" >> "$CALLS_LOG"\nprintf \'%s\' "$FLOOR_RESULT"\n')
+            fake.chmod(0o755)
+            log = pathlib.Path(directory) / 'log'
+            run = lambda payload, extra=None: self.run_new_check(
+                'test_update_floor', dict(env, SMOKE_UPDATE_FLOOR_CMD=str(fake), CALLS_LOG=str(log), FLOOR_RESULT=json.dumps(payload), **(extra or {})), '')[0]
+            self.assertRegex(run(good), r'update-floor\s+PASS')
+            self.assertIn('--official off --custom dev', log.read_text())
+            self.assertRegex(run(dict(good, floor_cleared=False)), r'update-floor\s+FAIL')
+            self.assertRegex(run(dict(good, refused=['machine list'])), r'update-floor\s+FAIL')
+            self.assertIn('--floor 2026.10.26.0', (run(good, {'SMOKE_STAGING_FLOOR': '2026.10.26.0'}) and log.read_text()))
+            out, _ = self.run_new_check('test_update_floor', {}, '')
+            self.assertNotIn('update-floor', out)
+
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
         # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.
@@ -659,6 +734,267 @@ exit "$FAILED"
                                             capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
+
+
+class ScheduledUpdateCheck(unittest.TestCase):
+    """update_scheduled.py against a simulated official machine and a fake clock (no minute is waited)."""
+
+    class World:
+        def __init__(self, updates_when_disabled=False, never_updates=False):
+            import datetime
+            self.datetime = datetime
+            self.time = datetime.datetime(2026, 10, 26, 8, 55, 30, tzinfo=datetime.timezone.utc)
+            self.version, self.latest = '2026.10.25.1', '2026.10.26.0'
+            self.enabled, self.local_time = True, '04:00'
+            self.updates_when_disabled, self.never_updates = updates_when_disabled, never_updates
+            self.runtime = self.version
+            self.invoked = []
+
+        def now(self):
+            return self.time
+
+        def next_run(self):
+            hour, minute = map(int, self.local_time.split(':'))
+            run = self.time.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            return run if run > self.time else run + self.datetime.timedelta(days=1)
+
+        def sleep(self, seconds):
+            before = self.time
+            self.time += self.datetime.timedelta(seconds=seconds)
+            hour, minute = map(int, self.local_time.split(':'))
+            fired = self.time.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if (self.enabled or self.updates_when_disabled) and before < fired <= self.time and not self.never_updates:
+                self.version = self.runtime = self.latest
+
+        def invoke(self, binary, *args, raw=False, **kwargs):
+            self.invoked.append(args)
+            if args[:1] == ('--version',):
+                return json.dumps({'ok': True, 'data': {'version': self.version}})
+            assert args[:2] == ('update', 'settings') or args[0] == 'update', args
+            if args[1] == 'settings':
+                for index, value in enumerate(args):
+                    if value.startswith('--auto='):
+                        self.enabled = value.endswith('true')
+                    if value == '--time':
+                        self.local_time = args[index + 1]
+                return {'data': {'automatic_updates': self.enabled, 'local_time': self.local_time, 'time_zone': 'UTC',
+                                 'next_maintenance_at': self.next_run().strftime('%Y-%m-%dT%H:%M:%SZ') if self.enabled else '0001-01-01T00:00:00Z'}}
+            if args[1] == 'status':
+                return {'data': {'settings': {'enabled': self.enabled, 'local_time': self.local_time},
+                                 'next_maintenance_at': self.next_run().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                                 'cli_version': self.version, 'runtime_version': self.runtime,
+                                 'activation_pending': False, 'update_available': self.version != self.latest}}
+            if args[1] == 'check':
+                return {'data': {'installed_version': self.version, 'latest_version': self.latest,
+                                 'update_available': self.version != self.latest, 'verified': True}}
+            raise AssertionError('the check must never install an update itself: %r' % (args,))
+
+        def doctor(self, *args, **kwargs):
+            return SimpleNamespace(returncode=0, stdout=json.dumps({'ok': True, 'data': {'overall': 'healthy', 'checks': [
+                {'code': 'machine_guard_version', 'status': 'pass'}]}}))
+
+    def run_check(self, world):
+        import update_scheduled
+        clock = SimpleNamespace(now=world.now, sleep=world.sleep)
+        with patch.object(update_scheduled, 'clock', clock), patch.object(update_scheduled.p, 'invoke', world.invoke), \
+                patch.object(update_scheduled.p, 'command_result', world.doctor), patch.object(update_scheduled, 'READY_SECONDS', 600), \
+                patch.object(sys, 'argv', ['update_scheduled.py']):
+            import io, contextlib
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                update_scheduled.main()
+            return json.loads(out.getvalue().strip().splitlines()[-1])
+
+    def test_the_machine_updates_by_itself_at_the_configured_time_and_settings_are_restored(self):
+        world = self.World()
+        receipt = self.run_check(world)
+        self.assertTrue(receipt['status'] == 'PASS' and receipt['to'] == '2026.10.26.0' and receipt['disabled_stayed_put'], receipt)
+        self.assertEqual((world.enabled, world.local_time), (True, '04:00'))
+        self.assertFalse(any(args[:2] == ('update', '--from') or args[:1] == ('update',) and len(args) > 1 and args[1] in ('install', 'download')
+                             for args in world.invoked), 'the check must not run an update command')
+        self.assertGreaterEqual(receipt['seconds_after_configured_time'], 0)
+
+    def test_a_schedule_that_never_fires_fails_and_still_restores_the_settings(self):
+        world = self.World(never_updates=True)
+        with self.assertRaisesRegex(AssertionError, 'by itself'):
+            self.run_check(world)
+        self.assertEqual((world.enabled, world.local_time), (True, '04:00'))
+
+    def test_a_disabled_schedule_that_still_updates_fails(self):
+        world = self.World(updates_when_disabled=True)
+        with self.assertRaisesRegex(AssertionError, 'disabled schedule still updated'):
+            self.run_check(world)
+
+
+class EnvScopesCheck(unittest.TestCase):
+    """env_scopes.py against a simulated ENV service: it must pass on correct behaviour and fail on each breakage."""
+
+    class World:
+        def __init__(self, leak_override=False, echo_value=False, unset_keeps=False, leak_diagnostics=False):
+            self.personal = self.override = None
+            self.name = None
+            self.leak_override, self.echo_value, self.unset_keeps, self.leak_diagnostics = leak_override, echo_value, unset_keeps, leak_diagnostics
+
+        def value_on(self, machine):
+            if machine in ('target', 'machine_target') and self.override is not None:
+                return self.override
+            if machine == 'machine_me' and self.leak_override and self.override is not None:
+                return self.override
+            return self.personal
+
+        def run(self, *args, stdin=None, timeout=90, records_value=False):
+            import env_scopes
+            result = self.respond(*args, stdin=stdin)
+            if not records_value:  # what the real run() does: remember what commands printed
+                env_scopes.Output.seen.extend([result[1], result[2]])
+            return result
+
+        def respond(self, *args, stdin=None):
+            ok = lambda payload, code=0: (code, json.dumps(payload), '')
+            if args[:2] == ('machine', 'list'):
+                return ok({'machines': [{'id': 'machine_target', 'alias': 'target'}, {'id': 'machine_me', 'alias': 'me'}]})
+            if args[:2] == ('env', 'set'):
+                self.name = args[2]
+                if '--machine' in args:
+                    self.override = stdin
+                else:
+                    self.personal = stdin
+                return (0, json.dumps({'ok': True, 'data': {'echo': stdin if self.echo_value else ''}}), '')
+            if args[:2] == ('env', 'list'):
+                return ok({'data': {'names': [self.name] if self.personal is not None else []}})
+            if args[:2] == ('env', 'host'):
+                return ok({'layers': [{'source': {'machine_id': 'machine_target'}}]})
+            if args[:2] == ('env', 'unset'):
+                if '--confirm' not in args:
+                    return (1, json.dumps({'ok': False, 'data': {'confirmation_token': 'TOK'}}), '')
+                if not self.unset_keeps:
+                    if '--machine' in args:
+                        self.override = None
+                    else:
+                        self.personal = None
+                return ok({'ok': True})
+            if args[0] == 'exec':
+                if args[3] == 'printenv':
+                    value = self.value_on(args[1])
+                    return (0, value + '\n', '') if value is not None else (1, '', '')
+                if args[3] == 'sh':
+                    return (0, 'diagnostics.log\n' if self.leak_diagnostics else '', '')
+            raise AssertionError(args)
+
+    def run_check(self, world):
+        import env_scopes
+        import io, contextlib
+
+        def terminal(machine, name, marker):
+            return world.value_on('machine_target')
+        with patch.object(env_scopes, 'run', world.run), patch.object(env_scopes, 'own_machine_id', lambda: 'machine_me'), \
+                patch.object(env_scopes, 'terminal_sees', terminal), patch.object(env_scopes, 'WAIT_SECONDS', 1), \
+                patch.object(env_scopes.time, 'sleep', lambda seconds: None), patch.object(env_scopes.Output, 'seen', []), \
+                patch.object(env_scopes.subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout='', returncode=1)), \
+                patch.object(sys, 'argv', ['env_scopes.py', 'target']):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                env_scopes.main()
+            return json.loads(out.getvalue().strip().splitlines()[-1])
+
+    def test_correct_scopes_pass(self):
+        receipt = self.run_check(self.World())
+        self.assertTrue(all(receipt[key] for key in ('personal_in_exec_and_terminal', 'override_isolated_to_machine',
+                                                      'unset_restores_and_removes', 'never_in_output_or_diagnostics')), receipt)
+
+    def test_an_override_that_reaches_the_other_machine_fails(self):
+        with self.assertRaisesRegex(RuntimeError, 'leaked to the other machine'):
+            self.run_check(self.World(leak_override=True))
+
+    def test_a_value_echoed_by_a_command_fails(self):
+        with self.assertRaisesRegex(RuntimeError, 'a value leaked: personal value in command output'):
+            self.run_check(self.World(echo_value=True))
+
+    def test_an_unset_that_does_not_take_fails(self):
+        with self.assertRaisesRegex(RuntimeError, 'restore the personal value'):
+            self.run_check(self.World(unset_keeps=True))
+
+    def test_a_value_in_diagnostics_fails(self):
+        with self.assertRaisesRegex(RuntimeError, 'diagnostics on the target'):
+            self.run_check(self.World(leak_diagnostics=True))
+
+
+class UpdateFloorCheck(unittest.TestCase):
+    """update_floor.py against a simulated staging server and two machines (no host is contacted)."""
+
+    class Staging:
+        def __init__(self, refuse_custom=False, ignore_floor=False, clear_fails=False, no_update_hint=False):
+            self.floor = ''
+            self.refuse_custom, self.ignore_floor, self.clear_fails, self.no_update_hint = refuse_custom, ignore_floor, clear_fails, no_update_hint
+            self.calls = []
+
+        def policy(self):
+            return {'revision': len(self.calls), 'minimum_version': self.floor}
+
+        def set_floor(self, version, reason):
+            self.calls.append((version, reason))
+            if version == '' and self.clear_fails:
+                raise RuntimeError('clearing failed')
+            self.floor = version
+
+    class Machine:
+        def __init__(self, staging, version, official):
+            self.staging, self.version, self.official, self.name = staging, version, official, 'official' if official else 'custom'
+
+        def pb(self, *args, timeout=90):
+            blocked = self.staging.floor and ((self.official and not self.staging.ignore_floor) or self.staging.refuse_custom)
+            first = args[0]
+            if first == '--version':
+                return 0, json.dumps({'data': {'version': self.version}}), ''
+            if first == 'update' and args[1] == 'check':
+                return 0, json.dumps({'data': {'latest_version': '2026.10.26.0'}}), ''
+            if first == 'update' and args[1] == 'status':
+                return 0, json.dumps({'data': {'required': self.staging.floor}}), ''
+            if first == 'auth':
+                return 0, '{}', ''
+            if first == 'doctor':
+                return 0, json.dumps({'data': {'overall': 'healthy'}}), ''
+            if blocked:
+                text = 'Update required: Paperboat %s or newer. pb: This Paperboat version is no longer supported.' % self.staging.floor
+                text += '' if self.staging.no_update_hint else ' Run `pb update` to continue.'
+                return 1, '', text
+            return 0, '{}', ''
+
+    def run_check(self, staging, **kwargs):
+        import update_floor
+        official = self.Machine(staging, '2026.10.25.1', True)
+        custom = self.Machine(staging, 'dev-abcdef12', False)
+        with patch.object(update_floor.time, 'sleep', lambda seconds: None), patch.object(update_floor, 'WAIT_SECONDS', 1):
+            return update_floor.check(staging, official, custom, **kwargs)
+
+    def test_the_old_official_build_is_refused_the_custom_build_is_not_and_the_floor_is_cleared(self):
+        staging = self.Staging()
+        receipt = self.run_check(staging)
+        self.assertTrue(receipt['custom_unaffected'] and receipt['floor_cleared'] and receipt['floor'] == '2026.10.26.0', receipt)
+        self.assertEqual(staging.calls[0][0], '2026.10.26.0')
+        self.assertEqual(staging.calls[-1], ('', ''))
+        self.assertEqual(staging.floor, '')
+
+    def test_a_floor_that_does_not_refuse_the_official_build_fails_and_is_still_cleared(self):
+        staging = self.Staging(ignore_floor=True)
+        with self.assertRaisesRegex(AssertionError, 'refused under the floor'):
+            self.run_check(staging)
+        self.assertEqual(staging.floor, '')
+
+    def test_a_custom_build_refused_under_the_floor_fails(self):
+        staging = self.Staging(refuse_custom=True)
+        with self.assertRaisesRegex(AssertionError, 'custom build was refused'):
+            self.run_check(staging)
+        self.assertEqual(staging.floor, '')
+
+    def test_a_refusal_without_the_update_hint_does_not_count(self):
+        staging = self.Staging(no_update_hint=True)
+        with self.assertRaisesRegex(AssertionError, 'refused under the floor'):
+            self.run_check(staging)
+
+    def test_a_floor_not_above_the_official_build_is_refused_up_front(self):
+        with self.assertRaisesRegex(AssertionError, 'must be above'):
+            self.run_check(self.Staging(), floor='2026.10.25.1')
 
 class TerminalDriver(unittest.TestCase):
     def test_failure_is_nonzero_and_private_output_is_withheld(self):

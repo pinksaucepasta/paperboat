@@ -853,6 +853,77 @@ test_update_crossbuild() {
   done
 }
 
+# F10-01: set/list/unset of personal values and per-machine overrides reach new execs and terminals, never logged.
+# Runs only when SMOKE_ENV_VAULT_FILE (an owner-only file with the ENV vault password) is set; the target is the
+# next device of the run (a second machine of the same account), so a run needs two devices.
+test_env_scopes() {
+  skipped env-scopes && return
+  [ -n "${SMOKE_ENV_VAULT_FILE:-}" ] || return 0
+  local device id out status t0 target index=0
+  for device in "${TLIST[@]}"; do
+    id="env-scopes:$device"
+    index=$((index+1))
+    skipped "$id" && continue
+    target=${TLIST[$((index % ${#TLIST[@]}))]}
+    t0=$(now)
+    if [ "$target" = "$device" ]; then
+      record "$id" FAIL 0 "needs a second machine of the account as the target; run with two devices"
+      continue
+    fi
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the device fixture"
+      continue
+    fi
+    on "$device" "umask 077; cat > /tmp/$RUN_ID/env-vault.pw" < "$SMOKE_ENV_VAULT_FILE"
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 env_scopes.py $target --password-file /tmp/$RUN_ID/env-vault.pw; rc=\$?; rm -f /tmp/$RUN_ID/env-vault.pw; exit \$rc" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="env-scopes" and r["status"]=="PASS" and r["personal_in_exec_and_terminal"] and r["override_isolated_to_machine"] and r["unset_restores_and_removes"] and r["never_in_output_or_diagnostics"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "personal and per-machine values in new exec and terminal on $target, override not leaked, unset removes, never in output or diagnostics"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
+# F14-06: an official install updates itself at the configured time. Runs only when SMOKE_SCHEDULED_UPDATE=1 and
+# the device is a paired official install older than the newest official release (it takes about 10 minutes).
+test_update_scheduled() {
+  skipped update-scheduled && return
+  [ "${SMOKE_SCHEDULED_UPDATE:-}" = 1 ] || return 0
+  local device id out status t0
+  for device in "${TLIST[@]}"; do
+    id="update-scheduled:$device"
+    skipped "$id" && continue
+    t0=$(now)
+    if ! stage_terminal_fixtures "$device"; then
+      record "$id" FAIL 0 "could not stage the device fixture"
+      continue
+    fi
+    out=$(on "$device" "cd /tmp/$RUN_ID && python3 update_scheduled.py" 2>&1); status=$?
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-scheduled" and r["status"]=="PASS" and r["disabled_stayed_put"] and r["settings_restored"]' "$out" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "disabled stayed put; at the configured time the machine reached $(python3 -c 'import json,sys;print(json.loads(sys.argv[1].strip().splitlines()[-1])["to"])' "$out") by itself; doctor healthy; settings restored"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done
+}
+
+# F14-07: a minimum supported version blocks an old official build, never a custom build. Runs against STAGING only (never
+# production) and only when SMOKE_STAGING_FLOOR_CRED (the staging operator credential file), SMOKE_STAGING_OFFICIAL and
+# SMOKE_STAGING_CUSTOM (two staging machines: an official build and a dev build, containers on the staging docker host)
+# are set. It runs on this host, not on a device; the floor is cleared on every exit path.
+test_update_floor() {
+  skipped update-floor && return
+  [ -n "${SMOKE_STAGING_FLOOR_CRED:-}" ] && [ -n "${SMOKE_STAGING_OFFICIAL:-}" ] && [ -n "${SMOKE_STAGING_CUSTOM:-}" ] || return 0
+  local id=update-floor t0 out status
+  t0=$(now)
+  out=$(${SMOKE_UPDATE_FLOOR_CMD:-python3 "$HERE/update_floor.py"} --cred "$SMOKE_STAGING_FLOOR_CRED" --official "$SMOKE_STAGING_OFFICIAL" --custom "$SMOKE_STAGING_CUSTOM" ${SMOKE_STAGING_FLOOR:+--floor $SMOKE_STAGING_FLOOR} 2>&1); status=$?
+  if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="update-floor" and r["status"]=="PASS" and r["custom_unaffected"] and r["floor_cleared"] and len(r["refused"])==3' "$out" 2>/dev/null; then
+    record "$id" PASS $(( $(now)-t0 )) "staging floor: old official build refused (machine list, session list, exec) with the update message, custom build unaffected, floor cleared and the official build works again"
+  else
+    record_command_failure "$id" $(( $(now)-t0 )) "$out"
+  fi
+}
+
 # Runs only when SMOKE_FRESH_HOST (a Linux VM with Docker, image laneh-ubuntu24-systemd, and a signed-in `pb` user)
 # and SMOKE_FRESH_BINARY (the linux-amd64 build under test) are set: a FRESH pair, then `pb access machine` to it
 # with no daemon restart (the private-access P0 of 2026-10-26 showed only on freshly paired machines).
@@ -1069,6 +1140,9 @@ if [ -n "$UPDATE_DIR" ]; then
   for t in "${TLIST[@]}"; do update_target "$t"; done
 fi
 test_update_crossbuild
+test_env_scopes
+test_update_scheduled
+test_update_floor
 
 # ---------------------------------------------------------------- report
 if [ -n "$ONLY_CHECK" ]; then
