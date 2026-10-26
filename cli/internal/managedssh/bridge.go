@@ -142,7 +142,10 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		count, copyErr := io.Copy(stream, sshd)
 		copyErr = normalizeBridgeError(copyErr)
 		if half, ok := stream.(interface{ CloseWrite() error }); ok {
-			copyErr = errors.Join(copyErr, normalizeBridgeError(half.CloseWrite()))
+			// After sshd's clean end the client may already have torn its side down; that is its normal exit.
+			if closeErr := normalizeBridgeError(half.CloseWrite()); copyErr != nil {
+				copyErr = errors.Join(copyErr, closeErr)
+			}
 		}
 		// Target EOF is terminal for an SSH connection. Some OpenSSH clients
 		// keep ProxyCommand input open until the proxy exits, so waiting for the

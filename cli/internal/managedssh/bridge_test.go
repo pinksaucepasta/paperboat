@@ -483,6 +483,9 @@ func (c *closedReadConn) Read(p []byte) (int, error) {
 }
 func (c *closedReadConn) Close() error { c.closed.Store(true); return c.Conn.Close() }
 
+// CloseWrite fails as a scope-bound native stream does once the client tore its session down.
+func (c *closedReadConn) CloseWrite() error { return errors.New("peer admission refused") }
+
 // F5-12: a session that ends because sshd ended (a command ran and exited) is not a failure, whatever error the
 // client-side read reports after the bridge closed it.
 func TestBridgeSSHTargetEndIsNotAFailureOnANativeStream(t *testing.T) {
