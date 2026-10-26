@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -36,10 +37,10 @@ var ErrWriteUncertain = errors.New("terminal write outcome is uncertain")
 var ErrTransportLost = errors.New("terminal transport lost")
 
 // ErrLocalDaemonLost: the link to the Paperboat daemon on this computer broke (it restarted or stopped).
-var ErrLocalDaemonLost = errors.New("local Paperboat daemon connection lost")
+var ErrLocalDaemonLost = fmt.Errorf("local Paperboat daemon connection lost: %w", ErrTransportLost)
 
 // ErrInputNotSent: a write failed before any of it left this process, so it is safe to send again on the next link.
-var ErrInputNotSent = errors.New("terminal input was not sent")
+var ErrInputNotSent = fmt.Errorf("terminal input was not sent: %w", ErrTransportLost)
 
 const terminalOutputBatchWindow = time.Duration(0)
 
