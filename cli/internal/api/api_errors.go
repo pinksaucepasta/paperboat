@@ -81,7 +81,7 @@ func (e *APIError) Error() string {
 	if e.Code == "team_suspended" && e.Team != "" {
 		return fmt.Sprintf("Team %q is suspended, so it cannot be changed. Ask a team owner to restore billing in the console; access returns when the team resumes.", e.Team)
 	}
-	return apiErrorMessage(e.Code, e.Status)
+	return apiErrorMessageFor(e.Code, e.Status, e.Details)
 }
 
 func (e *APIError) Is(target error) bool {

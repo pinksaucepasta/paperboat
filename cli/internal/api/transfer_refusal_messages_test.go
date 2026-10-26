@@ -31,3 +31,11 @@ func TestTeamLimitRendersFromItsDetails(t *testing.T) {
 		t.Fatalf("generic team_limit = %q", got)
 	}
 }
+
+// The refusal reaches the user through APIError.Error(); it used to print the bare 409 text.
+func TestAPIErrorTextCarriesTheRefusalDetails(t *testing.T) {
+	err := &APIError{Status: 409, Code: "destination_update_required", Details: map[string]any{"machine": "hp", "max_bytes": float64(524288000)}}
+	if got := err.Error(); got != "hp cannot receive files over 500 MB or unlimited yet. Update pb on hp (pb update), or send less than 500 MB." {
+		t.Fatalf("APIError.Error() = %q", got)
+	}
+}

@@ -715,7 +715,7 @@ func addSendManagementCommands(root *cobra.Command) {
 func transferClientForCommand(cobraCommand *cobra.Command, args []string) (transferHistory, api.UserMachine, io.Closer, error) {
 	destinationRef, _ := cobraCommand.Flags().GetString("on")
 	if strings.TrimSpace(destinationRef) == "" {
-		return nil, api.UserMachine{}, nil, invocationError(errors.New("--on is required"))
+		return nil, api.UserMachine{}, nil, localArgumentError("--on is required: name the machine the files were sent to, for example `pb send list --on <machine>`")
 	}
 	ctx := actionContext(cobraCommand, args)
 	backend, err := backendClient(ctx)
