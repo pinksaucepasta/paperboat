@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
 // Every round-30 machine reported "Update to <its own version> failed" (updater_unavailable) on each
@@ -16,7 +17,7 @@ import (
 // installation's updater listens on its own socket (/run/paperboat-updated-u1000/control.sock), which hostd
 // passes to the worker as PAPERBOAT_UPDATED_SOCKET. The worker's updater client must use that socket.
 func TestProductionUpdaterClientUsesTheInstallationsUpdaterSocket(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "control.sock")
+	socket := filepath.Join(shorttemp.Dir(t), "control.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
