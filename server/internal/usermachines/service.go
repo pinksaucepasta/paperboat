@@ -249,6 +249,8 @@ type Policy struct {
 	ExpiredAccessSessionRetention time.Duration
 	// TerminalCreateMaxAttempts ends a terminal creation the host never accepted (terminal_sessions.max_attempts_before_alert).
 	TerminalCreateMaxAttempts int
+	// TerminalOperationMaxAge ends a close or delete_history still pending this long after it was queued (0: never).
+	TerminalOperationMaxAge time.Duration
 }
 type Service struct {
 	inventoryFlights            inventoryFlights

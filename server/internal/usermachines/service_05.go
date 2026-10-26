@@ -629,6 +629,16 @@ func (s *Service) processDueTerminalSessionOperations(ctx context.Context) error
  WHERE m.id=o.user_machine_id AND o.state='pending' AND (m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL)`); err != nil {
 		return err
 	}
+	// A close or delete_history on a machine that stayed unreachable past the age bound ends too: no operation stays
+	// pending forever. (A creation is bounded by its attempts.) The host's orphan reconcile handles the session if
+	// the machine returns.
+	if age := s.policy.TerminalOperationMaxAge; age > 0 {
+		if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_terminal_session_operations
+ SET state='failed',completed_at=now(),updated_at=now(),last_error='machine_unreachable'
+ WHERE state='pending' AND operation IN ('close','delete_history') AND created_at < now()-make_interval(secs=>$1)`, age.Seconds()); err != nil {
+			return err
+		}
+	}
 	items, err := s.db.Queries().ListDueUserMachineTerminalSessionOperations(ctx, 32)
 	if err != nil {
 		return err

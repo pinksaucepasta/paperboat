@@ -3925,6 +3925,26 @@ func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {
 		t.Fatalf("close past the creation limit = %s, want pending (it applies when the host returns)", s)
 	}
 
+	// A close still pending past the age bound ends as machine_unreachable; a younger one keeps retrying.
+	service.policy.TerminalOperationMaxAge = 30 * 24 * time.Hour
+	exec(`UPDATE paperboat.user_machine_terminal_session_operations SET created_at=now()-interval '31 days' WHERE id=$1`, "op_close_"+suffix)
+	young := "umts_opsend_young_" + suffix
+	exec(`INSERT INTO paperboat.user_machine_terminal_sessions (id,user_machine_id,name,owner_account,launch_cwd,desired_state,runtime_state) VALUES ($1,$2,'c',$3,'/w','closed','running')`, young, machineID, userID)
+	exec(`INSERT INTO paperboat.user_machine_terminal_session_operations (id,user_machine_id,terminal_session_id,operation,created_at) VALUES ($1,$2,$3,'close',now()-interval '29 days')`, "op_young_"+suffix, machineID, young)
+	if err := service.processDueTerminalSessionOperations(ctx); err != nil {
+		t.Fatalf("the age sweep failed the worker: %v", err)
+	}
+	var lastError string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT last_error FROM paperboat.user_machine_terminal_session_operations WHERE id=$1`, "op_close_"+suffix).Scan(&lastError); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := state("op_close_" + suffix); s != "failed" || lastError != "machine_unreachable" {
+		t.Fatalf("31-day-old close = %s (%s), want failed (machine_unreachable)", s, lastError)
+	}
+	if s, _ := state("op_young_" + suffix); s != "pending" {
+		t.Fatalf("29-day-old close = %s, want pending", s)
+	}
+
 	if err := service.expireClosedTerminalSessions(ctx); err != nil {
 		t.Fatal(err)
 	}

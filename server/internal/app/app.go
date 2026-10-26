@@ -280,7 +280,7 @@ func New(opts Options) (*App, error) {
 	}
 	draining := new(atomic.Bool)
 	checker := readinessChecker{cfg: opts.Config, db: store, draining: draining}
-	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms, TerminalCreateMaxAttempts: opts.Config.TerminalSessions.MaxAttemptsBeforeAlert}, workspaceBilling)
+	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms, TerminalCreateMaxAttempts: opts.Config.TerminalSessions.MaxAttemptsBeforeAlert, TerminalOperationMaxAge: opts.Config.TerminalSessions.OperationMaxAge}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
 	deviceAuthService.SetEnroller(usermachines.DeviceEnroller{Service: userMachineService})
 	if err != nil {
