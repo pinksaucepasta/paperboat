@@ -82,7 +82,15 @@ type RuntimeStatus struct {
 	ActiveLeases           int      `json:"active_leases"`
 	ActiveOwners           int      `json:"active_owners"`
 	ProtectedLoopbackCIDRs []string `json:"protected_loopback_cidrs,omitempty"`
+	// Features names the protocol additions this guard understands; a client sends a request field only when
+	// its guard lists the feature, since an older guard decodes requests strictly.
+	Features []string `json:"features,omitempty"`
 }
+
+// FeatureAddressClaims: acquire takes account and machine and answers with the assigned address; the claims
+// operation releases absent machines (PLAN 3b multi-account hosts).
+const FeatureAddressClaims = "address_claims"
+
 type NamePublisher interface {
 	ReplaceNames(context.Context, map[string]netip.Addr) error
 	Close() error

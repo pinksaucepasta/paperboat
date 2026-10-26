@@ -13,13 +13,17 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Client struct {
-	mu   sync.Mutex
-	conn *net.UnixConn
+	// claims records whether the guard answered status with FeatureAddressClaims.
+	claims atomic.Bool
+	mu     sync.Mutex
+	conn   *net.UnixConn
 }
 
 type peerIdentityError struct{ cause error }
@@ -157,12 +161,19 @@ func (c *Client) Acquire(ctx context.Context, hostname string, ip netip.Addr, po
 // AcquireMachine opens a listener for one machine of one account; the guard assigns the address (the preferred
 // server address when free on this host) and returns it.
 func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname string, preferred netip.Addr, port int) (net.Listener, netip.Addr, error) {
-	return c.acquire(ctx, request{Operation: "acquire", Account: account, Machine: machine, Hostname: hostname, IP: preferred.String(), Port: port})
+	in := request{Operation: "acquire", Hostname: hostname, IP: preferred.String(), Port: port}
+	if c.claims.Load() {
+		in.Account, in.Machine = account, machine
+	}
+	return c.acquire(ctx, in)
 }
 
 // ReplaceClaims sends the complete machine set of account from a verified configuration; the guard releases the
 // rest into its hold.
 func (c *Client) ReplaceClaims(ctx context.Context, account string, machines []string) error {
+	if !c.claims.Load() {
+		return nil // an older guard keeps no claims to release
+	}
 	_, _, err := c.exchange(ctx, request{Operation: "claims", Account: account, Machines: machines})
 	return err
 }
@@ -223,6 +234,7 @@ func (c *Client) Status(ctx context.Context) (RuntimeStatus, error) {
 	if out.Status == nil || !out.Status.Ready {
 		return RuntimeStatus{}, errors.New("machine guard returned no ready status")
 	}
+	c.claims.Store(slices.Contains(out.Status.Features, FeatureAddressClaims))
 	return *out.Status, nil
 }
 func (c *Client) PrepareRangeChange(ctx context.Context, cidr string) error {

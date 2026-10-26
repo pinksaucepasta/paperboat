@@ -497,7 +497,7 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 			}
 		}
 	}
-	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...)}
+	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...), Features: []string{FeatureAddressClaims}}
 }
 
 // validName admits exactly one machine label beneath the owner's local access
@@ -830,14 +830,20 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 	if in.Operation != "acquire" || in.Hostname == splitdns.BrowserGatewayHostname {
 		return in, nil
 	}
-	if in.Account == "" || in.Machine == "" {
-		return in, errors.New("machine listener request names no account and machine")
-	}
 	preferred, err := netip.ParseAddr(in.IP)
 	if err != nil {
 		return in, errors.New("invalid preferred machine address")
 	}
-	ip, err := g.claims.assign(claimKey{UID: uid, Account: in.Account, Machine: in.Machine}, preferred, time.Now())
+	key := claimKey{UID: uid, Account: in.Account, Machine: in.Machine}
+	if in.Account == "" || in.Machine == "" {
+		// A daemon older than address claims (another OS user's pb, or a rollback) asks for an exact address.
+		// It is kept as that uid's claim on that address, refused if another claim holds it.
+		key = claimKey{UID: uid, legacyIP: in.IP}
+		if holder, held := g.claims.holder(in.IP); held && holder != key.String() {
+			return in, listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
+		}
+	}
+	ip, err := g.claims.assign(key, preferred, time.Now())
 	if err != nil {
 		return in, err
 	}
