@@ -32,6 +32,25 @@ func TestValidatePublicTCPRouteRequiresReservedEndpoint(t *testing.T) {
 	}
 }
 
+// A TLS passthrough route is served by the edge's shared port 443 listener, as the server's resources schema says.
+func TestValidateTLSPassthroughRouteUsesTheSharedListener(t *testing.T) {
+	route := TunnelRoute{Schema: TunnelV1Schema, Kind: "route", ID: "route_tls_1", TunnelID: "tun_1", Name: "tls1", Protocol: "tls", HostMatch: TunnelRouteHostMatch{Type: "managed_exact", Hostname: "clever-peach-shore-1646.example.test"}, Origin: TunnelRouteOrigin{Scheme: "tcp", Address: "127.0.0.1:47812"}, ConnectTimeoutMS: 10000, IdleTimeoutMS: 300000, MaxConcurrentStreams: 128, DesiredState: "active", Generation: 1, ETag: `"route:route_tls_1:1"`, PublicTCPListenerID: "listener_tls_443", PublicTCPPort: 443}
+	if err := validateRoute(route); err != nil {
+		t.Fatalf("valid TLS passthrough route rejected: %v", err)
+	}
+	for name, change := range map[string]func(*TunnelRoute){
+		"other listener": func(r *TunnelRoute) { r.PublicTCPListenerID = "listener_1" },
+		"other port":     func(r *TunnelRoute) { r.PublicTCPPort = 24567 },
+		"no listener":    func(r *TunnelRoute) { r.PublicTCPListenerID, r.PublicTCPPort = "", 0 },
+	} {
+		bad := route
+		change(&bad)
+		if err := validateRoute(bad); !errors.Is(err, ErrUnsafeTunnelResponse) {
+			t.Errorf("%s: error=%v", name, err)
+		}
+	}
+}
+
 func validTunnelHealthTestValue() TunnelHealth {
 	dimension := TunnelHealthDimension{Status: "healthy", Code: "ready"}
 	return TunnelHealth{Schema: TunnelV1Schema, Kind: "health", ResourceKind: "tunnel", ResourceID: "tun_1", OverallCode: "ready", Summary: "Tunnel is ready.", Since: time.Unix(1, 0).UTC(), Dimensions: TunnelHealthDimensions{Service: dimension, Edge: dimension, Config: dimension, Route: dimension, Origin: dimension, DNS: dimension, Certificate: dimension, Access: dimension, Update: dimension}}

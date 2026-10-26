@@ -372,12 +372,19 @@ func validateRoute(v TunnelRoute) error {
 	if v.Schema != TunnelV1Schema || v.Kind != "route" || !validTunnelID(v.ID) || !validTunnelID(v.TunnelID) || v.Generation < 1 || !validTunnelETag(v.ETag) || validateTunnelRouteInput(TunnelRouteInput{Name: v.Name, Protocol: v.Protocol, HostMatch: v.HostMatch, PathPrefix: v.PathPrefix, Origin: v.Origin, Priority: v.Priority, ConnectTimeoutMS: v.ConnectTimeoutMS, IdleTimeoutMS: v.IdleTimeoutMS, MaxConcurrentStreams: v.MaxConcurrentStreams}, false) != nil || (v.DesiredState != "active" && v.DesiredState != "disabled" && v.DesiredState != "deleted") {
 		return ErrUnsafeTunnelResponse
 	}
-	if v.Protocol == "tcp" {
+	switch v.Protocol {
+	case "tcp":
 		if !validTunnelID(v.PublicTCPListenerID) || v.PublicTCPPort < 1024 || v.PublicTCPPort > 65535 {
 			return ErrUnsafeTunnelResponse
 		}
-	} else if v.PublicTCPListenerID != "" || v.PublicTCPPort != 0 {
-		return ErrUnsafeTunnelResponse
+	case "tls": // TLS passthrough shares the edge's port 443 listener (resources.schema.json)
+		if v.PublicTCPListenerID != "listener_tls_443" || v.PublicTCPPort != 443 {
+			return ErrUnsafeTunnelResponse
+		}
+	default:
+		if v.PublicTCPListenerID != "" || v.PublicTCPPort != 0 {
+			return ErrUnsafeTunnelResponse
+		}
 	}
 	return nil
 }
