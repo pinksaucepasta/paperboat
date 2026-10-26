@@ -764,3 +764,34 @@ func TestPublisherStreamOutlivesTheJoiningRequest(t *testing.T) {
 	}
 	r.Leave(created.ID, browser.AttachmentID)
 }
+
+// A flood that outruns the edge stream drops the shared output's backlog; the registry counts it, so browser streams
+// send a fresh screen even when no later record would show them the gap (W9: the page stalled ~0.1 MB in).
+func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
+	manager, sessionID, generation, registry := newPublisherTestSession(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return writer, nil })
+	attachTestViewer(t, manager, sessionID, generation, "browser_a")
+	joinCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_a"); err != nil {
+		t.Fatal(err)
+	}
+	// The edge stream is not read: ~3 MB echoed by cat (lines under the tty's 4096-byte line limit) exceeds the
+	// 1 MiB attachment queue.
+	chunk := bytes.Repeat([]byte("x"), 4000)
+	for sequence := uint64(1); sequence <= 800; sequence++ {
+		if _, err := manager.Write(sessionID, session.InputKey{ClientID: "browser_a", AttachmentID: "browser_a", Generation: generation, InputSequence: sequence}, append(chunk, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	go func() { _, _ = io.Copy(io.Discard, reader) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for registry.Lags(sessionID) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("a dropped backlog was not counted")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

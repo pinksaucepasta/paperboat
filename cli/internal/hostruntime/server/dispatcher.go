@@ -459,6 +459,14 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				copy(data[17:], epoch.Key[:])
 				return protocol.BinaryFrame{Channel: protocol.TerminalBroadcastKey, StartSequence: s.checkpointSequence, Data: data}, nil
 			case <-time.After(time.Second):
+				if lags := s.broadcast.Lags(s.sessionID); lags != s.lagsSeen {
+					// Shared output was dropped; a later record would show the gap, but none may come.
+					s.lagsSeen = lags
+					if err := s.loadScreen(); err != nil {
+						return protocol.BinaryFrame{}, err
+					}
+					return s.Next(ctx)
+				}
 				snapshot, err := s.snapshot()
 				if err != nil {
 					diagnosticlog.TryInfo("browser terminal stream ended: session check failed")

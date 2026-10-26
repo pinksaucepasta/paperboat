@@ -28,7 +28,9 @@ type terminalOutputStream struct {
 	keyUpdates         <-chan browserbroadcastserver.Epoch
 	// screenRequests asks a browser stream for a fresh checkpoint of its own attachment (accountID, clientID,
 	// generation); unregisterScreens withdraws it from the dispatcher when the stream closes.
-	screenRequests    chan struct{}
+	screenRequests chan struct{}
+	// lagsSeen is the shared output's lag count when this stream last sent a screen for it.
+	lagsSeen          uint64
 	accountID         string
 	clientID          string
 	generation        uint64

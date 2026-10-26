@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -48,6 +49,9 @@ type publication struct {
 	// Join or Leave (Leave's stop closes the stream, which ends the stalled write).
 	writeMu  sync.Mutex
 	stopOnce sync.Once
+	// lags counts the output dropped behind a flood. A drop is silent until a later record shows the gap, so a
+	// flood that ends inside one would leave browsers on a stale screen; their streams send one on a change.
+	lags atomic.Uint64
 }
 
 func NewRegistry(manager session.Service, signingKey func(context.Context) (ed25519.PrivateKey, error)) (*Registry, error) {
@@ -139,6 +143,16 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	return updates, nil
 }
 
+// Lags reports how often the session's shared output dropped a backlog (see publication.lags).
+func (r *Registry) Lags(sessionID string) uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p := r.sessions[sessionID]; p != nil {
+		return p.lags.Load()
+	}
+	return 0
+}
+
 func (r *Registry) Leave(sessionID, attachmentID string) {
 	if r == nil {
 		return
@@ -228,6 +242,7 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 	for {
 		event, err := r.manager.WaitNext(ctx, p.sessionID, p.attachmentID, received)
 		if errors.Is(err, session.ErrAttachmentLagged) {
+			p.lags.Add(1)
 			continue // records skip ahead; each browser sees the gap and restores its screen in-band
 		}
 		if err != nil {
