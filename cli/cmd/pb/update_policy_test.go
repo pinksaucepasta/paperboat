@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -39,6 +40,15 @@ func TestCLIUpdateFloorWarnsBlocksAndLeavesRecoveryAccessible(t *testing.T) {
 	if err := checkCLIUpdatePolicy(command); err != nil || !bytes.Contains(stderr.Bytes(), []byte("before")) {
 		t.Fatalf("advance warning: %q %v", stderr.String(), err)
 	}
+	// F5-07: within cliUpdatePolicyFresh the cached policy answers; no request per command.
+	before := calls
+	if err := checkCLIUpdatePolicy(command); err != nil || calls != before {
+		t.Fatalf("fresh cache refetched: calls %d -> %d, %v", before, calls, err)
+	}
+	stale := time.Now().Add(-cliUpdatePolicyFresh - time.Minute)
+	if err := os.Chtimes(cache, stale, stale); err != nil {
+		t.Fatal(err)
+	}
 	policy.EnforceAt = nil
 	policy.Revision++
 	stderr.Reset()
@@ -57,6 +67,9 @@ func TestCLIUpdateFloorWarnsBlocksAndLeavesRecoveryAccessible(t *testing.T) {
 	}
 	fetchCLIUpdatePolicy = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) {
 		return api.UpdatePolicy{}, errors.New("offline")
+	}
+	if err := os.Chtimes(cache, stale, stale); err != nil {
+		t.Fatal(err)
 	}
 	if err := checkCLIUpdatePolicy(command); !errors.As(err, &apiError) {
 		t.Fatal("known unsupported policy forgotten while offline")
@@ -91,5 +104,16 @@ func TestCLIUpdateRequiredHasActionableFailure(t *testing.T) {
 	}
 	if message := commandFailureMessage(err, classifyCommandFailure(err)); !bytes.Contains([]byte(message), []byte("pb update")) {
 		t.Fatal(message)
+	}
+}
+
+func TestUpdateNoticeSkipsSSHConnections(t *testing.T) {
+	root := &cobra.Command{Use: "pb"}
+	ssh := &cobra.Command{Use: "ssh"}
+	doctor := &cobra.Command{Use: "doctor"}
+	root.AddCommand(ssh)
+	ssh.AddCommand(doctor)
+	if !sshConnectionCommand(ssh) || sshConnectionCommand(doctor) || sshConnectionCommand(root) {
+		t.Fatal("only `pb ssh` itself skips the updater notice")
 	}
 }

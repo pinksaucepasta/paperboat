@@ -63,18 +63,17 @@ func checkCLIUpdatePolicy(command *cobra.Command) error {
 	if err != nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(command.Context(), time.Second)
-	defer cancel()
-	client := &http.Client{Timeout: time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	policy, err := fetchCLIUpdatePolicy(ctx, issuer, client)
 	cachePath := cliUpdatePolicyCachePath(issuer, cfg.Path())
+	policy, err := freshCLIUpdatePolicy(cachePath)
 	if err != nil {
-		policy, err = readCLIUpdatePolicy(cachePath)
-		if err != nil {
-			return nil
-		} // The server still enforces incompatible requests.
-	} else {
-		_ = saveCLIUpdatePolicy(cachePath, policy)
+		ctx, cancel := context.WithTimeout(command.Context(), time.Second)
+		defer cancel()
+		client := &http.Client{Timeout: time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		if policy, err = fetchCLIUpdatePolicy(ctx, issuer, client); err == nil {
+			_ = saveCLIUpdatePolicy(cachePath, policy)
+		} else if policy, err = readCLIUpdatePolicy(cachePath); err != nil {
+			return nil // The server still enforces incompatible requests.
+		}
 	}
 	version := cliUpdateVersion()
 	if !policy.Behind(version) {
@@ -108,6 +107,21 @@ func cliPolicyCachePath(issuer, configPath string) string {
 	}
 	digest := sha256.Sum256([]byte(issuer + "\x00" + configPath))
 	return filepath.Join(root, hex.EncodeToString(digest[:])+".json")
+}
+
+// cliUpdatePolicyFresh is how long a fetched policy is used without asking the server again: every command
+// checks it, and pb ssh runs per connection (F5-07). The server still refuses incompatible requests.
+const cliUpdatePolicyFresh = time.Hour
+
+func freshCLIUpdatePolicy(path string) (api.UpdatePolicy, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return api.UpdatePolicy{}, err
+	}
+	if time.Since(info.ModTime()) >= cliUpdatePolicyFresh {
+		return api.UpdatePolicy{}, errors.New("cached update policy is stale")
+	}
+	return readCLIUpdatePolicy(path)
 }
 
 func readCLIUpdatePolicy(path string) (api.UpdatePolicy, error) {
