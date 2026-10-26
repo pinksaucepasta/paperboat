@@ -307,7 +307,7 @@ func TestDataPlaneStopsCarrierBeforeRouteAndIngress(t *testing.T) {
 	if err := dataPlane.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"start:store", "start:gateway", "start:http3", "start:private", "start:redirect", "start:control", "start:node", "start:carrier", "start:routes", "start:usage", "stop:usage", "stop:routes", "stop:carrier", "stop:node", "stop:control", "stop:redirect", "stop:private", "stop:http3", "stop:gateway", "stop:store"}
+	want := []string{"start:store", "start:gateway", "start:http3", "start:private", "start:redirect", "start:control", "start:node", "start:carrier", "start:routes", "start:usage", "stop:routes", "stop:carrier", "stop:usage", "stop:node", "stop:control", "stop:redirect", "stop:private", "stop:http3", "stop:gateway", "stop:store"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}

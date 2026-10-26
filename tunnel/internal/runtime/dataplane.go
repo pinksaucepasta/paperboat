@@ -94,9 +94,10 @@ func (d *DataPlane) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	d.closed = true
-	// Public ingress and connector forwarding stop before the final accounting
-	// flush. Control and persistence remain available for cleanup.
-	order := []Component{d.spec.Usage}
+	// Every traffic producer stops before the final accounting flush: usage is
+	// counted on carrier streams, so public TCP, routes and carriers go first.
+	// Usage then flushes and delivers while control and persistence still run.
+	var order []Component
 	if d.spec.PublicTCP != nil {
 		order = append(order, d.spec.PublicTCP)
 	}
@@ -119,7 +120,7 @@ func (d *DataPlane) Shutdown(ctx context.Context) error {
 		// and process teardown. This preserves the connector drain boundary.
 		order = append(order, d.spec.Carrier)
 	}
-	order = append(order, d.spec.Node, d.spec.Control, d.spec.RedirectIngress, d.spec.PrivateIngress, d.spec.HTTP3Ingress, d.spec.Gateway, d.spec.Persistence)
+	order = append(order, d.spec.Usage, d.spec.Node, d.spec.Control, d.spec.RedirectIngress, d.spec.PrivateIngress, d.spec.HTTP3Ingress, d.spec.Gateway, d.spec.Persistence)
 	var failures []error
 	for _, component := range order {
 		if err := component.Shutdown(ctx); err != nil {

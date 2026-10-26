@@ -45,7 +45,7 @@ func TestDataPlaneOrdersStartupAndAccountingSafeShutdown(t *testing.T) {
 	if err := dataPlane.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"start:store", "start:gateway", "start:http3", "start:private", "start:redirect", "start:control", "start:node", "start:routes", "start:usage", "stop:usage", "stop:routes", "stop:node", "stop:control", "stop:redirect", "stop:private", "stop:http3", "stop:gateway", "stop:store"}
+	want := []string{"start:store", "start:gateway", "start:http3", "start:private", "start:redirect", "start:control", "start:node", "start:routes", "start:usage", "stop:routes", "stop:usage", "stop:node", "stop:control", "stop:redirect", "stop:private", "stop:http3", "stop:gateway", "stop:store"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v", events)
 	}
@@ -84,6 +84,17 @@ func TestDataPlaneInstallsPreviewBeforeCarrierAndDetachesBeforeClose(t *testing.
 	}
 	if err := dataPlane.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	// Usage is flushed only after every traffic producer stopped, while control and the store
+	// still run (code review: counters recorded after the final delivery were lost).
+	usageStop := indexOf(events, "stop:usage")
+	for _, producer := range []string{"stop:routes", "stop:preview", "stop:carrier"} {
+		if indexOf(events, producer) > usageStop {
+			t.Fatalf("%s after the final usage flush: %v", producer, events)
+		}
+	}
+	if usageStop > indexOf(events, "stop:control") || usageStop > indexOf(events, "stop:store") {
+		t.Fatalf("usage flushed after control or the store stopped: %v", events)
 	}
 	previewStart, carrierStart := indexOf(events, "start:preview"), indexOf(events, "start:carrier")
 	previewStop, carrierStop := indexOf(events, "stop:preview"), indexOf(events, "stop:carrier")
