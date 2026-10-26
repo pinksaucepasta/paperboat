@@ -41,6 +41,13 @@ const sharedTestdata = "../../../shared/runtimeattachment/testdata"
 // on prod edges while every unit test passed. The probe as the agent receives it is written for the
 // agent's own contract test (cli runtimeattachment).
 func TestEngineRouteGoesReadyThroughTheRealEdgeCarrier(t *testing.T) {
+	// Routes after the carrier connected, and routes already admitted when it connects (staging
+	// 2026-10-26: that carrier took the connector path and its public streams got the preface).
+	t.Run("routes after connect", func(t *testing.T) { engineRouteThroughRealEdge(t, false) })
+	t.Run("routes before connect", func(t *testing.T) { engineRouteThroughRealEdge(t, true) })
+}
+
+func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	golden, err := os.ReadFile(filepath.Join(sharedTestdata, "engine_route_snapshot.json"))
@@ -147,10 +154,18 @@ func TestEngineRouteGoesReadyThroughTheRealEdgeCarrier(t *testing.T) {
 		defer done()
 		_ = assembly.Shutdown(shutdown)
 	}()
+	install := func() {
+		if err := durable.Replace(admissions, time.Now().UTC()); err != nil {
+			t.Fatalf("the edge refused the server's engine route: %v", err)
+		}
+	}
+	if routesFirst {
+		install()
+	}
 	agent := dialEngineAgent(t, ctx, tcpAddress, public, private, identity, epoch)
 	waitDynamicCondition(t, ctx, func() bool { _, ok := runtimeRoutes.Lookup("machine.runtime.example.test"); return ok })
-	if err := durable.Replace(admissions, time.Now().UTC()); err != nil {
-		t.Fatalf("the edge refused the server's engine route: %v", err)
+	if !routesFirst {
+		install()
 	}
 	waitDynamicCondition(t, ctx, func() bool { return routes.Len() == 1 })
 	// The readiness probe reaches the agent's carrier; the agent acknowledges it as the real agent does.
@@ -204,7 +219,7 @@ func TestEngineRouteGoesReadyThroughTheRealEdgeCarrier(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("no request stream reached the agent")
 	}
-	if dir := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); dir != "" {
+	if dir := os.Getenv("PAPERBOAT_UPDATE_GOLDEN"); dir != "" && !routesFirst {
 		encoded, _ := json.MarshalIndent(map[string]string{"kind": open.Kind, "route_id": open.RouteID}, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "engine_probe_open.json"), append(encoded, '\n'), 0o644); err != nil {
 			t.Fatal(err)
