@@ -144,7 +144,7 @@ def main():
     assert check['update_available'] and check['installed_version'] == before, \
         'needs an official install older than the newest release: %r' % check
     latest = check['latest_version']
-    # Only the download happens here, never the install: an installed updater older than 2026.10.26.4 blocks settings
+    # Only the download happens here, never the install: an installed updater without the controlMu fix blocks settings
     # reads while its automatic check downloads, which failed the schedule step below.
     run('update', 'download', timeout=300)
     try:
