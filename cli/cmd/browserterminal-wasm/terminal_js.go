@@ -380,10 +380,18 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 	for {
 		kind, payload, err := readApplicationFrame(stream)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-				return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
+			lost := &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
+			// Name why the transport ended when this side ended it (a rejected record, a full queue): those
+			// reasons are fixed strings, never terminal content, and otherwise read as a plain drop.
+			connection.mu.Lock()
+			ws := connection.websocket
+			connection.mu.Unlock()
+			if ws != nil {
+				if cause := ws.terminalError(); cause != nil && !errors.Is(cause, io.EOF) {
+					lost.details = map[string]any{"transport_cause": cause.Error()}
+				}
 			}
-			return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
+			return lost
 		}
 		if kind == appKindBinary {
 			frame, decodeErr := protocol.DecodeTerminalOutput(payload)
