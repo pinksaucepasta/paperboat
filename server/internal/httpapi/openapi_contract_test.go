@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -98,6 +100,44 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 				t.Errorf("duplicate operationId %q on %s and %s %s", operationID, previous, strings.ToUpper(method), path)
 			}
 			operationIDs[operationID] = strings.ToUpper(method) + " " + path
+		}
+	}
+}
+
+// TestEveryOpenAPIPathHasARoute is the other direction of TestOpenAPIMatchesRegisteredRoutes: a documented
+// path whose route was removed (or never written) would send clients to a 404 with a published contract.
+// Routes are registered in many files and some are built in a loop over actions, so a path counts as routed
+// when its text appears in server code outside tests, or its parent path is followed by a concatenated action.
+func TestEveryOpenAPIPathHasARoute(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var source strings.Builder
+	for _, root := range []string{"..", "../../cmd"} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			source.Write(data)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	code := source.String()
+	for path := range doc.Paths {
+		parent := path[:strings.LastIndex(path, "/")]
+		if !strings.Contains(code, path) && !strings.Contains(code, parent+`/"+`) {
+			t.Errorf("openapi documents %s but no server code registers it; delete it from docs/openapi.json or add the route", path)
 		}
 	}
 }
@@ -791,23 +831,22 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/auth/cli-client-sessions/{cli_client_session_id}":               {"delete"},
 		"/v1/admin/billing/workspace-operations/{operation_id}/reconcile-checkout": {"post"},
 		"/v1/admin/billing/workspace-operations/{operation_id}/supersede-portal":   {"post"},
-		"/v1/github/status":                               {"get"},
-		"/v1/github/repositories":                         {"get"},
-		"/v1/github/oauth/start":                          {"post"},
-		"/v1/github/oauth/callback":                       {"get", "post"},
-		"/v1/github/config-repositories/provision":        {"post"},
-		"/v1/usage-summary":                               {"get"},
-		"/v1/machines":                                    {"get"},
-		"/v1/machines/setup":                              {"post"},
-		"/v1/machine-enrollments":                         {"post"},
-		"/v1/machine-enrollments/{enrollment_id}":         {"get"},
-		"/v1/machine-enrollments/{enrollment_id}/cancel":  {"post"},
-		"/v1/machine-enrollments/{enrollment_id}/retry":   {"post"},
-		"/v1/machines/overview":                           {"get"},
-		"/v1/machines/update-summary":                     {"get"},
-		"/v1/machines/{machine_id}":                       {"get", "patch", "delete"},
-		"/v1/machines/{machine_id}/update-status":         {"get"},
-		"/v1/machines/{machine_id}/maintenance-approvals": {"get", "post"},
+		"/v1/github/status":                                                     {"get"},
+		"/v1/github/repositories":                                               {"get"},
+		"/v1/github/oauth/start":                                                {"post"},
+		"/v1/github/oauth/callback":                                             {"get", "post"},
+		"/v1/github/config-repositories/provision":                              {"post"},
+		"/v1/machines":                                                          {"get"},
+		"/v1/machines/setup":                                                    {"post"},
+		"/v1/machine-enrollments":                                               {"post"},
+		"/v1/machine-enrollments/{enrollment_id}":                               {"get"},
+		"/v1/machine-enrollments/{enrollment_id}/cancel":                        {"post"},
+		"/v1/machine-enrollments/{enrollment_id}/retry":                         {"post"},
+		"/v1/machines/overview":                                                 {"get"},
+		"/v1/machines/update-summary":                                           {"get"},
+		"/v1/machines/{machine_id}":                                             {"get", "patch", "delete"},
+		"/v1/machines/{machine_id}/update-status":                               {"get"},
+		"/v1/machines/{machine_id}/maintenance-approvals":                       {"get", "post"},
 		"/v1/machines/{machine_id}/maintenance-approvals/{approval_id}/approve": {"post"},
 		"/v1/machines/{machine_id}/maintenance-approvals/{approval_id}/reject":  {"post"},
 		"/v1/machines/{machine_id}/connection-descriptor":                       {"post"},

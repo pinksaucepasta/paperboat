@@ -204,7 +204,7 @@ export interface paths {
         put?: never;
         /**
          * Issue an exact native machine-service credential
-         * @description CLI-only. Authorizes an exact machine_service machine ID plus tcp:<port> independently of terminal sessions. Machine services use a capability-only access session and bind installation, boot, authorization-source and announcement generations. The five-minute credential expiry limits admission; admitted streams require renewable runtime authority at most 30 seconds long. Native traffic remains end-to-end encrypted.
+         * @description CLI-only. Authorizes an exact machine_service machine ID plus tcp:<port> independently of terminal sessions. Machine services use a capability-only access session and bind installation, boot, authorization-source and announcement generations. The five-minute credential expiry limits admission; admitted streams require renewable runtime authority at most 30 seconds long. Native traffic remains end-to-end encrypted. A 409 service_not_announced means the machine has not announced the port yet; retry after the Retry-After seconds.
          */
         post: operations["post_v1_native_private_access_grants"];
         delete?: never;
@@ -1652,7 +1652,7 @@ export interface paths {
         put?: never;
         /**
          * Wait for a change to something the host caches
-         * @description Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.
+         * @description Host-only, authenticated like carrier bootstrap by the renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host sends the generation of each topic it last saw. The server answers 200 as soon as any topic of that machine has a higher generation, naming only those topics, or 204 after up to 30 seconds without a change. Every answer carries X-Paperboat-Events-Answer, a signed statement of the answer (the unchanged one too) bound to the request body. A response carries generations, never data: the host refreshes the named topic itself. Generations are persisted per machine and topic, so a reconnecting host loses nothing. Topics: machine_access, peer_network, previews, tunnels, config, inventory.
          */
         post: operations["post_v1_machine_events_wait"];
         delete?: never;
@@ -1862,46 +1862,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/environment-variables": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List global environment variable metadata
-         * @description Returns names and version metadata only. Decrypted values are never returned by user-facing reads.
-         */
-        get: operations["get_v1_environment_variables"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-scopes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the authoritative ENV scope inventory
-         * @description Returns the current global scope and every current or retired machine scope in canonical order for recovery confirmation. It contains names and version metadata only, never envelopes, ciphertext digests, wrapped keys, observations, or plaintext.
-         */
-        get: operations["get_v1_environment_scopes"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/environment-vault": {
         parameters: {
             query?: never;
@@ -1916,308 +1876,6 @@ export interface paths {
          * @description The canonical signed envelope carries its generation, exact previous document digest, fixed writer key, password credential epoch, and optional recovery credential epoch. Generation one uses an all-zero previous digest and credential epochs one. Credential changes advance only their own epoch by exactly one. Exact document retries are idempotent.
          */
         put: operations["put_v1_environment_vault"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-variables/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        /** Get global environment variable metadata */
-        get: operations["get_v1_environment_variables_name"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/machines/{machine_id}/environment-variables": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * List machine environment variable metadata
-         * @description Returns machine-scope names, versions, and apply status without decrypted values.
-         */
-        get: operations["get_v1_machines_machine_id_environment_variables"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/machines/{machine_id}/environment-variables/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-                name: string;
-            };
-            cookie?: never;
-        };
-        /** Get machine environment variable metadata */
-        get: operations["get_v1_machines_machine_id_environment_variables_name"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-manifests/global": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get opaque signed global ENV manifest */
-        get: operations["get_v1_environment_manifests_global"];
-        /** Publish manager-signed opaque global ENV manifest */
-        put: operations["put_v1_environment_manifests_global"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-manifests/machines/{machine_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        /** Get opaque signed machine ENV manifest */
-        get: operations["get_v1_environment_manifests_machine"];
-        /** Publish manager-signed opaque machine ENV manifest */
-        put: operations["put_v1_environment_manifests_machine"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get active root-signed ENV authority */
-        get: operations["get_v1_environment_authority"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get sequential ENV authority documents */
-        get: operations["get_v1_environment_authority_documents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-key-enrollments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Request an ENV signing and recipient key binding
-         * @description Registers public key material and returns an HPKE proof-of-possession challenge. No value or private key is accepted.
-         */
-        post: operations["post_v1_environment_key_enrollments"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-key-enrollments/pending": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List pending ENV key enrollments */
-        get: operations["get_v1_environment_key_enrollments_pending"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-key-enrollments/{request_id}/proof": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        /** Prove possession of the ENV recipient private key */
-        put: operations["put_v1_environment_key_enrollment_proof"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-key-enrollments/{request_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve a public ENV key binding and stage authority */
-        post: operations["post_v1_environment_key_enrollment_approve"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/transitions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stage a root-signed ENV authority transition */
-        post: operations["post_v1_environment_authority_transitions"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/transitions/{transition_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        /** Get ENV authority transition state */
-        get: operations["get_v1_environment_authority_transition"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/transitions/{transition_id}/abort": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Abort a staged transition with root authorization */
-        post: operations["post_v1_environment_authority_transition_abort"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/transitions/{transition_id}/scopes/global": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        /** Stage the signed global scope for a transition */
-        put: operations["put_v1_environment_transition_global_scope"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-authority/transitions/{transition_id}/scopes/machines/{machine_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        /** Stage a signed machine scope for a transition */
-        put: operations["put_v1_environment_transition_machine_scope"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2879,26 +2537,6 @@ export interface paths {
          * @description Cancellation is idempotent. Work that has crossed a safe cancellation boundary returns a typed conflict.
          */
         delete: operations["delete_v1_operation"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/usage-summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Account usage summary
-         * @description Cookie authentication requires no bearer scope. Bearer authentication requires account:read.
-         */
-        get: operations["get_v1_usage_summary"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7954,6 +7592,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview account deletion
+         * @description Browser session only. Lists what deleting the account removes (machines, personal ENV vaults, previews, tunnels, config sync, inbox items, API tokens, the active subscription) and the teams that are deleted with it or block it. reauthentication_required is true when the session signed in more than five minutes ago; deletion then needs a fresh sign-in.
+         */
+        get: operations["get_v1_account_deletion_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete the account
+         * @description Browser session only, with CSRF. Irreversible. Revokes every machine the account owns, ends its sessions and tokens, removes its personal data, deletes single-member teams it owns and leaves other teams, and anonymizes its audit events. The user row stays as a tombstone. Provider cleanup (WorkOS user, Stripe subscription, confirmation email) runs afterwards from a retried queue and never blocks the deletion. Returns 204 and clears the session cookies.
+         */
+        delete: operations["delete_v1_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account preferences */
+        get: operations["get_v1_me_preferences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change account preferences
+         * @description Partial update; omitted fields keep their value. Unknown fields are refused.
+         */
+        patch: operations["patch_v1_me_preferences"];
+        trace?: never;
+    };
+    "/v1/team-inbox/requests/{request_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sender reports transfer progress
+         * @description Only the request's sender. The mode is fixed by the first report; committed_bytes never decreases and never exceeds the manifest total; transfer_state paused requires pause_reason. Report at most every 5 s; an unchanged report within 1 s is not stored.
+         */
+        post: operations["report_team_inbox_transfer_progress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the selected workspace's tunnel domains and live previews' custom domains
+         * @description Hostname order (then id), keyset paged, with the total. Tunnels and previews are the ones GET /v1/tunnels and GET /v1/previews?state=active list; deleted domains are not listed.
+         */
+        get: operations["get_v1_domains"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List received files across the selected workspace's machines
+         * @description Read live from the machines (the server stores no file names), at most a bounded number of machines per request in machine id order. Totals are of the machines checked so far.
+         */
+        get: operations["get_v1_inbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8835,6 +8596,8 @@ export interface components {
         PreviewLeasePage: {
             items: components["schemas"]["PreviewLease"][];
             next_cursor?: string;
+            /** @description Every preview the cursor pages through with these filters (workspace, q, state, owner, machine_id), counted by the same access rules as the items. */
+            total: number;
         };
         PreviewLeaseResponse: {
             data: components["schemas"]["PreviewLease"];
@@ -8903,6 +8666,8 @@ export interface components {
         TunnelPage: {
             items: components["schemas"]["Tunnel"][];
             next_cursor?: string;
+            /** @description Every tunnel the cursor pages through with these filters (workspace, q, state, owner, machine_id), counted by the same access rules as the items. */
+            total: number;
         };
         TunnelResponse: {
             data: components["schemas"]["Tunnel"];
@@ -9292,7 +9057,7 @@ export interface components {
                 /** Format: date-time */
                 updated_at?: string;
             }[];
-            pagination?: components["schemas"]["InventoryOffsetPagination"];
+            pagination?: components["schemas"]["InventoryCursorPagination"];
         };
         ConnectorAdmissionRequest: {
             operation_id: string;
@@ -9482,8 +9247,6 @@ export interface components {
             /** @enum {string} */
             state: "not_reporting" | "idle" | "checking" | "downloading" | "staged" | "activating" | "deferred" | "healthy" | "failed" | "rolled_back";
             observation?: components["schemas"]["UpdateObservation"];
-            /** @description Optional descriptive text; trimmed and contains no control characters. Not a selector. */
-            description?: string;
         };
         FleetUpdateSummary: {
             items: components["schemas"]["FleetUpdateMachine"][];
@@ -9745,62 +9508,6 @@ export interface components {
         ConnectorCarrierBootstrapErrorResponse: {
             error: components["schemas"]["ConnectorCarrierBootstrapError"];
         };
-        EnvironmentVariableMetadata: {
-            /** @enum {string} */
-            scope: "global" | "machine";
-            machine_id?: string;
-            name: string;
-            /** @constant */
-            configured: true;
-            /** Format: int64 */
-            version: number;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        EnvironmentVariableScope: {
-            /** @enum {string} */
-            scope: "global" | "machine";
-            machine_id?: string;
-            /** @enum {string} */
-            scope_state?: "active" | "retired";
-            /** @enum {string} */
-            key_state: "ready" | "key_authorization_required" | "rotation_required";
-            /** Format: int64 */
-            version: number;
-            /** Format: int64 */
-            key_epoch?: number;
-            manifest_id?: string;
-            variables: components["schemas"]["EnvironmentVariableMetadata"][];
-            /** @enum {string} */
-            status?: "pending" | "applied" | "failed" | "offline";
-            /** Format: int64 */
-            applied_global_version?: number;
-            /** Format: int64 */
-            applied_machine_version?: number;
-            /** @enum {string} */
-            applied_state?: "pending" | "applied" | "failed";
-            error_code?: string;
-            /** Format: date-time */
-            observed_at?: string;
-        };
-        EnvironmentScopeInventoryItem: {
-            /** @enum {string} */
-            scope: "global" | "machine";
-            machine_id?: string;
-            /** @enum {string} */
-            scope_state: "active" | "retired";
-            /** Format: int64 */
-            version: number;
-            /** Format: int64 */
-            key_epoch: number;
-            manifest_id: string;
-            names: string[];
-        };
-        EnvironmentScopeInventory: {
-            /** @constant */
-            schema: "paperboat.environment-scope-inventory/v1";
-            scopes: components["schemas"]["EnvironmentScopeInventoryItem"][];
-        };
         EnvironmentPasswordVault: {
             issuer: string;
             account_id: string;
@@ -9811,28 +9518,6 @@ export interface components {
             envelope: string;
         };
         EnvironmentPasswordVaultPut: {
-            envelope: string;
-        };
-        EnvironmentManifestMutation: {
-            /** @constant */
-            schema: "paperboat.environment-manifest-mutation/v1";
-            /** Format: int64 */
-            expected_version: number;
-            operation_id: string;
-            /** @description Canonical unpadded base64url manager-signed opaque COSE manifest. */
-            envelope: string;
-        };
-        EnvironmentManifestState: {
-            /** @constant */
-            schema: "paperboat.environment-manifest-state/v1";
-            /** @enum {string} */
-            scope: "global" | "machine";
-            machine_id?: string;
-            /** Format: int64 */
-            version: number;
-            /** Format: int64 */
-            key_epoch: number;
-            manifest_id: string;
             envelope: string;
         };
         EnvironmentObservation: {
@@ -10005,7 +9690,16 @@ export interface components {
         NativeRelaySubject: {
             account_id: string;
             endpoint_id: string;
-            generation: number;
+            /** @description Only from relays that did not send subjects_digest: the grant generation of the subject. */
+            generation?: number;
+        };
+        NativeRelayRevocation: {
+            account_id: string;
+            endpoint_id: string;
+            /** @description Relays without subjects_digest only: revoke grants below this generation. */
+            generation?: number;
+            /** @description Digest relays only: the first grant generation still valid for this endpoint; grants below it are revoked. Listed only above 1. */
+            min_generation?: number;
         };
         NativeRelayLease: {
             node_id: string;
@@ -10013,7 +9707,9 @@ export interface components {
             process_epoch: string;
             expires_at: number;
             capacity_limit: number;
-            revocations: components["schemas"]["NativeRelaySubject"][];
+            revocations: components["schemas"]["NativeRelayRevocation"][];
+            /** @description Only for relays that sent subjects_digest: resend the full subjects list. No revocations are given with it. */
+            subjects_required?: boolean;
             peer_relay?: {
                 wireguard_public_key: string;
                 disco_public_key: string;
@@ -10033,7 +9729,10 @@ export interface components {
             ready: boolean;
             draining: boolean;
             capacity_used: number;
-            subjects: components["schemas"]["NativeRelaySubject"][];
+            /** @description The full admitted list. Sent when it changed or subjects_required was answered; otherwise omitted and subjects_digest names the list the server holds. */
+            subjects?: components["schemas"]["NativeRelaySubject"][];
+            /** @description Lowercase hex SHA-256 of the membership: one account_id NUL endpoint_id LF line per subject, sorted as strings. Grant generations are not part of it. Required when subjects is omitted. */
+            subjects_digest?: string;
         };
         EnvironmentVaultScope: {
             /** @description personal or the canonical Team ID. Included in the signed encrypted source and private-key derivation. */
@@ -10529,7 +10228,6 @@ export interface components {
         MachineServiceItem: {
             machine_id: string;
             alias: string;
-            description?: string;
             installation_generation: number;
             boot_id: string;
             policy_generation: number;
@@ -11644,7 +11342,6 @@ export interface components {
             owner_team_id?: string;
             id: string;
             environment_id: string;
-            description?: string;
             alias: string;
             platform: string;
             architecture: string;
@@ -11657,7 +11354,7 @@ export interface components {
             shared: boolean;
             online: boolean;
             network_approved: boolean;
-            permissions: string[] | null;
+            permissions: string[];
             /** Format: int64 */
             installation_generation: number;
             runtime_versions: {
@@ -11708,6 +11405,8 @@ export interface components {
                     machine_name?: string;
                 };
             };
+            /** @description The machine's latest update observation (as in GET /v1/machines/update-summary), null before its first report. */
+            update?: components["schemas"]["UpdateObservation"] | null;
         };
         MeResponse: {
             data: components["schemas"]["Me"];
@@ -11719,6 +11418,10 @@ export interface components {
             data: {
                 items: components["schemas"]["Machine"][];
                 pagination: components["schemas"]["InventoryOffsetPagination"];
+                /** @description Every machine the filters select (the same on every page). */
+                total?: number;
+                /** @description Present when machines follow this page; pass it as cursor. */
+                next_cursor?: string;
             };
         };
         SelfhostRuntimeReadiness: {
@@ -11745,7 +11448,7 @@ export interface components {
             action: string;
             actor: {
                 /** @enum {string} */
-                kind: "user" | "api_token" | "directory" | "operator" | "system";
+                kind: "user" | "api_token" | "directory" | "operator" | "system" | "deleted_user";
                 id: string;
                 email?: string;
                 token_id?: string;
@@ -11851,7 +11554,6 @@ export interface components {
             machine_id: string;
             owner_account: string;
             owner_team_id?: string;
-            description?: string;
             alias: string;
             state: string;
             online: boolean;
@@ -11969,6 +11671,112 @@ export interface components {
             access_key_id?: string;
             secret_access_key?: string;
         };
+        AccountDeletionRequest: {
+            /** @description The account email, typed to confirm. */
+            confirm_email: string;
+        };
+        AccountDeletionPreview: {
+            account_email: string;
+            machines: number;
+            env_vaults: number;
+            previews: number;
+            tunnels: number;
+            config_sync: boolean;
+            inbox_items: number;
+            api_tokens: number;
+            subscription: null | {
+                plan: string;
+                /** Format: date-time */
+                period_end: string | null;
+            };
+            teams_deleted: {
+                slug: string;
+                name: string;
+            }[];
+            teams_blocking: {
+                slug: string;
+                name: string;
+                members: number;
+            }[];
+            /** Format: date-time */
+            reauthenticated_at: string | null;
+            reauthentication_required: boolean;
+        };
+        AccountDeletionPreviewResponse: {
+            data: components["schemas"]["AccountDeletionPreview"];
+        };
+        AccountPreferences: {
+            /**
+             * @description Default mode of `pb send` and console sends. automatic: up to the published automatic_max_batch_bytes, any path including Paperboat-hosted relays. unlimited: no size bound, direct paths and self-hosted relays only.
+             * @enum {string}
+             */
+            file_transfer_mode: "automatic" | "unlimited";
+        };
+        AccountPreferencesResponse: {
+            data: components["schemas"]["AccountPreferences"];
+        };
+        AccountPreferencesUpdate: {
+            /** @enum {string} */
+            file_transfer_mode?: "automatic" | "unlimited";
+        };
+        WorkspaceDomain: {
+            /** @enum {string} */
+            kind: "tunnel" | "preview";
+            /** @description The same view as GET /v1/tunnels/{tunnel_id}/domains (kind tunnel) or GET /v1/previews/{preview_id}/domains (kind preview). */
+            domain: components["schemas"]["TunnelDomain"] | components["schemas"]["PreviewDomain"];
+            /** @description kind tunnel: the tunnel's name. */
+            owner_name?: string;
+            /** @description kind preview: the preview's endpoint URL. */
+            endpoint?: string;
+        };
+        WorkspaceDomainPageResponse: {
+            data: {
+                items: components["schemas"]["WorkspaceDomain"][];
+                /** @description Every domain the filters select (the same on every page). */
+                total: number;
+                /** @description Present when domains follow this page. */
+                next_cursor?: string;
+            };
+        };
+        WorkspaceInboxFile: {
+            id: string;
+            name: string;
+            size: number;
+            /** Format: date-time */
+            received_at: string;
+            machine: {
+                id: string;
+                alias: string;
+            };
+        };
+        WorkspaceInboxResponse: {
+            data: {
+                /** @description Files of the machines checked by this request, newest first; q filters them. */
+                items: components["schemas"]["WorkspaceInboxFile"][];
+                /** @description How many machines this request covered (at most the server's bound). */
+                machines_checked: number;
+                /** @description Files on the machines checked by this request, as they counted them. Not a total of the workspace. */
+                files_on_checked_machines: number;
+                /** @description Machines whose listing held only their newest files. */
+                truncated: string[];
+                unavailable: {
+                    machine_id: string;
+                    alias: string;
+                    /** @enum {string} */
+                    reason: "machine_offline" | "machine_update_required" | "inbox_unavailable" | "machine_unreachable" | "timeout";
+                }[];
+                /** @description Present when more machines follow; pass it as machine_cursor for the next batch. */
+                next_machine_cursor?: string;
+            };
+        };
+        InventoryCursorPagination: {
+            limit: number;
+            offset: number;
+            total: number;
+            next_offset: number | null;
+            /** @description Keyset position of the next page (cursor); absent on the last page. */
+            next_cursor?: string;
+        };
     };
     responses: {
         /** @description Structured API error. */
@@ -12030,6 +11838,8 @@ export interface operations {
                 enrollment_state?: "pending" | "enrolled";
                 /** @description Literal true or false; observed complete claim and live node readiness. */
                 ready?: boolean;
+                /** @description name: by name, then capability and id. newest: the most recently created installation first. */
+                sort?: "name" | "newest";
             };
             header?: never;
             path?: never;
@@ -12201,6 +12011,8 @@ export interface operations {
                 closed?: boolean;
                 /** @description false returns the stored sessions without probing each host for live metadata (current directory, foreground process, participants). Authorization is unchanged. */
                 live?: boolean;
+                /** @description Only the sessions on this machine (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Pagination totals count the filtered set. */
+                machine_id?: string;
             };
             header?: never;
             path?: never;
@@ -12463,6 +12275,7 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -12828,12 +12641,33 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Heartbeat recorded. */
-            204: {
+            /** @description Heartbeat recorded. The answer carries the ingress limits the edge enforces (T11). */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        ingress_limits: {
+                            publication: {
+                                connections: number;
+                                opens_per_second: number;
+                                open_burst: number;
+                                /** Format: int64 */
+                                bytes_per_second: number;
+                                byte_burst: number;
+                            };
+                            account: {
+                                connections: number;
+                                opens_per_second: number;
+                                open_burst: number;
+                                /** Format: int64 */
+                                bytes_per_second: number;
+                                byte_burst: number;
+                            };
+                        };
+                    };
+                };
             };
             401: components["responses"]["Error"];
         };
@@ -13781,9 +13615,12 @@ export interface operations {
                 workspace?: string;
                 /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
-                state?: "allocating" | "connecting" | "ready" | "owner_disconnected" | "expired" | "stopped" | "active";
+                /** @description active: every live preview; ended: every preview whose lease ended (the exact complement of active). */
+                state?: "allocating" | "connecting" | "ready" | "owner_disconnected" | "expired" | "stopped" | "active" | "ended";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
+                /** @description Only the previews served from this machine (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Part of the cursor's filters. */
+                machine_id?: string;
             };
             header?: never;
             path?: never;
@@ -14283,9 +14120,12 @@ export interface operations {
                 workspace?: string;
                 /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
+                /** @description Without state the list leaves out deleted tunnels; state=deleted lists them. */
                 state?: "active" | "paused" | "deleted";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
+                /** @description Only the tunnels this machine created or hosts an active connector of (exact machine id), at most 128 UTF-8 bytes; whitespace and NUL are rejected. Part of the cursor's filters. */
+                machine_id?: string;
             };
             header?: never;
             path?: never;
@@ -15278,6 +15118,8 @@ export interface operations {
             200: {
                 headers: {
                     "Cache-Control": "no-store";
+                    /** @description Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204. */
+                    "X-Paperboat-Events-Answer"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15287,6 +15129,8 @@ export interface operations {
             /** @description No topic changed within the wait. */
             204: {
                 headers: {
+                    /** @description Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204. */
+                    "X-Paperboat-Events-Answer"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -15320,6 +15164,8 @@ export interface operations {
             200: {
                 headers: {
                     "Cache-Control": "no-store";
+                    /** @description Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204. */
+                    "X-Paperboat-Events-Answer"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15329,6 +15175,8 @@ export interface operations {
             /** @description No topic changed within the wait. */
             204: {
                 headers: {
+                    /** @description Signed answer (typ paperboat-machine-events+jwt, verified against /.well-known/jwks.json): kind changed or unchanged, the moved topics, and request_sha256 of the request body. Present on 200 and 204. */
+                    "X-Paperboat-Events-Answer"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -15709,62 +15557,6 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
-    get_v1_environment_variables: {
-        parameters: {
-            query?: {
-                /** @description Selected Personal or canonical team workspace. Validated against the current authenticated account; selecting a team does not grant resource access. */
-                workspace?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Global environment variable scope. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentVariableScope"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            500: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_scopes: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Metadata-only scope inventory, sorted global first and then by machine identifier. */
-            200: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentScopeInventory"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            500: components["responses"]["Error"];
-        };
-    };
     get_v1_environment_vault: {
         parameters: {
             query?: never;
@@ -15826,447 +15618,6 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_variables_name: {
-        parameters: {
-            query?: {
-                /** @description Selected Personal or canonical team workspace. Validated against the current authenticated account; selecting a team does not grant resource access. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Variable metadata without its value. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentVariableMetadata"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-        };
-    };
-    get_v1_machines_machine_id_environment_variables: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Machine environment variable scope. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentVariableScope"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-        };
-    };
-    get_v1_machines_machine_id_environment_variables_name: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                machine_id: string;
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Variable metadata without its value. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentVariableMetadata"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            422: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_manifests_global: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Opaque ciphertext manifest; never plaintext. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["EnvironmentManifestState"];
-                    };
-                };
-            };
-            401: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-        };
-    };
-    put_v1_environment_manifests_global: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentManifestMutation"];
-            };
-        };
-        responses: {
-            /** @description Manifest activated. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_manifests_machine: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Opaque ciphertext manifest. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: components["responses"]["Error"];
-        };
-    };
-    put_v1_environment_manifests_machine: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": string;
-            };
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentManifestMutation"];
-            };
-        };
-        responses: {
-            /** @description Manifest activated. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_authority: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Active opaque authority document. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Same-account authority is not initialized; stable error code authority_not_initialized. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_v1_environment_authority_documents: {
-        parameters: {
-            query: {
-                after_generation: number;
-                after_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description At most four sequential documents and four MiB decoded. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_environment_key_enrollments: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Enrollment challenge. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_key_enrollments_pending: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pending public enrollment requests. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    put_v1_environment_key_enrollment_proof: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Enrollment pending trusted approval. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Error"];
-        };
-    };
-    post_v1_environment_key_enrollment_approve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description All-scope authority transition staged. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_environment_authority_transitions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Transition staged. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    get_v1_environment_authority_transition: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Transition inventory and state. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    post_v1_environment_authority_transition_abort: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Transition permanently aborted. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: components["responses"]["Error"];
-        };
-    };
-    put_v1_environment_transition_global_scope: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Transition activated atomically. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Scope staged; more scopes required. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    put_v1_environment_transition_machine_scope: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                transition_id: string;
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Transition activated atomically. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Scope staged; more scopes required. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
         };
     };
     post_v1_environments_environment_id_routes: {
@@ -16971,6 +16322,8 @@ export interface operations {
                 state?: "disabled" | "revoked" | "consent_required" | "pending" | "offline" | "conflict" | "error" | "syncing" | "healthy" | "watching" | "restoring" | "warning" | "sync_uncertain";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
+                /** @description Keyset position from pagination.next_cursor: the page after it in alias order. Not with offset. */
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -17587,27 +16940,6 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
-    get_v1_usage_summary: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Credit, storage, and project summary. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            401: components["responses"]["Error"];
-        };
-    };
     post_v1_machines_setup: {
         parameters: {
             query?: {
@@ -17633,8 +16965,6 @@ export interface operations {
                     };
                     /** @description Opt this machine into sleep prevention. Omitted or false allows sleep for a new machine and preserves an existing machine policy. */
                     keep_awake?: boolean;
-                    /** @description Optional descriptive text; trimmed and contains no control characters. Not a selector. */
-                    description?: string;
                 } & unknown;
             };
         };
@@ -17732,12 +17062,19 @@ export interface operations {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
                 limit?: number;
+                /** @description Not with cursor. */
                 offset?: number;
-                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. Matches alias, machine id and local address; a hostname matches by its first label (the alias). */
                 q?: string;
+                /** @description revoked lists revoked and disconnected machines (what the summary counts as revoked); without state the list is the machines in use. */
                 state?: "online" | "offline" | "disconnected" | "revoked" | "pending";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
+                /** @description Keyset position from next_cursor: the page after it in alias order. Not with offset. */
+                cursor?: string;
+                platform?: "linux" | "macos" | "windows";
+                /** @description A workspace policy tag (tag:prod or prod): machines the selected workspace's policy tags with it. */
+                tag?: string;
             };
             header?: never;
             path?: never;
@@ -18143,8 +17480,6 @@ export interface operations {
             content: {
                 "application/json": {
                     alias: string;
-                    /** @description Optional descriptive text; trimmed and contains no control characters. Not a selector. */
-                    description?: string;
                 };
             };
         };
@@ -28951,6 +28286,250 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    get_v1_account_deletion_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deletion preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionPreviewResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            /** @description A CLI session or API token was used; account deletion is only available in the console. details.console_url names the console page. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_v1_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Account deleted; session cookies cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description confirm_email does not match the account email (confirmation_mismatch), or the body is malformed (validation_failed). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not signed in (unauthenticated), or the last sign-in is more than five minutes old (reauthentication_required). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A CLI session or API token was used (account_deletion_console_only, details.console_url), or the CSRF check failed. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The account owns a team with other members (account_owns_team). details.teams lists {slug, name, members}; transfer or delete those teams first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_me_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountPreferencesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    patch_v1_me_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountPreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description The account's preferences. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountPreferencesResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    report_team_inbox_transfer_progress: {
+        parameters: {
+            query?: {
+                /** @description Selected Personal or canonical team workspace. Validated against the current authenticated account; selecting a team does not grant resource access. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    transfer_mode: "automatic" | "unlimited";
+                    /** @enum {string} */
+                    transfer_state: "sending" | "paused" | "done" | "failed";
+                    /** @enum {string} */
+                    pause_reason?: "no_eligible_path" | "destination_offline" | "relay_quota_exhausted";
+                    committed_bytes: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The request with its recorded progress (transfer_mode, transfer_state, pause_reason, total_bytes, committed_bytes). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    get_v1_domains: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+                limit?: number;
+                cursor?: string;
+                /** @description Hostname substring. */
+                q?: string;
+                /** @description Without kind both are listed. */
+                kind?: "tunnel" | "preview";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workspace domain page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDomainPageResponse"];
+                };
+            };
+            /** @description Invalid query. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_v1_inbox: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+                machine_cursor?: string;
+                /** @description Only this machine's Inbox. */
+                machine_id?: string;
+                /** @description File name substring. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A batch of machines' Inboxes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInboxResponse"];
+                };
+            };
+            /** @description Invalid query. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

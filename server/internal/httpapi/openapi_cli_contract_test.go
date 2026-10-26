@@ -138,8 +138,6 @@ func TestOpenAPIFreezesCLIContractSchemas(t *testing.T) {
 	assertRequiredBearerScope(t, get, "account:read", "GET /v1/auth/cli-client-sessions")
 	configSync := objectValue(t, doc.Paths["/v1/config-sync/status"]["get"], "GET /v1/config-sync/status")
 	assertRequiredBearerScope(t, configSync, "account:read", "GET /v1/config-sync/status")
-	usageSummary := objectValue(t, doc.Paths["/v1/usage-summary"]["get"], "GET /v1/usage-summary")
-	assertRequiredBearerScope(t, usageSummary, "account:read", "GET /v1/usage-summary")
 	operation := doc.Paths["/v1/operations/{operation_id}"]
 	assertRequiredBearerScope(t, objectValue(t, operation["get"], "GET operation"), "operations:read", "GET operation")
 	assertRequiredBearerScope(t, objectValue(t, operation["delete"], "DELETE operation"), "operations:write", "DELETE operation")
@@ -235,50 +233,6 @@ func TestOpenAPIOriginTLSIsReferenceOnlyAndModeBound(t *testing.T) {
 	}
 	if len(arrayValue(t, tlsSchema["allOf"], "TunnelRouteTLS.allOf")) != 2 {
 		t.Fatalf("origin TLS mode/reference conditions missing: %#v", tlsSchema)
-	}
-}
-
-func TestOpenAPIEnvironmentScopeInventoryIsStrictMetadataOnly(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/openapi.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Components struct {
-			Schemas map[string]map[string]any `json:"schemas"`
-		}
-		Paths map[string]map[string]any `json:"paths"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	item := doc.Components.Schemas["EnvironmentScopeInventoryItem"]
-	if item["additionalProperties"] != false {
-		t.Fatalf("inventory item must reject additional properties: %#v", item)
-	}
-	properties := objectValue(t, item["properties"], "EnvironmentScopeInventoryItem.properties")
-	want := map[string]bool{"scope": true, "machine_id": true, "scope_state": true, "version": true, "key_epoch": true, "manifest_id": true, "names": true}
-	got := make(map[string]bool, len(properties))
-	for name := range properties {
-		got[name] = true
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("inventory item fields = %#v, want %#v", got, want)
-	}
-	for _, forbidden := range []string{"envelope", "ciphertext", "content_hash", "wrapped_key", "value", "observation"} {
-		if _, found := properties[forbidden]; found {
-			t.Fatalf("inventory item exposes forbidden field %q", forbidden)
-		}
-	}
-	operation := objectValue(t, doc.Paths["/v1/environment-scopes"]["get"], "GET /v1/environment-scopes")
-	assertRequiredBearerScope(t, operation, "machines:read", "GET /v1/environment-scopes")
-	responses := objectValue(t, operation["responses"], "GET /v1/environment-scopes responses")
-	response := objectValue(t, responses["200"], "GET /v1/environment-scopes 200")
-	headers := objectValue(t, response["headers"], "GET /v1/environment-scopes 200 headers")
-	cacheControl := objectValue(t, headers["Cache-Control"], "Cache-Control")
-	cacheSchema := objectValue(t, cacheControl["schema"], "Cache-Control.schema")
-	if cacheSchema["const"] != "no-store" {
-		t.Fatalf("Cache-Control schema = %#v", cacheSchema)
 	}
 }
 
