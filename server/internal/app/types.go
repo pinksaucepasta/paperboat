@@ -4,6 +4,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/jobmonitor"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -12,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +41,8 @@ type Options struct {
 }
 
 type App struct {
+	draining             *atomic.Bool
+	machineEvents        *machineevents.Hub
 	selfhost             *selfhost.Service
 	supportReports       *supportreport.Service
 	healthMonitor        *jobmonitor.Monitor

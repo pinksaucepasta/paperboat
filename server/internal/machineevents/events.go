@@ -79,10 +79,14 @@ type Hub struct {
 	direct *pgxpool.Pool
 	mu     sync.Mutex
 	subs   map[string]map[chan struct{}]struct{}
+	// draining closes when the server shuts down: every held wait answers "no change" at once, so the
+	// host waits again on a server that stays up instead of having its request reset (F21-09).
+	draining  chan struct{}
+	drainOnce sync.Once
 }
 
 func NewHub(pool, direct *pgxpool.Pool) *Hub {
-	return &Hub{pool: pool, direct: direct, subs: map[string]map[chan struct{}]struct{}{}}
+	return &Hub{pool: pool, direct: direct, subs: map[string]map[chan struct{}]struct{}{}, draining: make(chan struct{})}
 }
 
 func (h *Hub) subscribe(machineID string) (chan struct{}, func()) {
@@ -164,6 +168,9 @@ func (h *Hub) listen(ctx context.Context) error {
 	}
 }
 
+// Drain answers every held and later wait with "no change" right away.
+func (h *Hub) Drain() { h.drainOnce.Do(func() { close(h.draining) }) }
+
 // Wait returns the topics the host waits on (the keys of known) whose generation is higher than the one it
 // knows, as soon as there is one. Topics the host did not list are not reported: they would wake it for
 // changes it does not consume. It returns an empty map when maxWait passes with
@@ -201,6 +208,8 @@ func (h *Hub) Wait(ctx context.Context, machineID string, known map[string]int64
 		case <-accountWake:
 		case <-recheck.C:
 		case <-deadline.C:
+			return map[string]int64{}, nil
+		case <-h.draining:
 			return map[string]int64{}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()

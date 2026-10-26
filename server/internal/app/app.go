@@ -82,6 +82,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -277,7 +278,8 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure inbox dispatcher: %w", err)
 	}
-	checker := readinessChecker{cfg: opts.Config, db: store}
+	draining := new(atomic.Bool)
+	checker := readinessChecker{cfg: opts.Config, db: store, draining: draining}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
 	deviceAuthService.SetEnroller(usermachines.DeviceEnroller{Service: userMachineService})
@@ -1074,6 +1076,8 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_platform_certificates", certificateRuntime.PlatformWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 3), progress))
 	}
 	application := &App{
+		draining:       draining,
+		machineEvents:  machineEventHub,
 		supportReports: supportService,
 		selfhost:       selfhostService,
 		healthMonitor:  healthMonitor,

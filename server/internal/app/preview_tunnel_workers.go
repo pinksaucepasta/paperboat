@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"github.com/google/uuid"
-	"math/rand/v2"
 
 	"fmt"
 	"strings"
@@ -173,7 +172,7 @@ func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Contex
 			wait := interval
 			if err != nil {
 				failures++
-				wait = periodicFailureBackoff(interval, failures)
+				wait = workers.FailureBackoff(interval, failures)
 			} else {
 				failures = 0
 			}
@@ -186,18 +185,4 @@ func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Contex
 			}
 		}
 	}
-}
-
-// periodicFailureMaxBackoff caps the retry delay of a failing periodic worker.
-const periodicFailureMaxBackoff = time.Minute
-
-// periodicFailureBackoff doubles from min(interval, 1 s) per consecutive failure up to a minute, with up to
-// half of it as random jitter so instances do not retry in step.
-func periodicFailureBackoff(interval time.Duration, failures int) time.Duration {
-	backoff := min(interval, time.Second) << min(failures-1, 16)
-	if backoff <= 0 || backoff > periodicFailureMaxBackoff {
-		backoff = periodicFailureMaxBackoff
-	}
-	half := backoff / 2
-	return half + time.Duration(rand.Int64N(int64(half)+1))
 }

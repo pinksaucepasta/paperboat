@@ -3,7 +3,9 @@ package workers
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"sync"
+	"time"
 )
 
 type Worker func(context.Context) error
@@ -79,50 +81,71 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	}
 }
 
-// runTerm starts every worker and returns the first worker error, nil when all return cleanly, or the
-// context error. joined closes once every worker has returned.
+// runTerm starts every worker and returns nil when all return cleanly, or the context error. A worker that
+// fails is restarted after a jittered backoff instead of stopping its siblings and the server (F21-16): its
+// failure is already recorded by the worker's observer. joined closes once every worker has returned.
 func (s *Supervisor) runTerm(ctx context.Context) (<-chan struct{}, error) {
 	joined := make(chan struct{})
-	if len(s.workers) == 0 {
-		<-ctx.Done()
-		close(joined)
-		return joined, ctx.Err()
-	}
-	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	errs := make(chan error, len(s.workers))
 	for _, worker := range s.workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := worker(ctx); err != nil {
-				errs <- err
-			}
+			restartOnFailure(ctx, worker)
 		}()
 	}
 	go func() {
 		wg.Wait()
 		close(joined)
-		cancel()
 	}()
-	select {
-	case err := <-errs:
-		cancel()
-		return joined, err
-	case <-joined:
-		// A worker may return an error immediately before the join goroutine
-		// closes joined. Prefer that queued cause when both cases are ready so a
-		// fast worker failure cannot be reported as a clean shutdown.
+	if len(s.workers) == 0 {
+		<-ctx.Done()
+	} else {
 		select {
-		case err := <-errs:
-			return joined, err
-		default:
-			return joined, nil
+		case <-joined:
+		case <-ctx.Done():
 		}
-	case <-ctx.Done():
-		cancel()
-		return joined, ctx.Err()
 	}
+	return joined, ctx.Err()
+}
+
+// failureReset is how long a restarted worker must run before its failure count starts again.
+const failureReset = time.Minute
+
+func restartOnFailure(ctx context.Context, worker Worker) {
+	failures := 0
+	for {
+		started := time.Now()
+		err := worker(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		if time.Since(started) >= failureReset {
+			failures = 0
+		}
+		failures++
+		timer := time.NewTimer(FailureBackoff(time.Second, failures))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+// FailureMaxBackoff caps the retry delay of a failing worker.
+const FailureMaxBackoff = time.Minute
+
+// FailureBackoff doubles from min(interval, 1 s) per consecutive failure up to a minute, with up to half of
+// it as random jitter so instances do not retry in step.
+func FailureBackoff(interval time.Duration, failures int) time.Duration {
+	backoff := min(interval, time.Second) << min(failures-1, 16)
+	if backoff <= 0 || backoff > FailureMaxBackoff {
+		backoff = FailureMaxBackoff
+	}
+	half := backoff / 2
+	return half + time.Duration(rand.Int64N(int64(half)+1))
 }
 
 // Wait blocks until every worker started by Run has returned. Run deliberately

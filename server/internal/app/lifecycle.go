@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -189,6 +190,8 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}
 
+	a.beginShutdown()
+
 	if runErr != nil && supportreport.ProjectFault(ctx, "paperboat-server", "service_lifecycle", "service_error", "service_failed", runErr).Cause != "context_canceled" && failureCode != "worker_failed" && a.supportReports != nil {
 		captureLifecycleFailure(a.supportReports, "service_error", failureCode, runErr)
 	}
@@ -247,6 +250,17 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("close database: %w", databaseCloseErr)
 	}
 	return runErr
+}
+
+// beginShutdown runs first on shutdown (F21-09): readiness reports not-ready and every held event wait
+// gets its "no change" answer, so hosts wait again elsewhere before HTTP and workers stop.
+func (a *App) beginShutdown() {
+	if a.draining != nil {
+		a.draining.Store(true)
+	}
+	if a.machineEvents != nil {
+		a.machineEvents.Drain()
+	}
 }
 
 func selfhostReportingContext(ctx context.Context, reporter *supportreport.Service) context.Context {
@@ -320,9 +334,14 @@ func (a *App) updateServiceTelemetry(status telemetry.HealthStatus, code, summar
 type readinessChecker struct {
 	cfg config.Config
 	db  *db.DB
+	// draining is set when shutdown starts, so the proxy stops sending new requests here (F21-09).
+	draining *atomic.Bool
 }
 
 func (r readinessChecker) Ready(ctx context.Context) error {
+	if r.draining.Load() {
+		return errors.New("server is shutting down")
+	}
 	if err := r.db.Ping(ctx); err != nil {
 		return fmt.Errorf("database is not ready: %w", err)
 	}

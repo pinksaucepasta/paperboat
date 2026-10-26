@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -27,7 +28,7 @@ func TestReadinessDoesNotRequireRetiredOrUnconfiguredBilling(t *testing.T) {
 	cfg.ReleaseDirectory = ""
 	cfg.Secrets.WorkOSClientID = "client_test"
 	cfg.Secrets.WorkOSAPIKey = "sk_test_configured"
-	r := readinessChecker{cfg: cfg, db: store}
+	r := readinessChecker{cfg: cfg, db: store, draining: new(atomic.Bool)}
 	if err := r.Ready(context.Background()); err != nil {
 		t.Fatalf("optional payment setup blocked personal runtime: %v", err)
 	}

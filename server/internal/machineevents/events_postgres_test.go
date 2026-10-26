@@ -171,6 +171,16 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 			t.Fatalf("unknown topic %q accepted", bad)
 		}
 	}
+	// F21-09: on shutdown a held wait answers "no change" at once, and so does every later wait.
+	held := wait(machine, map[string]int64{TopicPreviews: 4, TopicMachineAccess: 1}, 20*time.Second)
+	time.Sleep(200 * time.Millisecond)
+	hub.Drain()
+	if r := <-held; r.err != nil || len(r.changed) != 0 || r.after > 2*time.Second {
+		t.Fatalf("held wait on drain = %+v", r)
+	}
+	if r := <-wait(machine, map[string]int64{TopicPreviews: 4, TopicMachineAccess: 1}, 20*time.Second); r.err != nil || len(r.changed) != 0 || r.after > time.Second {
+		t.Fatalf("wait after drain = %+v", r)
+	}
 }
 
 func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.T) {

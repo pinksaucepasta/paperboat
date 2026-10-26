@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"strings"
 	"testing"
 	"time"
@@ -122,8 +123,8 @@ func TestPeriodicPreviewTunnelWorkerKeepsRunningThroughFailures(t *testing.T) {
 		t.Fatalf("worker ended with %v after %d calls; want cancellation after 3 failures and a success", err, calls)
 	}
 	for failures := 1; failures <= 20; failures++ {
-		base := min(time.Second<<min(failures-1, 16), periodicFailureMaxBackoff)
-		if got := periodicFailureBackoff(time.Hour, failures); got < base/2 || got > base {
+		base := min(time.Second<<min(failures-1, 16), workers.FailureMaxBackoff)
+		if got := workers.FailureBackoff(time.Hour, failures); got < base/2 || got > base {
 			t.Fatalf("backoff after %d failures = %s, want within [%s, %s]", failures, got, base/2, base)
 		}
 	}

@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -92,66 +94,89 @@ func TestCertificateRuntimePreservesSecretResolutionCancellation(t *testing.T) {
 	}
 }
 
-func TestRunShutsDownHTTPServerBeforeReturningWorkerError(t *testing.T) {
+// F21-16: a worker that keeps failing is restarted; the server keeps running until it is stopped.
+func TestRunKeepsRunningThroughAFailingWorker(t *testing.T) {
+	failures := make(chan struct{}, 8)
+	application := &App{
+		cfg:               config.Config{HTTP: config.HTTPConfig{ShutdownTimeout: time.Second}},
+		logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		server:            &http.Server{Addr: "127.0.0.1:0"},
+		worker:            workers.NewSupervisor(func(context.Context) error { failures <- struct{}{}; return syscall.EIO }),
+		telemetryHTTP:     &telemetry.HTTPObserver{},
+		telemetryProducer: &telemetry.Producer{},
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- application.Run(runCtx) }()
+	for range 3 {
+		select {
+		case <-failures:
+		case err := <-runDone:
+			t.Fatalf("server stopped on a worker failure: %v", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("failing worker was not restarted")
+		}
+	}
+	cancelRun()
+	if err := <-runDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run = %v, want a clean stop", err)
+	}
+}
+
+// F21-09: shutdown marks the server draining before HTTP stops, so a held wait is answered (the host
+// waits again elsewhere) instead of being reset, and readiness reports not-ready from then on.
+func TestShutdownAnswersHeldWaitBeforeHTTPStops(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	workerErr := errors.Join(context.Canceled, syscall.EIO)
-	cfg := config.Default()
-	configureAppTestDatabase(t, &cfg)
-	cfg.HTTP.Address = address
-	cfg.HTTP.ShutdownTimeout = time.Second
-	app, err := New(Options{
-		Config: cfg,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	app.worker = workers.NewSupervisor(func(context.Context) error {
-		return workerErr
-	})
-
-	err = app.Run(context.Background())
-	if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EIO) {
-		t.Fatalf("error = %v, want canceled worker exit plus EIO", err)
-	}
-	serviceHealth := app.telemetryHealth.Snapshot().Dimensions.Service
-	if serviceHealth.Status != telemetry.StatusDown || serviceHealth.Code != "worker_failed" || serviceHealth.CorrelationID != "cor_server_lifecycle" {
-		t.Fatalf("service health=%+v", serviceHealth)
-	}
-	if events := app.telemetryEvents.Snapshot(); len(events) < 2 || events[len(events)-1].Code != "worker_failed" {
-		t.Fatalf("lifecycle events=%+v", events)
-	}
-
-	client := http.Client{Timeout: 50 * time.Millisecond}
-	resp, err := client.Get("http://" + address + "/healthz")
-	if err == nil {
-		resp.Body.Close()
-		t.Fatalf("server still accepted requests after Run returned")
-	}
-}
-
-func TestRunPreservesOperationalWorkerFailureJoinedWithCancellation(t *testing.T) {
-	workerErr := errors.Join(context.Canceled, syscall.EIO)
+	_ = listener.Close()
+	draining := new(atomic.Bool)
+	held := make(chan struct{})
 	application := &App{
-		cfg:               config.Config{HTTP: config.HTTPConfig{ShutdownTimeout: time.Second}},
-		logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
-		server:            &http.Server{Addr: "127.0.0.1:0"},
-		worker:            workers.NewSupervisor(func(context.Context) error { return workerErr }),
+		cfg:    config.Config{HTTP: config.HTTPConfig{ShutdownTimeout: 2 * time.Second}},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		server: &http.Server{Addr: address, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(held)
+			for !draining.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})},
+		draining:          draining,
+		worker:            workers.NewSupervisor(),
 		telemetryHTTP:     &telemetry.HTTPObserver{},
 		telemetryProducer: &telemetry.Producer{},
 	}
-
-	err := application.Run(context.Background())
-	if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EIO) {
-		t.Fatalf("Run error = %v, want canceled worker exit plus EIO", err)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- application.Run(runCtx) }()
+	answer := make(chan error, 1)
+	go func() {
+		for {
+			response, err := http.Get("http://" + address + "/v1/machine-events/wait")
+			if err == nil {
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusNoContent {
+					err = fmt.Errorf("status %d", response.StatusCode)
+				}
+				answer <- err
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	<-held
+	cancelRun()
+	if err := <-answer; err != nil {
+		t.Fatalf("held wait was not answered: %v", err)
+	}
+	if err := (readinessChecker{draining: draining}).Ready(context.Background()); err == nil {
+		t.Fatal("readiness reported ready while shutting down")
+	}
+	if err := <-runDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run = %v", err)
 	}
 }
 

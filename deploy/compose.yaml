@@ -37,6 +37,8 @@ services:
     command: [paperboat-server, serve]
     depends_on:
       migrate: {condition: service_completed_successfully}
+    # Shutdown answers held waits, then stops workers and HTTP within shutdown_timeout each (F21-09).
+    stop_grace_period: 30s
     healthcheck:
       test: [CMD, curl, -fsS, "http://127.0.0.1:8080/healthz"]
       interval: 10s
