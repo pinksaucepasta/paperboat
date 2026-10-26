@@ -4973,3 +4973,7 @@ Test tunnels/origins/certificates/probes removed, failed preview is stopped, pai
 
 2026-10-27 | SDK lane settled-edge rerun | Merger-requested ONCE tunnel-manage/preview-manage on unchanged hp dev346/server .114/edges .26.10: both still FAIL creation, support_777f1d8c/support_14468e36.
 Exact outputs sent; result tools/device-smoke/results/tunnel-preview-manage-stable-3468410e-20261027.json. No further retries/product edits; pair retained, fixture cleanup ran.
+
+2026-10-27 | Terminal core | F3-13 browser flood fixed (1ca96afb, fbcf681b; web lane W16 running). W9 (50 MB in a browser) [!]: the page stops after ~70-110 KB
+with resyncs 0. Host serves the screen requests about once a second (ad441296 diag), worker credits balanced, yet no event leaves the WASM after ~3 s.
+1207b242 fixed one silent-drop case, not this. Next: a js/wasm harness for readBroadcast/finishResync. F3-16 N12 waits for the client input queue (Terminal viewers, F3-15).
