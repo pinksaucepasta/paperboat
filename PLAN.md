@@ -1263,6 +1263,173 @@ One section, two owners: **data plane** (Lane R: `pb` CLI, daemon/hostd/carriers
 data path) and **API/DB** (Lane Q: server handlers, queries, pagination, retention). Rows: CHECKLIST
 section P. A client loop that costs the server is fixed in the client by Lane R; a slow endpoint by Lane Q.
 
+#### Go SDK v1 (design; coordinator 2026-10-26; moves await Lane A/R sign-off)
+
+**Contract.** `sdk/go/` is its own module, added to `go.work`; reusable code lives in the
+existing top-level `shared/` module. V1: API-token login → paginated machine inventory → native
+exec with streamed stdin/stdout/stderr, deadline/cancel, typed errors and `Close`. No subprocess
+`pb`, installed daemon, machine enrollment, OS network changes or edge-decrypted fallback.
+Relay fallback carries the same encrypted native connection. Server/service addresses come
+from explicit server configuration and discovery. SDK imports no `cli/internal` package.
+This section is design only; implementation and acceptance rows go in CHECKLIST before code.
+
+**Extraction boundary (exact destination packages).** Moving whole `api`, `config`, `resolver`
+or `tunnel` packages is rejected: their transitive imports include host runtime, local API,
+CLI reporting and user-profile discovery. Split the following owners in place first, preserving
+CLI behavior and tests; then move each resulting package and update all consumers together.
+Paths below are relative to `cli/internal/` unless prefixed `shared/`:
+
+- Whole leaf packages → same names in `shared/`: `wirejson`, `httptransport`, `serverclock`,
+  `supportref`, `backoff`, `diagnosticlog`, `machinename`, `remotepath`.
+- Whole peer packages → `shared/peertransport/{endpointidentity,fixedpacket,mesh,peerquic,
+  streamauth,native}`. Move production files and self-contained tests; cross-package acceptance
+  tests that import host runtime stay in CLI as external consumer tests. Lane R owns these moves.
+- `config` → `shared/client/state`: credential/account/profile value types, issuer normalization,
+  endpoint certificate/key custody, peer-network key/high-water transactions and refresh-attempt
+  state from `auth*.go`, `peer_identity.go`, `peer_network.go`, `refresh_attempt.go`,
+  `network_secret.go`. Move storage-independent transactions; inject storage and locking.
+  OS keyrings, profile paths, file ACL/atomic-file adapters and default profile selection stay CLI.
+- `api` → `shared/client/api`: HTTP request/response owner and safe structured API errors from
+  `client.go`, `http.go`, `errors.go`, `api_errors.go`, `issuance_retry.go`, `response_lost.go`;
+  session exchange/refresh/revoke from `device.go`; discovery from `client_configuration.go`;
+  inventory/pagination from `api_machines.go`, `inventory_pages.go`; identity/network calls from
+  `api_e2ee.go`, `peer_network.go`; exec descriptor/types from `api_terminal.go`; workspace
+  selection from `workspaces.go`. Split mixed files by declaration, retaining other endpoints
+  in CLI. Inject credentials, product/version headers, clock and observation callbacks: no
+  `buildinfo`, global `errorreport`, host config or self-update dependency in shared code.
+- `auth` and peer helpers → `shared/client/session` (login completion and serialized refresh),
+  `shared/peertransport/{identitybootstrap,trustedkeys,clientauthority}` (existing package code,
+  using the extracted API/state contracts). Browser/device approval and logout UX stay CLI.
+- `hostruntime/auth/jwks.go` → `shared/peertransport/jwks`: network JWKS fetch/cache only,
+  splitting file-cache helpers and reporting hooks first. Host credential verification/replay
+  policy remains host-owned. `peertransport/tailnet` → `shared/peertransport/tailnet`, replacing
+  its `api`/`config` imports with the extracted contracts. Existing `relay/derpquic` dependency
+  remains explicit; it imports no CLI code. No copied relay or cryptographic implementation.
+- `resolver` → `shared/client/discovery`: inventory selection and connection descriptor types;
+  split terminal queues and CLI telemetry away. `tunnel` → `shared/client/runtime` (native
+  authority/runtime ownership from `peer_terminal.go`, `native_runtime.go`) and
+  `shared/client/exec` (exec protocol from `helper_exec.go`, native stream adaptation from
+  `tailnet_terminal.go`, shared framing from `helper_websocket.go`, and execution recovery from
+  `cmd/pb/exec_command.go`, `exec_run.go`). Move required framing declarations, not WebSocket
+  dialing, terminal/SSH APIs, local-daemon transport or host config. Runtime receives state,
+  credentials, JWKS and connection authority explicitly. Exec receives a narrow dial/descriptor
+  interface; it does not import runtime. Existing `shared/reattach` remains the retry owner.
+
+Import graph (arrows mean imports; external libraries omitted):
+
+```text
+sdk/go → shared/client/{api,session,discovery,runtime,exec,state}
+cli/{cmd,internal adapters} → those same shared packages
+client/session → client/{api,state}, peertransport/identitybootstrap
+client/discovery → client/api
+client/runtime → client/{api,state,discovery}, peertransport/{clientauthority,native,tailnet,jwks}
+client/exec → client/discovery, peertransport/streamauth, shared/reattach
+peertransport/{identitybootstrap,clientauthority,trustedkeys,tailnet} → client/{api,state}, peer leaves
+peertransport/native → peertransport/{mesh,peerquic,streamauth,tailnet}
+client/api → client/state, shared/{wirejson,httptransport,serverclock,supportref,machinename}
+peer leaves / client/state / JWKS → shared leaf helpers and existing shared wire packages
+shared/* → NEVER cli/* (including tests); CLI acceptance tests remain downstream
+```
+
+**Move sequence and coordination.** Coordinator obtains A/R sign-off on each source slice and a
+short edit freeze for that slice, not a blanket CLI freeze. One commit per package boundary:
+(1) A splits leaf dependencies and CLI callbacks in place, then mechanically moves each leaf;
+(2) R moves peer leaves in dependency order: endpointidentity/fixedpacket/mesh/streamauth,
+then peerquic; (3) A splits state, then API (including its mixed endpoint types), then session
+and discovery, moving each only after its dependencies are shared; (4) A extracts JWKS and
+R moves identitybootstrap/trustedkeys/clientauthority, tailnet, native in dependency order;
+(5) A/R split runtime and exec framing, then mechanically move each; (6) A extracts exec
+recovery out of cmd/pb and switches CLI to that single owner; (7) add SDK facade and examples.
+Boundary preparation is a separate no-behavior-change commit; each mechanical commit is only
+`git mv`, package/import rewrites and module metadata, never a fix or protocol change. Move
+existing owning tests with code, preserve downstream integration tests, and verify the full
+import closure on Linux/macOS build variants before each move. No compatibility aliases or
+second implementations. Existing CLI terminal, exec, SSH, files, previews/private access and
+host native-session checks cover shared transport consumers; auth refresh/revoke, discovery,
+peer registration/direct/relay and exec uncertain-start/reattach/cancel checks are mandatory.
+Run affected checks and workspace gate per commit; Lane A alone owns device verification.
+
+**Instance state (tsnet prior art).** Local reference `~/ref/tailscale/tsnet/tsnet.go`,
+`Server.Dir`, `Store`, `Ephemeral`, `Close` and initialization: one embedded engine and state
+owner per instance, no global daemon. [tsnet](https://tailscale.com/docs/features/tsnet) enrolls
+an actual node; [ephemeral nodes](https://tailscale.com/docs/features/ephemeral-nodes) still have
+node identity and lifecycle. Reusing that model for Paperboat would avoid a new source shape
+but create a managed-machine record for each fresh SDK process, plus cleanup and inventory
+churn. [Teleport tbot](https://goteleport.com/docs/reference/architecture/machine-id-architecture/)
+uses a bot identity and renewable short-lived certificates; certificates are not necessarily
+one per exec session. Borrow per-instance ownership and short-lived credentials, recommend
+Paperboat's existing token-backed client session as source, not a new machine or bot principal.
+
+`Config{ServerURL, APIToken, Workspace, StateDir, ClientLabel}`: memory-only by default,
+including refresh credentials and peer keys; no fallback to CLI config, global keyring or
+implicit user directory. Optional explicit StateDir stores only this SDK instance's session,
+keys and replay/rotation state with owner-only permissions, atomic updates and exclusive
+ownership lock (second opener fails). Never persist the supplied API token. Explicit reuse of
+that dir resumes the session; separate dirs/memory clients have separate sessions and keys.
+`Close` is bounded/idempotent, rejects new work, cancels active operations, joins workers and
+closes transports. Memory mode best-effort revokes its session; failure is returned and expiry
+bounds server leftovers. Persistent mode retains its session for explicit reopen; provide
+`Logout(ctx)` to revoke it and erase its state. No telemetry or command contents sent implicitly.
+
+**Public API (proposed signatures).** `New(ctx, Config) (*Client, error)`,
+`Machines(ctx, ListOptions) (MachinePage, error)`, `Exec(ctx, machineID, ExecOptions)
+(ExecResult, error)`, `Close() error`, `Logout(ctx) error`. Inventory returns IDs and pagination;
+exec takes an exact ID, avoiding ambiguous names. ExecOptions contains Argv, Dir, Env, Stdin
+(io.Reader), Stdout/Stderr (io.Writer) and Timeout. Argv is exact, no implicit shell; PTY is
+outside v1. ExecResult contains OperationID, ExitCode, Signal and ExitedAt; nonzero remote
+exit is a result, not a transport error. Errors support errors.Is/As: `*APIError` exposes
+safe Code/Status/RetryAfter, `*AuthError`, `*AccessDeniedError`, `*MachineUnavailableError`,
+`*StartUncertainError{OperationID}`, `*ResultUnavailableError{OperationID}` and
+`*TransportError`; context cancellation/deadline causes remain unwrap-able. Do not reveal
+whether an unauthorized machine exists. Client generates one operation ID before issuance;
+all retries attach that ID with replay cursors. Lost start response never authorizes a new
+start. Output has bounded queues/backpressure; writer failures cancel the operation and keep
+the primary error. Deadline/context cancellation sends remote cancel with a bounded cleanup
+budget; missing acknowledgement reports an uncertain remote outcome, never claims success.
+
+**Server contract audit / Lane B prerequisite.** `httpapi/router.go` already allows session
+exchange (`POST /v1/auth/api-token-sessions`), account/workspace and machine inventory reads,
+client discovery, session refresh/revoke, peer keys/certificates, `POST /v1/e2ee/bootstrap`,
+and `POST /v1/peer-network/{register,config}` for client-session bearers. The peer handlers
+bind role=cli and endpoint ID to the authenticated session, not a caller-selected machine.
+`scopedTokenRoute` explicitly admits bootstrap/network/exec-descriptor plumbing; machine
+authorization also enforces the token scope. Certificate renewal's exact write route must
+remain within that allowlist: use existing bootstrap enrollment, not a blanket endpoint PUT
+exception. SDK identifies itself with ClientLabel and a versioned SDK User-Agent; existing
+supported device_type (server/container/desktop) describes its host, not a new SDK identity.
+
+Exec is NOT currently standalone: `usermachines/service_02.go:operationDescriptor` requires
+nonempty sourceMachineID and sourceMachineAllowed; the handler alone accepting a session is
+insufficient. Lane B must first implement and deploy a session-bound source: descriptor and
+signed operation claim name source kind=client_session and the authenticated token-backed
+session ID, with no fake machine ID. Derive source server-side; validate account/workspace,
+active session/token/expiry, a role/grant explicitly permitting exec from a session source,
+creator's current target access AND token scope, target and operation. Machine-sourced requests retain their actual machine-source checks. Destination
+admission binds the signed session source to the authenticated peer endpoint, target runtime
+generation, workspace and operation; no client-supplied source substitution. Update producer,
+shared exact signed-claim schema, persistence/audit and destination consumer together in
+server-first order; check every validator expecting source_machine_id (including host native
+admission and shared stream claims). Reuse role=cli peer identity; no new enrollment endpoint.
+
+**Threat model and acceptance.** A stolen API token can mint sessions within its creator's
+current permissions until expiry/revocation; short-lived transport credentials do not remove
+that risk. Encourage narrow exec-only token scopes/expiry, never log tokens, refresh material,
+private keys, Env or output. Prove token revocation ends refresh and new descriptors AND reaches
+live destination operations through the existing revocation/config feed, terminating admitted
+streams/processes within a configured bounded interval; fail closed at authorization lease
+expiry if the feed is unavailable. Do not infer live revocation from issuance checks alone.
+Lane B owns any missing propagation; Lane R owns destination enforcement. Audit names creator,
+API token ID, client-session ID, workspace, target, operation ID and outcome, including denials
+and uncertain outcomes, without command/file contents. Require configured per-token/account
+session-creation, descriptor and concurrent-exec limits, bounded refresh/backoff, pagination,
+output queues and connection counts; existing invalid-token/IP throttling alone is insufficient.
+Lane B owns missing limits and 429 Retry-After; SDK honors it without retrying command starts.
+Before v1 is accepted, named workspace tests cover isolation between two clients and pb login,
+refresh/revocation, scope denial, spoofed source/peer mismatch, direct/relay exec, exact argv,
+stream separation/backpressure, deadlines, cancellation acknowledgement loss, lost-start and
+reattach without rerun, replay gaps, shutdown leaks and directory-lock conflicts; Lane A then
+runs the same SDK example against L/M. No SDK capability is marked complete by this design.
+
 #### Data plane (Lane R, measured 2026-10-22/23)
 
 | What | Before | After / now | Reference | Check |
