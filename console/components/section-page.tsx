@@ -19,7 +19,7 @@ export function SectionPage({ id, children }: { id: keyof typeof sections; child
           <Suspense fallback={<Skeleton className="h-5 w-28" />}>
             {/* URL state reads search params, so it lives inside this boundary, not at the root. */}
             <NuqsAdapter>
-              <MachineScope />
+              <MachineScope allowAll={!("oneMachine" in section && section.oneMachine)} />
             </NuqsAdapter>
           </Suspense>
         )}
@@ -29,7 +29,7 @@ export function SectionPage({ id, children }: { id: keyof typeof sections; child
   )
 }
 
-function MachineScope() {
+function MachineScope({ allowAll }: { allowAll: boolean }) {
   const [machine, setMachine] = useQueryState("machine", parseAsString)
-  return <MachinePicker allowAll value={machine} onChange={setMachine} />
+  return <MachinePicker allowAll={allowAll} value={machine} onChange={setMachine} />
 }

@@ -23,13 +23,15 @@ export type Section = {
   icon: Icon
   /** Sections whose content belongs to individual machines get a machine picker. */
   machineScoped: boolean
+  /** Shown one machine at a time: the picker offers no "All machines". */
+  oneMachine?: boolean
 }
 
 export const machinesSection: Section = { href: "/", title: "Machines", icon: LaptopIcon, machineScoped: false }
 
 export const sections = {
   terminals: { href: "/terminals", title: "Terminals", icon: TerminalWindowIcon, machineScoped: true },
-  files: { href: "/files", title: "Files", icon: FolderIcon, machineScoped: true },
+  files: { href: "/files", title: "Files", icon: FolderIcon, machineScoped: true, oneMachine: true },
   previews: { href: "/previews", title: "Previews", icon: EyeIcon, machineScoped: true },
   tunnels: { href: "/tunnels", title: "Tunnels", icon: PlugsIcon, machineScoped: true },
   domains: { href: "/domains", title: "Domains", icon: GlobeIcon, machineScoped: false },

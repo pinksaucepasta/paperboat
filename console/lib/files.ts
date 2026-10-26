@@ -1,6 +1,6 @@
 "use client"
 
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey } from "@/lib/api"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 import { uploadFile } from "@/lib/upload"
@@ -54,43 +54,19 @@ const inboxPath = (machineId: string) => `machines/${encodeURIComponent(machineI
 const filePath = (machineId: string, fileId: string) => `${inboxPath(machineId)}/${encodeURIComponent(fileId)}`
 
 export const fileKeys = {
-  /** Every Inbox listing (the workspace list and its batches); refreshed after a send or delete. */
+  /** Every machine's Inbox listing; refreshed after a send or delete. */
   inboxes: ["inbox"] as const,
   requests: (workspace: string) => ["team-inbox", workspace] as const,
 }
 
-/** One batch of `GET /v1/inbox`: up to 50 machines' Inboxes read live by the server, merged. */
-export type InboxBatch = {
-  items: (InboxFile & { machine: { id: string; alias: string } })[]
-  /** Counts for the machines this batch read, never a workspace total. */
-  machines_checked: number
-  files_on_checked_machines: number
-  /** Machines whose listing held only their newest 200 files. */
-  truncated: string[]
-  unavailable: { machine_id: string; alias: string; reason: string }[]
-  next_machine_cursor?: string
-}
-
-/**
- * The workspace's Inboxes, one batch of machines per page ("Load more machines"); `machine`
- * narrows it to one machine, `q` filters file names. The server reads each machine live and
- * caches a batch for 30 s, so nothing is fanned out from the browser.
- */
-export const inboxListQuery = (workspace: string, q: string, machine?: string) =>
-  infiniteQueryOptions({
-    queryKey: [...fileKeys.inboxes, workspace, q, machine ?? ""],
-    queryFn: ({ pageParam }) =>
-      api<InboxBatch>(
-        `inbox?${new URLSearchParams({
-          workspace,
-          ...(q && { q }),
-          ...(machine && { machine_id: machine }),
-          ...(pageParam && { machine_cursor: pageParam }),
-        })}`,
-      ),
-    initialPageParam: "",
-    getNextPageParam: (last) => last.next_machine_cursor,
+/** `GET /v1/machines/{id}/inbox`: one machine's Inbox, read live from the machine, newest first. */
+export const inboxQuery = (machineId: string, workspace: string) =>
+  queryOptions({
+    queryKey: [...fileKeys.inboxes, machineId],
+    queryFn: () => api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`),
+    // The machine answers live, so poll gently and let a 409 machine_offline stand.
     refetchInterval: 30_000,
+    retry: false,
   })
 
 export const requestsQuery = (workspace: string) =>
