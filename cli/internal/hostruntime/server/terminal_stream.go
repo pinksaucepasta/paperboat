@@ -41,6 +41,9 @@ type terminalOutputStream struct {
 	idleWait time.Duration
 	// liveCheckedAt is when the stream last confirmed its session (liveChecked).
 	liveCheckedAt time.Time
+	// received is the end of the last output this stream returned; WaitNext frees output only up to it, so a reply
+	// lost to a poll deadline is delivered again instead of skipped.
+	received uint64
 }
 
 // participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.

@@ -68,8 +68,12 @@ func TestRouterKeepsOldSessionsWithTheirOwnerAndAdmitsNewSessionsGlobally(t *tes
 	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var output []byte
+	var waitFrom uint64 // the end of what this reader holds
 	for !bytes.Contains(output, []byte("old:from-router")) {
-		event, err := remote.WaitNext(waitCtx, oldSession.ID, "att_router")
+		event, err := remote.WaitNext(waitCtx, oldSession.ID, "att_router", waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatalf("read old owner output (attached at %d): %q: %v", attached.Replay.ToSequence, output, err)
 		}
@@ -199,8 +203,12 @@ func TestRouterReopensArchivedSessionOnCurrentOwnerCodeWithoutCatalogMutation(t 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var output []byte
+	var waitFrom uint64 // the end of what this reader holds
 	for !bytes.Contains(output, []byte("after-update:kept")) {
-		event, err := remote.WaitNext(ctx, oldSession.ID, "att_reopened")
+		event, err := remote.WaitNext(ctx, oldSession.ID, "att_reopened", waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatalf("read input response after owner reopen: %q: %v", output, err)
 		}

@@ -101,8 +101,12 @@ func percentile(values []time.Duration, p float64) time.Duration {
 // drain reads an attachment until want bytes arrived, the context ends, or the attachment fails.
 func drain(ctx context.Context, manager *Manager, sessionID, attachmentID string, want int) (int, error) {
 	got := 0
+	var waitFrom uint64 // the end of what this reader holds
 	for got < want {
-		event, err := manager.WaitNext(ctx, sessionID, attachmentID)
+		event, err := manager.WaitNext(ctx, sessionID, attachmentID, waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			return got, err
 		}
@@ -154,8 +158,12 @@ func TestLoadHundredSessionsFiftyViewers(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		var seen strings.Builder
+		var waitFrom uint64 // the end of what this reader holds
 		for !strings.Contains(seen.String(), "got "+marker) {
-			event, err := manager.WaitNext(ctx, echo.ID, "owner")
+			event, err := manager.WaitNext(ctx, echo.ID, "owner", waitFrom)
+			if err == nil {
+				waitFrom = event.EndSequence
+			}
 			if err != nil {
 				cancel()
 				t.Fatalf("echo %d: %v after %v (seen %q)", index, err, time.Since(sent), seen.String())

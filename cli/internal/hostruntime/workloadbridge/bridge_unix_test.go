@@ -87,8 +87,12 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 		t.Fatalf("input=%+v err=%v", decision, err)
 	}
 	var output string
+	var waitFrom uint64 // the end of what this reader holds
 	for !strings.Contains(output, "reply:before") {
-		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID)
+		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID, waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +107,10 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	var pollErr error
 	for drained := 0; drained < 16; drained++ {
 		pollCtx, stopPoll := context.WithTimeout(ctx, 100*time.Millisecond)
-		event, waitErr := remote.WaitNext(pollCtx, created.ID, participant.AttachmentID)
+		event, waitErr := remote.WaitNext(pollCtx, created.ID, participant.AttachmentID, waitFrom)
+		if waitErr == nil {
+			waitFrom = event.EndSequence
+		}
 		stopPoll()
 		if pollErr = waitErr; pollErr != nil {
 			break
@@ -117,7 +124,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	}
 	cancelCtx, stopCanceled := context.WithCancel(ctx)
 	stopCanceled()
-	if _, err := remote.WaitNext(cancelCtx, created.ID, participant.AttachmentID); err != context.Canceled {
+	if _, err := remote.WaitNext(cancelCtx, created.ID, participant.AttachmentID, 0); err != context.Canceled {
 		t.Fatalf("canceled poll became owner failure: %T %v", err, err)
 	}
 	keyAfterPoll := key
@@ -126,7 +133,10 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 		t.Fatalf("input after idle poll=%+v err=%v", decision, err)
 	}
 	for !strings.Contains(output, "reply:after-poll") {
-		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID)
+		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID, waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +222,7 @@ func (s *bridgeFailureSessions) Snapshot(string) (session.Snapshot, error) {
 	return session.Snapshot{}, s.failure
 }
 
-func (s *bridgeFailureSessions) WaitNext(context.Context, string, string) (history.Event, error) {
+func (s *bridgeFailureSessions) WaitNext(context.Context, string, string, uint64) (history.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return history.Event{}, s.failure
@@ -275,7 +285,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 		service.failure = errors.Join(cause, syscall.EIO)
 		service.mu.Unlock()
 		requestCtx, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		if _, err := remote.WaitNext(requestCtx, "missing", "attachment"); !errors.Is(err, session.ErrOwnerUnavailable) || errors.Is(err, context.DeadlineExceeded) {
+		if _, err := remote.WaitNext(requestCtx, "missing", "attachment", 0); !errors.Is(err, session.ErrOwnerUnavailable) || errors.Is(err, context.DeadlineExceeded) {
 			stop()
 			t.Fatalf("mixed failure was hidden or retried: %v", err)
 		}

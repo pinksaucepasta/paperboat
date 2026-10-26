@@ -303,12 +303,14 @@ func (m *Manager) Next(sessionID, attachmentID string) (history.Event, bool, err
 	return session.fanout.Next(attachmentID)
 }
 
-func (m *Manager) WaitNext(ctx context.Context, sessionID, attachmentID string) (history.Event, error) {
+// WaitNext returns the attachment's next output at or after from, the end of what the caller already holds; see
+// Fanout.WaitNextFrom. Nothing is consumed until a later call moves from past it.
+func (m *Manager) WaitNext(ctx context.Context, sessionID, attachmentID string, from uint64) (history.Event, error) {
 	session, err := m.get(sessionID)
 	if err != nil {
 		return history.Event{}, err
 	}
-	return session.fanout.WaitNextOwned(ctx, attachmentID)
+	return session.fanout.WaitNextFrom(ctx, attachmentID, from)
 }
 
 func (m *Manager) Acknowledge(sessionID, attachmentID string, nextSequence uint64) error {

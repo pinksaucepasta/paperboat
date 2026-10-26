@@ -56,8 +56,12 @@ func TestLocalTerminalDirectorySurvivesDetachAndReconnect(t *testing.T) {
 	}
 	var output strings.Builder
 	want, _ := filepath.EvalSymlinks(cwd)
+	var waitFrom uint64 // the end of what this reader holds
 	for !strings.Contains(output.String(), "PB_PWD="+want) {
-		event, err := sessions.WaitNext(ctx, "ses_local_pwd", "first")
+		event, err := sessions.WaitNext(ctx, "ses_local_pwd", "first", waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

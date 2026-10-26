@@ -104,7 +104,7 @@ func TestManagerSharesResizeInOutputOrder(t *testing.T) {
 	}
 	for _, attachmentID := range []string{"att_first", "att_second"} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		event, err := manager.WaitNext(ctx, created.ID, attachmentID)
+		event, err := manager.WaitNext(ctx, created.ID, attachmentID, 0)
 		cancel()
 		if err != nil {
 			t.Fatal(err)
@@ -144,7 +144,7 @@ func TestBrowserScreenAttachmentRestoresCurrentScreenAtLiveBoundary(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	event, err := manager.WaitNext(ctx, created.ID, participant.AttachmentID)
+	event, err := manager.WaitNext(ctx, created.ID, participant.AttachmentID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -906,8 +906,12 @@ func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	var received, next uint64
+	var waitFrom uint64 // the end of what this reader holds
 	for received < total {
-		event, err := manager.WaitNext(ctx, created.ID, owner.AttachmentID)
+		event, err := manager.WaitNext(ctx, created.ID, owner.AttachmentID, waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatalf("owner after %d of %d bytes: %v", received, total, err)
 		}
@@ -918,7 +922,7 @@ func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
 		received += uint64(bytes.Count(event.Data, []byte("x")))
 		time.Sleep(time.Millisecond) // a slow link
 	}
-	if _, err := manager.WaitNext(ctx, created.ID, viewer.AttachmentID); !errors.Is(err, ErrAttachmentLagged) {
+	if _, err := manager.WaitNext(ctx, created.ID, viewer.AttachmentID, 0); !errors.Is(err, ErrAttachmentLagged) {
 		t.Fatalf("stalled viewer: %v, want lagged (never evicted)", err)
 	}
 }

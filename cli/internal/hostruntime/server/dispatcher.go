@@ -486,7 +486,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			s.idleWait = terminalExitObservationInterval
 		}
 		waitCtx, cancel := context.WithTimeout(ctx, s.idleWait)
-		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID)
+		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID, s.received)
 		cancel()
 		if err == nil {
 			if !s.liveChecked(time.Now()) {
@@ -494,6 +494,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
 			s.idleWait = terminalExitObservationInterval
+			s.received = event.EndSequence
 			return protocol.BinaryFrame{Channel: event.Channel, StartSequence: event.StartSequence, Data: event.Data, Release: event.Release}, nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
@@ -545,6 +546,7 @@ func (s *terminalOutputStream) loadScreen() error {
 		return err
 	}
 	s.checkpoint, s.checkpointSequence, s.checkpointOffset, s.checkpointSent = checkpoint, boundary, 0, false
+	s.received = boundary
 	return nil
 }
 

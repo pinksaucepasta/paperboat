@@ -147,8 +147,12 @@ func TestManagerLiveOutputDoesNotWaitForSQLitePersistence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var output []byte
+	var waitFrom uint64 // the end of what this reader holds
 	for !bytes.Contains(output, []byte("live-output")) {
-		event, err := manager.WaitNext(ctx, created.ID, "att_live")
+		event, err := manager.WaitNext(ctx, created.ID, "att_live", waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatalf("output=%q err=%v", output, err)
 		}

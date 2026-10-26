@@ -223,8 +223,9 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 		r.mu.Unlock()
 		r.stop(p)
 	}()
+	var received uint64 // end of the last event sealed: the owner frees output only up to here
 	for {
-		event, err := r.manager.WaitNext(ctx, p.sessionID, p.attachmentID)
+		event, err := r.manager.WaitNext(ctx, p.sessionID, p.attachmentID, received)
 		if errors.Is(err, session.ErrAttachmentLagged) {
 			continue // records skip ahead; each browser sees the gap and restores its screen in-band
 		}
@@ -248,6 +249,7 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 			encodeErr = writeRecord(p.stream, frame)
 		}
 		p.writeMu.Unlock()
+		received = event.EndSequence
 		event.Release()
 		if encodeErr != nil {
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, encodeErr)

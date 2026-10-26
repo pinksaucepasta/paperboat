@@ -201,11 +201,12 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 		var args struct {
 			Sessionid    string
 			Attachmentid string
+			From         uint64
 		}
 		if err := decodeRemoteRequest(body, &args); err != nil {
 			return nil, ErrInvalidSession
 		}
-		v0, err := m.WaitNext(ctx, args.Sessionid, args.Attachmentid)
+		v0, err := m.WaitNext(ctx, args.Sessionid, args.Attachmentid, args.From)
 		if err != nil {
 			return nil, err
 		}

@@ -170,12 +170,13 @@ func (m *RemoteManager) Next(sessionID, attachmentID string) (history.Event, boo
 	}{sessionID, attachmentID}, &out)
 	return out.V0, out.V1, err
 }
-func (m *RemoteManager) WaitNext(ctx context.Context, sessionID, attachmentID string) (history.Event, error) {
+func (m *RemoteManager) WaitNext(ctx context.Context, sessionID, attachmentID string, from uint64) (history.Event, error) {
 	var out struct{ V0 history.Event }
 	err := m.invoke(ctx, "WaitNext", struct {
 		Sessionid    string
 		Attachmentid string
-	}{sessionID, attachmentID}, &out)
+		From         uint64
+	}{sessionID, attachmentID, from}, &out)
 	return out.V0, err
 }
 func (m *RemoteManager) Acknowledge(sessionID, attachmentID string, nextSequence uint64) error {

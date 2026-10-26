@@ -322,6 +322,60 @@ func (f *Fanout) WaitNext(ctx context.Context, attachmentID string) (history.Eve
 	return event, nil
 }
 
+// WaitNextFrom returns the next output event at or after from without consuming it. from confirms that the caller
+// holds everything before it, which frees that output; a caller whose answer was lost in transit (a poll deadline
+// racing the reply) asks again from the same place and gets the same event, so nothing is skipped.
+func (f *Fanout) WaitNextFrom(ctx context.Context, attachmentID string, from uint64) (history.Event, error) {
+	for {
+		f.mu.Lock()
+		cursor, ok := f.attachments[attachmentID]
+		if !ok {
+			f.mu.Unlock()
+			return history.Event{}, ErrAttachmentUnknown
+		}
+		if cursor.state == Evicted {
+			f.mu.Unlock()
+			return history.Event{}, ErrAttachmentEvicted
+		}
+		if cursor.state != Attached {
+			f.mu.Unlock()
+			return history.Event{}, ErrInvalidTransition
+		}
+		if cursor.lagged {
+			cursor.lagged = false
+			f.mu.Unlock()
+			return history.Event{}, ErrAttachmentLagged
+		}
+		if cursor.hasCursor && from > cursor.cursor && from <= cursor.enqueuedEnd {
+			previous := cursor.cursor
+			cursor.queuedBytes -= from - previous
+			cursor.cursor, cursor.progressAt = from, time.Now()
+			f.compactAfterAdvanceLocked(previous)
+			notify(f.room)
+		}
+		if cursor.hasCursor && cursor.cursor < cursor.enqueuedEnd {
+			event, found := f.eventAtLocked(cursor.cursor)
+			if !found {
+				f.mu.Unlock()
+				return history.Event{}, ErrOutputOrder
+			}
+			retained := event.Retain()
+			offset := cursor.cursor - event.StartSequence
+			retained.StartSequence = cursor.cursor
+			retained.Data = event.Data[offset:]
+			f.mu.Unlock()
+			return retained, nil
+		}
+		notification := cursor.notify
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return history.Event{}, ctx.Err()
+		case <-notification:
+		}
+	}
+}
+
 func (f *Fanout) WaitNextOwned(ctx context.Context, attachmentID string) (history.Event, error) {
 	for {
 		f.mu.Lock()

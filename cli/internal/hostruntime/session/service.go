@@ -24,7 +24,7 @@ type Service interface {
 	DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error
 	AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool
 	Next(sessionID, attachmentID string) (history.Event, bool, error)
-	WaitNext(ctx context.Context, sessionID, attachmentID string) (history.Event, error)
+	WaitNext(ctx context.Context, sessionID, attachmentID string, from uint64) (history.Event, error)
 	Acknowledge(sessionID, attachmentID string, nextSequence uint64) error
 	AcknowledgeAtGeneration(sessionID, attachmentID string, nextSequence, expectedGeneration uint64) error
 	AttachmentStatus(sessionID, attachmentID string) (AttachmentState, uint64, error)

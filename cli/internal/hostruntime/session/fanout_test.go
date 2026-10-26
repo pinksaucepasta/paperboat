@@ -391,3 +391,33 @@ func TestOnlyTheControllingOwnerPacesOutput(t *testing.T) {
 		t.Fatalf("stalled non-controller: %v, want lagged", err)
 	}
 }
+
+// F3-16: a poll whose reply is lost (its deadline raced the answer over the owner RPC) asks again from the same place
+// and gets the same output; only a later poll from past it frees it. A consuming read lost exactly that one event.
+func TestWaitNextFromRedeliversALostReply(t *testing.T) {
+	f := NewFanout()
+	f.Attach("att", 64)
+	f.Publish(history.Event{StartSequence: 0, EndSequence: 4, Data: []byte("RS33")})
+	f.Publish(history.Event{StartSequence: 4, EndSequence: 8, Data: []byte("RS34")})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	read := func(from uint64) history.Event {
+		t.Helper()
+		event, err := f.WaitNextFrom(ctx, "att", from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer event.Release()
+		return history.Event{StartSequence: event.StartSequence, EndSequence: event.EndSequence, Data: append([]byte(nil), event.Data...)}
+	}
+	first := read(0)
+	if lost := read(0); string(lost.Data) != "RS33" || lost.StartSequence != first.StartSequence {
+		t.Fatalf("the lost reply was not delivered again: %q", lost.Data)
+	}
+	if next := read(first.EndSequence); string(next.Data) != "RS34" {
+		t.Fatalf("after confirming RS33 got %q", next.Data)
+	}
+	if _, queued, _ := f.Status("att"); queued != 4 {
+		t.Fatalf("queued=%d, want only the unconfirmed RS34", queued)
+	}
+}

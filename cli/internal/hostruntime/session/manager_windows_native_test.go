@@ -142,8 +142,12 @@ func collectNativeWindowsUntil(t *testing.T, manager *Manager, sessionID, attach
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	var output strings.Builder
+	var waitFrom uint64 // the end of what this reader holds
 	for {
-		event, err := manager.WaitNext(ctx, sessionID, attachmentID)
+		event, err := manager.WaitNext(ctx, sessionID, attachmentID, waitFrom)
+		if err == nil {
+			waitFrom = event.EndSequence
+		}
 		if err != nil {
 			t.Fatalf("output=%q missing %q: %v", output.String(), marker, err)
 		}
