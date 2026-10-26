@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -126,9 +127,32 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 	upstream.SetReadLimit(browserTerminalMaxRecordBytes)
 	defer upstream.CloseNow()
 
-	p.observeBrowserTerminal(ctx, bridgeBrowserTerminal(ctx, browser, upstream, subscription, func(cause error) (terminalend.Reason, bool) {
+	ended := bridgeBrowserTerminal(ctx, browser, upstream, subscription, func(cause error) (terminalend.Reason, bool) {
 		return browserTerminalEnd(cause, admission)
-	}))
+	})
+	logBrowserTerminalEnd(ctx, ended)
+	p.observeBrowserTerminal(ctx, ended)
+}
+
+// bridgeEnd names the side of the bridge whose read or write ended it.
+type bridgeEnd struct {
+	step string
+	err  error
+}
+
+func (e bridgeEnd) Error() string { return e.step + ": " + e.err.Error() }
+func (e bridgeEnd) Unwrap() error { return e.err }
+
+// logBrowserTerminalEnd records how every browser terminal bridge ended, expected ends included: a drop the
+// browser sees as connection_lost otherwise leaves no trace. Only fixed values are logged, never error text.
+func logBrowserTerminalEnd(ctx context.Context, err error) {
+	step := "unknown"
+	var end bridgeEnd
+	if errors.As(err, &end) {
+		step = end.step
+	}
+	slog.InfoContext(ctx, "browser_terminal_ended", "step", step, "close_status", int(websocket.CloseStatus(err)),
+		"canceled", errors.Is(err, context.Canceled), "hub_ended", errors.Is(err, ErrBrowserTerminalHubEnded))
 }
 
 func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFence {
@@ -188,20 +212,20 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		for {
 			kind, message, err := browser.Read(ctx)
 			if err != nil {
-				report(err)
+				report(bridgeEnd{"browser_read", err})
 				return
 			}
 			if kind != websocket.MessageBinary {
-				report(ErrBrowserTerminalMessage)
+				report(bridgeEnd{"browser_read", ErrBrowserTerminalMessage})
 				return
 			}
 			payload, err := browserTerminalTLSMessagePayload(message)
 			if err != nil {
-				report(err)
+				report(bridgeEnd{"browser_read", err})
 				return
 			}
 			if err := upstream.Write(ctx, websocket.MessageBinary, payload); err != nil {
-				report(err)
+				report(bridgeEnd{"host_write", err})
 				return
 			}
 		}
@@ -213,16 +237,16 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		for {
 			kind, payload, err := upstream.Read(ctx)
 			if err != nil {
-				report(err)
+				report(bridgeEnd{"host_read", err})
 				return
 			}
 			if kind != websocket.MessageBinary || len(payload) == 0 || len(payload) > browserTerminalMaxRecordBytes {
-				report(ErrBrowserTerminalMessage)
+				report(bridgeEnd{"host_read", ErrBrowserTerminalMessage})
 				return
 			}
 			message, err := browserTerminalTLSMessage(payload)
 			if err != nil {
-				report(err)
+				report(bridgeEnd{"host_read", err})
 				return
 			}
 			// Wait for the writer: a browser that stops reading (a frozen or sleeping page) holds the host back
@@ -244,10 +268,10 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			if errors.Is(err, ErrBrowserTerminalLagged) {
 				message = []byte{browserTerminalLaggedDiscriminator}
 			} else if err != nil {
-				report(err)
+				report(bridgeEnd{"shared_output", err})
 				return
 			} else if message, err = browserTerminalSharedOutputMessagePayload(record); err != nil {
-				report(err)
+				report(bridgeEnd{"shared_output", err})
 				return
 			}
 			// The hub owns the bounded per-browser backlog. Wait for the
@@ -266,12 +290,12 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-subscription.Done():
-			return ErrBrowserTerminalHubEnded
+			return bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}
 		case cause := <-failures:
 			return cause
 		case message := <-outbound:
 			if err := browser.Write(ctx, websocket.MessageBinary, message); err != nil {
-				return err
+				return bridgeEnd{"browser_write", err}
 			}
 		}
 	}
