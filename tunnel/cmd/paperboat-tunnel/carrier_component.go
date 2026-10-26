@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
@@ -99,6 +100,7 @@ func newCarrierComponentWithTelemetry(
 			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
 				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 			} else {
+				slog.Warn("carrier_connection_failed", "error", err.Error())
 				reporter.ObserveFailure(ctx, "http_server", err)
 			}
 		},

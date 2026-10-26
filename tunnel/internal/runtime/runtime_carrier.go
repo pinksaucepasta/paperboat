@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -345,6 +346,8 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 					if err := w.registry(next).AttachAdmission(next, server); err == nil {
 						attached[key] = next
 						continue
+					} else {
+						logRuntimeAttachFailure(next, err)
 					}
 				}
 			}
@@ -356,7 +359,9 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 		}
 		for key, a := range desired {
 			if _, ok := attached[key]; !ok {
-				if err := w.registry(a).AttachAdmission(a, server); err == nil {
+				if err := w.registry(a).AttachAdmission(a, server); err != nil {
+					logRuntimeAttachFailure(a, err)
+				} else {
 					if w.BrowserTerminalHub != nil && !a.EndpointRoute() {
 						if err := w.BrowserTerminalHub.ActivateRoute(a.RouteID, browserTerminalFence(a)); err != nil {
 							_ = w.Routes.DetachAdmission(a)
@@ -480,4 +485,9 @@ func runtimeAdmissionEqual(left, right datacarrier.ExpectedAdmission) bool {
 	left.Admitted = false
 	right.Admitted = false
 	return left == right
+}
+
+// The carrier stays connected while its route is refused; this line names the route and the reason.
+func logRuntimeAttachFailure(a datacarrier.ExpectedAdmission, err error) {
+	slog.Warn("runtime_route_attach_refused", "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
 }

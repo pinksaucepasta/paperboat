@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"reflect"
 	"sort"
@@ -439,6 +440,9 @@ func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
 	w.mu.Lock()
 	w.lastErr = err
 	w.mu.Unlock()
+	if err != nil {
+		slog.Warn("route_reconcile_failed", "error", err.Error())
+	}
 	if err != nil && w.Reporter != nil {
 		w.Reporter.ObserveFailure(ctx, "route_reconcile", err)
 	}
