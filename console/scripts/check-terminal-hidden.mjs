@@ -11,6 +11,8 @@ import { readFileSync, rmSync } from "node:fs"
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, MACHINE: machine } = process.env
 const hiddenMs = Number(process.env.HIDDEN_MS ?? 125000)
+// TICKS=<n>: after the flood the shell prints WH1..WHn one every 20 s (n = HIDDEN_MS/20000 for a run that is hidden throughout).
+const ticks = Number(process.env.TICKS ?? 0)
 const profile = `/tmp/pb-terminal-hidden-${process.pid}`
 const chrome = spawn(CHROME, ["--remote-debugging-port=9339", `--user-data-dir=${profile}`, "--no-first-run", "--no-sandbox", "--window-size=1200,760", "about:blank"], { stdio: "ignore" })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -78,7 +80,8 @@ try {
   }, 250)
   console.log("flood typed at", stamp())
   const flooded = marker("hidden")
-  await typeLine(page, `sleep 5; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${flooded}`)
+  const ticker = ticks ? `; for i in $(seq 1 ${ticks}); do echo WH$i; sleep 20; done` : ""
+  await typeLine(page, `sleep 5; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${flooded}${ticker}`)
   const other = (await send("Target.createTarget", { url: "about:blank" })).targetId
   await sleep(1500)
   log((await evaluate(page, "document.visibilityState")) === "hidden", "the terminal tab is hidden", await evaluate(page, "document.visibilityState"))
@@ -97,6 +100,16 @@ try {
   console.log("switches done at", stamp(), "first reconnect seen:", seen || "none")
   after = await counts(page)
   log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
+  if (ticks) {
+    // Output made over the whole hidden time is on screen exactly once, in order, with no gap.
+    await shows(page, `WH${ticks}`, 120000)
+    const text = await evaluate(page, `document.querySelector(".terminal-host")?.innerText ?? ""`)
+    const got = [...text.matchAll(/^WH(\d+)[ \u00a0]*$/gm)].map((m) => Number(m[1]))
+    const missing = Array.from({ length: ticks }, (_, i) => i + 1).filter((n) => !got.includes(n)).length
+    log(missing === 0 && got.length === new Set(got).size, `${ticks} lines printed while hidden are on screen exactly once`, `${got.length} lines, ${got.length - new Set(got).size} duplicated, ${missing} missing`)
+    after = await counts(page)
+    log(after[0] === before[0] && after[1] === before[1], "whole run: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
+  }
   const echoed = marker("after")
   await typeLine(page, `echo ${echoed}`)
   log((await attr(page, "data-terminal-phase")) === "attached" && (await shows(page, echoed, 15000)), "still attached and echoes its marker")
