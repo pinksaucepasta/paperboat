@@ -137,6 +137,7 @@ func (s *Service) GrantMachine(ctx context.Context, account, team string, r Mach
 		return ApplyMachineAccessTx(ctx, tx, s.policy, team, account, r)
 	})
 }
+
 // unshareEndedMachineTx answers an unshare of a machine that is revoked or deleted: its owner or a
 // settings manager may end any binding still left in this team; another member gets not_found.
 func unshareEndedMachineTx(ctx context.Context, tx *db.Tx, team, machine, account string, actor Member) error {
