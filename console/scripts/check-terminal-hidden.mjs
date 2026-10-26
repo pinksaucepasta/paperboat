@@ -39,6 +39,7 @@ const send = (method, params = {}, sessionId) =>
 const attach = async (targetId) => (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId
 const evaluate = async (session, expression) => (await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, session)).result.value
 const attr = (session, name) => evaluate(session, `document.querySelector("[data-terminal-phase]")?.getAttribute(${JSON.stringify(name)}) ?? null`)
+const resyncs = async (session) => Number(await attr(session, "data-terminal-resyncs"))
 const counts = async (session) => [Number(await attr(session, "data-terminal-reconnects")), Number(await attr(session, "data-terminal-replays"))]
 const until = async (test, ms) => {
   for (const end = Date.now() + ms; Date.now() < end; await sleep(250)) if (await test()) return true
@@ -78,13 +79,13 @@ try {
   const back = Date.now()
   log(await shows(page, flooded, 2000), "output made while hidden is on screen within 2 s of return", `${Date.now() - back} ms`)
   let after = await counts(page)
-  log(after[0] === before[0] && after[1] === before[1], "hidden: reconnects and replays unchanged", `${before} -> ${after} close=${await attr(page, "data-terminal-close")}`)
+  log(after[0] === before[0] && after[1] === before[1], "hidden: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)} close=${await attr(page, "data-terminal-close")}`)
 
   for (let i = 0; i < 200; i++) await send("Target.activateTarget", { targetId: i % 2 ? first.targetId : other })
   await send("Target.activateTarget", { targetId: first.targetId })
   await sleep(6000)
   after = await counts(page)
-  log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after}`)
+  log(after[0] === before[0] && after[1] === before[1], "200 tab switches: reconnects and replays unchanged", `${before} -> ${after} resyncs=${await resyncs(page)}`)
   const echoed = marker("after")
   await typeLine(page, `echo ${echoed}`)
   log((await attr(page, "data-terminal-phase")) === "attached" && (await shows(page, echoed, 15000)), "still attached and echoes its marker")

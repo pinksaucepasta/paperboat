@@ -172,7 +172,7 @@ export function useTerminalConnection({
   // not keep up with: a repaint, not a reconnect.
   const [resyncs, setResyncs] = useState(0)
   const attachedConnectionRef = useRef("")
-  // The last typed close ("<code> <close number>"), for checks and bug reports.
+  // The last typed close ("<code> <close number> <transport cause>"), for checks and bug reports.
   const [lastClose, setLastClose] = useState("")
   const [connectedEdge, setConnectedEdge] = useState("")
   // The window title the shell sets (OSC 0/2), seen as it happens; the server's copy lags.
@@ -657,7 +657,7 @@ export function useTerminalConnection({
         // Every end of a connection is one typed outcome (close-codes.ts): the words and the next step.
         const outcome = terminalCloseCodes[workerCloseCode(event) ?? "edge_unavailable"]
         connectionIDRef.current = ""
-        setLastClose(`${event.code ?? event.state} ${event.close ?? ""}`.trim())
+        setLastClose([event.code ?? event.state, event.close, event.transport_cause].filter(Boolean).join(" "))
         if (outcome.phase === "reconnect") {
           setError(outcome.message)
           scheduleReconnect()

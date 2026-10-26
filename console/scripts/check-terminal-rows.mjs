@@ -31,6 +31,7 @@ const type = async (p, text) => {
 }
 const shot = (p, name) => p.screenshot({ path: `/tmp/terminal-rows-${row}-${name}.png` })
 const marker = (name) => `M${name}-${Date.now().toString(36)}`
+const resyncs = async (p) => Number(await attr(p, "data-terminal-resyncs"))
 const counts = async (p) => [Number(await attr(p, "data-terminal-reconnects")), Number(await attr(p, "data-terminal-replays"))]
 
 async function open() {
@@ -93,7 +94,7 @@ async function f313() {
   log(await shows(p, frozenMarker, 15000), "frozen: output made meanwhile is on screen")
   after = await counts(p)
   log(after[1] === before[1], "frozen: no replayed output", `${before} -> ${after}`)
-  console.log(`INFO frozen: reconnects ${before[0]} -> ${after[0]}, close=${await attr(p, "data-terminal-close")}`)
+  console.log(`INFO frozen: reconnects ${before[0]} -> ${after[0]}, resyncs=${await resyncs(p)}, close=${await attr(p, "data-terminal-close")}`)
   await live(p, "after-freeze")
   await other.close()
   return id

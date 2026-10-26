@@ -5,6 +5,8 @@ export type BrowserTerminalEvent = {
   code?: string
   /** Close-state events: the raw WebSocket close number, for diagnostics only; never branched on. */
   close?: number
+  /** connection_lost only: why the WASM ended the socket itself; absent when it was closed from outside. */
+  transport_cause?: string
   message?: string
   owner_account_id?: string
   machine_id?: string
