@@ -29,11 +29,11 @@ export const bandwidthRow = plans.map((plan) => plan.bandwidth)
 export const bandwidthNotes = [
   {
     title: "Direct traffic is always free",
-    text: "When your machines can reach each other directly, nothing is counted. That is most of the time.",
+    text: "When your machines connect directly, nothing is counted. That is most of the time.",
   },
   {
     title: "What counts",
-    text: "Traffic through our relays, used when machines can’t connect directly, and through our edges, used by public previews and tunnels.",
+    text: "Traffic through our relays, when machines can’t connect directly, and through our edges, for public previews and tunnels.",
   },
   {
     title: "When you run out",
@@ -41,7 +41,7 @@ export const bandwidthNotes = [
   },
   {
     title: "Adding more",
-    text: "Add 100 GB at a time from the console, whenever you need it. On a team, it goes into one shared pool.",
+    text: "Add 100 GB at a time from the console. On a team, it goes into one shared pool.",
   },
 ]
 
@@ -53,7 +53,7 @@ export const faq = [
   {
     question: "Are features locked behind a plan?",
     answer:
-      "No. Free and Pro differ only in limits and bandwidth. Team adds people: members and lasting access to each other’s machines.",
+      "No. Free and Pro differ only in limits and bandwidth. Team adds members and lasting access to each other’s machines.",
   },
   {
     question: "What counts as a browser terminal?",
@@ -61,7 +61,7 @@ export const faq = [
   },
   {
     question: "Do I need Team to share with someone?",
-    answer: "No. Sharing a terminal session or a preview link is free on every plan. Team is for people who work on each other’s machines every day.",
+    answer: "No. Sharing a terminal session or a preview link is free on every plan. Team is for people who work on each other’s machines daily.",
   },
   {
     question: "How does the Team trial work?",
@@ -77,6 +77,6 @@ export const faq = [
   },
   {
     question: "What happens to my machines if I cancel?",
-    answer: "You move back to Free. Your machines, terminals and settings stay; only the bandwidth goes back to 5 GB.",
+    answer: "You move back to Free. Your machines, terminals and settings stay. Bandwidth goes back to 5 GB.",
   },
 ]

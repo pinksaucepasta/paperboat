@@ -8,7 +8,7 @@ interface Props {
 const { tone = "light" } = Astro.props
 ---
 <div class:list={["install", `install-${tone}`]}>
-  <p class="install-platform">macOS and Linux. Your browser opens to sign in when it’s done.</p>
+  <p class="install-platform">macOS and Linux. Your browser opens to sign in.</p>
   <button class="install-command" aria-label="Copy install command" data-copy={installCommand}>
     <code>{installCommand}</code>
     <span class="install-icon">

@@ -43,7 +43,7 @@ export const sections: Section[] = [
   {
     id: "network",
     title: "Network and encryption",
-    sentence: "How your machines connect, and who can read the traffic.",
+    sentence: "How machines connect and who can read the traffic.",
     rows: [
       { id: "encryption_native", label: "End-to-end encryption, direct when possible" },
       { id: "private_network", label: "Machines reach each other privately" },
@@ -64,7 +64,7 @@ export const sections: Section[] = [
   {
     id: "publish",
     title: "Previews and secrets",
-    sentence: "Show your work and keep secrets safe.",
+    sentence: "Share work and keep secrets.",
     rows: [
       { id: "preview_url", label: "Previews and tunnels" },
       { id: "env_secrets", label: "Encrypted environment variables" },
@@ -96,34 +96,34 @@ function cells(sources: Record<string, string>, values: Record<RowId, [string, s
 export const paperboat = {
   name: "Paperboat",
   cells: cells({}, {
-    terminal_persistent: ["Yes, sessions keep running on the machine"],
-    terminal_replay: ["Yes, replays what you missed on reconnect"],
-    terminal_browser: ["Yes, in the web console, phones too"],
-    terminal_share: ["Yes, view-only or interactive, by invite"],
+    terminal_persistent: ["Yes, runs on the machine"],
+    terminal_replay: ["Yes, replays what you missed"],
+    terminal_browser: ["Yes, in the console, on phones too"],
+    terminal_share: ["Yes, view-only or interactive"],
     exec: ["Yes, pb exec, with exit codes"],
     ssh_keys: ["Yes, keys and host trust handled"],
     ssh_tools: ["Yes, pb ssh, scp, sftp, rsync and plain ssh"],
     ssh_vscode: ["Yes, through generated SSH host names"],
-    files_send: ["Yes, pb send, resumes if interrupted"],
+    files_send: ["Yes, pb send, resumable"],
     files_inbox: ["Yes, an Inbox on each machine"],
     env_secrets: ["Yes, end-to-end encrypted"],
-    env_where: ["Terminals and pb exec; plain SSH coming"],
+    env_where: ["Terminals and pb exec; SSH coming"],
     config_sync: ["Yes, from your Git repository"],
     preview_url: ["Yes, pb preview 3000"],
     preview_inspect: ["Coming: inspector in the console"],
-    tunnel_permanent: ["Yes, names that stay"],
+    tunnel_permanent: ["Yes"],
     tunnel_domains: ["Yes, on every plan"],
     tunnel_protocols: ["HTTP/1.1, HTTP/2, HTTP/3, WebSocket"],
-    private_network: ["Yes, private names for every machine"],
-    encryption_native: ["End to end; direct when possible"],
+    private_network: ["Yes, a private name per machine"],
+    encryption_native: ["Yes, direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
-    teams: ["Yes, owners, admins and members"],
-    access_rules: ["Per-machine access; tags and rules coming"],
+    teams: ["Yes, owners, admins, members"],
+    access_rules: ["Per machine; tags and rules coming"],
     api_tokens: ["Coming"],
-    selfhost: ["Relays and tunnel servers"],
-    platforms: ["Linux and macOS; Windows coming; any browser"],
-    pricing_model: ["By bandwidth; Team per seat"],
-    free_tier: ["Everything for one person, 5 GB a month"],
+    selfhost: ["Yes, relays and tunnel servers"],
+    platforms: ["Linux, macOS, any browser; Windows coming"],
+    pricing_model: ["Bandwidth; Team per seat"],
+    free_tier: ["Everything for one person, 5 GB"],
   }),
   pricing: [
     "Free: $0, everything for one person, 5 GB of relay and edge bandwidth a month",
@@ -152,7 +152,7 @@ export type Product = {
   faq: { q: string; a: string }[]
 }
 
-const install = "Install Paperboat on each machine with the one-line installer and sign in."
+const install = "Install Paperboat on each machine with the one-line installer, then sign in."
 
 // Tailscale — sources opened 2026-10-23.
 const tailscaleSources = {
@@ -275,13 +275,13 @@ const vscodeSources = {
 /** Paperboat's side of the differences that recur, written once. */
 const ours = {
   terminals:
-    "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. When you come back, from the same computer, another one or a phone's browser, you see what happened while you were away, and you can let someone watch or type along.",
+    "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. Reconnect from any computer or a phone browser and you see what you missed. Others can watch or type along.",
   previews:
-    "pb preview gives a port a public HTTPS link in one command, and pb tunnel keeps a permanent address with your own domain, on every plan.",
+    "pb preview gives a port a public HTTPS link. pb tunnel gives it a permanent address on your own domain. Both are on every plan.",
   files:
-    "pb send puts files in the other machine's Inbox, resuming if the connection drops. ENV delivers encrypted variables to the commands and terminals that need them, and config sync keeps settings the same everywhere from a Git repository.",
+    "pb send puts files in the other machine's Inbox and resumes after a drop. ENV delivers encrypted variables to your commands and terminals. Config sync keeps settings the same everywhere from a Git repository.",
   install:
-    "Paperboat is one install per machine and a sign-in. There is no network, gateway or proxy to plan, and nothing to keep running besides the machines themselves.",
+    "Paperboat is one install per machine and a sign-in. No network, gateway or proxy to plan.",
 }
 
 export const products: Product[] = [
@@ -290,7 +290,7 @@ export const products: Product[] = [
     name: "Tailscale",
     label: "Tailscale",
     summary:
-      "Tailscale connects your devices into one private WireGuard network, with detailed access rules and clients for every platform. Paperboat also connects your machines privately, but it is built around working on them: terminals that survive disconnects, SSH and files, encrypted environment variables, previews and tunnels.",
+      "Tailscale puts your devices on one private WireGuard network, with detailed access rules and clients for every platform. Paperboat also connects your machines privately and adds terminals that survive disconnects, SSH, files, encrypted variables, previews and tunnels.",
     cells: cells(tailscaleSources, {
       terminal_persistent: ["No, a standard SSH session", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -325,14 +325,14 @@ export const products: Product[] = [
       {
         title: "A network, or a place to work",
         body: [
-          "Tailscale gives every device an address on a private network and leaves the rest to the tools you already use: you open ssh, start tmux, copy files with scp.",
+          "Tailscale gives each device an address on a private network. You bring the tools: ssh, tmux, scp.",
           ours.install,
         ],
       },
       {
         title: "Terminals that survive a dropped connection",
         body: [
-          "A Tailscale SSH session is a normal SSH session: when the connection drops, the shell ends unless you started tmux. SSH Console opens a shell in the admin console's browser tab, for owners and admins, and also ends when the tab closes.",
+          "A Tailscale SSH session is a normal SSH session. When the connection drops, the shell ends unless you started tmux. SSH Console opens a shell in the admin console for owners and admins, and ends when the tab closes.",
           ours.terminals,
         ],
         them: "$ ssh devbox\n$ tmux new -A -s work",
@@ -341,7 +341,7 @@ export const products: Product[] = [
       {
         title: "Public links",
         body: [
-          "Funnel shares a local HTTPS service on your tailnet's ts.net name, on ports 443, 8443 or 10000. Your own domains aren't supported for Funnel.",
+          "Funnel shares a local HTTPS service on your tailnet's ts.net name, on ports 443, 8443 or 10000. It doesn't support your own domains.",
           ours.previews,
         ],
         them: "$ tailscale funnel 3000",
@@ -350,7 +350,7 @@ export const products: Product[] = [
       {
         title: "Files, secrets and settings",
         body: [
-          "Taildrop sends files between your own devices, into Downloads. Tailscale has no environment variables or config sync.",
+          "Taildrop sends files between your devices into Downloads. Tailscale has no environment variables or config sync.",
           ours.files,
         ],
         them: "$ tailscale file cp report.pdf laptop:",
@@ -359,8 +359,8 @@ export const products: Product[] = [
       {
         title: "Access rules for a whole company",
         body: [
-          "Tailscale's policy file (grants, ACLs, groups, tags) and its clients for phones are mature and cover whole companies.",
-          "Paperboat gives team members access per machine today; tags and access rules are being built. If you need company-wide network policy now, Tailscale is the stronger choice.",
+          "Tailscale's policy file (grants, ACLs, groups, tags) and phone clients are mature and cover whole companies.",
+          "Paperboat gives team members access per machine. Tags and access rules are being built. For company-wide network policy today, choose Tailscale.",
         ],
       },
     ],
@@ -407,7 +407,7 @@ export const products: Product[] = [
     name: "ngrok",
     label: "ngrok",
     summary:
-      "ngrok puts a local service on a public URL, with traffic tools such as a request inspector and policies. Paperboat does previews and permanent tunnels too, and it also gives you terminals, SSH, files and secrets on the same machines.",
+      "ngrok puts a local service on a public URL, with a request inspector and traffic policies. Paperboat also does previews and permanent tunnels, plus terminals, SSH, files and secrets.",
     cells: cells(ngrokSources, {
       terminal_persistent: ["No", "agent"],
       terminal_replay: ["No", "agent"],
@@ -442,8 +442,8 @@ export const products: Product[] = [
       {
         title: "A port, or the whole machine",
         body: [
-          "ngrok is built for one thing: getting traffic to a service. It doesn't give you a shell, files or secrets on the machine behind it.",
-          "Paperboat gives you the link and the machine: open a terminal on it, copy files to it, run a command, from your laptop or a browser.",
+          "ngrok gets traffic to a service. It gives you no shell, files or secrets on the machine behind it.",
+          "Paperboat gives you the link and the machine: open a terminal, copy files, run commands, from your laptop or a browser.",
         ],
         them: "$ ngrok http 3000",
         us: "$ pb preview 3000",
@@ -451,8 +451,8 @@ export const products: Product[] = [
       {
         title: "Your own domains",
         body: [
-          "On ngrok, bringing your own domain starts at the Pay-as-you-go plan; Free has one development domain and Hobbyist ngrok-branded ones.",
-          "Paperboat tunnels take your own domains on every plan, including Free, with the DNS records shown for you and the certificate issued automatically.",
+          "On ngrok, your own domain starts at Pay-as-you-go. Free has one development domain and Hobbyist has ngrok-branded ones.",
+          "Paperboat tunnels take your own domains on every plan, Free included. We show the DNS records and issue the certificate.",
         ],
         them: "$ ngrok http 3000 --url api.example.com",
         us: "$ pb tunnel domain add api api.example.com",
@@ -460,15 +460,15 @@ export const products: Product[] = [
       {
         title: "Request inspection",
         body: [
-          "ngrok's traffic inspector shows each request and lets you replay it; that is one of its strongest features.",
-          "Paperboat's inspector, with replay, is being built into the console. Until it ships, ngrok is ahead here.",
+          "ngrok's traffic inspector shows each request and lets you replay it. It is one of its strongest features.",
+          "Paperboat's inspector, with replay, is being built into the console. Until it ships, ngrok is ahead.",
         ],
       },
       {
         title: "How you pay",
         body: [
-          "ngrok plans add charges per user, per active domain hour and for data and requests beyond what is included.",
-          "Paperboat plans differ only in bandwidth through its relays and edges; previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
+          "ngrok plans charge per user, per active domain hour, and for data and requests beyond the plan.",
+          "Paperboat plans differ only in relay and edge bandwidth. Previews, tunnels and domains cost nothing extra, and direct traffic is free.",
         ],
       },
     ],
@@ -515,7 +515,7 @@ export const products: Product[] = [
     name: "Cloudflare Tunnel",
     label: "Cloudflare Tunnel",
     summary:
-      "Cloudflare Tunnel connects a service to Cloudflare's network, so it can be reached on your Cloudflare domain with Cloudflare's protection in front. Paperboat gives you tunnels and previews without moving your DNS, plus terminals, SSH, files and secrets on the same machines.",
+      "Cloudflare Tunnel connects a service to Cloudflare's network, behind Cloudflare's protection, on your Cloudflare domain. Paperboat gives you tunnels and previews without moving your DNS, plus terminals, SSH, files and secrets.",
     cells: cells(cfTunnelSources, {
       terminal_persistent: ["No", "tunnel"],
       terminal_replay: ["No", "tunnel"],
@@ -550,8 +550,8 @@ export const products: Product[] = [
       {
         title: "Your DNS stays where it is",
         body: [
-          "A named Cloudflare Tunnel serves a hostname on a domain whose DNS is on Cloudflare, so using your own domain means moving it there.",
-          "Paperboat asks for two CNAME records at whichever DNS provider you already use and issues the certificate itself.",
+          "A named Cloudflare Tunnel serves a hostname on a domain whose DNS is on Cloudflare. Using your domain means moving its DNS there.",
+          "Paperboat asks for two CNAME records at your current DNS provider and issues the certificate.",
         ],
         them: "$ cloudflared tunnel route dns api api.example.com",
         us: "$ pb tunnel domain add api api.example.com",
@@ -559,8 +559,8 @@ export const products: Product[] = [
       {
         title: "Quick links",
         body: [
-          "Quick tunnels give a random trycloudflare.com address with no account, meant for testing.",
-          "pb preview gives a named link under Paperboat's preview domain that you can make public, private to you, or open to your team, with a time limit you choose.",
+          "Quick tunnels give a random trycloudflare.com address with no account, for testing.",
+          "pb preview gives a named link on Paperboat's preview domain. Make it public, private to you or open to your team, with a time limit you choose.",
         ],
         them: "$ cloudflared tunnel --url http://localhost:3000",
         us: "$ pb preview 3000 --ttl 2h",
@@ -568,15 +568,15 @@ export const products: Product[] = [
       {
         title: "Working on the machine",
         body: [
-          "Cloudflare Tunnel connects services; reaching a shell takes Cloudflare Access and cloudflared on the client.",
+          "Cloudflare Tunnel connects services. Reaching a shell takes Cloudflare Access and cloudflared on the client.",
           ours.terminals,
         ],
       },
       {
         title: "Cloudflare in front",
         body: [
-          "Traffic through a Cloudflare Tunnel flows through Cloudflare's network, where its CDN, firewall and DDoS protection apply. For a public site that needs that, it is a real advantage.",
-          "Paperboat's edge ends TLS for public links and forwards to your machine; it doesn't cache or filter your traffic.",
+          "Tunnel traffic flows through Cloudflare's network, with its CDN, firewall and DDoS protection. For a public site that needs them, that is a real advantage.",
+          "Paperboat's edge ends TLS for public links and forwards to your machine. It doesn't cache or filter traffic.",
         ],
       },
     ],
@@ -614,7 +614,7 @@ export const products: Product[] = [
     name: "Teleport",
     label: "Teleport",
     summary:
-      "Teleport is an access platform for companies: SSH, Kubernetes, databases and internal apps behind short-lived certificates, with session recording and audit. Paperboat is lighter: install it on your machines and you are working in a minute, with terminals that survive disconnects, previews and tunnels.",
+      "Teleport is a company access platform for SSH, Kubernetes, databases and internal apps, with short-lived certificates, session recording and audit. Paperboat is lighter: install it and work in a minute, with terminals that survive disconnects, previews and tunnels.",
     cells: cells(teleportSources, {
       terminal_persistent: ["No", "matrix"],
       terminal_replay: ["Recorded sessions play back afterwards", "tsh"],
@@ -649,14 +649,14 @@ export const products: Product[] = [
       {
         title: "An access platform, or a tool you install",
         body: [
-          "Teleport runs a cluster (auth service and proxy) that every connection goes through; it is built for many servers, many people and compliance.",
+          "Teleport runs a cluster (auth service and proxy) that every connection goes through. It is built for many servers, many people and compliance.",
           ours.install,
         ],
       },
       {
         title: "Sessions",
         body: [
-          "Teleport records sessions and plays them back afterwards; people can join a live session, and moderated sessions are an Enterprise feature. A session ends when its connection does.",
+          "Teleport records sessions and plays them back. People can join a live session, and moderated sessions are Enterprise. A session ends with its connection.",
           ours.terminals,
         ],
         them: "$ tsh ssh dev@devbox\n$ tsh join <session-id>",
@@ -665,7 +665,7 @@ export const products: Product[] = [
       {
         title: "Public links",
         body: [
-          "Teleport's application access puts internal apps behind its proxy for signed-in users; it doesn't publish a port to the internet.",
+          "Teleport's application access puts internal apps behind its proxy for signed-in users. It doesn't publish a port to the internet.",
           ours.previews,
         ],
         us: "$ pb preview 3000",
@@ -673,8 +673,8 @@ export const products: Product[] = [
       {
         title: "Audit and compliance",
         body: [
-          "Teleport's session recording, access requests and audit export are mature and made for regulated companies.",
-          "Paperboat records activity per workspace; roles, SSO and audit export for businesses are being built. If you need them now, Teleport is the better fit.",
+          "Teleport's session recording, access requests and audit export are mature and built for regulated companies.",
+          "Paperboat records activity per workspace. Roles, SSO and audit export for businesses are being built. If you need them now, choose Teleport.",
         ],
       },
     ],
@@ -714,7 +714,7 @@ export const products: Product[] = [
     name: "NetBird",
     label: "NetBird",
     summary:
-      "NetBird is an open-source WireGuard network between your devices, with access policies and a management server you can run yourself. Paperboat also connects your machines privately and focuses on working on them: terminals, SSH, files, secrets, previews and tunnels.",
+      "NetBird is an open-source WireGuard network with access policies and a management server you can run yourself. Paperboat also connects your machines privately and adds terminals, SSH, files, secrets, previews and tunnels.",
     cells: cells(netbirdSources, {
       terminal_persistent: ["No", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -749,14 +749,14 @@ export const products: Product[] = [
       {
         title: "A network, or a place to work",
         body: [
-          "NetBird builds a private WireGuard network with policies and leaves the work to your usual tools; its dashboard can open an SSH session in the browser.",
+          "NetBird builds a private WireGuard network with policies. You bring the tools, and its dashboard can open an SSH session in the browser.",
           ours.install,
         ],
       },
       {
         title: "Terminals that survive a dropped connection",
         body: [
-          "NetBird SSH sessions end when the connection drops, like any SSH session.",
+          "NetBird SSH sessions end when the connection drops.",
           ours.terminals,
         ],
         them: "$ netbird ssh devbox",
@@ -770,8 +770,8 @@ export const products: Product[] = [
       {
         title: "Running it yourself",
         body: [
-          "NetBird is open source and you can run the whole service on your own servers.",
-          "With Paperboat you can run your own relays and tunnel servers, but the control plane is hosted. If self-hosting everything matters most, NetBird fits better.",
+          "NetBird is open source. You can run the whole service on your servers.",
+          "With Paperboat you run your own relays and tunnel servers, but the control plane is hosted. To self-host everything, choose NetBird.",
         ],
       },
     ],
@@ -809,7 +809,7 @@ export const products: Product[] = [
     name: "ZeroTier",
     label: "ZeroTier",
     summary:
-      "ZeroTier makes your devices act as if they shared one Ethernet network, with broadcast and bridging. Paperboat connects your machines privately too and is built around working on them: terminals, SSH, files, secrets, previews and tunnels.",
+      "ZeroTier makes your devices act like one Ethernet network, with broadcast and bridging. Paperboat connects your machines privately and adds terminals, SSH, files, secrets, previews and tunnels.",
     cells: cells(zerotierSources, {
       terminal_persistent: ["No", "protocol"],
       terminal_replay: ["No", "protocol"],
@@ -844,7 +844,7 @@ export const products: Product[] = [
       {
         title: "A virtual LAN, or a place to work",
         body: [
-          "ZeroTier emulates Ethernet, so broadcast, multicast and bridging work as on a local network; everything else is up to your own tools.",
+          "ZeroTier emulates Ethernet, so broadcast, multicast and bridging work as on a local network. You bring the other tools.",
           ours.install,
         ],
       },
@@ -861,8 +861,8 @@ export const products: Product[] = [
       {
         title: "Devices that aren't computers",
         body: [
-          "ZeroTier runs on routers, NAS boxes and other devices, and can bridge a whole physical network.",
-          "Paperboat runs on Linux and macOS computers (Windows is coming) and connects those machines only.",
+          "ZeroTier runs on routers, NAS boxes and other devices, and can bridge a physical network.",
+          "Paperboat runs on Linux and macOS computers (Windows is coming) and connects only those.",
         ],
       },
     ],
@@ -900,7 +900,7 @@ export const products: Product[] = [
     name: "Twingate",
     label: "Twingate",
     summary:
-      "Twingate gives a company's people access to private resources without a VPN, through connectors you deploy and policies tied to your identity provider. Paperboat is for working on machines directly: terminals, SSH, files, secrets, previews and tunnels.",
+      "Twingate gives a company's people access to private resources without a VPN, using connectors you deploy and policies tied to your identity provider. Paperboat is for working on machines: terminals, SSH, files, secrets, previews and tunnels.",
     cells: cells(twingateSources, {
       terminal_persistent: ["No", "ssh"],
       terminal_replay: ["No", "ssh"],
@@ -935,14 +935,14 @@ export const products: Product[] = [
       {
         title: "People to resources, or machines to each other",
         body: [
-          "Twingate connects users' devices to resources in private networks through connectors; it is built for giving employees access.",
-          "Paperboat connects the machines you install it on to each other, and lets you work on them from anywhere.",
+          "Twingate connects users' devices to private resources through connectors. It is built to give employees access.",
+          "Paperboat connects the machines you install it on and lets you work on them from anywhere.",
         ],
       },
       {
         title: "Terminals that survive a dropped connection",
         body: [
-          "Twingate's Privileged Access for SSH signs SSH connections with short-lived certificates; the session ends with the connection.",
+          "Twingate's Privileged Access for SSH signs connections with short-lived certificates. The session ends with the connection.",
           ours.terminals,
         ],
         us: "$ pb devbox",
@@ -991,7 +991,7 @@ export const products: Product[] = [
     name: "Cloudflare Zero Trust",
     label: "Cloudflare Zero Trust",
     summary:
-      "Cloudflare Zero Trust (Access, the WARP client and Tunnel together) puts a company's apps and networks behind Cloudflare, with identity policies and web filtering. Paperboat is a tool for working on your own machines, end to end encrypted, without moving your DNS.",
+      "Cloudflare Zero Trust (Access, WARP and Tunnel) puts a company's apps and networks behind Cloudflare, with identity policies and web filtering. Paperboat is for working on your own machines, end to end encrypted, without moving your DNS.",
     cells: cells(cfZeroTrustSources, {
       terminal_persistent: ["No", "setup"],
       terminal_replay: ["No", "setup"],
@@ -1026,7 +1026,7 @@ export const products: Product[] = [
       {
         title: "A company's perimeter, or your machines",
         body: [
-          "Cloudflare Zero Trust secures a whole company: who may reach which app, from which device, with web filtering and logs.",
+          "Cloudflare Zero Trust secures a company: who reaches which app, from which device, with web filtering and logs.",
           ours.install,
         ],
       },
@@ -1034,13 +1034,13 @@ export const products: Product[] = [
         title: "Who can read the traffic",
         body: [
           "With WARP, your traffic goes through Cloudflare, which applies policies and can inspect it.",
-          "Paperboat encrypts between your own devices end to end and connects them directly when it can; relays forward traffic they can't read. Only public links end TLS at Paperboat's edge.",
+          "Paperboat encrypts end to end between your devices and connects them directly when it can. Relays forward traffic they can't read. Only public links end TLS at Paperboat's edge.",
         ],
       },
       {
         title: "Terminals that survive a dropped connection",
         body: [
-          "Access can render SSH in the browser; the session ends when the tab or connection does.",
+          "Access can show SSH in the browser. The session ends with the tab or connection.",
           ours.terminals,
         ],
         us: "$ pb devbox",
@@ -1049,7 +1049,7 @@ export const products: Product[] = [
         title: "Your DNS stays where it is",
         body: [
           "Public hostnames on Cloudflare need the domain's DNS on Cloudflare.",
-          "Paperboat asks for two CNAME records at whichever DNS provider you already use.",
+          "Paperboat asks for two CNAME records at your current DNS provider.",
         ],
         us: "$ pb tunnel domain add api api.example.com",
       },
@@ -1082,7 +1082,7 @@ export const products: Product[] = [
     name: "an enterprise VPN",
     label: "Enterprise VPN",
     summary:
-      "Zscaler Private Access, Palo Alto Prisma Access, Cisco Secure Client (AnyConnect) and OpenVPN Access Server connect employees to a company network with central policy. Paperboat connects you to your own machines and lets you work on them.",
+      "Zscaler Private Access, Palo Alto Prisma Access, Cisco Secure Client (AnyConnect) and OpenVPN Access Server connect employees to a company network with central policy. Paperboat connects you to your own machines.",
     cells: cells(vpnSources, {
       terminal_persistent: ["No", "zpa"],
       terminal_replay: ["No", "zpa"],
@@ -1118,13 +1118,13 @@ export const products: Product[] = [
         title: "A company network, or your machines",
         body: [
           "An enterprise VPN or ZTNA product puts employees inside the company network, with policy run by IT.",
-          "Paperboat is for the machines you work on: your laptop, a server, a box under a desk. It doesn't route a network.",
+          "Paperboat is for the machines you work on: a laptop, a server, a box under a desk. It doesn't route a network.",
         ],
       },
       {
         title: "Nothing to run",
         body: [
-          "These products need gateways, connectors or a cloud tenant set up and maintained by someone.",
+          "These products need gateways, connectors or a cloud tenant that someone sets up and maintains.",
           ours.install,
         ],
       },
@@ -1170,7 +1170,7 @@ export const products: Product[] = [
     name: "SSH and a bastion",
     label: "SSH + bastion",
     summary:
-      "Plain OpenSSH through a bastion (jump) host is the classic way in, with tmux to keep work running. Paperboat keeps SSH working and adds terminals that survive disconnects, files, secrets, previews and tunnels, with no open port to maintain.",
+      "OpenSSH through a bastion (jump) host, with tmux to keep work running, is the classic setup. Paperboat keeps SSH and adds terminals that survive disconnects, files, secrets, previews and tunnels, with no open port.",
     cells: cells(sshSources, {
       terminal_persistent: ["With tmux or screen", "tmux"],
       terminal_replay: ["With tmux scrollback", "tmux"],
@@ -1205,8 +1205,8 @@ export const products: Product[] = [
       {
         title: "No open port, no bastion to patch",
         body: [
-          "A bastion needs a public address, an open port 22 and someone to keep it patched and its keys in order.",
-          "Paperboat machines make only outbound connections and reach each other directly or through relays; there is nothing to expose.",
+          "A bastion needs a public address, an open port 22, and someone to patch it and manage keys.",
+          "Paperboat machines make only outbound connections and reach each other directly or through relays. Nothing is exposed.",
         ],
         them: "$ ssh -J bastion.example.com dev@10.0.1.5",
         us: "$ pb ssh devbox",
@@ -1214,7 +1214,7 @@ export const products: Product[] = [
       {
         title: "Persistence built in",
         body: [
-          "With SSH you add tmux or screen on every host to keep work running and to share it.",
+          "With SSH you add tmux or screen on every host to keep work running and share it.",
           ours.terminals,
         ],
         them: "$ ssh devbox -t tmux new -A -s work",
@@ -1223,7 +1223,7 @@ export const products: Product[] = [
       {
         title: "Your tools keep working",
         body: [
-          "Paperboat generates SSH host names, so plain ssh, scp, rsync, VS Code Remote-SSH and anything else built on OpenSSH work as before, without keys to copy around.",
+          "Paperboat generates SSH host names. Plain ssh, scp, rsync, VS Code Remote-SSH and anything built on OpenSSH work as before, with no keys to copy.",
         ],
         us: "$ ssh devbox.{localDomain}\n$ rsync -a ./site devbox.{localDomain}:site",
       },
@@ -1263,7 +1263,7 @@ export const products: Product[] = [
     name: "VS Code Remote Tunnels",
     label: "VS Code Tunnels",
     summary:
-      "VS Code Remote Tunnels opens a remote machine in VS Code or vscode.dev through Microsoft's dev tunnels service, and VS Code can forward ports, also publicly. Paperboat works with any terminal, editor or browser, and adds persistent terminals, files, secrets, permanent tunnels and sharing.",
+      "VS Code Remote Tunnels opens a remote machine in VS Code or vscode.dev through Microsoft's dev tunnels, and can forward ports, also publicly. Paperboat works with any terminal, editor or browser and adds persistent terminals, files, secrets, permanent tunnels and sharing.",
     cells: cells(vscodeSources, {
       terminal_persistent: ["No; only while VS Code runs there", "tunnels"],
       terminal_replay: ["No", "tunnels"],
@@ -1298,8 +1298,8 @@ export const products: Product[] = [
       {
         title: "One editor, or any tool",
         body: [
-          "Remote Tunnels is built for VS Code: the machine opens in VS Code or vscode.dev, signed in with the same GitHub or Microsoft account on both ends.",
-          "Paperboat works with any terminal, editor or agent, including VS Code through plain Remote-SSH.",
+          "Remote Tunnels is built for VS Code. The machine opens in VS Code or vscode.dev, signed in with the same GitHub or Microsoft account on both ends.",
+          "Paperboat works with any terminal, editor or agent, including VS Code over Remote-SSH.",
         ],
         them: "$ code tunnel",
         us: "$ pb devbox\n$ ssh devbox.{localDomain}",
@@ -1307,14 +1307,14 @@ export const products: Product[] = [
       {
         title: "Terminals that survive a dropped connection",
         body: [
-          "The machine is reachable while VS Code runs there, and one person uses it at a time.",
+          "The machine is reachable while VS Code runs there, for one person at a time.",
           ours.terminals,
         ],
       },
       {
         title: "Public links and domains",
         body: [
-          "A forwarded port can be made public, and dev tunnels can keep a stable address on Microsoft's domain; your own domains aren't supported.",
+          "A forwarded port can be public, and dev tunnels can keep a stable address on Microsoft's domain. Your own domains aren't supported.",
           ours.previews,
         ],
         them: "$ devtunnel host -p 3000 --allow-anonymous",

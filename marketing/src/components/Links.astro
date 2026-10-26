@@ -4,10 +4,10 @@ import Icon from "./Icon.astro"
 import { previewDomain, tunnelDomain } from "../site"
 ---
 
-<Section id="links" title="Share a port.">
+<Section id="links" title="Share a port">
   <Fragment slot="text">
     <p>
-      One command gives the app on your machine a public link. Nothing to deploy.
+      One command gives an app on your machine a public link. Nothing to deploy.
     </p>
   </Fragment>
 
@@ -15,7 +15,7 @@ import { previewDomain, tunnelDomain } from "../site"
     <article class="card surface-pattern">
       <div class="card-head">
         <h3 class="subtitle">Previews</h3>
-        <p class="body">A quick link to a port, until you stop it. Open to anyone, just you, or your team.</p>
+        <p class="body">A temporary link to a port. Open to anyone, only you, or your team.</p>
       </div>
       <pre class="out"><span class="dollar">$</span> pb preview 3000
 Preview ready
@@ -27,7 +27,7 @@ Preview ready
     <article class="card surface-pattern">
       <div class="card-head">
         <h3 class="subtitle">Tunnels</h3>
-        <p class="body">A permanent address for a service. Use your own domain if you like; we handle the certificates.</p>
+        <p class="body">A permanent address for a service. Use your own domain. We handle the certificates.</p>
       </div>
       <pre class="out"><span class="dollar">$</span> pb tunnel create api --port 8080
 Created tunnel api (tunnel_4kq81zc2)
@@ -43,8 +43,7 @@ Status: ready</pre>
       <div>
         <h3 class="extra-title">Send files between machines.</h3>
         <p class="body">
-          Run <code>pb send ./report.pdf --to homelab</code>, or drop a file into a machine’s Inbox from the
-          console.
+          Run <code>pb send ./report.pdf --to homelab</code>, or drop a file into a machine’s Inbox in the console.
         </p>
       </div>
     </div>
@@ -53,7 +52,7 @@ Status: ready</pre>
       <div>
         <h3 class="extra-title">Run your own edge.</h3>
         <p class="body">
-          Serve previews and tunnels from your own server, on your own domain.
+          Serve previews and tunnels from your own server and domain.
         </p>
         <a class="more" href="/#selfhost">Set one up <span aria-hidden="true">→</span></a>
       </div>

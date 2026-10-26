@@ -37,7 +37,7 @@ export const plans = [
     publications: "100",
     browserTerminals: "10",
     nativeTerminals: "Unlimited",
-    detail: "Everything one person needs, on your own machines.",
+    detail: "Everything one person needs.",
   },
   {
     name: "Pro",
@@ -48,7 +48,7 @@ export const plans = [
     publications: "1,000",
     browserTerminals: "100",
     nativeTerminals: "Unlimited",
-    detail: "Everything in Free, with 20 times the bandwidth. Add 100 GB any time.",
+    detail: "Free, with 20 times the bandwidth. Add 100 GB any time.",
   },
   {
     name: "Team",
@@ -59,13 +59,13 @@ export const plans = [
     publications: "Unlimited",
     browserTerminals: "Unlimited",
     nativeTerminals: "Unlimited",
-    detail: "Members, and lasting access to each other’s machines. 14-day free trial.",
+    detail: "Members and lasting access to each other’s machines. 14-day free trial.",
   },
 ] as const
 
 /** The Team plan's trial, said once wherever it is mentioned. */
 export const teamTrial =
-  "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."
+  "Team starts with a 14-day trial. We take your card at the start and bill on day 15. We remind you 3 days before. Cancelling during the trial is free."
 
 /** The mark: a paper boat on a 10 × 6 cell grid, 60 units per cell (brand guidelines 02). */
 export const boatPath =
