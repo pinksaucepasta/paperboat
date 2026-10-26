@@ -80,14 +80,17 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  ) probes) probe ON true
  WHERE t.account_id=$1 AND t.id=ANY($2::text[]) GROUP BY t.id
  ), updated AS (
- UPDATE tunnels t SET summary_code=CASE WHEN h.code='expired' THEN t.summary_code ELSE h.code END,
- summary_transitioned_at=CASE WHEN h.code<>'expired' AND t.summary_code<>h.code THEN $3 ELSE t.summary_transitioned_at END
- FROM health h WHERE t.id=h.id RETURNING t.id,h.code AS summary_code,t.desired_state
+ -- Edges report every few seconds; only a changed summary is written. Pending operations are settled from the
+ -- projected health below, whether or not the summary changed.
+ UPDATE tunnels t SET summary_code=h.code,summary_transitioned_at=$3
+ FROM health h WHERE t.id=h.id AND h.code<>'expired' AND t.summary_code IS DISTINCT FROM h.code RETURNING t.id
+ ), projected AS (
+ SELECT t.id,h.code AS summary_code,t.desired_state FROM tunnels t JOIN health h ON h.id=t.id
  )
  UPDATE operations o SET state=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'succeeded' END,
  phase=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'ready' END,progress=100,retrying=false,next_retry_at=NULL,
  error_code=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'tunnel_expired' ELSE NULL END,completed_at=$3,updated_at=$3
- FROM updated t WHERE o.account_id=$1 AND o.resource_kind='tunnel' AND o.resource_id=t.id
+ FROM projected t WHERE o.account_id=$1 AND o.resource_kind='tunnel' AND o.resource_id=t.id
  AND o.state IN ('pending','running') AND (
  (t.summary_code IN ('ready','expired','origin_unreachable') AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END

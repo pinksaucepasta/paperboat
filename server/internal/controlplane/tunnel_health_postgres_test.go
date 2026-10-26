@@ -84,6 +84,25 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert("ready", "succeeded")
+	// Edges report every few seconds: an unchanged summary leaves the tunnel row untouched (PLAN 3b idle writes),
+	// and an operation started after the tunnel was already ready still completes.
+	var steady, after string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT xmin::text FROM paperboat.tunnels WHERE id=$1`, f.tunnelID).Scan(&steady); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO paperboat.operations(id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id) VALUES($1,$2,$1,decode(repeat('00',32),'hex'),'tunnel.patch','tunnel',$3,'connecting','running',40,'changed',$1)`, "op_patch_"+f.suffix, f.accountID, f.tunnelID)
+	for range 3 {
+		if err := tunnelv1.RefreshHealth(ctx, database.Pool(), f.accountID, []string{f.tunnelID}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.SQL().QueryRowContext(ctx, `SELECT xmin::text FROM paperboat.tunnels WHERE id=$1`, f.tunnelID).Scan(&after); err != nil || after != steady {
+		t.Fatalf("3 unchanged health refreshes rewrote the tunnel (xmin %s -> %s, err %v)", steady, after, err)
+	}
+	var patchState string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.operations WHERE id=$1`, "op_patch_"+f.suffix).Scan(&patchState); err != nil || patchState != "succeeded" {
+		t.Fatalf("an operation started while ready = %s, %v; want succeeded", patchState, err)
+	}
 	exec(`DELETE FROM paperboat.tunnel_edge_route_assignments WHERE assignment_id='assignment_second_'||$1::text`, f.suffix)
 
 	// The host reports its local app: unreachable holds the tunnel in origin_unreachable (the create
