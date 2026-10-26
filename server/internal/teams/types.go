@@ -4,6 +4,7 @@ package teams
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 )
@@ -25,6 +26,18 @@ var (
 const MaximumMembers = 128
 const MaximumInvitations = 128
 const MaximumResources = 128
+
+// LimitError is ErrLimit with the count a client names: Used of Limit active team entries,
+// refused while adding one of Kind.
+type LimitError struct {
+	Kind        string
+	Used, Limit int
+}
+
+func (e *LimitError) Error() string {
+	return fmt.Sprintf("team capacity reached: %d of %d active entries", e.Used, e.Limit)
+}
+func (e *LimitError) Unwrap() error { return ErrLimit }
 
 // MaximumOperationReceipts bounds exact stored-result/digest reconciliation to 4096 operations
 // per account. Older requests still cannot repeat effects: team generations,

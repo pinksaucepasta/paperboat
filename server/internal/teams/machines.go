@@ -335,7 +335,7 @@ func bindMachineTx(ctx context.Context, tx *db.Tx, team, machine, owner string) 
 		return err
 	}
 	if !exists && count >= MaximumResources {
-		return ErrLimit
+		return &LimitError{Kind: "machine", Used: count, Limit: MaximumResources}
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'machine',$2,$3,true,1) ON CONFLICT(team_id,resource_kind,resource_id) DO UPDATE SET active=true,generation=team_resource_bindings.generation+1`, team, machine, owner)
 	return err

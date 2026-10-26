@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -143,7 +145,12 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 			case expectedHTTPErrorOnly(err, teams.ErrSeatRequired):
 				writeError(w, r, http.StatusConflict, "seat_required", teams.ErrSeatRequired.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrLimit):
-				writeError(w, r, http.StatusConflict, "team_limit", "Team capacity reached. Remove unused entries before retrying.")
+				var limit *teams.LimitError
+				if errors.As(err, &limit) {
+					writeErrorDetails(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("Team capacity reached (%d of %d active entries). Remove an unused %s or entry before retrying.", limit.Used, limit.Limit, limit.Kind), map[string]any{"kind": limit.Kind, "used": limit.Used, "limit": limit.Limit})
+				} else {
+					writeError(w, r, http.StatusConflict, "team_limit", "Team capacity reached. Remove unused entries before retrying.")
+				}
 			case err != nil:
 				writeError(w, r, http.StatusInternalServerError, "internal_error", "Team operation could not be confirmed. Retry the same operation to reconcile its result.", err)
 			default:
