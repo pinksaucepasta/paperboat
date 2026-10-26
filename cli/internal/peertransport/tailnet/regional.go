@@ -52,6 +52,7 @@ type RegionalNode struct {
 
 // SelfHosted reports whether the account runs this relay itself. A node that does not say is managed.
 func (n RegionalNode) SelfHosted() bool { return n.Hosting == "self_hosted" }
+
 type RegionalCandidates struct {
 	STUNServers             []string       `json:"stun_servers,omitempty"`
 	Schema                  string         `json:"schema"`

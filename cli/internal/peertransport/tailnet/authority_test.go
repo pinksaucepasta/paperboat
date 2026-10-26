@@ -1235,3 +1235,32 @@ func TestPeerEntriesMayCarryCandidateEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// The signed endpoints reach the engine as the peer's direct contact, keyed by its WireGuard key with its
+// disco key; a peer without endpoints has no contact and still needs a relay.
+func TestSignedEndpointsBecomeDirectContacts(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].Endpoints = []string{"192.168.1.20:41641"}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	contacts := a.peerContactsLocked()
+	a.mu.Unlock()
+	peer, _ := publicKey(cfg.Peers[0].Identity.WireGuardPublicKey)
+	contact, ok := contacts[peer]
+	if !ok || len(contacts) != 1 || contact.Disco.IsZero() || len(contact.Endpoints) != 1 || contact.Endpoints[0].String() != "192.168.1.20:41641" {
+		t.Fatalf("contacts %+v", contacts)
+	}
+	if !a.PeerHasEndpoints(cfg.Peers[0].Identity.EndpointID) || a.PeerHasEndpoints("machine_unknown") {
+		t.Fatal("PeerHasEndpoints does not follow the signed configuration")
+	}
+	cfg.Generation++
+	cfg.Peers[0].Endpoints = nil
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if a.PeerHasEndpoints(cfg.Peers[0].Identity.EndpointID) {
+		t.Fatal("a peer whose endpoints were withdrawn still counts as directly reachable")
+	}
+}

@@ -36,6 +36,44 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 	return peers, admitted
 }
 
+// peerContactsLocked is each peer's direct contact from the signed configuration: its disco key and the
+// endpoints the server delivered (PLAN 3b "Direct paths without a relay"). Peers without endpoints have none.
+func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
+	contacts := make(map[key.NodePublic]mesh.PeerContact)
+	for _, p := range a.current.Peers {
+		if len(p.Endpoints) == 0 {
+			continue
+		}
+		pub, err := publicKey(p.Identity.WireGuardPublicKey)
+		disco, discoErr := derpquic.ParseDiscoKey(p.Identity.DiscoPublicKey)
+		if err != nil || discoErr != nil || disco.IsZero() {
+			continue
+		}
+		endpoints := make([]netip.AddrPort, 0, len(p.Endpoints))
+		for _, raw := range p.Endpoints {
+			endpoints = append(endpoints, netip.MustParseAddrPort(raw)) // validated with the configuration
+		}
+		contacts[pub] = mesh.PeerContact{Disco: disco, Endpoints: endpoints}
+	}
+	return contacts
+}
+
+// PeerHasEndpoints reports whether the signed configuration gives endpointID's own addresses, so a native
+// dial can reach it directly when no relay is usable.
+func (a *Authority) PeerHasEndpoints(endpointID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.current == nil {
+		return false
+	}
+	for _, p := range a.current.Peers {
+		if p.Identity.EndpointID == endpointID {
+			return len(p.Endpoints) > 0
+		}
+	}
+	return false
+}
+
 // PeerPath reports the selected WireGuard underlay only for a currently
 // authorized peer. It returns unknown while the peer is idle or changing paths.
 func (a *Authority) PeerPath(endpointID string) (string, error) {
@@ -87,9 +125,13 @@ func (a *Authority) replaceLocked() error {
 			a.clients[id] = lease
 		}
 	}
+	contacts := a.peerContactsLocked()
 	if a.clientEngine != nil {
 		peers, _ := a.peersLocked()
 		if err := a.clientEngine.ReplaceAllowedPeers(peers); err != nil {
+			return err
+		}
+		if err := a.clientEngine.SetPeerContacts(contacts); err != nil {
 			return err
 		}
 	}
@@ -126,6 +168,9 @@ func (a *Authority) replaceLocked() error {
 	}
 	a.server.mu.Unlock()
 	if err := a.server.server.ReplaceAllowedPeers(peers); err != nil {
+		return err
+	}
+	if err := a.server.server.SetPeerContacts(contacts); err != nil {
 		return err
 	}
 	for _, p := range removed {

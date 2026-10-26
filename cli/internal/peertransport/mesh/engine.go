@@ -50,7 +50,10 @@ type Server struct {
 	Key                    key.NodePrivate
 	LocalAddr              netip.Addr
 	AllowedPeers           map[key.NodePublic]netip.Addr
-	Logf                   logger.Logf
+	// PeerContacts are the allowed peers' direct contacts from the signed configuration, applied at Start
+	// (SetPeerContacts replaces them later).
+	PeerContacts map[key.NodePublic]PeerContact
+	Logf         logger.Logf
 	// Region is an explicitly supplied bootstrap relay. Nil permits direct-only startup.
 	Region *tailcfg.DERPRegion
 	// OnUDP dispatches local datagram flows. Nil rejects all new inbound flows,
@@ -225,6 +228,9 @@ func (s *Server) Start() error {
 		lb.Close()
 		return err
 	}
+	if len(s.PeerContacts) > 0 {
+		return s.SetPeerContacts(s.PeerContacts)
+	}
 	return nil
 }
 
@@ -287,6 +293,19 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 	if !s.lb.onMeow(peer, disco) {
 		return errors.New("mesh: peer is not admitted")
 	}
+	// A peer whose endpoints the signed configuration gives is reached directly: the WireGuard handshake
+	// goes to those addresses at once, relay or not. The relay handshake still runs, bounded, for a peer
+	// that does not know our endpoints yet.
+	if s.lb.directContact(peer) {
+		s.meowInBackground(peer)
+		s.pingDirect(ctx, peer)
+		return nil
+	}
+	return s.awaitMeow(ctx, peer)
+}
+
+// awaitMeow sends the meow handshake over the peer's relay region until the peer acknowledges it.
+func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 	s.peerReadyMu.Lock()
 	if s.peerReady == nil {
 		s.peerReady = make(map[key.NodePublic]chan struct{})

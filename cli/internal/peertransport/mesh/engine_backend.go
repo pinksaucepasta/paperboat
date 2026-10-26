@@ -51,8 +51,10 @@ type locoBackend struct {
 	stunServers            []string
 	logf                   logger.Logf
 	allowedPeers           map[key.NodePublic]netip.Addr
-	policyMu               sync.Mutex // serializes policy replacement through machine synchronization
-	nextClientID           tailcfg.NodeID
+	// contacts are the allowed peers' direct contacts from the signed configuration (peer_contacts.go).
+	contacts     map[key.NodePublic]PeerContact
+	policyMu     sync.Mutex // serializes policy replacement through machine synchronization
+	nextClientID tailcfg.NodeID
 
 	// discoPublic returns the node's disco public key, memoized to
 	// avoid redoing the curve25519 derivation for every client that
@@ -396,29 +398,18 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 		return false
 	}
 
-	if _, ok := b.clients[src]; ok {
+	if n, ok := b.clients[src]; ok {
+		// A node made from the signed contact before any meow carries the configured disco key; the meow
+		// carries the live one.
+		if n.DiscoKey != discoPub {
+			updated := n.Clone()
+			updated.DiscoKey = discoPub
+			b.setClientLocked(src, updated)
+			b.updateServerMapLocked()
+		}
 		return true
 	}
-	if b.nextClientID < 2 {
-		b.nextClientID = 2
-	}
-	id := b.nextClientID
-	b.nextClientID++
-	addr := b.allowedPeers[src]
-	derpRegion := b.derpRegionIDLocked()
-	b.setClientLocked(src, &tailcfg.Node{
-		ID:         tailcfg.NodeID(id),
-		StableID:   tailcfg.StableNodeID(fmt.Sprint(id)),
-		Name:       fmt.Sprintf("peer%d.paperboat.", id),
-		User:       100,
-		Key:        src,
-		DiscoKey:   discoPub,
-		Addresses:  []netip.Prefix{pfxOf(addr)},
-		AllowedIPs: []netip.Prefix{pfxOf(addr)},
-		HomeDERP:   derpRegion,
-		Cap:        tailcfg.CurrentCapabilityVersion,
-	})
-
+	b.addClientLocked(src, discoPub, b.allowedPeers[src])
 	b.updateServerMapLocked()
 
 	// No engine reconfig needed: the WireGuard machine learns about the
