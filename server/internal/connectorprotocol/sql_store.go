@@ -459,6 +459,31 @@ LIMIT 1`, tunnelID).Scan(&generation, &storedHash, &payload); err != nil {
 	return result, err
 }
 
+func (s *SQLControlStore) SnapshotVersion(ctx context.Context, tunnelID string) (uint64, string, error) {
+	if ctx == nil || s.valid() != nil || wire.ValidateIdentifier(tunnelID) != nil {
+		return 0, "", wire.ErrInvalidInput
+	}
+	var generation int64
+	var hash []byte
+	err := s.DB.SQL().QueryRowContext(ctx, `
+SELECT g.generation, g.content_hash
+FROM paperboat.tunnel_config_generations AS g
+JOIN paperboat.tunnels AS t ON t.id = g.tunnel_id
+WHERE g.tunnel_id = $1 AND t.deleted_at IS NULL
+ORDER BY g.generation DESC
+LIMIT 1`, tunnelID).Scan(&generation, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", ErrConfigNotFound
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	if generation <= 0 || len(hash) != sha256.Size {
+		return 0, "", ErrConfigHashCorrupt
+	}
+	return uint64(generation), "sha256:" + hex.EncodeToString(hash), nil
+}
+
 func (s *SQLControlStore) CreateConnectorSession(ctx context.Context, ref wire.SessionRef, lease wire.Lease, credentialGeneration uint64) error {
 	return s.createConnectorSession(ctx, ref, lease, credentialGeneration, wire.ProtocolVersion, nil)
 }

@@ -208,6 +208,29 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 		bound = next
 		serving = next
 	}
+	// A heartbeat on an unchanged generation reads no snapshot payload and gets no snapshot (F21-22).
+	store.snapshotMu.Lock()
+	readsBefore := store.snapshotReads
+	store.snapshotMu.Unlock()
+	steady := wire.Heartbeat{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, LastAppliedGeneration: serving.Generation, LastAppliedHash: serving.ContentHash, SentAt: now.Add(10 * time.Second)}
+	frame, _ = wire.NewFrame(wire.MessageHeartbeat, "heartbeat_transport_steady", steady)
+	if err = wire.WriteFrame(clientSide, frame); err != nil {
+		t.Fatal(err)
+	}
+	if steadyAck, err := wire.ReadFrame(clientSide); err != nil || steadyAck.Type != wire.MessageHeartbeatAck {
+		t.Fatalf("steady heartbeat ack=%+v err=%v", steadyAck, err)
+	}
+	_ = clientSide.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if extra, err := wire.ReadFrame(clientSide); err == nil {
+		t.Fatalf("an unchanged generation sent %s", extra.Type)
+	}
+	_ = clientSide.SetReadDeadline(time.Time{})
+	store.snapshotMu.Lock()
+	readsAfter := store.snapshotReads
+	store.snapshotMu.Unlock()
+	if readsAfter != readsBefore {
+		t.Fatalf("a heartbeat on an unchanged generation read the snapshot payload %d times", readsAfter-readsBefore)
+	}
 	disconnect := wire.Disconnect{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, SessionID: welcome.SessionID, ProcessGeneration: 1, Reason: wire.ReasonProtocolClosed}
 	frame, _ = wire.NewFrame(wire.MessageDisconnect, "disconnect_transport_01", disconnect)
 	if err = wire.WriteFrame(clientSide, frame); err != nil {
@@ -216,7 +239,7 @@ func TestControlTransportPersistsReadyHeartbeatAndGenerationSafeDisconnect(t *te
 	if err = <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, ok = sessions.Lookup(auth.TunnelID, auth.ConnectorID, welcome.SessionID, 1); ok || len(store.applied) != 4 || len(store.ready) != 3 || len(store.heartbeats) != 3 || len(store.disconnect) != 1 {
+	if _, ok = sessions.Lookup(auth.TunnelID, auth.ConnectorID, welcome.SessionID, 1); ok || len(store.applied) != 4 || len(store.ready) != 3 || len(store.heartbeats) != 4 || len(store.disconnect) != 1 {
 		t.Fatalf("active=%t applied=%d ready=%d heartbeats=%d disconnects=%d", ok, len(store.applied), len(store.ready), len(store.heartbeats), len(store.disconnect))
 	}
 	if _, ok = dispatcher.session(auth.ConnectorID); ok {

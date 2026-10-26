@@ -439,8 +439,17 @@ func (t *ControlTransport) Serve(ctx context.Context, stream io.ReadWriteCloser,
 			}
 			// The existing heartbeat cadence drives desired configuration;
 			// long-lived paused sessions must receive resume without reconnect.
+			// A heartbeat reads only the newest generation and hash; the payload is read and parsed only
+			// when the generation advanced (F21-22).
 			fetchCtx, cancel := context.WithTimeout(ctx, wire.DefaultAbortTimeout)
-			desired, fetchErr := t.server.store.Snapshot(fetchCtx, hello.TunnelID)
+			generation, hash, fetchErr := t.server.store.SnapshotVersion(fetchCtx, hello.TunnelID)
+			var desired wire.Snapshot
+			if fetchErr == nil {
+				desired = wire.Snapshot{TunnelID: hello.TunnelID, Generation: generation, ContentHash: hash}
+				if generation > lastOffered.Generation {
+					desired, fetchErr = t.server.store.Snapshot(fetchCtx, hello.TunnelID)
+				}
+			}
 			cancel()
 			if fetchErr != nil {
 				return finish(classifyControlError(fetchErr), fetchErr)

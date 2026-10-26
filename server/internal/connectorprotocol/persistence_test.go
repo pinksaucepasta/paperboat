@@ -16,6 +16,7 @@ type persistenceStoreStub struct {
 	snapshotMu            sync.Mutex
 	authResult            wire.AuthResult
 	snapshot              wire.Snapshot
+	snapshotReads         int
 	created               []wire.SessionRef
 	applied               []wire.Ack
 	ready                 []wire.Readiness
@@ -52,7 +53,13 @@ func (s *persistenceStoreStub) RenewConnector(context.Context, wire.RenewalReque
 func (s *persistenceStoreStub) Snapshot(context.Context, string) (wire.Snapshot, error) {
 	s.snapshotMu.Lock()
 	defer s.snapshotMu.Unlock()
+	s.snapshotReads++
 	return s.snapshot, nil
+}
+func (s *persistenceStoreStub) SnapshotVersion(context.Context, string) (uint64, string, error) {
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+	return s.snapshot.Generation, s.snapshot.ContentHash, nil
 }
 func (s *persistenceStoreStub) CreateConnectorSession(_ context.Context, ref wire.SessionRef, _ wire.Lease, _ uint64) error {
 	s.created = append(s.created, ref)

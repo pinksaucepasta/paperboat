@@ -25,6 +25,9 @@ type PersistentControlStore interface {
 	AuthenticateConnector(context.Context, wire.AuthRequest) (wire.AuthResult, error)
 	RenewConnector(context.Context, wire.RenewalRequest) (wire.AuthResult, error)
 	Snapshot(context.Context, string) (wire.Snapshot, error)
+	// SnapshotVersion is the newest snapshot's generation and content hash, without its payload: what a
+	// heartbeat compares (F21-22).
+	SnapshotVersion(context.Context, string) (uint64, string, error)
 	CreateConnectorSession(context.Context, wire.SessionRef, wire.Lease, uint64) error
 	RecordApplied(context.Context, wire.SessionRef, wire.Ack) error
 	RecordReady(context.Context, wire.SessionRef, wire.Readiness) error
