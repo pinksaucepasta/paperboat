@@ -226,11 +226,21 @@ export function useTerminalConnection({
 
   // The machine sizes the shell to the typing window that was last active; focusing counts, typing
   // does on its own. Viewers have no say.
+  // The machine only knows a window's size once it has been told, and a window it knows nothing about
+  // can never become the one the size follows: offer ours after every attach and before focus.
+  const offerSize = useCallback(() => {
+    const browser = apiRef.current
+    const terminal = terminalRef.current
+    if (!browser || !terminal || !connectionIDRef.current || phaseRef.current !== "attached" || roleRef.current === "viewer") return
+    void browser.resize(connectionIDRef.current, terminal.cols, terminal.rows).catch(() => undefined)
+  }, [])
+
   const markActive = useCallback(() => {
     const browser = apiRef.current
     if (!browser || !connectionIDRef.current || phaseRef.current !== "attached" || roleRef.current === "viewer") return
+    offerSize()
     void browser.activity(connectionIDRef.current).catch(() => undefined)
-  }, [])
+  }, [offerSize])
 
   const writeTerminal = useCallback((data: Uint8Array | string) => {
     terminalRef.current?.write(data)
@@ -736,7 +746,9 @@ export function useTerminalConnection({
           return
         }
         requestAnimationFrame(() => {
-          if (connectionIDRef.current === connectionID && roleRef.current !== "viewer") fitRef.current?.()
+          if (connectionIDRef.current !== connectionID || roleRef.current === "viewer") return
+          fitRef.current?.()
+          offerSize()
         })
         return
       }
@@ -781,6 +793,7 @@ export function useTerminalConnection({
       acknowledge,
       dropConnection,
       scheduleReconnect,
+      offerSize,
       setPhaseValue,
       syncInputLock,
       writeTerminal,
