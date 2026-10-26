@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -203,8 +204,16 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		configured := make(map[string]string, len(cfg.Peers))
 		for _, peer := range cfg.Peers {
-			scopes, _ := json.Marshal(peer.Scopes)
-			configured[peer.Identity.WireGuardPublicKey] = string(scopes)
+			// Relays and the mint refuse peer scopes without expiry: a configured until-revoked scope (expires_at 0,
+			// F21-01) appears in a grant with the grant's own expiry. Everything else must match exactly.
+			scopes := slices.Clone(peer.Scopes)
+			for i := range scopes {
+				if scopes[i].ExpiresAt == 0 {
+					scopes[i].ExpiresAt = g.ExpiresAt
+				}
+			}
+			encoded, _ := json.Marshal(scopes)
+			configured[peer.Identity.WireGuardPublicKey] = string(encoded)
 		}
 		seenPeer := make(map[string]bool, len(g.Peers)+len(earlier.Peers))
 		if chunk {
