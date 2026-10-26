@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -167,6 +168,14 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 			}
 			switch result.frame.Type {
 			case "heartbeat":
+				// A probe (a client checking its connection on resume, with its own deadline) gets the
+				// same heartbeat back at once, ahead of queued output. Other heartbeats, including a
+				// client's echo of ours, need no answer.
+				if strings.HasPrefix(result.frame.RequestID, "probe_") {
+					if err := writer.write(protocol.Frame{Type: "heartbeat", RequestID: result.frame.RequestID, Version: protocol.ProtocolVersion}); err != nil {
+						return err
+					}
+				}
 				continue
 			case "ack", "detach":
 				s.handleControl(result.frame, writer, authorizer)

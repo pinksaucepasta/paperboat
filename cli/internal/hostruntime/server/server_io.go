@@ -41,10 +41,14 @@ func readFrames(reader Connection, results chan<- readResult, done <-chan struct
 	}
 }
 
+// lockedWriter serialises one connection's writes. Control frames (input results, heartbeats,
+// responses, events) always go before queued terminal output, so a flood never delays the
+// answer to a keystroke, a heartbeat or a probe. Output keeps its own order.
 type lockedWriter struct {
 	writer     io.Writer
 	connection Connection
 	requests   chan writerRequest
+	output     chan writerRequest
 	stop       chan struct{}
 	done       chan struct{}
 	startOnce  sync.Once
@@ -65,6 +69,7 @@ func newLockedWriter(connection Connection) *lockedWriter {
 func (w *lockedWriter) start() {
 	w.startOnce.Do(func() {
 		w.requests = make(chan writerRequest, 256)
+		w.output = make(chan writerRequest, 256)
 		w.stop = make(chan struct{})
 		w.done = make(chan struct{})
 		go w.run()
@@ -74,24 +79,30 @@ func (w *lockedWriter) start() {
 func (w *lockedWriter) run() {
 	defer close(w.done)
 	for {
+		var request writerRequest
 		select {
-		case request := <-w.requests:
-			err := request.write()
-			request.result <- err
-			if err != nil {
+		case request = <-w.requests:
+		default:
+			select {
+			case request = <-w.requests:
+			case request = <-w.output:
+			case <-w.stop:
 				return
 			}
-		case <-w.stop:
+		}
+		err := request.write()
+		request.result <- err
+		if err != nil {
 			return
 		}
 	}
 }
 
-func (w *lockedWriter) enqueue(write func() error) error {
+func (w *lockedWriter) enqueue(queue func(*lockedWriter) chan writerRequest, write func() error) error {
 	w.start()
 	request := writerRequest{write: write, result: make(chan error, 1)}
 	select {
-	case w.requests <- request:
+	case queue(w) <- request:
 	case <-w.done:
 		return io.ErrClosedPipe
 	}
@@ -109,8 +120,11 @@ func (w *lockedWriter) close() {
 	<-w.done
 }
 
+func controlQueue(w *lockedWriter) chan writerRequest { return w.requests }
+func outputQueue(w *lockedWriter) chan writerRequest  { return w.output }
+
 func (w *lockedWriter) write(frame protocol.Frame) error {
-	return w.enqueue(func() error {
+	return w.enqueue(controlQueue, func() error {
 		if connection, ok := w.connection.(FramedConnection); ok {
 			return connection.WriteStructured(frame)
 		}
@@ -119,7 +133,7 @@ func (w *lockedWriter) write(frame protocol.Frame) error {
 }
 
 func (w *lockedWriter) writeTerminalOutput(streamID uint32, frame protocol.BinaryFrame) error {
-	return w.enqueue(func() error {
+	return w.enqueue(outputQueue, func() error {
 		if connection, ok := w.connection.(ApplicationConnection); ok {
 			return connection.WriteTerminalOutput(streamID, frame)
 		}

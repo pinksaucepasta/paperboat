@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -664,5 +665,110 @@ func TestTerminalCreationErrorEnvelopeRetainsBoundedPlatformErrno(t *testing.T) 
 		} else if envelope.Details["errno"] != float64(number) {
 			t.Fatalf("platform errno %d lost in wire envelope", number)
 		}
+	}
+}
+
+type gatedWriter struct {
+	mu      sync.Mutex
+	writes  [][]byte
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	first := len(w.writes) == 0
+	w.writes = append(w.writes, append([]byte(nil), p...))
+	w.mu.Unlock()
+	if first {
+		close(w.entered)
+		<-w.gate
+	}
+	return len(p), nil
+}
+
+// A flood must never delay the answer to a keystroke, heartbeat or probe: control frames go before
+// terminal output already waiting for the same connection, and output keeps its own order.
+func TestControlFramesGoBeforeQueuedTerminalOutput(t *testing.T) {
+	out := &gatedWriter{entered: make(chan struct{}), gate: make(chan struct{})}
+	writer := &lockedWriter{writer: out}
+	defer writer.close()
+	errs := make(chan error, 3)
+	go func() {
+		errs <- writer.writeTerminalOutput(1, protocol.BinaryFrame{Channel: 1, Data: []byte("first-output")})
+	}()
+	<-out.entered // the first output write is in progress and holds the connection
+	go func() {
+		errs <- writer.writeTerminalOutput(1, protocol.BinaryFrame{Channel: 1, Data: []byte("second-output")})
+	}()
+	time.Sleep(50 * time.Millisecond) // the second output is queued
+	go func() {
+		errs <- writer.write(protocol.Frame{Type: "heartbeat", RequestID: "probe_1", Version: protocol.ProtocolVersion})
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(out.gate)
+	for range 3 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	out.mu.Lock()
+	defer out.mu.Unlock()
+	var order []string
+	for _, record := range out.writes {
+		switch {
+		case bytes.Contains(record, []byte("first-output")):
+			order = append(order, "first")
+		case bytes.Contains(record, []byte("probe_1")):
+			order = append(order, "probe")
+		case bytes.Contains(record, []byte("second-output")):
+			order = append(order, "second")
+		}
+	}
+	if strings.Join(order, ",") != "first,probe,second" {
+		t.Fatalf("write order %v: the probe answer must not wait behind queued output", order)
+	}
+}
+
+// A client resuming (tab shown, laptop awake) checks its connection with a probe and its own short
+// deadline; the host answers a probe at once, and leaves ordinary heartbeats unanswered.
+func TestServeAnswersAProbeHeartbeat(t *testing.T) {
+	journal, err := operation.NewJournal(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Journal:    journal,
+		Authorizer: authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
+			return Authorization{JournalBinding: "probe-test"}, nil
+		}),
+		Handler: handlerFunc(func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+			return operation.Outcome{}
+		}),
+		MaxConcurrent:     1,
+		HeartbeatInterval: time.Hour,
+		MutationDeadline:  time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, peer := net.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(peer) }()
+	defer func() { _ = client.Close(); <-done }()
+	hello(t, client)
+	for _, id := range []string{"heartbeat", "probe_7"} {
+		if err := protocol.WriteFrame(client, protocol.Frame{Type: "heartbeat", RequestID: id, Version: protocol.ProtocolVersion}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	frame, err := protocol.ReadFrame(client)
+	if err != nil {
+		t.Fatalf("no answer to the probe: %v", err)
+	}
+	if frame.Type != "heartbeat" || frame.RequestID != "probe_7" {
+		t.Fatalf("first frame after the probe = %s %q, want the probe's heartbeat (and none for the plain heartbeat)", frame.Type, frame.RequestID)
 	}
 }
