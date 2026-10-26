@@ -2,6 +2,7 @@ package managedssh
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -86,8 +87,11 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 	if _, err := ResolveUsername("", "", "", "local", true); !errors.Is(err, ErrSSHUsernameMissing) {
 		t.Fatalf("registered-user absence error = %v", err)
 	}
-	if got, err := ResolveUsername("root", "", "deploy", "local", true); err != nil || got != "root" {
-		t.Fatalf("explicit user override = %q, %v", got, err)
+	// F5-11: managed keys live only in the registered user's authorized_keys, so another user is refused
+	// up front, naming the one that works.
+	var notAllowed *UsernameNotAllowedError
+	if _, err := ResolveUsername("root", "", "deploy", "local", true); !errors.Is(err, ErrSSHUsernameNotAllowed) || !errors.As(err, &notAllowed) || notAllowed.Registered != "deploy" || !strings.Contains(err.Error(), `"deploy"`) {
+		t.Fatalf("another user than the registered one = %v", err)
 	}
 	for _, value := range []string{"-oProxyCommand=x", "user@host", "bad user", "bad;user", "bad\nuser", ""} {
 		_, err := ResolveUsername(value, "", "", "", false)
@@ -120,8 +124,8 @@ func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
 	if err != nil || got != "Pujan" {
 		t.Fatalf("ResolveUsernameForPlatform() = %q, %v", got, err)
 	}
-	if got, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); err != nil || got != "pujan" {
-		t.Fatalf("Linux explicit override = %q, %v", got, err)
+	if _, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); !errors.Is(err, ErrSSHUsernameNotAllowed) {
+		t.Fatalf("Linux user names are case-sensitive: %v", err)
 	}
 }
 

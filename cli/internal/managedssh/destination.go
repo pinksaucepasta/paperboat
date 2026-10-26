@@ -2,6 +2,7 @@ package managedssh
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -141,8 +142,22 @@ func ResolveUsernameForPlatform(requested, openSSH, registered, local string, ha
 	if hasRegistered && equal(selected, registered) {
 		return registered, nil
 	}
+	if hasRegistered {
+		// Managed keys live only in the registered user's authorized_keys: refuse here, naming that
+		// user, instead of letting sshd answer "Permission denied (publickey)" (F5-11).
+		return "", &UsernameNotAllowedError{Requested: selected, Registered: registered}
+	}
 	return selected, nil
 }
+
+// UsernameNotAllowedError is a request to sign in as a user other than the machine's registered one.
+type UsernameNotAllowedError struct{ Requested, Registered string }
+
+func (e *UsernameNotAllowedError) Error() string {
+	return fmt.Sprintf("Paperboat SSH signs in to this machine as %q, not %q: leave the user out or use %s@<machine>", e.Registered, e.Requested, e.Registered)
+}
+
+func (e *UsernameNotAllowedError) Is(target error) bool { return target == ErrSSHUsernameNotAllowed }
 
 func ValidateDestinationPort(value string, registered uint16) (uint16, error) {
 	port, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
