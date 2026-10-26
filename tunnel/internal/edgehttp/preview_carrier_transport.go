@@ -489,7 +489,9 @@ func newerDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {
 	if next.EdgeProcessEpoch != old.EdgeProcessEpoch || next.Identity.ProcessGeneration < old.Identity.ProcessGeneration || next.Identity.Generation < old.Identity.Generation {
 		return false
 	}
-	if next.Identity.ProcessGeneration == old.Identity.ProcessGeneration && next.Identity.SessionID != old.Identity.SessionID {
+	// A host restart keeps the worker generation but opens a new session; the server fences that new
+	// attachment with a higher generation, so it replaces the old (dead, not yet closed) carrier at once.
+	if next.Identity.ProcessGeneration == old.Identity.ProcessGeneration && next.Identity.SessionID != old.Identity.SessionID && (old.AttachmentGeneration == 0 || next.AttachmentGeneration <= old.AttachmentGeneration) {
 		return false
 	}
 	return next.AttachmentGeneration > old.AttachmentGeneration || next.Identity.ProcessGeneration > old.Identity.ProcessGeneration || next.Identity.Generation > old.Identity.Generation || next.Revision > old.Revision

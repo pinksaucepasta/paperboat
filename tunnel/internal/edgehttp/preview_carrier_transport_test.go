@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
 	"net/http"
@@ -958,5 +959,39 @@ func TestDataCarrierPreviewTransportSkipsInterimContinueAndReturnsTheFinalRespon
 	_ = response.Body.Close()
 	if err != nil || response.StatusCode != http.StatusOK || string(body) != fmt.Sprintf("received %d bytes", len(payload)) {
 		t.Fatalf("status=%d body=%q err=%v, want the final 200 with the full response", response.StatusCode, body, err)
+	}
+}
+
+// A host restart keeps the worker generation but opens a new carrier session. The server's higher
+// attachment generation lets it replace the old carrier at once instead of waiting for it to close.
+func TestDataCarrierPreviewRegistryRestartedSessionReplacesTheOldCarrier(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	before := testEdgePreviewIdentity(2, 2)
+	after := before
+	after.SessionID = before.SessionID + "_restarted"
+	oldServer, oldClient := testEdgePreviewCarrierPair(t, before)
+	newServer, newClient := testEdgePreviewCarrierPair(t, after)
+	defer oldClient.Close()
+	defer oldServer.Close()
+	defer newClient.Close()
+	defer newServer.Close()
+	route := func(server *datacarrier.Server, generation uint64) DataCarrierPreviewRoute {
+		return DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: generation, Server: server}
+	}
+	if err := registry.Attach(route(oldServer, 5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Attach(route(newServer, 5)); !errors.Is(err, ErrDataCarrierPreviewRegistryStale) {
+		t.Fatalf("unfenced new session error = %v, want stale", err)
+	}
+	if err := registry.Attach(route(newServer, 6)); err != nil {
+		t.Fatalf("fenced new session refused: %v", err)
+	}
+	if got, ok := registry.Lookup("app.preview.example.test"); !ok || got.Server != newServer {
+		t.Fatalf("lookup after restart = %+v, ok=%v", got, ok)
 	}
 }
