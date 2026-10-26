@@ -77,8 +77,54 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		if console := consoleURL(details); console != "" {
 			return "Deleting an account is done in the Paperboat console: " + console
 		}
+	case "destination_update_required":
+		if message := destinationUpdateMessage(details); message != "" {
+			return message
+		}
+	case "transfer_too_large":
+		total, _ := details["total_bytes"].(float64)
+		limit, _ := details["max_bytes"].(float64)
+		if total > 0 && limit > 0 {
+			return "This transfer is " + transferBytes(int64(total)) + ". Automatic sends up to " + transferBytes(int64(limit)) + ". Send less than " + transferBytes(int64(limit)) + "."
+		}
 	}
 	return apiErrorMessage(code, status)
+}
+
+// destinationUpdateMessage renders 409 destination_update_required (PLAN 3b File transfer modes step 1): the
+// receiving machine runs a pb that cannot accept this transfer.
+func destinationUpdateMessage(details map[string]any) string {
+	alias, _ := details["machine"].(string)
+	version, _ := details["minimum_version"].(string)
+	limit, _ := details["max_bytes"].(float64)
+	if !safeDetailLabel(alias) || !safeDetailLabel(version) || limit <= 0 {
+		return ""
+	}
+	size := transferBytes(int64(limit))
+	return alias + " needs pb " + version + " or later to receive files over " + size + " (or unlimited). Update pb on " + alias + " (pb update), or send less than " + size + "."
+}
+
+// safeDetailLabel accepts a machine name or version from the server's details, never free text.
+func safeDetailLabel(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// transferBytes is a size for a person: whole MB for the binary caps (500 MB = 524,288,000 bytes), else GB.
+func transferBytes(bytes int64) string {
+	const mib = 1 << 20
+	if bytes%mib == 0 && bytes < 1<<30 {
+		return fmt.Sprintf("%d MB", bytes/mib)
+	}
+	value := fmt.Sprintf("%.1f", float64(bytes)/1e9)
+	return strings.TrimSuffix(value, ".0") + " GB"
 }
 
 // PlanLimitRefusal is the plan-limit refusal (machine_limit_reached, preview_limit_reached,
