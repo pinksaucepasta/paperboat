@@ -66,7 +66,7 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 		return nil, ErrControlInvalid
 	}
 	var result runtimewire.Snapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities}, &result, maxRuntimeCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
@@ -107,7 +107,7 @@ func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, sinc
 		}
 		var result runtimewire.Snapshot
 		request := runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities, Since: since, Page: page}
-		if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, request, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+		if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, request, &result, maxRuntimeCarrierSnapshotBytes); err != nil {
 			return EndpointUpdate{}, err
 		}
 		if result.Schema != runtimewire.Schema || result.Carriers == nil || result.Cursor == "" || len(result.Cursor) > 64 || len(result.Next) > 1024 {
@@ -170,5 +170,9 @@ func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch s
 	if len(observations) == 0 {
 		return nil
 	}
-	return c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeObservePath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Observations: observations}, nil, maxPreviewCarrierSnapshotBytes)
+	return c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeObservePath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Observations: observations}, nil, maxRuntimeCarrierSnapshotBytes)
 }
+
+// A complete snapshot may contain thousands of metadata-only admissions: bound this response
+// independently of the regular control document limit so it cannot cause an unbounded read.
+const maxRuntimeCarrierSnapshotBytes = 16 << 20

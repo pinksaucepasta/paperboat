@@ -17,19 +17,14 @@ import (
 func newCarrierComponentWithTelemetry(
 	deployment config.Deployment,
 	serverCertificate tls.Certificate,
-	previewExpected *datacarrier.ExpectedAdmissionRegistry,
 	durableExpected *datacarrier.DurableAdmissionRegistry,
 	accessorExpected *datacarrier.DurableAdmissionRegistry,
-	previewHandle edgeruntime.CarrierHandler,
 	durableRoutes *edgehttp.DataCarrierRouteRegistry,
 	privateAccess *edgehttp.PrivateAccessStreamBridge,
 	carrierTelemetry *datacarrier.CarrierTelemetry,
 	reporter *reporting.Reporter,
 	runtimeWorkers ...*edgeruntime.RuntimeCarrierWorker,
 ) (edgeruntime.Component, func() error, error) {
-	if previewExpected == nil || previewHandle == nil {
-		return nil, nil, errors.New("preview carrier admission and handler are required")
-	}
 	if durableExpected == nil && durableRoutes != nil || durableExpected != nil && durableRoutes == nil {
 		return nil, nil, errors.New("durable carrier admission and route registry are required")
 	}
@@ -49,7 +44,7 @@ func newCarrierComponentWithTelemetry(
 			return nil, nil, errors.New("runtime carrier admissions required")
 		}
 	}
-	bindings := []datacarrier.PeerBinding{previewExpected.PeerBinding}
+	var bindings []datacarrier.PeerBinding
 	if runtimeWorker != nil {
 		bindings = append(bindings, runtimeWorker.Expected.PeerBinding)
 	}
@@ -79,7 +74,7 @@ func newCarrierComponentWithTelemetry(
 	// their independent input streams and the shared output publisher stream.
 	// The listener shares this bound with the other authenticated carrier uses.
 	carrierConfig.MaximumStreams = 256
-	authorizers := []datacarrier.Authorizer{previewExpected}
+	var authorizers []datacarrier.Authorizer
 	if runtimeWorker != nil {
 		authorizers = append(authorizers, runtimeWorker.Expected)
 	}
@@ -156,13 +151,9 @@ func newCarrierComponentWithTelemetry(
 			durableRegistered = true
 			return nil
 		}
-		previewAttached := len(previewExpected.ForIdentity(identity, time.Now().UTC())) != 0
 		durableAuthorized := durableExpected != nil && durableExpected.HasIdentity(identity, time.Now().UTC())
 		accessorAttached := accessorExpected != nil && accessorExpected.HasIdentity(identity, time.Now().UTC())
-		// Preview-only carriers do not participate in the durable route
-		// lifecycle. Accessor carriers remain eligible for in-place durable
-		// promotion because one authenticated connector may legitimately own
-		// both ephemeral preview and durable routes.
+		// Accessor carriers remain eligible for in-place durable promotion.
 		durableLifecycle := durableAuthorized || accessorAttached
 		if durableLifecycle {
 			if err := syncDurable(time.Now().UTC()); err != nil {
@@ -175,7 +166,7 @@ func newCarrierComponentWithTelemetry(
 		// attach it is reported and retried; it must not close a carrier that serves the agent's
 		// runtime route and previews.
 		engineReplica := runtimeAttached && !durableLifecycle && durableExpected != nil && durableRoutes != nil
-		if !runtimeAttached && !previewAttached && !durableAuthorized && !accessorAttached {
+		if !runtimeAttached && !durableAuthorized && !accessorAttached {
 			return datacarrier.ErrDurableAdmissionMissing
 		}
 		if durableRoutes != nil {
@@ -241,10 +232,6 @@ func newCarrierComponentWithTelemetry(
 		if privateAccess != nil {
 			workers++
 			go func() { results <- privateAccess.Serve(handlerCtx, server) }()
-		}
-		if previewAttached {
-			workers++
-			go func() { results <- previewHandle(handlerCtx, server) }()
 		}
 		if workers != 0 {
 			select {

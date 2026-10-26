@@ -341,14 +341,14 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 			if ok {
 				previous := a
 				previous.ExpiresAt = next.ExpiresAt
-				if previewCarrierAdmissionEqual(previous, next) {
+				if runtimeAdmissionEqual(previous, next) {
 					if err := w.registry(next).AttachAdmission(next, server); err == nil {
 						attached[key] = next
 						continue
 					}
 				}
 			}
-			if !ok || !previewCarrierAdmissionEqual(a, next) {
+			if !ok || !runtimeAdmissionEqual(a, next) {
 				w.detachAdmission(a)
 				delete(attached, key)
 				changed = true
@@ -471,4 +471,13 @@ func (w *RuntimeCarrierWorker) Shutdown(ctx context.Context) error {
 
 func browserTerminalFence(admission datacarrier.ExpectedAdmission) edgehttp.BrowserTerminalRouteFence {
 	return edgehttp.BrowserTerminalRouteFence{Identity: admission.Identity, Revision: admission.RouteRevision, AttachmentGeneration: admission.AttachmentGeneration}
+}
+
+// runtimeAdmissionEqual compares two admissions apart from their expiry and admitted flag.
+func runtimeAdmissionEqual(left, right datacarrier.ExpectedAdmission) bool {
+	left.ExpiresAt = time.Time{}
+	right.ExpiresAt = time.Time{}
+	left.Admitted = false
+	right.Admitted = false
+	return left == right
 }

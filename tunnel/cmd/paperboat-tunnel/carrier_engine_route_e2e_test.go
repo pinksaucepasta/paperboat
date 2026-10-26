@@ -98,11 +98,6 @@ func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	previewExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: node, ProcessEpoch: epoch})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer previewExpected.Close()
 	runtimeExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: node, ProcessEpoch: epoch})
 	if err != nil {
 		t.Fatal(err)
@@ -138,8 +133,8 @@ func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
-		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), previewExpected, durable, nil,
-		func(context.Context, *datacarrier.Server) error { return nil }, routes, nil, nil, nil,
+		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durable, nil,
+		routes, nil, nil, nil,
 		&edgeruntime.RuntimeCarrierWorker{Expected: runtimeExpected, Routes: runtimeRoutes},
 	)
 	if err != nil {

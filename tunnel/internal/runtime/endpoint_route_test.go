@@ -79,7 +79,7 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	}
 	defer func() { _ = w.Shutdown(context.Background()) }()
 	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 2 })
-	server := newPreviewCarrierTestServer(t, ea.Identity)
+	server := newTestCarrierServer(t, ea.Identity)
 	go func() { _ = w.Handle(ctx, server) }()
 	readyRoutes := func() map[string]bool {
 		source.mu.Lock()
@@ -109,24 +109,6 @@ func TestEndpointRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	})
 	if err := expected.AuthorizeStream(decisionCtx, route.Identity, open); err != nil {
 		t.Fatalf("restricted endpoint browser stream refused by the runtime admission: %v (route %+v)", err, route)
-	}
-
-	// The preview carrier worker's complete snapshot does not list endpoint routes; it must keep them.
-	previews := &previewCarrierSourceFake{}
-	previewExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
-	if err != nil {
-		t.Fatal(err)
-	}
-	previewWorker, err := NewPreviewCarrierWorker(PreviewCarrierWorkerConfig{Source: previews, Expected: previewExpected, Registry: endpoints, NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = previewWorker.reconcile(ctx)
-	if err := previewWorker.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := endpoints.Lookup("bright-otter.preview.example.test"); !ok {
-		t.Fatal("preview carrier worker removed an endpoint route it does not own")
 	}
 
 	// The server withdraws the endpoint (preview stopped): the route leaves, the runtime route stays.
@@ -166,7 +148,7 @@ func TestEndpointRouteIsAdmittedByTheFastPullBetweenFullPulls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := newPreviewCarrierTestServer(t, ea.Identity)
+	server := newTestCarrierServer(t, ea.Identity)
 	go func() { _ = w.Handle(ctx, server) }()
 	waitRuntime(t, func() bool { return routes.Len() == 1 })
 	started := time.Now()

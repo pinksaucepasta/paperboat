@@ -2,18 +2,29 @@ package control
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
-	p := testPreviewCarrierAdmissionForHTTP(t, "preview", "operation", "runtime_route", "machine.runtime.example.test", time.Now().Add(time.Hour))
-	b := p.Binding
-	a := runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: b.AccountID, HostID: b.HostID, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, InstallationGeneration: 1, RouteID: b.RouteID, RouteGeneration: b.RouteGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint}, AttachmentGeneration: 1, ConfigContentHash: p.ConfigContentHash, EdgeEndpoints: p.EdgeEndpoints, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: p.ExpiresAt}
+	publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for index := range publicKey {
+		publicKey[index] = byte(index + 1)
+	}
+	digest := sha256.Sum256(publicKey)
+	trust, err := NewProcessCarrierServerTrust("edge_1", "edge_epoch_1", "edge.example.test", time.Now().UTC(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "runtime_route", RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
 	for _, scenario := range []string{"valid", "incomplete", "missing_admissions", "wrong_epoch", "wrong_kind", "wrong_key", "stale_revision", "wrong_installation"} {
 		t.Run(scenario, func(t *testing.T) {
 			value := a

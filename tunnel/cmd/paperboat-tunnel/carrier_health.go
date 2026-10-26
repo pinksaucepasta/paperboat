@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
@@ -29,4 +30,27 @@ func (c *trackedCarrierComponent) Done() <-chan error {
 		return source.Done()
 	}
 	return nil
+}
+
+// previewReadiness answers a host's route state from the endpoint registry first, then the fallback.
+type previewReadiness struct {
+	Canonical interface {
+		RouteState(string) (string, string, string, bool)
+		Lookup(string) (edgehttp.DataCarrierPreviewRoute, bool)
+	}
+	Fallback interface {
+		RouteState(string) (string, string, string, bool)
+	}
+}
+
+func (r previewReadiness) RouteState(host string) (string, string, string, bool) {
+	if r.Canonical != nil {
+		if _, ok := r.Canonical.Lookup(host); ok {
+			return r.Canonical.RouteState(host)
+		}
+	}
+	if r.Fallback != nil {
+		return r.Fallback.RouteState(host)
+	}
+	return "", "", "", false
 }

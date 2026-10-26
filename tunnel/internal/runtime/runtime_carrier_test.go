@@ -2,12 +2,16 @@ package runtime
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"net"
 	"sync"
 	"testing"
 	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
@@ -54,9 +58,16 @@ func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ strin
 }
 func runtimeAdmission(t *testing.T) runtimewire.Admission {
 	t.Helper()
-	p := testPreviewCarrierAdmission("preview", "operation", "runtime_route", "machine.runtime.example.test", time.Now().Add(time.Hour))
-	b := p.Binding
-	return runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: b.AccountID, HostID: b.HostID, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, InstallationGeneration: 1, RouteID: b.RouteID, RouteGeneration: b.RouteGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint}, AttachmentGeneration: p.AttachmentGeneration, ConfigContentHash: p.ConfigContentHash, EdgeEndpoints: p.EdgeEndpoints, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: p.ExpiresAt}
+	publicKey := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for index := range publicKey {
+		publicKey[index] = byte(index + 1)
+	}
+	digest := sha256.Sum256(publicKey)
+	trust, err := control.NewProcessCarrierServerTrust("edge_1", "edge_epoch_1", "edge.example.test", time.Now().UTC(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "runtime_route", RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
 }
 func waitRuntime(t *testing.T, f func() bool) {
 	t.Helper()
@@ -108,7 +119,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			server := newPreviewCarrierTestServer(t, ea.Identity)
+			server := newTestCarrierServer(t, ea.Identity)
 			done := make(chan error, 1)
 			go func() { done <- w.Handle(ctx, server) }()
 			waitRuntime(t, func() bool {
@@ -148,7 +159,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 				source.mu.Lock()
 				source.err = nil
 				source.mu.Unlock()
-				second := newPreviewCarrierTestServer(t, ea.Identity)
+				second := newTestCarrierServer(t, ea.Identity)
 				secondDone := make(chan error, 1)
 				go func() { secondDone <- w.Handle(ctx, second) }()
 				waitRuntime(t, func() bool { return routes.Len() == 1 })

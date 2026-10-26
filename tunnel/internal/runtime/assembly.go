@@ -23,10 +23,9 @@ type AssemblySpec struct {
 	// Certificates is the optional live server-to-edge certificate
 	// distribution worker. It owns only in-memory edge key material.
 	Certificates Component
-	// Preview reconciles server-issued preview carrier admissions and must stop
+	// Runtime reconciles the agents' runtime carrier admissions and must stop
 	// before Carrier so route detach observations can use live peer handles.
 	Runtime               Component
-	Preview               Component
 	Node                  Component
 	Routes                Component
 	PublicTCP             Component
@@ -84,7 +83,6 @@ func NewAssembly(spec AssemblySpec) (*Assembly, error) {
 		Control:         spec.Control,
 		Carrier:         spec.Carrier,
 		Certificates:    spec.Certificates,
-		Preview:         spec.Preview,
 		Runtime:         spec.Runtime,
 		Node:            spec.Node,
 		Routes:          spec.Routes,

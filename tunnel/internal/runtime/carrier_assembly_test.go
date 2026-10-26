@@ -350,7 +350,7 @@ func TestCarrierAssemblyPeerFailureRetainsAcceptAndFatalFailureReachesOwner(t *t
 		t.Fatal(err)
 	}
 	for range 2 {
-		service.peers <- newPreviewCarrierTestServer(t, identity)
+		service.peers <- newTestCarrierServer(t, identity)
 	}
 	select {
 	case got := <-observed:

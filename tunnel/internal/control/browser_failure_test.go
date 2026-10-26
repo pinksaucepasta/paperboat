@@ -136,11 +136,6 @@ func TestPrivateGrantTransportCauseIsPrivateAndRecovers(t *testing.T) {
 }
 
 func TestControlDocumentParserCauseDoesNotExposeInput(t *testing.T) {
-	_, err := (PreviewCarrierAdmission{Endpoint: "https://PRIVATE.invalid/%zz"}).Normalize()
-	var cause *url.Error
-	if !errors.Is(err, ErrPreviewCarrierInvalid) || !errors.As(err, &cause) || strings.Contains(err.Error(), "PRIVATE") {
-		t.Fatal("parser cause/privacy lost")
-	}
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

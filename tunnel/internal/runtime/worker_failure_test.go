@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
@@ -59,38 +60,6 @@ func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
 			t.Fatal("request cause lost")
 		}
 
-		now := time.Now().UTC()
-		p := testPreviewCarrierAdmission("preview", "operation", "route", "a.preview.example.test", now.Add(time.Hour))
-		pe, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: p.Binding.EdgeNodeID, ProcessEpoch: p.Binding.EdgeProcessEpoch})
-		if err != nil {
-			t.Fatal(err)
-		}
-		pr, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: p.Binding.EdgeProcessEpoch})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer pr.Close()
-		cause := &os.PathError{Op: "open", Path: "PRIVATE_FILENAME", Err: syscall.EACCES}
-		ps := &previewCarrierSourceFake{snapshots: [][]control.PreviewCarrierAdmission{{p}}, ackError: cause}
-		pw, err := NewPreviewCarrierWorker(PreviewCarrierWorkerConfig{Reporter: reporter, Source: ps, Expected: pe, Registry: pr, NodeID: p.Binding.EdgeNodeID, ProcessEpoch: p.Binding.EdgeProcessEpoch, Clock: func() time.Time { return now }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := pw.reconcile(ctx); !errors.Is(err, syscall.EACCES) {
-			t.Fatal("preview ACK cause lost")
-		}
-		for _, a := range pe.Snapshot() {
-			if a.Admitted {
-				t.Fatal("failed ACK admitted authority")
-			}
-		}
-		ps.ackError = nil
-		if err := pw.reconcile(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if values := pe.Snapshot(); len(values) != 1 || !values[0].Admitted {
-			t.Fatal("preview recovery did not admit authority")
-		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -114,15 +83,12 @@ func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
 		}
 		faults = append(faults, f)
 	}
-	if len(faults) != 2 {
-		t.Fatalf("faults=%d, want exactly two semantic failures", len(faults))
+	if len(faults) != 1 {
+		t.Fatalf("faults=%d, want exactly one semantic failure", len(faults))
 	}
-	for i, code := range []string{"runtime_admission_failed", "preview_admission_failed"} {
+	for i, code := range []string{"runtime_admission_failed"} {
 		if faults[i].Code != code || faults[i].SupportReference != reference || faults[i].CorrelationID != reference || faults[i].SourceFile == "" {
 			t.Fatalf("fault %d lost safe contract: %+v", i, faults[i])
 		}
-	}
-	if faults[1].Cause != "permission_denied" || faults[1].Errno != int(syscall.EACCES) {
-		t.Fatal("preview cause projection lost")
 	}
 }

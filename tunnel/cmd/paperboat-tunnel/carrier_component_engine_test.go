@@ -59,11 +59,6 @@ func TestRuntimeCarrierBecomesTheReplicaOfItsEngineTunnelRoutes(t *testing.T) {
 		return r
 	}
 	durableExpected := registry()
-	previewExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: edgeNodeID, ProcessEpoch: edgeProcess})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer previewExpected.Close()
 	runtimeExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: edgeNodeID, ProcessEpoch: edgeProcess})
 	if err != nil {
 		t.Fatal(err)
@@ -91,12 +86,11 @@ func TestRuntimeCarrierBecomesTheReplicaOfItsEngineTunnelRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer routes.Close()
-	previewHandle := func(context.Context, *datacarrier.Server) error { return nil }
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
-		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), previewExpected, durableExpected, nil,
-		previewHandle, routes, nil, nil, nil, worker,
+		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durableExpected, nil,
+		routes, nil, nil, nil, worker,
 	)
 	if err != nil {
 		t.Fatal(err)
