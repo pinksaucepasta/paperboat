@@ -10,7 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type LoginClient interface {

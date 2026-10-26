@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const contentType = "application/offset+octet-stream"

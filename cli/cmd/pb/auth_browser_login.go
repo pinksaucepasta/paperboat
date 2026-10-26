@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var authCredentialStoreAvailable = config.CredentialStoreAvailable

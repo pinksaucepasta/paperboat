@@ -10,7 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
 )
 

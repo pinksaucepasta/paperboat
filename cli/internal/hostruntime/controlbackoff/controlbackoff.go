@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const (

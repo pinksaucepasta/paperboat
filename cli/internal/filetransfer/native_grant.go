@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // NativeGrant couples one freshly authorized resource credential to its

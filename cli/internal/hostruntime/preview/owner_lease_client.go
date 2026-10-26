@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const ownerSessionLeaseResponseLimit = 16 << 10

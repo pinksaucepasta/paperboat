@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // TestRenewalWorksOnAMachineTenMinutesBehind: the server's clock is 10 minutes ahead and accepts a

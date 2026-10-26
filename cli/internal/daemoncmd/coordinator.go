@@ -18,8 +18,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type Coordinator struct {

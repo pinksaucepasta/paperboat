@@ -7,7 +7,7 @@ import (
 	"net/url"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type ConfigComparisonDescriptor struct {

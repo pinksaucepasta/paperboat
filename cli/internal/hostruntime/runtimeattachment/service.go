@@ -32,8 +32,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const path = "/v1/runtime/carrier-attachment"

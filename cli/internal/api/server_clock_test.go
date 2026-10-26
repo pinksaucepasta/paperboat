@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // A machine whose clock runs 10 minutes ahead of the server: the server's answer teaches this process

@@ -12,8 +12,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/serverclock"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var ErrMachineNotFound = errors.New("machine not found")
