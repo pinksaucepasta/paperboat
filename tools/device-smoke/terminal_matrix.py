@@ -297,6 +297,8 @@ def fast_output(a, sessions):
         c1.pending.clear()
         c1.send('yes\r')
         time.sleep(3)
+        # The hardest case at once: the flood, a 256 KiB paste in flight and a stalled viewer (c2).
+        c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
         # The tty discards input typed before the interrupt lands, so wait for yes to stop
         # (output goes quiet) before typing the next command.
@@ -321,6 +323,34 @@ def fast_output(a, sessions):
     finally:
         c1.close()
         c2.close()
+
+
+def keystrokes(a, sessions):
+    """No reconnect while typing: 2 000 single keystrokes, each its own write, cause no stream
+    reopen (the daemon logs peer_stream_opened per stream) and the shell answers right after."""
+    import glob
+
+    def opens():
+        files = glob.glob(str(Path.home() / '.local/state/paperboat/diagnostics/events-*.ndjson'))
+        return sum(open(f).read().count('peer_stream_opened') for f in files)
+
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name)
+    try:
+        c1.send('cat > /dev/null\r')
+        time.sleep(1)
+        before = opens()
+        for _ in range(2000):
+            c1.send('x')
+            time.sleep(0.01)
+        c1.send('\r\x04')
+        t0 = time.monotonic()
+        c1.run_discarding('true', 60)
+        reopened = opens() - before
+        row('N11 2 000 keystrokes: no stream reopen', reopened == 0, f'{reopened} reopens')
+        row('N11 the shell answers right after typing', time.monotonic() - t0 < 2, f'{time.monotonic() - t0:.1f} s')
+    finally:
+        c1.close()
 
 
 def resize_storm(a, sessions):
@@ -453,7 +483,7 @@ def shared(a, sessions):
 
 ROWS = {'two': two_clients, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
         'server': control_plane_down, 'fast': fast_output, 'resize': resize_storm,
-        'paste': large_paste, 'many': many_sessions, 'shared': shared}
+        'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'shared': shared}
 
 
 def main():
