@@ -67,11 +67,13 @@ VALUES($1,$2,$3,'hb-'||$4,'linux','amd64','/w','offline','occupied',false)`, mac
 
 	heartbeat(idle, 1) // offline to online: a real change
 	online := read()
-	for range 5 {
+	// F21-19: 1,000 unchanged observations write no row.
+	const unchanged = 1000
+	for range unchanged {
 		heartbeat(idle, 1)
 	}
 	if after := read(); after.xmin != online.xmin {
-		t.Fatalf("5 unchanged heartbeats rewrote the machine row (xmin %s -> %s)", online.xmin, after.xmin)
+		t.Fatalf("%d unchanged heartbeats rewrote the machine row (xmin %s -> %s)", unchanged, online.xmin, after.xmin)
 	}
 
 	heartbeat(idle, 2) // a new worker generation is a real diagnostics change
