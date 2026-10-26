@@ -49,8 +49,13 @@ func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordin
 	} else if !installNotExistOnly(err) {
 		return err
 	}
-	return pruneUnixSessionOwnerPins(ctx, root, keep, coordinator.Catalog.Maximum+2)
+	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(coordinator.Catalog))
 }
+
+// pinSweepBound is how many pin directories one sweep reads: every
+// session-owner reference, one stable carrier, and one unreferenced candidate,
+// so repeated sweeps make bounded progress.
+func pinSweepBound(c sessionowner.Catalog) int { return c.Maximum + 2 }
 
 // Open each ancestor without following links and validate privileged custody.
 // All subsequent deletion uses directory descriptors, never recursive paths.
@@ -86,7 +91,7 @@ func openProtectedPinDirectory(path string) (int, error) {
 }
 
 func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string]bool, maximum int) (resultErr error) {
-	if ctx == nil || maximum < 2 || maximum > 258 {
+	if ctx == nil || maximum < 2 || maximum > pinSweepBound(sessionowner.Catalog{Maximum: sessionowner.MaxCatalogEntries}) {
 		return ErrInvalidRequest
 	}
 	fd, err := openProtectedPinDirectory(root)
@@ -98,8 +103,6 @@ func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string
 	}
 	directory := os.NewFile(uintptr(fd), root)
 	defer func() { resultErr = errors.Join(resultErr, directory.Close()) }()
-	// The bound includes all session-owner references, one stable carrier, and
-	// one unreferenced candidate, so repeated sweeps make bounded progress.
 	entries, err := directory.ReadDir(maximum)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err

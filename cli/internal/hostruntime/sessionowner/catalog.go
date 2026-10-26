@@ -16,6 +16,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
+// MaxCatalogEntries is the ceiling of Catalog.Maximum: the configured session
+// limit's own ceiling (256) plus one active generation.
+const MaxCatalogEntries = 257
+
 // Catalog is the privileged per-account descriptor and native-service owner.
 // Maximum reuses the configured session limit plus one active generation.
 type Catalog struct {
@@ -31,7 +35,7 @@ func Find(root, generation string) (string, error) {
 	return filepath.Join(root, generation+".json"), nil
 }
 func (c Catalog) validate() error {
-	if !absolute(c.Root) || !absolute(c.ConfigRoot) || c.Maximum < 1 || c.Maximum > 257 || c.User == "" || c.Group == "" {
+	if !absolute(c.Root) || !absolute(c.ConfigRoot) || c.Maximum < 1 || c.Maximum > MaxCatalogEntries || c.User == "" || c.Group == "" {
 		return ErrInvalid
 	}
 	return nil

@@ -12,6 +12,26 @@ import (
 	"testing"
 )
 
+// Since the terminal ceiling became 256 (b9ebbc8d), the installed catalogue's Maximum is 257 and the
+// pin sweep's bound 259, which the sweep refused as an invalid request. The updater's reconcile pass
+// builds its coordinator through that sweep, so every pass failed before retiring anything: on lanec-gate
+// twelve idle session owners from rounds 15 to 30 stayed running on their old binaries.
+func TestSessionOwnerPinSweepAcceptsTheInstalledCatalogueBound(t *testing.T) {
+	catalog, _, err := sessionOwnerCatalog(Request{UID: 1000, GID: 1000, User: "pbt", Group: "pbt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A missing pin root under a root-owned parent: the sweep validates its bound, then finds nothing to do.
+	nonce := sha256.Sum256([]byte(t.Name() + t.TempDir()))
+	missing := filepath.Join("/var/lib", "paperboat-pin-sweep-missing-"+hex.EncodeToString(nonce[:8]))
+	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)); err != nil {
+		t.Fatalf("sweep with the installed catalogue's bound %d: %v", pinSweepBound(catalog), err)
+	}
+	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)+1); err == nil {
+		t.Fatal("sweep accepted a bound above the catalogue ceiling")
+	}
+}
+
 func TestSessionOwnerPinPrunePreservesReferencesAndUntrustedFiles(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires protected root-owned pin fixture")
