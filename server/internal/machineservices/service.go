@@ -43,6 +43,17 @@ type Service struct {
 	LocalAccessBaseDomain string
 	DB                    *sql.DB
 	Now                   func() time.Time
+	// Lease is how long a stored snapshot stays valid without a new report (the server sets the machine
+	// offline cutoff, so a snapshot ends with the machine's presence). An unchanged report renews it only once
+	// less than half is left. Zero means SnapshotLifetime.
+	Lease time.Duration
+}
+
+func (s *Service) lease() time.Duration {
+	if s.Lease > 0 {
+		return s.Lease
+	}
+	return SnapshotLifetime
 }
 
 // serviceCleanupFailure keeps an operation failure and its transaction/row
@@ -259,11 +270,17 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 	if e != nil {
 		return p, e
 	}
+	// Every machine-services poll and snapshot projects the policy; only a changed policy is written (and bumps
+	// the generation), an unchanged one is read back.
 	e = tx.QueryRowContext(ctx, `INSERT INTO paperboat.machine_service_discovery_policies(machine_id,generation,automatic_discovery_enabled,explicit_ports) VALUES($1,1,$2,$3)
  ON CONFLICT(machine_id) DO UPDATE SET
- generation=machine_service_discovery_policies.generation+CASE WHEN machine_service_discovery_policies.automatic_discovery_enabled IS DISTINCT FROM EXCLUDED.automatic_discovery_enabled OR machine_service_discovery_policies.explicit_ports IS DISTINCT FROM EXCLUDED.explicit_ports THEN 1 ELSE 0 END,
+ generation=machine_service_discovery_policies.generation+1,
  automatic_discovery_enabled=EXCLUDED.automatic_discovery_enabled,explicit_ports=EXCLUDED.explicit_ports
+ WHERE machine_service_discovery_policies.automatic_discovery_enabled IS DISTINCT FROM EXCLUDED.automatic_discovery_enabled OR machine_service_discovery_policies.explicit_ports IS DISTINCT FROM EXCLUDED.explicit_ports
  RETURNING generation`, machine, p.AutomaticDiscoveryEnabled, encoded).Scan(&p.Generation)
+	if errors.Is(e, sql.ErrNoRows) {
+		e = tx.QueryRowContext(ctx, `SELECT generation FROM paperboat.machine_service_discovery_policies WHERE machine_id=$1`, machine).Scan(&p.Generation)
+	}
 	if e != nil {
 		return p, e
 	}
@@ -274,9 +291,10 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 	if observedAt.IsZero() || observedAt.After(now.Add(5*time.Second)) || !observedAt.Add(SnapshotLifetime).After(now) {
 		return wire.ErrInvalid
 	}
-	expiry := observedAt.Add(SnapshotLifetime)
-	if expiry.After(now.Add(SnapshotLifetime)) {
-		expiry = now.Add(SnapshotLifetime)
+	lease := s.lease()
+	expiry := observedAt.Add(lease)
+	if expiry.After(now.Add(lease)) {
+		expiry = now.Add(lease)
 	}
 	if e := wire.ValidateSnapshot(in, now); e != nil {
 		return e
@@ -305,7 +323,7 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 	result, e := tx.ExecContext(ctx, `INSERT INTO paperboat.machine_service_snapshots(machine_id,installation_generation,boot_id,started_at,generation,services,expires_at,updated_at)
  SELECT id,$3,$4,$5,$6,$7,$8,$9 FROM paperboat.user_machines WHERE id=$1 AND environment_id=$2 AND installation_generation=$3 AND revoked_at IS NULL AND deleted_at IS NULL
  ON CONFLICT(machine_id) DO UPDATE SET installation_generation=EXCLUDED.installation_generation,boot_id=EXCLUDED.boot_id,started_at=EXCLUDED.started_at,generation=EXCLUDED.generation,services=EXCLUDED.services,expires_at=EXCLUDED.expires_at,updated_at=EXCLUDED.updated_at
- WHERE EXCLUDED.installation_generation>machine_service_snapshots.installation_generation OR (EXCLUDED.installation_generation=machine_service_snapshots.installation_generation AND ((EXCLUDED.boot_id=machine_service_snapshots.boot_id AND EXCLUDED.started_at=machine_service_snapshots.started_at AND (EXCLUDED.generation>machine_service_snapshots.generation OR (EXCLUDED.generation=machine_service_snapshots.generation AND EXCLUDED.services=machine_service_snapshots.services AND EXCLUDED.expires_at>=machine_service_snapshots.expires_at))) OR (EXCLUDED.boot_id<>machine_service_snapshots.boot_id AND EXCLUDED.started_at>machine_service_snapshots.started_at)))`, machine, environment, in.InstallationGeneration, in.BootID, in.StartedAt, in.Generation, data, expiry, now)
+ WHERE EXCLUDED.installation_generation>machine_service_snapshots.installation_generation OR (EXCLUDED.installation_generation=machine_service_snapshots.installation_generation AND ((EXCLUDED.boot_id=machine_service_snapshots.boot_id AND EXCLUDED.started_at=machine_service_snapshots.started_at AND (EXCLUDED.generation>machine_service_snapshots.generation OR (EXCLUDED.generation=machine_service_snapshots.generation AND EXCLUDED.services=machine_service_snapshots.services AND EXCLUDED.expires_at>=machine_service_snapshots.expires_at AND machine_service_snapshots.expires_at<$10))) OR (EXCLUDED.boot_id<>machine_service_snapshots.boot_id AND EXCLUDED.started_at>machine_service_snapshots.started_at)))`, machine, environment, in.InstallationGeneration, in.BootID, in.StartedAt, in.Generation, data, expiry, now, now.Add(lease/2))
 	if e != nil {
 		return fmt.Errorf("record machine services: %w", e)
 	}
@@ -314,7 +332,18 @@ func (s *Service) RecordMachineServices(ctx context.Context, environment, machin
 		return e
 	}
 	if n == 0 {
-		return ErrConflict
+		// An unchanged report while more than half the stored lease is left writes nothing; anything else that
+		// was not written is a stale generation or boot.
+		var fresh bool
+		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.machine_service_snapshots s JOIN paperboat.user_machines m ON m.id=s.machine_id
+ WHERE s.machine_id=$1 AND m.environment_id=$8 AND m.installation_generation=$2 AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+ AND s.installation_generation=$2 AND s.boot_id=$3 AND s.started_at=$4 AND s.generation=$5 AND s.services=$6 AND s.expires_at>=$7)`, machine, in.InstallationGeneration, in.BootID, in.StartedAt, in.Generation, data, now.Add(lease/2), environment).Scan(&fresh); e != nil {
+			return e
+		}
+		if !fresh {
+			return ErrConflict
+		}
+		return tx.Commit()
 	}
 	// A family replacement changes the exact browser target and therefore its
 	// policy generation; explicit port policies retain their selected address.

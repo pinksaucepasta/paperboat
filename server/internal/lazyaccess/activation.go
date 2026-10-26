@@ -113,6 +113,17 @@ func validRuntimeBoot(boot string) bool {
 type Activator struct {
 	DB     *db.DB
 	Leases *previewv1.Service
+	// OwnerLease is how long a runtime owner stays valid without a new observation (the server sets the
+	// machine offline cutoff). An unchanged observation renews it only once less than half is left. Zero
+	// means 30 s.
+	OwnerLease time.Duration
+}
+
+func (s *Activator) ownerLease() time.Duration {
+	if s.OwnerLease > 0 {
+		return s.OwnerLease
+	}
+	return 30 * time.Second
 }
 
 // RecordLazyRuntimeObservation is called only for a signed machine observation.
@@ -122,14 +133,26 @@ func (s *Activator) RecordLazyRuntimeObservation(ctx context.Context, environmen
 	if r.Schema != "paperboat.lazy-runtime/v1" || !validRuntimeBoot(r.BootID) || r.InstallationGeneration < 1 || r.StartedAt.IsZero() || r.StartedAt.After(now.Add(5*time.Second)) {
 		return ErrInvalid
 	}
+	lease := s.ownerLease()
 	result, err := s.DB.Pool().Exec(ctx, `INSERT INTO lazy_runtime_owners(machine_id,account_id,installation_generation,boot_id,started_at,expires_at)
  SELECT id,user_id,installation_generation,$4,$5,$6 FROM user_machines WHERE id=$1 AND environment_id=$2 AND installation_generation=$3 AND revoked_at IS NULL AND deleted_at IS NULL AND seat_state='occupied' AND state NOT IN ('pending','revoked','deleted')
  ON CONFLICT(machine_id) DO UPDATE SET account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,boot_id=EXCLUDED.boot_id,started_at=EXCLUDED.started_at,expires_at=EXCLUDED.expires_at
- WHERE lazy_runtime_owners.installation_generation<EXCLUDED.installation_generation OR (lazy_runtime_owners.installation_generation=EXCLUDED.installation_generation AND ((lazy_runtime_owners.boot_id=EXCLUDED.boot_id AND lazy_runtime_owners.started_at=EXCLUDED.started_at) OR (lazy_runtime_owners.boot_id<>EXCLUDED.boot_id AND lazy_runtime_owners.started_at<EXCLUDED.started_at)))`, machine, environment, r.InstallationGeneration, r.BootID, r.StartedAt, now.Add(30*time.Second))
+ WHERE lazy_runtime_owners.installation_generation<EXCLUDED.installation_generation OR (lazy_runtime_owners.installation_generation=EXCLUDED.installation_generation AND ((lazy_runtime_owners.boot_id=EXCLUDED.boot_id AND lazy_runtime_owners.started_at=EXCLUDED.started_at AND (lazy_runtime_owners.account_id<>EXCLUDED.account_id OR lazy_runtime_owners.expires_at<$7)) OR (lazy_runtime_owners.boot_id<>EXCLUDED.boot_id AND lazy_runtime_owners.started_at<EXCLUDED.started_at)))`, machine, environment, r.InstallationGeneration, r.BootID, r.StartedAt, now.Add(lease), now.Add(lease/2))
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() != 1 {
+	if result.RowsAffected() == 1 {
+		return nil
+	}
+	// The same runtime while more than half its lease is left writes nothing; anything else not written is a
+	// stale installation or boot.
+	var fresh bool
+	if err := s.DB.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM lazy_runtime_owners o JOIN user_machines m ON m.id=o.machine_id AND m.user_id=o.account_id
+ WHERE o.machine_id=$1 AND m.environment_id=$2 AND m.installation_generation=$3 AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.seat_state='occupied' AND m.state NOT IN ('pending','revoked','deleted')
+ AND o.installation_generation=$3 AND o.boot_id=$4 AND o.started_at=$5 AND o.expires_at>=$6)`, machine, environment, r.InstallationGeneration, r.BootID, r.StartedAt, now.Add(lease/2)).Scan(&fresh); err != nil {
+		return err
+	}
+	if !fresh {
 		return ErrConflict
 	}
 	return nil

@@ -613,7 +613,7 @@ func New(opts Options) (*App, error) {
 		previewAttachmentHandler.SetAddressPublisher(previewAddressPublisher)
 		previewLeaseService.ConfigureAddressPublisher(previewAddressPublisher)
 	}
-	lazyActivator := &lazyaccess.Activator{DB: store, Leases: previewLeaseService}
+	lazyActivator := &lazyaccess.Activator{DB: store, Leases: previewLeaseService, OwnerLease: opts.Config.UserMachines.OfflineAfter}
 	inspectorHandlers := &httpapi.InspectorHandlers{Access: inspectaccess.NewService(store), Machine: previewAttachmentMachineVerifier}
 	var browserAccessHandlers *httpapi.BrowserAccessHandlers
 	var previewEdgeAttachmentHandler http.Handler
@@ -735,6 +735,7 @@ func New(opts Options) (*App, error) {
 		}
 	}
 	machineServices := machineservices.New(store, opts.Config.LocalAccessBaseDomain)
+	machineServices.Lease = opts.Config.UserMachines.OfflineAfter
 	supportStore, err := supportreport.NewSQLStore(store)
 	if err != nil {
 		_ = store.Close()
