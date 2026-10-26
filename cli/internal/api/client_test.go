@@ -96,11 +96,20 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 // connection. The client asks for a native-only descriptor and accepts one without edge endpoints;
 // half an edge endpoint pair is still refused.
 func TestOperationDescriptorAcceptsNativeOnlyAnswers(t *testing.T) {
-	for name, endpoints := range map[string]TerminalEndpoints{"native only": {}, "edge": {QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, "half an edge pair": {WSS: "wss://machine.test/v1/runtime"}} {
+	// "path ingress" is what a path-based edge ingress produces (staging): a wss endpoint under a prefix, no QUIC.
+	refused := map[string]bool{"half an edge pair": true, "quic without wss": true, "path ingress with quic": true, "wss not the runtime": true}
+	for name, endpoints := range map[string]TerminalEndpoints{
+		"native only": {}, "edge": {QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"},
+		"path ingress":           {WSS: "wss://192.168.31.149/v1/runtime/machine-abc.192.168.31.149/v1/runtime"},
+		"half an edge pair":      {WSS: "wss://machine.test/v1/runtime"},
+		"quic without wss":       {QUIC: "quic://machine.test:443"},
+		"path ingress with quic": {QUIC: "quic://machine.test:443", WSS: "wss://machine.test/prefix/v1/runtime"},
+		"wss not the runtime":    {WSS: "wss://machine.test/prefix/other"},
+	} {
 		expiresAt := time.Now().Add(time.Minute)
 		descriptor := ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: endpoints, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt}
 		err := validateOperationDescriptor(descriptor, "um_1", "operation_exec_1", "exec:operate", "exec")
-		if (err == nil) != (name != "half an edge pair") {
+		if (err == nil) == refused[name] {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

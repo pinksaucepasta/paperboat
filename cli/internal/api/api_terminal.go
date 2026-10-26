@@ -317,15 +317,22 @@ type operationDescriptorRequest struct {
 	NativeOnlyAccepted bool   `json:"native_only_accepted"`
 }
 
-// validEdgeEndpoints reports whether e is either empty (a native-only descriptor) or both edge endpoints.
+// validEdgeEndpoints reports whether e is what the server sends: nothing (a native-only descriptor), both edge
+// endpoints, or only a wss endpoint when the edge ingress has a path prefix (path-based ingress carries no QUIC
+// endpoint, server machineTerminalEndpoints). Half a pair on a root-path ingress is refused.
 func validEdgeEndpoints(e TerminalEndpoints) bool {
 	if e.QUIC == "" && e.WSS == "" {
 		return true
 	}
-	quic, quicErr := url.Parse(e.QUIC)
 	wss, wssErr := url.Parse(e.WSS)
-	return quicErr == nil && quic.Scheme == "quic" && quic.Hostname() != "" && quic.User == nil && quic.Path == "" && quic.RawQuery == "" && quic.Fragment == "" &&
-		wssErr == nil && wss.Scheme == "wss" && wss.Hostname() != "" && wss.User == nil && wss.Path == "/v1/runtime" && wss.RawQuery == "" && wss.Fragment == ""
+	if wssErr != nil || wss.Scheme != "wss" || wss.Hostname() == "" || wss.User != nil || wss.RawQuery != "" || wss.Fragment != "" || !strings.HasSuffix(wss.Path, "/v1/runtime") {
+		return false
+	}
+	if e.QUIC == "" {
+		return wss.Path != "/v1/runtime"
+	}
+	quic, quicErr := url.Parse(e.QUIC)
+	return quicErr == nil && quic.Scheme == "quic" && quic.Hostname() != "" && quic.User == nil && quic.Path == "" && quic.RawQuery == "" && quic.Fragment == "" && wss.Path == "/v1/runtime"
 }
 
 func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, expectedScope, operationKind string) error {
