@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"net"
 	"net/url"
@@ -1035,4 +1036,15 @@ func validEndpointBaseDomain(raw string) bool {
 		}
 	}
 	return true
+}
+
+// Published is the file transfer policy as clients receive it (descriptor and signed connector
+// admission). Its shape is what released pb validates: change it only with PLAN 3b's rollout
+// (tools/compat checks it against the oldest supported official release).
+func (p FileTransferPolicy) Published() mint.FileTransferPolicy {
+	return mint.FileTransferPolicy{
+		Revision: p.Revision, MaxFileBytes: p.MaxFileBytes, MaxBatchFiles: p.MaxBatchFiles, MaxBatchBytes: p.MaxBatchBytes,
+		MaxConcurrentTransfers: p.MaxConcurrentTransfers, RetentionSeconds: int64(p.Retention / time.Second),
+		DeliveryTimeoutSeconds: int64(p.DeliveryTimeout / time.Second), MaxPendingSpoolBytes: p.MaxPendingSpoolBytes,
+	}
 }

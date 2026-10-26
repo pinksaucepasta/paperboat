@@ -804,7 +804,9 @@ func peersHaveDiscoKeys(peers []networkPeer) bool {
 	return true
 }
 
-type regionalNode struct {
+// RegionalNode is one relay in the signed regional candidate set. Claims is the one place its
+// signed shape is built; released pb decodes it strictly (tools/compat checks the oldest one).
+type RegionalNode struct {
 	NodeID, ProcessEpoch, Region, FailureDomain string
 	NodeGeneration                              int64
 	Roles, Transports                           []string
@@ -813,7 +815,22 @@ type regionalNode struct {
 	State                                       string
 	ObservedAt, ExpiresAt, CapacityObservedAt   int64
 	CapacityLimit, CapacityUsed                 int64
-	DrainDeadline                               *int64 `json:",omitempty"`
+	DrainDeadline                               *int64
+	TLSPin                                      []byte
+}
+
+func (n RegionalNode) Claims() (map[string]any, error) {
+	m := map[string]any{"node_id": n.NodeID, "node_generation": n.NodeGeneration, "process_epoch": n.ProcessEpoch, "region": n.Region, "failure_domain": n.FailureDomain, "roles": n.Roles, "transports": n.Transports, "endpoint_host": n.EndpointHost, "endpoint_tcp_port": n.EndpointTCPPort, "endpoint_quic_port": n.EndpointQUICPort, "state": n.State, "observed_at": n.ObservedAt, "expires_at": n.ExpiresAt, "capacity_limit": n.CapacityLimit, "capacity_used": n.CapacityUsed, "capacity_observed_at": n.CapacityObservedAt}
+	if len(n.TLSPin) > 0 {
+		if len(n.TLSPin) != sha256.Size {
+			return nil, ErrUnavailable
+		}
+		m["tls_spki_sha256"] = base64.RawURLEncoding.EncodeToString(n.TLSPin)
+	}
+	if n.DrainDeadline != nil {
+		m["drain_deadline"] = *n.DrainDeadline
+	}
+	return m, nil
 }
 
 func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, accountID, endpointID string, generation int64, now, authorityExpiry time.Time) (string, error) {
@@ -824,12 +841,11 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 	defer rows.Close()
 	nodes := make([]map[string]any, 0, 32)
 	for rows.Next() {
-		var n regionalNode
+		var n RegionalNode
 		var roles, transports []byte
 		var observed, expires, capacityAt time.Time
 		var drain sql.NullTime
-		var tlsPin []byte
-		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &n.EndpointTCPPort, &n.EndpointQUICPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &tlsPin); err != nil {
+		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &n.EndpointTCPPort, &n.EndpointQUICPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &n.TLSPin); err != nil {
 			return "", err
 		}
 		if err := json.Unmarshal(roles, &n.Roles); err != nil {
@@ -842,16 +858,14 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 			return "", ErrResourceLimit
 		}
 		n.ObservedAt, n.ExpiresAt, n.CapacityObservedAt = observed.Unix(), expires.Unix(), capacityAt.Unix()
-		m := map[string]any{"node_id": n.NodeID, "node_generation": n.NodeGeneration, "process_epoch": n.ProcessEpoch, "region": n.Region, "failure_domain": n.FailureDomain, "roles": n.Roles, "transports": n.Transports, "endpoint_host": n.EndpointHost, "endpoint_tcp_port": n.EndpointTCPPort, "endpoint_quic_port": n.EndpointQUICPort, "state": n.State, "observed_at": n.ObservedAt, "expires_at": n.ExpiresAt, "capacity_limit": n.CapacityLimit, "capacity_used": n.CapacityUsed, "capacity_observed_at": n.CapacityObservedAt}
-		if len(tlsPin) > 0 {
-			if len(tlsPin) != sha256.Size {
-				slog.Warn("peer network authority unavailable", "site", "network.go:743")
-				return "", ErrUnavailable
-			}
-			m["tls_spki_sha256"] = base64.RawURLEncoding.EncodeToString(tlsPin)
-		}
 		if drain.Valid {
-			m["drain_deadline"] = drain.Time.Unix()
+			deadline := drain.Time.Unix()
+			n.DrainDeadline = &deadline
+		}
+		m, err := n.Claims()
+		if err != nil {
+			slog.Warn("peer network authority unavailable", "site", "network.go:743")
+			return "", err
 		}
 		nodes = append(nodes, m)
 	}
@@ -862,7 +876,12 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 	if authorityExpiry.Before(expires) {
 		expires = authorityExpiry
 	}
-	return s.signRegionalCandidates(map[string]any{"schema": "paperboat.regional-candidates.v1", "iss": s.issuer, "aud": "paperboat-regional-candidates", "account_id": accountID, "endpoint_id": endpointID, "authorization_generation": generation, "generation": generation, "iat": now.Unix(), "exp": expires.Unix(), "nodes": nodes})
+	return s.signRegionalCandidates(RegionalCandidateSet(s.issuer, accountID, endpointID, generation, now, expires, nodes))
+}
+
+// RegionalCandidateSet is the signed regional candidate set's claims (nodes from RegionalNode.Claims).
+func RegionalCandidateSet(issuer, accountID, endpointID string, generation int64, now, expires time.Time, nodes []map[string]any) map[string]any {
+	return map[string]any{"schema": "paperboat.regional-candidates.v1", "iss": issuer, "aud": "paperboat-regional-candidates", "account_id": accountID, "endpoint_id": endpointID, "authorization_generation": generation, "generation": generation, "iat": now.Unix(), "exp": expires.Unix(), "nodes": nodes}
 }
 
 func (s *NetworkService) signRegionalCandidates(claims map[string]any) (string, error) {
