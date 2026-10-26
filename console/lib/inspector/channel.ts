@@ -67,6 +67,15 @@ async function issue(previewId: string, action: InspectorAction): Promise<Grant>
   )
 }
 
+/** Extend a live grant in place; the credential and its token stay the same. */
+async function renew(grant: Grant): Promise<Grant> {
+  const next = await api<{ expires_at: string }>(
+    `inspector/credentials/${encodeURIComponent(grant.credential_id)}/renew`,
+    json({ ttl_seconds: GRANT_TTL }),
+  )
+  return { ...grant, expires_at: next.expires_at }
+}
+
 function revoke(grant: Grant | undefined) {
   if (!grant) return
   void api(`inspector/credentials/${encodeURIComponent(grant.credential_id)}`, {
@@ -262,31 +271,6 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
     }
   }, [enabled])
 
-  // Grants last five minutes; swap in fresh ones a minute early and revoke the old ones.
-  useEffect(() => {
-    if (!enabled) return
-    const refresh = window.setInterval(async () => {
-      const current = grants.current
-      if (!current || Date.parse(current.inspect.expires_at) - Date.now() > 60_000) return
-      try {
-        const next = await issueGrants(previewId)
-        if (disposed.current) return [next.inspect, next.replay].forEach(revoke)
-        grants.current = next
-        setCanReplay(Boolean(next.replay))
-        revoke(current.inspect)
-        revoke(current.replay)
-      } catch (error) {
-        const final = finalPhase(error)
-        // A preview that is not routing refuses grants for now; the next start retries.
-        if (final && final !== "offline" && !(final === "denied" && !routingRef.current)) {
-          setPhase(final)
-          setMessage(error instanceof Error ? error.message : "")
-        }
-      }
-    }, 15_000)
-    return () => window.clearInterval(refresh)
-  }, [enabled, previewId])
-
   /** One daemon inspector API call over the E2E channel, with the grant for `action`. */
   /**
    * The machine refused a grant: revoked, or fenced by a policy save.
@@ -301,6 +285,32 @@ export function useInspectorChannel(previewId: string, machineId: string, enable
     grants.current = null
     retry("Access changed. Reconnecting with fresh permissions…")
   }, [retry])
+
+  // A grant is extended in place a minute before it ends (same credential, so the open channel is never closed for it).
+  // A credential that no longer renews (revoked, or its access changed) reconnects with fresh grants; a refusal there is final.
+  useEffect(() => {
+    if (!enabled) return
+    const refresh = window.setInterval(async () => {
+      const current = grants.current
+      if (!current || Date.parse(current.inspect.expires_at) - Date.now() > 60_000) return
+      try {
+        const next: Grants = { inspect: await renew(current.inspect), replay: current.replay && (await renew(current.replay)) }
+        if (!disposed.current && grants.current === current) {
+          grants.current = next
+          setCanReplay(Boolean(next.replay))
+        }
+      } catch (error) {
+        const final = finalPhase(error)
+        // A preview that is not routing refuses grants for now; the next start retries.
+        if (final === "denied" && routingRef.current) refreshAccess()
+        else if (final && final !== "offline" && final !== "denied") {
+          setPhase(final)
+          setMessage(error instanceof Error ? error.message : "")
+        }
+      }
+    }, 15_000)
+    return () => window.clearInterval(refresh)
+  }, [enabled, refreshAccess])
 
   const request = useCallback(
     async (action: InspectorAction, method: string, path: string, query?: Record<string, string>, body?: unknown) => {

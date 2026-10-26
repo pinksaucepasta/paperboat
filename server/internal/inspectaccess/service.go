@@ -450,7 +450,9 @@ func orZero(v *int64) int64 {
 // preview's machine.
 type BrowserCredential struct {
 	Decision
-	Action      string
+	// ResourceExpiresAt is when the previewed resource itself ends; no credential outlives it.
+	ResourceExpiresAt time.Time
+	Action            string
 	MachineID   string
 	WorkspaceID string
 }
@@ -502,7 +504,31 @@ func (s *Service) ResolveBrowserCredential(ctx context.Context, account, credent
 		}
 		out.Decision = Decision{AccountID: account, OwnerAccountID: owner, ResourceKind: kind, ResourceID: id, RouteID: id, ResourceGeneration: a.resourceGeneration, CredentialID: credentialID, IssuedAt: now, ExpiresAt: minTime(expiry, a.expires)}
 		out.Action = action
+		out.ResourceExpiresAt = a.expires
 		return nil
 	})
 	return out, err
+}
+
+// Renew extends a live credential's expiry to now+ttl, never past its resource, so a console channel admitted with
+// it keeps its authority without being closed and re-opened. It fails closed exactly as ResolveBrowserCredential does:
+// a revoked, expired or drifted credential (owner, generation, team grant) is not renewed.
+func (s *Service) Renew(ctx context.Context, account, credentialID string, ttl time.Duration) (time.Time, error) {
+	if ttl <= 0 || ttl > credentialTTLMax {
+		return time.Time{}, ErrInvalid
+	}
+	current, err := s.ResolveBrowserCredential(ctx, account, credentialID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	now := s.now()
+	expires := minTime(now.Add(ttl), current.ResourceExpiresAt)
+	if !expires.After(now) {
+		return time.Time{}, ErrNotAuthorized
+	}
+	// revoked_at and expires_at are re-checked here: a revoke between the resolve and this update wins.
+	if err := s.db.Pool().QueryRow(ctx, `UPDATE inspector_credentials SET expires_at=GREATEST(expires_at,$3) WHERE credential_id=$1 AND account_id=$2 AND revoked_at IS NULL AND expires_at>$4 RETURNING expires_at`, credentialID, account, expires, now).Scan(&expires); err != nil {
+		return time.Time{}, mapMissing(err)
+	}
+	return expires, nil
 }

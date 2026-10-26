@@ -167,6 +167,37 @@ func TestInspectorAuthorizationPostgres(t *testing.T) {
 		t.Fatalf("tunnel credential opened a console inspector channel: %v", err)
 	}
 
+	// Renewal keeps an open channel's credential alive in place: same ID and token, later expiry; others and the dead are refused.
+	renewable, err := issue(owner, "preview", lease, lease, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.now = func() time.Time { return now.Add(4 * time.Minute) }
+	renewed, err := svc.Renew(ctx, owner, renewable.CredentialID, 5*time.Minute)
+	if err != nil || !renewed.After(renewable.ExpiresAt) {
+		t.Fatalf("renew=%v err=%v, original expiry %v", renewed, err, renewable.ExpiresAt)
+	}
+	if _, err = svc.Renew(ctx, stranger, renewable.CredentialID, 5*time.Minute); err != ErrNotAuthorized {
+		t.Fatalf("another user renewed a credential: %v", err)
+	}
+	if _, err = svc.Renew(ctx, owner, renewable.CredentialID, time.Hour); err != ErrInvalid {
+		t.Fatalf("renewal past the credential maximum accepted: %v", err)
+	}
+	svc.now = func() time.Time { return now.Add(6 * time.Minute) }
+	if _, err = svc.ResolveBrowserCredential(ctx, owner, renewable.CredentialID); err != nil {
+		t.Fatalf("renewed credential expired at its original expiry: %v", err)
+	}
+	if _, err = svc.Renew(ctx, owner, ownerPreview.CredentialID, 5*time.Minute); err != ErrNotAuthorized {
+		t.Fatalf("an expired credential was renewed: %v", err)
+	}
+	svc.now = func() time.Time { return now }
+	if err = svc.RevokeCredential(ctx, owner, renewable.CredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Renew(ctx, owner, renewable.CredentialID, 5*time.Minute); err != ErrNotAuthorized {
+		t.Fatalf("a revoked credential was renewed: %v", err)
+	}
+
 	// Authorized teammate holds both actions on both resources.
 	matePreviewReplay, err := issue(mate, "preview", lease, lease, "replay")
 	if err != nil {

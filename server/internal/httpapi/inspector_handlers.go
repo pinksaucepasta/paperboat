@@ -58,6 +58,29 @@ func (h *InspectorHandlers) IssueCredential(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"credential_id": out.CredentialID, "token": out.Token, "expires_at": out.ExpiresAt.UTC().Format(time.RFC3339Nano)}})
 }
 
+// RenewCredential extends the caller's own live credential, so an open console inspector channel keeps its
+// authority; a revoked or drifted credential is refused and the page issues a new one.
+func (h *InspectorHandlers) RenewCredential(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	account, ok := vaultScopePrincipal(w, r)
+	if !ok {
+		return
+	}
+	limitEnvironmentJSON(w, r, 4<<10)
+	var body struct {
+		TTLSeconds int64 `json:"ttl_seconds"`
+	}
+	if !decodeStrictJSON(w, r, &body) {
+		return
+	}
+	expires, err := h.Access.Renew(r.Context(), account, r.PathValue("credential_id"), time.Duration(body.TTLSeconds)*time.Second)
+	if err != nil {
+		inspectorError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"expires_at": expires.UTC().Format(time.RFC3339Nano)}})
+}
+
 // RevokeCredential revokes one credential. The holder or the current resource
 // owner may revoke.
 func (h *InspectorHandlers) RevokeCredential(w http.ResponseWriter, r *http.Request) {

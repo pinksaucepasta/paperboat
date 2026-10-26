@@ -823,6 +823,7 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		mux.Handle("POST /v1/inspector/targets", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.Inspector.Targets)))))
 		mux.Handle("POST /v1/inspector/access", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.Inspector.ResolveAccess)))))
 		mux.Handle("POST /v1/inspector/credentials", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.Inspector.IssueCredential)))))
+		mux.Handle("POST /v1/inspector/credentials/{credential_id}/renew", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.Inspector.RenewCredential)))))
 		mux.Handle("DELETE /v1/inspector/credentials/{credential_id}", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, http.HandlerFunc(opts.Inspector.RevokeCredential)))))
 		mux.HandleFunc("POST /v1/inspector/authorize", opts.Inspector.Authorize)
 	}
