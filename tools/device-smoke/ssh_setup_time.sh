@@ -63,15 +63,19 @@ DOMAIN=
 for i in $(seq 1 60); do DOMAIN=$(grep -o 'Host \*\.[^ ]*' ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed 's/Host \*\.//'); [ -n "$DOMAIN" ] && break; sleep 2; done
 HOST=$ALIAS.$DOMAIN
 for i in $(seq 1 30); do ssh "$HOST" true </dev/null >/dev/null 2>&1 && break; sleep 2; done
-ms() { local s e; s=$(date +%s%N); "$@" </dev/null >/dev/null 2>&1 || { echo -1; return; }; e=$(date +%s%N); echo $(( (e-s)/1000000 )); }
+ms() { local s e; s=$(date +%s%N); timeout 30 "$@" </dev/null >/dev/null 2>&1 || { echo -1; return; }; e=$(date +%s%N); echo $(( (e-s)/1000000 )); }
 plain=""; pb=""
-for i in $(seq 1 7); do plain="$plain $(ms ssh "$HOST" true)"; pb="$pb $(ms "$PB" ssh "$ALIAS" -- true)"; done
+for i in $(seq 1 7); do
+  a=$(ms ssh "$HOST" true); b=$(ms "$PB" ssh "$ALIAS" -- true)
+  echo "RUN $i plain=$a pb=$b"
+  plain="$plain $a"; pb="$pb $b"
+done
 p50() { tr ' ' '\n' | grep -v '^$' | sort -n | sed -n 4p; }
 echo "RESULT plain_p50=$(echo $plain | p50) pb_p50=$(echo $pb | p50) plain=[$plain ] pb=[$pb ]"
 RUN
 ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
 res=$(ssh "$HOST" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 600 bash /home/pbt/run.sh $ALIAS" 2>&1)
-detail=$(grep -E "^(domain=|RESULT)" <<<"$res" | tr '\n' ' ')
+detail=$(grep -E "^(domain=|RESULT|RUN )" <<<"$res" | tr '\n' ' ')
 plain=$(sed -n 's/^RESULT plain_p50=\(-\?[0-9]*\) .*/\1/p' <<<"$res"); pb=$(sed -n 's/.* pb_p50=\(-\?[0-9]*\) .*/\1/p' <<<"$res")
 if [ -n "$plain" ] && [ -n "$pb" ] && [ "$plain" -ge 0 ] && [ "$pb" -ge 0 ] && [ "$plain" -lt 1000 ] && [ "$pb" -lt 1000 ] && ! grep -q -- "-1" <<<"$(grep '^RESULT' <<<"$res")"; then
   finish PASS "$detail"
