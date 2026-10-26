@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -204,13 +203,23 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		configured := make(map[string]string, len(cfg.Peers))
 		for _, peer := range cfg.Peers {
-			// Relays and the mint refuse peer scopes without expiry: a configured until-revoked scope (expires_at 0,
-			// F21-01) appears in a grant with the grant's own expiry. Everything else must match exactly.
-			scopes := slices.Clone(peer.Scopes)
-			for i := range scopes {
-				if scopes[i].ExpiresAt == 0 {
-					scopes[i].ExpiresAt = g.ExpiresAt
+			// Until-revoked scopes (expires_at 0, F21-01) differ in a grant: relays and the mint refuse peer scopes
+			// without expiry, so a machine_network scope appears with the grant's own expiry, and a session right
+			// (any other kind, which authorizes no relay pair) is left out. A peer with only session rights is not
+			// named. Everything else must match exactly.
+			var scopes []NetworkScope
+			for _, scope := range peer.Scopes {
+				switch {
+				case scope.ExpiresAt != 0:
+				case scope.ResourceKind == "machine_network":
+					scope.ExpiresAt = g.ExpiresAt
+				default:
+					continue
 				}
+				scopes = append(scopes, scope)
+			}
+			if len(scopes) == 0 {
+				continue
 			}
 			encoded, _ := json.Marshal(scopes)
 			configured[peer.Identity.WireGuardPublicKey] = string(encoded)
