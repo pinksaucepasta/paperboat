@@ -83,7 +83,7 @@ func (m *Manager) recover(ctx context.Context) error {
 				return err
 			}
 		}
-		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, persistedState: recovered, history: retained, fanout: NewFanout(), inputs: inputJournal, participants: make(map[string]Participant)}
+		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, persistedState: recovered, history: retained, fanout: NewFanout(), inputs: inputJournal, participants: make(map[string]Participant), sizes: newWindowSizes()}
 		if record.ExitCode != nil {
 			session.exit = &pty.ExitResult{Code: *record.ExitCode, Signal: record.ExitSignal}
 			if record.ExitedAt != nil {

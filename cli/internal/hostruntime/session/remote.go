@@ -7,7 +7,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"sync"
-	"time"
 )
 
 // RemoteCall is the private, authenticated terminal-owner transport.
@@ -255,17 +254,16 @@ func (m *RemoteManager) QueryInput(sessionID string, key InputKey) (InputDecisio
 	}{sessionID, key}, &out)
 	return out.V0, err
 }
-func (m *RemoteManager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions, activeAt time.Time) error {
+func (m *RemoteManager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions) error {
 	var out struct{}
 	err := m.invoke(context.Background(), "Resize", struct {
 		Sessionid    string
 		Attachmentid string
 		Dimensions   pty.Dimensions
-		Activeat     time.Time
-	}{sessionID, attachmentID, dimensions, activeAt}, &out)
+	}{sessionID, attachmentID, dimensions}, &out)
 	return err
 }
-func (m *RemoteManager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
+func (m *RemoteManager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions) error {
 	var out struct{}
 	err := m.invoke(context.Background(), "ResizeParticipantAtGeneration", struct {
 		Sessionid          string
@@ -274,8 +272,18 @@ func (m *RemoteManager) ResizeParticipantAtGeneration(sessionID, attachmentID, a
 		Clientid           string
 		Expectedgeneration uint64
 		Dimensions         pty.Dimensions
-		Activeat           time.Time
-	}{sessionID, attachmentID, accountID, clientID, expectedGeneration, dimensions, activeAt}, &out)
+	}{sessionID, attachmentID, accountID, clientID, expectedGeneration, dimensions}, &out)
+	return err
+}
+func (m *RemoteManager) ActivateParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+	var out struct{}
+	err := m.invoke(context.Background(), "ActivateParticipantAtGeneration", struct {
+		Sessionid          string
+		Attachmentid       string
+		Accountid          string
+		Clientid           string
+		Expectedgeneration uint64
+	}{sessionID, attachmentID, accountID, clientID, expectedGeneration}, &out)
 	return err
 }
 func (m *RemoteManager) Signal(sessionID string, generation uint64, signal pty.Signal) error {

@@ -251,9 +251,20 @@ func (d *Dispatcher) HandleTerminalResize(_ context.Context, authorization Autho
 		return session.ErrInvalidInput
 	}
 	if isGenerationBoundTerminal(authorization) {
-		return d.config.Sessions.ResizeParticipantAtGeneration(sessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: columns, Rows: rows}, d.config.Now())
+		return d.config.Sessions.ResizeParticipantAtGeneration(sessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: columns, Rows: rows})
 	}
-	return d.config.Sessions.Resize(sessionID, attachmentID, pty.Dimensions{Columns: columns, Rows: rows}, d.config.Now())
+	return d.config.Sessions.Resize(sessionID, attachmentID, pty.Dimensions{Columns: columns, Rows: rows})
+}
+
+// HandleTerminalActivity is a window's focus signal: the PTY size follows the window that was last active.
+func (d *Dispatcher) HandleTerminalActivity(_ context.Context, authorization Authorization, sessionID, attachmentID string) error {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)) {
+		return session.ErrInvalidInput
+	}
+	if isGenerationBoundTerminal(authorization) {
+		return d.config.Sessions.ActivateParticipantAtGeneration(sessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+	}
+	return d.config.Sessions.ActivateParticipantAtGeneration(sessionID, attachmentID, "", "", 0)
 }
 
 func (d *Dispatcher) HandleExecInput(_ context.Context, authorization Authorization, operationID string, data []byte) error {
@@ -787,9 +798,9 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		var err error
 		if participantBound {
-			err = d.config.Sessions.ResizeParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
+			err = d.config.Sessions.ResizeParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: request.Columns, Rows: request.Rows})
 		} else {
-			err = d.config.Sessions.Resize(request.SessionID, request.AttachmentID, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
+			err = d.config.Sessions.Resize(request.SessionID, request.AttachmentID, pty.Dimensions{Columns: request.Columns, Rows: request.Rows})
 		}
 		return domainResult(struct{}{}, err)
 	case "signal":

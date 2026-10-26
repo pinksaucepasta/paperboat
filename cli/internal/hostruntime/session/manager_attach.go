@@ -49,6 +49,7 @@ func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Pa
 			session.participants = make(map[string]Participant)
 		}
 		session.participants[participant.AttachmentID] = participant
+		m.registerWindowLocked(session, participant)
 		result.Snapshot = session.snapshotLocked()
 	}
 	return result, err
@@ -106,6 +107,7 @@ func (m *Manager) AttachLiveParticipantAtGeneration(sessionID string, participan
 			session.participants = make(map[string]Participant)
 		}
 		session.participants[participant.AttachmentID] = participant
+		m.registerWindowLocked(session, participant)
 		result.Snapshot = session.snapshotLocked()
 	}
 	return result, err
@@ -159,10 +161,10 @@ func validParticipant(participant Participant, expectedGeneration uint64) bool {
 	return true
 }
 
-// controllingOwner is the attachment whose consumption paces the PTY, like an ssh session: the owner's own
-// native terminal. Viewers, interactive guests and browsers (fed by the shared publisher) run free and resync.
+// controllingOwner reports whether a participant's window may pace the PTY when the size rule makes it the
+// controller: a native owner or interactive window. Viewers never control; a browser is fed by the shared publisher.
 func controllingOwner(participant Participant) bool {
-	return participant.Role == "owner" && !participant.Browser
+	return participant.Role != "viewer" && !participant.Browser
 }
 
 func (m *Manager) attachLocked(session *managedSession, attachmentID string, fromSequence uint64, controlOnly, backpressure bool) (AttachResult, error) {
@@ -258,6 +260,7 @@ func (m *Manager) Detach(sessionID, attachmentID string) error {
 	err = session.fanout.Detach(attachmentID)
 	if err == nil {
 		session.removeParticipantLocked(attachmentID)
+		m.applyWindowSizeObservedLocked(session)
 	}
 	return err
 }
@@ -276,6 +279,7 @@ func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, account
 	}
 	if err = session.fanout.Detach(attachmentID); err == nil {
 		session.removeParticipantLocked(attachmentID)
+		m.applyWindowSizeObservedLocked(session)
 	}
 	return err
 }

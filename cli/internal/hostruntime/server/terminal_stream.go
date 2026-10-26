@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
@@ -232,7 +233,7 @@ func newTerminalAttachResponse(attachmentID string, attached session.AttachResul
 
 // The normal request and journal replay bind the same authenticated participant.
 func (d *Dispatcher) attachTerminalParticipant(authorization Authorization, request terminalRequest, attachmentID string) (session.AttachResult, error) {
-	participant := session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal}
+	participant := session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}}
 	if isGenerationBoundTerminal(authorization) {
 		if request.AtLiveBoundary && authorization.BrowserTerminal {
 			return d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)

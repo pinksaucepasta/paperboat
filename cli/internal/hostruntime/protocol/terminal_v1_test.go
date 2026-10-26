@@ -310,3 +310,23 @@ func BenchmarkEncodeTerminalInput32Bytes(b *testing.B) {
 		}
 	}
 }
+
+// The focus frame a window sends when it becomes the one in use (F3-17) round-trips exactly and rejects anything else.
+func TestTerminalActivityFrameRoundTrip(t *testing.T) {
+	encoded, err := EncodeTerminalActivity(TerminalActivityFrame{StreamID: 42}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opcode, err := TerminalOpcode(encoded); err != nil || opcode != TerminalActivityOpcode {
+		t.Fatalf("opcode=%d err=%v", opcode, err)
+	}
+	if frame, err := DecodeTerminalActivity(encoded); err != nil || frame.StreamID != 42 {
+		t.Fatalf("decoded=%+v err=%v", frame, err)
+	}
+	if _, err := EncodeTerminalActivity(TerminalActivityFrame{}, nil); err == nil {
+		t.Fatal("stream 0 was encoded")
+	}
+	if _, err := DecodeTerminalActivity(append(encoded, 0)); err == nil {
+		t.Fatal("a frame with a trailing byte was accepted")
+	}
+}

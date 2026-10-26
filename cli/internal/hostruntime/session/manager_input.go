@@ -51,6 +51,7 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if attachmentState, _, err := session.fanout.Status(key.AttachmentID); err != nil || attachmentState != Attached {
 		return InputDecision{}, ErrInvalidInput
 	}
+	m.noteWindowActivity(session, key.AttachmentID)
 	key, _ = normalizeInputKey(key)
 	if _, queryErr := session.inputs.Query(key); queryErr == nil {
 		return session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: process})
@@ -75,8 +76,6 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if err != nil {
 		return decision, err
 	}
-	// The owner terminal that types is the one in use: it paces the output from now on.
-	session.fanout.SetController(key.AttachmentID)
 	if m.config.Store != nil {
 		persisted := store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError}
 		if persistErr := m.config.Store.UpdateInputDecision(context.Background(), persisted); persistErr != nil {
@@ -185,6 +184,7 @@ func (m *Manager) WriteStreamContext(ctx context.Context, sessionID, attachmentI
 	if !session.fanout.IsAttached(attachmentID) {
 		return ErrInvalidInput
 	}
+	m.noteWindowActivity(session, attachmentID)
 	n, writeErr := (contextInputWriter{ctx: ctx, writer: live.process}).Write(data)
 	if writeErr != nil {
 		return writeErr
@@ -203,15 +203,23 @@ func (m *Manager) QueryInput(sessionID string, key InputKey) (InputDecision, err
 	return session.inputs.Query(key)
 }
 
-func (m *Manager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions, activeAt time.Time) error {
-	return m.resize(sessionID, attachmentID, "", "", 0, dimensions, activeAt)
+func (m *Manager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions) error {
+	return m.resize(sessionID, attachmentID, "", "", 0, &dimensions)
 }
 
-func (m *Manager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
-	return m.resize(sessionID, attachmentID, accountID, clientID, expectedGeneration, dimensions, activeAt)
+func (m *Manager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions) error {
+	return m.resize(sessionID, attachmentID, accountID, clientID, expectedGeneration, &dimensions)
 }
 
-func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
+// ActivateParticipantAtGeneration records that the attachment's window is in use (it gained focus), which makes it
+// the window that sets the PTY size if it controls. Typing counts the same way, without a call.
+func (m *Manager) ActivateParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+	return m.resize(sessionID, attachmentID, accountID, clientID, expectedGeneration, nil)
+}
+
+// resize applies a window's reported size (nil: only its activity) under the rule of windowSizes: the PTY follows the
+// controller window that was last active, so a resize from any other window is stored and not applied.
+func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions *pty.Dimensions) error {
 	session, err := m.get(sessionID)
 	if err != nil {
 		return err
@@ -229,16 +237,28 @@ func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, ex
 	if statusErr != nil || attachmentState != Attached || session.process == nil {
 		return ErrInvalidInput
 	}
-	if activeAt.Before(session.resizeTime) || activeAt.Equal(session.resizeTime) && attachmentID < session.resizeID {
+	if dimensions != nil {
+		session.sizes.report(attachmentID, *dimensions)
+	} else {
+		session.sizes.touch(attachmentID, time.Now())
+	}
+	return m.applyWindowSizeLocked(session)
+}
+
+// applyWindowSizeLocked sets the PTY to the size of the window that controls, when it differs. opMu is held.
+func (m *Manager) applyWindowSizeLocked(session *managedSession) error {
+	if session.process == nil {
 		return nil
 	}
-	if session.command.Dimensions == dimensions {
+	controller, dimensions, ok := session.sizes.controller()
+	// The window that sets the size also paces the output (one rule, F3-17): its consumption holds the PTY back.
+	session.fanout.SetController(controller)
+	if !ok || session.command.Dimensions == dimensions {
 		return nil
 	}
 	if err := session.process.Resize(dimensions); err != nil {
 		return err
 	}
-	session.resizeID, session.resizeTime = attachmentID, activeAt
 	session.command.Dimensions = dimensions
 	if session.screen != nil {
 		session.screen.Resize(int(dimensions.Columns), int(dimensions.Rows))

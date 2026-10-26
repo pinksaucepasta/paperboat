@@ -73,9 +73,8 @@ func (f *Fanout) Attach(attachmentID string, maxPendingBytes uint64) error {
 	return f.attach(attachmentID, maxPendingBytes, true, false)
 }
 
-// AttachBackpressured attaches an owner terminal. It paces the PTY only while it is the controller: the first
-// owner attached becomes the controller, a later one only once it types (SetController). A reconnect never takes
-// control from the terminal in use, and a second, idle window never slows the first.
+// AttachBackpressured attaches a window that may pace the PTY (a native owner or interactive terminal). It paces
+// only while the size rule names it the controller (SetController); until then it runs free like any viewer.
 func (f *Fanout) AttachBackpressured(attachmentID string, maxPendingBytes uint64) error {
 	if err := f.attach(attachmentID, maxPendingBytes, true, false); err != nil {
 		return err
@@ -83,27 +82,24 @@ func (f *Fanout) AttachBackpressured(attachmentID string, maxPendingBytes uint64
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.attachments[attachmentID].owner = true
-	for _, cursor := range f.attachments {
-		if cursor.backpressure && cursor.state == Attached {
-			return nil
-		}
-	}
-	f.attachments[attachmentID].backpressure = true
 	return nil
 }
 
-// SetController makes attachmentID, an owner terminal that just typed, the one attachment that paces the PTY.
+// SetController makes attachmentID the one attachment that paces the PTY. The controller of the size rule may be a
+// window that cannot pace (a browser, or none attached): then nothing paces and every attachment runs free.
 func (f *Fanout) SetController(attachmentID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	target, ok := f.attachments[attachmentID]
-	if !ok || target.state != Attached || target.backpressure || !target.owner {
+	target := f.attachments[attachmentID]
+	if target != nil && target.backpressure {
 		return
 	}
 	for _, cursor := range f.attachments {
 		cursor.backpressure = false
 	}
-	target.backpressure, target.progressAt = true, time.Now()
+	if target != nil && target.state == Attached && target.owner {
+		target.backpressure, target.progressAt = true, time.Now()
+	}
 	notify(f.room)
 }
 

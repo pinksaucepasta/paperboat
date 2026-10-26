@@ -12,9 +12,10 @@ import (
 )
 
 type terminalSecurityHandler struct {
-	inputs  int
-	acks    int
-	resizes int
+	inputs     int
+	acks       int
+	resizes    int
+	activities int
 }
 
 func (h *terminalSecurityHandler) Handle(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
@@ -30,6 +31,11 @@ func (h *terminalSecurityHandler) HandleTerminalACK(context.Context, Authorizati
 }
 func (h *terminalSecurityHandler) HandleTerminalResize(context.Context, Authorization, string, string, uint16, uint16) error {
 	h.resizes++
+	return nil
+}
+
+func (h *terminalSecurityHandler) HandleTerminalActivity(context.Context, Authorization, string, string) error {
+	h.activities++
 	return nil
 }
 
@@ -107,6 +113,23 @@ func TestTerminalInputAndResizeSequencesMustBeContiguous(t *testing.T) {
 	if handler.inputs != 1 || handler.resizes != 1 {
 		t.Fatalf("input calls=%d resize calls=%d", handler.inputs, handler.resizes)
 	}
+}
+
+// A focus frame reaches the handler as the window's activity; it has no sequence of its own and a bad frame is refused.
+func TestTerminalActivityFrameReachesTheHandler(t *testing.T) {
+	handler := &terminalSecurityHandler{}
+	server := &Server{config: Config{Handler: handler}}
+	state := boundTerminalState(7)
+	frame, _ := protocol.EncodeTerminalActivity(protocol.TerminalActivityFrame{StreamID: 7}, nil)
+	for range 2 {
+		if err := server.handleTerminalData(context.Background(), frame, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if handler.activities != 2 {
+		t.Fatalf("activity calls=%d, want 2", handler.activities)
+	}
+	requireInvalidTerminalFrame(t, server.handleTerminalData(context.Background(), append(frame, 0), state))
 }
 
 func TestRevokedTerminalBindingRejectsDataFrames(t *testing.T) {

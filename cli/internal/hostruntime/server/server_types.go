@@ -152,6 +152,7 @@ type ControlHandler interface {
 type TerminalDataHandler interface {
 	HandleTerminalACK(context.Context, Authorization, string, string, uint64) error
 	HandleTerminalResize(context.Context, Authorization, string, string, uint16, uint16) error
+	HandleTerminalActivity(context.Context, Authorization, string, string) error
 }
 
 // TerminalInputHandler receives one durable, idempotent input operation. The

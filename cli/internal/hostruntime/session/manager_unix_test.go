@@ -91,15 +91,15 @@ func TestManagerSharesResizeInOutputOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background(), created.ID)
-	first, err := manager.Attach(created.ID, "att_first", 0)
+	first, err := manager.AttachParticipant(created.ID, Participant{AttachmentID: "att_first", Role: "owner", ConnectedAt: time.Now()}, 0)
 	if err != nil || !first.FirstAttachment {
 		t.Fatalf("first attachment=%#v err=%v", first, err)
 	}
-	second, err := manager.Attach(created.ID, "att_second", 0)
+	second, err := manager.AttachParticipant(created.ID, Participant{AttachmentID: "att_second", Role: "owner", ConnectedAt: time.Now()}, 0)
 	if err != nil || second.FirstAttachment {
 		t.Fatalf("second attachment=%#v err=%v", second, err)
 	}
-	if err := manager.Resize(created.ID, "att_first", pty.Dimensions{Columns: 120, Rows: 35}, time.Now()); err != nil {
+	if err := manager.Resize(created.ID, "att_first", pty.Dimensions{Columns: 120, Rows: 35}); err != nil {
 		t.Fatal(err)
 	}
 	for _, attachmentID := range []string{"att_first", "att_second"} {
@@ -417,7 +417,7 @@ func TestManagerAttachLiveCannotRaceContinuousCompaction(t *testing.T) {
 	if err := lifecycle.Transition(Running); err != nil {
 		t.Fatal(err)
 	}
-	session := &managedSession{id: "ses_hot", name: "hot", lifecycle: lifecycle, history: retained, fanout: NewFanout()}
+	session := &managedSession{id: "ses_hot", name: "hot", lifecycle: lifecycle, history: retained, fanout: NewFanout(), sizes: newWindowSizes()}
 	manager := &Manager{config: ManagerConfig{AttachmentBytes: 1 << 20, MaxAttachments: 16}, sessions: map[string]*managedSession{"ses_hot": session}, names: map[string]string{"hot": "ses_hot"}}
 	done := make(chan struct{})
 	go func() {
@@ -743,6 +743,105 @@ func TestInputReachesThePTYWhileOutputHoldsTheSessionLock(t *testing.T) {
 	waitState(t, manager, created.ID, Exited)
 }
 
+// F3-17: with several windows attached the PTY has the size of the controller window that was last active. Typing
+// moves control, a reconnect never takes it, and a viewer never resizes.
+func TestPTYSizeFollowsTheLatestActiveWindow(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "windows", Command: shellCommand(shell, root, "cat")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	attach := func(attachment string, size pty.Dimensions) {
+		t.Helper()
+		participant := Participant{AttachmentID: attachment, AccountID: "acc_owner", ClientID: "cli_" + attachment, Role: "owner", ConnectedAt: time.Now(), Dimensions: size}
+		if _, err := manager.AttachParticipantAtGeneration(created.ID, participant, 0, created.Generation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	size := func() pty.Dimensions {
+		snapshot, err := manager.Snapshot(created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snapshot.Dimensions
+	}
+	wantSize := func(want pty.Dimensions, why string) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if size() == want {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s: PTY is %v, want %v", why, size(), want)
+	}
+	var sequence uint64
+	type_ := func(attachment string) {
+		t.Helper()
+		sequence++
+		key := InputKey{ClientID: "cli_" + attachment, AttachmentID: attachment, Generation: created.Generation, InputSequence: sequence}
+		if _, err := manager.Write(created.ID, key, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	attach("att_a", pty.Dimensions{Columns: 100, Rows: 30})
+	attach("att_b", pty.Dimensions{Columns: 80, Rows: 24})
+	wantSize(pty.Dimensions{Columns: 100, Rows: 30}, "no activity yet: the first window controls")
+
+	type_("att_b")
+	wantSize(pty.Dimensions{Columns: 80, Rows: 24}, "typing in window b")
+	type_("att_a")
+	wantSize(pty.Dimensions{Columns: 100, Rows: 30}, "typing in window a")
+
+	// A resize from the window that is not active is stored, not applied; the active one applies at once.
+	if err := manager.ResizeParticipantAtGeneration(created.ID, "att_b", "acc_owner", "cli_att_b", created.Generation, pty.Dimensions{Columns: 70, Rows: 20}); err != nil {
+		t.Fatal(err)
+	}
+	if got := size(); got != (pty.Dimensions{Columns: 100, Rows: 30}) {
+		t.Fatalf("a resize from the inactive window changed the PTY to %v", got)
+	}
+	if err := manager.ResizeParticipantAtGeneration(created.ID, "att_a", "acc_owner", "cli_att_a", created.Generation, pty.Dimensions{Columns: 110, Rows: 33}); err != nil {
+		t.Fatal(err)
+	}
+	wantSize(pty.Dimensions{Columns: 110, Rows: 33}, "the active window resized")
+
+	// Focus counts like typing, and its stored size applies.
+	if err := manager.ActivateParticipantAtGeneration(created.ID, "att_b", "acc_owner", "cli_att_b", created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	wantSize(pty.Dimensions{Columns: 70, Rows: 20}, "window b gained focus")
+
+	// Window a reconnects (its connection drops and the same attachment id comes back with a new size): it does not
+	// take control, because attaching is not activity.
+	if err := manager.DetachParticipantAtGeneration(created.ID, "att_a", "acc_owner", "cli_att_a", created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	attach("att_a", pty.Dimensions{Columns: 90, Rows: 28})
+	if got := size(); got != (pty.Dimensions{Columns: 70, Rows: 20}) {
+		t.Fatalf("a reconnect of window a took control: PTY is %v", got)
+	}
+
+	// A viewer attaches and resizes: nothing changes.
+	viewer := Participant{AttachmentID: "att_v", AccountID: "acc_view", ClientID: "cli_v", Role: "viewer", ConnectedAt: time.Now(), Dimensions: pty.Dimensions{Columns: 40, Rows: 10}}
+	if _, err := manager.AttachParticipantAtGeneration(created.ID, viewer, 0, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	_ = manager.ResizeParticipantAtGeneration(created.ID, "att_v", "acc_view", "cli_v", created.Generation, pty.Dimensions{Columns: 30, Rows: 8})
+	_ = manager.ActivateParticipantAtGeneration(created.ID, "att_v", "acc_view", "cli_v", created.Generation)
+	if got := size(); got != (pty.Dimensions{Columns: 70, Rows: 20}) {
+		t.Fatalf("a viewer changed the PTY to %v", got)
+	}
+
+	// The controller leaves: the next most recently active window takes over.
+	if err := manager.DetachParticipantAtGeneration(created.ID, "att_b", "acc_owner", "cli_att_b", created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	wantSize(pty.Dimensions{Columns: 90, Rows: 28}, "the controller left")
+}
+
 // F3-11: a paste into a program that never reads stdin holds the input lock on a blocked PTY write, with more of it
 // queued. Ctrl-C must overtake both, stop the program within a second, and every key keeps a final journal entry.
 func TestCtrlCOvertakesAPasteTheProgramNeverReads(t *testing.T) {
@@ -796,7 +895,7 @@ func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background(), created.ID)
-	owner := Participant{AttachmentID: "att_owner", AccountID: "acct", ClientID: "cli_owner", Role: "owner", ConnectedAt: time.Now()}
+	owner := Participant{AttachmentID: "att_owner", AccountID: "acct", ClientID: "cli_owner", Role: "owner", ConnectedAt: time.Now(), Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}
 	viewer := Participant{AttachmentID: "att_viewer", AccountID: "acct_2", ClientID: "cli_viewer", Role: "viewer", ConnectedAt: time.Now()}
 	if _, err := manager.AttachParticipantAtGeneration(created.ID, owner, 0, created.Generation); err != nil {
 		t.Fatal(err)

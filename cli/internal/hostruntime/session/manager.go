@@ -100,8 +100,9 @@ type managedSession struct {
 	inputs           *InputJournal
 	process          PTYProcess
 	exit             *pty.ExitResult
-	resizeID         string
-	resizeTime       time.Time
+	sizes            *windowSizes // which attached window sets the PTY size (F3-17)
+	sizeApplying     atomic.Bool  // an asynchronous size application is queued or running
+	sizeDirty        atomic.Bool  // typing moved control to another window since the last application
 	// persisting and persistedLatest are owned by persistMu: whether the group-commit writer
 	// still persists this session's output, and how far the store holds it.
 	persisting      bool
@@ -151,6 +152,8 @@ type Participant struct {
 	Role         string    `json:"role"`
 	ConnectedAt  time.Time `json:"connected_at"`
 	Browser      bool      `json:"-"`
+	// Dimensions is the window's size when it attached; 0x0 until it reports one.
+	Dimensions pty.Dimensions `json:"dimensions,omitempty"`
 }
 
 type AttachResult struct {
@@ -310,7 +313,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		return Snapshot{}, ErrSessionExists
 	}
 	retained, _ := history.New(m.config.HistoryBytes)
-	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), sizes: newWindowSizes(), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
 	setSessionSupportReference(session, supportref.FromContext(ctx))
 	if m.config.Store != nil {
 		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
@@ -355,6 +358,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 // acknowledgement. session.opMu must be held.
 func (s *managedSession) removeParticipantLocked(attachmentID string) {
 	delete(s.participants, attachmentID)
+	s.sizes.detach(attachmentID, time.Now())
 	if s.history != nil {
 		s.history.Forget(attachmentID)
 	}

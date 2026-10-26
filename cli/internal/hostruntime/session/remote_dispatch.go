@@ -7,7 +7,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"io"
-	"time"
 )
 
 // ServeRemoteCall exposes only explicit session operations, never lifecycle shutdown.
@@ -341,12 +340,11 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 			Sessionid    string
 			Attachmentid string
 			Dimensions   pty.Dimensions
-			Activeat     time.Time
 		}
 		if err := decodeRemoteRequest(body, &args); err != nil {
 			return nil, ErrInvalidSession
 		}
-		err := m.Resize(args.Sessionid, args.Attachmentid, args.Dimensions, args.Activeat)
+		err := m.Resize(args.Sessionid, args.Attachmentid, args.Dimensions)
 		if err != nil {
 			return nil, err
 		}
@@ -359,13 +357,27 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 			Clientid           string
 			Expectedgeneration uint64
 			Dimensions         pty.Dimensions
-			Activeat           time.Time
 		}
 		if err := decodeRemoteRequest(body, &args); err != nil {
 			return nil, ErrInvalidSession
 		}
-		err := m.ResizeParticipantAtGeneration(args.Sessionid, args.Attachmentid, args.Accountid, args.Clientid, args.Expectedgeneration, args.Dimensions, args.Activeat)
+		err := m.ResizeParticipantAtGeneration(args.Sessionid, args.Attachmentid, args.Accountid, args.Clientid, args.Expectedgeneration, args.Dimensions)
 		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct{}{})
+	case "ActivateParticipantAtGeneration":
+		var args struct {
+			Sessionid          string
+			Attachmentid       string
+			Accountid          string
+			Clientid           string
+			Expectedgeneration uint64
+		}
+		if err := decodeRemoteRequest(body, &args); err != nil {
+			return nil, ErrInvalidSession
+		}
+		if err := m.ActivateParticipantAtGeneration(args.Sessionid, args.Attachmentid, args.Accountid, args.Clientid, args.Expectedgeneration); err != nil {
 			return nil, err
 		}
 		return json.Marshal(struct{}{})

@@ -657,8 +657,8 @@ func (connection *browserTerminal) sendInput(data []byte) error {
 func (connection *browserTerminal) sendResize(columns, rows uint16) error {
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
-	if connection.config.Role != "owner" {
-		return errors.New("only the owner may resize the terminal")
+	if connection.config.Role != "owner" && connection.config.Role != "interactive" {
+		return errors.New("a viewer does not resize the terminal")
 	}
 	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
 		return net.ErrClosed
@@ -673,6 +673,23 @@ func (connection *browserTerminal) sendResize(columns, rows uint16) error {
 	}
 	connection.resizeSequence = sequence
 	return nil
+}
+
+// sendActivity sends the focus frame: a viewer never controls, so it sends nothing.
+func (connection *browserTerminal) sendActivity() error {
+	connection.mu.Lock()
+	defer connection.mu.Unlock()
+	if connection.config.Role == "viewer" {
+		return nil
+	}
+	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
+		return net.ErrClosed
+	}
+	encoded, err := protocol.EncodeTerminalActivity(protocol.TerminalActivityFrame{StreamID: connection.streamID}, nil)
+	if err != nil {
+		return err
+	}
+	return connection.writes.enqueue(terminalWrite{kind: appKindBinary, payloads: [][]byte{encoded}, bytes: len(encoded) + 5})
 }
 
 func (connection *browserTerminal) sendAck(nextSequence uint64) error {

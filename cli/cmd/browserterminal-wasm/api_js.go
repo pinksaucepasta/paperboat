@@ -119,6 +119,22 @@ func apiResize(_ js.Value, args []js.Value) any {
 	return nil
 }
 
+// apiActivity tells the machine this window is now the one in use (it gained focus): the PTY size follows the
+// window that was last active (F3-17). Typing counts too; this covers focusing without typing.
+func apiActivity(_ js.Value, args []js.Value) any {
+	if len(args) != 1 {
+		return errorObject("invalid_request", "Terminal activity is invalid.")
+	}
+	connection := getConnection(args[0].String())
+	if connection == nil {
+		return errorObject("connection_closed", "The encrypted terminal connection is closed.")
+	}
+	if err := connection.sendActivity(); err != nil {
+		return errorObject("activity_failed", "Terminal activity could not be sent.")
+	}
+	return nil
+}
+
 func apiAck(_ js.Value, args []js.Value) any {
 	if len(args) != 2 {
 		return errorObject("invalid_request", "Terminal acknowledgement is invalid.")

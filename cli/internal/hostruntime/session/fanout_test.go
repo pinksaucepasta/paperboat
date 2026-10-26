@@ -34,6 +34,7 @@ func TestWaitNextWakesForOutputDetachEvictionAndCancellation(t *testing.T) {
 			if err := fanout.AttachBackpressured("att", limit); err != nil {
 				t.Fatal(err)
 			}
+			fanout.SetController("att")
 			done := make(chan error, 1)
 			go func() {
 				event, err := fanout.WaitNext(context.Background(), "att")
@@ -212,6 +213,7 @@ func TestSlowConsumerEvictsOnlyFullAttachment(t *testing.T) {
 	f := NewFanout()
 	f.AttachBackpressured("slow", 3)
 	f.AttachBackpressured("fast", 3)
+	f.SetController("slow") // only the controller is ever evicted: a link that stopped draining
 	f.Publish(history.Event{StartSequence: 0, EndSequence: 3, Data: []byte("abc")})
 	if _, ok, err := f.Next("fast"); err != nil || !ok {
 		t.Fatalf("fast drain ok=%v err=%v", ok, err)
@@ -358,12 +360,13 @@ func TestFreeRunningAttachmentLagsInsteadOfEviction(t *testing.T) {
 	}
 }
 
-// Of two owner terminals, only the controller paces output: the first attached, until the other one types. A
-// stalled second window never holds the program back.
+// Of two owner terminals, only the controller the size rule names paces output. A stalled second window never
+// holds the program back, and moving control releases it.
 func TestOnlyTheControllingOwnerPacesOutput(t *testing.T) {
 	f := NewFanout()
 	f.AttachBackpressured("first", 3)
 	f.AttachBackpressured("second", 3)
+	f.SetController("first") // the size rule's controller
 	f.Publish(history.Event{StartSequence: 0, EndSequence: 3, Data: []byte("abc")})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

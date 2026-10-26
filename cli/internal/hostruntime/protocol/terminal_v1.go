@@ -67,6 +67,9 @@ const (
 	TerminalACKOpcode    byte = 3
 	TerminalResizeOpcode byte = 4
 	TerminalEOFOpcode    byte = 5
+	// TerminalActivityOpcode says the sending window is in use (it gained focus); the PTY size follows the window that
+	// was last active. Typing says the same without a frame.
+	TerminalActivityOpcode byte = 6
 
 	TerminalStdout byte = 1
 	TerminalStderr byte = 2
@@ -90,6 +93,7 @@ const (
 	terminalACKLen                        = 13
 	terminalResizeLen                     = 17
 	terminalEOFLen                        = 13
+	terminalActivityLen                   = 5
 )
 
 type TerminalInputFrame struct {
@@ -150,6 +154,8 @@ type TerminalResizeFrame struct {
 	Rows     uint16
 	Sequence uint64
 }
+
+type TerminalActivityFrame struct{ StreamID uint32 }
 
 type TerminalEOFFrame struct {
 	StreamID uint32
@@ -367,6 +373,27 @@ func EncodeTerminalResize(frame TerminalResizeFrame, dst []byte) ([]byte, error)
 	return dst, nil
 }
 
+func EncodeTerminalActivity(frame TerminalActivityFrame, dst []byte) ([]byte, error) {
+	if frame.StreamID == 0 {
+		return nil, &Error{Code: InvalidFrame}
+	}
+	dst = growFrame(dst, terminalActivityLen)
+	dst[0] = TerminalActivityOpcode
+	binary.BigEndian.PutUint32(dst[1:5], frame.StreamID)
+	return dst, nil
+}
+
+func DecodeTerminalActivity(message []byte) (TerminalActivityFrame, error) {
+	if len(message) != terminalActivityLen || message[0] != TerminalActivityOpcode {
+		return TerminalActivityFrame{}, &Error{Code: InvalidFrame}
+	}
+	frame := TerminalActivityFrame{StreamID: binary.BigEndian.Uint32(message[1:5])}
+	if frame.StreamID == 0 {
+		return TerminalActivityFrame{}, &Error{Code: InvalidFrame}
+	}
+	return frame, nil
+}
+
 func DecodeTerminalResize(message []byte) (TerminalResizeFrame, error) {
 	if len(message) != terminalResizeLen || message[0] != TerminalResizeOpcode {
 		return TerminalResizeFrame{}, &Error{Code: InvalidFrame}
@@ -404,7 +431,7 @@ func TerminalOpcode(message []byte) (byte, error) {
 	if len(message) == 0 {
 		return 0, &Error{Code: InvalidFrame, Cause: errors.New("terminal frame is empty")}
 	}
-	if message[0] < TerminalInputOpcode || message[0] > TerminalEOFOpcode {
+	if message[0] < TerminalInputOpcode || message[0] > TerminalActivityOpcode {
 		return 0, &Error{Code: UnsupportedChannel}
 	}
 	return message[0], nil

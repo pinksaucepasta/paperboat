@@ -222,6 +222,27 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 		}
 		state.mu.Unlock()
 		return nil
+	case protocol.TerminalActivityOpcode:
+		frame, decodeErr := protocol.DecodeTerminalActivity(message)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		streamID = frame.StreamID
+		binding, bindErr := state.binding(streamID)
+		if bindErr != nil {
+			if errors.Is(bindErr, errTerminalStreamClosed) {
+				return nil
+			}
+			return bindErr
+		}
+		if err := validateTerminalBinding(binding); err != nil {
+			return err
+		}
+		handler, ok := s.config.Handler.(TerminalDataHandler)
+		if !ok || binding.kind == "exec" || binding.kind == "ssh" {
+			return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("only a terminal stream has windows")}
+		}
+		return handler.HandleTerminalActivity(ctx, binding.authorization, binding.sessionID, binding.attachmentID)
 	default:
 		return &protocol.Error{Code: protocol.InvalidFrame}
 	}

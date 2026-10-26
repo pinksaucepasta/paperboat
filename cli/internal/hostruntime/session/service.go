@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
-	"time"
 )
 
 // Service is the terminal boundary shared by the process owner and feature runtime.
@@ -34,8 +33,9 @@ type Service interface {
 	InputSequence(sessionID, clientID, attachmentID string, generation uint64) (uint64, error)
 	WriteStream(sessionID, attachmentID string, generation uint64, data []byte) error
 	QueryInput(sessionID string, key InputKey) (InputDecision, error)
-	Resize(sessionID, attachmentID string, dimensions pty.Dimensions, activeAt time.Time) error
-	ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error
+	Resize(sessionID, attachmentID string, dimensions pty.Dimensions) error
+	ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions) error
+	ActivateParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error
 	Signal(sessionID string, generation uint64, signal pty.Signal) error
 	Clear(sessionID string) (uint64, error)
 	ClearAtGeneration(sessionID string, expectedGeneration uint64) (uint64, error)

@@ -66,7 +66,7 @@ func TestNativeWindowsManagerReplayReconnectResizeCancelAndCleanup(t *testing.T)
 		_ = manager.Shutdown(shutdownCtx)
 	})
 
-	first, err := manager.Attach(created.ID, "first", 0)
+	first, err := manager.AttachParticipant(created.ID, Participant{AttachmentID: "first", Role: "owner", ConnectedAt: time.Now()}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestNativeWindowsManagerReplayReconnectResizeCancelAndCleanup(t *testing.T)
 		t.Fatalf("ready output=%q", readyOutput)
 	}
 
-	if err := manager.Resize(created.ID, "first", pty.Dimensions{Columns: 101, Rows: 37}, time.Now()); err != nil {
+	if err := manager.Resize(created.ID, "first", pty.Dimensions{Columns: 101, Rows: 37}); err != nil {
 		t.Fatal(err)
 	}
 	resized, err := manager.Snapshot(created.ID)
