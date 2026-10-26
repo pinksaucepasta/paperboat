@@ -181,6 +181,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 		{Code: "local_state", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorLocalState(ctx) }},
 		{Code: "clock", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorClock(ctx, command) }},
 		{Code: "machine_guard_version", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorGuardVersion(ctx) }},
+		{Code: "machine_credentials", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorCredentials(ctx) }},
 		{Code: "udp_ipv4", Run: func(ctx context.Context) doctorpkg.Check {
 			return probeDoctorUDP(ctx, "udp4", "0.0.0.0:0", "udp_ipv4", "IPv4")
 		}},
