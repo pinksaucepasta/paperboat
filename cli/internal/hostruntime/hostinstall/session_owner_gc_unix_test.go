@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -23,7 +24,12 @@ func TestSessionOwnerPinSweepAcceptsTheInstalledCatalogueBound(t *testing.T) {
 	}
 	// A missing pin root under a root-owned parent: the sweep validates its bound, then finds nothing to do.
 	nonce := sha256.Sum256([]byte(t.Name() + t.TempDir()))
-	missing := filepath.Join("/var/lib", "paperboat-pin-sweep-missing-"+hex.EncodeToString(nonce[:8]))
+	// macOS has no /var/lib, and /var there is a symlink the sweep refuses to walk through.
+	parent := "/var/lib"
+	if runtime.GOOS == "darwin" {
+		parent = "/Library"
+	}
+	missing := filepath.Join(parent, "paperboat-pin-sweep-missing-"+hex.EncodeToString(nonce[:8]))
 	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)); err != nil {
 		t.Fatalf("sweep with the installed catalogue's bound %d: %v", pinSweepBound(catalog), err)
 	}
