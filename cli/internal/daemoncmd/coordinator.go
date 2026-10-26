@@ -44,6 +44,9 @@ type Coordinator struct {
 	inventoryMu        sync.Mutex
 	inventoryRevision  uint64
 	inventoryMachines  []api.UserMachine
+	// claimMachines is every machine of the last complete inventory read, online or not (guarded by mu);
+	// the guard releases claims only against it. Nil until the first complete read.
+	claimMachines []string
 	inventoryTimer     *time.Timer
 	stopInventoryTimer func() bool
 	cleanups           []*generationCleanup
@@ -205,6 +208,15 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 		c.stopInventoryTimer()
 	}
 	c.inventoryMachines = slices.Clone(machines)
+	claimMachines := make([]string, 0, len(machines))
+	for _, m := range machines {
+		if m.ID != "" {
+			claimMachines = append(claimMachines, m.ID)
+		}
+	}
+	c.mu.Lock()
+	c.claimMachines = claimMachines
+	c.mu.Unlock()
 	byID := make(map[string]api.MachineServicesMachine, len(services))
 	var expiry time.Time
 	for _, service := range services {

@@ -265,15 +265,11 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("machine_names", err)
 	}
-	// The snapshot is the complete, verified machine set of this account: the guard releases the claims of
-	// machines that left it (held 7 days). An empty set is refused by the guard while claims exist.
-	if c.cfg.AccountID != "" && len(peers) > 0 {
-		machines := make([]string, 0, len(peers))
-		for _, peer := range peers {
-			if peer != nil && peer.GetPeerId() != "" {
-				machines = append(machines, peer.GetPeerId())
-			}
-		}
+	// Claims are released only against the last complete inventory read (every machine, online or not), never
+	// against the routable peers: an offline machine keeps its address, and a withdrawal (expired services, a
+	// rejected snapshot, an outage) releases nothing. The guard holds released claims 7 days and refuses an
+	// empty set while claims exist.
+	if machines := c.claimMachines; c.cfg.AccountID != "" && len(machines) > 0 {
 		if err := nameClient.ReplaceClaims(ctx, c.cfg.AccountID, machines); err != nil {
 			diagnosticlog.TryWarn("local machine address claims were not updated; the guard keeps them", "error", err)
 		}

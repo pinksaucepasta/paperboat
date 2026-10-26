@@ -990,27 +990,83 @@ func (c relocatingNameClient) AcquireMachine(ctx context.Context, account, machi
 }
 
 // PLAN 3b multi-account hosts: the daemon publishes the address the guard assigned, not the server's
-// preferred one, and sends the account's complete machine set (offline machines included) so the guard
-// releases only machines that left it.
+// preferred one, and sends the account's complete machine set from the inventory (offline machines included)
+// so the guard releases only machines that left it.
 func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing.T) {
 	names := relocatingNameClient{&coordinatorNameClient{}}
-	c, err := NewCoordinator(CoordinatorConfig{AccountID: "acct_alice", NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	c := startClaimsCoordinator(t, names)
+	machines := []api.UserMachine{
+		{ID: "m_hp", Alias: "hp", AssignedIP: "127.100.0.3", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 1},
+		{ID: "m_off", Alias: "nas", AssignedIP: "127.100.0.4", State: "offline", NetworkApproved: true},
+	}
+	services := []api.MachineServicesMachine{{MachineID: "m_hp", InstallationGeneration: 1, ExpiresAt: time.Now().Add(time.Hour), Services: []api.MachineServicePort{{Port: 45680, AddressFamily: "ipv4"}}}}
+	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
+		t.Fatal(err)
+	}
+	names.mu.Lock()
+	got, claims := names.names["hp."+c.localDomain()], slices.Clone(names.claims)
+	names.mu.Unlock()
+	if got.String() != "127.100.0.77" {
+		t.Fatalf("published %v, want the guard-assigned 127.100.0.77", got)
+	}
+	if len(claims) != 1 || claims[0] != "acct_alice:m_hp,m_off" {
+		t.Fatalf("claims=%v, want the complete set including the offline machine", claims)
+	}
+}
+
+// F23-03: a server outage releases nothing. While the inventory cannot be read the daemon keeps sending the
+// last complete set (expired services withdraw routes, never claims), and an empty answer sends no set at all,
+// so the guard's claims and 7-day holds stay as they were.
+func TestCoordinatorOutageThenEmptyListReleasesNoClaim(t *testing.T) {
+	names := &coordinatorNameClient{}
+	c := startClaimsCoordinator(t, names)
+	machines := []api.UserMachine{
+		{ID: "m_a", Alias: "a", AssignedIP: "127.100.0.3", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 1},
+		{ID: "m_b", Alias: "b", AssignedIP: "127.100.0.4", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 1},
+	}
+	services := []api.MachineServicesMachine{{MachineID: "m_a", InstallationGeneration: 1, ExpiresAt: time.Now().Add(50 * time.Millisecond), Services: []api.MachineServicePort{{Port: 45679, AddressFamily: "ipv4"}}}}
+	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
+		t.Fatal(err)
+	}
+	// Outage: no inventory read succeeds, the services lease expires and the daemon withdraws its routes, and
+	// every machine goes offline in the last known view.
+	time.Sleep(200 * time.Millisecond)
+	for i := range machines {
+		machines[i].Online, machines[i].State = false, "offline"
+	}
+	if err := c.ApplyServices(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	// The outage ends with an empty answer.
+	if err := c.ApplyMachines(t.Context(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	names.mu.Lock()
+	claims := slices.Clone(names.claims)
+	names.mu.Unlock()
+	for _, sent := range claims {
+		if sent != "acct_alice:m_a,m_b" {
+			t.Fatalf("claims sent %v: an outage or an empty answer must never shrink the set", claims)
+		}
+	}
+	if len(claims) == 0 {
+		t.Fatal("the complete set was never sent")
+	}
+}
+
+func startClaimsCoordinator(t *testing.T, names guardedNameClient) *Coordinator {
+	t.Helper()
+	dir := shorttemp.Dir(t)
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCoordinator(CoordinatorConfig{AccountID: "acct_alice", SocketAddress: socketAddress(dir), NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.ctx = t.Context()
-	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{
-		{PeerId: "m_hp", Alias: "hp", AssignedIp: "127.100.0.3", Approved: true, Online: true, ExportedPorts: []int32{22}},
-		{PeerId: "m_off", Alias: "nas", AssignedIp: "127.100.0.4", Approved: true, Online: false},
-	}
-	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+	if err := c.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if got := names.names["hp."+c.localDomain()]; got.String() != "127.100.0.77" {
-		t.Fatalf("published %v, want the guard-assigned 127.100.0.77 (names=%v)", got, names.names)
-	}
-	if len(names.claims) != 1 || names.claims[0] != "acct_alice:m_hp,m_off" {
-		t.Fatalf("claims=%v, want the complete set including the offline machine", names.claims)
-	}
+	t.Cleanup(func() { _ = c.Stop() })
+	return c
 }

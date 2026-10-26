@@ -58,6 +58,16 @@ func TestClaimsOfMachinesThatCameAndWentDoNotFillTheCap(t *testing.T) {
 		if err := book.releaseAbsent("1001", "acct", map[string]bool{machine: true}, at); err != nil {
 			t.Fatal(err)
 		}
+		// Another user acquiring meanwhile never gets an address still active or held for uid 1001.
+		mine := map[string]bool{}
+		for _, address := range book.addresses("1001") {
+			mine[address] = true
+		}
+		got, err := book.assign(claimKey{UID: "1002", Account: "acct_b", Machine: machine}, netip.MustParseAddr("127.100.0.2"), at)
+		if err != nil || mine[got] {
+			t.Fatalf("round %d: uid 1002 got %q (%v), an address of uid 1001", i, got, err)
+		}
+		_ = book.releaseAbsent("1002", "acct_b", map[string]bool{machine: true}, at)
 	}
 }
 
