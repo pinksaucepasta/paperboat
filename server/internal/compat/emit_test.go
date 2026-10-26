@@ -94,5 +94,11 @@ func TestEmitCompatArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write("regional_candidates.json", peersessions.RegionalCandidateSet("https://api.compat.example.test", "usr_compat", "endpoint_compat", 1, now, now.Add(time.Minute), []map[string]any{nodeClaims}))
+	own := node
+	own.NodeID, own.SelfHosted = "node_own_compat", true
+	ownClaims, err := own.Claims()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("regional_candidates.json", peersessions.RegionalCandidateSet("https://api.compat.example.test", "usr_compat", "endpoint_compat", 1, now, now.Add(time.Minute), []map[string]any{nodeClaims, ownClaims}))
 }
