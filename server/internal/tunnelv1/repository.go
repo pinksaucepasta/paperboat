@@ -353,6 +353,11 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 		if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: input.AccountID, Team: ws.TeamID}, planlimits.Publications); err != nil {
 			return err
 		}
+		if input.Origin.Scheme == "tcp" && input.AccessMode == AccessPublic {
+			if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: input.AccountID, Team: ws.TeamID}, planlimits.PublicTCP); err != nil {
+				return err
+			}
+		}
 
 		now := r.now().UTC()
 		tunnel, err := queries.CreatePreviewTunnel(ctx, dbsqlc.CreatePreviewTunnelParams{

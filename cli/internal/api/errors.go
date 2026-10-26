@@ -71,7 +71,7 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		if billing != "" {
 			return apiErrorMessage(code, status) + " Add bandwidth: " + billing
 		}
-	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached":
+	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached":
 		return planLimitMessage(code, details, billing)
 	case "account_deletion_console_only":
 		if console := consoleURL(details); console != "" {
@@ -142,7 +142,7 @@ func transferBytes(bytes int64) string {
 // package that decode the server's error envelope themselves (machine bootstrap). Other codes: nil.
 func PlanLimitRefusal(status int, code string, details map[string]any) *APIError {
 	switch code {
-	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached":
+	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached":
 		return &APIError{Status: status, Code: code, Message: apiErrorMessageFor(code, status, details), Details: details}
 	}
 	return nil
@@ -158,6 +158,8 @@ func planLimitMessage(code string, details map[string]any, billing string) strin
 			message = fmt.Sprintf("This workspace's plan allows %d machines. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade.", int64(limit))
 		case "preview_limit_reached":
 			message = fmt.Sprintf("This workspace's plan allows %d running previews and tunnels. Stop one you no longer need, or upgrade.", int64(limit))
+		case "public_tcp_limit_reached":
+			message = fmt.Sprintf("This workspace's plan allows %d public TCP tunnels. Stop one you no longer need, upgrade, or run your own tunnel edge (self-hosted tunnels are not limited).", int64(limit))
 		default:
 			message = fmt.Sprintf("This workspace's plan allows %d open browser terminals. Close one you no longer need, or upgrade.", int64(limit))
 		}
@@ -211,6 +213,7 @@ var publicAPIMessages = map[string]string{
 	"team_limit":                      "Team capacity reached. Remove an entry the team no longer uses, then retry.",
 	"machine_limit_reached":           "This workspace's plan machine limit is reached. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade under Billing in the Paperboat console.",
 	"browser_terminal_limit_reached":  "This workspace's plan limit for open browser terminals is reached. Close one you no longer need, or upgrade under Billing in the Paperboat console.",
+	"public_tcp_limit_reached":        "This workspace's plan limit for public TCP tunnels is reached. Stop one you no longer need, upgrade under Billing in the Paperboat console, or run your own tunnel edge (self-hosted tunnels are not limited).",
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                        "The resource state changed. Refresh it and try again.",

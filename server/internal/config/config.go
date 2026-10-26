@@ -217,6 +217,16 @@ type PlanLimits struct {
 	// ViewersPerSharedTerminal caps one shared terminal's viewers (abuse protection; the shared
 	// terminal itself counts as one session, its viewers do not).
 	ViewersPerSharedTerminal int `json:"viewers_per_shared_terminal"`
+	// PublicTCP bounds concurrent public raw-TCP tunnels (user decision 2026-10-27).
+	PublicTCP PublicTCPLimit `json:"public_tcp"`
+}
+
+// PublicTCPLimit is the concurrent public raw-TCP tunnel limit: Free and Pro per personal workspace, a team
+// gets TeamPerSeat for every paid seat, pooled. A workspace on its own (self-hosted) edge is not limited.
+type PublicTCPLimit struct {
+	Free        int `json:"free"`
+	Pro         int `json:"pro"`
+	TeamPerSeat int `json:"team_per_seat"`
 }
 
 func (l PlanLimit) valid() bool {
@@ -501,7 +511,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50}},
+		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -669,7 +679,7 @@ func (c Config) Validate() error {
 	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) {
 		errs = append(errs, fmt.Errorf("configured billing allowances must be nonnegative"))
 	}
-	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 {
+	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.PublicTCP.Free < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
 		errs = append(errs, fmt.Errorf("billing.limits: each plan limit needs free > 0, pro >= free and team_ceiling >= pro, and viewers_per_shared_terminal > 0"))
 	}
 	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {

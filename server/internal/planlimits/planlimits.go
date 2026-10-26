@@ -23,6 +23,8 @@ const (
 	Machines         Kind = "machines"
 	Publications     Kind = "publications"
 	BrowserTerminals Kind = "browser_terminals"
+	// PublicTCP is concurrent public raw-TCP tunnels; a workspace on a self-hosted edge is exempt.
+	PublicTCP Kind = "public_tcp"
 )
 
 // Plan is the plan a workspace's limits come from.
@@ -59,6 +61,8 @@ func (e *LimitError) Code() string {
 		return "machine_limit_reached"
 	case Publications:
 		return "preview_limit_reached"
+	case PublicTCP:
+		return "public_tcp_limit_reached"
 	default:
 		return "browser_terminal_limit_reached"
 	}
@@ -109,7 +113,15 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 	if err != nil {
 		return err
 	}
-	limit := limitFor(set.limits, kind, plan)
+	var limit int
+	if kind == PublicTCP {
+		var exempt bool
+		if limit, exempt, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan); err != nil || exempt {
+			return err
+		}
+	} else {
+		limit = limitFor(set.limits, kind, plan)
+	}
 	used, err := countTx(ctx, tx, scope, kind)
 	if err != nil {
 		return err
@@ -165,6 +177,25 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 		out[kind] = u
 	}
 	return out, nil
+}
+
+// publicTCPLimitTx is the workspace's public raw-TCP tunnel limit: per plan for a personal workspace, per paid
+// seat (pooled) for a team. A workspace whose tunnel edge is self-hosted is exempt, its listeners are its own.
+func publicTCPLimitTx(ctx context.Context, tx *db.Tx, l config.PublicTCPLimit, scope Scope, plan Plan) (limit int, exempt bool, err error) {
+	if err = tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,NULLIF($2,''))='self-hosted-only'`, scope.Account, scope.Team).Scan(&exempt); err != nil || exempt {
+		return 0, exempt, err
+	}
+	switch plan {
+	case Team:
+		var seats int
+		if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT quantity FROM billing_workspaces WHERE team_id=$1 AND team_paid_entitled($1)),0)`, scope.Team).Scan(&seats); err != nil {
+			return 0, false, err
+		}
+		return seats * l.TeamPerSeat, false, nil
+	case Pro:
+		return l.Pro, false, nil
+	}
+	return l.Free, false, nil
 }
 
 func limitFor(l config.PlanLimits, kind Kind, plan Plan) int {
@@ -227,6 +258,13 @@ func countSQL(kind Kind) (string, error) {
   WHERE t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())
   AND m.online AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND
   CASE WHEN $2<>'' THEN t.owner_team_id=$2 ELSE t.account_id=$1 AND t.owner_team_id IS NULL END))`, nil
+	case PublicTCP:
+		// A public TCP route of an active tunnel on a live machine (the Publications liveness rule).
+		return `(SELECT count(*) FROM tunnel_routes r JOIN tunnels t ON t.id=r.tunnel_id JOIN user_machines m ON m.id=t.created_by_host_id
+  WHERE r.protocol='tcp' AND r.deleted_at IS NULL AND r.desired_state='active'
+  AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())
+  AND m.online AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND
+  CASE WHEN $2<>'' THEN t.owner_team_id=$2 ELSE t.account_id=$1 AND t.owner_team_id IS NULL END)`, nil
 	case BrowserTerminals:
 		// Open console terminals: distinct terminal sessions with a live edge admission, so a
 		// reconnect or a shared terminal's viewers never count twice.

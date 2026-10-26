@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
@@ -102,6 +103,11 @@ func (r *SQLRepository) CreateResourceRoute(ctx context.Context, input RouteReco
 		}
 		if conflict {
 			return ErrRouteConflict
+		}
+		if candidate.Protocol == "tcp" {
+			if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: input.AccountID, Team: tunnel.OwnerTeamID.String}, planlimits.PublicTCP); err != nil {
+				return err
+			}
 		}
 		if candidate.Protocol == "tcp" || candidate.Protocol == "tls" {
 			if err := q.LockTunnelPublicListenerAllocatorV1(ctx); err != nil {

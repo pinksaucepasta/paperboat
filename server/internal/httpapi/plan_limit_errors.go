@@ -31,6 +31,8 @@ func planLimitMessage(l *planlimits.LimitError) string {
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d machines. Remove machines you no longer use, or upgrade your plan.", l.Limit)
 	case planlimits.Publications:
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d active previews and tunnels. Stop one you no longer need, or upgrade your plan.", l.Limit)
+	case planlimits.PublicTCP:
+		return fmt.Sprintf("This workspace has reached its plan's limit of %d public TCP tunnels. Stop one you no longer need, upgrade your plan, or run your own tunnel edge (self-hosted tunnels are not limited).", l.Limit)
 	default:
 		return fmt.Sprintf("This workspace has reached its plan's limit of %d open browser terminals. Close one, or upgrade your plan.", l.Limit)
 	}
