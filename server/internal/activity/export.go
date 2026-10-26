@@ -14,6 +14,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
+// exportPageRows is how many events one export transaction reads.
+const exportPageRows = 500
+
 // ErrExportNeedsTeam: export is a Team plan feature (PLAN F19, user decision 2026-10-23).
 var ErrExportNeedsTeam = errors.New("audit log export is available in team workspaces")
 
@@ -45,22 +48,38 @@ func (s *Service) Export(ctx context.Context, account string, scope workspace.Sc
 	if err != nil {
 		return err
 	}
+	// Pages of exportPageRows are read by cursor, each in its own short transaction, and written after it
+	// ends: a slow client never pins a pool slot or an old snapshot (F21-41).
 	rows := 0
-	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		out := newEncoder(format, w)
-		var writeErr error
-		if _, err := scan(ctx, tx, ws, retention, 0, q, s.cfg.AuditExportMaxRows, func(e Event) bool {
-			writeErr = out.event(e)
-			rows++
-			return writeErr == nil
+	out := newEncoder(format, w)
+	var before int64
+	for rows < s.cfg.AuditExportMaxRows {
+		want := min(exportPageRows, s.cfg.AuditExportMaxRows-rows)
+		page := make([]Event, 0, want)
+		var last int64
+		if err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			page = page[:0]
+			var err error
+			last, err = scan(ctx, tx, ws, retention, before, q, want, func(e Event) bool {
+				page = append(page, e)
+				return true
+			})
+			return err
 		}); err != nil {
 			return err
 		}
-		if writeErr != nil {
-			return writeErr
+		for _, e := range page {
+			if err = out.event(e); err != nil {
+				return err
+			}
 		}
-		return out.close()
-	})
+		rows += len(page)
+		before = last
+		if len(page) < want {
+			break
+		}
+	}
+	err = out.close()
 	if err != nil {
 		return err
 	}
