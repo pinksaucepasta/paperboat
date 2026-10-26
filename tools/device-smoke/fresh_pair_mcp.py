@@ -89,6 +89,7 @@ def setup(args, run_id, containers):
     for source, destination in [(args.binary, root + '/pb'), (args.probe, root + '/mcp-smoke')]:
         subprocess.run(['scp', '-q', source, args.host + ':' + destination], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
+    remote(args.host, ['chmod', '700', root + '/pb', root + '/mcp-smoke'])
     script = 'set -euo pipefail\nFRESH_BINARY=' + shlex.quote(root + '/pb') + '\n'
     script += (HERE / 'fresh_pair_lib.sh').read_text() + '\n'
     for container in containers:

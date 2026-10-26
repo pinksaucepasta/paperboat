@@ -181,6 +181,7 @@ func (s *suite) protocol() map[string]any {
 	}
 	session.Close()
 	session = s.open()
+	defer session.Close()
 	go func() {
 		_, _ = session.CallTool(s.ctx, &mcp.CallToolParams{Name: "exec", Arguments: s.sleeper("eof", 60)})
 	}()
