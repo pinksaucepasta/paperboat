@@ -562,33 +562,41 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			cols, rows := remoteSize()
 			_ = forceTerminalRedraw(conn, rows, cols)
 		}
-		stalled := "Reconnecting: no reply from " + info.Machine + "; what you type is kept"
+		reason := "no reply from " + info.Machine + "; what you type is kept"
+		if rc, ok := conn.(*tunnel.ReconnectingConn); ok && (event == tunnel.ReconnectStarted || event == tunnel.ReconnectRecovered) {
+			reason = strings.Replace(rc.ReconnectReason(), "the machine", info.Machine, 1)
+		}
+		var notice string
+		switch event {
+		case tunnel.ReconnectStalled, tunnel.ReconnectStarted:
+			notice = "Reconnecting: " + reason + " · Enter ~ r to reconnect now"
+		case tunnel.ReconnectResumed:
+			notice = "Reconnected"
+		case tunnel.ReconnectRecovered:
+			notice = "Reconnected after " + reason
+		case tunnel.ReconnectFailed:
+			notice = "Connection lost"
+		}
 		if !useStatusBar {
-			switch event {
-			case tunnel.ReconnectStalled:
-				fmt.Fprint(os.Stderr, "\r\n["+stalled+"]\r\n")
-			case tunnel.ReconnectResumed:
-				fmt.Fprint(os.Stderr, "\r\n[Reconnected]\r\n")
+			if event != tunnel.ReconnectFailed {
+				fmt.Fprint(os.Stderr, "\r\n["+notice+"]\r\n")
 			}
 			return
 		}
 		switch event {
-		case tunnel.ReconnectStalled:
+		case tunnel.ReconnectStalled, tunnel.ReconnectStarted:
 			bar.SetConnection("reconnecting")
-			bar.LoadingPersistent(stalled)
+			bar.LoadingPersistent(notice)
 		case tunnel.ReconnectResumed:
 			bar.SetConnection("connected")
-			bar.Notice("Reconnected")
-		case tunnel.ReconnectStarted:
-			bar.SetConnection("reconnecting")
-			bar.Loading("Reconnecting")
+			bar.Notice(notice)
 		case tunnel.ReconnectRecovered:
 			bar.RecoverFailureFor("connection")
 			bar.SetConnection("connected")
-			bar.Notice("Reconnected")
+			bar.Notice(notice)
 		case tunnel.ReconnectFailed:
 			bar.SetConnection("failed")
-			bar.FailureFor("connection", "Connection lost")
+			bar.FailureFor("connection", notice)
 		}
 	}))
 
@@ -642,7 +650,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		})
 		runOptions = append(runOptions, session.WithOutput(bar), session.WithRemoteSize(remoteSize))
 	}
-	code, err := session.Run(ctx, conn, interceptor, runOptions...)
+	var input io.WriteCloser = interceptor
+	if rc, ok := conn.(*tunnel.ReconnectingConn); ok {
+		input = newEscapeInput(interceptor, rc.Redial, func() { _ = rc.Close() })
+	}
+	code, err := session.Run(ctx, conn, input, runOptions...)
 	if err == nil {
 		if useStatusBar {
 			bar.ClearForExit()

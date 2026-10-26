@@ -578,7 +578,7 @@ func (c *localPeerConn) readLoop() {
 		}
 		if err != nil {
 			if !errors.Is(err, ErrPeerTerminalInvalid) {
-				err = errors.Join(ErrTransportLost, err)
+				err = errors.Join(ErrTransportLost, ErrLocalDaemonLost, err)
 			}
 			select {
 			case c.result <- localPeerWaitResult{err: err}:

@@ -381,3 +381,32 @@ func TestReconnectingConnResendsInputThatWasNotSent(t *testing.T) {
 		t.Fatalf("new link got %q", got)
 	}
 }
+
+// F3-18: the reason is known when ReconnectStarted fires, so the notice can say why the terminal reconnects.
+func TestReconnectingConnSaysWhyItReconnects(t *testing.T) {
+	for _, tc := range []struct {
+		lost error
+		want string
+	}{
+		{errors.Join(ErrTransportLost, ErrLocalDaemonLost), "Paperboat on this computer restarted"},
+		{ErrTransportLost, "the connection to the machine was lost"},
+	} {
+		first := &reconnectTestConn{Reader: bytes.NewReader(nil), err: tc.lost}
+		second := &reconnectTestConn{Reader: bytes.NewReader(nil)}
+		started := make(chan struct{}, 1)
+		c := NewObservedReconnectingConn(t.Context(), first, 1, 0, func(context.Context) (Conn, error) { return second, nil }, nil, nil, TelemetryContext{},
+			WithReconnectObserver(func(event ReconnectEvent) {
+				if event == ReconnectStarted {
+					started <- struct{}{}
+				}
+			}))
+		<-started
+		if reason := c.ReconnectReason(); reason != tc.want {
+			t.Fatalf("reason=%q, want %q", reason, tc.want)
+		}
+		_ = c.Close()
+	}
+	if reason := reconnectReason(ErrTransportLost, true); reason != "you asked to reconnect" {
+		t.Fatalf("requested reason=%q", reason)
+	}
+}

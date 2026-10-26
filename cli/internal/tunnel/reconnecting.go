@@ -35,6 +35,9 @@ type TelemetryContext struct {
 var ErrWriteUncertain = errors.New("terminal write outcome is uncertain")
 var ErrTransportLost = errors.New("terminal transport lost")
 
+// ErrLocalDaemonLost: the link to the Paperboat daemon on this computer broke (it restarted or stopped).
+var ErrLocalDaemonLost = errors.New("local Paperboat daemon connection lost")
+
 // ErrInputNotSent: a write failed before any of it left this process, so it is safe to send again on the next link.
 var ErrInputNotSent = errors.New("terminal input was not sent")
 
@@ -59,6 +62,22 @@ type reconnectingOptions struct {
 	outputQueueChunks int
 	outputBatchWindow time.Duration
 	observer          func(ReconnectEvent)
+}
+
+// ReconnectReason says, in words for the user, why the terminal is reconnecting or last reconnected.
+func (c *ReconnectingConn) ReconnectReason() string {
+	reason, _ := c.reason.Load().(string)
+	return reason
+}
+
+func reconnectReason(err error, requested bool) string {
+	switch {
+	case requested:
+		return "you asked to reconnect"
+	case errors.Is(err, ErrLocalDaemonLost):
+		return "Paperboat on this computer restarted"
+	}
+	return "the connection to the machine was lost"
 }
 
 func WithReconnectObserver(observer func(ReconnectEvent)) ReconnectingOption {
@@ -118,6 +137,7 @@ type ReconnectingConn struct {
 	maxEchoLatencyMS  atomic.Int64
 	outputBatchWindow time.Duration
 	observer          func(ReconnectEvent)
+	reason            atomic.Value // string: why the current or last reconnect happened
 }
 
 func (c *ReconnectingConn) record(name, outcome string, started time.Time) {
@@ -204,7 +224,8 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		_ = conn.Close()
 		<-readDone
 		c.recordCompression(conn)
-		if c.redial.Swap(false) && c.reconnect != nil && c.maxRetries > 0 {
+		requested := c.redial.Swap(false) && c.reconnect != nil && c.maxRetries > 0
+		if requested {
 			err = ErrTransportLost
 		}
 		if err == nil || !errors.Is(err, ErrTransportLost) || c.reconnect == nil || c.maxRetries <= 0 {
@@ -215,6 +236,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			return
 		}
 		c.setUnavailable(conn)
+		c.reason.Store(reconnectReason(err, requested))
 		c.notify(ReconnectStarted)
 		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
 			attemptStarted := c.now()
