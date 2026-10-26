@@ -3193,12 +3193,27 @@ xterm.js.
    - The status is shown even when the native status bar is off (K6).
    - Prior art: wezterm client reconnect loop (`~/ref/wezterm/wezterm-client`); VS Code reconnect grace
      (`~/ref/vscode/src/vs/platform/terminal`).
-7. **Errors: typed, end to end.**
-   - One code list for terminal ends and refusals: ended, revoked, no_access, limit, machine_unavailable, edge_unavailable,
-     too_many_pending, expired, protocol.
-   - Host → server → edge → browser and host → daemon → `pb` carry the code and a reason (WS close 4xxx with reason; the
-     native end event). No 1006, no status-only mapping, no string parsing.
-   - The console and `pb` branch on the code (C, V7).
+7. **Errors: typed, end to end (contract with Lane V and Lane C, 2026-10-26).**
+   - The edge closes the browser WS only after accept, with a reason that is a typed code, optionally followed by
+     ": <human text>". The code is what everyone branches on; the WS number is a fallback class for tools.
+     | reason | WS | meaning |
+     |---|---|---|
+     | `no_access` | 4404 | missing, not shared, or access changed |
+     | `ended` | 4409 | the terminal closed or exited, or its session ended |
+     | `revoked` | 4401 | access ended while attached |
+     | `expired` | 4408 | ticket lapsed or used: fetch a fresh one silently |
+     | `limit` | 4402 | plan limit of open terminals |
+     | `bandwidth_quota_exhausted` | 4403 | hosted allowance used up |
+     | `too_many_pending` | 4429 | retry after a wait |
+     | `machine_unavailable` | 4503 | the machine did not answer through its edge |
+     | `edge_unavailable` | 4504 | edge or control plane cannot admit now; retry shortly |
+     | `protocol` | 4500 | framing error; unknown reasons and numbers map here |
+   - 1006 means the network dropped, so reconnect.
+   - The WASM is the only mapper. Its state event carries `code` (typed), `message` (human text), `close` (the raw
+     number, for diagnostics) and `clean`. The console branches only on `code`.
+   - Ticket HTTP errors: 409 `machine_edge_unavailable` (same UI as `machine_unavailable`), 409
+     `terminal_session_closed`, 429 `too_many_pending_tickets` with Retry-After, 404 only for "not yours".
+   - Native: host → daemon → `pb` carry the same codes in the terminal end event; no string parsing anywhere.
 8. **Admission and lifetime (server + edge).**
    - Admission credentials (tickets, attach credentials) expire only before admission. A live stream is never cut for
      credential expiry, which would bring back periodic disconnects.
