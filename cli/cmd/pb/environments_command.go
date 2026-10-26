@@ -24,6 +24,7 @@ func environmentsCobraCommand() *cobra.Command {
 	}}
 	environments.Flags().Bool("json", false, "print JSON")
 	inventoryFilterFlags(environments)
+	addListPaging(environments)
 	return environments
 }
 
@@ -32,13 +33,18 @@ func environmentsList(c *command.Context) error {
 	if err != nil {
 		return err
 	}
-	machines, err := client.ListUserMachinesFiltered(c.Context, commandInventoryFilters(c))
+	maxItems, err := commandListPagingMax(c)
+	if err != nil {
+		return err
+	}
+	machines, total, err := client.ListUserMachinesPage(c.Context, commandInventoryFilters(c), maxItems)
 	if err != nil {
 		return err
 	}
 	if c.Bool("json") {
-		return json.NewEncoder(c.Writer).Encode(map[string]any{"machines": machines})
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"machines": machines, "total": total})
 	}
+	defer writeListFooter(c.ErrWriter, len(machines), total, "machines")
 	w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATE\tPLATFORM\tID")
 	for _, machine := range machines {

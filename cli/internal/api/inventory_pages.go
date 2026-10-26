@@ -111,3 +111,46 @@ func collectCursorInventory[T any](ctx context.Context, c *Client, path string) 
 		cursor = page.NextCursor
 	}
 }
+
+// collectKeysetPage reads at most maxItems items by the server's keyset cursor and returns the server's total
+// (PQ-04): {items, total, next_cursor}. A page that repeats a cursor, overflows its limit or claims more
+// results without returning any is refused.
+func collectKeysetPage[T any](ctx context.Context, c *Client, path string, filters url.Values, maxItems int) ([]T, int, error) {
+	limit := min(200, max(1, maxItems))
+	invalid := func() error { return &ResponseDecodeError{Err: errors.New("invalid inventory cursor page")} }
+	items := []T{}
+	seen := map[string]bool{"": true}
+	for cursor := ""; ; {
+		query := url.Values{}
+		for key, values := range filters {
+			query[key] = append([]string(nil), values...)
+		}
+		query.Set("limit", strconv.Itoa(limit))
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		var page struct {
+			Items      *[]T   `json:"items"`
+			Total      *int   `json:"total"`
+			NextCursor string `json:"next_cursor"`
+		}
+		if err := c.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &page); err != nil {
+			return nil, 0, err
+		}
+		if page.Items == nil || page.Total == nil || *page.Total < 0 || len(*page.Items) > limit || len(page.NextCursor) > 4096 || strings.ContainsAny(page.NextCursor, "\x00\r\n") {
+			return nil, 0, invalid()
+		}
+		items = append(items, (*page.Items)...)
+		if page.NextCursor == "" || len(items) >= maxItems {
+			if len(items) > maxItems {
+				items = items[:maxItems]
+			}
+			return items, *page.Total, nil
+		}
+		if len(*page.Items) == 0 || seen[page.NextCursor] {
+			return nil, 0, invalid()
+		}
+		seen[page.NextCursor] = true
+		cursor = page.NextCursor
+	}
+}

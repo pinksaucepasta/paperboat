@@ -18,7 +18,7 @@ func TestSessionIdentificationListHumanAndJSON(t *testing.T) {
 		case "/v1/machines":
 			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "machine_ident", "alias": "hp", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case "/v1/machines/machine_ident/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "terminal_ident", "name": "backend-work", "title": "✳ Fixing auth", "foreground_process": "claude", "current_directory": "/projects/api", "started_in": "/home/user", "state": "detached"}, {"id": "terminal_shell", "name": "shell-work", "title": "", "foreground_process": "bash", "started_in": "/home/user", "state": "detached"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 2, "next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "terminal_ident", "name": "backend-work", "title": "✳ Fixing auth", "foreground_process": "claude", "current_directory": "/projects/api", "started_in": "/home/user", "state": "detached"}, {"id": "terminal_shell", "name": "shell-work", "title": "", "foreground_process": "bash", "started_in": "/home/user", "state": "detached"}}, "pagination": map[string]any{"limit": echoedLimit(r), "offset": 0, "total": 2, "next_offset": nil}})
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 			http.NotFound(w, r)

@@ -19,8 +19,13 @@ pb config repository list [flags]
 ### Options
 
 ```
-  -h, --help   help for list
-      --json   print JSON
+      --all            show every item, up to 10000
+  -h, --help           help for list
+      --json           print JSON
+      --limit int      show at most this many items (1-200) (default 50)
+      --owner string   filter owner: mine, shared, or an authorized account ID
+      --q string       filter by resource name or ID
+      --state string   filter by resource state
 ```
 
 ### Options inherited from parent commands

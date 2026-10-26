@@ -33,7 +33,7 @@ func (c *Client) ListTunnelsV1Filtered(ctx context.Context, cursor string, limit
 	var out TunnelPage
 	e = c.doTunnelRequest(ctx, http.MethodGet, "/v1/tunnels"+q, nil, &out, nil, nil)
 	if e == nil {
-		if len(out.Items) > limit || !validNextCursor(out.NextCursor) {
+		if len(out.Items) > limit || out.Total < 0 || !validNextCursor(out.NextCursor) {
 			return TunnelPage{}, ErrUnsafeTunnelResponse
 		}
 		for _, v := range out.Items {

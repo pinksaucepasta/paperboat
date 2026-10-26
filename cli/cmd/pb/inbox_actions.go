@@ -66,13 +66,18 @@ func inboxRequestsCommand(c *command.Context) error {
 	if err != nil {
 		return err
 	}
-	requests, err := client.TeamInboxRequests(c.Context)
+	maxItems, err := commandListPagingMax(c)
+	if err != nil {
+		return err
+	}
+	requests, total, err := client.TeamInboxRequestsPage(c.Context, commandInventoryFilters(c), maxItems)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
 	if c.Bool("json") {
-		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": map[string]any{"requests": requests}})
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": map[string]any{"requests": requests, "total": total}})
 	}
+	defer writeListFooter(c.ErrWriter, len(requests), total, "requests")
 	if len(requests) == 0 {
 		fmt.Fprintln(c.Writer, "No team file requests.")
 		return nil

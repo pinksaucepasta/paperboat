@@ -19,7 +19,7 @@ func TestSessionSharedExplainsWhereTeamSharedSessionsAre(t *testing.T) {
 	configPath := filepath.Join(root, "config.json")
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/terminal-sessions" {
-			writeAPIData(t, w, map[string]any{"sessions": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"sessions": []any{}, "pagination": map[string]any{"limit": echoedLimit(r), "offset": 0, "total": 0, "next_offset": nil}})
 			return
 		}
 		http.NotFound(w, r)

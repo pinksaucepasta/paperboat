@@ -49,6 +49,7 @@ func tunnelListCommand() *cobra.Command {
 				return err
 			}
 		}
+		writePageTotal(command.ErrOrStderr(), len(out.Items), out.Total, "tunnels")
 		return writeInventoryContinuation(command, nil, out.NextCursor, limit)
 	})
 	command.Flags().String("cursor", "", "continue a previous page")

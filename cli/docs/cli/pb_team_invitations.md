@@ -19,8 +19,11 @@ pb team invitations [team] [flags]
 ### Options
 
 ```
-  -h, --help   help for invitations
-      --json   print canonical JSON
+      --all         show every item, up to 10000
+  -h, --help        help for invitations
+      --json        print canonical JSON
+      --limit int   show at most this many items (1-200) (default 50)
+      --q string    filter by email or ID
 ```
 
 ### Options inherited from parent commands

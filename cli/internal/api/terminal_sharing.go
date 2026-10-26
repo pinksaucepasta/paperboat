@@ -82,6 +82,11 @@ func (c *Client) SharedTerminalSessions(ctx context.Context) ([]SharedTerminalSe
 	return c.SharedTerminalSessionsFiltered(ctx, nil)
 }
 
+// SharedTerminalSessionsPage reads at most maxItems catalog sessions and the server's total (PQ-04).
+func (c *Client) SharedTerminalSessionsPage(ctx context.Context, filters url.Values, maxItems int) ([]SharedTerminalSession, int, error) {
+	return collectOffsetInventoryPage[SharedTerminalSession](ctx, c, "/v1/terminal-sessions", "sessions", filters, maxItems)
+}
+
 func (c *Client) SharedTerminalSessionsFiltered(ctx context.Context, filters url.Values) ([]SharedTerminalSession, error) {
 	return collectOffsetInventory[SharedTerminalSession](ctx, c, "/v1/terminal-sessions", "sessions", filters)
 }

@@ -59,19 +59,26 @@ func configRepositoryCobraCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items, err := client.ListConfigRepositories(cmd.Context())
+		maxItems, err := listPagingMax(cmd)
+		if err != nil {
+			return err
+		}
+		items, total, err := client.ListConfigRepositoriesPage(cmd.Context(), inventoryFilters(cmd), maxItems)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
 		if jsonOutput, _ := cmd.Flags().GetBool("json"); jsonOutput {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"version": "1", "repositories": items})
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"version": "1", "repositories": items, "total": total})
 		}
+		defer writeListFooter(cmd.ErrOrStderr(), len(items), total, "repositories")
 		for _, item := range items {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", item.ID, item.DisplayName, item.Provider)
 		}
 		return nil
 	}
 	list.Flags().Bool("json", false, "print JSON")
+	inventoryFilterFlags(list)
+	addListPaging(list)
 	connect := &cobra.Command{Use: "connect <url-or-absolute-path>", Short: "Connect an HTTPS, SSH, or local Git repository", Args: commandArgs(cobra.ExactArgs(1))}
 	connect.Flags().String("name", "", "display name")
 	connect.Flags().String("branch", "main", "Git branch")

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/pinksaucepasta/paperboat/internal/command"
+
 	"github.com/spf13/cobra"
 )
 
@@ -36,5 +38,20 @@ func listPagingMax(command *cobra.Command) (int, error) {
 func writeListFooter(writer io.Writer, shown, total int, noun string) {
 	if total > shown {
 		fmt.Fprintf(writer, "Showing %d of %d %s. Use --limit or --all for more, or narrow the list with --q.\n", shown, total, noun)
+	}
+}
+
+// commandListPagingMax is listPagingMax for an action run through actionRun.
+func commandListPagingMax(ctx *command.Context) (int, error) {
+	if selected, ok := ctx.Context.Value(confirmationCommandKey{}).(*cobra.Command); ok {
+		return listPagingMax(selected)
+	}
+	return defaultListLimit, nil
+}
+
+// writePageTotal is the footer of a cursor list, whose next page is printed as a command.
+func writePageTotal(writer io.Writer, shown, total int, noun string) {
+	if total > shown {
+		fmt.Fprintf(writer, "Showing %d of %d %s.\n", shown, total, noun)
 	}
 }

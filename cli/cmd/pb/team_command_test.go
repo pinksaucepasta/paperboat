@@ -78,7 +78,7 @@ func TestTeamInvitationInventoryShowsPendingEmailVerification(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 			"items":      []map[string]any{{"invitation_id": "inv_1", "team_id": "team_1", "email": "new.member@example.test", "account_id": "", "state": "pending", "expires_at": "2026-10-20T00:00:00Z"}},
-			"pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil},
+			"pagination": map[string]any{"limit": echoedLimit(r), "offset": 0, "total": 1, "next_offset": nil},
 		}})
 	}))
 	defer server.Close()

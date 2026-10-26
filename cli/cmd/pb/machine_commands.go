@@ -46,17 +46,24 @@ func machineListCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		// A tag filter is applied here, so it reads up to the --all bound and reports the matches.
+		// The server filters by one tag; each further --tag narrows that set here, which reads up to the --all
+		// bound and reports the matches.
 		tags, _ := command.Flags().GetStringArray("tag")
-		read := maxItems
+		if _, err := machineTagFilter(command, nil); err != nil {
+			return err
+		}
+		filters, read := inventoryFilters(command), maxItems
 		if len(tags) > 0 {
+			filters.Set("tag", strings.TrimPrefix(tags[0], "tag:"))
+		}
+		if len(tags) > 1 {
 			read = maxListAll
 		}
-		machines, total, err := client.ListUserMachinesPage(ctx.Context, inventoryFilters(command), read)
+		machines, total, err := client.ListUserMachinesPage(ctx.Context, filters, read)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		if len(tags) > 0 {
+		if len(tags) > 1 {
 			if machines, err = machineTagFilter(command, machines); err != nil {
 				return err
 			}

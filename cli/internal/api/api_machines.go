@@ -269,15 +269,16 @@ func (c *Client) ListUserMachines(ctx context.Context) ([]UserMachine, error) {
 	return c.ListUserMachinesFiltered(ctx, nil)
 }
 
-// ListUserMachinesPage reads at most maxItems machines (0: all) and the server's total.
+// ListUserMachinesPage reads at most maxItems machines by the server's keyset cursor, filtered on the server
+// (q, state, owner, tag), and the server's total (PQ-04).
 func (c *Client) ListUserMachinesPage(ctx context.Context, filters url.Values, maxItems int) ([]UserMachine, int, error) {
 	query := url.Values{"sort": {"alias"}}
-	for _, key := range []string{"q", "state", "owner"} {
+	for _, key := range []string{"q", "state", "owner", "tag"} {
 		if value := filters.Get(key); value != "" {
 			query.Set(key, value)
 		}
 	}
-	return collectOffsetInventoryPage[UserMachine](ctx, c, "/v1/machines", "items", query, maxItems)
+	return collectKeysetPage[UserMachine](ctx, c, "/v1/machines", query, maxItems)
 }
 
 func (c *Client) ListUserMachinesFiltered(ctx context.Context, filters url.Values) ([]UserMachine, error) {

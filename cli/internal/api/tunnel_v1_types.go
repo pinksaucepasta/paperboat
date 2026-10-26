@@ -67,6 +67,8 @@ type Tunnel struct {
 type TunnelPage struct {
 	Items      []Tunnel `json:"items"`
 	NextCursor string   `json:"next_cursor,omitempty"`
+	// Total counts every tunnel matching the filters, not only this page (PQ-04).
+	Total int `json:"total"`
 }
 
 type TunnelOriginInput struct {

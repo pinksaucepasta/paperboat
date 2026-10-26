@@ -82,6 +82,7 @@ func sessionCobraCommand() *cobra.Command {
 	list.Flags().Bool("json", false, "print JSON")
 	inventoryFilterFlags(list)
 	list.Flags().Bool("closed", false, "filter explicitly by closed state")
+	addListPaging(list)
 	group.AddCommand(list)
 	for _, child := range []struct {
 		name, short string
@@ -123,13 +124,18 @@ func sessionList(c *command.Context) error {
 	if err != nil {
 		return err
 	}
-	sessions, err := client.ListUserMachineTerminalSessionsFiltered(c.Context, target.id, commandInventoryFilters(c))
+	maxItems, err := commandListPagingMax(c)
+	if err != nil {
+		return err
+	}
+	sessions, total, err := client.ListUserMachineTerminalSessionsPage(c.Context, target.id, commandInventoryFilters(c), maxItems)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
 	if c.Bool("json") {
-		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "sessions": sessions})
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "sessions": sessions, "total": total})
 	}
+	defer writeListFooter(c.ErrWriter, len(sessions), total, "sessions")
 	w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
 	if c.Bool("wide") {
 		fmt.Fprintln(w, "NAME\tID\tTITLE / PROCESS\tDIRECTORY\tSTATE\tATTACHED\tLAST ACTIVE\tCREATED")

@@ -403,6 +403,11 @@ func (c *Client) ListUserMachineTerminalSessions(ctx context.Context, machineID 
 	return c.ListUserMachineTerminalSessionsFiltered(ctx, machineID, nil)
 }
 
+// ListUserMachineTerminalSessionsPage reads at most maxItems sessions and the server's total (PQ-04).
+func (c *Client) ListUserMachineTerminalSessionsPage(ctx context.Context, machineID string, filters url.Values, maxItems int) ([]TerminalSession, int, error) {
+	return collectOffsetInventoryPage[TerminalSession](ctx, c, "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters, maxItems)
+}
+
 func (c *Client) ListUserMachineTerminalSessionsFiltered(ctx context.Context, machineID string, filters url.Values) ([]TerminalSession, error) {
 	return collectOffsetInventory[TerminalSession](ctx, c, "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters)
 }

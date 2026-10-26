@@ -19,9 +19,11 @@ pb session shared [flags]
 ### Options
 
 ```
+      --all            show every item, up to 10000
       --closed         filter explicitly by closed state
   -h, --help           help for shared
       --json           print canonical JSON
+      --limit int      show at most this many items (1-200) (default 50)
       --owner string   filter owner: mine, shared, or an authorized account ID
       --q string       filter by resource name or ID
       --state string   filter by resource state

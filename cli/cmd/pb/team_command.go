@@ -584,10 +584,17 @@ func teamInvitationsCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items, err := client.TeamInvitations(command.Context(), team)
+		maxItems, err := listPagingMax(command)
 		if err != nil {
 			return err
 		}
+		q, _ := command.Flags().GetString("q")
+		items, total, err := client.TeamInvitationsPage(command.Context(), team, url.Values{"q": {q}}, maxItems)
+		if err != nil {
+			return err
+		}
+		// The JSON stays a list; the footer on stderr says when it is not the whole list.
+		defer writeListFooter(command.ErrOrStderr(), len(items), total, "invitations")
 		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(items)
 		}
@@ -603,6 +610,8 @@ func teamInvitationsCommand() *cobra.Command {
 		return nil
 	}}
 	command.Flags().Bool("json", false, "print canonical JSON")
+	command.Flags().String("q", "", "filter by email or ID")
+	addListPaging(command)
 	return command
 }
 func teamInvitationShowCommand() *cobra.Command {

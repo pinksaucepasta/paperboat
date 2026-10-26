@@ -69,6 +69,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 	if action == "shared" {
 		inventoryFilterFlags(c)
 		c.Flags().Bool("closed", false, "filter explicitly by closed state")
+		addListPaging(c)
 	}
 	if action == "share" {
 		c.Long = terminalSharingNotice
@@ -104,10 +105,16 @@ func terminalSharingCommand(action string) *cobra.Command {
 		}
 		jsonOutput, _ := c.Flags().GetBool("json")
 		if action == "shared" {
-			sessions, err := client.SharedTerminalSessionsFiltered(c.Context(), inventoryFilters(c))
+			maxItems, err := listPagingMax(c)
 			if err != nil {
 				return err
 			}
+			sessions, total, err := client.SharedTerminalSessionsPage(c.Context(), inventoryFilters(c), maxItems)
+			if err != nil {
+				return err
+			}
+			// The JSON stays a list; the footer on stderr says when it is not the whole list.
+			defer writeListFooter(c.ErrOrStderr(), len(sessions), total, "sessions")
 			if jsonOutput {
 				return terminalSharingOutputFailure(json.NewEncoder(c.OutOrStdout()).Encode(sessions))
 			}

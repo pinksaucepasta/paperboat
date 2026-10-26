@@ -52,8 +52,9 @@ func (c *Client) CreateTeamInboxRequest(ctx context.Context, request TeamInboxRe
 	return out, err
 }
 
-func (c *Client) TeamInboxRequests(ctx context.Context) ([]TeamInboxRequest, error) {
-	return collectOffsetInventory[TeamInboxRequest](ctx, c, "/v1/team-inbox/requests", "requests", nil)
+// TeamInboxRequestsPage reads at most maxItems requests and the server's total (PQ-04).
+func (c *Client) TeamInboxRequestsPage(ctx context.Context, filters url.Values, maxItems int) ([]TeamInboxRequest, int, error) {
+	return collectOffsetInventoryPage[TeamInboxRequest](ctx, c, "/v1/team-inbox/requests", "requests", filters, maxItems)
 }
 
 // PendingTeamInboxRequests filters at the authorization-owning server before

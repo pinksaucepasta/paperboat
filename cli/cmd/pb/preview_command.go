@@ -505,6 +505,7 @@ func runPreviewListCobra(command *cobra.Command, _ []string) error {
 	if err := writePreviewLeaseTable(command.OutOrStdout(), page.Items); err != nil {
 		return err
 	}
+	writePageTotal(command.ErrOrStderr(), len(page.Items), page.Total, "previews")
 	return writeInventoryContinuation(command, nil, page.NextCursor, limit)
 }
 

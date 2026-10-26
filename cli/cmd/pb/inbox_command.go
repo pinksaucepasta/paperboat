@@ -18,7 +18,9 @@ func inboxCobraCommand() *cobra.Command {
 	child("path", "", cobra.NoArgs, actionRun(inboxPathCommand))
 	child("set <directory>", "", cobra.ExactArgs(1), actionRun(inboxSetCommand))
 	child("reset", "", cobra.NoArgs, actionRun(inboxResetCommand))
-	child("requests", "List team file requests", cobra.NoArgs, actionRun(inboxRequestsCommand))
+	requests := child("requests", "List team file requests", cobra.NoArgs, actionRun(inboxRequestsCommand))
+	inventoryFilterFlags(requests)
+	addListPaging(requests)
 	for _, decision := range []struct{ name, short string }{
 		{"approve", "Approve an exact team file request"},
 		{"decline", "Decline an exact team file request"},

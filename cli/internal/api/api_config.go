@@ -104,6 +104,11 @@ func (c *Client) ListConfigRepositories(ctx context.Context) ([]ConfigRepository
 	return collectOffsetInventory[ConfigRepository](ctx, c, "/v1/config-repositories", "items", nil)
 }
 
+// ListConfigRepositoriesPage reads at most maxItems repositories and the server's total (PQ-04).
+func (c *Client) ListConfigRepositoriesPage(ctx context.Context, filters url.Values, maxItems int) ([]ConfigRepository, int, error) {
+	return collectOffsetInventoryPage[ConfigRepository](ctx, c, "/v1/config-repositories", "items", filters, maxItems)
+}
+
 type ConfigRepositoryCandidate struct {
 	Provider      string `json:"provider"`
 	ExternalID    string `json:"external_id"`

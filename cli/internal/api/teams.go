@@ -225,6 +225,12 @@ func (c *Client) GrantTeamMachine(ctx context.Context, team string, in TeamMachi
 // by the account in the explicitly selected team. Resources remain authorized
 // by the server before returning their invitation IDs.
 func (c *Client) TeamInvitations(ctx context.Context, team string) ([]TeamInvitation, error) {
+	items, _, err := c.TeamInvitationsPage(ctx, team, nil, 0)
+	return items, err
+}
+
+// TeamInvitationsPage reads at most maxItems pending invitations (0: all) and the server's total (PQ-04).
+func (c *Client) TeamInvitationsPage(ctx context.Context, team string, extra url.Values, maxItems int) ([]TeamInvitation, int, error) {
 	path := "/v1/team-invitations"
 	filters := url.Values{"state": {"pending"}}
 	if team != "" {
@@ -232,7 +238,10 @@ func (c *Client) TeamInvitations(ctx context.Context, team string) ([]TeamInvita
 	} else {
 		filters.Set("owner", "mine")
 	}
-	return collectOffsetInventory[TeamInvitation](ctx, c, path, "items", filters)
+	if q := extra.Get("q"); q != "" {
+		filters.Set("q", q)
+	}
+	return collectOffsetInventoryPage[TeamInvitation](ctx, c, path, "items", filters, maxItems)
 }
 func (c *Client) GetTeamInvitation(ctx context.Context, id string) (TeamInvitation, error) {
 	var out TeamInvitation

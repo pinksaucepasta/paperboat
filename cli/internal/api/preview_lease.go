@@ -252,6 +252,8 @@ func (c *Client) StopPreviewLease(ctx context.Context, lease PreviewLease, idemp
 type PreviewLeasePage struct {
 	Items      []PreviewLease `json:"items"`
 	NextCursor string         `json:"next_cursor,omitempty"`
+	// Total counts every preview matching the filters, not only this page (PQ-04).
+	Total int `json:"total"`
 }
 
 // ListPreviewLeases returns one bounded page of temporary preview leases.
@@ -287,7 +289,7 @@ func (c *Client) ListPreviewLeasesFiltered(ctx context.Context, cursor string, l
 	if err := c.doChecked(ctx, http.MethodGet, path, nil, &page); err != nil {
 		return PreviewLeasePage{}, err
 	}
-	if len(page.Items) > limit {
+	if len(page.Items) > limit || page.Total < 0 {
 		return PreviewLeasePage{}, fmt.Errorf("%w: preview page exceeds requested limit", ErrPreviewLeaseInvalid)
 	}
 	if len(page.NextCursor) > 4096 || strings.ContainsAny(page.NextCursor, "\r\n") {
