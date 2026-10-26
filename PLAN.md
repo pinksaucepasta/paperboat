@@ -4983,3 +4983,6 @@ Remaining 7.3/min is relay observations valid 15 s vs a 30 s renewal cadence; no
 
 2026-10-27 | SDK lane C126 | L PASS official tunnel_private_access.py on hp dev-785d6f16/server .117/edge .26.15: both selectors exact4118-byte echo, correct resource identity, listeners close; help/error paths PASS. Result tunnel-private-access-785d6f16-edge15-20261027.json.
 Public TCP from oracle PASS4120 bytes, status ready/logs2, cleaned; result tunnel-public-tcp-785d6f16-edge15-20261027.json. Earlier346 manage/preview/TLS creation failures sent to Merger; upgraded TLS passthrough PASS (oracle openssl CN=mgtls.test). Pair retained, Merger mgc126 untouched.
+
+2026-10-27 | SDK lane final management checks | hp dev-785d6f16/server .117/edge .26.15: tunnel-manage and preview-manage PASS, including route mutations/rename and preview stop/delete/TTL; identities unchanged.
+Result tools/device-smoke/results/tunnel-preview-manage-785d6f16-edge15-20261027.json; all requested C126/public TCP/TLS/manage checks now green. Own resources removed; pair retained, Merger mgc126 untouched. M/W/custom-domain rerun skipped.
