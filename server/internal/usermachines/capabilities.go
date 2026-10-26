@@ -161,6 +161,10 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 		if in.Status == "applied" && in.Applied != selectionFromNames(machine.ConfiguredCapabilities) {
 			return ErrCapabilitiesObservationStale
 		}
+		// Every heartbeat repeats the last report; an unchanged one writes nothing.
+		if machine.State != "revoked" && machine.State != "deleted" && !machine.DeletedAt.Valid && machine.CapabilitiesDesiredVersion == in.Version && machine.CapabilitiesObservedVersion == in.Version && machine.CapabilitiesStatus == in.Status && machine.CapabilitiesErrorCode.String == in.ErrorCode && slices.Equal(machine.CapabilitiesApplied, capabilityNames(in.Applied)) {
+			return nil
+		}
 		rows, err := tx.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{AppliedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
 		if err != nil {
 			return err

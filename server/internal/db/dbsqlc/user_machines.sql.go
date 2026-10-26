@@ -4744,31 +4744,55 @@ func (q *Queries) MarkUserMachineAccessSessionRevoked(ctx context.Context, id st
 	return result.RowsAffected(), nil
 }
 
-const markUserMachineOnlineFromHelper = `-- name: MarkUserMachineOnlineFromHelper :execrows
-UPDATE user_machines
-SET state = 'online', online = true, observed_capabilities = paperboat.machine_observed_capabilities(COALESCE($1, '{}'::text[]), capabilities_applied), reporter_version = COALESCE(NULLIF($2::text, ''), reporter_version), last_seen_at = now(), updated_at = now(), version = version + 1
-WHERE id = $3 AND environment_id = $4
-  AND seat_state = 'occupied' AND deleted_at IS NULL AND state IN ('pending','offline','online')
+const markUserMachineOnlineFromHelper = `-- name: MarkUserMachineOnlineFromHelper :one
+WITH present AS (
+  SELECT um.id AS machine_id, um.state AS prior_state, um.online AS prior_online,
+    um.observed_capabilities AS prior_capabilities, um.last_seen_at AS prior_seen_at,
+    paperboat.machine_observed_capabilities(COALESCE($1, '{}'::text[]), um.capabilities_applied) AS next_capabilities,
+    um.reporter_version AS prior_reporter, COALESCE(NULLIF($2::text, ''), um.reporter_version) AS next_reporter
+  FROM user_machines um
+  WHERE um.id = $3 AND um.environment_id = $4
+    AND um.seat_state = 'occupied' AND um.deleted_at IS NULL AND um.state IN ('pending','offline','online')
+), due AS (
+  SELECT p.machine_id, p.next_capabilities, p.next_reporter,
+    (p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities) AS material
+  FROM present p
+  WHERE p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities
+    OR p.prior_reporter IS DISTINCT FROM p.next_reporter OR p.prior_seen_at IS NULL OR p.prior_seen_at < now() - make_interval(secs => $5::float8)
+), written AS (
+  UPDATE user_machines m
+  SET state = 'online', online = true, observed_capabilities = d.next_capabilities, reporter_version = d.next_reporter, last_seen_at = now(),
+      updated_at = CASE WHEN d.material THEN now() ELSE m.updated_at END,
+      version = m.version + CASE WHEN d.material THEN 1 ELSE 0 END
+  FROM due d WHERE m.id = d.machine_id
+  RETURNING m.id
+)
+SELECT EXISTS(SELECT 1 FROM present)::boolean AS eligible
 `
 
 type MarkUserMachineOnlineFromHelperParams struct {
-	ObservedCapabilities interface{}
-	ReporterVersion      string
-	ID                   string
-	EnvironmentID        string
+	ObservedCapabilities   interface{}
+	ReporterVersion        string
+	ID                     string
+	EnvironmentID          string
+	PresenceRefreshSeconds float64
 }
 
-func (q *Queries) MarkUserMachineOnlineFromHelper(ctx context.Context, arg MarkUserMachineOnlineFromHelperParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markUserMachineOnlineFromHelper,
+// A heartbeat writes the row only when presence or capabilities change, or to refresh last_seen_at once it is
+// older than presence_refresh_seconds (half the offline cutoff); an unchanged heartbeat writes nothing. A new
+// reporter_version is written too (an observation without one keeps the last value). A
+// last_seen_at-only refresh keeps version and updated_at: nothing a client reads changed.
+func (q *Queries) MarkUserMachineOnlineFromHelper(ctx context.Context, arg MarkUserMachineOnlineFromHelperParams) (bool, error) {
+	row := q.db.QueryRow(ctx, markUserMachineOnlineFromHelper,
 		arg.ObservedCapabilities,
 		arg.ReporterVersion,
 		arg.ID,
 		arg.EnvironmentID,
+		arg.PresenceRefreshSeconds,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	var eligible bool
+	err := row.Scan(&eligible)
+	return eligible, err
 }
 
 const markUserMachineTerminalSessionOperationApplied = `-- name: MarkUserMachineTerminalSessionOperationApplied :exec
@@ -5019,17 +5043,23 @@ SET worker_generation = $1,
 WHERE id = $7 AND environment_id = $8
   AND deleted_at IS NULL
   AND (runtime_diagnostics_observed_at IS NULL OR runtime_diagnostics_observed_at <= $6)
+  -- Unchanged diagnostics refresh their timestamp at most every presence_refresh_seconds.
+  AND (worker_generation IS DISTINCT FROM $1 OR os_boot_id IS DISTINCT FROM $2
+    OR worker_service_scope IS DISTINCT FROM $3 OR connector_state IS DISTINCT FROM $4
+    OR connector_generation IS DISTINCT FROM $5 OR runtime_diagnostics_observed_at IS NULL
+    OR runtime_diagnostics_observed_at < $6 - make_interval(secs => $9::float8))
 `
 
 type RecordUserMachineRuntimeDiagnosticsParams struct {
-	WorkerGeneration    int64
-	OsBootID            sql.NullString
-	WorkerServiceScope  string
-	ConnectorState      string
-	ConnectorGeneration int64
-	ObservedAt          sql.NullTime
-	ID                  string
-	EnvironmentID       string
+	WorkerGeneration       int64
+	OsBootID               sql.NullString
+	WorkerServiceScope     string
+	ConnectorState         string
+	ConnectorGeneration    int64
+	ObservedAt             sql.NullTime
+	ID                     string
+	EnvironmentID          string
+	PresenceRefreshSeconds float64
 }
 
 func (q *Queries) RecordUserMachineRuntimeDiagnostics(ctx context.Context, arg RecordUserMachineRuntimeDiagnosticsParams) (int64, error) {
@@ -5042,6 +5072,7 @@ func (q *Queries) RecordUserMachineRuntimeDiagnostics(ctx context.Context, arg R
 		arg.ObservedAt,
 		arg.ID,
 		arg.EnvironmentID,
+		arg.PresenceRefreshSeconds,
 	)
 	if err != nil {
 		return 0, err

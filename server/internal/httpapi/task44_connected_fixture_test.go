@@ -242,7 +242,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := httptest.NewServer(runtimeObservation(metering.NewRuntimeRepository(store, "task44-isolated-encryption-key"), enrollment, 10, machines))
+	observation := httptest.NewServer(runtimeObservation(metering.NewRuntimeRepository(store, time.Minute), enrollment, 10, machines))
 	defer observation.Close()
 	now := time.Now().UTC()
 	ownerToken, err := signer.SignCredential(mint.CredentialInput{Issuer: "https://task44.invalid", Audience: "paperboat-machine", Subject: owner.id, JTI: "task44-owner", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: environment, MachineID: machine, UserID: owner.id, AccountID: owner.id, CLIClientSessionID: "task44-owner", SessionID: terminal})

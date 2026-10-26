@@ -861,7 +861,7 @@ func New(opts Options) (*App, error) {
 		Teams:                     teamService,
 		Policy:                    teamService,
 		TeamInbox:                 teamInboxService,
-		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.Secrets.EncryptionKey, opts.Config.ConfigSync.StaleHeartbeatAfter),
+		MeteringRepo:              metering.NewRuntimeRepository(store, opts.Config.UserMachines.OfflineAfter/2, opts.Config.ConfigSync.StaleHeartbeatAfter),
 		RuntimeIdentity:           enrollmentService,
 		Machines:                  userMachineService,
 		Inbox:                     inboxDispatcher,

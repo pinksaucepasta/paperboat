@@ -40,7 +40,7 @@ func TestRuntimeObservationRecordsTheReporterVersionOnPostgres(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($2,$1,$2,'rv-'||right($2,6),'linux','amd64','/w','online','occupied',true)`, user, machine); err != nil {
 		t.Fatal(err)
 	}
-	repo := NewRuntimeRepository(store, "")
+	repo := NewRuntimeRepository(store, time.Minute)
 	version := func() string {
 		t.Helper()
 		var v sql.NullString

@@ -14,15 +14,19 @@ var ErrDuplicateMachineIdentity = errors.New("machine identity is active on anot
 
 type RuntimeRepository struct {
 	db                     *db.DB
+	presenceRefresh        time.Duration
 	identityConflictWindow time.Duration
 }
 
-func NewRuntimeRepository(store *db.DB, _ string, identityConflictWindow ...time.Duration) *RuntimeRepository {
+// NewRuntimeRepository records machine heartbeats. presenceRefresh is how stale last_seen_at may become
+// before an otherwise unchanged heartbeat writes it again (half the offline cutoff, so an idle machine
+// costs one row write per presenceRefresh instead of one per heartbeat).
+func NewRuntimeRepository(store *db.DB, presenceRefresh time.Duration, identityConflictWindow ...time.Duration) *RuntimeRepository {
 	window := 2 * time.Minute
 	if len(identityConflictWindow) > 0 && identityConflictWindow[0] > 0 {
 		window = identityConflictWindow[0]
 	}
-	return &RuntimeRepository{db: store, identityConflictWindow: window}
+	return &RuntimeRepository{db: store, presenceRefresh: presenceRefresh, identityConflictWindow: window}
 }
 
 type RuntimeObservation struct {
@@ -53,8 +57,9 @@ func (r *RuntimeRepository) RecordRuntimeObservation(ctx context.Context, observ
 				return ErrDuplicateMachineIdentity
 			}
 		}
-		updated, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities, ReporterVersion: observation.ReporterVersion})
-		if err != nil || updated != 1 {
+		refresh := r.presenceRefresh.Seconds()
+		eligible, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities, ReporterVersion: observation.ReporterVersion, PresenceRefreshSeconds: refresh})
+		if err != nil || !eligible {
 			return err
 		}
 		if _, err = tx.Queries().MarkPairingInstallationReady(ctx, sql.NullString{String: observation.MachineID, Valid: true}); err != nil {
@@ -64,7 +69,7 @@ func (r *RuntimeRepository) RecordRuntimeObservation(ctx context.Context, observ
 			if observation.DiagnosticsObservedAt.IsZero() {
 				observation.DiagnosticsObservedAt = observation.ObservedAt
 			}
-			if _, err = tx.Queries().RecordUserMachineRuntimeDiagnostics(ctx, dbsqlc.RecordUserMachineRuntimeDiagnosticsParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, WorkerGeneration: int64(observation.WorkerGeneration), OsBootID: sql.NullString{String: observation.OSBootID, Valid: true}, WorkerServiceScope: observation.WorkerServiceScope, ConnectorState: observation.ConnectorState, ConnectorGeneration: int64(observation.ConnectorGeneration), ObservedAt: sql.NullTime{Time: observation.DiagnosticsObservedAt, Valid: true}}); err != nil {
+			if _, err = tx.Queries().RecordUserMachineRuntimeDiagnostics(ctx, dbsqlc.RecordUserMachineRuntimeDiagnosticsParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, WorkerGeneration: int64(observation.WorkerGeneration), OsBootID: sql.NullString{String: observation.OSBootID, Valid: true}, WorkerServiceScope: observation.WorkerServiceScope, ConnectorState: observation.ConnectorState, ConnectorGeneration: int64(observation.ConnectorGeneration), ObservedAt: sql.NullTime{Time: observation.DiagnosticsObservedAt, Valid: true}, PresenceRefreshSeconds: refresh}); err != nil {
 				return err
 			}
 		}

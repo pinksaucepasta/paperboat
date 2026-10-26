@@ -1126,8 +1126,8 @@ func TestWorkerMarksStaleMachineOfflineAndHeartbeatRestoresIt(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if rows, err := store.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: userMachineID, EnvironmentID: environmentID}); err != nil || rows != 1 {
-		t.Fatalf("restore heartbeat rows=%d err=%v", rows, err)
+	if eligible, err := store.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: userMachineID, EnvironmentID: environmentID}); err != nil || !eligible {
+		t.Fatalf("restore heartbeat eligible=%v err=%v", eligible, err)
 	}
 	var state string
 	var online bool

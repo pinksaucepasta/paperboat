@@ -146,7 +146,7 @@ func TestTask43ServeTerminalJoinLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	machines := usermachines.New(database, writer, usermachines.Policy{}, nil)
-	handler := runtimeObservation(metering.NewRuntimeRepository(database, "task43-terminal-join-encryption-key"), enrollment, 10, machines)
+	handler := runtimeObservation(metering.NewRuntimeRepository(database, time.Minute), enrollment, 10, machines)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	fixture := struct {

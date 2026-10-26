@@ -108,6 +108,17 @@ func TestMachineCapabilityApplicationMatchesDesiredPostgres(t *testing.T) {
 	if err != nil || final.Desired != (MachineCapabilitySelection{}) || final.Applied != final.Desired || final.AppliedVersion != policy.DesiredVersion || final.Status != "applied" {
 		t.Fatal("all-disabled acknowledgement did not publish exact desired state")
 	}
+	// Every heartbeat repeats the last report: an unchanged one leaves the machine row untouched.
+	var before, after string
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT xmin::text FROM paperboat.user_machines WHERE id=$1`, f.machine).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); err != nil {
+		t.Fatalf("repeated acknowledgement: %v", err)
+	}
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT xmin::text FROM paperboat.user_machines WHERE id=$1`, f.machine).Scan(&after); err != nil || after != before {
+		t.Fatalf("an unchanged capabilities report rewrote the machine row (xmin %s -> %s, err %v)", before, after, err)
+	}
 	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID+"-foreign", observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
 		t.Fatalf("foreign environment changed capabilities: %v", err)
 	}

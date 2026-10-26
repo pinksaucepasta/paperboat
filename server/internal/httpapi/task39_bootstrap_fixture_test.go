@@ -153,7 +153,7 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeCarrier := &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: database}, Machine: machineVerifier, Edge: edgeVerifier}
-	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, ManagedSSH: sshService, MachineServices: machineservices.New(database, "local.example.test"), RuntimeCarrierAttachment: runtimeCarrier, LazyActivation: &lazyaccess.Activator{DB: database}, MeteringRepo: metering.NewRuntimeRepository(database, secret, cfg.ConfigSync.StaleHeartbeatAfter)})}
+	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, ManagedSSH: sshService, MachineServices: machineservices.New(database, "local.example.test"), RuntimeCarrierAttachment: runtimeCarrier, LazyActivation: &lazyaccess.Activator{DB: database}, MeteringRepo: metering.NewRuntimeRepository(database, cfg.UserMachines.OfflineAfter/2, cfg.ConfigSync.StaleHeartbeatAfter)})}
 	type user struct {
 		Name         string `json:"name"`
 		AccountID    string `json:"account_id"`
@@ -302,7 +302,7 @@ VALUES($1,$2,$1,$1,$3,$3,'consumed','installing',1,$4,$3,'OBSERVE123','fixture-o
 	}
 	defer clear(private)
 	machines := usermachines.New(database, writer, usermachines.Policy{}, nil)
-	options := Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Enrollment: identities, RuntimeIdentity: identities, Machines: machines, MeteringRepo: metering.NewRuntimeRepository(database, "unused")}
+	options := Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Enrollment: identities, RuntimeIdentity: identities, Machines: machines, MeteringRepo: metering.NewRuntimeRepository(database, time.Minute)}
 	router := NewRouter(options)
 	exchangeBody, err := json.Marshal(map[string]string{"credential": grant.Credential, "public_key": base64.RawURLEncoding.EncodeToString(public)})
 	if err != nil {
