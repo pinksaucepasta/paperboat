@@ -33,6 +33,21 @@ type Header struct {
 	// by the receiving host before application dispatch.
 	Target         string `json:"target,omitempty"`
 	UsageSessionID string `json:"usage_session_id,omitempty"`
+	// Offline asks the host to admit a new session from the signed session scopes it holds,
+	// because the client could not reach Paperboat (F21-11). It carries no credential: the
+	// native session already proves the peer, and the host decides from its own state.
+	Offline bool `json:"offline,omitempty"`
+}
+
+// OfflineConsumers are the sessions a host may start without Paperboat.
+var OfflineConsumers = map[string]bool{"terminal": true, "exec": true, "ssh": true}
+
+func NewOffline(operationID, consumer, streamID string, deadline time.Time, maximumBytes uint64) (Header, error) {
+	value := Header{Version: Version, OperationID: operationID, Consumer: consumer, StreamID: streamID, DeadlineUnix: deadline.UTC().Unix(), MaximumBytes: maximumBytes, Offline: true}
+	if value.Validate(time.Time{}) != nil {
+		return Header{}, ErrInvalid
+	}
+	return value, nil
 }
 
 func NewNativePrivate(operationID, consumer, streamID, credential string, deadline time.Time, maximumBytes uint64, target []byte) (Header, error) {
@@ -52,7 +67,10 @@ func New(operationID, consumer, streamID, credential string, deadline time.Time,
 }
 
 func (h Header) Validate(now time.Time) error {
-	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || h.Credential == "" || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 || len(h.Target) > MaximumTarget {
+	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 || len(h.Target) > MaximumTarget {
+		return ErrInvalid
+	}
+	if h.Offline != (h.Credential == "") || h.Offline && !OfflineConsumers[h.Consumer] {
 		return ErrInvalid
 	}
 	if len(h.UsageSessionID) > 128 || strings.ContainsAny(h.UsageSessionID, "\x00\r\n") || h.UsageSessionID != "" && h.Consumer != "config_compare" {

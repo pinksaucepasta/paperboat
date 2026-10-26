@@ -123,7 +123,9 @@ func WriteRecord(w io.Writer, kind byte, payload []byte, typed bool) error {
 }
 
 func validLengths(role byte, bindingLen, tokenLen int) bool {
-	return (role == RoleControl || role == RoleUnified) && bindingLen == 0 && tokenLen > 0 ||
+	// A control preface without a token is valid only on a stream the host admitted offline
+	// (server.OfflinePeerConn); the association manager refuses it everywhere else.
+	return (role == RoleControl || role == RoleUnified) && bindingLen == 0 ||
 		(role == RoleInput || role == RoleOutput) && bindingLen == BindingSize && tokenLen == 0
 }
 

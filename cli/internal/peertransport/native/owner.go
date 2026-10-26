@@ -196,6 +196,8 @@ type Config struct {
 	Observe          func(Event)
 	RefreshAuthority func(context.Context) error
 	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
+	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
+	AdmitOffline func(context.Context, OfflineAdmission) error
 }
 
 type Owner struct {
@@ -204,6 +206,7 @@ type Owner struct {
 	observe          func(Event)
 	refreshAuthority func(context.Context) error
 	meterIncoming    func(net.Conn, MeterBinding) net.Conn
+	admitOffline     func(context.Context, OfflineAdmission) error
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mu               sync.Mutex
@@ -220,7 +223,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {

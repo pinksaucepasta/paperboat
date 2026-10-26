@@ -207,6 +207,13 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if capability == "" {
 		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
 	}
+	if header.Offline {
+		admitted, err := s.acceptOffline(ctx, connection, header, capability)
+		if err != nil {
+			return rejectAuthorizedStream(connection, err)
+		}
+		return admitted, header, nil
+	}
 	var accessSessionID string
 	err = s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
 		var authorizeErr error

@@ -68,7 +68,7 @@ func (m *NativeAssociationManager) Serve(conn net.Conn) error {
 }
 
 func (m *NativeAssociationManager) serveControl(conn net.Conn, p nativeproto.Preface) error {
-	authorizer, err := m.config.Authorizer(p.Token)
+	authorizer, err := m.controlAuthorizer(conn, p)
 	if err != nil || authorizer == nil {
 		_ = conn.Close()
 		return ErrNativeAssociation
@@ -101,6 +101,19 @@ func (m *NativeAssociationManager) serveControl(conn net.Conn, p nativeproto.Pre
 		native.Close()
 	}()
 	return m.config.Server.ServeAuthenticated(native, authorizer)
+}
+
+// controlAuthorizer takes the server credential from the preface, or for a stream admitted offline
+// (no credential, by construction) the admitted peer. The two never mix.
+func (m *NativeAssociationManager) controlAuthorizer(conn net.Conn, p nativeproto.Preface) (Authorizer, error) {
+	offline, isOffline := conn.(OfflinePeerConn)
+	if isOffline != (p.Token == "") {
+		return nil, ErrNativeAssociation
+	}
+	if isOffline {
+		return newOfflineAuthorizer(offline)
+	}
+	return m.config.Authorizer(p.Token)
 }
 
 func (m *NativeAssociationManager) serveAuxiliary(conn net.Conn, p nativeproto.Preface) error {

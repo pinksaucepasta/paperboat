@@ -22,16 +22,17 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
-	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=optional-authorized-relay-region
 	"tailscale.com/tailcfg"
 )
@@ -52,6 +53,8 @@ type productionNativePeerConfig struct {
 	inspector                                http.Handler
 	inspectorStore                           *inspector.Store
 	usage                                    *bandwidth.Recorder
+	// offlineAudit records sessions started or refused without Paperboat (F21-11); nil refuses them.
+	offlineAudit *offlineaudit.Queue
 	// networkEvents wakes the signed-network renewal when the server reports a peer or key change
 	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
 	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
@@ -297,7 +300,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}

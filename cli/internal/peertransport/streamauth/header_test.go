@@ -67,3 +67,35 @@ func TestNativePrivateHeaderRequiresBoundedCanonicalTarget(t *testing.T) {
 		t.Fatal("non-private stream with target accepted")
 	}
 }
+
+// An offline header carries no credential and names only a session the host may start without
+// Paperboat; an online header must carry its credential.
+func TestOfflineHeaderCarriesNoCredentialAndOnlySessionConsumers(t *testing.T) {
+	deadline := time.Now().Add(time.Minute)
+	for _, consumer := range []string{"terminal", "exec", "ssh"} {
+		header, err := NewOffline("op_1", consumer, "stream_1", deadline, 1<<20)
+		if err != nil {
+			t.Fatalf("%s: %v", consumer, err)
+		}
+		encoded, err := header.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := Parse(encoded, time.Now())
+		if err != nil || !parsed.Offline || parsed.Credential != "" {
+			t.Fatalf("%s: parsed %+v, %v", consumer, parsed, err)
+		}
+	}
+	for _, consumer := range []string{"file_transfer", "private_tcp", "config_compare", "inspector"} {
+		if _, err := NewOffline("op_1", consumer, "stream_1", deadline, 1<<20); err == nil {
+			t.Fatalf("an offline %s header was accepted", consumer)
+		}
+	}
+	withCredential := Header{Version: Version, OperationID: "op", Consumer: "exec", StreamID: "s", Credential: "token", DeadlineUnix: deadline.Unix(), MaximumBytes: 1, Offline: true}
+	if withCredential.Validate(time.Time{}) == nil {
+		t.Fatal("an offline header with a credential was accepted")
+	}
+	if _, err := New("op", "exec", "s", "", deadline, 1); err == nil {
+		t.Fatal("an online header without a credential was accepted")
+	}
+}

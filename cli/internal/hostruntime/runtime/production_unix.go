@@ -43,6 +43,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
@@ -348,7 +349,12 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
-	runtimeService := serviceGroup{availabilityService, runtimeObservation}
+	offlineAudit, err := offlineaudit.Open(filepath.Join(runtimeConfig.StateRoot, "runtime", "offline-audit.json"), nil)
+	if err != nil {
+		return nil, errors.Join(ErrProductionInvalid, err)
+	}
+	offlineAuditUploads := &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: offlineAudit, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID, Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect}, Tokens: renewingTokens, Proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, OperationID: operationID}}
+	runtimeService := serviceGroup{availabilityService, runtimeObservation, offlineAuditUploads}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID, OSBootID: bootState.OSBootID,
 		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx, Events: machineEvents,
@@ -430,7 +436,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	if managedSSHIdentity != nil && nativeDispatch == nil {
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore, usage: dependencies.Bandwidth, networkEvents: machineEvents.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)})
+			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore, usage: dependencies.Bandwidth, offlineAudit: offlineAudit, networkEvents: machineEvents.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)})
 		}
 	}
 	if nativeDispatch != nil {
