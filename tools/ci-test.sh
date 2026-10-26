@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run the heavy test suites for the committed HEAD on GitHub Actions instead of this machine.
-#   tools/ci-test.sh [module...] [-run PATTERN]
+#   tools/ci-test.sh [module...] [-run PATTERN] [-count N]
 #   tools/ci-test.sh cli                       # vet + go test -race for cli
 #   tools/ci-test.sh server -run 'TestTeams'   # server incl. its PostgreSQL suites, narrowed
+#   tools/ci-test.sh cli -run TestX -count 5   # repeat each matching test 5 times (flake check)
 #   tools/ci-test.sh                           # every module and the console
 # Modules: shared cli relay tunnel helper server console. server and tunnel also run their PostgreSQL
 # suites against a throwaway postgres:17 service container. Only committed work is tested.
@@ -11,12 +12,13 @@
 # duration per job plus the failing tests, and deletes the branch. Exit status is 0 only if all pass.
 set -euo pipefail
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-modules=() run=""
+modules=() run="" count=1
 while [ $# -gt 0 ]; do
   case $1 in
     -run | --run) [ $# -ge 2 ] || usage; run=$2; shift 2 ;;
+    -count | --count) [ $# -ge 2 ] || usage; count=$2; shift 2 ;;
     -h | --help) usage ;;
     shared | cli | relay | tunnel | helper | server | console) modules+=("$1"); shift ;;
     *) echo "ci-test: unknown argument '$1'" >&2; usage ;;
@@ -43,7 +45,7 @@ commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $lane $sha [skip ci]"
 git push -q --no-verify origin "$commit:refs/heads/$branch" 2>/dev/null ||
   { echo "ci-test: could not push the ci branch (is origin reachable and writable?)" >&2; exit 1; }
 
-args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run")
+args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run" -f "count=$count")
 gh workflow run lane-test.yml "${args[@]}"
 
 id=""

@@ -17,6 +17,9 @@ on:
       run:
         description: 'go test -run pattern (empty = all tests)'
         default: ''
+      count:
+        description: 'go test -count: repeat each test (flake check)'
+        default: '1'
   schedule:
     - cron: '17 3 * * *'
 
@@ -77,6 +80,7 @@ jobs:
         working-directory: ${{ matrix.module }}
     env:
       RUN: ${{ inputs.run }}
+      COUNT: ${{ inputs.count || '1' }}
       PAPERBOAT_TEST_DATABASE_DSN: ${{ matrix.pg && 'postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -105,7 +109,7 @@ jobs:
           run=(); [ -z "$RUN" ] || run=(-run "$RUN")
           # Without a PostgreSQL DSN no package needs a database: one run covers them all.
           if [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ]; then
-            go test -race -count=1 -timeout 30m "${run[@]}" ./...
+            go test -race -count="$COUNT" -timeout 30m "${run[@]}" ./...
             exit
           fi
           # Every package gets its own empty database, created here, so no package sees rows another
@@ -117,7 +121,7 @@ jobs:
             db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
             psql -h localhost -U postgres -qc "create database \"$db\"" || { failed=1; continue; }
             PAPERBOAT_TEST_DATABASE_DSN="${PAPERBOAT_TEST_DATABASE_DSN/lane_test\?/$db?}" \
-              go test -race -count=1 -timeout 30m "${run[@]}" "$pkg" || failed=1
+              go test -race -count="$COUNT" -timeout 30m "${run[@]}" "$pkg" || failed=1
           done
           exit $failed
       - name: migration tests (each on its own empty database)
