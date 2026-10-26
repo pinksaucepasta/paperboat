@@ -178,7 +178,8 @@ func (r *MachinePreviewRuntime) resolvePrivateTCPRoute(ctx context.Context, sele
 	if err != nil {
 		return "", "", err
 	}
-	return selected.RouteID, selected.TunnelID, nil
+	// ResourceID is the tunnel; TunnelID is the owner's carrier binding, not something a user names.
+	return selected.RouteID, selected.ResourceID, nil
 }
 
 func (r *MachinePreviewRuntime) validatePrivateTCPRoute(ctx context.Context, tunnelID, routeID string) (time.Time, error) {
@@ -186,7 +187,7 @@ func (r *MachinePreviewRuntime) validatePrivateTCPRoute(ctx context.Context, tun
 	if err != nil {
 		return time.Time{}, err
 	}
-	if selected.TunnelID != tunnelID {
+	if selected.ResourceID != tunnelID {
 		return time.Time{}, ErrPrivateTCPAccessForbidden
 	}
 	return selected.ExpiresAt, nil
