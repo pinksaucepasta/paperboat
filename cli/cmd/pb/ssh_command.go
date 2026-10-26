@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/processlifetime"
@@ -56,15 +57,28 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return err
 	}
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
-	var exit managedssh.NativeExitError
-	if errors.As(err, &exit) && exit.Code == 255 {
-		// Only a failed connection needs the server; the warm path built no client (sshClientFor).
-		if client, clientErr := sshClientFor(ctx, client); clientErr == nil && !explainRevokedSSHAccess(command, client, machine, err) {
-			explainChangedSSHHostIdentity(command, client, machine, err)
-		}
-	}
+	explainSSHFailure(command, machine, err, func() (*api.Client, error) { return sshClientFor(ctx, client) })
 	return err
 }
+
+// explainSSHFailure follows a failed OpenSSH connection (exit 255) with its reason. Only then is the server
+// needed; the warm path built no client.
+func explainSSHFailure(command *cobra.Command, machine api.UserMachine, err error, clientFor func() (*api.Client, error)) {
+	var exit managedssh.NativeExitError
+	if !errors.As(err, &exit) || exit.Code != 255 {
+		return
+	}
+	client, clientErr := clientFor()
+	switch {
+	case errors.Is(clientErr, config.ErrNoCredentials):
+		// Signed out (pb logout, or the session revoked and removed): the host closed the session for it.
+		fmt.Fprintf(command.ErrOrStderr(), sshSignInEndedMessage, machine.Alias)
+	case clientErr == nil && !explainRevokedSSHAccess(command, client, machine, err):
+		explainChangedSSHHostIdentity(command, client, machine, err)
+	}
+}
+
+const sshSignInEndedMessage = "pb: access to %s was revoked: this sign-in was ended. Run `pb login` to sign in again.\n"
 
 // explainRevokedSSHAccess follows an OpenSSH connection failure (exit 255) with the reason when it is a revocation: the
 // host closes open sessions within seconds of the user's access ending, and OpenSSH itself only says the connection closed.
@@ -78,7 +92,7 @@ func explainRevokedSSHAccess(command *cobra.Command, client *api.Client, machine
 	var apiErr *api.APIError
 	switch {
 	case errors.Is(probeErr, api.ErrUnauthenticated):
-		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: this sign-in was ended. Run `pb login` to sign in again.\n", machine.Alias)
+		fmt.Fprintf(command.ErrOrStderr(), sshSignInEndedMessage, machine.Alias)
 	case errors.As(probeErr, &apiErr) && apiErr.Status == http.StatusForbidden:
 		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: your account no longer has permission to use it. Ask its owner or team admin.\n", machine.Alias)
 	default:

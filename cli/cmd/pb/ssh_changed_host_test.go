@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,5 +80,20 @@ func TestManagedSSHSaysAccessWasRevoked(t *testing.T) {
 		if said != (test.want != "") || !strings.Contains(stderr.String(), test.want) {
 			t.Fatalf("%s: said=%v stderr %q", name, said, stderr.String())
 		}
+	}
+}
+
+// F5-10: after `pb logout` this computer has no credentials, so no server can be asked; the session the host
+// closed is still explained as a revocation.
+func TestManagedSSHSaysAccessWasRevokedWhenSignedOut(t *testing.T) {
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetErr(&stderr)
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	explainSSHFailure(command, machine, managedssh.NativeExitError{Code: 255}, func() (*api.Client, error) {
+		return nil, fmt.Errorf("load credential: %w", config.ErrNoCredentials)
+	})
+	if !strings.Contains(stderr.String(), "access to studio was revoked: this sign-in was ended") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
