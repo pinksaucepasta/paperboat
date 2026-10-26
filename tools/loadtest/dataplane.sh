@@ -31,8 +31,9 @@ run_parallel() {
     "$name" "$count" "$ok" "$failed" "$hung" "$(( ($(date +%s%N) - started) / 1000000 ))" "$slowest" "${messages:-none}"
 }
 
-# Host bounds (cli/internal/hostruntime/config DefaultResources): 32 concurrent execs, 32 managed SSH streams,
-# 2 concurrent transfers. Each step uses 40 so the last 8 must fail clearly and quickly.
+# Host bounds (cli/internal/hostruntime/config DefaultResources): 32 concurrent execs and 2 concurrent transfers;
+# those steps use 40 so the last 8 must fail clearly and quickly. Managed SSH has no Paperboat limit (the
+# machine's sshd MaxStartups/MaxSessions decides), so all 40 ssh attempts should succeed.
 case $STEP in ssh|all)
   run_parallel ssh 40 90 -- "$PB" ssh "$TARGET" -- -o BatchMode=yes sleep 20 ;;
 esac

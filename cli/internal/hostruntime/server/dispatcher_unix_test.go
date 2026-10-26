@@ -231,7 +231,7 @@ func TestSSHDispatcherBridgesOpaqueBytesAndEOF(t *testing.T) {
 			}()
 		}
 	}()
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 2, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestSSHStreamPreservesBridgeDiagnosticCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

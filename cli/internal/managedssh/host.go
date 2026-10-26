@@ -12,7 +12,8 @@ import (
 var (
 	ErrSSHHostInvalid = errors.New("managed SSH host service is invalid")
 	ErrSSHHostStale   = errors.New("managed SSH host target generation is stale")
-	ErrSSHHostBusy    = errors.New("managed SSH host stream capacity is exhausted")
+	// ErrSSHSessionsOpen refuses retiring a host or source while SSH sessions it accepted are still open.
+	ErrSSHSessionsOpen = errors.New("managed SSH sessions are still open")
 )
 
 type HostTarget struct {
@@ -22,8 +23,9 @@ type HostTarget struct {
 	Readiness    SSHReadiness
 }
 
+// HostConfig has no session limit: like Tailscale and NetBird, the machine's own sshd (MaxStartups,
+// MaxSessions) decides how many sessions it takes (user decision 2026-10-26).
 type HostConfig struct {
-	MaxStreams   int
 	ProbeTimeout time.Duration
 	DialTimeout  time.Duration
 	// Audit records the sessions the host serves, refuses and ends (F5-12). Optional.
@@ -36,7 +38,6 @@ type Host struct {
 	mu             sync.RWMutex
 	config         HostConfig
 	target         HostTarget
-	capacity       chan struct{}
 	active         map[uint64]int
 	activeBySource map[string]int
 	retired        bool
@@ -55,10 +56,10 @@ type hostFlow struct {
 }
 
 func NewHost(config HostConfig) (*Host, error) {
-	if config.MaxStreams < 1 || config.MaxStreams > 1024 || config.ProbeTimeout <= 0 || config.ProbeTimeout > 30*time.Second || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
+	if config.ProbeTimeout <= 0 || config.ProbeTimeout > 30*time.Second || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
 		return nil, ErrSSHHostInvalid
 	}
-	return &Host{config: config, capacity: make(chan struct{}, config.MaxStreams), active: make(map[uint64]int), activeBySource: make(map[string]int), flows: make(map[*hostFlow]struct{})}, nil
+	return &Host{config: config, active: make(map[uint64]int), activeBySource: make(map[string]int), flows: make(map[*hostFlow]struct{})}, nil
 }
 
 // ReconcileTarget proves listener readiness for a source-less target. Callers
@@ -134,7 +135,9 @@ func (h *Host) OpenStreams() int {
 	if h == nil {
 		return 0
 	}
-	return len(h.capacity)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.flows)
 }
 
 // Retire fences new bridges only once every accepted connection has finished.
@@ -146,7 +149,7 @@ func (h *Host) Retire() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.active) != 0 {
-		return ErrSSHHostBusy
+		return ErrSSHSessionsOpen
 	}
 	h.retired = true
 	return nil
@@ -220,7 +223,7 @@ func (h *Host) CheckSourceRetirement(sourceSHA256 string) error {
 		return ErrSSHHostStale
 	}
 	if h.activeBySource[sourceSHA256] != 0 {
-		return ErrSSHHostBusy
+		return ErrSSHSessionsOpen
 	}
 	return nil
 }
@@ -236,15 +239,8 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.Refused(ctx, stream, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
 	}
-	select {
-	case h.capacity <- struct{}{}:
-		h.active[generation]++
-		h.activeBySource[target.SourceSHA256]++
-	default:
-		h.mu.Unlock()
-		h.Refused(ctx, stream, generation, RefusedBusy)
-		return BridgeResult{}, ErrSSHHostBusy
-	}
+	h.active[generation]++
+	h.activeBySource[target.SourceSHA256]++
 	bridgeCtx, cancel := context.WithCancel(ctx)
 	flow := &hostFlow{cancel: cancel}
 	h.flows[flow] = struct{}{}
@@ -262,7 +258,6 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		if h.activeBySource[target.SourceSHA256] == 0 {
 			delete(h.activeBySource, target.SourceSHA256)
 		}
-		<-h.capacity
 	}()
 	sessionID, peer, audited, err := h.begin(ctx, generation)
 	if err != nil {

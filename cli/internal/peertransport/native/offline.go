@@ -56,6 +56,9 @@ func (s *Session) acceptOffline(ctx context.Context, connection net.Conn, header
 		return nil, errors.Join(tailnet.ErrAdmission, err)
 	}
 	allowed := s.owner.authority.Allows(s.peerID, self.MachineID, capability, "accept")
+	if !allowed && header.Consumer == "ssh" {
+		streamauth.WriteSSHRefusal(connection, "no_access") // managedssh.RefusedNoAccess: pb says so, not OpenSSH
+	}
 	if err := s.owner.admitOffline(ctx, OfflineAdmission{Peer: s.binding, Header: header, Capability: capability, Allowed: allowed}); err != nil {
 		return nil, errors.Join(ErrOfflineRefused, err)
 	}

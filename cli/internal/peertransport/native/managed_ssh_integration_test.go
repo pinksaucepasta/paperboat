@@ -69,7 +69,7 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 	}
 	defer serverOwner.Close()
 
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 8, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

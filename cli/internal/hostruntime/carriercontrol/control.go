@@ -168,7 +168,7 @@ func (s *Server) handler() http.Handler {
 				}
 			}
 			switch {
-			case errors.Is(operationErr, managedssh.ErrSSHHostBusy):
+			case errors.Is(operationErr, managedssh.ErrSSHSessionsOpen):
 				result.Error = "busy"
 			case errors.Is(operationErr, managedssh.ErrSSHHostStale), errors.Is(operationErr, hostdproto.ErrFenced):
 				result.Error = "fenced"

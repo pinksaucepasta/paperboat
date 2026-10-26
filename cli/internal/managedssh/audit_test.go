@@ -46,12 +46,12 @@ func (l *auditLog) wait(t *testing.T, count int) []SessionEvent {
 	return nil
 }
 
-func auditedHost(t *testing.T, maxStreams int, log *auditLog) *Host {
+func auditedHost(t *testing.T, log *auditLog) *Host {
 	t.Helper()
 	listener := loopbackListener(t)
 	t.Cleanup(func() { listener.Close() })
 	go echoConnections(listener)
-	host, err := NewHost(HostConfig{MaxStreams: maxStreams, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: log.record})
+	host, err := NewHost(HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: log.record})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ var auditPeer = Peer{AccountID: "user_a", EndpointID: "cli_a", OperationID: "op_
 // F5-12: a served session is audited from its start to its end, with the bytes each way and who it was.
 func TestServeAuditsTheSessionStartAndEndWithBytes(t *testing.T) {
 	log := &auditLog{}
-	host := auditedHost(t, 2, log)
+	host := auditedHost(t, log)
 	client, server := net.Pipe()
 	done := make(chan error, 1)
 	go func() { _, err := host.Serve(WithPeer(context.Background(), auditPeer), 4, server); done <- err }()
@@ -89,59 +89,59 @@ func TestServeAuditsTheSessionStartAndEndWithBytes(t *testing.T) {
 	}
 }
 
-// A refused stream names why: capacity is busy; a stale or disabled target is not set up.
+// A refused stream names why: a stale or disabled target is not set up. There is no session limit of ours
+// (the machine's sshd decides), so many concurrent streams are all served.
 func TestServeAuditsRefusalsWithTheirReason(t *testing.T) {
 	log := &auditLog{}
-	host := auditedHost(t, 1, log)
+	host := auditedHost(t, log)
 	ctx := WithPeer(context.Background(), auditPeer)
-	holder, holderServer := net.Pipe()
-	defer holder.Close()
-	go func() { _, _ = host.Serve(ctx, 4, holderServer) }()
-	for host.OpenStreams() != 1 {
-		time.Sleep(time.Millisecond)
-	}
 	extra, extraServer := net.Pipe()
 	defer extra.Close()
-	sent := make(chan error, 3)
+	sent := make(chan error, 2)
 	go func() {
 		remote := bufio.NewReader(extra)
-		for range 3 {
+		for range 2 {
 			sent <- ReadRefusal(remote)
 		}
 	}()
-	if _, err := host.Serve(ctx, 4, extraServer); !errors.Is(err, ErrSSHHostBusy) {
-		t.Fatalf("busy: %v", err)
-	}
 	if _, err := host.Serve(ctx, 9, extraServer); !errors.Is(err, ErrSSHHostStale) {
 		t.Fatalf("stale: %v", err)
 	}
 	host.Refused(ctx, extraServer, 0, RefusedNotSetUp)
 	// F5-09: the client reads each reason from the stream.
-	for _, want := range []string{RefusedBusy, RefusedNotSetUp, RefusedNotSetUp} {
+	for range 2 {
 		var refused *RefusedError
-		if err := <-sent; !errors.As(err, &refused) || refused.Reason != want {
-			t.Fatalf("client read %v, want %s", err, want)
+		if err := <-sent; !errors.As(err, &refused) || refused.Reason != RefusedNotSetUp {
+			t.Fatalf("client read %v, want %s", err, RefusedNotSetUp)
 		}
 	}
-	reasons := []string{}
-	for _, event := range log.wait(t, 4) {
-		if event.Kind == SessionRefused {
-			reasons = append(reasons, event.Reason)
-			if event.Peer != auditPeer {
-				t.Fatalf("refusal names %+v", event.Peer)
-			}
+	for _, event := range log.wait(t, 2) {
+		if event.Kind != SessionRefused || event.Reason != RefusedNotSetUp || event.Peer != auditPeer {
+			t.Fatalf("refusal = %+v", event)
 		}
 	}
-	// Busy (full), stale generation, then the explicit no-target refusal: in the order they happened.
-	if len(reasons) != 3 || reasons[0] != RefusedBusy || reasons[1] != RefusedNotSetUp || reasons[2] != RefusedNotSetUp {
-		t.Fatalf("refusal reasons = %v", reasons)
+}
+
+func TestServeHasNoSessionLimit(t *testing.T) {
+	host := auditedHost(t, &auditLog{})
+	ctx := WithPeer(context.Background(), auditPeer)
+	const sessions = 40 // above the 32 the host used to cap at
+	for range sessions {
+		client, server := net.Pipe()
+		t.Cleanup(func() { _ = client.Close() })
+		go func() { _, _ = host.Serve(ctx, 4, server) }()
+	}
+	for deadline := time.Now().Add(5 * time.Second); host.OpenStreams() != sessions; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("open streams = %d, want %d", host.OpenStreams(), sessions)
+		}
 	}
 }
 
 // A session cut by Disable (access revoked) ends as revoked, not closed.
 func TestServeAuditsARevokedSession(t *testing.T) {
 	log := &auditLog{}
-	host := auditedHost(t, 1, log)
+	host := auditedHost(t, log)
 	client, server := net.Pipe()
 	defer client.Close()
 	go func() { _, _ = host.Serve(WithPeer(context.Background(), auditPeer), 4, server) }()
@@ -161,7 +161,7 @@ func TestServeAuditsARevokedSession(t *testing.T) {
 // An offline session whose start cannot be recorded is refused (audit fails closed); an online one is served.
 func TestServeRefusesAnOfflineSessionItCannotRecord(t *testing.T) {
 	log := &auditLog{fail: errors.New("backlog full")}
-	host := auditedHost(t, 2, log)
+	host := auditedHost(t, log)
 	offline := auditPeer
 	offline.Offline = true
 	_, server := net.Pipe()
@@ -185,7 +185,7 @@ func TestServeRefusesAnOfflineSessionItCannotRecord(t *testing.T) {
 // A stream with no named peer is served and not audited.
 func TestServeWithoutAPeerIsNotAudited(t *testing.T) {
 	log := &auditLog{}
-	host := auditedHost(t, 1, log)
+	host := auditedHost(t, log)
 	client, server := net.Pipe()
 	done := make(chan error, 1)
 	go func() { _, err := host.Serve(context.Background(), 4, server); done <- err }()

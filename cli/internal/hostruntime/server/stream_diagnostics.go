@@ -166,7 +166,7 @@ func expectedStreamOpenFailure(err error) bool {
 			session.ErrInputUncertain, session.ErrInputUnknown, session.ErrInputJournalFull,
 			execprocess.ErrInvalid, execprocess.ErrConflict, execprocess.ErrCapacity,
 			execprocess.ErrNotFound, execprocess.ErrReplayUnavailable,
-			managedssh.ErrSSHHostInvalid, managedssh.ErrSSHHostStale, managedssh.ErrSSHHostBusy,
+			managedssh.ErrSSHHostInvalid, managedssh.ErrSSHHostStale, managedssh.ErrSSHSessionsOpen,
 			browserbroadcastserver.ErrUnavailable:
 			return true
 		}

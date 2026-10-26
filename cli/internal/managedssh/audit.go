@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"github.com/google/uuid"
+
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 )
 
 // Session audit (F5-12). Managed SSH has no server-side admission, so the host that serves a session says who
@@ -38,7 +40,6 @@ const (
 	SessionEnded   = "ended"
 
 	// Why a session was refused.
-	RefusedBusy     = "busy"
 	RefusedNoAccess = "no_access"
 	RefusedNotSetUp = "not_set_up"
 
@@ -69,7 +70,7 @@ var ErrSSHAuditUnavailable = errors.New("managed SSH session could not be record
 
 // Refused tells the client why its stream is refused and audits it.
 func (h *Host) Refused(ctx context.Context, stream io.Writer, generation uint64, reason string) {
-	writeRefusal(stream, reason)
+	streamauth.WriteSSHRefusal(stream, reason)
 	if h == nil || h.config.Audit == nil {
 		return
 	}

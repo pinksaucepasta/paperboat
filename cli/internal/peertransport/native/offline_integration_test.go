@@ -105,8 +105,20 @@ func TestOfflineSessionsStartFromTheHostsSignedScopes(t *testing.T) {
 	if err := echo("terminal"); err != nil {
 		t.Fatalf("offline terminal with a signed scope: %v", err)
 	}
-	if err := echo("ssh"); err == nil {
-		t.Fatal("offline ssh without a managed_ssh scope was served")
+	// F5-09: a refused SSH stream says why in a refusal line pb prints, not only a closed stream.
+	header, err := streamauth.NewOffline("op_ssh", "ssh", "stream_ssh", time.Now().Add(time.Minute), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused, err := session.OpenOffline(t.Context(), header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refused.SetReadDeadline(time.Now().Add(5 * time.Second))
+	line, _ := io.ReadAll(refused)
+	_ = refused.Close()
+	if string(line) != streamauth.SSHRefusalPrefix+"no_access\r\n" {
+		t.Fatalf("refused ssh stream sent %q", line)
 	}
 	mu.Lock()
 	backlogFull = true

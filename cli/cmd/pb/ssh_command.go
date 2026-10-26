@@ -222,7 +222,12 @@ func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrit
 	if refused := managedssh.ReadRefusal(remote); refused != nil {
 		return refused
 	}
-	_, outputErr := io.Copy(output, remote)
+	copied, outputErr := io.Copy(output, remote)
+	// A remote end with no byte at all is sshd ending the connection before its banner.
+	var closed error
+	if copied == 0 {
+		closed = managedssh.ErrSSHServerClosed
+	}
 	if outputErr != nil && !errors.Is(outputErr, io.EOF) {
 		return outputErr
 	}
@@ -239,12 +244,12 @@ func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrit
 		if result.copyErr != nil {
 			return result.copyErr
 		}
-		return nil
+		return closed
 	case <-time.After(25 * time.Millisecond):
 		// Keep remote EOF bounded when OpenSSH intentionally leaves stdin open,
 		// while giving an already-failed input copy a deterministic chance to
 		// publish its authoritative transport error.
-		return nil
+		return closed
 	}
 }
 

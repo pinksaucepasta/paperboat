@@ -16,7 +16,7 @@ func TestHostReconcilesAndServesGenerationFencedTarget(t *testing.T) {
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	const sourceA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const sourceB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	host, err := NewHost(HostConfig{MaxStreams: 2, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, err := NewHost(HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestHostReconcilesAndServesGenerationFencedTarget(t *testing.T) {
 	if _, err := io.ReadFull(client, got); err != nil || string(got) != string(message) {
 		t.Fatalf("echo=%q error=%v", got, err)
 	}
-	if err := host.Retire(); !errors.Is(err, ErrSSHHostBusy) {
+	if err := host.Retire(); !errors.Is(err, ErrSSHSessionsOpen) {
 		t.Fatalf("retire active connection: %v", err)
 	}
 	if err := host.CheckSourceRetirement(sourceA); !errors.Is(err, ErrSSHHostStale) {
@@ -102,7 +102,7 @@ func TestHostReconcilesAndServesGenerationFencedTarget(t *testing.T) {
 	if _, err := host.ReconcileSourceTarget(context.Background(), 5, port, sourceB); err != nil {
 		t.Fatal(err)
 	}
-	if err := host.CheckSourceRetirement(sourceA); !errors.Is(err, ErrSSHHostBusy) {
+	if err := host.CheckSourceRetirement(sourceA); !errors.Is(err, ErrSSHSessionsOpen) {
 		t.Fatalf("old source with live connection: %v", err)
 	}
 	if _, err := left2.Write(message); err != nil {
@@ -142,12 +142,13 @@ func TestHostReconcilesAndServesGenerationFencedTarget(t *testing.T) {
 	}
 }
 
-func TestHostEnforcesCapacity(t *testing.T) {
+// Disable cuts open sessions and fences new ones until Enable.
+func TestHostDisableEndsOpenSessions(t *testing.T) {
 	listener := loopbackListener(t)
 	defer listener.Close()
 	go echoConnections(listener)
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
-	host, _ := NewHost(HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, _ := NewHost(HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if _, err := host.ReconcileTarget(context.Background(), 1, port); err != nil {
 		t.Fatal(err)
 	}
@@ -156,15 +157,12 @@ func TestHostEnforcesCapacity(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() { _, err := host.Serve(context.Background(), 1, firstServer); firstDone <- err }()
 	deadline := time.Now().Add(time.Second)
-	for len(host.capacity) != 1 && time.Now().Before(deadline) {
+	for host.OpenStreams() != 1 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	secondClient, secondServer := net.Pipe()
 	defer secondClient.Close()
 	defer secondServer.Close()
-	if _, err := host.Serve(context.Background(), 1, secondServer); !errors.Is(err, ErrSSHHostBusy) {
-		t.Fatalf("capacity error=%v", err)
-	}
 	disableCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := host.Disable(disableCtx); err != nil {

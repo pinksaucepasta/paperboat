@@ -73,7 +73,7 @@ func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
 			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
 		}
 	}()
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: SSHSessionAudit(queue)})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: SSHSessionAudit(queue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestCarrierSSHSessionsAreQueuedInTheCarrierBacklog(t *testing.T) {
 			go func() { defer connection.Close(); _, _ = io.Copy(connection, connection) }()
 		}
 	}()
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

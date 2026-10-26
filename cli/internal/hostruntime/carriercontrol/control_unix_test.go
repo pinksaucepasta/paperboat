@@ -35,7 +35,7 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 			go func() { defer conn.Close(); _, _ = io.Copy(conn, conn) }()
 		}
 	}()
-	ssh, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 2, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	ssh, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestDisableSSHCancelsOnWorkerLeaseLossAndJoinsWatcher(t *testing.T) {
 			go func() { defer conn.Close(); _, _ = io.Copy(conn, conn) }()
 		}
 	}()
-	ssh, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 2, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	ssh, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

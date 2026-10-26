@@ -33,7 +33,7 @@ func TestSSHDispatcherAuditsTheSessionWithBytes(t *testing.T) {
 	}()
 	var mu sync.Mutex
 	var events []managedssh.SessionEvent
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 2, ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: func(event managedssh.SessionEvent) error {
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second, Audit: func(event managedssh.SessionEvent) error {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
