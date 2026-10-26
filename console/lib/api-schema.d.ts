@@ -4193,6 +4193,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inspector/credentials/{credential_id}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew one inspector credential in place
+         * @description Authenticated user operation. The credential holder extends a live credential to at most five minutes from now and never past its resource, so an open console inspector channel keeps its authority. Revoked, expired or drifted credentials (owner, generation, team grant) are refused and a new one must be issued.
+         */
+        post: operations["inspector_credential_renew"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/inspector/authorize": {
         parameters: {
             query?: never;
@@ -20035,6 +20055,42 @@ export interface operations {
                     "application/json": {
                         data: {
                             revoked: boolean;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    inspector_credential_renew: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    ttl_seconds?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The credential's new expiry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** Format: date-time */
+                            expires_at: string;
                         };
                     };
                 };
