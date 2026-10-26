@@ -181,16 +181,6 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		default:
 		}
 	}
-	queue := func(message []byte) error {
-		select {
-		case outbound <- message:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return ErrBrowserTerminalHubFull
-		}
-	}
 
 	workers.Add(1)
 	go func() {
@@ -235,8 +225,11 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 				report(err)
 				return
 			}
-			if err := queue(message); err != nil {
-				report(err)
+			// Wait for the writer: a browser that stops reading (a frozen or sleeping page) holds the host back
+			// through TCP instead of ending the terminal.
+			select {
+			case outbound <- message:
+			case <-ctx.Done():
 				return
 			}
 		}

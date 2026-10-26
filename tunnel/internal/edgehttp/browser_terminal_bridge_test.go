@@ -173,3 +173,74 @@ func TestBrowserTerminalEndsWithTheTypedReason(t *testing.T) {
 		t.Fatal("a user-level refusal is expected; an unavailable machine is an edge failure")
 	}
 }
+
+// A frozen page stops reading while the host keeps sending (output, heartbeats). The edge must hold the host back,
+// not end the bridge because its small queue toward the browser is full: that was a reconnect on every resume.
+func TestBrowserTerminalBridgeWaitsForAFrozenBrowser(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	identity := testEdgePreviewIdentity(1, 1)
+	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if err := hub.ActivateRoute("route_frozen", fence); err != nil {
+		t.Fatal(err)
+	}
+	key := BrowserTerminalSessionKey{RouteID: "route_frozen", TerminalSessionID: "term_frozen", ProcessGeneration: identity.ProcessGeneration}
+	const records = 200
+	record := make([]byte, 64<<10)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		for range records {
+			if err := conn.Write(r.Context(), websocket.MessageBinary, record); err != nil {
+				return
+			}
+		}
+		_, _, _ = conn.Read(r.Context())
+	}))
+	defer upstream.Close()
+	completed := make(chan error, 1)
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub, err := hub.Subscribe(key, fence, "browser_frozen")
+		if err != nil {
+			completed <- err
+			return
+		}
+		defer sub.Close()
+		host, _, err := websocket.Dial(r.Context(), "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
+		if err != nil {
+			completed <- err
+			return
+		}
+		host.SetReadLimit(browserTerminalMaxRecordBytes)
+		browser, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			host.CloseNow()
+			completed <- err
+			return
+		}
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
+	}))
+	defer edge.Close()
+	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browser.CloseNow()
+	browser.SetReadLimit(browserTerminalMaxRecordBytes + 1)
+	time.Sleep(time.Second) // frozen
+	for received := 0; received < records; received++ {
+		if _, _, err := browser.Read(ctx); err != nil {
+			select {
+			case cause := <-completed:
+				t.Fatalf("bridge ended after %d of %d records: %v", received, records, cause)
+			default:
+				t.Fatalf("read %d: %v", received, err)
+			}
+		}
+	}
+}
