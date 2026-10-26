@@ -151,3 +151,74 @@ func (c *EndpointCarrier) serving(hub *DataCarrierPreviewHub) bool {
 	defer c.mu.Unlock()
 	return c.routes[hub] != nil
 }
+
+// Prod 2026-10-26 (1 in 4 previews never loaded): the route serves the edge's streams as soon as it
+// is registered and its origin answers, while readiness is still being reported; a stream the
+// edge opens during a slow report is answered, not left queued. Prior art: cloudflared and ngrok
+// serve a tunnel from its registration on.
+func TestPreviewRouteServesWhileReadinessIsStillReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "served") }))
+	defer origin.Close()
+	identity := testPreviewCarrierIdentity(1)
+	pair := newPreviewCarrierPair(t, ctx, identity)
+	defer pair.close()
+	hub, err := NewDataCarrierPreviewHub(ctx, DataCarrierPreviewHubConfig{Active: pair.active, Identity: identity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	agent := &agentCarriersFake{hubs: []*DataCarrierPreviewHub{hub}, changed: make(chan struct{})}
+	carrier, err := NewEndpointCarrier(agent, func(h *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
+		return NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{Hub: h, DialOrigin: func(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer carrier.Close(context.Background())
+	lease := Lease{ID: "preview_slow_ready", AccountID: identity.AccountID, Generation: 1, AccessMode: "public", Endpoint: "https://slow-ready.example.test", Target: LeaseTarget{Scheme: "http", Address: origin.Listener.Addr().String()}, LeaseDeadline: time.Now().UTC().Add(time.Hour)}
+	release := make(chan struct{})
+	go func() {
+		_ = carrier.Run(ctx, lease, func(Lease) error {
+			// The server has not seen an edge serve the route yet, for longer than the test runs.
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	defer close(release)
+	var body string
+	for deadline := time.Now().Add(8 * time.Second); body != "served"; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("stream during a pending readiness report = %q, want the origin's answer", body)
+		}
+		body = func() string {
+			streamCtx, done := context.WithTimeout(ctx, 2*time.Second)
+			defer done()
+			stream, err := pair.edge.OpenStream(streamCtx)
+			if err != nil {
+				return ""
+			}
+			defer stream.Close()
+			stop := time.AfterFunc(2*time.Second, func() { _ = stream.Close() })
+			defer stop.Stop()
+			if err := connectorprotocol.WriteStreamOpen(stream, testPreviewStreamOpen(identity, lease.ID, fmt.Sprintf("request_%d", time.Now().UnixNano()))); err != nil {
+				return ""
+			}
+			_, _ = io.WriteString(stream, "GET / HTTP/1.1\r\nHost: slow-ready.example.test\r\nConnection: close\r\n\r\n")
+			response, err := http.ReadResponse(bufio.NewReader(stream), nil)
+			if err != nil {
+				return ""
+			}
+			defer response.Body.Close()
+			got, _ := io.ReadAll(response.Body)
+			return string(got)
+		}()
+	}
+}

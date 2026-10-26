@@ -125,7 +125,9 @@ func readyWhenServed(ctx context.Context, observed Lease, ready func(Lease) erro
 	wait := 250 * time.Millisecond
 	for {
 		err := ready(observed)
-		if err == nil || !errors.Is(err, ErrDispatchNotServed) || time.Now().Add(wait).After(deadline) {
+		// Not served yet, or the server briefly unavailable: retry until the deadline.
+		transient := errors.Is(err, ErrDispatchNotServed) || errors.Is(err, ErrDispatchUnavailable)
+		if err == nil || !transient || time.Now().Add(wait).After(deadline) {
 			return err
 		}
 		select {

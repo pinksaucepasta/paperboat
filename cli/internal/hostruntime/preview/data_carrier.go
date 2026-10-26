@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
@@ -556,25 +557,35 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 	}
 	observed := lease
 	observed.State, observed.AllocationState, observed.EdgeState, observed.OriginState = "ready", "ready", "ready", "ready"
-	if err := ready(observed); err != nil {
-		return err
-	}
-	c.startOriginHealth(runCtx, lease)
-	// Publish the lease's replay binding once the target is ready, so public
-	// HTTP (which carries no per-stream decision) replays against current
-	// lease authority. Browser streams use the same lease identity.
-	if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.registry != nil && c.inspector != nil && isPreviewHTTPScheme(lease.Target.Scheme) {
-		target := normalizePreviewTarget(lease.Target)
-		dialWait := c.dialWait
-		if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
-			dialWait = LazyOriginConnectTimeout
+	// The route is registered and its origin answers: serve the edge's streams now and report
+	// readiness alongside, as cloudflared and ngrok serve a tunnel the moment it is registered.
+	// Serving waited for the report before, so every stream the edge sent while the server still
+	// answered "not served" queued unanswered (prod 2026-10-26: 1 in 4 previews never loaded).
+	// A readiness failure that is not transient ends the route.
+	var readyFailure atomic.Pointer[error]
+	go func() {
+		if err := ready(observed); err != nil {
+			readyFailure.Store(&err)
+			cancelRun()
+			return
 		}
-		verification := "not_applicable"
-		if target.Scheme == "https" {
-			verification = "system"
+		c.startOriginHealth(runCtx, lease)
+		// Publish the lease's replay binding once the target is ready, so public
+		// HTTP (which carries no per-stream decision) replays against current
+		// lease authority. Browser streams use the same lease identity.
+		if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.registry != nil && c.inspector != nil && isPreviewHTTPScheme(lease.Target.Scheme) {
+			target := normalizePreviewTarget(lease.Target)
+			dialWait := c.dialWait
+			if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
+				dialWait = LazyOriginConnectTimeout
+			}
+			verification := "not_applicable"
+			if target.Scheme == "https" {
+				verification = "system"
+			}
+			c.registerReplay(c.previewHTTPRoute(lease.ID, target, verification, dialWait), target, identity)
 		}
-		c.registerReplay(c.previewHTTPRoute(lease.ID, target, verification, dialWait), target, identity)
-	}
+	}()
 
 	permits := make(chan struct{}, c.max)
 	inspectorPermits := make(chan struct{}, 4)
@@ -583,6 +594,9 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		stream, open, err := registration.Accept(runCtx)
 		if err != nil {
 			streams.Wait()
+			if failure := readyFailure.Load(); failure != nil && ctx.Err() == nil {
+				return *failure
+			}
 			if ctx.Err() != nil || c.isClosed() {
 				return nil
 			}
