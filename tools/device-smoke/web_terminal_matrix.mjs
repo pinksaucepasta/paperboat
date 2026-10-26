@@ -75,6 +75,7 @@ async function waitText(page, text, timeout = 30_000) {
   return false
 }
 async function type(page, text) {
+  await page.bringToFront() // headless Chromium delivers keys only to the front tab
   await page.locator(".terminal-host").click()
   await page.keyboard.type(text, { delay: 5 })
   await page.keyboard.press("Enter")
@@ -125,7 +126,7 @@ async function closeTerminal(context, id) {
 }
 const sttySize = async (page) => {
   const out = await run(page, "stty size")
-  const m = out && [...out.matchAll(/^(\d+)[ \u00a0](\d+)$/gm)].pop()
+  const m = out && [...out.matchAll(/^(\d+)[ \u00a0](\d+)[ \u00a0]*$/gm)].pop()
   return m ? `${m[1]}x${m[2]}` : null
 }
 
