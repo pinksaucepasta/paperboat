@@ -353,6 +353,50 @@ def keystrokes(a, sessions):
         c1.close()
 
 
+def echo_latency(a, sessions):
+    """Input-to-echo latency: 200 single keystrokes into cat (the tty echoes each), p50/p99 idle and
+    while another session on the target floods output. Reported, and failed above 150 ms p99."""
+    import select
+    import statistics
+
+    def sample(c, count=200):
+        times = []
+        for i in range(count):
+            ch = 'abcdefghij'[i % 10].encode()
+            c.pending.clear()
+            t0 = time.monotonic()
+            c.send(ch)
+            deadline = t0 + 5
+            got = b''
+            while ch not in got and time.monotonic() < deadline:
+                if select.select([c.fd], [], [], 0.05)[0]:
+                    got += os.read(c.fd, 4096)
+            times.append((time.monotonic() - t0) * 1000 if ch in got else 5000)
+            time.sleep(0.02)
+        q = statistics.quantiles(times, n=100)
+        return q[49], q[98]
+
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name)
+    flood = None
+    try:
+        c1.send('stty echo; cat\r')
+        c1.settle(1)
+        p50, p99 = sample(c1)
+        row('N16 echo latency idle', p99 < 150, f'p50 {p50:.0f} ms, p99 {p99:.0f} ms')
+        other = fresh_name(); sessions.append(other)
+        flood = connect(a.target, other)
+        flood.send('yes\r')
+        time.sleep(2)
+        p50, p99 = sample(c1)
+        row('N16 echo latency while another session floods', p99 < 150, f'p50 {p50:.0f} ms, p99 {p99:.0f} ms')
+    finally:
+        if flood is not None:
+            flood.send('\x03')
+            flood.close()
+        c1.close()
+
+
 def resize_storm(a, sessions):
     """W10: 200 resizes in about 2 s; the final size wins."""
     name = fresh_name(); sessions.append(name)
@@ -483,7 +527,7 @@ def shared(a, sessions):
 
 ROWS = {'two': two_clients, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
         'server': control_plane_down, 'fast': fast_output, 'resize': resize_storm,
-        'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'shared': shared}
+        'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'latency': echo_latency, 'shared': shared}
 
 
 def main():
