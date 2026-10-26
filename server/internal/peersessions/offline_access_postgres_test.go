@@ -215,6 +215,20 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		t.Errorf("a suspended team's member still has offline scopes %v", after["offline_cli_"+suspendedMember])
 	}
 
+	// A machine shared out of the team (or back in) ends (or starts) every member's rights on it.
+	moves("binding written again", false, func() {
+		exec(`UPDATE paperboat.team_resource_bindings SET active=active WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2`, team, host)
+	})
+	moves("machine unshared from the team", true, func() {
+		exec(`UPDATE paperboat.team_resource_bindings SET active=false WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2`, team, host)
+	})
+	moves("machine shared into the team again", true, func() {
+		exec(`UPDATE paperboat.team_resource_bindings SET active=true WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2`, team, host)
+	})
+	moves("binding deleted", true, func() {
+		exec(`DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_kind='machine' AND resource_id=$2`, team, host)
+	})
+
 	// An earlier daemon gets no offline scopes and expiring mesh scopes.
 	legacy, legacyMesh := read("")
 	if len(legacy) != 0 || slices.Contains(legacyMesh, 0) {

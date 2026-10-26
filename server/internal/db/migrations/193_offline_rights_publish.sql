@@ -34,6 +34,28 @@ CREATE TRIGGER team_resource_grants_publish_host_peer_network_update
     FOR EACH ROW WHEN (old.active IS DISTINCT FROM new.active OR old.permission IS DISTINCT FROM new.permission OR old.generation IS DISTINCT FROM new.generation)
     EXECUTE FUNCTION paperboat.publish_grant_host_peer_network();
 
+-- A machine shared into or out of a team: every member's offline rights on that host start or end (the binding's
+-- generation is part of the scope's generation).
+-- +goose StatementBegin
+CREATE FUNCTION paperboat.publish_binding_host_peer_network() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+DECLARE binding_row paperboat.team_resource_bindings;
+BEGIN
+  binding_row := CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  IF binding_row.resource_kind = 'machine' THEN
+    PERFORM paperboat.publish_machine_topic(ARRAY[binding_row.resource_id], 'peer_network');
+  END IF;
+  RETURN NULL;
+END $$;
+-- +goose StatementEnd
+CREATE TRIGGER team_resource_bindings_publish_host_peer_network_insert
+    AFTER INSERT OR DELETE ON paperboat.team_resource_bindings
+    FOR EACH ROW EXECUTE FUNCTION paperboat.publish_binding_host_peer_network();
+CREATE TRIGGER team_resource_bindings_publish_host_peer_network_update
+    AFTER UPDATE OF active, generation ON paperboat.team_resource_bindings
+    FOR EACH ROW WHEN (old.active IS DISTINCT FROM new.active OR old.generation IS DISTINCT FROM new.generation)
+    EXECUTE FUNCTION paperboat.publish_binding_host_peer_network();
+
 -- A team's suspension (its members' rights on its machines).
 -- +goose StatementBegin
 CREATE FUNCTION paperboat.publish_team_suspension_peer_network() RETURNS trigger
@@ -100,6 +122,9 @@ CREATE TRIGGER users_publish_status_peer_network
     EXECUTE FUNCTION paperboat.publish_account_status_peer_network();
 
 -- +goose Down
+DROP TRIGGER team_resource_bindings_publish_host_peer_network_update ON paperboat.team_resource_bindings;
+DROP TRIGGER team_resource_bindings_publish_host_peer_network_insert ON paperboat.team_resource_bindings;
+DROP FUNCTION paperboat.publish_binding_host_peer_network();
 DROP TRIGGER users_publish_status_peer_network ON paperboat.users;
 DROP FUNCTION paperboat.publish_account_status_peer_network();
 DROP TRIGGER workspace_policies_publish_peer_network ON paperboat.workspace_policies;
