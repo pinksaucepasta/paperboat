@@ -138,7 +138,7 @@ const sttyCols = async (p) => {
   const m = marker("size")
   await type(p, `printf '${m}%s\\n' "$(stty size)"`)
   await shows(p, m, 15000)
-  return Number([...(await screenText(p)).matchAll(new RegExp(`${m}(\\d+) (\\d+)`, "g"))].pop()?.[2])
+  return Number([...(await screenText(p)).matchAll(new RegExp(`${m}(\\d+)[ \\u00a0](\\d+)`, "g"))].pop()?.[2])
 }
 
 // F3-07: open, type, resize, reconnect, close, from the console.
@@ -179,7 +179,7 @@ async function f308() {
   log(await peopleHave(p, "Owner"), "the panel lists the owner", (await people(p)).join(" | "))
   await p.getByRole("button", { name: "Share", exact: true }).click({ timeout: 15000 })
   const code = await p
-    .waitForFunction(() => document.querySelector("[role=dialog] span.font-mono")?.textContent?.trim() || null, null, { timeout: 30000 })
+    .waitForFunction(() => document.querySelector("[role=dialog] span.font-mono.text-lg")?.textContent?.trim() || null, null, { timeout: 30000 })
     .then((h) => h.jsonValue(), () => null)
   log(!!code, "Share makes a join code", code ? "code shown" : "no code")
   await p.keyboard.press("Escape")
@@ -188,7 +188,7 @@ async function f308() {
   const guestCtx = await browser.newContext({ viewport: { width: 1100, height: 700 } })
   const guest = await guestCtx.newPage()
   await guest.goto(`${origin}/terminal/${id}`, { timeout: 120000 })
-  await guest.getByRole("button", { name: "Join with a code" }).click({ timeout: 30000 }).catch(() => {})
+  await guest.getByText("Enter it", { exact: true }).click({ timeout: 30000 })
   await guest.locator("#join-code").fill(code ?? "")
   await guest.locator("#join-name").fill("Guest Tester")
   await guest.getByRole("button", { name: "Join", exact: true }).click()

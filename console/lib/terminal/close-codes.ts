@@ -25,7 +25,9 @@ export type CloseOutcome = { phase: TerminalPhase | "reconnect"; message: string
 
 export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   no_access: { phase: "denied", message: "You do not have access to this terminal. Ask its owner." },
-  revoked: { phase: "denied", message: "Your access to this terminal was removed. Ask its owner to restore it." },
+  // Revoked only says the access policy changed: a fresh ticket says whether this person is still allowed
+  // (the owner always is), so the page asks instead of showing "removed".
+  revoked: { phase: "reconnect", message: "", silent: true },
   ended: { phase: "closed", message: "This terminal has ended." },
   expired: { phase: "reconnect", message: "", silent: true },
   limit: { phase: "limit", message: "Your plan's browser terminal limit is reached. Close one or change plan." },

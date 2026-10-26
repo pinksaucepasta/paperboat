@@ -10,6 +10,10 @@ describe("terminal close codes", () => {
     expect(terminalCloseCodes.machine_unavailable.phase).toBe("reconnect")
     expect(terminalCloseCodes.machine_unavailable.message).toMatch(/machine is unavailable/)
   })
+  test("a revoked close asks for a fresh ticket instead of showing 'removed' (the owner is revoked by every policy change)", () => {
+    expect(terminalCloseCodes.revoked).toEqual({ phase: "reconnect", message: "", silent: true })
+    expect(ticketCloseCode(refusal(403, "forbidden"))).toBe("no_access")
+  })
   test("in-channel host codes map onto the table, unknown ones fall back by state", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "credential_expired" })).toBe("expired")
     expect(workerCloseCode({ state: "denied", code: "something_new" })).toBe("no_access")
