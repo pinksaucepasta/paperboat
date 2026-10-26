@@ -300,7 +300,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.config.networkEvents.Healthy), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -653,7 +653,10 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 			return ErrProductionInvalid
 		}
 		if peer, ok := native.PeerFromContext(ctx); ok {
-			ctx = managedssh.WithPeer(ctx, managedssh.Peer{AccountID: peer.AccountID, EndpointID: peer.EndpointID, OperationID: header.OperationID, Offline: header.Offline})
+			// Every SSH stream is admitted from the host's signed rules (D1); it is offline only while the host
+			// hears nothing from Paperboat.
+			offline := header.Offline && !s.config.networkEvents.Healthy()
+			ctx = managedssh.WithPeer(ctx, managedssh.Peer{AccountID: peer.AccountID, EndpointID: peer.EndpointID, OperationID: header.OperationID, Offline: offline})
 		}
 		target, ok := s.config.ssh.Target()
 		if !ok {

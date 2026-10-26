@@ -53,7 +53,12 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	var expires time.Time
 	var token string
 	var quicEndpoint, wssEndpoint string
-	if request.Consumer != "exec" && request.Consumer != "ssh" {
+	if request.Consumer == "ssh" {
+		// D1 (F5-07): the host admits every SSH stream from its own signed access rules, online or offline,
+		// so an SSH connection makes no control-plane request.
+		return hostRulesPeerStream(request)
+	}
+	if request.Consumer != "exec" {
 		return request, errors.New("daemon descriptor issuance is unavailable for this consumer")
 	}
 	var descriptor api.ExecDescriptor
@@ -67,11 +72,7 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 			return request, err
 		}
 		client.SetSourceMachineID(s.SourceMachineID)
-		if request.Consumer == "exec" {
-			descriptor, err = client.MachineExecDescriptor(ctx, request.MachineID, request.OperationID)
-		} else {
-			descriptor, err = client.MachineSSHDescriptor(ctx, request.MachineID, request.OperationID)
-		}
+		descriptor, err = client.MachineExecDescriptor(ctx, request.MachineID, request.OperationID)
 		if err == nil {
 			break
 		}
@@ -87,7 +88,7 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 			}
 		}
 		if api.Unreachable(err) {
-			return offlinePeerStream(request)
+			return hostRulesPeerStream(request)
 		}
 		return request, err
 	}
@@ -293,8 +294,9 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 // received from the host's signed state still ends it at once.
 const offlineStreamLifetime = 12 * time.Hour
 
-// offlinePeerStream asks the host to admit the stream from its own signed scopes (F21-11).
-func offlinePeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
+// hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH stream,
+// and exec or terminal streams while Paperboat is unreachable.
+func hostRulesPeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
 	if !localapi.OfflineConsumers[request.Consumer] {
 		return request, errors.New("this session needs Paperboat online")
 	}

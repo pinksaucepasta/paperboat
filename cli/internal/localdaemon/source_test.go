@@ -320,3 +320,17 @@ func TestIssuePeerStreamGoesOfflineOnlyWhenPaperboatIsUnreachable(t *testing.T) 
 		t.Fatal("a client-requested offline stream was accepted")
 	}
 }
+
+// D1 (F5-07): an SSH stream asks Paperboat nothing; the host admits it from its own signed rules.
+func TestIssuePeerStreamSendsSSHToTheHostRulesWithoutARequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("SSH stream made a control request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "ssh", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	result, err := source.IssuePeerStream(context.Background(), request)
+	if err != nil || !result.Offline || result.Credential != "" || result.Validate(time.Now().UTC()) != nil {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

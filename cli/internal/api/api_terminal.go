@@ -295,19 +295,7 @@ func (c *Client) MachineExecDescriptor(ctx context.Context, machineID, operation
 	return out, err
 }
 
-func (c *Client) MachineSSHDescriptor(ctx context.Context, machineID, operationID string) (SSHDescriptor, error) {
-	if strings.TrimSpace(machineID) == "" || len(operationID) < 8 || len(operationID) > 128 || c.sourceMachineID == "" {
-		return SSHDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
-	}
-	var out SSHDescriptor
-	err := c.doIssuance(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", operationDescriptorRequest{SourceMachineID: c.sourceMachineID, OperationID: operationID, NativeOnlyAccepted: true}, &out, false)
-	if err == nil {
-		err = validateOperationDescriptor(out, machineID, operationID, "ssh:operate", "ssh")
-	}
-	return out, err
-}
-
-// operationDescriptorRequest asks for an exec or SSH descriptor. NativeOnlyAccepted lets the server
+// operationDescriptorRequest asks for an exec descriptor. NativeOnlyAccepted lets the server
 // answer while the machine's edge runtime carrier is not current (after a restart, an outage or an edge
 // incident): the operation runs over the native peer connection, so the descriptor then has no edge
 // endpoints instead of the server refusing it with machine_not_ready.

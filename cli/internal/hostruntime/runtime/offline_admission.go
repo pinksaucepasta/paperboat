@@ -18,13 +18,13 @@ import (
 // a start that cannot be recorded is refused, so audit fails closed. A multi-account host
 // dispatches streams to per-account workers that hold no peer state of their own here, so it
 // refuses offline sessions, except SSH: the carrier serves SSH itself under its own signed rules.
-func offlineAdmission(queue *offlineaudit.Queue, dispatching bool) func(context.Context, native.OfflineAdmission) error {
+func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func() bool) func(context.Context, native.OfflineAdmission) error {
 	if queue == nil {
 		return nil
 	}
 	return func(_ context.Context, request native.OfflineAdmission) error {
 		if request.Capability == sshCapability {
-			return admitOfflineSSH(queue, request)
+			return admitOfflineSSH(queue, request, online())
 		}
 		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
 		var refusal error
@@ -85,15 +85,19 @@ func (s *offlineAuditService) Shutdown(ctx context.Context) error {
 
 const sshCapability = "managed_ssh"
 
-// admitOfflineSSH is the offline decision for a managed SSH stream. A refusal is recorded as an
-// ssh_session_refused (origin offline); an admitted session is recorded by managedssh.Host.Serve, which audits
-// every SSH session online or offline and refuses an offline one whose start cannot be recorded.
-func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission) error {
+// admitOfflineSSH decides a managed SSH stream from the host's signed rules, which admit every SSH stream (D1). A
+// refusal is recorded as an ssh_session_refused (origin offline while the host hears nothing from Paperboat); an
+// admitted session is recorded by managedssh.Host.Serve, which refuses an offline one whose start cannot be recorded.
+func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission, online bool) error {
 	if request.Allowed {
 		return nil
 	}
 	refusal := errors.New("no signed scope allows this session")
-	err := queue.Record(offlineaudit.Event{Kind: offlineaudit.KindSSHRefused, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: offlineaudit.OriginOffline, Reason: managedssh.RefusedNoAccess})
+	origin := offlineaudit.OriginOffline
+	if online {
+		origin = offlineaudit.OriginOnline
+	}
+	err := queue.Record(offlineaudit.Event{Kind: offlineaudit.KindSSHRefused, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: origin, Reason: managedssh.RefusedNoAccess})
 	return errors.Join(refusal, err)
 }
 

@@ -145,35 +145,6 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 	}
 }
 
-func TestMachineSSHDescriptorRequiresExactScope(t *testing.T) {
-	for _, scope := range []string{"ssh:operate", "exec:operate"} {
-		t.Run(scope, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/um_1/ssh-descriptor" {
-					http.NotFound(w, r)
-					return
-				}
-				var body operationDescriptorRequest
-				if json.NewDecoder(r.Body).Decode(&body) != nil || body.SourceMachineID != "um_source" || body.OperationID != "operation_ssh_1" || !body.NativeOnlyAccepted {
-					t.Fatalf("body=%#v", body)
-				}
-				expiresAt := time.Now().Add(time.Minute)
-				writeData(w, http.StatusOK, SSHDescriptor{OperationID: "operation_ssh_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "ssh-token", ExpiresAt: expiresAt, Scopes: []string{scope}}, ExpiresAt: expiresAt})
-			}))
-			defer server.Close()
-			client := New(server.URL, config.Credential{AccessToken: "token"}, nil)
-			client.SetSourceMachineID("um_source")
-			_, err := client.MachineSSHDescriptor(context.Background(), "um_1", "operation_ssh_1")
-			if scope == "ssh:operate" && err != nil {
-				t.Fatal(err)
-			}
-			if scope != "ssh:operate" && err == nil {
-				t.Fatal("exec scope accepted for ssh descriptor")
-			}
-		})
-	}
-}
-
 func TestManagedSSHAuthorizedKeysReportsSafeContractMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/machine_1/ssh-authorized-keys" {
