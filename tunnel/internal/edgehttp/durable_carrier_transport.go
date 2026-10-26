@@ -420,7 +420,7 @@ func (r *DataCarrierRouteRegistry) entryForExactAssignment(rule route.RouteRule)
 	defer r.mu.RUnlock()
 	entry := r.byKey[carrierRouteIdentityKey(identity)]
 	if entry == nil {
-		return nil, fmt.Errorf("%w: exact carrier missing", ErrDataCarrierRouteUnavailable)
+		return nil, fmt.Errorf("%w: exact carrier missing for %s (host %s session %s)", ErrDataCarrierRouteUnavailable, rule.RouteID, rule.HostID, rule.ConnectorSessionID)
 	}
 	if entry.identity != identity || entry.server == nil || !entry.state.Ready || entry.state.Generation != rule.ConfigGeneration || uint32(entry.server.ActiveStreams()) >= entry.state.Capacity {
 		return nil, fmt.Errorf("%w: exact carrier is not ready", ErrDataCarrierRouteUnavailable)
@@ -430,9 +430,12 @@ func (r *DataCarrierRouteRegistry) entryForExactAssignment(rule route.RouteRule)
 		return nil, ErrDataCarrierRouteUnavailable
 	default:
 	}
-	binding, ok := replicaRouteBinding(entry.state.RouteBindings, carrierRouteID(rule))
-	if !ok || !sortedContains(entry.state.HealthyRoutes, carrierRouteID(rule)) || binding.AssignmentID != rule.AssignmentID || binding.AssignmentGeneration != rule.AssignmentGeneration || binding.RouteGeneration != rule.RouteGeneration || binding.ConfigContentHash != rule.ConfigContentHash {
-		return nil, fmt.Errorf("%w: exact route binding mismatch", ErrDataCarrierRouteUnavailable)
+	routeID := carrierRouteID(rule)
+	binding, ok := replicaRouteBinding(entry.state.RouteBindings, routeID)
+	if !ok || !sortedContains(entry.state.HealthyRoutes, routeID) || binding.AssignmentID != rule.AssignmentID || binding.AssignmentGeneration != rule.AssignmentGeneration || binding.RouteGeneration != rule.RouteGeneration || binding.ConfigContentHash != rule.ConfigContentHash {
+		return nil, fmt.Errorf("%w: exact route binding mismatch for %s (bound=%t healthy=%t assignment=%t/%t route_generation=%d/%d hash=%t)", ErrDataCarrierRouteUnavailable,
+			routeID, ok, sortedContains(entry.state.HealthyRoutes, routeID), binding.AssignmentID == rule.AssignmentID, binding.AssignmentGeneration == rule.AssignmentGeneration,
+			binding.RouteGeneration, rule.RouteGeneration, binding.ConfigContentHash == rule.ConfigContentHash)
 	}
 	return entry, nil
 }

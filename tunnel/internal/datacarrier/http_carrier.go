@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -310,6 +311,11 @@ func (s *HTTPService) safeHandler(next http.Handler) http.Handler {
 type carrierHTTPDiagnosticWriter struct{ service *HTTPService }
 
 func (writer carrierHTTPDiagnosticWriter) Write(data []byte) (int, error) {
+	text := strings.TrimSpace(string(data))
+	if len(text) > 240 {
+		text = text[:240]
+	}
+	slog.Warn("carrier_http_diagnostic", "text", text)
 	writer.service.observeFailure(errCarrierHTTPDiagnostic)
 	return len(data), nil
 }
