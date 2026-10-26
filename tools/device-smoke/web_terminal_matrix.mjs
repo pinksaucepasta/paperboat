@@ -235,6 +235,8 @@ const rows = {
     await ctx.setOffline(true)
     await sleep(5000)
     const offlinePhase = await phase(page)
+    const reason = await page.evaluate(() => document.body.innerText.includes("You are offline"))
+    row("W6 offline: the page shows it is reconnecting and why", offlinePhase === "reconnecting" && reason, `${id} phase ${offlinePhase}`)
     const key = `PBW_OFFKEY_${nonce()}`
     await page.keyboard.type(emit(key), { delay: 5 }).catch(() => {})
     await page.keyboard.press("Enter").catch(() => {})
@@ -246,8 +248,8 @@ const rows = {
     const out = (await run(page, "true")) ?? ""
     const [ok, why] = exactlyOnce(out, "WO", 1, 20)
     row("W6 offline: output made meanwhile shows exactly once", ok, `${id} ${why}`)
-    const ran = out.split("\n").filter((l) => l === key).length
-    row("W8 keys typed while offline: run once, or are refused visibly", ran <= 1, `${id} ran ${ran} times (0 = dropped)`)
+    const ran = out.split("\n").filter((l) => l.trim() === key).length
+    row("W8 keys typed while offline: run exactly once", ran === 1, `${id} ran ${ran} times (0 = dropped)`)
     await page.close()
     await closeTerminal(ctx, id)
   },

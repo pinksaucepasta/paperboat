@@ -89,6 +89,11 @@ export function TerminalSurface({
             >
               <CircleNotchIcon className="size-3.5 animate-spin" />
               {phase === "reconnecting" ? (error ? `Reconnecting: ${error}` : "Reconnecting") : "Connecting"}
+              {phase === "reconnecting" && (
+                <Button size="xs" variant="outline" className="pointer-events-auto ml-1" onClick={connection.reconnect}>
+                  Reconnect now
+                </Button>
+              )}
             </div>
           </div>
         )}

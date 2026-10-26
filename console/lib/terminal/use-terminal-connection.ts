@@ -68,6 +68,10 @@ type Ticket = {
   root_fingerprint: string
 }
 
+const offlineMessage = "You are offline. Reconnecting when the network is back."
+/** Why a reconnect is happening: while offline, that is the reason. */
+const reconnectReason = (message: string) => (typeof navigator !== "undefined" && !navigator.onLine ? offlineMessage : message)
+
 /** Accepted close requests cannot be reopened before the runtime confirms them. */
 export function terminalCanAttach(session: Pick<TerminalSession, "state" | "desired_state">): boolean {
   // `browser-session` (guests) reports the raw runtime state "running"; the other endpoints say
@@ -212,6 +216,11 @@ export function useTerminalConnection({
   const disposedRef = useRef(false)
   const busyRef = useRef(false)
   const startedOnceRef = useRef(false)
+  // Keys typed while the connection is down, sent once when it is back (bounded).
+  const queuedInputRef = useRef<Uint8Array[]>([])
+  const queuedBytesRef = useRef(0)
+  // The connection that was live when the browser went offline.
+  const offlineConnectionRef = useRef("")
   const startConnectionRef = useRef<((retry?: boolean) => Promise<void>) | null>(null)
 
   // Polled session details (title, participants) must not restart the terminal.
@@ -247,7 +256,9 @@ export function useTerminalConnection({
   }, [])
 
   const inputLocked = () =>
-    filePasteBusyRef.current || phaseRef.current !== "attached" || roleRef.current === "viewer"
+    filePasteBusyRef.current ||
+    (phaseRef.current !== "attached" && phaseRef.current !== "reconnecting") ||
+    roleRef.current === "viewer"
 
   const syncInputLock = useCallback(() => {
     const input = terminalRef.current?.element.querySelector("textarea")
@@ -420,6 +431,17 @@ export function useTerminalConnection({
         setNotice("Terminal input is paused while files upload.")
         return
       }
+      if (roleRef.current !== "viewer" && phaseRef.current === "reconnecting" && !receiptInsertion) {
+        // Typed while the connection is down: kept, in order, and sent once when it is back.
+        if (queuedBytesRef.current + data.byteLength > 65536) {
+          setNotice("Too much was typed while reconnecting; the rest was ignored.")
+        } else {
+          queuedInputRef.current.push(data)
+          queuedBytesRef.current += data.byteLength
+          setNotice("Keys typed now are sent once the terminal has reconnected.")
+        }
+        return
+      }
       if (
         roleRef.current === "viewer" ||
         phaseRef.current !== "attached" ||
@@ -456,6 +478,21 @@ export function useTerminalConnection({
       } finally {
         fittingRef.current = false
       }
+    }
+    const onOffline = () => {
+      if (phaseRef.current !== "attached") return
+      offlineConnectionRef.current = connectionIDRef.current
+      setError(offlineMessage)
+      setPhaseValue("reconnecting")
+    }
+    const onOnline = () => {
+      const id = offlineConnectionRef.current
+      offlineConnectionRef.current = ""
+      // The network came back: the old connection cannot be trusted, so replace it at once.
+      if (!id || connectionIDRef.current !== id) return
+      connectionIDRef.current = ""
+      apiRef.current?.leave(id)
+      scheduleReconnect(0)
     }
     const onActive = () => {
       if (document.visibilityState === "visible") markActive()
@@ -518,7 +555,7 @@ export function useTerminalConnection({
               setNotice("Terminal input is paused while files upload.")
               return
             }
-            if (phaseRef.current !== "attached") return
+            if (phaseRef.current !== "attached" && phaseRef.current !== "reconnecting") return
             const receiptInsertion = insertingReceiptRef.current !== null
             const modifiers = receiptInsertion ? noMobileModifiers : mobileModifiersRef.current
             if (!receiptInsertion && (modifiers.ctrl || modifiers.alt)) {
@@ -571,6 +608,8 @@ export function useTerminalConnection({
         })
         observer.observe(host)
         window.addEventListener("focus", onActive)
+        window.addEventListener("offline", onOffline)
+        window.addEventListener("online", onOnline)
         document.addEventListener("visibilitychange", onActive)
         host.addEventListener("paste", onPasteCapture, true)
         host.addEventListener("dragenter", onDragEnter, true)
@@ -595,6 +634,8 @@ export function useTerminalConnection({
       setReady(false)
       observer?.disconnect()
       window.removeEventListener("focus", onActive)
+      window.removeEventListener("offline", onOffline)
+      window.removeEventListener("online", onOnline)
       document.removeEventListener("visibilitychange", onActive)
       host.removeEventListener("paste", onPasteCapture, true)
       host.removeEventListener("dragenter", onDragEnter, true)
@@ -608,7 +649,7 @@ export function useTerminalConnection({
       coreRef.current = null
       fitRef.current = null
     }
-  }, [sessionID, hostRef, uploadFiles, setPhaseValue, showFilePasteNotice, markActive])
+  }, [sessionID, hostRef, uploadFiles, scheduleReconnect, setPhaseValue, showFilePasteNotice, markActive])
 
   const acknowledge = useCallback((connectionID: string, next: string) => {
     if (
@@ -683,11 +724,13 @@ export function useTerminalConnection({
         connectionIDRef.current = ""
         setLastClose([event.code ?? event.state, event.close, event.transport_cause].filter(Boolean).join(" "))
         if (outcome.phase === "reconnect") {
-          setError(outcome.message)
+          setError(reconnectReason(outcome.message))
           scheduleReconnect()
           return
         }
         window.clearTimeout(reconnectTimerRef.current)
+        queuedInputRef.current = []
+        queuedBytesRef.current = 0
         if (outcome.phase !== "transport-error") void filePasteUploaderRef.current?.cancel()
         setPhaseValue(outcome.phase)
         setError(
@@ -744,6 +787,23 @@ export function useTerminalConnection({
           setError("The terminal screen could not be restored. Reconnect and try again.")
           apiRef.current?.leave(connectionID)
           return
+        }
+        // Keys typed while the connection was down go out once, in order, now that it is back.
+        const queued = queuedInputRef.current
+        queuedInputRef.current = []
+        queuedBytesRef.current = 0
+        if (queued.length && nextRole !== "viewer") {
+          const keys = new Uint8Array(queued.reduce((total, chunk) => total + chunk.byteLength, 0))
+          let at = 0
+          for (const chunk of queued) {
+            keys.set(chunk, at)
+            at += chunk.byteLength
+          }
+          setNotice("")
+          void apiRef.current
+            ?.sendInput(connectionID, keys)
+            .then(checkResult)
+            .catch(() => setNotice("Keys typed while reconnecting could not be sent."))
         }
         requestAnimationFrame(() => {
           if (connectionIDRef.current !== connectionID || roleRef.current === "viewer") return
@@ -899,7 +959,7 @@ export function useTerminalConnection({
         const code = ticketCloseCode(reason)
         const outcome = code && terminalCloseCodes[code]
         if (outcome) {
-          setError(outcome.message)
+          setError(outcome.phase === "reconnect" ? reconnectReason(outcome.message) : outcome.message)
           if (outcome.phase === "reconnect") {
             scheduleReconnect(outcome.silent ? 0 : reason instanceof ApiError ? reason.retryAfterMs : undefined)
           } else {
@@ -953,6 +1013,7 @@ export function useTerminalConnection({
   }, [])
 
   const reconnect = useCallback(() => {
+    window.clearTimeout(reconnectTimerRef.current)
     if (terminalRef.current) void startConnection()
     else window.location.reload()
   }, [startConnection])
