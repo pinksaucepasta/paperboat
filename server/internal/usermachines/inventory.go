@@ -17,7 +17,7 @@ type InventoryOptions struct {
 	MachineID       string // the terminal catalog's machine filter
 	// After is the machine list's keyset cursor: the page starts after this (lowercased alias, id).
 	After *InventoryPosition
-	// Platform (linux, darwin, windows) and Tag (a workspace policy tag, without "tag:") narrow the machine list.
+	// Platform (linux, darwin, windows) and Tag (a workspace policy tag, without "tag:"; the policy stores it as tag:<name>) narrow the machine list.
 	Platform, Tag string
 	// WithoutLiveMetadata skips the terminal catalog's live host enrichment (current directory,
 	// foreground process, participants) for callers that need only the stored rows.
@@ -258,7 +258,7 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions,
  AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)
  AND ($7='' OR m.platform=$7)
  AND ($8='' OR EXISTS(SELECT 1 FROM workspace_policy_tags tg JOIN workspace_policies p ON p.id=tg.policy_id
-  WHERE tg.machine_id=m.id AND tg.tag=$8 AND (($3::text IS NOT NULL AND p.team_id=$3)
+  WHERE tg.machine_id=m.id AND tg.tag='tag:'||$8 AND (($3::text IS NOT NULL AND p.team_id=$3)
    OR ($3::text IS NULL AND p.team_id IS NULL AND p.owner_account=$1)
    OR (NOT $2::boolean AND p.team_id IN (SELECT team_id FROM team_members WHERE account_id=$1 AND active)))))`
 	return with, predicate, []any{account, scoped, teamID, opts.Q, opts.State, opts.Owner, opts.Platform, opts.Tag}

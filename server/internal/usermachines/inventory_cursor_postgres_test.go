@@ -51,7 +51,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
  CASE WHEN g>=8 THEN 'released' ELSE 'occupied' END,g%2=0 FROM generate_series(1,9) g`, user)
 	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, user+"_m8")
 	exec(`INSERT INTO paperboat.workspace_policies(owner_account,version,source,digest) VALUES($1,1,'{}','sha256:test')`, user)
-	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'prod',$1||'_m'||g FROM paperboat.workspace_policies,generate_series(2,3) g WHERE owner_account=$1`, user)
+	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'tag:prod',$1||'_m'||g FROM paperboat.workspace_policies,generate_series(2,3) g WHERE owner_account=$1`, user)
 	exec(`SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, user+"_m5")
 	var address string
 	if err := store.SQL().QueryRowContext(ctx, `SELECT '127.100.'||(address_slot/256)||'.'||(address_slot%256) FROM paperboat.control_sync_leases WHERE machine_id=$1`, user+"_m5").Scan(&address); err != nil {
