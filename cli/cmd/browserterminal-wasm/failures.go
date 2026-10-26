@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"io"
+
+	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 )
 
 type terminalConnectError struct {
@@ -34,17 +36,32 @@ func browserFileFailure(remoteCode string) (string, string) {
 	return code, "The file upload could not finish. Reconnect and retry; no path was pasted."
 }
 
-// bandwidthQuotaExhausted is the edge's WebSocket close reason when the workspace's hosted bandwidth is
-// used up; the console stops reconnecting on this code and shows the plan limit.
-const bandwidthQuotaExhausted = "bandwidth_quota_exhausted"
-
 // closeFailure turns the WebSocket close reason into the terminal's outcome: the plan-limit close is a
 // denial (no reconnect loop); any other close is a plain end of stream.
-func closeFailure(reason string) error {
-	if reason == bandwidthQuotaExhausted {
-		return &terminalConnectError{state: "denied", code: bandwidthQuotaExhausted, message: "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."}
+// closeFailure turns a WebSocket close into the terminal's outcome. A close without a code (1006: the
+// network dropped) reconnects. Otherwise the reason is a typed code (shared/terminalend), or the close
+// number names it when the reason is empty; the state event carries the typed code, which the console
+// branches on and words, plus the raw close number and whether the close was clean.
+func closeFailure(code int, reason string, clean bool) error {
+	if code == 0 || code == 1006 || code == 1000 && reason == "" {
+		return io.EOF
 	}
-	return io.EOF
+	ended := terminalend.Parse(reason)
+	if reason == "" {
+		ended = terminalend.ForCloseCode(code)
+	}
+	state := "transport-error"
+	switch ended {
+	case terminalend.Ended:
+		state = "closed"
+	case terminalend.NoAccess, terminalend.Revoked, terminalend.Limit, terminalend.BandwidthQuotaExhausted:
+		state = "denied"
+	}
+	message := ""
+	if ended == terminalend.BandwidthQuotaExhausted {
+		message = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."
+	}
+	return &terminalConnectError{state: state, code: string(ended), message: message, details: map[string]any{"close": code, "clean": clean}}
 }
 
 // innermostConnectError prefers the most specific outcome: a transport failure wrapping the socket's

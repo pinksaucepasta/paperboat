@@ -36,3 +36,14 @@ func TestWireValuesAreStable(t *testing.T) {
 		t.Fatal("a browser terminal close reason changed")
 	}
 }
+
+func TestForCloseCodeInvertsCloseCode(t *testing.T) {
+	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable, Protocol} {
+		if got := ForCloseCode(r.CloseCode()); got != r {
+			t.Fatalf("ForCloseCode(%d) = %s, want %s", r.CloseCode(), got, r)
+		}
+	}
+	if got := ForCloseCode(4999); got != Protocol {
+		t.Fatalf("unknown code = %s, want protocol", got)
+	}
+}

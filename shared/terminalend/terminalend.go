@@ -83,3 +83,13 @@ func Parse(value string) Reason {
 	}
 	return Protocol
 }
+
+// ForCloseCode is the reason for a WebSocket close code that arrived without a reason; an unknown code is Protocol.
+func ForCloseCode(code int) Reason {
+	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable} {
+		if r.CloseCode() == code {
+			return r
+		}
+	}
+	return Protocol
+}

@@ -42,7 +42,7 @@ func TestTerminalWriterAdmissionIsBoundedAndOrdered(t *testing.T) {
 	}
 }
 
-func TestTerminalACKCoalescesLatestSequenceAndThreshold(t *testing.T) {
+func TestTerminalACKCoalescesLatestSequence(t *testing.T) {
 	q := newTerminalWriterQueue()
 	for _, sequence := range []uint64{10, 20, 15} {
 		if err := q.ack(sequence); err != nil {
@@ -52,25 +52,19 @@ func TestTerminalACKCoalescesLatestSequenceAndThreshold(t *testing.T) {
 	if got := q.pendingACK(); got != 20 {
 		t.Fatalf("pending = %d", got)
 	}
-	if q.urgentACK() {
-		t.Fatal("small ACK bypassed debounce")
-	}
 	if len(q.ackNotify) != 1 {
 		t.Fatal("ACK notifications did not coalesce")
 	}
 	<-q.ackNotify
-	if err := q.ack(terminalACKBytes); err != nil {
+	if err := q.ack(64 << 10); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-q.ackNotify:
 	default:
-		t.Fatal("byte threshold did not wake writer")
+		t.Fatal("ACK did not wake the writer")
 	}
-	if !q.urgentACK() {
-		t.Fatal("byte threshold did not flush immediately")
-	}
-	q.sentACK(terminalACKBytes)
+	q.sentACK(64 << 10)
 	if got := q.pendingACK(); got != 0 {
 		t.Fatalf("already acknowledged sequence pending = %d", got)
 	}
@@ -81,7 +75,7 @@ func TestTerminalACKCoalescesLatestSequenceAndThreshold(t *testing.T) {
 		t.Fatal("ACK regressed")
 	}
 	q.close()
-	if err := q.ack(terminalACKBytes + 1); err == nil {
+	if err := q.ack(64<<10 + 1); err == nil {
 		t.Fatal("closed queue accepted ACK")
 	}
 }

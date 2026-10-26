@@ -89,11 +89,13 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 			return nil
 		}),
 		js.FuncOf(func(_ js.Value, args []js.Value) any {
-			reason := ""
+			code, reason, clean := 0, "", false
 			if len(args) > 0 && args[0].Type() == js.TypeObject {
+				code = args[0].Get("code").Int()
 				reason = args[0].Get("reason").String()
+				clean = args[0].Get("wasClean").Bool()
 			}
-			connection.finish(closeFailure(reason))
+			connection.finish(closeFailure(code, reason, clean))
 			return nil
 		}),
 	)

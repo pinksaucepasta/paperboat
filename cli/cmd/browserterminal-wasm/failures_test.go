@@ -30,20 +30,42 @@ func TestBrowserConnectionFailureRetainsCauseWithOwnedMessage(t *testing.T) {
 	}
 }
 
-// F13-03: the edge closing the terminal at the plan limit is a denial with the plan-limit code (the
-// console then stops reconnecting); other closes stay a plain end of stream.
-func TestPlanLimitCloseIsADenial(t *testing.T) {
-	var denied *terminalConnectError
-	if !errors.As(closeFailure("bandwidth_quota_exhausted"), &denied) || denied.state != "denied" || denied.code != "bandwidth_quota_exhausted" || !strings.Contains(denied.message, "Billing") {
-		t.Fatalf("got %#v", denied)
+// F13-03 / F3-19: the edge closes with a typed reason (shared/terminalend); the worker maps it to the
+// state the console shows, by reason first and by the close number when the reason is empty. A dropped
+// network (1006) or a plain close stays an end of stream, which reconnects.
+func TestEdgeClosesMapToTypedOutcomes(t *testing.T) {
+	for _, c := range []struct {
+		code         int
+		reason       string
+		state, typed string
+	}{
+		{4403, "bandwidth_quota_exhausted", "denied", "bandwidth_quota_exhausted"},
+		{4404, "no_access", "denied", "no_access"},
+		{4401, "", "denied", "revoked"},
+		{4402, "limit", "denied", "limit"},
+		{4409, "ended", "closed", "ended"},
+		{4408, "expired", "transport-error", "expired"},
+		{4429, "too_many_pending", "transport-error", "too_many_pending"},
+		{4503, "machine_unavailable", "transport-error", "machine_unavailable"},
+		{4504, "", "transport-error", "edge_unavailable"},
+		{4999, "something_new", "transport-error", "protocol"},
+	} {
+		var got *terminalConnectError
+		if !errors.As(closeFailure(c.code, c.reason, true), &got) || got.state != c.state || got.code != c.typed || got.details["close"] != c.code {
+			t.Fatalf("close %d %q: got %#v, want state %s code %s", c.code, c.reason, got, c.state, c.typed)
+		}
 	}
-	if closeFailure("closed") != io.EOF || closeFailure("") != io.EOF {
-		t.Fatal("an ordinary close is not a plain end of stream")
+	var quota *terminalConnectError
+	if errors.As(closeFailure(4403, "bandwidth_quota_exhausted", true), &quota) && !strings.Contains(quota.message, "Billing") {
+		t.Fatal("the bandwidth denial lost its wording")
+	}
+	if closeFailure(1006, "", false) != io.EOF || closeFailure(0, "", false) != io.EOF || closeFailure(1000, "", true) != io.EOF {
+		t.Fatal("a dropped network or a plain close is not a plain end of stream")
 	}
 }
 
 func TestAPlanLimitDenialInsideATransportFailureWins(t *testing.T) {
-	outer := &terminalConnectError{state: "transport-error", code: "connection_failed", cause: closeFailure("bandwidth_quota_exhausted")}
+	outer := &terminalConnectError{state: "transport-error", code: "connection_failed", cause: closeFailure(4403, "bandwidth_quota_exhausted", true)}
 	if got := innermostConnectError(outer); got.code != "bandwidth_quota_exhausted" || got.state != "denied" {
 		t.Fatalf("got %#v", got)
 	}

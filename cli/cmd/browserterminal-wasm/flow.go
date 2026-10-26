@@ -8,7 +8,6 @@ import (
 
 const terminalWriteQueueBytes = (1 << 20) + 4096
 const terminalWriteQueueDepth = 32
-const terminalACKBytes = 64 << 10
 
 type terminalWrite struct {
 	kind     byte
@@ -98,12 +97,6 @@ func (q *terminalWriterQueue) sentACK(sequence uint64) {
 	q.mu.Lock()
 	q.ackSent = sequence
 	q.mu.Unlock()
-}
-
-func (q *terminalWriterQueue) urgentACK() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.ackLatest-q.ackSent >= terminalACKBytes
 }
 
 const terminalBroadcastQueueBytes = 512 << 10

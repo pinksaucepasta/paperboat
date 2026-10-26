@@ -628,13 +628,6 @@ func (connection *browserTerminal) sendAck(nextSequence uint64) error {
 // This writer preserves command order after attach; graceful detach is sent
 // during leave. Network operations never hold connection.mu or a JS callback.
 func (connection *browserTerminal) writeLoop(writer io.Writer, ws *browserWSConn) {
-	var timer *time.Timer
-	var timerC <-chan time.Time
-	defer func() {
-		if timer != nil {
-			timer.Stop()
-		}
-	}()
 	defer connection.writes.close()
 	fail := func(err error) {
 		connection.mu.Lock()
@@ -667,22 +660,13 @@ func (connection *browserTerminal) writeLoop(writer io.Writer, ws *browserWSConn
 			}
 			continue
 		case <-connection.writes.ackNotify:
+			// Credit goes back as soon as output is consumed, with no coalescing timer: Go timers
+			// run on setTimeout in the WASM, which a hidden tab throttles to about once a minute,
+			// and late credit filled the host's per-viewer budget and forced a reconnect. Acks
+			// that arrive while a write is in progress still collapse into one (one-slot notify).
 			if connection.writes.pendingACK() == 0 {
 				continue
 			}
-			if !connection.writes.urgentACK() {
-				if timerC == nil {
-					timer = time.NewTimer(5 * time.Millisecond)
-					timerC = timer.C
-				}
-				continue
-			}
-			if timer != nil {
-				timer.Stop()
-			}
-			timerC = nil
-		case <-timerC:
-			timerC = nil
 		}
 		if connection.stopping.Load() {
 			continue
