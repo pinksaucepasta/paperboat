@@ -8,7 +8,7 @@
 #   unlimited: a 300 MiB `pb send --unlimited` started with the client's UDP blocked (no direct path, so no eligible
 #     path) says it is waiting and delivers nothing; after UDP is unblocked it resumes and arrives byte-identical;
 #   path loss: the same send with UDP blocked mid-transfer stops at once (the client's egress over 30 s stays under
-#     3 MB: nothing crosses a hosted relay), then resumes and arrives byte-identical.
+#     3 MB: nothing crosses a hosted relay); the sender's daemon restarts while it waits, then it resumes and arrives byte-identical.
 # Prints one JSON line {"check":"transfer-modes","status":"PASS"|"FAIL",...}; machines are revoked by exact id and
 # containers removed on every exit path.
 set -uo pipefail
@@ -102,6 +102,7 @@ sudo -n docker exec $CLIENT ip6tables -I \$block 2>/dev/null || true
 sleep 10 # bytes in flight drain
 a=\$(tx); sleep 30; leaked=\$((\$(tx)-a))
 if [ \$leaked -lt 3000000 ] && ! \$C grep -q '^EXIT=' /home/pbt/loss.log && ! arrived unlimited.bin \$sha; then echo LOSS_STOPPED; else echo LOSS_LEAKED \$leaked; \$C tail -c 300 /home/pbt/loss.log; fi
+\$C /home/pbt/.local/bin/pb service restart >/dev/null 2>&1 # the paused send must survive its daemon restarting
 sudo -n docker exec $CLIENT iptables -D \$block
 sudo -n docker exec $CLIENT ip6tables -D \$block 2>/dev/null || true
 for i in \$(seq 1 900); do
