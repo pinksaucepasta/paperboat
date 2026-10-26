@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -55,8 +55,8 @@ func TestCoordinatorGenerationCleanupRetainsLateCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	client.mu.Lock()
@@ -65,7 +65,7 @@ func TestCoordinatorGenerationCleanupRetainsLateCause(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	err = c.replaceGuardedRoutes(ctx, []*pbSync.PeerUpdate{peer})
+	err = c.replaceGuardedRoutes(ctx, []*daemonrpc.PeerUpdate{peer})
 	if !errors.Is(err, net.ErrClosed) || time.Since(started) > 250*time.Millisecond {
 		t.Fatalf("reconciliation lost deadline: %v", err)
 	}
@@ -261,8 +261,8 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	client.mu.Lock()
@@ -270,7 +270,7 @@ func TestCoordinatorStartRejectsUnfinishedGenerationCleanup(t *testing.T) {
 	client.mu.Unlock()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
-	if err := c.replaceGuardedRoutes(ctx, []*pbSync.PeerUpdate{peer}); !errors.Is(err, net.ErrClosed) {
+	if err := c.replaceGuardedRoutes(ctx, []*daemonrpc.PeerUpdate{peer}); !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 	started := time.Now()

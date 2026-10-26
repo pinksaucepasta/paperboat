@@ -5,15 +5,13 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 )
 
 func TestBrowserURLsFollowOwnedSnapshot(t *testing.T) {
 	b := NewLiveDaemonBackend("test")
-	peer := &pbSync.PeerUpdate{PeerId: "machine", Alias: "office", Approved: true, Online: true, ExportedPorts: []int32{3000}}
+	peer := &PeerUpdate{PeerId: "machine", Alias: "office", Approved: true, Online: true, ExportedPorts: []int32{3000}}
 	urls := map[string]map[int32]string{"machine": {3000: "https://0123456789abcdef.pprbt"}}
-	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, urls)
+	b.ApplyPeerUpdates([]*PeerUpdate{peer}, 1, urls)
 	urls["machine"][3000] = "mutated"
 	resolved, err := b.ResolveMachine(t.Context(), "machine")
 	if err != nil {
@@ -39,8 +37,8 @@ func TestBrowserURLsFollowOwnedSnapshot(t *testing.T) {
 
 func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
 	b := NewLiveDaemonBackend("test")
-	peer := &pbSync.PeerUpdate{PeerId: "machine_a", Alias: "alpha", AssignedIp: "127.100.0.2", Approved: true, Online: true}
-	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, nil)
+	peer := &PeerUpdate{PeerId: "machine_a", Alias: "alpha", AssignedIp: "127.100.0.2", Approved: true, Online: true}
+	b.ApplyPeerUpdates([]*PeerUpdate{peer}, 1, nil)
 	if _, err := b.ResolveMachine(context.Background(), "alpha"); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +47,7 @@ func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
 		t.Fatal("withdrawn peer remained resolvable")
 	}
 	peer.Approved = false
-	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 3, nil)
+	b.ApplyPeerUpdates([]*PeerUpdate{peer}, 3, nil)
 	if _, err := b.ResolveMachine(context.Background(), "alpha"); err == nil {
 		t.Fatal("unapproved peer remained resolvable")
 	}

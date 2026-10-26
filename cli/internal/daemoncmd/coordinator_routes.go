@@ -4,28 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"net/netip"
 	"strconv"
 	"strings"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
-	"google.golang.org/protobuf/proto"
 )
 
-func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpdate, error) {
+func mapPeerSnapshot(peers []*daemonrpc.PeerUpdate, cidr string) ([]*daemonrpc.PeerUpdate, error) {
 	if cidr == "" {
 		cidr = machineloopback.DefaultCIDR
 	}
-	mapped := make([]*pbSync.PeerUpdate, len(peers))
+	mapped := make([]*daemonrpc.PeerUpdate, len(peers))
 	for index, peer := range peers {
 		if peer == nil {
 			continue
 		}
-		copyPeer := proto.Clone(peer).(*pbSync.PeerUpdate)
+		copyPeer := peer.Clone()
 		if strings.TrimSpace(peer.GetAssignedIp()) != "" {
 			canonical, err := netip.ParseAddr(peer.GetAssignedIp())
 			if err != nil {
@@ -67,7 +66,7 @@ func (c *Coordinator) resolveLocalDomainLocked(ctx context.Context, nameClient g
 	return nil
 }
 
-func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.PeerUpdate) (err error) {
+func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonrpc.PeerUpdate) (err error) {
 	c.mu.Lock()
 	defer func() {
 		err = coordinatorFailure("local machine access reconciliation failed", err, c.completedCleanupLocked())

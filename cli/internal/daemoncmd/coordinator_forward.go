@@ -3,6 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"io"
 	"maps"
 	"net"
@@ -10,7 +11,6 @@ import (
 	"sync"
 	"syscall"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
@@ -65,14 +65,14 @@ func (c *Coordinator) retireFailedRoute(route *guardedRoute, cause error) {
 			if err != nil {
 				failure = coordinatorFailure("local machine listener failed", failure, err)
 			} else {
-				updates := make([]*pbSync.PeerUpdate, 0, len(status.Peers))
+				updates := make([]*daemonrpc.PeerUpdate, 0, len(status.Peers))
 				urls := make(map[string]map[int32]string, len(status.Peers))
 				for _, peer := range status.Peers {
 					ports := slices.Clone(peer.ForwardedPorts)
 					if peer.PeerId == route.machineID {
 						ports = slices.DeleteFunc(ports, func(port int32) bool { return int(port) == route.port })
 					}
-					updates = append(updates, &pbSync.PeerUpdate{PeerId: peer.PeerId, Alias: peer.Alias, AssignedIp: peer.AssignedIp, Approved: peer.Approved, Online: peer.Online, ExportedPorts: ports})
+					updates = append(updates, &daemonrpc.PeerUpdate{PeerId: peer.PeerId, Alias: peer.Alias, AssignedIp: peer.AssignedIp, Approved: peer.Approved, Online: peer.Online, ExportedPorts: ports})
 					urls[peer.PeerId] = maps.Clone(peer.BrowserUrls)
 				}
 				c.rpcBackend.ApplyPeerUpdates(updates, status.Generation, urls)

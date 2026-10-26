@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
@@ -56,7 +55,7 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatalf("a busy browser gateway port must not fail reconciliation: %v", err)
 	}
@@ -99,7 +98,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +223,7 @@ func TestCoordinatorLifecycle(t *testing.T) {
 	}
 	defer client.Close()
 
-	coord.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "peer-workstation", Alias: "workstation", AssignedIp: "127.100.0.11", Online: true, Approved: true, ExportedPorts: []int32{3000, 8080}}}, 1)
+	coord.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "peer-workstation", Alias: "workstation", AssignedIp: "127.100.0.11", Online: true, Approved: true, ExportedPorts: []int32{3000, 8080}}}, 1)
 	// Wait for the peer update
 	var resolvedIP string
 	for i := 0; i < 30; i++ {
@@ -271,8 +270,8 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 	if err = coordinator.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	coordinator.applySnapshot([]*pbSync.PeerUpdate{peer}, 1)
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	coordinator.applySnapshot([]*daemonrpc.PeerUpdate{peer}, 1)
 	names.mu.Lock()
 	_, present := names.names["studio.local.example.test"]
 	names.mu.Unlock()
@@ -282,8 +281,8 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 	names.mu.Lock()
 	names.failAcquire = errors.New("guard unavailable")
 	names.mu.Unlock()
-	replacement := &pbSync.PeerUpdate{PeerId: "other", Alias: "other", AssignedIp: "127.100.0.23", Approved: true, Online: true, ExportedPorts: []int32{9090}}
-	coordinator.applySnapshot([]*pbSync.PeerUpdate{replacement}, 2)
+	replacement := &daemonrpc.PeerUpdate{PeerId: "other", Alias: "other", AssignedIp: "127.100.0.23", Approved: true, Online: true, ExportedPorts: []int32{9090}}
+	coordinator.applySnapshot([]*daemonrpc.PeerUpdate{replacement}, 2)
 	remainingAfterFailure := -1
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
 		names.mu.Lock()
@@ -325,7 +324,7 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 	}
 	c.ctx = t.Context()
 	t.Cleanup(func() { _ = c.Stop() })
-	peers := []*pbSync.PeerUpdate{
+	peers := []*daemonrpc.PeerUpdate{
 		{PeerId: "local", Alias: "apple", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{5000, 7000}},
 		{PeerId: "remote", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6768}},
 	}
@@ -519,7 +518,7 @@ func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Stop() })
-	c.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{24443}}}, 1)
+	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{24443}}}, 1)
 	names.mu.Lock()
 	address := names.addresses[24443]
 	names.mu.Unlock()
@@ -643,7 +642,7 @@ func TestCoordinatorBoundsGuardReconciliationAndWithdrawsNames(t *testing.T) {
 	started := time.Now()
 	reconcileCtx, cancel := context.WithTimeout(context.Background(), coordinator.cfg.ReconcileTimeout)
 	defer cancel()
-	err = coordinator.replaceGuardedRoutes(reconcileCtx, []*pbSync.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}})
+	err = coordinator.replaceGuardedRoutes(reconcileCtx, []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
 		t.Fatalf("bounded reconcile error=%v duration=%v", err, time.Since(started))
 	}
@@ -769,7 +768,7 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +859,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	first := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	first := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), first); err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +867,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	if gateway == nil || names.addresses[443] == "" {
 		t.Fatal("the browser gateway did not start its :443 listener (round 22 regression)")
 	}
-	second := append(first, &pbSync.PeerUpdate{PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
+	second := append(first, &daemonrpc.PeerUpdate{PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
 	if err := c.replaceGuardedRoutes(t.Context(), second); err != nil {
 		t.Fatal(err)
 	}
@@ -917,8 +916,8 @@ func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T)
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peer := func(ports ...int32) []*pbSync.PeerUpdate {
-		return []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
+	peer := func(ports ...int32) []*daemonrpc.PeerUpdate {
+		return []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), peer(6767)); err != nil {
 		t.Fatal(err)
@@ -970,7 +969,7 @@ func TestCoordinatorRefusedListenerSkipsOnlyThatItem(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{
+	peers := []*daemonrpc.PeerUpdate{
 		{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{3000, 6767}},
 		{PeerId: "second", Alias: "nas", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{3000}},
 	}

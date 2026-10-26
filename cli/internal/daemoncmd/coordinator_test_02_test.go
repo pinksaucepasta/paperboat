@@ -8,7 +8,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
@@ -69,8 +69,8 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	first.mu.Lock()
@@ -86,14 +86,14 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 	first.mu.Lock()
 	first.failReplace = true
 	first.mu.Unlock()
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); !errors.Is(err, net.ErrClosed) {
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("generation failure=%v", err)
 	}
 	_ = remote.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err := remote.Read(make([]byte, 1)); err == nil {
 		t.Fatal("generation failure retained active flow")
 	}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	first.mu.Lock()
@@ -117,8 +117,8 @@ func TestCoordinatorGenerationCleanupHonorsReconcileDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	client.mu.Lock()
@@ -127,7 +127,7 @@ func TestCoordinatorGenerationCleanupHonorsReconcileDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	err = coordinator.replaceGuardedRoutes(ctx, []*pbSync.PeerUpdate{peer})
+	err = coordinator.replaceGuardedRoutes(ctx, []*daemonrpc.PeerUpdate{peer})
 	if !errors.Is(err, net.ErrClosed) || time.Since(started) > 250*time.Millisecond {
 		t.Fatalf("cleanup error=%v duration=%v", err, time.Since(started))
 	}
@@ -167,8 +167,8 @@ func TestCoordinatorProtectedHTTPFrontDoorUsesAuthenticatedMachineDial(t *testin
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	names.mu.Lock()
@@ -293,8 +293,8 @@ func testRawRouteCoordinator(t *testing.T, dial func(context.Context, string, in
 
 func installTestRawRoute(t *testing.T, coordinator *Coordinator, names *coordinatorNameClient) string {
 	t.Helper()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	names.mu.Lock()
@@ -383,8 +383,8 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinator.ctx = t.Context()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{3000}}
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	urls := coordinator.BrowserURLs()
@@ -442,7 +442,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		}
 	}
 	peer.ExportedPorts = []int32{3001}
-	if err := coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	urls = coordinator.BrowserURLs()
@@ -521,8 +521,8 @@ func TestCoordinatorWebOnlyPeerPublishesName(t *testing.T) {
 	}
 	coordinator.ctx = t.Context()
 	defer coordinator.Stop()
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{80, 443}}
-	if err = coordinator.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{80, 443}}
+	if err = coordinator.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	names.mu.Lock()
@@ -543,7 +543,7 @@ func TestCoordinatorFailedProjectionWithdrawsIPCAddress(t *testing.T) {
 	}
 	coordinator.ctx = t.Context()
 	defer coordinator.Stop()
-	peers := []*pbSync.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}}
 	coordinator.applySnapshot(peers, 1)
 	if _, err = coordinator.rpcBackend.ResolveMachine(t.Context(), "peer"); err != nil {
 		t.Fatal("ready route absent from IPC", err)
@@ -558,15 +558,15 @@ func TestCoordinatorFailedProjectionWithdrawsIPCAddress(t *testing.T) {
 }
 
 func TestMapPeerSnapshotProjectsCanonicalAddressWithoutMutation(t *testing.T) {
-	peer := &pbSync.PeerUpdate{PeerId: "peer", AssignedIp: "127.100.23.45", Approved: true}
-	mapped, err := mapPeerSnapshot([]*pbSync.PeerUpdate{peer}, "127.212.0.0/16")
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", AssignedIp: "127.100.23.45", Approved: true}
+	mapped, err := mapPeerSnapshot([]*daemonrpc.PeerUpdate{peer}, "127.212.0.0/16")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mapped[0].GetAssignedIp() != "127.212.23.45" || peer.GetAssignedIp() != "127.100.23.45" {
 		t.Fatalf("mapped=%q canonical=%q", mapped[0].GetAssignedIp(), peer.GetAssignedIp())
 	}
-	if _, err = mapPeerSnapshot([]*pbSync.PeerUpdate{{PeerId: "bad", AssignedIp: "127.211.23.45"}}, "127.212.0.0/16"); err == nil {
+	if _, err = mapPeerSnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", AssignedIp: "127.211.23.45"}}, "127.212.0.0/16"); err == nil {
 		t.Fatal("noncanonical server assignment accepted")
 	}
 }
@@ -613,7 +613,7 @@ func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
 	}
 	c.ctx, c.cancel = context.WithCancel(t.Context())
 	defer c.Stop()
-	c.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
+	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
 	if !errors.Is(reported, guardErr) || strings.Contains(reported.Error(), guardErr.Error()) {
 		t.Fatalf("readiness failure not reported: %v", reported)
 	}
@@ -643,13 +643,13 @@ func TestCoordinatorStreamingReadinessReportsFailedAndRecoveredReconciliation(t 
 	}
 	c.ctx = ctx
 	defer c.Stop()
-	peers := []*pbSync.PeerUpdate{{PeerId: "peer", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true}}
 	c.applySnapshot(peers, 1)
 	if err := c.ReconcileStatus(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	names.replaceCause = syscall.EIO
-	c.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "bad", Alias: "hp", AssignedIp: "PRIVATE invalid address", Approved: true, Online: true}}, 2)
+	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", Alias: "hp", AssignedIp: "PRIVATE invalid address", Approved: true, Online: true}}, 2)
 	failure := c.ReconcileStatus(t.Context())
 	if !errors.Is(failure, syscall.EIO) {
 		t.Fatal("invalid snapshot lost independent protected-name withdrawal cause")
@@ -698,8 +698,8 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peer := &pbSync.PeerUpdate{PeerId: "home", Alias: "homelab", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{80}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	peer := &daemonrpc.PeerUpdate{PeerId: "home", Alias: "homelab", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{80}}
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	web := c.webRoutes[splitdns.BrowserGatewayHostname]
@@ -739,7 +739,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 
 	// An explicit override selects only that port. Removing it restores port 80.
 	c.cfg.LocalAccess.MachineProxies = []config.LocalMachineProxy{{MachineAlias: "homelab", Port: 8080}}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	web = c.webRoutes[splitdns.BrowserGatewayHostname]
@@ -747,7 +747,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 		t.Fatal("unexported override fell back to default80")
 	}
 	peer.ExportedPorts = []int32{80, 8080}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	web = c.webRoutes[splitdns.BrowserGatewayHostname]
@@ -755,7 +755,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 		t.Fatal("override failed to select authorized8080")
 	}
 	c.cfg.LocalAccess.MachineProxies = nil
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	web = c.webRoutes[splitdns.BrowserGatewayHostname]
@@ -763,7 +763,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 		t.Fatal("unset override did not restore default80")
 	}
 	peer.ExportedPorts = []int32{8080}
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	web = c.webRoutes[splitdns.BrowserGatewayHostname]
@@ -776,7 +776,7 @@ func TestCoordinatorMachineProxyFollowsAuthorizedExportAndRevocation(t *testing.
 		t.Fatal("unauthorized proxy forwarded")
 	}
 	peer.Approved = false
-	if err := c.replaceGuardedRoutes(t.Context(), []*pbSync.PeerUpdate{peer}); err != nil {
+	if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.webRoutes) != 0 {

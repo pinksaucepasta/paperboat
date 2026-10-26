@@ -17,7 +17,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
@@ -132,7 +131,7 @@ func TestResolveCommandOutputFailureAndRecovery(t *testing.T) {
 	}
 	backend := daemonrpc.NewLiveDaemonBackend("test")
 	backend.SetAccount("user_test", "tester@example.test")
-	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
+	backend.ApplyPeerUpdates([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
 	server := daemonrpc.NewServer(backend)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
@@ -191,7 +190,7 @@ func TestResolveRefusesAnotherAccountsSession(t *testing.T) {
 	}
 	backend := daemonrpc.NewLiveDaemonBackend("test")
 	backend.SetAccount("user_owner", "owner@example.test")
-	backend.ApplyPeerUpdates([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
+	backend.ApplyPeerUpdates([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "office", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}, 1, nil)
 	server := daemonrpc.NewServer(backend)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()

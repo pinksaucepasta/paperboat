@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 )
 
@@ -42,7 +41,7 @@ func NewLiveDaemonBackend(version string) *LiveDaemonBackend {
 }
 
 // ApplyPeerUpdates ingests peer updates received from the control plane sync stream.
-func (b *LiveDaemonBackend) ApplyPeerUpdates(updates []*pbSync.PeerUpdate, revision uint64, browserURLs map[string]map[int32]string) {
+func (b *LiveDaemonBackend) ApplyPeerUpdates(updates []*PeerUpdate, revision uint64, browserURLs map[string]map[int32]string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.generation = revision

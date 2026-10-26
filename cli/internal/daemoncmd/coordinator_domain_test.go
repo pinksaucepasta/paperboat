@@ -3,12 +3,12 @@ package daemoncmd
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net"
 	"os"
 	"testing"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
@@ -43,8 +43,8 @@ func newUnsetDomainCoordinator(t *testing.T, client guardedNameClient) *Coordina
 func TestCoordinatorUsesTheDomainTheGuardRecordsWhenConfigurationHasNone(t *testing.T) {
 	names := &guardDomainClient{coordinatorNameClient: &coordinatorNameClient{}, domain: "ppr.example.test"}
 	coordinator := newUnsetDomainCoordinator(t, names)
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	coordinator.applySnapshot([]*pbSync.PeerUpdate{peer}, 1)
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	coordinator.applySnapshot([]*daemonrpc.PeerUpdate{peer}, 1)
 	names.mu.Lock()
 	_, present := names.names["studio.ppr.example.test"]
 	names.mu.Unlock()
@@ -53,7 +53,7 @@ func TestCoordinatorUsesTheDomainTheGuardRecordsWhenConfigurationHasNone(t *test
 	}
 	// A reinstall that records another domain is followed without restarting the daemon.
 	names.domain = "other.example.test"
-	coordinator.applySnapshot([]*pbSync.PeerUpdate{peer}, 2)
+	coordinator.applySnapshot([]*daemonrpc.PeerUpdate{peer}, 2)
 	names.mu.Lock()
 	_, present = names.names["studio.other.example.test"]
 	names.mu.Unlock()
@@ -65,8 +65,8 @@ func TestCoordinatorUsesTheDomainTheGuardRecordsWhenConfigurationHasNone(t *test
 func TestCoordinatorServesNothingWithoutALocalAccessDomain(t *testing.T) {
 	names := &guardDomainClient{coordinatorNameClient: &coordinatorNameClient{}}
 	coordinator := newUnsetDomainCoordinator(t, names)
-	peer := &pbSync.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
-	coordinator.applySnapshot([]*pbSync.PeerUpdate{peer}, 1)
+	peer := &daemonrpc.PeerUpdate{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	coordinator.applySnapshot([]*daemonrpc.PeerUpdate{peer}, 1)
 	names.mu.Lock()
 	published := len(names.names)
 	names.mu.Unlock()

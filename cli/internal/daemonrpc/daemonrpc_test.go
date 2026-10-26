@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -265,7 +264,7 @@ func (*streamRaceBackend) ResolveMachine(context.Context, string) (*pb.MachineAd
 	return nil, nil
 }
 func (*streamRaceBackend) ApprovePeer(context.Context, string, bool) error { return nil }
-func (*streamRaceBackend) Account() (string, string)                      { return "user_test", "" }
+func (*streamRaceBackend) Account() (string, string)                       { return "user_test", "" }
 
 func (b *streamRaceBackend) apply(status *pb.StatusResponse) {
 	b.mu.Lock()
@@ -365,7 +364,7 @@ func (b *rpcBoundaryBackend) ResolveMachine(context.Context, string) (*pb.Machin
 }
 
 func (*rpcBoundaryBackend) ApprovePeer(context.Context, string, bool) error { return nil }
-func (*rpcBoundaryBackend) Account() (string, string)                      { return "user_test", "" }
+func (*rpcBoundaryBackend) Account() (string, string)                       { return "user_test", "" }
 
 func (b *rpcBoundaryBackend) setResolve(err error, address *pb.MachineAddress) {
 	b.mu.Lock()
@@ -539,7 +538,7 @@ func TestLiveDaemonBackendAuthorizedPortsAndUnknownTransport(t *testing.T) {
 	backend := NewLiveDaemonBackend("v2.0.0")
 
 	// Ingest peer update with dynamic ports
-	updates := []*pbSync.PeerUpdate{
+	updates := []*PeerUpdate{
 		{
 			PeerId:        "node-xyz",
 			Alias:         "dev-box",

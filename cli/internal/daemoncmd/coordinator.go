@@ -15,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
@@ -24,29 +23,29 @@ import (
 )
 
 type Coordinator struct {
-	cfg                CoordinatorConfig
-	rpcServer          *daemonrpc.Server
-	rpcListener        net.Listener
-	rpcBackend         *daemonrpc.LiveDaemonBackend
-	errors             chan error
-	servicesNudge      chan struct{}
-	nameClient         guardedNameClient
-	ctx                context.Context
-	cancel             context.CancelFunc
-	mu                 sync.Mutex
-	running            bool
-	routes             map[string]*guardedRoute
-	webRoutes          map[string]guardedWebRoute
-	connections        chan struct{}
-	wg                 sync.WaitGroup
-	snapshotMu         sync.Mutex
-	reconcileErr       error
-	inventoryMu        sync.Mutex
-	inventoryRevision  uint64
-	inventoryMachines  []api.UserMachine
+	cfg               CoordinatorConfig
+	rpcServer         *daemonrpc.Server
+	rpcListener       net.Listener
+	rpcBackend        *daemonrpc.LiveDaemonBackend
+	errors            chan error
+	servicesNudge     chan struct{}
+	nameClient        guardedNameClient
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.Mutex
+	running           bool
+	routes            map[string]*guardedRoute
+	webRoutes         map[string]guardedWebRoute
+	connections       chan struct{}
+	wg                sync.WaitGroup
+	snapshotMu        sync.Mutex
+	reconcileErr      error
+	inventoryMu       sync.Mutex
+	inventoryRevision uint64
+	inventoryMachines []api.UserMachine
 	// claimMachines is every machine of the last complete inventory read, online or not (guarded by mu);
 	// the guard releases claims only against it. Nil until the first complete read.
-	claimMachines []string
+	claimMachines      []string
 	inventoryTimer     *time.Timer
 	stopInventoryTimer func() bool
 	cleanups           []*generationCleanup
@@ -227,7 +226,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 			}
 		}
 	}
-	peers := make([]*pbSync.PeerUpdate, 0, len(machines))
+	peers := make([]*daemonrpc.PeerUpdate, 0, len(machines))
 	for _, m := range machines {
 		if m.AssignedIP == "" || !m.NetworkApproved || !m.Online || m.State != "online" {
 			continue
@@ -241,7 +240,7 @@ func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMach
 				}
 			}
 		}
-		peers = append(peers, &pbSync.PeerUpdate{PeerId: m.ID, Alias: m.Alias,
+		peers = append(peers, &daemonrpc.PeerUpdate{PeerId: m.ID, Alias: m.Alias,
 			AssignedIp: m.AssignedIP, Approved: m.NetworkApproved, Online: m.Online, ExportedPorts: ports})
 	}
 	c.inventoryRevision++
@@ -374,7 +373,7 @@ func (c *Coordinator) completedCleanupLocked() error {
 	return coordinatorFailure("local access generation cleanup failed", causes...)
 }
 
-func (c *Coordinator) applySnapshot(peers []*pbSync.PeerUpdate, revision uint64) {
+func (c *Coordinator) applySnapshot(peers []*daemonrpc.PeerUpdate, revision uint64) {
 	c.mu.Lock()
 	parent := c.ctx
 	c.mu.Unlock()
@@ -384,7 +383,7 @@ func (c *Coordinator) applySnapshot(peers []*pbSync.PeerUpdate, revision uint64)
 	_ = c.reconcileSnapshot(parent, peers, revision)
 }
 
-func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*pbSync.PeerUpdate, revision uint64) error {
+func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
 	err := c.applySnapshotLocked(ctx, peers, revision)
@@ -411,7 +410,7 @@ func (c *Coordinator) ReconcileStatus(ctx context.Context) error {
 	return c.reconcileErr
 }
 
-func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*pbSync.PeerUpdate, revision uint64) error {
+func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
 	localPeers, err := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
 	if err != nil {
 		c.mu.Lock()
