@@ -74,6 +74,9 @@ func TestDomainDNSBackoffRespectsTTLAndCaps(t *testing.T) {
 	if got := domainDNSBackoff(30, 2*time.Hour, true); got != 2*time.Hour {
 		t.Fatalf("verified recheck = %v", got)
 	}
+	if got := domainDNSBackoff(0, 0, true); got != domainDNSDefaultTTL {
+		t.Fatalf("verified recheck with a zero TTL = %v", got)
+	}
 }
 
 func TestVerifiedDomainDNSDriftAndTransientGrace(t *testing.T) {

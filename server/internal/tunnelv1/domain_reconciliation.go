@@ -487,7 +487,9 @@ func boundedDNSTTL(value time.Duration) time.Duration {
 
 func domainDNSBackoff(attempt int32, ttl time.Duration, verified bool) time.Duration {
 	if verified {
-		return ttl
+		// A zero or tiny TTL must not turn a verified domain into a check every tick: each check
+		// bumps the domain generation and invalidates a certificate being issued for it.
+		return boundedDNSTTL(ttl)
 	}
 	delay := domainDNSMinimumRetry
 	for i := int32(0); i < attempt && delay < domainDNSMaximumRetry; i++ {
