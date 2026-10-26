@@ -77,6 +77,13 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		if console := consoleURL(details); console != "" {
 			return "Deleting an account is done in the Paperboat console: " + console
 		}
+	case "team_limit":
+		kind, _ := details["kind"].(string)
+		used, _ := details["used"].(float64)
+		limit, _ := details["limit"].(float64)
+		if kind == "machine" && limit >= 1 && used == float64(int64(used)) && limit == float64(int64(limit)) {
+			return fmt.Sprintf("Team machine limit reached (%d of %d). Remove a machine from the team or upgrade.", int64(used), int64(limit))
+		}
 	case "destination_update_required":
 		if message := destinationUpdateMessage(details); message != "" {
 			return message
@@ -198,6 +205,7 @@ var publicAPIMessages = map[string]string{
 	"access_denied":                   "Access was denied. Sign in with an authorized account.",
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
 	"account_deletion_console_only":   "Deleting an account is done in the Paperboat console. Run `pb account delete` for the link.",
+	"team_limit":                      "Team capacity reached. Remove an entry the team no longer uses, then retry.",
 	"machine_limit_reached":           "This workspace's plan machine limit is reached. Remove machines you no longer use (`pb machine revoke <machine>`) or upgrade under Billing in the Paperboat console.",
 	"browser_terminal_limit_reached":  "This workspace's plan limit for open browser terminals is reached. Close one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",

@@ -16,3 +16,13 @@ func TestTransferRefusalsRenderFromTheirDetails(t *testing.T) {
 		t.Fatalf("free text from details was rendered: %q", forged)
 	}
 }
+
+// Lane O 44a17b1f: a team at its cap answers 409 team_limit; the CLI said "resource state changed".
+func TestTeamLimitRendersFromItsDetails(t *testing.T) {
+	if got := apiErrorMessageFor("team_limit", 409, map[string]any{"kind": "machine", "used": float64(128), "limit": float64(128)}); got != "Team machine limit reached (128 of 128). Remove a machine from the team or upgrade." {
+		t.Fatalf("machine team_limit = %q", got)
+	}
+	if got := apiErrorMessageFor("team_limit", 409, nil); got != "Team capacity reached. Remove an entry the team no longer uses, then retry." {
+		t.Fatalf("generic team_limit = %q", got)
+	}
+}
