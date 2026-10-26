@@ -74,3 +74,25 @@ func TestManagedSSHStartupReportingSkipsOwnedHTTPAndPureCancellation(t *testing.
 		t.Fatal("startup masked independent operational failure")
 	}
 }
+
+// readinessProbe records what the diagnostics held at the moment the daemon published the machine as degraded.
+type readinessProbe struct {
+	scriptedMachineSource
+	recorder    *diagnostics.Recorder
+	recentAtSet int
+}
+
+func (p *readinessProbe) SetManagedSSHReadiness(bool, string) {
+	p.recentAtSet = len(p.recorder.Recent())
+}
+
+// Anything that sees the machine as degraded (a snapshot, pb doctor) may read the diagnostics next, so the
+// startup diagnostic is recorded before the readiness is published, not after.
+func TestManagedSSHStartupRecordsItsDiagnosticBeforePublishingReadiness(t *testing.T) {
+	recorder := diagnostics.NewMemoryRecorder()
+	probe := &readinessProbe{recorder: recorder}
+	reportManagedSSHStartup(t.Context(), probe, recorder, errors.New("ssh target is not ready"))
+	if probe.recentAtSet != 1 {
+		t.Fatalf("diagnostics at the moment readiness was published = %d, want 1 (the managed_startup event)", probe.recentAtSet)
+	}
+}
