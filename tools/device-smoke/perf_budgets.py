@@ -22,6 +22,24 @@ BUDGETS = {
     'idle_server': {
         'api_requests_per_s': ('max', 0.1),
     },
+    # tools/loadtest/request_mix.py: requests per machine per 10 min by path, on staging (F21-18/19/22). 'request_mix' is an
+    # idle machine; 'stream_open' adds one open native stream (F21-18: at most one signed config fetch and one JWKS fetch
+    # over 10 min absent changes, so revocation arrives by push). Bounds without a stated limit are the first
+    # measurement (stg-d18bd114, 2026-10-26: peer config ~66, runtime observations ~60, carrier attachment ~20,
+    # machine-services ~4 per machine per 10 min) rounded down to the cadence the owner lane is moving to.
+    'request_mix': {
+        '/v1/machine-services': ('max', 20),
+        '/v1/runtime/carrier-attachment': ('max', 25),
+        '/v1/runtime-observations': ('max', 40),
+        '/v1/machine-peer-network/config': ('max', 10),
+        '/v1/peer-network/config': ('max', 10),
+        'total': ('max', 60),
+    },
+    'stream_open': {
+        '/v1/machine-peer-network/config': ('max', 1),
+        '/v1/peer-network/config': ('max', 1),
+        '/v1/jwks': ('max', 1),
+    },
     # Checked on every path: local commands answer from the binary and the daemon snapshot
     # (PR-07; hp: --version 32 ms, status 960 ms before it stopped listing machines on the server).
     'cli': {

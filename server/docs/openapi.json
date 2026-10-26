@@ -25724,7 +25724,7 @@
         "summary": "Complete GitHub OAuth from browser redirect",
         "responses": {
           "303": {
-            "description": "Redirect to the console's /github/done?result=connected&login=… or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
+            "description": "Redirect to the console's /github/done?result=connected&login=\u2026 or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -44069,7 +44069,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant’s client session is revoked."
+            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."
@@ -46421,7 +46421,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -46501,7 +46501,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {
@@ -48692,7 +48692,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
+        "description": "The bearer is an API token (pbat_\u2026). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
       }
     },
     "/v1/github/native-links/{link_id}/review": {
@@ -49265,8 +49265,8 @@
     },
     "/v1/machines/{id}/audit-backlog": {
       "post": {
-        "summary": "Upload a host's offline audit backlog",
-        "description": "A host uploads the session starts and refusals it decided while Paperboat was unreachable (F21-11). Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine uploads only its own backlog. 1 to 500 events of the last 7 days per request; each event lands once (deduplicated by event id) in the deciding workspace's audit log with origin offline.",
+        "summary": "Upload a host's session audit events",
+        "description": "A host uploads the sessions it started, refused and ended (F21-11, PLAN 3b D1). Kinds: offline_session_started and offline_session_refused (terminal, exec, managed_ssh, files; decided while Paperboat was unreachable), and ssh_session_started, ssh_session_refused (busy, no_access, wrong_user, not_set_up) and ssh_session_ended (closed, revoked, failed, with bytes and the started event's id), which carry origin online or offline because managed SSH has no server-side admission. Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine uploads only its own events. 1 to 500 events of the last 7 days per request; each event lands once (deduplicated by event id) in the deciding workspace's audit log.",
         "security": [],
         "parameters": [
           {
