@@ -717,3 +717,58 @@ func TestLocalPeerCarriesLaunchWarningsToTheCLI(t *testing.T) {
 	cancel()
 	_ = connection.Close()
 }
+
+type stallingPeerRemote struct {
+	*localPeerRemote
+	observer chan func(bool)
+	done     chan struct{}
+}
+
+func (c *stallingPeerRemote) ObserveLinkState(observer func(bool)) { c.observer <- observer }
+func (c *stallingPeerRemote) Wait() (int, error)                   { <-c.done; return 0, nil }
+
+// F3-15: a stalled host link shows as reconnecting in pb connect at once; the link is kept, so input typed while it
+// is stalled still reaches the host exactly once, and hearing the host again shows it resumed.
+func TestStalledLinkIsShownAndKeepsInput(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	remote := &stallingPeerRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, observer: make(chan func(bool), 1), done: make(chan struct{})}
+	defer close(remote.done)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = ServeLocalPeerTerminalConn(ctx, localServer, remote, &LocalPeerCursorBridge{}) }()
+	local, err := NewLocalPeerConn(localClient, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan ReconnectEvent, 8)
+	conn := NewObservedReconnectingConn(ctx, local, 3, 0, func(context.Context) (Conn, error) {
+		return nil, errors.New("must not redial")
+	}, nil, nil, TelemetryContext{}, WithReconnectObserver(func(event ReconnectEvent) { events <- event }))
+	defer conn.Close()
+	report := <-remote.observer
+	next := func() ReconnectEvent {
+		select {
+		case event := <-events:
+			return event
+		case <-time.After(5 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	report(true)
+	if event := next(); event != ReconnectStalled {
+		t.Fatalf("event=%q, want stalled", event)
+	}
+	go func() { _, _ = conn.Write([]byte("keys")) }()
+	buffer := make([]byte, 4)
+	_ = remotePeer.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(remotePeer, buffer); err != nil || string(buffer) != "keys" {
+		t.Fatalf("input=%q err=%v", buffer, err)
+	}
+	report(false)
+	if event := next(); event != ReconnectResumed {
+		t.Fatalf("event=%q, want resumed", event)
+	}
+}

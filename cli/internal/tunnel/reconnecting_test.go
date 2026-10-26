@@ -313,3 +313,41 @@ func TestReconnectingConnRedialReplacesTheConnection(t *testing.T) {
 		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
 	}
 }
+
+// F3-15: keys typed while the terminal redials are neither dropped nor doubled: the write waits for the new link
+// and is sent on it once.
+func TestReconnectingConnKeepsInputTypedDuringRedial(t *testing.T) {
+	lost := make(chan struct{})
+	first := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	second := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	redialing, release := make(chan struct{}), make(chan struct{})
+	c := NewReconnectingConn(t.Context(), &lostOnStop{first, lost}, 1, 0, func(context.Context) (Conn, error) {
+		close(redialing)
+		<-release
+		return second, nil
+	})
+	defer c.Close()
+	close(lost)
+	<-redialing
+	written := make(chan error, 1)
+	go func() { _, err := c.Write([]byte("keys")); written <- err }()
+	select {
+	case err := <-written:
+		t.Fatalf("write returned during the redial: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if got := second.writes.String(); got != "keys" || first.writes.Len() != 0 {
+		t.Fatalf("new link got %q, old link got %d bytes", got, first.writes.Len())
+	}
+}
+
+type lostOnStop struct {
+	*blockingReconnectConn
+	lost chan struct{}
+}
+
+func (c *lostOnStop) Wait() (int, error) { <-c.lost; return 1, ErrTransportLost }

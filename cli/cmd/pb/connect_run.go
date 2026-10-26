@@ -562,10 +562,23 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			cols, rows := remoteSize()
 			_ = forceTerminalRedraw(conn, rows, cols)
 		}
+		stalled := "Reconnecting: no reply from " + info.Machine + "; what you type is kept"
 		if !useStatusBar {
+			switch event {
+			case tunnel.ReconnectStalled:
+				fmt.Fprint(os.Stderr, "\r\n["+stalled+"]\r\n")
+			case tunnel.ReconnectResumed:
+				fmt.Fprint(os.Stderr, "\r\n[Reconnected]\r\n")
+			}
 			return
 		}
 		switch event {
+		case tunnel.ReconnectStalled:
+			bar.SetConnection("reconnecting")
+			bar.LoadingPersistent(stalled)
+		case tunnel.ReconnectResumed:
+			bar.SetConnection("connected")
+			bar.Notice("Reconnected")
 		case tunnel.ReconnectStarted:
 			bar.SetConnection("reconnecting")
 			bar.Loading("Reconnecting")

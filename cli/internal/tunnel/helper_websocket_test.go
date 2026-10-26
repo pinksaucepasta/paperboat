@@ -892,3 +892,48 @@ func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
 		t.Fatalf("decided %d, still queued %v; want 0 and [2 3 4]", len(decided), pending)
 	}
 }
+
+type silentThenMessageConnection struct {
+	capturedHelperMessageConnection
+	heard chan struct{}
+}
+
+func (c *silentThenMessageConnection) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {
+	select {
+	case <-c.heard:
+		return helperStructuredMessage, []byte(`{"type":"heartbeat","request_id":"heartbeat","version":1}`), nil
+	case <-ctx.Done():
+		return 0, nil, ctx.Err()
+	}
+}
+
+// F3-15: a host that goes silent (a black hole sends no reset) is reported as stalled without ending the link; the
+// next message reports it heard again.
+func TestHelperTerminalSilentHostIsStalledNotLost(t *testing.T) {
+	previous := helperStallAfter
+	helperStallAfter = 50 * time.Millisecond
+	defer func() { helperStallAfter = previous }()
+	message := &silentThenMessageConnection{heard: make(chan struct{})}
+	connection := newHelperTerminalConn(message, &resolver.TerminalTarget{SessionID: "ses_silent"}, 1)
+	states := make(chan bool, 4)
+	connection.ObserveLinkState(func(stalled bool) { states <- stalled })
+	go connection.readLoop()
+	defer connection.finish(0, nil)
+	select {
+	case stalled := <-states:
+		if !stalled {
+			t.Fatal("reported heard before any silence")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a silent host was not reported")
+	}
+	select {
+	case <-connection.done:
+		t.Fatal("a stall ended the link")
+	default:
+	}
+	message.heard <- struct{}{}
+	if stalled := <-states; stalled {
+		t.Fatal("hearing the host did not report it")
+	}
+}

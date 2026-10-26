@@ -46,6 +46,10 @@ const (
 	ReconnectStarted   ReconnectEvent = "reconnecting"
 	ReconnectRecovered ReconnectEvent = "recovered"
 	ReconnectFailed    ReconnectEvent = "failed"
+	// ReconnectStalled: the machine has not been heard from for a while; the link is kept and resumes on its own
+	// with the input typed meanwhile. ReconnectResumed: it is heard again.
+	ReconnectStalled ReconnectEvent = "stalled"
+	ReconnectResumed ReconnectEvent = "resumed"
 )
 
 type reconnectingOptions struct {
@@ -162,6 +166,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		c.record("terminal.lifetime", lifetimeOutcome, c.started)
 	}()
 	for {
+		if observed, ok := conn.(LinkStateObserver); ok {
+			observed.ObserveLinkState(func(stalled bool) {
+				if stalled {
+					c.notify(ReconnectStalled)
+				} else {
+					c.notify(ReconnectResumed)
+				}
+			})
+		}
 		readDone := make(chan struct{})
 		go func() {
 			defer close(readDone)

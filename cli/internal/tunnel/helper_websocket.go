@@ -192,6 +192,9 @@ type helperTerminalConn struct {
 	compressionEncodedBytes   atomic.Uint64
 	compressionDecodeNanos    atomic.Uint64
 	compressionDecodeFailures atomic.Uint64
+	lastMessage               atomic.Int64 // unix nanoseconds of the last message from the host
+	stalled                   atomic.Bool
+	linkState                 atomic.Pointer[func(stalled bool)]
 }
 
 func newHelperTerminalConn(message helperMessageConnection, target *resolver.TerminalTarget, queue int) *helperTerminalConn {
@@ -537,8 +540,43 @@ func (c *helperTerminalConn) nextWrite() (helperWrite, bool) {
 	}
 }
 
+// helperStallAfter is how long the host may send nothing before the terminal shows it is reconnecting. The host sends
+// a heartbeat every 15 s (hostruntime config DefaultLimits). The link is kept: it resumes on its own when the network
+// returns, with the input it queued, so a stall only changes what the user sees.
+var helperStallAfter = 20 * time.Second
+
+// ObserveLinkState reports when the host goes silent (true) and when it is heard again (false).
+func (c *helperTerminalConn) ObserveLinkState(observer func(stalled bool)) {
+	c.linkState.Store(&observer)
+}
+
+func (c *helperTerminalConn) reportLinkState(stalled bool) {
+	if c.stalled.Swap(stalled) != stalled {
+		if observer := c.linkState.Load(); observer != nil {
+			(*observer)(stalled)
+		}
+	}
+}
+
+func (c *helperTerminalConn) watchSilence() {
+	ticker := time.NewTicker(min(time.Second, helperStallAfter/4))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case now := <-ticker.C:
+			if now.Sub(time.Unix(0, c.lastMessage.Load())) > helperStallAfter {
+				c.reportLinkState(true)
+			}
+		}
+	}
+}
+
 func (c *helperTerminalConn) readLoop() {
 	defer close(c.out)
+	c.lastMessage.Store(time.Now().UnixNano())
+	go c.watchSilence()
 	firstOutput := true
 	for _, output := range c.initial {
 		if firstOutput {
@@ -561,6 +599,8 @@ func (c *helperTerminalConn) readLoop() {
 			}
 			return
 		}
+		c.lastMessage.Store(time.Now().UnixNano())
+		c.reportLinkState(false)
 		switch messageType {
 		case helperStructuredMessage:
 			frame, err := decodeHelperFrame(data)

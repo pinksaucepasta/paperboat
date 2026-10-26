@@ -33,7 +33,11 @@ const (
 	localPeerReplayGap
 	localPeerExecCancelAck
 	localPeerLaunchWarning
+	localPeerLinkState
 )
+
+// LinkStateObserver is a terminal connection that reports when its host goes silent (true) and is heard again (false).
+type LinkStateObserver interface{ ObserveLinkState(func(stalled bool)) }
 
 type localPeerReplayGapPayload struct{ requested, earliest, latest uint64 }
 
@@ -150,7 +154,7 @@ func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	size := binary.BigEndian.Uint32(header[1:])
-	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerLaunchWarning {
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerLinkState {
 		return 0, nil, ErrPeerTerminalInvalid
 	}
 	payload := make([]byte, size)
@@ -213,6 +217,15 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 	done := make(chan error, 3)
 	outputDone := make(chan struct{})
 	waitStarted := false
+	if observed, ok := remote.(LinkStateObserver); ok && !isExec {
+		observed.ObserveLinkState(func(stalled bool) {
+			state := byte(0)
+			if stalled {
+				state = 1
+			}
+			_ = writer.write(localPeerLinkState, []byte{state})
+		})
+	}
 	if isExec {
 		workers.Add(1)
 		go func() {
@@ -453,6 +466,9 @@ type localPeerConn struct {
 	sequenceSink      func(int)
 	replayGapSink     func(uint64, uint64, uint64)
 	launchWarningSink func([]string)
+	linkMu            sync.Mutex
+	linkStalled       bool
+	linkObserver      func(stalled bool)
 	once              sync.Once
 	stopOnce          sync.Once
 	closeErr          error
@@ -532,6 +548,20 @@ func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSi
 	return value, nil
 }
 
+// ObserveLinkState also tells a late observer that the link is stalled already.
+func (c *localPeerConn) ObserveLinkState(observer func(stalled bool)) {
+	c.linkMu.Lock()
+	defer c.linkMu.Unlock()
+	c.linkObserver = observer
+	if c.linkStalled {
+		observer(true)
+	}
+}
+
+func (c *localBasicPeerConn) ObserveLinkState(observer func(stalled bool)) {
+	c.inner.ObserveLinkState(observer)
+}
+
 func (c *localBasicPeerConn) TerminalRuntimeVersion() string { return c.inner.runtimeVersion }
 
 func (c *localPeerConn) readLoop() {
@@ -571,6 +601,17 @@ func (c *localPeerConn) readLoop() {
 			if !c.enqueue(localPeerOutput{sequence: binary.BigEndian.Uint64(payload)}) {
 				return
 			}
+		case localPeerLinkState:
+			if c.exec || len(payload) != 1 {
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
+				return
+			}
+			c.linkMu.Lock()
+			c.linkStalled = payload[0] == 1
+			if c.linkObserver != nil {
+				c.linkObserver(c.linkStalled)
+			}
+			c.linkMu.Unlock()
 		case localPeerLaunchWarning:
 			var codes []string
 			if c.exec || json.Unmarshal(payload, &codes) != nil || len(codes) > 8 {
