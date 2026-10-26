@@ -165,6 +165,11 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 	if err := tunnelv1.RefreshHealth(ctx, database.Pool(), f.accountID, []string{f.tunnelID}, now); err != nil {
 		t.Fatal(err)
 	}
+	assertOperation(pauseID, "running") // the live edges have not fetched a snapshot since the pause
+	exec(`UPDATE paperboat.control_tunnel_nodes SET tunnel_snapshot_at=now()+interval '2 seconds' WHERE id IN ($1,$2)`, f.nodeID, secondNode)
+	if err := tunnelv1.RefreshHealth(ctx, database.Pool(), f.accountID, []string{f.tunnelID}, now); err != nil {
+		t.Fatal(err)
+	}
 	assertOperation(pauseID, "succeeded")
 
 	expiredID := "expired_" + f.suffix
