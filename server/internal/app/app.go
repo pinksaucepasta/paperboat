@@ -43,6 +43,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
+	"github.com/pinksaucepasta/paperboat/server/internal/mintwithdrawal"
 	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
@@ -242,6 +243,14 @@ func New(opts Options) (*App, error) {
 	}
 	githubService := pbgithub.NewService(store, auditWriter, githubClient(opts.Config), opts.Config)
 	mintKeys, err := mintKeyProvider(opts.Config)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	mintWithdrawals := mintwithdrawal.NewWatcher(store.Pool(), store.Direct(), mintKeys)
+	withdrawalContext, cancelWithdrawals := context.WithTimeout(context.Background(), opts.Config.HTTP.RequestTimeout)
+	err = mintWithdrawals.Apply(withdrawalContext)
+	cancelWithdrawals()
 	if err != nil {
 		_ = store.Close()
 		return nil, err
@@ -1026,6 +1035,9 @@ func New(opts Options) (*App, error) {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_assignments", edgeControlService.TunnelEdgeAssignmentWorker(opts.Config.TerminalSessions.WorkerInterval, 100), progress))
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_mint_withdrawals", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+		return mintWithdrawals.ListenFor(ctx, 24*time.Second)
+	}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_machine_events", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
 		return machineEventHub.ListenFor(ctx, 24*time.Second)
 	}), progress))

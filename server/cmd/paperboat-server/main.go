@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/mintwithdrawal"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 )
 
@@ -57,15 +58,52 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+const adminUsage = "usage: paperboat-server admin usage-key provision [flags] | admin mint-key withdraw [flags]"
+
+// runAdminWithdrawMintKey takes a mint signing key out of service on every running server (F21-08).
+func runAdminWithdrawMintKey(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("admin mint-key withdraw", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "path to JSON config file")
+	actorID := fs.String("actor-user-id", "", "administrator user ID")
+	keyID := fs.String("key-id", "", "mint signing key ID to withdraw")
+	reason := fs.String("reason", "", "why the key is withdrawn")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("admin mint-key withdraw does not accept positional arguments")
+	}
+	cfg, err := config.Load(context.Background(), config.LoadOptions{Environment: os.Getenv("PAPERBOAT_ENV"), FilePath: *configPath, LookupEnv: os.LookupEnv, ReadFile: os.ReadFile})
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	store, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if err := mintwithdrawal.Withdraw(context.Background(), store.Pool(), *keyID, cfg.CLIAuth.MintActiveKeyID, *actorID, *reason); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "mint signing key %s withdrawn; running servers refuse it now\n", strings.TrimSpace(*keyID))
+	return err
+}
+
 func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if len(args) < 2 {
-		return errors.New("usage: paperboat-server admin usage-key provision [flags]")
+		return errors.New(adminUsage)
 	}
 	switch args[0] + " " + args[1] {
 	case "usage-key provision":
 		return runAdminProvisionUsageKey(args[2:], stdout, stderr)
+	case "mint-key withdraw":
+		return runAdminWithdrawMintKey(args[2:], stdout, stderr)
 	default:
-		return errors.New("usage: paperboat-server admin usage-key provision [flags]")
+		return errors.New(adminUsage)
 	}
 }
 

@@ -178,6 +178,9 @@ times and does not roll back or duplicate the completed file transfer.
   Cache-Control max-age uses this one value).
 - `PAPERBOAT_MINT_WITHDRAWN_KEY_IDS` (comma-separated kids): keys that stop verifying at once and are listed in the
   trust document's `withdrawn_key_ids`. Edges drop them when they next fetch the trust document (up to one max-age).
+  To withdraw a key without a restart, run `paperboat-server admin mint-key withdraw --key-id <kid> --actor-user-id <id>
+  --reason <why>`: every running server refuses the key within a second (LISTEN on `paperboat_mint_withdrawn`) and
+  publishes it; servers started later apply the stored set before serving. The active key cannot be withdrawn.
 
 
 Postgres tables live in the dedicated `paperboat` schema. The migration policy is
