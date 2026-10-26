@@ -14,24 +14,11 @@ const limitCells = (key: "machines" | "publications" | "browserTerminals" | "nat
 export type PlanCell = boolean | string
 export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCell] }[] = [
   { feature: "Machines", cells: limitCells("machines") },
-  { feature: "Terminals that survive a dropped connection, with replay", cells: [true, true, true] },
-  { feature: "Remote commands", cells: [true, true, true] },
-  { feature: "SSH, SCP, SFTP and rsync, with managed keys", cells: [true, true, true] },
-  { feature: "Send and receive files", cells: [true, true, true] },
-  { feature: "Previews and tunnels (active, combined)", cells: limitCells("publications") },
-  { feature: "Browser terminals (open in the console)", cells: limitCells("browserTerminals") },
-  { feature: "Terminals from the pb command (not counted as browser terminals)", cells: limitCells("nativeTerminals") },
-  { feature: "Your own domains", cells: [true, true, true] },
-  { feature: "Environment variables, end-to-end encrypted", cells: [true, true, true] },
-  { feature: "Config sync from a Git repository", cells: [true, true, true] },
-  { feature: "Tags and access rules", cells: [true, true, true] },
-  { feature: "Share a terminal session or a preview link", cells: [true, true, true] },
+  { feature: "Live previews and tunnels", cells: limitCells("publications") },
+  { feature: "Live browser terminals", cells: limitCells("browserTerminals") },
+  { feature: "Terminals from the pb command", cells: limitCells("nativeTerminals") },
+  { feature: "Team members and shared machines", cells: [false, false, true] },
   { feature: "Self-hosted relays and tunnel servers", cells: [true, true, true] },
-  { feature: "Team members", cells: [false, false, true] },
-  { feature: "Lasting access to each other’s machines", cells: [false, false, true] },
-  { feature: "Roles", cells: [false, false, "Coming"] },
-  { feature: "SSO and SCIM", cells: [false, false, "Coming"] },
-  { feature: "Audit log export", cells: [false, false, "Coming"] },
   { feature: "Invoices and receipts", cells: [false, true, true] },
 ]
 
