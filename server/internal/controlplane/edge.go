@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"io"
 	"log/slog"
 	"net/http"
@@ -55,6 +56,7 @@ type EdgeService struct {
 	scopedBandwidth         ScopedBandwidthDebiter
 	relayQuota              *bandwidthgate.Gate
 	relayMetrics            *telemetry.Metrics
+	ingressLimits           edgelimits.IngressLimits
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	issuer                  string
@@ -70,6 +72,9 @@ type EdgeService struct {
 // SetRelayQuotaGate makes relay observations report which connected accounts are out of
 // bandwidth allowance (see relayNodeLeaseDocument.QuotaDenied). Nil leaves the list empty.
 func (s *EdgeService) SetRelayQuotaGate(gate *bandwidthgate.Gate) { s.relayQuota = gate }
+
+// SetIngressLimits sets the ingress limits edges receive in every heartbeat answer (T11).
+func (s *EdgeService) SetIngressLimits(limits edgelimits.IngressLimits) { s.ingressLimits = limits }
 
 // SetRelayMetrics counts how relay observations carried their subjects (MetricRelaySubjectObservations).
 func (s *EdgeService) SetRelayMetrics(metrics *telemetry.Metrics) { s.relayMetrics = metrics }
@@ -938,7 +943,15 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeHeartbeatAnswer(w, s.ingressLimits)
+}
+
+// writeHeartbeatAnswer answers a recorded heartbeat with exactly the ingress limits the edge enforces (T11):
+// edges decode it strictly, and older edges ignore the body.
+func writeHeartbeatAnswer(w http.ResponseWriter, limits edgelimits.IngressLimits) {
+	writeEdgeJSON(w, http.StatusOK, struct {
+		IngressLimits edgelimits.IngressLimits `json:"ingress_limits"`
+	}{limits})
 }
 
 func (s *EdgeService) handleAssignment(w http.ResponseWriter, r *http.Request) {

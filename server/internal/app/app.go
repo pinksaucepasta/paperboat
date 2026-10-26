@@ -681,6 +681,7 @@ func New(opts Options) (*App, error) {
 	telemetryMetrics := telemetry.NewMetrics()
 	if edgeControlService != nil {
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
+		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
 	}
 	telemetryHealth, telemetryErr := telemetry.NewHealthTracker(time.Now)
 	if telemetryErr != nil {

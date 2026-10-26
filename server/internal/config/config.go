@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"net"
 	"net/url"
 	"os"
@@ -56,36 +57,39 @@ type Config struct {
 	// SelfhostAllowPrivateIngress lets self-hosted node claim and ingress verification accept private
 	// (RFC 1918 / ULA) addresses: a staging stack on a LAN. Refused in production, where it would open the
 	// claim dialer to internal addresses.
-	SelfhostAllowPrivateIngress bool             `json:"selfhost_allow_private_ingress"`
-	LocalAccessBaseDomain       string           `json:"local_access_base_domain"`
-	RuntimeBaseDomain           string           `json:"runtime_base_domain"`
-	BrowserSessions             BrowserSessions  `json:"browser_sessions"`
-	HTTP                        HTTPConfig       `json:"http"`
-	Database                    Database         `json:"database"`
-	Billing                     Billing          `json:"billing"`
-	Business                    Business         `json:"business"`
-	APITokens                   APITokens        `json:"api_tokens"`
-	RateLimits                  RateLimits       `json:"rate_limits"`
-	UserMachines                UserMachines     `json:"user_machines"`
-	ManagedSSH                  ManagedSSH       `json:"managed_ssh"`
-	TerminalSessions            TerminalSessions `json:"terminal_sessions"`
-	Preview                     Preview          `json:"preview"`
-	Tunnel                      Tunnel           `json:"tunnel"`
-	Certificates                Certificates     `json:"certificates"`
-	ConfigSync                  ConfigSync       `json:"config_sync"`
-	CLIAuth                     CLIAuth          `json:"cli_auth"`
-	GitHub                      GitHub           `json:"github"`
-	Access                      Access           `json:"access"`
-	Sync                        SyncConfig       `json:"sync"`
-	Diagnostics                 Diagnostics      `json:"diagnostics"`
-	Retention                   Retention        `json:"retention"`
-	Notifications               Notifications    `json:"notifications"`
-	Providers                   Providers        `json:"providers"`
-	Secrets                     Secrets          `json:"secrets"`
-	ReleaseDirectory            string           `json:"release_directory"`
-	ReleaseBaseURL              string           `json:"release_base_url"`
-	ReleaseAuthority            ReleaseAuthority `json:"release_authority"`
-	WorkspacePolicy             WorkspacePolicy  `json:"workspace_policy"`
+	SelfhostAllowPrivateIngress bool `json:"selfhost_allow_private_ingress"`
+	// EdgeIngressLimits are the per-publication and per-account ingress limits every edge enforces (T11), sent
+	// to edges in the heartbeat answer. One set for all plans, from this one place.
+	EdgeIngressLimits     edgelimits.IngressLimits `json:"edge_ingress_limits"`
+	LocalAccessBaseDomain string                   `json:"local_access_base_domain"`
+	RuntimeBaseDomain     string                   `json:"runtime_base_domain"`
+	BrowserSessions       BrowserSessions          `json:"browser_sessions"`
+	HTTP                  HTTPConfig               `json:"http"`
+	Database              Database                 `json:"database"`
+	Billing               Billing                  `json:"billing"`
+	Business              Business                 `json:"business"`
+	APITokens             APITokens                `json:"api_tokens"`
+	RateLimits            RateLimits               `json:"rate_limits"`
+	UserMachines          UserMachines             `json:"user_machines"`
+	ManagedSSH            ManagedSSH               `json:"managed_ssh"`
+	TerminalSessions      TerminalSessions         `json:"terminal_sessions"`
+	Preview               Preview                  `json:"preview"`
+	Tunnel                Tunnel                   `json:"tunnel"`
+	Certificates          Certificates             `json:"certificates"`
+	ConfigSync            ConfigSync               `json:"config_sync"`
+	CLIAuth               CLIAuth                  `json:"cli_auth"`
+	GitHub                GitHub                   `json:"github"`
+	Access                Access                   `json:"access"`
+	Sync                  SyncConfig               `json:"sync"`
+	Diagnostics           Diagnostics              `json:"diagnostics"`
+	Retention             Retention                `json:"retention"`
+	Notifications         Notifications            `json:"notifications"`
+	Providers             Providers                `json:"providers"`
+	Secrets               Secrets                  `json:"secrets"`
+	ReleaseDirectory      string                   `json:"release_directory"`
+	ReleaseBaseURL        string                   `json:"release_base_url"`
+	ReleaseAuthority      ReleaseAuthority         `json:"release_authority"`
+	WorkspacePolicy       WorkspacePolicy          `json:"workspace_policy"`
 }
 
 type HTTPConfig struct {
@@ -461,8 +465,9 @@ func Load(ctx context.Context, opts LoadOptions) (Config, error) {
 func Default() Config {
 	reportingEnabled := DefaultSentryDSN != "" && DefaultSentryRelease != ""
 	return Config{
-		Certificates: Certificates{Challenge: CertificateChallengeDNS01},
-		Mail:         TransactionalMail{InvitationLifetimeSeconds: 2592000},
+		Certificates:      Certificates{Challenge: CertificateChallengeDNS01},
+		EdgeIngressLimits: edgelimits.Default(),
+		Mail:              TransactionalMail{InvitationLifetimeSeconds: 2592000},
 		Reporting: Reporting{
 			Enabled: reportingEnabled,
 			Release: DefaultSentryRelease,
@@ -669,6 +674,9 @@ func (c Config) Validate() error {
 				errs = append(errs, fmt.Errorf("user_machines allowed platform %q is unsupported", platform))
 			}
 		}
+	}
+	if err := c.EdgeIngressLimits.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("edge_ingress_limits: %w", err))
 	}
 	if c.Environment == EnvironmentProduction && c.SelfhostAllowPrivateIngress {
 		errs = append(errs, errors.New("selfhost_allow_private_ingress (PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS) is for staging only and is refused in production"))

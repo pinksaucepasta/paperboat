@@ -18297,8 +18297,89 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Heartbeat recorded."
+          "200": {
+            "description": "Heartbeat recorded. The answer carries the ingress limits the edge enforces (T11).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ingress_limits"
+                  ],
+                  "properties": {
+                    "ingress_limits": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "publication",
+                        "account"
+                      ],
+                      "properties": {
+                        "publication": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "connections",
+                            "opens_per_second",
+                            "open_burst",
+                            "bytes_per_second",
+                            "byte_burst"
+                          ],
+                          "properties": {
+                            "connections": {
+                              "type": "integer"
+                            },
+                            "opens_per_second": {
+                              "type": "number"
+                            },
+                            "open_burst": {
+                              "type": "integer"
+                            },
+                            "bytes_per_second": {
+                              "type": "integer",
+                              "format": "int64"
+                            },
+                            "byte_burst": {
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        "account": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "connections",
+                            "opens_per_second",
+                            "open_burst",
+                            "bytes_per_second",
+                            "byte_burst"
+                          ],
+                          "properties": {
+                            "connections": {
+                              "type": "integer"
+                            },
+                            "opens_per_second": {
+                              "type": "number"
+                            },
+                            "open_burst": {
+                              "type": "integer"
+                            },
+                            "bytes_per_second": {
+                              "type": "integer",
+                              "format": "int64"
+                            },
+                            "byte_burst": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Error"
