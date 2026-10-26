@@ -104,36 +104,43 @@ func (m *Manager) applyPrepared(ctx context.Context, journal updateflow.Journal,
 	if err != nil {
 		// The native journal owns recovery. Keep the exact prepared approval so
 		// the protected helper can retry without a second binary rollback owner.
-		knownRestored := committed.Validate() == nil && committed.Version == m.active.Version && committed.SHA256 == m.active.SHA256 && committed.Length == m.active.Length && committed.Platform == m.active.Platform && committed.Architecture == m.active.Architecture
-		if knownRestored {
-			if verifyErr := committed.Verify(m.config.Binary); verifyErr != nil {
-				return result, errors.Join(err, verifyErr, ErrBlocked)
-			}
-		}
-		if knownRestored && prepared && m.config.Gate != nil {
-			recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseDuration(signed.RollbackTimeout, m.config.RollbackTimeout))
-			defer cancel()
-			status, statusErr := m.config.Hostd.Active(recoveryCtx)
-			if statusErr != nil || !m.validActiveRuntime(status, m.active) {
-				return result, errors.Join(err, statusErr, ErrBlocked)
-			}
-			request := GateRequest{TransactionID: journal.TransactionID, Previous: signed, Candidate: m.active, Worker: status}
-			if rollbackErr := m.config.Gate.Rollback(recoveryCtx, request); rollbackErr != nil {
-				return result, errors.Join(err, rollbackErr, ErrBlocked)
-			}
-		}
-		if knownRestored {
-			failure, quarantine := updateflow.FailureDrain, ""
-			if validationStarted {
-				failure, quarantine = updateflow.FailureHealth, signed.Version
-			}
-			if idleErr := m.write(m.idleJournal(journal, failure, quarantine)); idleErr != nil {
-				return result, errors.Join(err, idleErr, ErrBlocked)
-			}
-		}
-		return result, err
+		return m.finishRestored(ctx, journal, signed, committed, prepared, validationStarted, err)
 	}
 	return m.finishCommitted(ctx, journal, signed, payload, committed)
+}
+
+// finishRestored ends an attempt whose native owner restored the previous installation: hostd
+// releases the candidate's gate and the journal goes idle with the failure, so no helper start
+// retries it. Any other committed source leaves the journal for native recovery.
+func (m *Manager) finishRestored(ctx context.Context, journal updateflow.Journal, signed Release, committed installsource.Source, prepared, validationStarted bool, cause error) (Result, error) {
+	result := Result{Version: m.active.Version}
+	knownRestored := committed.Validate() == nil && committed.Version == m.active.Version && committed.SHA256 == m.active.SHA256 && committed.Length == m.active.Length && committed.Platform == m.active.Platform && committed.Architecture == m.active.Architecture
+	if !knownRestored {
+		return result, cause
+	}
+	if verifyErr := committed.Verify(m.config.Binary); verifyErr != nil {
+		return result, errors.Join(cause, verifyErr, ErrBlocked)
+	}
+	if prepared && m.config.Gate != nil {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseDuration(signed.RollbackTimeout, m.config.RollbackTimeout))
+		defer cancel()
+		status, statusErr := m.config.Hostd.Active(recoveryCtx)
+		if statusErr != nil || !m.validActiveRuntime(status, m.active) {
+			return result, errors.Join(cause, statusErr, ErrBlocked)
+		}
+		request := GateRequest{TransactionID: journal.TransactionID, Previous: signed, Candidate: m.active, Worker: status}
+		if rollbackErr := m.config.Gate.Rollback(recoveryCtx, request); rollbackErr != nil {
+			return result, errors.Join(cause, rollbackErr, ErrBlocked)
+		}
+	}
+	failure, quarantine := updateflow.FailureDrain, ""
+	if validationStarted {
+		failure, quarantine = updateflow.FailureHealth, signed.Version
+	}
+	if idleErr := m.write(m.idleJournal(journal, failure, quarantine)); idleErr != nil {
+		return result, errors.Join(cause, idleErr, ErrBlocked)
+	}
+	return result, cause
 }
 
 // candidateSource is the official install identity the native owner commits for payload.

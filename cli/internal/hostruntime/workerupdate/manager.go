@@ -31,6 +31,9 @@ var (
 	ErrInvalidConfig  = errors.New("invalid worker update configuration")
 	ErrInvalidRelease = errors.New("invalid worker release")
 	ErrBlocked        = errors.New("worker updates require recovery")
+	// ErrNativeRestored means the native owner rolled an interrupted installation back to the
+	// previous version; the candidate did not become active.
+	ErrNativeRestored = errors.New("the update was interrupted before it was committed; the previous version was restored")
 	ErrQuarantined    = errors.New("worker release is quarantined")
 	ErrReleaseRevoked = errors.New("worker release is revoked")
 	ErrUnsafeStorage  = errors.New("unsafe worker release storage")
@@ -134,6 +137,10 @@ type Config struct {
 	// FinalizePrepared owns retryable post-commit maintenance such as manuals.
 	// Failure keeps staging receipts without rolling back committed services.
 	FinalizePrepared func(context.Context, installsource.Source) error
+	// RecoverPrepared completes the native owner's recovery of an interrupted installation and
+	// returns the source it has committed. A candidate whose bytes are in the worker slot is
+	// finished only when that source is the candidate's; otherwise the attempt is over.
+	RecoverPrepared func(context.Context) (installsource.Source, error)
 	// RecoveryExecutable is the verified previous helper retained while the
 	// canonical slot is replaced by the native installation owner.
 	RecoveryExecutable string
@@ -282,6 +289,18 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 		// The native owner already installed this exact payload and consumed the staged file.
 		// Finish the interrupted post-commit steps; verifying the staged payload cannot succeed.
 		source := m.candidateSource(localRelease)
+		if m.config.RecoverPrepared != nil {
+			// The bytes alone do not prove the native commit: an attempt interrupted before it
+			// leaves them in the slot with the lifecycle still pending, and hostd then refuses the
+			// commit on every start. Native recovery decides which installation stands.
+			committed, recoverErr := m.config.RecoverPrepared(ctx)
+			if recoverErr != nil {
+				return Result{Version: m.active.Version}, errors.Join(ErrBlocked, recoverErr)
+			}
+			if committed.Version != source.Version || committed.SHA256 != source.SHA256 || committed.Length != source.Length {
+				return m.finishRestored(ctx, journal, release, committed, true, true, ErrNativeRestored)
+			}
+		}
 		if err = source.Verify(m.config.Binary); err != nil {
 			return Result{Version: m.active.Version}, errors.Join(ErrPreparedCandidate, err)
 		}

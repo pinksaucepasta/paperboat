@@ -963,6 +963,43 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 	return source, err
 }
 
+// recoverPrepared runs the native recovery of an installation interrupted before its commit. When
+// that restored the previous version, the routing daemon restarts on it, as after a rolled-back
+// attempt, before the attempt ends.
+func (s *Service) recoverPrepared(ctx context.Context) (installsource.Source, error) {
+	handoff, err := readUnixHandoff(s.config.StateRoot)
+	if err != nil {
+		return installsource.Source{}, err
+	}
+	if handoff == nil {
+		return installsource.Source{}, ErrInvalidConfig
+	}
+	committed, err := s.config.RecoverPrepared(ctx)
+	if err != nil {
+		return installsource.Source{}, err
+	}
+	previous := handoff.Previous
+	if committed.Version != previous.Version || committed.SHA256 != previous.SHA256 || committed.Length != previous.Length {
+		return committed, nil
+	}
+	timeout := handoff.RecoveryTimeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	if handoff.Baseline.Running {
+		if err := s.config.Participants.Restart(recoveryCtx); err != nil {
+			return installsource.Source{}, participantFailure("restart_daemon", errors.Join(ErrParticipantReadiness, err))
+		}
+	}
+	readiness := &unixParticipantReadiness{participants: s.config.Participants, handoff: handoff}
+	if err := readiness.waitReady(recoveryCtx, committed.Version, false); err != nil {
+		return installsource.Source{}, err
+	}
+	return committed, nil
+}
+
 // resolveUnixPreparedRelease keeps ordinary queued approval pinned to the current
 // candidate; only protected native progress permits resuming its original bytes.
 func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixActivationHandoff, manager *workerupdate.Manager) (workerupdate.Release, error) {

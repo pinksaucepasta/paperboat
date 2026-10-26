@@ -46,8 +46,11 @@ func healthFailure(reason string, cause error) error {
 }
 
 type Config struct {
-	ApplyPrepared       func(context.Context, workerupdate.PreparedActivation) (installsource.Source, error)
-	FinalizePrepared    func(context.Context, installsource.Source) error
+	ApplyPrepared    func(context.Context, workerupdate.PreparedActivation) (installsource.Source, error)
+	FinalizePrepared func(context.Context, installsource.Source) error
+	// RecoverPrepared runs the native recovery of an interrupted installation and returns the
+	// source it committed (the candidate's, or the restored previous one).
+	RecoverPrepared     func(context.Context) (installsource.Source, error)
 	RecoveryExecutable  string
 	LoadInstalledSource func() (installsource.Source, error)
 	// NativeRecoveryStarted proves an exact protected native receipt or committed
@@ -99,7 +102,7 @@ func New(config Config) (*Service, error) {
 	if !filepath.IsAbs(config.StateRoot) || !filepath.IsAbs(config.ControlSocket) || !validUnixWorkerIdentity(config.WorkerUID, config.WorkerGID) || len(config.Token) != 32 || config.SocketPath == "" || config.RepositoryURL == "" && (config.Active.LocalSource == nil || config.Active.LocalSource.Distribution != installsource.Custom) || config.MachineID == "" || config.Health == nil || config.ActivationController == nil || config.Participants == nil {
 		return nil, ErrInvalidConfig
 	}
-	if config.ApplyPrepared == nil || config.LoadInstalledSource == nil {
+	if config.ApplyPrepared == nil || config.RecoverPrepared == nil || config.LoadInstalledSource == nil {
 		return nil, ErrInvalidConfig
 	}
 	if err := secureRoot(config.StateRoot); err != nil {
@@ -138,6 +141,7 @@ func New(config Config) (*Service, error) {
 	source := workerupdate.TUFSource{RepositoryURL: config.RepositoryURL, StateRoot: filepath.Join(config.StateRoot, "tuf"), MachineID: config.MachineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: client, MachineID: config.MachineID}, Deferral: deferral}
 	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, Fetcher: source, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
 	service.managerConfig.ApplyPrepared = service.applyPrepared
+	service.managerConfig.RecoverPrepared = service.recoverPrepared
 	service.managerConfig.RecoveryExecutable = config.RecoveryExecutable
 	service.managerConfig.FinalizePrepared = func(ctx context.Context, committed installsource.Source) error {
 		if config.FinalizePrepared != nil {

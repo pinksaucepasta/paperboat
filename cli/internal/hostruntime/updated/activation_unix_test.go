@@ -676,3 +676,44 @@ func TestPreparedNativeActivationStrengthensBaselineBeforeDrain(t *testing.T) {
 		})
 	}
 }
+
+// An installation interrupted before its commit that native recovery restored to the previous
+// version ends with the routing daemon restarted and ready on that version (luf26a).
+func TestRecoveredPreviousInstallationRestartsTheDaemonOnIt(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected native handoff requires root")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := installsource.Inspect(executable, "2026.10.25.1", installsource.Official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := workerupdate.InstalledBaseline(previous, executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := UnixParticipantProbe{Running: true, Version: previous.Version, UpdaterVersion: previous.Version, State: "ready"}
+	h := &unixActivationHandoff{Schema: unixHandoffSchema, ApprovalID: strings.Repeat("a", 64), Previous: release, Candidate: "2026.10.26.0", Baseline: ready}
+	if err := writeUnixHandoff(root, h); err != nil {
+		t.Fatal(err)
+	}
+	participants := &participantFixture{probe: ready}
+	service := &Service{config: Config{StateRoot: root, Participants: participants, RecoverPrepared: func(context.Context) (installsource.Source, error) { return previous, nil }}}
+	committed, err := service.recoverPrepared(context.Background())
+	if err != nil || committed != previous || participants.restarts != 1 {
+		t.Fatalf("restored installation: %+v %v restarts=%d", committed, err, participants.restarts)
+	}
+	candidate := previous
+	candidate.Version = h.Candidate
+	service.config.RecoverPrepared = func(context.Context) (installsource.Source, error) { return candidate, nil }
+	if committed, err = service.recoverPrepared(context.Background()); err != nil || committed != candidate || participants.restarts != 1 {
+		t.Fatalf("committed candidate must not restart the daemon: %+v %v restarts=%d", committed, err, participants.restarts)
+	}
+}

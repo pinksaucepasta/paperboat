@@ -167,17 +167,18 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	if *helper {
 		recoveryExecutable = filepath.Join(stateRoot, "activation", "pb")
 	}
+	authorizeRestore := func(restoreCtx context.Context, previous installsource.Source, executable string) error {
+		if err := previous.Verify(executable); err != nil {
+			return err
+		}
+		if previous.Distribution == installsource.Custom {
+			return nil
+		}
+		source := workerupdate.TUFSource{RepositoryURL: repository, StateRoot: filepath.Join(stateRoot, "tuf"), MachineID: machineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: hostdClient, MachineID: machineID}, Deferral: deferral}
+		return source.AuthorizeRecovery(restoreCtx, previous.Version, previous.Platform, previous.Architecture)
+	}
 	applyPrepared := func(applyCtx context.Context, candidate workerupdate.PreparedActivation) (installsource.Source, error) {
-		hooks := hostinstall.PreparedUpdateHooks{DrainTimeout: candidate.Signed.DrainTimeout, Prepare: candidate.Prepare, Validate: candidate.Validate, AuthorizeRestore: func(restoreCtx context.Context, previous installsource.Source, executable string) error {
-			if err := previous.Verify(executable); err != nil {
-				return err
-			}
-			if previous.Distribution == installsource.Custom {
-				return nil
-			}
-			source := workerupdate.TUFSource{RepositoryURL: repository, StateRoot: filepath.Join(stateRoot, "tuf"), MachineID: machineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: hostdClient, MachineID: machineID}, Deferral: deferral}
-			return source.AuthorizeRecovery(restoreCtx, previous.Version, previous.Platform, previous.Architecture)
-		}}
+		hooks := hostinstall.PreparedUpdateHooks{DrainTimeout: candidate.Signed.DrainTimeout, Prepare: candidate.Prepare, Validate: candidate.Validate, AuthorizeRestore: authorizeRestore}
 		if err := hostinstall.ActivatePreparedUpdate(applyCtx, uid, candidate.Executable, candidate.Source, candidate.Force, hooks); err != nil {
 			return installsource.Source{}, err
 		}
@@ -196,6 +197,8 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		}
 		candidateSource := installsource.Source{Version: candidate.Version, Platform: candidate.Platform, Architecture: candidate.Architecture, SHA256: candidate.SHA256, Length: candidate.Length, Distribution: installsource.Official, AutomaticUpdates: previousSource.AutomaticUpdates}
 		return hostinstall.PreparedUpdateRecoveryStarted(ctx, uid, previousSource, candidateSource)
+	}, RecoverPrepared: func(ctx context.Context) (installsource.Source, error) {
+		return hostinstall.RecoverPreparedUpdate(ctx, uid, authorizeRestore)
 	}, LoadInstalledSource: loadInstalledSource, ApplyPrepared: applyPrepared, RecoveryExecutable: recoveryExecutable, AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals, ReconcileCarrier: func(ownerCtx context.Context) error {
 		return hostinstall.ReconcileInstalledCarrier(ownerCtx, "u"+strconv.Itoa(uid))
 	}, SessionOwners: func(ownerCtx context.Context) (sessionowner.Coordinator, error) {

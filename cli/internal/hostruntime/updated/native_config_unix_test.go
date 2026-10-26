@@ -18,6 +18,11 @@ func nativeFixtureConfig(config Config) Config {
 			return installsource.Source{}, errors.New("native activation is outside this fixture's contract")
 		}
 	}
+	if config.RecoverPrepared == nil {
+		config.RecoverPrepared = func(context.Context) (installsource.Source, error) {
+			return installsource.Source{}, errors.New("native recovery is outside this fixture's contract")
+		}
+	}
 	if config.LoadInstalledSource == nil {
 		config.LoadInstalledSource = func() (installsource.Source, error) {
 			if config.Active.LocalSource != nil {

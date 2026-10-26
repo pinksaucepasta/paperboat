@@ -103,39 +103,9 @@ func ActivatePreparedUpdate(ctx context.Context, uid int, executable string, sou
 		return err
 	}
 	defer func() { resultErr = withCleanup("prepared update cleanup failed", resultErr, lock.Close()) }()
-	previous, err := loadInstallMetadata(paths.metadata, uid)
+	previous, lifecycle, err := recoverPreparedLocked(ctx, paths, uid, hooks.AuthorizeRestore)
 	if err != nil {
 		return err
-	}
-	if previous.EnrollmentPending {
-		return ErrInvalidRequest
-	}
-	// A crash may publish metadata before the lifecycle receipt is removed.
-	// Restore its protected baseline before deciding whether this is a retry.
-	hostd, updater, err := pendingInstallers(previous, paths)
-	if err != nil {
-		return err
-	}
-	var host *service.Installer
-	if runtime.GOOS != "darwin" {
-		host, err = hostInstallerWithMissing(previous, paths, true)
-		if err != nil {
-			return err
-		}
-	}
-	lifecycle, err := newLifecycleManagerWithRestorePolicy(previous, paths, host, hostd, updater, false, hooks.AuthorizeRestore)
-	if err != nil {
-		return err
-	}
-	if err = lifecycle.Recover(ctx); err != nil {
-		return err
-	}
-	previous, err = loadInstallMetadata(paths.metadata, uid)
-	if err != nil {
-		return err
-	}
-	if previous.EnrollmentPending {
-		return ErrInvalidRequest
 	}
 	if err = previous.Source.Verify(paths.worker); err != nil {
 		return err
@@ -178,6 +148,72 @@ func ActivatePreparedUpdate(ctx context.Context, uid int, executable string, sou
 		}
 	}
 	return err
+}
+
+// RecoverPreparedUpdate completes the recovery of a signed update interrupted before its commit and
+// returns the source that is installed afterwards: the candidate's when it was committed, else the
+// restored previous source. authorize rechecks a restored source against current recovery policy.
+func RecoverPreparedUpdate(ctx context.Context, uid int, authorize func(context.Context, installsource.Source, string) error) (_ installsource.Source, resultErr error) {
+	if os.Geteuid() != 0 {
+		return installsource.Source{}, ErrNotPrivileged
+	}
+	if ctx == nil || uid < 0 || authorize == nil {
+		return installsource.Source{}, ErrInvalidRequest
+	}
+	paths := platformPaths(uid)
+	lock, err := LockSuppliedOperation(paths.metadata+".lock", 0)
+	if err != nil {
+		return installsource.Source{}, err
+	}
+	defer func() { resultErr = withCleanup("prepared update cleanup failed", resultErr, lock.Close()) }()
+	installed, _, err := recoverPreparedLocked(ctx, paths, uid, authorize)
+	if err != nil {
+		return installsource.Source{}, err
+	}
+	if err = installed.Source.Verify(paths.worker); err != nil {
+		return installsource.Source{}, err
+	}
+	return installed.Source, nil
+}
+
+// recoverPreparedLocked restores an interrupted lifecycle transaction to its protected baseline and
+// returns the installation record that stands afterwards. The caller holds the metadata lock.
+func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int, authorize func(context.Context, installsource.Source, string) error) (Request, *service.LifecycleManager, error) {
+	previous, err := loadInstallMetadata(paths.metadata, uid)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	if previous.EnrollmentPending {
+		return Request{}, nil, ErrInvalidRequest
+	}
+	// A crash may publish metadata before the lifecycle receipt is removed.
+	// Restore its protected baseline before deciding whether this is a retry.
+	hostd, updater, err := pendingInstallers(previous, paths)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	var host *service.Installer
+	if runtime.GOOS != "darwin" {
+		host, err = hostInstallerWithMissing(previous, paths, true)
+		if err != nil {
+			return Request{}, nil, err
+		}
+	}
+	lifecycle, err := newLifecycleManagerWithRestorePolicy(previous, paths, host, hostd, updater, false, authorize)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	if err = lifecycle.Recover(ctx); err != nil {
+		return Request{}, nil, err
+	}
+	previous, err = loadInstallMetadata(paths.metadata, uid)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	if previous.EnrollmentPending {
+		return Request{}, nil, ErrInvalidRequest
+	}
+	return previous, lifecycle, nil
 }
 
 // This runs inside lifecycle.Replace: rejection leaves the old metadata untouched

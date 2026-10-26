@@ -232,6 +232,9 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 	// Restart: the helper starts from the previous release again; the journal still holds the receipt.
 	f.manager.setActive(previous)
 	finalizeFails = false
+	f.manager.config.RecoverPrepared = func(context.Context) (installsource.Source, error) {
+		return f.manager.candidateSource(f.candidate), nil
+	}
 	// The helper first asks the manager for the approved release, as resolveUnixPreparedRelease does.
 	if _, _, err := f.manager.PreparedRelease(context.Background()); err != nil {
 		t.Fatalf("approved release unavailable once its payload is installed: %v", err)
@@ -244,6 +247,79 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 	if err != nil || journal.Stage != updateflow.StageIdle || journal.ActiveVersion != f.candidate.Version {
 		t.Fatalf("receipt not retired by the retry: %+v %v", journal, err)
 	}
+}
+
+// luf26a: a network loss during the participant step failed an update after the native owner had
+// put the candidate in the worker slot and consumed the staged payload, but before its commit. The
+// next helper starts saw the candidate's bytes, took them for a committed install and asked hostd to
+// commit; hostd refused (maintenance busy) because the source was never committed, every 7 s, for
+// hours. Native recovery now decides first: a restored previous version ends the attempt.
+func TestInstalledCandidateWithoutNativeCommitIsRolledBackNotCommitted(t *testing.T) {
+	f := newFixture(t)
+	var completeErr error
+	if f.candidate, completeErr = completeJournalRelease(f.candidate); completeErr != nil {
+		t.Fatal(completeErr)
+	}
+	gate := &commitRefusingGate{}
+	f.manager.config.Gate = gate
+	f.manager.config.ApplyPrepared = func(ctx context.Context, a PreparedActivation) (installsource.Source, error) {
+		if err := a.Prepare(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		body, err := os.ReadFile(a.Executable)
+		if err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.WriteFile(f.paths.current, body, 0700); err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.Remove(a.Executable); err != nil {
+			return installsource.Source{}, err
+		}
+		return installsource.Source{}, errors.New("participant readiness: lookup failed; service lifecycle outcome is uncertain")
+	}
+	previous := f.manager.active
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
+		t.Fatal("the interrupted activation was not reported")
+	}
+	restored := installsource.Source{Version: previous.Version, Platform: previous.Platform, Architecture: previous.Architecture, SHA256: previous.SHA256, Length: previous.Length, Distribution: installsource.Official}
+	recoveries := 0
+	f.manager.config.RecoverPrepared = func(context.Context) (installsource.Source, error) {
+		recoveries++
+		return restored, nil
+	}
+	// Restart: the helper runs the previous release and the journal still holds the approval.
+	f.manager.setActive(previous)
+	result, err := f.manager.Activate(context.Background(), f.candidate)
+	if !errors.Is(err, ErrNativeRestored) || result.Updated || recoveries != 1 {
+		t.Fatalf("restored installation not reported as a rollback: %+v %v recoveries=%d", result, err, recoveries)
+	}
+	if gate.commits != 0 || gate.rollbacks != 1 {
+		t.Fatalf("hostd gate commits=%d rollbacks=%d, want the candidate's gate released, never committed", gate.commits, gate.rollbacks)
+	}
+	journal, err := updateflow.Load(f.paths.journal)
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.ActiveVersion != previous.Version || journal.LastFailure != updateflow.FailureHealth {
+		t.Fatalf("attempt not ended on the previous version: %+v %v", journal, err)
+	}
+	if state, err := f.manager.TransactionState(); err != nil || !state.Quarantined {
+		t.Fatalf("the failed candidate is not quarantined, so it would be retried: %+v %v", state, err)
+	}
+}
+
+// commitRefusingGate is hostd while the native source is uncommitted: it refuses every commit.
+type commitRefusingGate struct {
+	fakeActivationGate
+	commits, rollbacks int
+}
+
+func (g *commitRefusingGate) Commit(context.Context, GateRequest) error {
+	g.commits++
+	return hostdproto.ErrMaintenanceBusy
+}
+
+func (g *commitRefusingGate) Rollback(context.Context, GateRequest) error {
+	g.rollbacks++
+	return nil
 }
 
 // A rolled-back or never-started installation consumes the staged payload. The approval for it can
