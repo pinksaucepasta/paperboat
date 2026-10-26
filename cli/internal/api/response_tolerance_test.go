@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/wirejson"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
 // addUnknownFields puts a field the client has never heard of into every JSON object.

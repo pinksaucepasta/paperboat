@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/wirejson"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"net"
 	"net/http"
 	"net/url"

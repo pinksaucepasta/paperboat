@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/serverclock"
-	"github.com/pinksaucepasta/paperboat/internal/wirejson"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"io"
 	"net/http"
 	"net/url"

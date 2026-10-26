@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/wirejson"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"io"
 	"net/http"
 	"strings"
