@@ -3,6 +3,8 @@ export type BrowserTerminalEvent = {
   connection_id?: string
   state?: string
   code?: string
+  /** Close-state events: the raw WebSocket close number, for diagnostics only; never branched on. */
+  close?: number
   message?: string
   owner_account_id?: string
   machine_id?: string

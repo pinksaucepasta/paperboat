@@ -66,6 +66,7 @@ export function TerminalSurface({
       data-terminal-role={role}
       data-terminal-reconnects={connection.reconnects}
       data-terminal-replays={connection.replays}
+      data-terminal-close={connection.lastClose || undefined}
     >
       <div className="relative min-h-0 flex-1 px-3 pt-2 pb-1">
         <div

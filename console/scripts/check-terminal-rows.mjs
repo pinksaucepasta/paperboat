@@ -49,7 +49,7 @@ async function live(p, name) {
   if (attached) await type(p, `echo ${m}`)
   const echoed = attached && (await shows(p, m))
   await shot(p, name)
-  log(echoed, `${name}: attached and echoes its marker`, `phase=${await attr(p, "data-terminal-phase")}`)
+  log(echoed, `${name}: attached and echoes its marker`, `phase=${await attr(p, "data-terminal-phase")} close=${await attr(p, "data-terminal-close")}`)
   return echoed
 }
 
