@@ -72,6 +72,7 @@ type cliNativeRuntime struct {
 	cancel                context.CancelFunc
 	done                  chan struct{}
 	once                  sync.Once
+	waking                sync.Map // machine IDs with a WakePeer connection in flight
 }
 
 // NativeProbe reports an authenticated connection to one admitted machine.
@@ -481,6 +482,31 @@ func (t *PeerTerminalTunnel) PathEligibility(ctx context.Context, machineID stri
 	changed := make(chan struct{})
 	go func() { <-ctx.Done(); close(changed) }()
 	return tailnet.PathNone, changed
+}
+
+// WakePeer starts a connection to machineID in the background, one at a time per machine, so the engine looks
+// for a path (nothing else produces traffic while an Unlimited transfer waits for one).
+func (t *PeerTerminalTunnel) WakePeer(machineID string) {
+	if t == nil {
+		return
+	}
+	t.nativeMu.Lock()
+	runtime := t.nativeRuntime
+	t.nativeMu.Unlock()
+	if runtime == nil || !runtime.alive() {
+		return
+	}
+	if _, running := runtime.waking.LoadOrStore(machineID, struct{}{}); running {
+		return
+	}
+	go func() {
+		defer runtime.waking.Delete(machineID)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if session, err := runtime.Dial(ctx, machineID, peerquic.ClassInteractive); err == nil {
+			_ = session.Close()
+		}
+	}()
 }
 
 // RefreshNetwork renews the daemon's signed peer network now, for example when the server reports

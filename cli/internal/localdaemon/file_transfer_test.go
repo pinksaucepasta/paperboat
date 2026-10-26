@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,12 @@ type transferPreparerFake struct {
 	paths    *pathFake
 }
 
+func (f transferPreparerFake) WakePeer(string) {
+	if f.paths != nil {
+		f.paths.woken.Add(1)
+	}
+}
+
 func (f transferPreparerFake) PathEligibility(ctx context.Context, machineID string) (tailnet.PathKind, <-chan struct{}) {
 	if f.paths == nil {
 		return tailnet.PathDirect, ctx.Done()
@@ -35,6 +42,7 @@ type pathFake struct {
 	mu      sync.Mutex
 	kind    tailnet.PathKind
 	changed chan struct{}
+	woken   atomic.Int32
 }
 
 func newPathFake(kind tailnet.PathKind) *pathFake {
@@ -175,6 +183,8 @@ func (f nativeTransferPreparerFunc) PrepareNativeFileTransfer(ctx context.Contex
 	return f(ctx, info, operationID)
 }
 
+func (nativeTransferPreparerFunc) WakePeer(string) {}
+
 func (nativeTransferPreparerFunc) PathEligibility(ctx context.Context, _ string) (tailnet.PathKind, <-chan struct{}) {
 	return tailnet.PathDirect, ctx.Done()
 }
@@ -218,5 +228,36 @@ func TestUnlimitedTransferStreamsUseOnlyDirectOrOwnRelayPaths(t *testing.T) {
 			t.Fatal("the stream stayed open after the path moved to a hosted relay")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// After a daemon restart no traffic has crossed, so the peer reads as no path; an Unlimited transfer that only waited
+// would never find one (a paused send stayed paused after its daemon restarted). Refusing it wakes the peer.
+func TestUnlimitedTransferWakesAPeerWithNoPath(t *testing.T) {
+	now := time.Unix(10_000, 0).UTC()
+	paths := newPathFake(tailnet.PathNone)
+	broker, err := NewFileTransferBroker(transferPreparerFake{direct: &transferDirectFake{open: true}, paths: paths})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = broker.Close() })
+	broker.now = func() time.Time { return now }
+	owner := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
+	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20, TransferMode: "unlimited"}
+	result, err := broker.PrepareFileTransfer(context.Background(), owner, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var waiting *localapi.NoEligiblePathError
+	if _, err := broker.OpenFileTransferStream(context.Background(), owner, result.Handle); !errors.As(err, &waiting) || waiting.Path != "none" {
+		t.Fatalf("a stream opened with no path: %v", err)
+	}
+	if paths.woken.Load() != 1 {
+		t.Fatalf("the peer was woken %d times", paths.woken.Load())
+	}
+	paths.set(tailnet.PathHostedRelay)
+	_, _ = broker.OpenFileTransferStream(context.Background(), owner, result.Handle)
+	if paths.woken.Load() != 1 {
+		t.Fatal("a hosted relay path woke the peer: it already has traffic")
 	}
 }

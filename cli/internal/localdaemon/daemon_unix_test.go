@@ -53,6 +53,8 @@ func (p daemonNativeTransferPreparer) PrepareNativeFileTransfer(context.Context,
 	return p.opener, nil
 }
 
+func (daemonNativeTransferPreparer) WakePeer(string) {}
+
 func (daemonNativeTransferPreparer) PathEligibility(ctx context.Context, _ string) (tailnet.PathKind, <-chan struct{}) {
 	return tailnet.PathDirect, ctx.Done()
 }

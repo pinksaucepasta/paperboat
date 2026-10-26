@@ -61,6 +61,9 @@ type nativeTransferPreparer interface {
 	PrepareNativeFileTransfer(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error)
 	// PathEligibility reports the path the engine uses to the machine and a channel closed on its next change.
 	PathEligibility(context.Context, string) (tailnet.PathKind, <-chan struct{})
+	// WakePeer starts looking for a path to the machine: a peer nothing has crossed since the engine started
+	// reads as no path, and a transfer that waits for a path would never create the traffic that finds one.
+	WakePeer(string)
 }
 
 func NewFileTransferBroker(peerTunnel nativeTransferPreparer) (*FileTransferBroker, error) {
@@ -150,6 +153,9 @@ func eligiblePath(kind tailnet.PathKind) bool {
 func (b *FileTransferBroker) openEligibleStream(ctx context.Context, lease daemonTransferLease) (net.Conn, error) {
 	watch, stopWatch := context.WithCancel(context.Background())
 	kind, changed := b.tunnel.PathEligibility(watch, lease.machineID)
+	if kind == tailnet.PathNone {
+		b.tunnel.WakePeer(lease.machineID)
+	}
 	if !eligiblePath(kind) {
 		stopWatch()
 		return nil, &localapi.NoEligiblePathError{Path: string(kind)}
