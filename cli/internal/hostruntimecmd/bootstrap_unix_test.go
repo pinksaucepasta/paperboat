@@ -29,11 +29,11 @@ func TestResolveUserShellUsesOverrideAndEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolveUserShell(shell, func(string) string { return "/bin/false" })
+	got, err := resolveUserShell(t.Context(), shell, func(string) string { return "/bin/false" })
 	if err != nil || got != canonicalShell {
 		t.Fatalf("override shell=%q err=%v", got, err)
 	}
-	got, err = resolveUserShell("", func(name string) string {
+	got, err = resolveUserShell(t.Context(), "", func(name string) string {
 		if name == "SHELL" {
 			return shell
 		}
@@ -42,7 +42,7 @@ func TestResolveUserShellUsesOverrideAndEnvironment(t *testing.T) {
 	if err != nil || got != canonicalShell {
 		t.Fatalf("detected shell=%q err=%v", got, err)
 	}
-	if _, err := resolveUserShell("relative-shell", nil); err == nil {
+	if _, err := resolveUserShell(t.Context(), "relative-shell", nil); err == nil {
 		t.Fatal("relative shell override was accepted")
 	}
 }
@@ -420,4 +420,26 @@ func structuralHTTPStatus(err error) int {
 		return status.DiagnosticStatus()
 	}
 	return 0
+}
+
+// Code review, 2026-10-27: login-shell discovery ran dscl/getent with no deadline even when $SHELL was usable,
+// so a stalled directory service could hang setup.
+func TestShellResolutionDoesNotWaitOnTheDirectoryWhenSHELLIsUsable(t *testing.T) {
+	old := loginShellLookup
+	t.Cleanup(func() { loginShellLookup = old })
+	consulted := false
+	loginShellLookup = func(ctx context.Context) string {
+		consulted = true
+		<-ctx.Done()
+		return ""
+	}
+	if got, err := resolveUserShell(t.Context(), "", func(string) string { return "/bin/sh" }); err != nil || got == "" || consulted {
+		t.Fatalf("shell=%q err=%v directory consulted=%v", got, err, consulted)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if got, err := resolveUserShell(ctx, "", func(string) string { return "" }); err != nil || got == "" || time.Since(started) > 2*time.Second {
+		t.Fatalf("a blocked directory lookup was not bounded by ctx: shell=%q err=%v after %s", got, err, time.Since(started))
+	}
 }

@@ -104,7 +104,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	// Root is a supported enrollment account. Dashboard-issued one-shot
 	// commands are intentionally non-interactive, so do not require a
 	// confirmation prompt that would fail when stdin is piped from curl.
-	resolvedShell, err := resolveUserShell(*shell, os.Getenv)
+	resolvedShell, err := resolveUserShell(ctx, *shell, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -567,27 +567,29 @@ func canonicalUserHome() (string, error) {
 	return home, nil
 }
 
-func resolveUserShell(explicit string, getenv func(string) string) (string, error) {
-	candidates := []string{strings.TrimSpace(explicit)}
-	if candidates[0] == "" && getenv != nil {
-		candidates = append(candidates, strings.TrimSpace(getenv("SHELL")))
+// resolveUserShell picks the explicit shell, else $SHELL, else the account's login shell from the directory,
+// else /bin/sh. Each source is consulted only when the earlier ones gave nothing usable, so a usable $SHELL never
+// waits on directory services; the directory lookup is bounded by ctx (it hung setup when dscl/getent stalled).
+func resolveUserShell(ctx context.Context, explicit string, getenv func(string) string) (string, error) {
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		return validateUserShell(explicit)
 	}
-	if candidates[0] == "" {
-		candidates = append(candidates, accountLoginShell())
+	sources := []func() string{
+		func() string {
+			if getenv == nil {
+				return ""
+			}
+			return strings.TrimSpace(getenv("SHELL"))
+		},
+		func() string { return loginShellLookup(ctx) },
+		func() string { return "/bin/sh" },
 	}
-	if candidates[0] == "" {
-		candidates = append(candidates, "/bin/sh")
-	}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		resolved, err := validateUserShell(candidate)
-		if err == nil {
-			return resolved, nil
-		}
-		if explicit != "" {
-			return "", err
+	for _, source := range sources {
+		if candidate := source(); candidate != "" {
+			if resolved, err := validateUserShell(candidate); err == nil {
+				return resolved, nil
+			}
 		}
 	}
 	return "", errors.New("could not detect an executable login shell; use --shell")
@@ -608,18 +610,26 @@ func validateUserShell(path string) (string, error) {
 	return resolved, nil
 }
 
-func accountLoginShell() string {
+// loginShellLookup reads the account's login shell from the directory; replaced in tests.
+var loginShellLookup = accountLoginShell
+
+// loginShellTimeout bounds one directory lookup, so a stalled directory service cannot hang setup.
+const loginShellTimeout = 5 * time.Second
+
+func accountLoginShell(ctx context.Context) string {
 	current, err := currentUnixUser()
 	if err != nil || current.Username == "" {
 		return ""
 	}
+	ctx, cancel := context.WithTimeout(ctx, loginShellTimeout)
+	defer cancel()
 	if runtime.GOOS == "darwin" {
-		output, err := exec.Command("dscl", ".", "-read", "/Users/"+current.Username, "UserShell").Output()
+		output, err := exec.CommandContext(ctx, "dscl", ".", "-read", "/Users/"+current.Username, "UserShell").Output()
 		if err == nil {
 			return strings.TrimSpace(strings.TrimPrefix(string(output), "UserShell:"))
 		}
 	}
-	output, err := exec.Command("getent", "passwd", current.Username).Output()
+	output, err := exec.CommandContext(ctx, "getent", "passwd", current.Username).Output()
 	if err != nil {
 		return ""
 	}
