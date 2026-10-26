@@ -4,7 +4,9 @@ Connect to a machine with OpenSSH
 
 ### Synopsis
 
-Connect to a machine with OpenSSH
+Connect to a machine with OpenSSH over Paperboat.
+
+Forwarding follows the machine's sshd: port and agent forwarding work as it allows; pb never requests X11 and does not strip -X/-Y.
 
 Connect to an enrolled machine through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
 
