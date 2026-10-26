@@ -191,6 +191,14 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 				}
 				continue
 			}
+			if opcode, err := protocol.TerminalOpcode(result.binary); len(result.binary) != 0 && err == nil && opcode == protocol.TerminalACKOpcode {
+				// Output acknowledgements never wait behind input: under a flood into a program that does not read,
+				// a stuck write would otherwise stall the output too.
+				if err := s.handleTerminalDataWithWriter(connectionCtx, result.binary, terminalState, writer); err != nil {
+					return err
+				}
+				continue
+			}
 			if len(result.binary) != 0 && busy.Load() {
 				s.interruptTerminalInput(connectionCtx, result.binary, terminalState)
 			}
