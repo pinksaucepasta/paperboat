@@ -71,6 +71,10 @@ type EngineTunnel struct {
 	TunnelID          string `json:"tunnel_id"`
 	ConfigGeneration  uint64 `json:"config_generation"`
 	ConfigContentHash string `json:"config_content_hash"`
+	// TunnelGeneration and RouteGenerations are the current generations an inspector credential
+	// binds a capture to; the agent stamps them on each route's captures so replay authorizes.
+	TunnelGeneration uint64            `json:"tunnel_generation"`
+	RouteGenerations map[string]uint64 `json:"route_generations"`
 	// Snapshot is the tunnel's active config snapshot (paperboat.preview-tunnel/v1), as a
 	// connector would receive it.
 	Snapshot json.RawMessage `json:"snapshot"`

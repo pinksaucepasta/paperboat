@@ -119,6 +119,9 @@ type engineTunnel struct {
 	hash       string
 	restricted bool
 	routes     []hoststate.TunnelConfigRoute
+	// capture is the inspector identity of each route (tunnel and route generations), so a
+	// captured request can be replayed.
+	capture map[string]tunnelmanager.CaptureIdentity
 }
 
 type engineOrigins struct {
@@ -259,7 +262,17 @@ func decodeEngineTunnel(item runtimewire.EngineTunnel) (engineTunnel, error) {
 	if err != nil {
 		return engineTunnel{}, err
 	}
-	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public"}
+	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public", capture: map[string]tunnelmanager.CaptureIdentity{}}
+	// Replay re-checks a fresh server decision each time; this expiry only bounds the local binding.
+	// shortcut: a route restarts on config changes only, so a tunnel generation bump alone (rename)
+	// leaves its captures unreplayable until the next config change; key restarts on it if that matters.
+	expires := time.Now().AddDate(1, 0, 0)
+	if parsed.ExpiresAt != nil {
+		expires = *parsed.ExpiresAt
+	}
+	for routeID, generation := range item.RouteGenerations {
+		tunnel.capture[routeID] = tunnelmanager.CaptureIdentity{ResourceID: routeID, ResourceGeneration: item.TunnelGeneration, RouteGeneration: generation, TargetGeneration: generation, ExpiresAt: expires}
+	}
 	if parsed.DesiredState != "active" {
 		return tunnel, nil
 	}
@@ -322,6 +335,9 @@ func (e *EngineTunnels) serve(ctx context.Context, hub *preview.DataCarrierPrevi
 	forwarder.EngineRoutes = true
 	forwarder.IngressAuthority = e.browserIngress
 	forwarder.Restricted = tunnel.restricted
+	if identity, ok := tunnel.capture[route.ID]; ok {
+		forwarder.CaptureIdentity = &identity
+	}
 	streams, err := forwarder.StartFrom(ctx, registration, hub.Identity(), []hoststate.TunnelConfigRoute{route})
 	if err != nil {
 		_ = registration.Close()

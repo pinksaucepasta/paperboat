@@ -274,6 +274,14 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil || len(served) != 1 || served[0].TunnelID != tunnel || served[0].ConfigGeneration != 1 || !strings.Contains(string(served[0].Snapshot), route) {
 		t.Fatalf("agent engine tunnels = %+v, %v", served, err)
 	}
+	// It also carries the generations an inspector credential binds a capture to, so replay works.
+	var tunnelGeneration, routeGeneration uint64
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT t.generation,r.generation FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE r.id=$1`, route).Scan(&tunnelGeneration, &routeGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if served[0].TunnelGeneration != tunnelGeneration || served[0].RouteGenerations[route] != routeGeneration {
+		t.Fatalf("engine tunnel generations = %d %v, want %d %s:%d", served[0].TunnelGeneration, served[0].RouteGenerations, tunnelGeneration, route, routeGeneration)
+	}
 	if _, err := f.service.Tunnels(f.ctx, f.proof, runtimewire.TunnelsRequest{OperationID: "other"}); err != ErrInvalid {
 		t.Fatalf("tunnels request not bound to its proof: %v", err)
 	}

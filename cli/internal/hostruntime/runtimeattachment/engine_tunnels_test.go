@@ -293,3 +293,22 @@ func TestEngineTunnelsRefuseToStartWithoutAnOriginTransport(t *testing.T) {
 		t.Fatal("engine tunnels started without an origin transport")
 	}
 }
+
+// pbvm3 2026-10-26: `pb tunnel replay` answered inspector_expired on engine tunnels because their
+// captures had no replay identity. Each route now carries the tunnel and route generations the
+// server's inspector credential binds.
+func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {
+	payload := `{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_cap","generation":2,"name":"cap","desired_state":"active","access_mode":"public","stable_endpoint":"https://brave-blue-beacon-0421.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"route_cap","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":1000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}]}`
+	snapshot, err := hoststate.NewConfigSnapshot("tunnel_cap", 2, []byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tunnel, err := decodeEngineTunnel(runtimewire.EngineTunnel{TunnelID: "tunnel_cap", ConfigGeneration: 2, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload), TunnelGeneration: 5, RouteGenerations: map[string]uint64{"route_cap": 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := tunnel.capture["route_cap"]
+	if identity.ResourceID != "route_cap" || identity.ResourceGeneration != 5 || identity.RouteGeneration != 7 || identity.TargetGeneration != 7 || identity.ExpiresAt.IsZero() {
+		t.Fatalf("route inspector identity = %+v", identity)
+	}
+}
