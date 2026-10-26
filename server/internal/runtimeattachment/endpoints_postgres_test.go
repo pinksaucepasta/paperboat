@@ -300,18 +300,14 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("preview_routes while the app is down = %v, want %s/ready", got, node)
 	}
 	exec(`UPDATE preview_leases SET origin_state='ready' WHERE id=$1`, lease)
-	// A DNS republication in flight (the second edge joining, a carrier session renewed) does not make
-	// a preview whose published record names a serving edge look pending ("connecting").
+	// A managed preview's route is pending until EVERY live edge serves it: the wildcard answers with all of them
+	// and edges do not forward, so a visitor may land on any live edge.
 	store, err := previewtunnelstore.New(database)
 	if err != nil {
 		t.Fatal(err)
 	}
 	exec(`UPDATE control_tunnel_nodes SET public_ingress_ipv4='192.0.2.10',public_ingress_verified_at=now() WHERE id=$1`, node)
-	exec(`INSERT INTO edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,publication_generation,desired_addresses,provider_records,state,created_at,updated_at)
-VALUES($1,$2,1,'republishing',now(),2,'["192.0.2.10","192.0.2.11"]','[{"Address":"192.0.2.10","Hostname":"x"}]','desired',now(),now())`, host, lease)
-	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
-	})
+	exec(`UPDATE control_tunnel_nodes SET public_ingress_ipv4='192.0.2.11',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, backupNode)
 	pending := func() bool {
 		t.Helper()
 		record, err := store.GetPreviewLeaseV1(ctx, account, lease)
@@ -320,13 +316,19 @@ VALUES($1,$2,1,'republishing',now(),2,'["192.0.2.10","192.0.2.11"]','[{"Address"
 		}
 		return record.ManagedRoutePending
 	}
-	if pending() {
-		t.Fatal("a republication in flight made a preview whose published record names a serving edge pending")
-	}
-	exec(`UPDATE edge_dns_publications SET provider_records='[]' WHERE hostname=$1`, host)
 	if !pending() {
-		t.Fatal("a preview with no published record is not pending")
+		t.Fatal("a preview served by one of two live edges is not pending")
 	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
+	if pending() {
+		t.Fatal("a preview served by every live edge is still pending")
+	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
+	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
+	if pending() {
+		t.Fatal("a drained edge was waited for")
+	}
+	exec(`UPDATE control_tunnel_nodes SET drain_deadline=NULL WHERE id=$1`, backupNode)
 	// The owner's native `pb preview inspect` gets its inspector network scope from a preview served
 	// as an endpoint route (it read only the legacy attachments, so the dial was refused).
 	cli, credential := prefix+"_cli", prefix+"_inspector"

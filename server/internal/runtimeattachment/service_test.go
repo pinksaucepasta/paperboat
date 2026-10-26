@@ -24,7 +24,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
@@ -262,17 +261,28 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		}
 	}
 	ready(false)
-	dnsArgs := dbsqlc.ListReadyRuntimeEdgeDNSAddressesV1Params{RouteID: route, Hostname: machine + ".runtime.example.test"}
-	// dnsAddresses is what DNS would hold for the host: every edge with a fresh carrier, node -> IPv4.
+	// dnsAddresses is every edge holding a fresh, applied carrier of the host's route, node -> IPv4: the edges a
+	// visitor may be sent to (the wildcard answers with all of them), so each must serve the route.
 	dnsAddresses := func() map[string]string {
 		t.Helper()
-		rows, err := database.Queries().ListReadyRuntimeEdgeDNSAddressesV1(ctx, dnsArgs)
+		rows, err := database.SQL().QueryContext(ctx, `SELECT n.id, COALESCE(host(n.public_ingress_ipv4),'')
+FROM paperboat.control_routes r
+JOIN paperboat.runtime_carrier_attachments a ON a.route_id=r.id
+JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
+WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.applied_revision=r.desired_revision
+ AND paperboat.runtime_carrier_valid(r.id,n.id,n.process_epoch,true)
+ AND n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)`, route, machine+".runtime.example.test")
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer rows.Close()
 		out := map[string]string{}
-		for _, row := range rows {
-			out[row.ID] = row.Ipv4
+		for rows.Next() {
+			var id, ip string
+			if err := rows.Scan(&id, &ip); err != nil {
+				t.Fatal(err)
+			}
+			out[id] = ip
 		}
 		return out
 	}

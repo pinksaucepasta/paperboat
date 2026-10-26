@@ -296,10 +296,6 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_certificate_records WHERE id=$1`, certificate)
 	})
 	f.exec(t, `INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1),($1,$4,$5,1,'active',1)`, certificate, f.node, f.edge.ProcessEpoch, f.backupNode, f.backupEdge.ProcessEpoch)
-	addresses, err := f.database.Queries().ListReadyEdgeDNSAddressesV1(f.ctx, dbsqlc.ListReadyEdgeDNSAddressesV1Params{TunnelID: tunnel, Hostname: endpointID + ".tunnels.example.test", Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}})
-	if err != nil || len(addresses) != 2 {
-		t.Fatalf("engine tunnel DNS addresses = %+v, %v; want both edges", addresses, err)
-	}
 	// The edge's public ingress authority for the route is bound to the same carrier identity its
 	// stream preface carries, and names the tunnel route and its origin.
 	decisions, err := ingressprojection.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)

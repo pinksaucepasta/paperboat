@@ -546,3 +546,56 @@ func TestWaitingForDNSIsOnlyThePropagationWait(t *testing.T) {
 		t.Fatal("a conflict, a plain error or no error counted as waiting")
 	}
 }
+
+// cancelingAddressProvider runs out the caller's budget while it lists the provider's records.
+type cancelingAddressProvider struct{ cancel context.CancelFunc }
+
+func (p cancelingAddressProvider) ListAddressRecords(ctx context.Context, _ string, _ string) ([]AddressRecord, error) {
+	p.cancel()
+	return nil, ctx.Err()
+}
+func (cancelingAddressProvider) CreateAddressRecord(context.Context, AddressRecord, bool) (AddressRecord, error) {
+	return AddressRecord{}, ErrInvalid
+}
+func (cancelingAddressProvider) DeleteAddressRecord(context.Context, AddressRecord) error {
+	return ErrInvalid
+}
+
+// A publish whose budget expires mid-way still records the failed attempt: the row used to stay "desired".
+func TestAddressPublishRecordsAFailureAfterItsBudgetExpiredOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "budget-"+suffix+".example.test", "preview_"+suffix
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reconciler, err := NewAddressReconciler(database, cancelingAddressProvider{cancel: cancel}, &fakeAddressResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	desired := DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute), Addresses: []string{"8.8.8.8"}}
+	if err := reconciler.Publish(ctx, desired); err == nil {
+		t.Fatal("publish succeeded although its budget ran out")
+	}
+	var state string
+	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "failed" {
+		t.Fatalf("state after the failed attempt = %q, %v; want failed", state, err)
+	}
+}

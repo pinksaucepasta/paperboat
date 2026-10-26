@@ -8,7 +8,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-func TestRetiredTunnelDNSLeavesQueueAfterVerifiedWithdrawalPostgres(t *testing.T) {
+// Managed tunnel names are covered by the platform wildcard, so an active tunnel is never queued for DNS; only a
+// publication row still holding provider records (or not verified) is, until its withdrawal is verified.
+func TestTunnelDNSQueueHoldsOnlyUnwithdrawnPublicationsPostgres(t *testing.T) {
 	f := newTRK07PostgresFixture(t)
 	ctx := context.Background()
 	account, host := f.addAccount(t, "dns-retirement")
@@ -33,21 +35,11 @@ func TestRetiredTunnelDNSLeavesQueueAfterVerifiedWithdrawalPostgres(t *testing.T
 			t.Fatalf("tunnel DNS queued=%v want=%v: %v", got, want, err)
 		}
 	}
-	queued(true)
-	exec(`UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, tunnel)
 	queued(false)
 	exec(`INSERT INTO paperboat.edge_dns_publications(hostname,owner_id,resource_generation,readiness_version,observed_at,valid_until,publication_generation,desired_addresses,provider_records,state,created_at,updated_at) VALUES($1,$2,1,'fixture',now(),$3,1,'["8.8.8.8"]','[]','verified',now(),now())`, "retired-"+f.suffix+".example.test", tunnel, time.Now().Add(time.Hour))
 	queued(true)
 	exec(`UPDATE paperboat.edge_dns_publications SET desired_addresses='[]',provider_records='[]',state='submitted' WHERE owner_id=$1`, tunnel)
 	queued(true)
 	exec(`UPDATE paperboat.edge_dns_publications SET state='verified',verified_at=now() WHERE owner_id=$1`, tunnel)
-	queued(false)
-	exec(`UPDATE paperboat.tunnels SET desired_state='active',expires_at=now()+interval '1 hour' WHERE id=$1`, tunnel)
-	queued(true)
-	exec(`UPDATE paperboat.tunnels SET created_at=now()-interval '1 hour',expires_at=now()-interval '1 second' WHERE id=$1`, tunnel)
-	queued(false)
-	exec(`UPDATE paperboat.tunnels SET expires_at=now()+interval '1 hour' WHERE id=$1`, tunnel)
-	queued(true)
-	exec(`UPDATE paperboat.tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tunnel)
 	queued(false)
 }

@@ -27,6 +27,14 @@ hostnames.
 5. Close the incident only after the durable operation and edge observation
    agree and the retired generation can no longer remove the replacement.
 
+## Managed names and a dead edge
+
+Managed tunnel, preview and runtime hostnames are covered by DNS-only wildcards (`*.pprbt.app`, `*.runtime.pprbt.dev`)
+that list every managed edge; the server publishes no per-hostname records for them, and a custom domain's CNAME
+points at the resource's own managed name. Edges do not forward, so a route is reported ready only when every live
+edge serves it. When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
+the wildcards are static, so until you do, about half of new connections go to the dead edge.
+
 ## DNS ownership or certificate failure
 
 1. Separate `dns` health from `certificate` health. A DNS mismatch must not

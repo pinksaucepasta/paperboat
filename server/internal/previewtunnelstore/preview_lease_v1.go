@@ -1247,10 +1247,10 @@ func (s *Store) CurrentPreviewRoutes(ctx context.Context, previews map[string]st
 	return out, rows.Err()
 }
 
-// decoratePreviewEndpoints marks a managed preview's route pending until the published DNS records
-// (provider_records, what resolvers get) name an edge that serves it. A republication in flight (an
-// edge added, a carrier session renewed) keeps the records it replaces, so it does not make a serving
-// preview look pending ("connecting").
+// decoratePreviewEndpoints marks a managed preview's route pending until every live managed edge serves it. A
+// managed name resolves through the platform wildcard to all of them and edges do not forward, so a visitor may land
+// on any live edge: the URL is "connecting" until each one holds the route. A drained or dead edge is not live and
+// is not waited for.
 func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewLeaseRecord) error {
 	if len(records) == 0 {
 		return nil
@@ -1262,14 +1262,15 @@ func (s *Store) decoratePreviewEndpoints(ctx context.Context, records []PreviewL
 		indices[record.ID] = i
 	}
 	rows, err := s.db.Pool().Query(ctx, `SELECT p.id,paperboat.workspace_edge_mode(p.account_id,p.owner_team_id),CASE WHEN paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='self-hosted-only' THEN coalesce((SELECT 'https://'||d.hostname FROM paperboat.preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id AND d.deleted_at IS NULL AND d.match_type='exact' AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation ORDER BY d.hostname LIMIT 1),'') ELSE NULL END,
- paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only' AND NOT EXISTS (
- SELECT 1 FROM paperboat.edge_dns_publications d
- JOIN paperboat.preview_routes a ON a.preview_id=p.id AND a.account_id=p.account_id
- JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
- WHERE d.owner_id=p.id AND d.hostname=substring(p.endpoint from 9) AND d.resource_generation=1
- AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now()
- AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.provider_records) r
- WHERE r->>'Address' IN (host(n.public_ingress_ipv4),host(n.public_ingress_ipv6))))
+ paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only' AND (
+ NOT EXISTS (SELECT 1 FROM paperboat.preview_routes a WHERE a.preview_id=p.id AND a.account_id=p.account_id
+  AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now())
+ OR EXISTS (SELECT 1 FROM paperboat.control_tunnel_nodes n
+  WHERE n.state='ready' AND n.ready AND n.drain_deadline IS NULL AND n.roles @> ARRAY['edge']::text[]
+  AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND n.public_ingress_verified_at IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM paperboat.preview_routes a WHERE a.preview_id=p.id AND a.account_id=p.account_id
+   AND a.edge_node_id=n.id AND a.edge_process_epoch=n.process_epoch
+   AND a.state='ready' AND a.edge_ready AND a.origin_ready AND a.expires_at>now())))
  FROM paperboat.preview_leases p WHERE p.id=ANY($1::text[])`, ids)
 	if err != nil {
 		return err

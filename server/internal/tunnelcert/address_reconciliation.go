@@ -476,7 +476,11 @@ func (r *AddressReconciler) recordFailure(ctx context.Context, conn *pgx.Conn, d
 	} else {
 		publicationError = nil
 	}
-	if err := r.markState(ctx, conn, desired, generation, records, "failed", kind); err != nil {
+	// The caller's context is often what ran out (a preview's 4 s publish): the failure is recorded on a context of
+	// its own, or the row would stay "desired" with no trace of the attempt.
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := r.markState(recordCtx, conn, desired, generation, records, "failed", kind); err != nil {
 		publicationKind := AddressPublicationPending
 		if publicationError != nil {
 			publicationKind = publicationError.Kind
