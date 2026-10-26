@@ -257,6 +257,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	// No transfer is admitted until the authenticated heartbeat supplies policy.
 	transferPolicy := &filetransfer.PolicyStore{}
 	capabilityController := newMachineCapabilityController(nil)
+	capabilityController.Persist(filepath.Join(runtimeConfig.StateRoot, "runtime", "machine-capabilities.json"), uint64(machineRegistration.InstallationGeneration))
 	networkHandler, err := newNetworkChangeHandler(metrics)
 	if err != nil {
 		return nil, err

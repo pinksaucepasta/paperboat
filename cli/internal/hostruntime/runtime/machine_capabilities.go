@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 const machineCapabilitiesSchemaV1 = "paperboat.machine-capabilities/v1"
@@ -45,6 +49,48 @@ type machineCapabilityController struct {
 	status    string
 	errorCode string
 	reconcile machineCapabilityReconciler
+	// statePath keeps the last applied policy across restarts, so admission gates hold while Paperboat
+	// is unreachable (F5-08, F21-11); generation fences it to this installation.
+	statePath  string
+	generation uint64
+}
+
+type persistedMachineCapabilities struct {
+	InstallationGeneration uint64                     `json:"installation_generation"`
+	Desired                machineCapabilitySelection `json:"desired"`
+}
+
+// Persist loads the last applied policy saved for this installation generation into the admission gate
+// and saves each applied policy from then on. A file from another generation, or one that does not
+// parse, is ignored. The loaded policy only opens gates; the first server answer is always applied
+// and wins at once, including one that turns a capability off.
+func (c *machineCapabilityController) Persist(path string, generation uint64) {
+	if c == nil || path == "" || generation == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.statePath, c.generation = path, generation
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) > 4<<10 {
+		return
+	}
+	var saved persistedMachineCapabilities
+	if json.Unmarshal(raw, &saved) != nil || saved.InstallationGeneration != generation {
+		return
+	}
+	c.desired = saved.Desired
+}
+
+func (c *machineCapabilityController) saveLocked() error {
+	if c.statePath == "" {
+		return nil
+	}
+	raw, err := json.Marshal(persistedMachineCapabilities{InstallationGeneration: c.generation, Desired: c.applied})
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(c.statePath, raw, atomicfile.CurrentOwnerOptions(0o600))
 }
 
 func (c *machineCapabilityController) SetReconciler(reconcile machineCapabilityReconciler) {
@@ -142,6 +188,9 @@ func (c *machineCapabilityController) Apply(ctx context.Context, policy machineC
 		return err
 	}
 	c.applied, c.status, c.errorCode = policy.Desired, "applied", ""
+	if err := c.saveLocked(); err != nil {
+		slog.Warn("machine capabilities could not be saved for a restart while Paperboat is unreachable", "error", err)
+	}
 	return nil
 }
 

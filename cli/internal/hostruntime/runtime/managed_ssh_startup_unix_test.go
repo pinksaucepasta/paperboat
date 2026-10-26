@@ -19,7 +19,8 @@ import (
 	"time"
 )
 
-func TestManagedSSHStartsClosedDuringHTTPOutageAndRecovers(t *testing.T) {
+// F5-08: the last verified key stays through an outage at start and across a stop; recovery refreshes it.
+func TestManagedSSHKeepsLastKeysDuringHTTPOutageAndRecovers(t *testing.T) {
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
 	if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); err != nil {
@@ -72,7 +73,7 @@ func TestManagedSSHStartsClosedDuringHTTPOutageAndRecovers(t *testing.T) {
 			t.Fatalf("managed key presence != %t", want)
 		}
 	}
-	assertKey(false)
+	assertKey(true)
 	available.Store(true)
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -88,7 +89,7 @@ func TestManagedSSHStartsClosedDuringHTTPOutageAndRecovers(t *testing.T) {
 	if err := service.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	assertKey(false)
+	assertKey(true)
 }
 
 func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
@@ -115,12 +116,13 @@ func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
 			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 				t.Fatal(readErr)
 			}
-			if bytes.Contains(raw, []byte(key)) {
-				t.Fatal("unavailable or rejected authority retained old key")
+			// F5-08: an unreachable authority keeps the last verified key; a rejection removes it.
+			if kept := bytes.Contains(raw, []byte(key)); kept != tc.retry {
+				t.Fatalf("key kept=%t after %s, want %t", kept, tc.name, tc.retry)
 			}
 		})
 	}
-	for _, authorityErr := range []error{&clientapi.APIError{Status: 503}, nil} {
+	for _, authorityErr := range []error{&clientapi.APIError{Status: 403}, nil} {
 		home := managedSSHRuntimeTestHome(t)
 		if err := os.Symlink(t.TempDir(), filepath.Join(home, ".ssh")); err != nil {
 			t.Fatal(err)

@@ -305,6 +305,7 @@ func TestManagedSSHKeyReconcilerActivatesPromotedHostWithoutRestart(t *testing.T
 	}
 }
 
+// A refresh the authority answers with an error that is not "unavailable" removes the managed keys.
 func TestManagedSSHKeyReconcilerFailsClosedWhenAuthorityRefreshFails(t *testing.T) {
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
@@ -328,6 +329,35 @@ func TestManagedSSHKeyReconcilerFailsClosedWhenAuthorityRefreshFails(t *testing.
 	}
 }
 
+// F5-08: while Paperboat is unreachable (503, timeouts), the last verified managed keys stay in place.
+func TestManagedSSHKeyReconcilerKeepsKeysWhileAuthorityIsUnreachable(t *testing.T) {
+	key := managedSSHTestPublicKey(t)
+	home := managedSSHRuntimeTestHome(t)
+	unavailable := &clientapi.APIError{Status: http.StatusServiceUnavailable}
+	client := &rotatingManagedSSHClient{keys: [][]string{{key}}, observeErrors: []error{nil, unavailable, unavailable, unavailable}}
+	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 11, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		client.mu.Lock()
+		failed := client.hostCalls > 3
+		client.mu.Unlock()
+		if failed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("reconciler did not retry the unreachable authority")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if kept, err := os.ReadFile(filepath.Join(home, ".ssh", "authorized_keys")); err != nil || !bytes.Contains(kept, []byte(key)) {
+		t.Fatalf("managed key removed while Paperboat was unreachable: %q error=%v", kept, err)
+	}
+}
+
 func TestManagedSSHKeyReconcilerReportsTypedInitialAuthorityFailure(t *testing.T) {
 	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{errors.New("authority unavailable")}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 13, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: t.TempDir(), ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
 	if err := service.Start(t.Context()); !errors.Is(err, ErrManagedSSHUnavailable) {
@@ -335,7 +365,8 @@ func TestManagedSSHKeyReconcilerReportsTypedInitialAuthorityFailure(t *testing.T
 	}
 }
 
-func TestManagedSSHKeyReconcilerRemovesManagedKeysOnShutdown(t *testing.T) {
+// F5-08: a stop (restart, update) keeps the last verified keys; only turning managed SSH off removes them.
+func TestManagedSSHKeyReconcilerKeepsManagedKeysOnShutdown(t *testing.T) {
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
 	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 12, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
@@ -349,9 +380,9 @@ func TestManagedSSHKeyReconcilerRemovesManagedKeysOnShutdown(t *testing.T) {
 	if err := service.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := os.ReadFile(path)
-	if err != nil || bytes.Contains(removed, []byte(key)) {
-		t.Fatalf("managed key remained after shutdown: %q error=%v", removed, err)
+	kept, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(kept, []byte(key)) {
+		t.Fatalf("managed key removed by shutdown: %q error=%v", kept, err)
 	}
 }
 

@@ -100,10 +100,8 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 		reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
 		err := s.reconcile(reconcileCtx)
 		cancel()
-		// A managed key is only authoritative while the host can obtain a
-		// current authority response. Retaining it after a failed refresh
-		// would turn a temporary control-plane failure into unbounded
-		// revocation latency.
+		// An unreachable authority keeps the last verified keys (reconcile); an explicit refusal
+		// removed them.
 		if failed = err != nil; failed {
 			slog.Warn("managed SSH authority refresh failed", "error", err)
 		}
@@ -120,12 +118,15 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 		s.refusedAt = time.Now()
 	}
 	if err != nil {
+		// Paperboat unreachable: the last verified keys stay until a revocation the host receives, as
+		// the peer network does (user decision "offline until revoked", F5-08). An explicit answer
+		// (refused, revoked, host keys in use, invalid) still removes them.
+		if !s.hostKeyInUse.Load() && retryableManagedSSHAuthorityError(err) {
+			return &managedSSHAuthorityUnavailable{cause: err}
+		}
 		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
 		if cleanupErr == nil && s.hostKeyInUse.Load() {
 			return &managedSSHHostKeyInUse{cause: err}
-		}
-		if cleanupErr == nil && retryableManagedSSHAuthorityError(err) {
-			return &managedSSHAuthorityUnavailable{cause: err}
 		}
 		return errors.Join(err, cleanupErr)
 	}
@@ -147,18 +148,19 @@ func (s *managedSSHKeyReconciler) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	cancel()
+	// The last verified keys stay across a restart (F5-08); turning managed SSH off removes them
+	// (managedSSHService.cleanupPersisted).
 	select {
 	case <-done:
-		_, err := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
-		return err
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// Only availability failures may keep initial reconciliation alive. Explicit
-// authentication/authorization rejection and invalid local or protocol state
-// still fail startup; no previous keys survive an unavailable authority.
+// Only availability failures may keep initial reconciliation alive, and they keep the last verified
+// keys. Explicit authentication/authorization rejection and invalid local or protocol state fail
+// startup and remove them.
 type managedSSHAuthorityUnavailable struct{ cause error }
 
 func (e *managedSSHAuthorityUnavailable) Error() string {

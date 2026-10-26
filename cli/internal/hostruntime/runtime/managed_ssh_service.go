@@ -91,6 +91,11 @@ func (s *managedSSHService) run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 	for {
+		if localCleanupPending && s.gate.Enabled("ssh.v1") {
+			// Managed SSH is on (the persisted policy holds across a restart): the keys on disk are
+			// the last verified set and stay until the authority answers (F5-08).
+			localCleanupPending = false
+		}
 		if localCleanupPending {
 			if err := s.cleanupPersisted(ctx); err != nil {
 				s.setHealth(health.Unavailable, "cleanup_failed")
@@ -106,7 +111,11 @@ func (s *managedSSHService) run(ctx context.Context) {
 			}
 		}
 		if !s.gate.Enabled("ssh.v1") {
+			running := authority != nil
 			err := stopAuthority()
+			if err == nil && running {
+				localCleanupPending = true // turned off: its keys go on the next pass
+			}
 			if err != nil {
 				s.setHealth(health.Unavailable, "cleanup_failed")
 			} else {
