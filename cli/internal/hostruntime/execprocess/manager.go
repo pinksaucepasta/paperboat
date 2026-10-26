@@ -412,9 +412,9 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 		return Request{}, [sha256.Size]byte{}, ErrInvalid
 	}
 	total := 0
-	for _, arg := range request.Argv {
+	for index, arg := range request.Argv {
 		total += len(arg)
-		if len(arg) == 0 || len(arg) > 4096 || total > 64<<10 || strings.ContainsRune(arg, '\x00') {
+		if index == 0 && arg == "" || len(arg) > 4096 || total > 64<<10 || strings.ContainsRune(arg, '\x00') {
 			return Request{}, [sha256.Size]byte{}, ErrInvalid
 		}
 	}

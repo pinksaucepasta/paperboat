@@ -57,7 +57,12 @@ func TestExactArgvCWDEnvironmentAndSeparateStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{OperationID: "operation_exact", Argv: []string{"/bin/sh", "-c", `printf '%s|%s' "$PWD" "$VALUE"; printf error >&2; exit 7`}, CWD: root, Environment: map[string]string{"VALUE": "a b"}}
+	request := Request{
+		OperationID: "operation_exact", CWD: root, Environment: map[string]string{"VALUE": "a b"},
+		Argv: []string{"/bin/sh", "-c",
+			`printf '%s|%s|%s|%s|%s' "$PWD" "$VALUE" "$#" "$1" "$2"; printf error >&2; exit 7`,
+			"fixture", "", "literal ; $(false)"},
+	}
 	execution, replay, err := manager.Start(context.Background(), request)
 	if err != nil || replay {
 		t.Fatalf("replay=%v err=%v", replay, err)
@@ -76,7 +81,7 @@ func TestExactArgvCWDEnvironmentAndSeparateStreams(t *testing.T) {
 			stderr.Write(event.Data)
 		}
 	}
-	if stdout.String() != resolvedRoot+"|a b" || stderr.String() != "error" {
+	if stdout.String() != resolvedRoot+"|a b|2||literal ; $(false)" || stderr.String() != "error" {
 		t.Fatalf("stdout=%q stderr=%q events=%#v", stdout.String(), stderr.String(), events)
 	}
 }
@@ -588,6 +593,7 @@ func TestValidationRejectsEscapedCWDInvalidEnvironmentAndImplicitDimensions(t *t
 	root := t.TempDir()
 	manager := testManager(t, root, nil)
 	requests := []Request{
+		{OperationID: "operation_bad_executable", Argv: []string{""}, CWD: root},
 		{OperationID: "operation_bad_cwd", Argv: []string{"/bin/true"}, CWD: filepath.Dir(root)},
 		{OperationID: "operation_bad_env", Argv: []string{"/bin/true"}, CWD: root, Environment: map[string]string{"BAD-KEY": "x"}},
 		{OperationID: "operation_bad_size", Argv: []string{"/bin/true"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}},

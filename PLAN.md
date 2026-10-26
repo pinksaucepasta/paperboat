@@ -4936,3 +4936,5 @@ Lane H config-sync PASS on laneh-s313-a/b (revoked team row kept), dev-0f9fe843,
 2026-10-26 | SDK F24 device | L F24-01/03 PASS twice: bounded inventory/total, actual Inbox hash and symlink refusal on fresh pbvm2 pairs; all eight throwaway IDs revoked across four runs.
 F24-00/02 [!]: MCP exec reports transport_unavailable/not_started, while plain exec true/python passes; daemon-diagnostic follow-up blocked by pbvm2 SSH banner timeout (no fifth fixture created).
 CLI CI 40315925420: all except tailnet authority/future PASS; that unchanged check passed one focused race rerun (clock-boundary flake, Lane R notified); earlier preview panic fixed upstream d85ed057.
+
+2026-10-26 | SDK F24 exec | Empty argv entry wrongly refused by execprocess.Manager; existing real-process argv/CWD/streams test RED before fix, GREEN after; empty executable/NUL/bounds still rejected. | F24-02 waits for fixed-build device check; F24-00 destination-fault capture underway, SSH recovered.
