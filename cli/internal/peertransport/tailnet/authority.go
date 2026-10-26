@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
@@ -267,7 +268,10 @@ func strictDecode(raw []byte, value any) error {
 	return nil
 }
 
-func (a *Authority) verify(ctx context.Context, token string, now time.Time) (NetworkConfiguration, string, error) {
+// verify checks a signed configuration. restored is a configuration this authority verified before and
+// persisted: its body hash is checked against the persisted one by the caller instead of the signature (the
+// signing keys may be unreachable with Paperboat), and it is used past its exp (F21-01).
+func (a *Authority) verify(ctx context.Context, token string, now time.Time, restored bool) (NetworkConfiguration, string, error) {
 	var cfg NetworkConfiguration
 	if len(token) > MaxConfigurationBytes {
 		return cfg, "", ErrAuthority
@@ -294,14 +298,19 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	if e1 != nil || e2 != nil || e3 != nil || len(header) > 1024 || strictDecode(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != "paperboat-network-config+jwt" || !validID(h.KeyID) {
 		return cfg, "", ErrAuthority
 	}
-	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
-	if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictDecode(body, &cfg) != nil {
+	if !restored {
+		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
+		if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
+			return cfg, "", ErrAuthority
+		}
+	}
+	if strictDecode(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || !validBinding(cfg.Self) || len(cfg.Peers) > MaxConfigurationPeers {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.ExpiresAt <= now.Unix() {
+	if cfg.ExpiresAt <= now.Unix() && !restored {
 		return cfg, "", ErrExpiredAuthority
 	}
 	s, want := cfg.Self, a.options.Self
@@ -409,7 +418,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cfg, hash, err := a.verify(ctx, token, time.Now())
+	cfg, hash, err := a.verify(ctx, token, time.Now(), false)
 	if err != nil {
 		return err
 	}
@@ -459,6 +468,12 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		s.VirtualAddress = cfg.Self.VirtualAddress
 		return nil
 	})
+	if err == nil {
+		// Kept for a restart without Paperboat (its hash is now custody's); a failed write loses only that.
+		if saveErr := a.options.Store.SavePeerNetworkConfiguration(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, token); saveErr != nil {
+			diagnosticlog.TryWarn("peer network configuration was not kept for an offline restart", "error", saveErr)
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed {
@@ -477,12 +492,16 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	if time.Now().Unix() >= cfg.ExpiresAt {
 		return ErrExpiredAuthority
 	}
+	return a.installLocked(cfg, selected, time.Now())
+}
+
+func (a *Authority) installLocked(cfg NetworkConfiguration, selected key.NodePrivate, verifiedAt time.Time) error {
 	if a.current != nil && a.current.Self != cfg.Self {
 		a.dropLocked()
 	}
 	a.expired = false
 	a.current = &cfg
-	a.lastVerified = time.Now()
+	a.lastVerified = verifiedAt
 	a.expiresAt.Store(cfg.ExpiresAt)
 	select {
 	case a.refreshWake <- struct{}{}:
@@ -494,6 +513,59 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		return err
 	}
 	return nil
+}
+
+var errRestoreReadOnly = errors.New("peer network state read only")
+
+// ErrNothingToRestore is Restore's answer when no verified configuration was persisted.
+var ErrNothingToRestore = errors.New("no verified peer network configuration to restore")
+
+// Restore installs the configuration this authority last verified and persisted, so a daemon restarted while
+// Paperboat is unreachable keeps its peers (F21-01, offline until revoked). It is the exact persisted document:
+// same body hash, generation, binding and key as the state it was installed with. A configuration already in
+// force is kept. The next successful refresh replaces it as usual.
+func (a *Authority) Restore(ctx context.Context) error {
+	token, err := a.options.Store.LoadPeerNetworkConfiguration(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, MaxConfigurationBytes)
+	if err != nil {
+		return err
+	}
+	var hash, address string
+	var raw []byte
+	var generation, keyGeneration uint64
+	err = a.state(func(s *config.PeerNetworkState) error {
+		hash, address, generation, keyGeneration = s.ConfigHash, s.VirtualAddress, s.Generation, s.KeyGeneration
+		raw = append([]byte(nil), s.PrivateKey...)
+		return errRestoreReadOnly
+	})
+	defer clear(raw)
+	if !errors.Is(err, errRestoreReadOnly) {
+		return err
+	}
+	if token == "" {
+		return ErrNothingToRestore
+	}
+	cfg, got, err := a.verify(ctx, token, time.Now(), true)
+	if err != nil || got != hash || cfg.Generation != generation || cfg.Self.VirtualAddress != address || cfg.Self.KeyGeneration != keyGeneration || cfg.Self != a.options.Self {
+		return errors.Join(ErrAuthority, err)
+	}
+	selected, err := privateKey(raw)
+	if err != nil {
+		return err
+	}
+	if pub := selected.Public().Raw32(); base64.RawURLEncoding.EncodeToString(pub[:]) != cfg.Self.WireGuardPublicKey {
+		return ErrAuthority
+	}
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return ErrAuthority
+	}
+	if a.current != nil {
+		return nil
+	}
+	return a.installLocked(cfg, selected, time.Unix(cfg.IssuedAt, 0))
 }
 
 func (a *Authority) dropLocked() {
@@ -540,6 +612,7 @@ func (a *Authority) Close() error {
 	a.recoveryWorkers.Wait()
 	return nil
 }
+
 // OutOfSync reports whether the configuration in force is past its refresh hint: Paperboat has not answered
 // since, and the daemon is running on its last verified state (pb status/doctor "out of sync with Paperboat").
 func (a *Authority) OutOfSync() bool {

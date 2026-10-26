@@ -647,7 +647,7 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 		return nil, nil, nil, err
 	}
 	register, cancelRegister := context.WithTimeout(ctx, 15*time.Second)
-	err = authority.Register(register, networkAPI, false)
+	err = authority.RegisterOrRestore(register, networkAPI, false)
 	cancelRegister()
 	if err != nil {
 		_ = authority.Close()

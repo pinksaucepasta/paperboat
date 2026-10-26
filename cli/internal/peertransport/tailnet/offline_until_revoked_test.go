@@ -2,10 +2,12 @@ package tailnet
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"tailscale.com/types/key"
 )
 
@@ -90,5 +92,68 @@ func TestHostSessionRightsLastUntilRevoked(t *testing.T) {
 	}
 	if a.Allows("cli_peer", "host_test", "exec", "accept") {
 		t.Fatal("a capability that was not granted is allowed")
+	}
+}
+
+type unreachableKeys struct{}
+
+func (unreachableKeys) Lookup(context.Context, string) (ed25519.PublicKey, bool, error) {
+	return nil, false, errors.New("paperboat unreachable")
+}
+
+// F21-01: a daemon restarted while Paperboat is unreachable (signing keys unreachable too) restores the
+// configuration it last verified and keeps its peers; an altered persisted file is refused.
+func TestRestartWithoutPaperboatRestoresTheLastVerifiedPeers(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.ExpiresAt = time.Now().Unix() + 2
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.Close()
+	time.Sleep(time.Until(time.Unix(cfg.ExpiresAt, 0)) + 50*time.Millisecond)
+
+	restart := func() *Authority {
+		t.Helper()
+		next, err := NewAuthority(AuthorityOptions{Store: a.options.Store, Issuer: a.options.Issuer, Self: cfg.Self, Keys: unreachableKeys{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = next.Close() })
+		return next
+	}
+	refused := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+		return api.PeerNetworkRegistrationResult{}, &api.APIError{Status: 403, Code: "machine_revoked"}
+	}}
+	if err := restart().RegisterOrRestore(t.Context(), refused, false); err == nil {
+		t.Fatal("a machine Paperboat refused restored its old peers")
+	}
+	unreachable := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+		return api.PeerNetworkRegistrationResult{}, errors.New("dial tcp: connection refused")
+	}}
+	restarted := restart()
+	if err := restarted.RegisterOrRestore(t.Context(), unreachable, false); err != nil {
+		t.Fatal("restart without Paperboat lost the verified configuration:", err)
+	}
+	if _, err := restarted.Peer("machine_test"); err != nil {
+		t.Fatal("restart without Paperboat dropped the peer:", err)
+	}
+	if !restarted.OutOfSync() || restarted.LastVerifiedAt().Unix() != cfg.IssuedAt {
+		t.Fatal("a restored configuration must report out of sync since it was issued")
+	}
+
+	path, err := a.options.Store.LoadPeerNetworkConfiguration(a.options.Issuer, cfg.Self.AccountID, cfg.Self.EndpointID, MaxConfigurationBytes)
+	if err != nil || path == "" {
+		t.Fatal("configuration was not persisted:", err)
+	}
+	altered := cfg
+	altered.Peers = append(altered.Peers, NetworkPeer{Identity: networkTestBinding("machine", "machine_extra", "fd7a:115c:a1e0::9", key.NewNode()), Scopes: cfg.Peers[0].Scopes})
+	if err := a.options.Store.SavePeerNetworkConfiguration(a.options.Issuer, cfg.Self.AccountID, cfg.Self.EndpointID, networkToken(t, signer, altered)); err != nil {
+		t.Fatal(err)
+	}
+	if err := restart().Restore(t.Context()); !errors.Is(err, ErrAuthority) {
+		t.Fatalf("an altered persisted configuration = %v, want refused", err)
 	}
 }

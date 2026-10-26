@@ -887,14 +887,14 @@ func TestNetworkIssuedAtToleratesClockSkewWithoutExtendingExpiry(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	token := networkToken(t, signer, c)
 	for _, seconds := range []int64{1, 3, 60} {
-		if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-seconds, 0)); err != nil {
+		if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-seconds, 0), false); err != nil {
 			t.Fatalf("%ds clock skew: %v", seconds, err)
 		}
 	}
-	if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-61, 0)); err == nil {
+	if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-61, 0), false); err == nil {
 		t.Fatal("excessive clock skew accepted")
 	}
-	if _, _, err := a.verify(t.Context(), token, time.Unix(c.ExpiresAt, 0)); err == nil {
+	if _, _, err := a.verify(t.Context(), token, time.Unix(c.ExpiresAt, 0), false); err == nil {
 		t.Fatal("expired authority accepted")
 	}
 }

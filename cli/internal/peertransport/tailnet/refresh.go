@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 type NetworkAPI interface {
@@ -45,6 +46,23 @@ func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool
 		return err
 	}
 	return a.Refresh(ctx, client)
+}
+
+// RegisterOrRestore registers and refreshes; when Paperboat cannot be reached (no answer, or a 5xx), it
+// restores the configuration last verified on this machine instead, so a restart during an outage keeps the
+// peers (F21-01). An answer refusing the machine (4xx) is returned: refused authority is never restored.
+// Run keeps refreshing either way.
+func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, rotate bool) error {
+	err := a.Register(ctx, client, rotate)
+	var answered *api.APIError
+	if err == nil || errors.As(err, &answered) && answered.Status < 500 {
+		return err
+	}
+	if restoreErr := a.Restore(context.WithoutCancel(ctx)); restoreErr != nil {
+		return errors.Join(err, restoreErr)
+	}
+	diagnosticlog.TryWarn("Paperboat is unreachable; using the last verified peer network configuration", "error", err)
+	return nil
 }
 
 func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {

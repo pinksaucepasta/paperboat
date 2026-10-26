@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 )
 
 // PeerNetworkState is one atomic secure-store record. Keys are independent of
@@ -98,4 +101,51 @@ func validPeerNetworkState(s PeerNetworkState) bool {
 	}
 	hash, err := hex.DecodeString(s.ConfigHash)
 	return err == nil && len(hash) == 32 && hex.EncodeToString(hash) == s.ConfigHash && len(s.PrivateKey) == 32
+}
+
+// The last verified signed peer network configuration is kept in its own owner-only file beside the profile,
+// so a daemon restarted while Paperboat is unreachable keeps its peers (F21-01). Integrity comes from custody:
+// the reader installs it only if its body hash equals PeerNetworkState.ConfigHash.
+func (s ProfileStore) peerNetworkConfigurationPath(issuer, accountID, endpointID string) (string, error) {
+	if s.Path == "" || !validCredentialID(accountID) || !validCredentialID(endpointID) {
+		return "", errors.New("peer network configuration path is invalid")
+	}
+	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + endpointID))
+	return filepath.Join(s.Path, "peer-network-config-v1-"+hex.EncodeToString(digest[:])+".jwt"), nil
+}
+
+// SavePeerNetworkConfiguration replaces the persisted configuration with token, atomically, mode 0600.
+func (s ProfileStore) SavePeerNetworkConfiguration(issuer, accountID, endpointID, token string) error {
+	path, err := s.peerNetworkConfigurationPath(issuer, accountID, endpointID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.Path, 0o700); err != nil {
+		return err
+	}
+	return writeCredentialFile(path, []byte(token))
+}
+
+// LoadPeerNetworkConfiguration reads the persisted configuration of at most limit bytes; "" when none.
+func (s ProfileStore) LoadPeerNetworkConfiguration(issuer, accountID, endpointID string, limit int) (string, error) {
+	path, err := s.peerNetworkConfigurationPath(issuer, accountID, endpointID)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > limit {
+		return "", errors.New("persisted peer network configuration is too large")
+	}
+	return string(data), nil
 }
