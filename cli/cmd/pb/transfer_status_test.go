@@ -64,6 +64,10 @@ func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 			if !bytes.Contains(body, []byte(`"source_machine_id":"machine_source"`)) {
 				t.Errorf("descriptor body=%s", body)
 			}
+			// The server refuses an undeclared descriptor request (history lookups included).
+			if !bytes.Contains(body, []byte(`"transfer_mode":"automatic"`)) || !bytes.Contains(body, []byte(`"declared_bytes":1`)) {
+				t.Errorf("descriptor request declares no transfer: %s", body)
+			}
 			writeAPIData(t, writer, api.FileTransfer{Endpoint: "https://machine.example.test/v1/file-transfers", SourceMachineID: "machine_source", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", Auth: api.AuthMaterial{Method: "bearer", Token: "transfer-token", AccessSessionID: "access_1", ExpiresAt: time.Now().Add(time.Hour)}})
 		default:
 			http.NotFound(writer, request)

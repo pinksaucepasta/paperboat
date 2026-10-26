@@ -739,7 +739,9 @@ func transferClientForCommand(cobraCommand *cobra.Command, args []string) (trans
 		return thisComputerTransfers{root: root, machineID: sourceMachineID, userID: destination.OwnerAccount}, destination, noopCloser{}, nil
 	}
 	sessionID, _ := cobraCommand.Flags().GetString("session")
-	descriptor, err := backend.MachineFileTransferDescriptor(ctx.Context, destination.ID, sourceMachineID, sessionID)
+	// The server signs only a declared transfer. A history lookup moves no data, so it declares the smallest
+	// automatic one; an undeclared request was refused as "pb too old" and shown as "server rejected the request".
+	descriptor, err := backend.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, "", "", api.TransferDeclaration{Mode: "automatic", Bytes: 1})
 	if err != nil {
 		return nil, api.UserMachine{}, nil, friendlyCommandError(err)
 	}
