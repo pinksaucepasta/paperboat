@@ -44,7 +44,7 @@ func TestPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"sendCommand":      "requireLocalDaemonService",
+		"runSendCommand":   "requireLocalDaemonService",
 		"actionPing":       "requireLocalDaemonService",
 		"actionRemoteExec": "requireLocalDaemonService",
 	}
