@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -812,4 +813,38 @@ func TestInputDecisionsArePrunedToTheWindow(t *testing.T) {
 	if got := ids(); len(got) != 1 || !got["2:1"] {
 		t.Fatalf("after generation change: %v", got)
 	}
+}
+
+// PLAN 3b File transfer modes, release N of two: the store a later release migrates to (the per-file 50 MiB
+// CHECK lifted) must open here, or rolling back from that release would find the store "corrupt".
+func TestStoreOpensTheMigratedUnboundedFileTransferTable(t *testing.T) {
+	root := t.TempDir()
+	state, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table string
+	if err := state.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name='file_transfers'`).Scan(&table); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE file_transfers RENAME TO file_transfers_old`,
+		strings.Replace(table, "CHECK(size BETWEEN 0 AND 52428800)", "CHECK(size >= 0)", 1),
+		`INSERT INTO file_transfers SELECT * FROM file_transfers_old`,
+		`DROP TABLE file_transfers_old`,
+		`CREATE INDEX file_transfers_pending ON file_transfers(delivery_client_id,session_id,created_at) WHERE state='pending'`,
+		`CREATE INDEX file_transfers_expiry ON file_transfers(expires_at)`,
+	} {
+		if _, err := state.db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatalf("the migrated store did not open: %v", err)
+	}
+	_ = reopened.Close()
 }
