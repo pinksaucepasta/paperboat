@@ -31,6 +31,29 @@ import (
 	"golang.org/x/net/http2"
 )
 
+// acquireAdmittedCarrier acquires the runtime carrier an admission fixture describes.
+func acquireAdmittedCarrier(source *MachineAttachmentSessionSource, ctx context.Context, a CarrierAdmission) (AttachmentSession, error) {
+	b := a.Binding
+	return source.AcquireRuntimeCarrier(ctx, RuntimeCarrierAdmission{
+		AccountID: b.AccountID, MachineID: b.HostID, MachineIdentityPublicKey: b.MachineIdentityPublicKey,
+		MachineIdentityThumbprint: b.MachineIdentityThumbprint, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID,
+		SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration,
+		EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch,
+		EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM,
+		EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt,
+	})
+}
+
+func prepareTestAdmission(s *MachineAttachmentSessionSource, a CarrierAdmission, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
+	b := a.Binding
+	return s.prepareCarrier(b.AccountID, b.HostID, b.MachineIdentityPublicKey, b.TunnelID, b.ConnectorID, b.SessionID, b.ProcessGeneration, b.ConfigGeneration, b.EdgeNodeID, b.EdgeProcessEpoch, b.EdgeCarrierServerSPKISHA256, b.EdgeCarrierServerCertificateChainPEM, a.EdgeEndpoints, a.ExpiresAt, now)
+}
+
+func testEndpointConfigs(s *MachineAttachmentSessionSource, a CarrierAdmission, expected connector.DataCarrierIdentity, leaf tls.Certificate) (connector.NetworkDialerConfig, bool, bool, error) {
+	b := a.Binding
+	return s.endpointConfigsValues(a.EdgeEndpoints, expected, b.EdgeNodeID, b.EdgeProcessEpoch, b.EdgeCarrierServerSPKISHA256, b.EdgeCarrierServerCertificateChainPEM, leaf)
+}
+
 func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testing.T) {
 	ctx := context.Background()
 	stateRoot, store := newMachineAttachmentIdentity(t)
@@ -77,11 +100,11 @@ func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testin
 		}
 	})
 
-	first, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	first, err := acquireAdmittedCarrier(source, ctx, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	second, err := acquireAdmittedCarrier(source, ctx, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +171,7 @@ func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testin
 		t.Fatalf("idempotent release = %v", err)
 	}
 
-	third, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	third, err := acquireAdmittedCarrier(source, ctx, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +400,7 @@ func TestMachineAttachmentAcquirePreservesCanceledDialFailureAndCleanup(t *testi
 
 	result := make(chan error, 1)
 	go func() {
-		_, acquireErr := source.AcquirePreviewDataCarrier(ctx, admission)
+		_, acquireErr := acquireAdmittedCarrier(source, ctx, admission)
 		result <- acquireErr
 	}()
 	select {
@@ -473,7 +496,7 @@ func TestMachineAttachmentProductionSourceUsesAuthenticatedHTTP2CONNECT(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, endpoints, poolConfig, err := source.prepareAdmission(admission, now)
+	_, _, _, endpoints, poolConfig, err := prepareTestAdmission(source, admission, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,12 +618,12 @@ func TestMachineAttachmentSessionSourceRejectsMachineAndEndpointMismatch(t *test
 	}
 	badMachine := valid
 	badMachine.Binding.MachineIdentityPublicKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x99}, ed25519.PublicKeySize))
-	if _, err := source.AcquirePreviewDataCarrier(context.Background(), badMachine); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
+	if _, err := acquireAdmittedCarrier(source, context.Background(), badMachine); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
 		t.Fatalf("machine mismatch err=%v", err)
 	}
 	badEndpoint := valid
 	badEndpoint.EdgeEndpoints = []string{"https://edge.example.test"}
-	if _, err := source.AcquirePreviewDataCarrier(context.Background(), badEndpoint); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
+	if _, err := acquireAdmittedCarrier(source, context.Background(), badEndpoint); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
 		t.Fatalf("endpoint mismatch err=%v", err)
 	}
 }
@@ -619,7 +642,7 @@ func TestMachineAttachmentSessionSourceRequiresPinnedTrustAndExactEdgeTuple(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, _, _, err := source.endpointConfigs(admission, identityValue, leaf)
+	endpoints, _, _, err := testEndpointConfigs(source, admission, identityValue, leaf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +655,7 @@ func TestMachineAttachmentSessionSourceRequiresPinnedTrustAndExactEdgeTuple(t *t
 	stale.Binding.EdgeProcessEpoch = "edge_epoch_02"
 	_, staleCertificate := testEdgeServerCertificate(t, now, identityValue, stale.Binding.EdgeProcessEpoch)
 	stale.Binding.EdgeCarrierServerSPKISHA256, stale.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, staleCertificate)
-	staleEndpoints, _, _, err := source.endpointConfigs(stale, identityValue, leaf)
+	staleEndpoints, _, _, err := testEndpointConfigs(source, stale, identityValue, leaf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +715,7 @@ func TestMachineAttachmentSessionSourceUsesStandardTLSHostnameAndRoots(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, _, _, err := source.endpointConfigs(admission, identityValue, leaf)
+	endpoints, _, _, err := testEndpointConfigs(source, admission, identityValue, leaf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -836,21 +859,20 @@ func newMachineAttachmentIdentity(t *testing.T) (string, *identity.Store) {
 
 func machineAttachmentAdmission(t *testing.T, store *identity.Store, now time.Time, identityValue connector.DataCarrierIdentity, endpoints []string) CarrierAdmission {
 	t.Helper()
-	_, attachment := providerTestLeaseAttachment(t, now, "preview_source", "operation_source_01", "route_source_01", identityValue, 1)
 	key := store.Current()
 	publicKey := base64.RawURLEncoding.EncodeToString(key.Public())
-	attachment.EdgeEndpoints = append([]string(nil), endpoints...)
-	attachment.Binding.MachineIdentityPublicKey = publicKey
-	attachment.Binding.MachineIdentityThumbprint = machineIdentityThumbprint(publicKey)
-	_, edgeCertificate := testEdgeServerCertificate(t, now, identityValue, attachment.Binding.EdgeProcessEpoch)
-	attachment.Binding.EdgeCarrierServerSPKISHA256, attachment.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, edgeCertificate)
-	if err := attachment.Validate(now); err != nil {
-		t.Fatal(err)
+	admission := CarrierAdmission{
+		Binding: Binding{
+			AccountID: identityValue.AccountID, HostID: identityValue.HostID, TunnelID: identityValue.TunnelID,
+			ConnectorID: identityValue.ConnectorID, SessionID: identityValue.SessionID,
+			ProcessGeneration: identityValue.ProcessGeneration, ConfigGeneration: identityValue.Generation,
+			EdgeNodeID: "edge_node_01", EdgeProcessEpoch: "edge_epoch_01",
+			MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: machineIdentityThumbprint(publicKey),
+		},
+		EdgeEndpoints: append([]string(nil), endpoints...), ExpiresAt: now.Add(30 * time.Minute),
 	}
-	admission, err := attachment.Admission()
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, edgeCertificate := testEdgeServerCertificate(t, now, identityValue, admission.Binding.EdgeProcessEpoch)
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, edgeCertificate)
 	return admission
 }
 
@@ -885,7 +907,7 @@ func TestMachineAttachmentCarrierTrustsPinnedSelfSignedIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, h2, h3, err := source.endpointConfigs(admission, identityValue, leaf)
+	endpoints, h2, h3, err := testEndpointConfigs(source, admission, identityValue, leaf)
 	if err != nil || !h2 || !h3 {
 		t.Fatalf("endpoint trust: %v", err)
 	}

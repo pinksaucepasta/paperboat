@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -486,10 +487,8 @@ func previewDispatchFailureCode(err error) string {
 		switch {
 		case attachmentDispatchContains(nodes, ErrAttachmentBinding), attachmentDispatchContains(nodes, ErrMachineAttachmentSessionInvalid):
 			return "attachment_binding_invalid"
-		case attachmentDispatchContains(nodes, ErrPreviewCarrierProviderUnavailable), attachmentDispatchContains(nodes, ErrMachineAttachmentSessionUnavailable):
+		case attachmentDispatchContains(nodes, ErrPreviewEndpointsNotServed), attachmentDispatchContains(nodes, ErrMachineAttachmentSessionUnavailable):
 			return "attachment_carrier_unavailable"
-		case attachmentDispatchContains(nodes, ErrAttachmentClientUnavailable):
-			return "attachment_control_unavailable"
 		case attachmentDispatchContains(nodes, ErrDataCarrierPreviewOrigin):
 			return "origin_unavailable"
 		case attachmentDispatchContains(nodes, ErrLeaseExpired):
@@ -512,9 +511,8 @@ func attachmentDispatchExpectedOnly(nodes []machineAttachmentDialErrorNode) bool
 	expected := [...]error{
 		ErrAttachmentBinding,
 		ErrMachineAttachmentSessionInvalid,
-		ErrPreviewCarrierProviderUnavailable,
+		ErrPreviewEndpointsNotServed,
 		ErrMachineAttachmentSessionUnavailable,
-		ErrAttachmentClientUnavailable,
 		ErrDataCarrierPreviewOrigin,
 		ErrLeaseExpired,
 	}

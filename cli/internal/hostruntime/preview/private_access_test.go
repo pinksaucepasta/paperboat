@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 )
 
@@ -92,21 +93,8 @@ func TestPrivateAccessSourceIssuesMachineProofAndOpensBoundCarrierStream(t *test
 		t.Fatal(err)
 	}
 	source.now = func() time.Time { return now.Add(123 * time.Millisecond) }
-	lease, attachment := providerTestLeaseAttachment(t, now, "preview_private", "operation_private_01", "route_private_01", identity, 3)
-	lease.AccessMode = "private"
-	attachment.AccessMode = "private"
-	attachment.Binding.LeaseGeneration = 3
-	admission, err := attachment.Admission()
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := source.register(lease, admission, pair.active, identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token == 0 {
-		t.Fatal("registration token is zero")
-	}
+	lease, admission := privateTestLeaseAdmission(t, now, identity)
+	registerTestRoute(t, source, lease, admission, pair.active, identity)
 
 	edgeResult := make(chan error, 1)
 	go func() {
@@ -419,14 +407,7 @@ func TestPrivateAccessorPreviewHTTPOutlivesGrantAndRevokes(t *testing.T) {
 		t.Fatal(err)
 	}
 	source.now = func() time.Time { return now.Add(123 * time.Millisecond) }
-	lease, attachment := providerTestLeaseAttachment(t, now, "preview_private", "operation_private_01", "route_private_01", identity, 3)
-	lease.AccessMode = "private"
-	attachment.AccessMode = "private"
-	attachment.Binding.LeaseGeneration = 3
-	admission, err := attachment.Admission()
-	if err != nil {
-		t.Fatal(err)
-	}
+	lease, admission := privateTestLeaseAdmission(t, now, identity)
 	stateRoot, store := newMachineAttachmentIdentity(t)
 	public := base64.RawURLEncoding.EncodeToString(store.Current().Public())
 	thumb, err := connectorprotocol.IdentityThumbprint(store.Current().Public())
@@ -618,4 +599,39 @@ func TestRoutesSnapshotIsSharedByEverySessionForASecond(t *testing.T) {
 	if _, err := client.snapshot(t.Context()); err != nil || requests.Load() != 2 {
 		t.Fatalf("a check a second later made %d requests in total (err %v), want a fresh snapshot", requests.Load(), err)
 	}
+}
+
+// privateTestLeaseAdmission is a private preview lease at generation 3 and the carrier admission
+// binding it to identity's carrier.
+func privateTestLeaseAdmission(t *testing.T, now time.Time, identity connector.DataCarrierIdentity) (Lease, CarrierAdmission) {
+	t.Helper()
+	lease := Lease{
+		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_private", AccountID: identity.AccountID, ActorID: "actor_01",
+		OwnerMachineID: identity.HostID, OwnerSessionID: "owner_session_01", OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		AccessMode: "private", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour),
+		State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now.Add(-time.Minute), LastRenewedAt: now,
+		CreateOperationID: "operation_private_01", Generation: 3, ETag: formatLeaseETag("preview_private", 3),
+	}
+	admission := CarrierAdmission{AccessMode: "private", EdgeEndpoints: []string{"h2://edge.example.test"}, ExpiresAt: now.Add(30 * time.Minute), Binding: Binding{
+		AccountID: identity.AccountID, PreviewID: lease.ID, OperationID: lease.CreateOperationID, OwnerMachineID: identity.HostID, OwnerSessionID: lease.OwnerSessionID,
+		HostID: identity.HostID, LeaseGeneration: 3, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID,
+		ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, RouteID: "route_private_01", RouteGeneration: 1,
+		EdgeNodeID: "edge_node_01", EdgeProcessEpoch: "edge_epoch_01",
+	}}
+	_, edgeCertificate := testEdgeServerCertificate(t, now, identity, admission.Binding.EdgeProcessEpoch)
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, edgeCertificate)
+	return lease, admission
+}
+
+// registerTestRoute publishes an owner route for lease on active, as an endpoint carrier does.
+func registerTestRoute(t *testing.T, s *PrivateAccessSource, lease Lease, admission CarrierAdmission, active *connector.ActiveDataCarrier, identity connector.DataCarrierIdentity) {
+	t.Helper()
+	host, err := privateAccessEndpointHost(lease.Endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	s.ownerRoutes[host] = privateAccessRoute{lease: lease, admission: admission, active: active, identity: identity, token: s.next}
 }

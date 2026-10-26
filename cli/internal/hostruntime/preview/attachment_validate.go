@@ -2,7 +2,7 @@ package preview
 
 import (
 	"bytes"
-	"context"
+
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,59 +13,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
-	"time"
 )
-
-func decodeAttachmentEnvelope(data []byte, now time.Time) (Attachment, error) {
-	if len(data) == 0 || len(data) > attachmentResponseMaxBytes {
-		return Attachment{}, ErrAttachmentClientInvalid
-	}
-	if err := rejectAttachmentDuplicateFields(data); err != nil {
-		return Attachment{}, fmt.Errorf("%w: response JSON: %v", ErrAttachmentClientInvalid, err)
-	}
-	var envelope struct {
-		Data json.RawMessage `json:"data"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&envelope); err != nil || len(envelope.Data) == 0 {
-		return Attachment{}, fmt.Errorf("%w: invalid response envelope", ErrAttachmentClientInvalid)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return Attachment{}, fmt.Errorf("%w: response has trailing data", ErrAttachmentClientInvalid)
-	}
-	if err := rejectAttachmentDuplicateFields(envelope.Data); err != nil {
-		return Attachment{}, fmt.Errorf("%w: attachment JSON: %v", ErrAttachmentClientInvalid, err)
-	}
-	var attachment Attachment
-	attachmentDecoder := json.NewDecoder(bytes.NewReader(envelope.Data))
-	if err := attachmentDecoder.Decode(&attachment); err != nil {
-		return Attachment{}, fmt.Errorf("%w: invalid attachment", ErrAttachmentClientInvalid)
-	}
-	if err := attachmentDecoder.Decode(&struct{}{}); err != io.EOF {
-		return Attachment{}, fmt.Errorf("%w: attachment has trailing data", ErrAttachmentClientInvalid)
-	}
-	if err := attachment.Validate(now); err != nil {
-		return Attachment{}, err
-	}
-	return attachment, nil
-}
-
-func validateAttachmentForRequest(attachment Attachment, request AttachmentRequest) error {
-	if attachment.PreviewID != request.PreviewID || attachment.OperationID != request.OperationID || attachment.OwnerMachineID != request.OwnerMachineID || attachment.OwnerSessionID != request.OwnerSessionID || attachment.IdempotencyKey != request.IdempotencyKey || attachment.RequestID != request.RequestID || attachment.CorrelationID != request.CorrelationID {
-		return fmt.Errorf("%w: response identity differs from request", ErrAttachmentBinding)
-	}
-	// The authenticated lease revision can advance on a deadline-only renewal
-	// while the server retains the exact admitted carrier generation.
-	leaseGeneration := leaseGenerationForID(request.PreviewID, request.LeaseETag)
-	if attachment.Binding.PreviewID != request.PreviewID || attachment.Binding.OperationID != request.OperationID || attachment.Binding.OwnerMachineID != request.OwnerMachineID || attachment.Binding.OwnerSessionID != request.OwnerSessionID || leaseGeneration < 1 || attachment.Binding.LeaseGeneration == 0 || attachment.Binding.LeaseGeneration > uint64(leaseGeneration) {
-		return fmt.Errorf("%w: response binding differs from request", ErrAttachmentBinding)
-	}
-	want, err := request.Hash(attachment.AccountID)
-	if err != nil || attachment.RequestHash != want {
-		return fmt.Errorf("%w: response request hash differs from request", ErrAttachmentBinding)
-	}
-	return nil
-}
 
 func validateAttachmentTarget(target LeaseTarget) error {
 	if len(target.Scheme) == 0 || len(target.Scheme) > 32 || len(target.Address) == 0 || len(target.Address) > 512 || hasAttachmentControl(target.Scheme) || hasAttachmentControl(target.Address) {
@@ -212,7 +160,3 @@ func rejectAttachmentDuplicateFields(data []byte) error {
 	}
 	return nil
 }
-
-var _ interface {
-	Allocate(context.Context, AttachmentRequest) (Attachment, error)
-} = (*AttachmentClient)(nil)

@@ -15,7 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
@@ -23,6 +22,9 @@ import (
 var (
 	ErrMachinePreviewRuntimeInvalid = errors.New("invalid machine preview runtime")
 	ErrMachinePreviewRuntimeClosed  = errors.New("machine preview runtime is closed")
+	// ErrPreviewEndpointsNotServed means this machine's agent holds no runtime carrier whose
+	// edges serve preview endpoints, so the preview has nowhere to run.
+	ErrPreviewEndpointsNotServed = errors.New("this machine's agent is not serving previews yet; check `pb status` and retry")
 )
 
 // MachinePreviewRuntimeConfig is the production composition boundary for a
@@ -50,10 +52,6 @@ type MachinePreviewRuntimeConfig struct {
 	Inspector     *inspector.Store
 	Registry      *inspector.Registry
 	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
-
-	// PlacementEvents wakes the placement watch of every carrier when a preview of this machine
-	// changes on the server; nil polls at the placement interval only.
-	PlacementEvents *machineevents.Subscription
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -61,14 +59,10 @@ type MachinePreviewRuntimeConfig struct {
 // runtime therefore share the machine identity/carrier safely; stopping one
 // route only drops its own reference.
 type MachinePreviewRuntime struct {
-	attachments *AttachmentClient
-	sessions    *MachineAttachmentSessionSource
-	provider    *AttachmentPreviewCarrierProvider
-	private     *PrivateAccessSource
-	auth        *machinecontrol.Source
-	machineID   string
-
-	placementEvents *machineevents.Subscription
+	sessions  *MachineAttachmentSessionSource
+	private   *PrivateAccessSource
+	auth      *machinecontrol.Source
+	machineID string
 
 	// route is the template for a preview route served on one of the agent's runtime carriers
 	// (PLAN 3a); agent is set by BindAgentCarriers.
@@ -118,13 +112,6 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 	if err != nil {
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
-	attachments, err := NewAttachmentClient(AttachmentClientConfig{
-		ControlURL: control.String(), AllowedHosts: []string{control.Hostname()},
-		Tokens: auth, Identities: auth, Proofs: auth, Transport: config.Transport,
-	})
-	if err != nil {
-		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
-	}
 	sessions, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{
 		StateRoot: config.StateRoot,
 		Carrier:   config.Carrier, TLSLeafLifetime: config.TLSLeafLifetime, SessionFactory: config.SessionFactory,
@@ -141,24 +128,13 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
-	provider, err := NewAttachmentPreviewCarrierProvider(AttachmentPreviewCarrierProviderConfig{
-		BrowserIngress: browserIngress, Sessions: sessions, PrivateAccess: privateAccess, RunContext: config.RunContext, QueueDepth: config.QueueDepth, MaxStreams: config.MaxStreams,
-		OriginDial: config.OriginDial, OriginDialTimeout: config.OriginDialTimeout, OriginCloseTimeout: config.OriginCloseTimeout,
-		ObserveStreamError: config.ObserveStreamError,
-		Inspector:          config.Inspector, Registry: config.Registry,
-		InspectorHTTP: config.InspectorHTTP,
-	})
-	if err != nil {
-		_ = sessions.Close(context.WithoutCancel(config.RunContext))
-		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
-	}
 	route := DataCarrierPreviewCarrierConfig{
 		DialOrigin: config.OriginDial, MaxStreams: config.MaxStreams, OriginDialTimeout: config.OriginDialTimeout,
 		OriginCloseTimeout: config.OriginCloseTimeout, ObserveStreamError: config.ObserveStreamError,
 		BrowserIngress: browserIngress, BrowserRouteGeneration: endpointRouteRevision,
 		Inspector: config.Inspector, Registry: config.Registry, InspectorHTTP: config.InspectorHTTP,
 	}
-	return &MachinePreviewRuntime{attachments: attachments, sessions: sessions, provider: provider, private: privateAccess, auth: auth, machineID: registration.MachineID, placementEvents: config.PlacementEvents, route: route}, nil
+	return &MachinePreviewRuntime{sessions: sessions, private: privateAccess, auth: auth, machineID: registration.MachineID, route: route}, nil
 }
 
 // attachPrivate lets this machine's own browser reach its private preview through the local
@@ -171,7 +147,7 @@ func (r *MachinePreviewRuntime) attachPrivate(hub *DataCarrierPreviewHub, lease 
 }
 
 // agentAnswerWait bounds how long a new preview waits for the agent's first attachment answer
-// after a host start before it chooses its carrier.
+// after a host start.
 const agentAnswerWait = 15 * time.Second
 
 // endpointRouteRevision is the revision of a preview's one endpoint route; the server never
@@ -179,7 +155,7 @@ const agentAnswerWait = 15 * time.Second
 const endpointRouteRevision = 1
 
 // BindAgentCarriers makes every later preview an endpoint route on the agent's runtime carriers
-// instead of a carrier of its own (PLAN 3a).
+// (PLAN 3a).
 func (r *MachinePreviewRuntime) BindAgentCarriers(agent AgentCarriers) error {
 	if r == nil || agent == nil {
 		return ErrMachinePreviewRuntimeInvalid
@@ -193,7 +169,7 @@ func (r *MachinePreviewRuntime) BindAgentCarriers(agent AgentCarriers) error {
 	return nil
 }
 
-// NewCarrier creates a route-scoped lazy attachment carrier. The target is
+// NewCarrier creates a preview's endpoint route on the agent's runtime carriers. The target is
 // checked at composition time for a useful typed error, while the server
 // remains authoritative for the lease target and access mode.
 func (r *MachinePreviewRuntime) NewCarrier(ctx context.Context, target LeaseTarget, machineID, ownerSessionID string) (Carrier, error) {
@@ -221,24 +197,20 @@ func (r *MachinePreviewRuntime) NewCarrier(ctx context.Context, target LeaseTarg
 		served = agent.EndpointsServed(waitCtx)
 		cancelWait()
 	}
-	if served {
-		carrier, err := NewEndpointCarrier(agent, func(hub *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
-			config := r.route
-			config.Hub = hub
-			return NewDataCarrierPreviewCarrier(config)
-		})
-		if err != nil {
-			_ = r.release(ctx)
-			return nil, err
-		}
-		carrier.attach = r.attachPrivate
-		return &machinePreviewCarrier{inner: carrier, runtime: r}, nil
+	if !served {
+		_ = r.release(ctx)
+		return nil, ErrPreviewEndpointsNotServed
 	}
-	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{Attachments: r.attachments, Provider: r.provider, PlacementEvents: r.placementEvents})
+	carrier, err := NewEndpointCarrier(agent, func(hub *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
+		config := r.route
+		config.Hub = hub
+		return NewDataCarrierPreviewCarrier(config)
+	})
 	if err != nil {
 		_ = r.release(ctx)
 		return nil, err
 	}
+	carrier.attach = r.attachPrivate
 	return &machinePreviewCarrier{inner: carrier, runtime: r}, nil
 }
 
@@ -303,7 +275,7 @@ func (r *MachinePreviewRuntime) Close(ctx context.Context) error {
 	if r.private != nil {
 		r.private.Close()
 	}
-	return errors.Join(r.provider.Close(ctx), r.sessions.Close(ctx))
+	return r.sessions.Close(ctx)
 }
 
 func (r *MachinePreviewRuntime) release(ctx context.Context) error {

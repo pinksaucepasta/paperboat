@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	lifetime "github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	lifetime "github.com/pinksaucepasta/paperboat/shared/admission"
+
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
@@ -24,6 +26,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"golang.org/x/net/idna"
 )
+
+func newAttachmentTraceID(noun string) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return noun + "_" + id.String(), nil
+}
 
 const (
 	privateAccessGrantKind = "private_access_authorization"
@@ -204,28 +214,6 @@ func newPrivateAccessSource(grants *privateAccessGrantClient) (*PrivateAccessSou
 		grants: grants, now: func() time.Time { return time.Now().UTC() },
 		ownerRoutes: make(map[string]privateAccessRoute), discoveredRoutes: make(map[string]privateAccessRoute),
 	}, nil
-}
-
-func (s *PrivateAccessSource) register(lease Lease, admission CarrierAdmission, active *connector.ActiveDataCarrier, identity connector.DataCarrierIdentity) (uint64, error) {
-	if s == nil || lease.AccessMode != "private" || active == nil || admission.AccessMode != "private" || admission.Binding.PreviewID != lease.ID || admission.Binding.AccountID != lease.AccountID || admission.Binding.LeaseGeneration != uint64(lease.Generation) {
-		return 0, ErrPrivateAccessInvalid
-	}
-	host, err := privateAccessEndpointHost(lease.Endpoint)
-	if err != nil {
-		return 0, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return 0, ErrPrivateAccessInvalid
-	}
-	s.next++
-	entry := privateAccessRoute{lease: lease, admission: admission, active: active, identity: identity, token: s.next}
-	if _, conflict := s.discoveredRoutes[host]; conflict {
-		return 0, ErrPrivateAccessInvalid
-	}
-	s.ownerRoutes[host] = entry
-	return entry.token, nil
 }
 
 // registerEndpoint makes a private preview served as an endpoint route (PLAN 3a) reachable from

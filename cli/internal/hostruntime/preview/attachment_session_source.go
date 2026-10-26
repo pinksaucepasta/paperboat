@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
@@ -357,27 +358,6 @@ func machineAttachmentDialErrorEqual(err, target error) bool {
 	return t != nil && t.Comparable() && err == target
 }
 
-// AcquirePreviewDataCarrier obtains or shares the active carrier bound to the
-// complete server admission. The server's machine public key is checked
-// against the secure local identity store before a TLS leaf is minted.
-func (s *MachineAttachmentSessionSource) AcquirePreviewDataCarrier(ctx context.Context, admission CarrierAdmission) (AttachmentSession, error) {
-	if s == nil || ctx == nil {
-		return AttachmentSession{}, ErrMachineAttachmentSessionInvalid
-	}
-	if err := ctx.Err(); err != nil {
-		return AttachmentSession{}, err
-	}
-	now := s.clock().UTC()
-	if err := admission.Validate(now); err != nil {
-		return AttachmentSession{}, fmt.Errorf("%w: admission: %v", ErrMachineAttachmentSessionInvalid, err)
-	}
-	key, localIdentity, _, endpoints, poolConfig, err := s.prepareAdmission(admission, now)
-	if err != nil {
-		return AttachmentSession{}, err
-	}
-	return s.acquirePrepared(ctx, key, localIdentity, endpoints, poolConfig)
-}
-
 func (s *MachineAttachmentSessionSource) AcquirePrivateAccessCarrier(ctx context.Context, admission AccessorCarrierAdmission) (AttachmentSession, error) {
 	if s == nil || ctx == nil || admission.AccountID == "" || admission.MachineID == "" || admission.TunnelID == "" || admission.CarrierConnectorID == "" || admission.CarrierSessionID == "" || admission.ProcessGeneration == 0 || admission.ConfigGeneration == 0 || admission.EdgeNodeID == "" || admission.EdgeProcessEpoch == "" || len(admission.EdgeEndpoints) == 0 || !admission.ExpiresAt.After(s.clock().UTC()) {
 		return AttachmentSession{}, ErrMachineAttachmentSessionInvalid
@@ -462,11 +442,6 @@ func machineAttachmentEntryReady(entry *machineAttachmentSessionEntry, identity 
 	return false
 }
 
-func (s *MachineAttachmentSessionSource) prepareAdmission(admission CarrierAdmission, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
-	binding := admission.Binding
-	return s.prepareCarrier(binding.AccountID, binding.HostID, binding.MachineIdentityPublicKey, binding.TunnelID, binding.ConnectorID, binding.SessionID, binding.ProcessGeneration, binding.ConfigGeneration, binding.EdgeNodeID, binding.EdgeProcessEpoch, binding.EdgeCarrierServerSPKISHA256, binding.EdgeCarrierServerCertificateChainPEM, admission.EdgeEndpoints, admission.ExpiresAt, now)
-}
-
 func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machinePublicKey, tunnelID, connectorID, sessionID string, processGeneration, configGeneration uint64, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM string, edgeEndpoints []string, expiresAt, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
 	store, err := identity.Open(identity.Config{StateRoot: s.stateRoot})
 	if err != nil {
@@ -535,10 +510,6 @@ func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machi
 		endpoints: strings.Join(edgeEndpoints, "\x00"),
 	}
 	return keyValue, liveIdentity, leaf, endpoints, poolConfig, nil
-}
-
-func (s *MachineAttachmentSessionSource) endpointConfigs(admission CarrierAdmission, expected connector.DataCarrierIdentity, leaf tls.Certificate) (connector.NetworkDialerConfig, bool, bool, error) {
-	return s.endpointConfigsValues(admission.EdgeEndpoints, expected, admission.Binding.EdgeNodeID, admission.Binding.EdgeProcessEpoch, admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM, leaf)
 }
 
 func (s *MachineAttachmentSessionSource) endpointConfigsValues(edgeEndpoints []string, expected connector.DataCarrierIdentity, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM string, leaf tls.Certificate) (connector.NetworkDialerConfig, bool, bool, error) {
@@ -632,4 +603,6 @@ func normalizeCarrierEndpoint(raw string) (string, string, string, error) {
 	return scheme, net.JoinHostPort(host, strconv.Itoa(portNumber)), host, nil
 }
 
-var _ AttachmentSessionSource = (*MachineAttachmentSessionSource)(nil)
+func logAttachmentFailure(ctx context.Context, _ string, err error) {
+	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "preview_attachment", "peer_connect", "transport_failed", err)
+}

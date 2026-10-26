@@ -25,6 +25,12 @@ func TestMachinePreviewRuntimeOwnsSharedCarrierReferences(t *testing.T) {
 	if err != nil || auth == nil {
 		t.Fatalf("machine auth source = %v, err=%v", auth, err)
 	}
+	if _, err := runtime.NewCarrier(context.Background(), LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, "host_01", "owner_session_01"); !errors.Is(err, ErrPreviewEndpointsNotServed) {
+		t.Fatalf("carrier without agent endpoints err = %v", err)
+	}
+	if err := runtime.BindAgentCarriers(&agentCarriersFake{changed: make(chan struct{})}); err != nil {
+		t.Fatal(err)
+	}
 	first, err := runtime.NewCarrier(context.Background(), LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, "host_01", "owner_session_01")
 	if err != nil {
 		t.Fatal(err)
