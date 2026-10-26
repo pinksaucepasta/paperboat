@@ -1010,6 +1010,8 @@ elif sys.argv[2]=="approve-refusals":
  assert r["refusals"] == ["machine_not_found", "approval_not_pending"]
 elif sys.argv[2]=="tunnel-manage":
  assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
+elif sys.argv[2]=="tunnel-public-protocols":
+ assert r["public_tcp_echo"] and r["tls_passthrough_origin_certificate"]
 else:
  raise AssertionError("unknown device application")
 ' "$out" "$group" 2>/dev/null; then
@@ -1115,6 +1117,7 @@ test_application_pairs send-self send_self.py
 test_application_pairs preview-access preview_access.py
 test_team_checks
 test_device_application tunnel-manage tunnel_manage.py
+test_device_application tunnel-public-protocols tunnel_public_protocols.py
 test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain
 test_device_application config-sync config_sync.py
