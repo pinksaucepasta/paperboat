@@ -91,6 +91,8 @@ type PeerTerminalPayload struct {
 	ReplayHistory       bool              `json:"replay_history,omitempty"`
 	AfterSequence       int               `json:"after_sequence,omitempty"`
 	InputAttachmentID   string            `json:"input_attachment_id,omitempty"`
+	// InputOwner identifies one pb connect across redials so the daemon keeps its unanswered input.
+	InputOwner string `json:"input_owner,omitempty"`
 }
 
 // InspectorRequest is one explicit inspector call. The daemon owns the CLI-role peer identity,
@@ -298,16 +300,16 @@ type MachineStatus struct {
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPort uint16 `json:"ssh_port,omitempty"`
 	// SSHHostKeys is the machine's active SSH host key set, for the CLI's known_hosts helper.
-	SSHHostKeys []string `json:"ssh_host_keys,omitempty"`
-	NATMappingIPv4     string              `json:"nat_mapping_ipv4"`
-	NATMappingIPv6     string              `json:"nat_mapping_ipv6"`
-	CaptivePortal      string              `json:"captive_portal"`
-	PMTU               string              `json:"pmtu"`
-	RouterProtocol     string              `json:"router_protocol"`
-	RouterMapping      string              `json:"router_mapping"`
-	MappingLifetime    string              `json:"mapping_lifetime"`
-	UpdateHealth       string              `json:"update_health"`
-	Health             []HealthItem        `json:"health"`
+	SSHHostKeys     []string     `json:"ssh_host_keys,omitempty"`
+	NATMappingIPv4  string       `json:"nat_mapping_ipv4"`
+	NATMappingIPv6  string       `json:"nat_mapping_ipv6"`
+	CaptivePortal   string       `json:"captive_portal"`
+	PMTU            string       `json:"pmtu"`
+	RouterProtocol  string       `json:"router_protocol"`
+	RouterMapping   string       `json:"router_mapping"`
+	MappingLifetime string       `json:"mapping_lifetime"`
+	UpdateHealth    string       `json:"update_health"`
+	Health          []HealthItem `json:"health"`
 }
 
 // TransportConsumer is one active path and the number of local consumers
