@@ -213,6 +213,18 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if rows := snapshot(); rows[0].ObservedState != "ready" {
 		t.Fatalf("engine route after the edge observed it ready = %s", rows[0].ObservedState)
 	}
+	// The state change is a tunnel log line (pb tunnel logs); an unchanged repeat adds none.
+	if err := observe(row.AssignmentGeneration, row.ConnectorSessionID); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := tunnelv1.NewRepository(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := repo.ListResourceTunnelLogs(f.ctx, f.account, tunnel, 0, 10)
+	if err != nil || len(logs) != 1 || logs[0].Code != "tunnel_edge_ready" || logs[0].RouteID.String != route {
+		t.Fatalf("engine tunnel logs = %+v, %v; want one tunnel_edge_ready for the route", logs, err)
+	}
 	// The tunnel is ready only once every edge holding its route has observed it (F8-06).
 	health := func() string {
 		t.Helper()
