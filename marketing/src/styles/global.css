@@ -148,15 +148,15 @@ svg {
   padding-inline: var(--gutter);
 }
 
-/* Type */
+/* Type scale, defined once: .display is h1, .title is h2, .subtitle is h3. Use these on every page. */
 
 .display {
   font-family: var(--font-brand);
   font-weight: 600;
   color: var(--ink);
-  font-size: clamp(2.75rem, 1.6rem + 4.6vw, 5.25rem);
-  line-height: 0.98;
-  letter-spacing: -0.042em;
+  font-size: clamp(2.25rem, 1.7rem + 2vw, 3.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 
@@ -164,9 +164,9 @@ svg {
   font-family: var(--font-brand);
   font-weight: 600;
   color: var(--ink);
-  font-size: clamp(2.125rem, 1.4rem + 2.6vw, 3.5rem);
-  line-height: 1.02;
-  letter-spacing: -0.038em;
+  font-size: clamp(1.75rem, 1.45rem + 1.1vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 

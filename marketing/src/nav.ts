@@ -19,7 +19,6 @@ export const navGroups: NavGroup[] = [
     links: compares.map((compare) => ({ href: `/compare/${compare.slug}`, label: `Paperboat vs ${compare.name}` })),
   },
   { title: "Pricing", href: "/pricing", links: [] },
-  { title: "Docs", href: "/docs", links: [] },
 ]
 
 export const getStartedLinks: NavLink[] = [

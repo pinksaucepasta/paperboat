@@ -6,9 +6,8 @@ import { plans, teamTrial } from "../site"
 <Section id="pricing" title="Free to start.">
   <Fragment slot="text">
     <p>
-      Free and Pro have everything one person needs, with room for 100 machines, previews and tunnels on Free and 1,000 on Pro. Direct
-      traffic is always free; bandwidth counts only what goes through our relays and edges each month. Sharing a
-      terminal session or a preview link is free on every plan. Team adds people.
+      Every plan has every feature. Plans differ in limits and bandwidth, and Team adds people. Traffic straight
+      between your machines is always free.
     </p>
   </Fragment>
   <div class="plans">
@@ -22,6 +21,12 @@ import { plans, teamTrial } from "../site"
           </p>
           <p class="bandwidth">{plan.bandwidth} of relay and edge bandwidth a month</p>
           <p class="body">{plan.detail}</p>
+          <ul class="limits">
+            <li><strong>{plan.machines}</strong> machines</li>
+            <li><strong>{plan.publications}</strong> live previews and tunnels</li>
+            <li><strong>{plan.browserTerminals}</strong> live browser terminals</li>
+            <li><strong>{plan.nativeTerminals}</strong> terminals from the pb command</li>
+          </ul>
         </article>
       ))
     }
@@ -30,6 +35,21 @@ import { plans, teamTrial } from "../site"
 </Section>
 
 <style>
+  .limits {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.9375rem;
+    color: var(--fog);
+  }
+
+  .limits strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
   .plans {
     display: grid;
     gap: 16px;

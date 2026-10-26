@@ -12,11 +12,13 @@ export type Product = {
   /** The page's one headline, and the line under it. */
   headline: string
   summary: string
-  /** Exactly three short blocks. */
+  /** Three short blocks. */
   benefits: { title: string; text: string }[]
   example: { title: string; text: string }
   /** Exactly three steps. */
   steps: { title: string; text: string }[]
+  /** How it connects to other products: a product slug and one sentence. */
+  related: { slug: string; text: string }[]
   /** Compare pages that apply, by slug (see compare-data.ts). */
   compare: string[]
 }
@@ -41,6 +43,11 @@ export const products: Product[] = [
       title: "Open a terminal on a machine",
       text: ["$ pb new", "$ pb connect studio"].join("\n"),
     },
+    related: [
+      { slug: "ssh", text: "Use the same machine from VS Code, scp or rsync with plain SSH." },
+      { slug: "teams", text: "Share a live session, view-only or interactive, with someone who needs to see what you see." },
+      { slug: "previews", text: "Run a dev server in a terminal, then share its port with a link." },
+    ],
     compare: ["tailscale", "teleport"],
   },
   {
@@ -62,6 +69,11 @@ export const products: Product[] = [
       title: "Plain SSH tools, with keys handled for you",
       text: ["$ pb ssh studio", "$ ssh studio.pprbt", "$ rsync -a ./site studio.pprbt:/srv"].join("\n"),
     },
+    related: [
+      { slug: "terminals", text: "Prefer one persistent shell? Open a terminal that survives drops." },
+      { slug: "private-access", text: "Reach databases and internal apps on the same machine, with no open ports." },
+      { slug: "files", text: "Move a single file with pb send, without setting up scp." },
+    ],
     compare: ["tailscale", "teleport"],
   },
   {
@@ -89,6 +101,11 @@ export const products: Product[] = [
         "Press Ctrl+C to stop",
       ].join("\n"),
     },
+    related: [
+      { slug: "tunnels", text: "Need an address that stays? Make it a tunnel." },
+      { slug: "terminals", text: "Start your app in a terminal that keeps running, then share it." },
+      { slug: "teams", text: "Limit a link to your team instead of the whole internet." },
+    ],
     compare: ["ngrok", "cloudflare-tunnel"],
   },
   {
@@ -116,6 +133,11 @@ export const products: Product[] = [
         "Status: ready",
       ].join("\n"),
     },
+    related: [
+      { slug: "previews", text: "For a quick, temporary link, use a preview." },
+      { slug: "self-hosting", text: "Serve tunnels from your own server and domain." },
+      { slug: "teams", text: "Share a tunnel with the people on your team." },
+    ],
     compare: ["ngrok", "cloudflare-tunnel"],
   },
   {
@@ -137,6 +159,11 @@ export const products: Product[] = [
       title: "Reach a port on a machine without publishing it",
       text: "$ pb access machine studio --port 5432",
     },
+    related: [
+      { slug: "ssh", text: "SSH is the most common thing to reach privately." },
+      { slug: "self-hosting", text: "Run your own relay for the traffic that can’t go direct." },
+      { slug: "teams", text: "Give teammates access to a machine without exposing it." },
+    ],
     compare: ["tailscale", "netbird"],
   },
   {
@@ -162,6 +189,11 @@ export const products: Product[] = [
         "report.pdf: delivered to /home/ana/Paperboat/Inbox/report.pdf on studio",
       ].join("\n"),
     },
+    related: [
+      { slug: "private-access", text: "Need a whole service, not one file? Reach its port instead." },
+      { slug: "teams", text: "Send to a teammate’s machine once it is shared with you." },
+      { slug: "ssh", text: "Prefer scp or rsync? They work with managed keys." },
+    ],
     compare: ["tailscale"],
   },
   {
@@ -183,6 +215,11 @@ export const products: Product[] = [
       title: "Store a secret, encrypted before it leaves your machine",
       text: ["$ pb env set API_KEY", "$ pb env list"].join("\n"),
     },
+    related: [
+      { slug: "config-sync", text: "Sync your dotfiles; keep secrets in ENV, not in the repo." },
+      { slug: "teams", text: "Share secrets with the machines of a team." },
+      { slug: "terminals", text: "Variables are set when a terminal or pb exec starts." },
+    ],
     compare: [],
   },
   {
@@ -204,6 +241,11 @@ export const products: Product[] = [
       title: "Keep dotfiles the same on every machine",
       text: ["$ pb config status", "$ pb config sync"].join("\n"),
     },
+    related: [
+      { slug: "env", text: "Keep secrets out of the repo and in encrypted variables." },
+      { slug: "teams", text: "Give a new teammate’s machine the same setup." },
+      { slug: "terminals", text: "Your shell settings are there in every terminal you open." },
+    ],
     compare: [],
   },
   {
@@ -225,6 +267,11 @@ export const products: Product[] = [
       title: "Invite someone and share a machine",
       text: ["$ pb team invite my-team ana@example.com", "$ pb team machine grant my-team machine_8a1d5c2e-3b47-4f0e-9d62-1c7e5b0a4f93"].join("\n"),
     },
+    related: [
+      { slug: "terminals", text: "Share a terminal session with a teammate." },
+      { slug: "previews", text: "Share a preview link with your team only." },
+      { slug: "env", text: "Share secrets with the team’s machines, encrypted end to end." },
+    ],
     compare: ["tailscale", "teleport", "netbird"],
   },
   {
@@ -246,6 +293,11 @@ export const products: Product[] = [
       title: "Run your own relay or tunnel server",
       text: "$ curl -fsSL {selfhostInstallUrl} | sh",
     },
+    related: [
+      { slug: "tunnels", text: "Your tunnel server serves your own domains." },
+      { slug: "private-access", text: "Your relay carries traffic when machines can’t connect directly." },
+      { slug: "previews", text: "Previews can come from your own edge too." },
+    ],
     compare: ["netbird", "cloudflare-tunnel"],
   },
 ]

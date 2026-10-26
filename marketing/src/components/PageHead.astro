@@ -6,15 +6,13 @@ interface Props {
   eyebrow?: string
 }
 const { title, eyebrow } = Astro.props
-// A short title ("Pricing") is set at the display size; a sentence is set one step smaller so it stays on two lines.
-const size = title.length > 24 ? "title" : "display"
 ---
 
 <section class="page-head">
   <div class="wrap">
     <header class="page-head-text">
       {eyebrow && <p class="chapter">{eyebrow}</p>}
-      <h1 class={size}>{title}</h1>
+      <h1 class="display">{title}</h1>
       <div class="lede page-head-lede"><slot /></div>
     </header>
   </div>

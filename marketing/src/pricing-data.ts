@@ -4,7 +4,7 @@
  */
 import { plans, teamTrial } from "./site"
 
-const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
+const limitCells = (key: "machines" | "publications" | "browserTerminals" | "nativeTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
   plans[1][key],
   plans[2][key],
@@ -20,7 +20,7 @@ export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCel
   { feature: "Send and receive files", cells: [true, true, true] },
   { feature: "Previews and tunnels (active, combined)", cells: limitCells("publications") },
   { feature: "Browser terminals (open in the console)", cells: limitCells("browserTerminals") },
-  { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+  { feature: "Terminals from the pb command (not counted as browser terminals)", cells: limitCells("nativeTerminals") },
   { feature: "Your own domains", cells: [true, true, true] },
   { feature: "Environment variables, end-to-end encrypted", cells: [true, true, true] },
   { feature: "Config sync from a Git repository", cells: [true, true, true] },
@@ -46,7 +46,7 @@ export const bandwidthNotes = [
   },
   {
     title: "What counts",
-    text: "Traffic that goes through our relays (when machines can’t connect directly) and through our edges (public previews and tunnels).",
+    text: "Traffic through our relays, used when machines can’t connect directly, and through our edges, used by public previews and tunnels.",
   },
   {
     title: "When you run out",
@@ -61,12 +61,12 @@ export const bandwidthNotes = [
 export const faq = [
   {
     question: "Is there a limit on machines?",
-    answer: "Free allows 100 machines and Pro 1,000. Team has no limit.",
+    answer: `Free allows ${plans[0].machines} machines and Pro ${plans[1].machines}. Team has no limit.`,
   },
   {
     question: "Are features locked behind a plan?",
     answer:
-      "Free and Pro have everything one person needs, with generous limits on machines, previews and tunnels; they differ in those limits and in bandwidth. Team adds people: members and lasting access to each other’s machines.",
+      "No. Free and Pro differ only in limits and bandwidth. Team adds people: members and lasting access to each other’s machines.",
   },
   {
     question: "What counts as a browser terminal?",

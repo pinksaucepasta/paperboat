@@ -38,123 +38,43 @@ export type RowId =
 
 export type Section = { id: string; title: string; sentence: string; rows: { id: RowId; label: string }[] }
 
-/** What every comparison answers, grouped the way Paperboat's features are. */
+/** What people decide on: ten rows in four groups. */
 export const sections: Section[] = [
   {
-    id: "terminals",
-    title: "Terminals",
-    sentence: "A shell on your machine that you can leave and come back to.",
-    rows: [
-      { id: "terminal_persistent", label: "Keeps running when you disconnect" },
-      { id: "terminal_replay", label: "Shows the output you missed" },
-      { id: "terminal_browser", label: "From a browser or a phone" },
-      { id: "terminal_share", label: "Share a live session" },
-    ],
-  },
-  {
-    id: "exec",
-    title: "Remote commands",
-    sentence: "Run one command on another machine and get its output and exit code.",
-    rows: [{ id: "exec", label: "Run a command on another machine" }],
-  },
-  {
-    id: "ssh",
-    title: "SSH",
-    sentence: "Use ssh and the tools built on it, without managing keys or opening ports.",
-    rows: [
-      { id: "ssh_keys", label: "Keys handled for you" },
-      { id: "ssh_tools", label: "ssh, scp, sftp and rsync" },
-      { id: "ssh_vscode", label: "VS Code Remote-SSH" },
-    ],
-  },
-  {
-    id: "files",
-    title: "Files",
-    sentence: "Send a file to a machine without setting anything up.",
-    rows: [
-      { id: "files_send", label: "Send files to a machine" },
-      { id: "files_inbox", label: "An inbox for received files" },
-    ],
-  },
-  {
-    id: "env",
-    title: "Environment variables",
-    sentence: "The secrets your programs need, delivered to the machine that runs them.",
-    rows: [
-      { id: "env_secrets", label: "End-to-end encrypted variables" },
-      { id: "env_where", label: "Where they are available" },
-    ],
-  },
-  {
-    id: "config",
-    title: "Config sync",
-    sentence: "The same settings on every machine, from a repository you control.",
-    rows: [{ id: "config_sync", label: "Settings from a Git repository" }],
-  },
-  {
-    id: "previews",
-    title: "Previews",
-    sentence: "A public link to a port on your machine, for as long as you need it.",
-    rows: [
-      { id: "preview_url", label: "Public link in one command" },
-      { id: "preview_inspect", label: "See and replay requests" },
-    ],
-  },
-  {
-    id: "tunnels",
-    title: "Tunnels",
-    sentence: "A public address for a service that stays the same.",
-    rows: [
-      { id: "tunnel_permanent", label: "Permanent addresses" },
-      { id: "tunnel_domains", label: "Your own domains" },
-      { id: "tunnel_protocols", label: "Protocols" },
-    ],
-  },
-  {
     id: "network",
-    title: "Private network",
-    sentence: "Your machines reach each other's ports without exposing them.",
-    rows: [{ id: "private_network", label: "Machines reach each other" }],
-  },
-  {
-    id: "encryption",
-    title: "Encryption",
-    sentence: "Who could read your traffic on the way.",
+    title: "Network and encryption",
+    sentence: "How your machines connect, and who can read the traffic.",
     rows: [
-      { id: "encryption_native", label: "Between your own devices" },
-      { id: "encryption_public", label: "Public links" },
+      { id: "encryption_native", label: "End-to-end encryption, direct when possible" },
+      { id: "private_network", label: "Machines reach each other privately" },
+      { id: "selfhost", label: "Self-hosted relay" },
     ],
   },
   {
-    id: "teams",
-    title: "Teams and access",
-    sentence: "Working with other people, and deciding who may do what.",
+    id: "terminals",
+    title: "Terminals and SSH",
+    sentence: "Work on a machine from anywhere.",
     rows: [
-      { id: "teams", label: "Members and roles" },
-      { id: "access_rules", label: "Access rules, groups and tags" },
-      { id: "api_tokens", label: "Tokens for automation" },
+      { id: "terminal_persistent", label: "Terminal survives disconnects" },
+      { id: "terminal_browser", label: "Terminal in the browser" },
+      { id: "terminal_share", label: "Shareable terminals" },
+      { id: "ssh_keys", label: "Managed SSH" },
     ],
   },
   {
-    id: "selfhost",
-    title: "Self-hosting",
-    sentence: "Which parts you can run on your own servers.",
-    rows: [{ id: "selfhost", label: "Run it yourself" }],
-  },
-  {
-    id: "platforms",
-    title: "Platforms",
-    sentence: "Where it runs.",
-    rows: [{ id: "platforms", label: "Operating systems" }],
+    id: "publish",
+    title: "Previews and secrets",
+    sentence: "Show your work and keep secrets safe.",
+    rows: [
+      { id: "preview_url", label: "Previews and tunnels" },
+      { id: "env_secrets", label: "Encrypted environment variables" },
+    ],
   },
   {
     id: "pricing",
     title: "Pricing",
-    sentence: "How you pay, and what is free.",
-    rows: [
-      { id: "pricing_model", label: "How you pay" },
-      { id: "free_tier", label: "Free plan" },
-    ],
+    sentence: "How you pay.",
+    rows: [{ id: "pricing_model", label: "How you pay" }],
   },
 ]
 

@@ -36,7 +36,8 @@ export const plans = [
     machines: "100",
     publications: "100",
     browserTerminals: "10",
-    detail: "Everything for one person, on your own machines.",
+    nativeTerminals: "Unlimited",
+    detail: "Everything one person needs, on your own machines.",
   },
   {
     name: "Pro",
@@ -46,7 +47,8 @@ export const plans = [
     machines: "1,000",
     publications: "1,000",
     browserTerminals: "100",
-    detail: "Everything in Free, with more bandwidth. Add 100 GB any time.",
+    nativeTerminals: "Unlimited",
+    detail: "Everything in Free, with 20 times the bandwidth. Add 100 GB any time.",
   },
   {
     name: "Team",
@@ -56,7 +58,8 @@ export const plans = [
     machines: "Unlimited",
     publications: "Unlimited",
     browserTerminals: "Unlimited",
-    detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
+    nativeTerminals: "Unlimited",
+    detail: "Members, and lasting access to each other’s machines. 14-day free trial.",
   },
 ] as const
 
