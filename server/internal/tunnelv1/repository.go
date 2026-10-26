@@ -19,6 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -376,6 +377,9 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 		if err := createInitialConfigGeneration(ctx, queries, input, tunnel, route, now); err != nil {
 			return err
 		}
+		if err := syncEngine(ctx, tx, tunnel); err != nil {
+			return err
+		}
 		if err := insertAudit(ctx, queries, input.AuditEventID, input.AccountID, auditActorID(input.ActorID, input.AuditActorID), input.ActorType,
 			"tunnel.created", "create", "changed", tunnel.ID, input.IdempotencyKey, input.RequestID,
 			input.CorrelationID, input.SourceMachineID, now, map[string]any{
@@ -457,6 +461,9 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 			}
 			current = updated
 			if err := createResourceConfigGeneration(ctx, queries, current, input.ActorID, now); err != nil {
+				return err
+			}
+			if err := syncEngine(ctx, tx, current); err != nil {
 				return err
 			}
 		}
@@ -602,6 +609,9 @@ func transitionTx(ctx context.Context, tx *db.Tx, input StateRecord, now time.Ti
 		if err := createResourceConfigGeneration(ctx, queries, current, input.ActorID, now); err != nil {
 			return result, err
 		}
+		if err := syncEngine(ctx, tx, current); err != nil {
+			return result, err
+		}
 	}
 	outcome := "unchanged"
 	if changed {
@@ -638,6 +648,12 @@ func transitionTx(ctx context.Context, tx *db.Tx, input StateRecord, now time.Ti
 	}
 	result = MutationRecord{Tunnel: current, Operation: operation, Changed: changed}
 	return result, nil
+}
+
+// syncEngine makes the tunnel's change reach the endpoint engine in the same transaction, so a
+// pause, route edit or new tunnel does not wait for the agent's next attachment check.
+func syncEngine(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel) error {
+	return endpoints.SyncAgentTunnelsTx(ctx, tx, tunnel.CreatedByHostID)
 }
 
 func shortDigest(value string) string {

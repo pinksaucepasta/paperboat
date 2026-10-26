@@ -126,6 +126,9 @@ func (r *SQLRepository) CreateResourceRoute(ctx context.Context, input RouteReco
 		if err := createResourceConfigGeneration(ctx, q, updatedTunnel, input.ActorID, input.Now); err != nil {
 			return err
 		}
+		if err := syncEngine(ctx, tx, updatedTunnel); err != nil {
+			return err
+		}
 		op, err = advanceResourceOperation(ctx, q, op.ID, route.ID, "connecting", 60, input.Now)
 		if err != nil {
 			return err
@@ -233,6 +236,9 @@ func (r *SQLRepository) PatchResourceRoute(ctx context.Context, input RouteRecor
 			if err := createResourceConfigGeneration(ctx, q, tunnel, input.ActorID, now); err != nil {
 				return err
 			}
+			if err := syncEngine(ctx, tx, tunnel); err != nil {
+				return err
+			}
 		}
 		outcome := "unchanged"
 		if changed {
@@ -322,6 +328,9 @@ func (r *SQLRepository) DeleteResourceRoute(ctx context.Context, input RouteReco
 			return translate(err)
 		}
 		if err := createResourceConfigGeneration(ctx, q, tunnel, input.ActorID, input.Now); err != nil {
+			return err
+		}
+		if err := syncEngine(ctx, tx, tunnel); err != nil {
 			return err
 		}
 		op, err = advanceResourceOperation(ctx, q, op.ID, current.ID, "draining", 60, input.Now)
