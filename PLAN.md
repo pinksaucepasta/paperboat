@@ -3070,6 +3070,16 @@ Decisions (coordinator, 2026-10-26):
 - Live sessions are closed on revocation (slice 6, required).
 Order: slice 1 first, then 2–8. Nothing is ticked until the full SSH check set passes on L.
 
+Slice 1 result (2026-10-26, dev-8910ed61, two fresh pbvm2 containers, target OpenSSH 9.6, ~/lanei/sshphase.sh):
+plain `ssh -vvv <alias> echo ok` 4.5–6.9 s (5 runs, p50 ~5 s), `pb ssh <alias> -- echo ok` 4.6–5.6 s; plain
+OpenSSH on the same link is 0.32 s. Per connection: ProxyCommand runs once and takes 2.4–4.9 s to the remote
+banner (client-configuration + live ssh-target + ssh-descriptor POST + peer dial); KnownHostsCommand runs
+**twice** (OpenSSH asks once to order host key algorithms, once to verify), 0.85–1.2 s each, each with its own
+client-configuration + ssh-target + ssh-host-keys calls; kex, auth and the command take < 0.2 s. So ~95% of
+setup is our helpers' control calls, the target of slices 3 and 4. 40 in parallel from one container hit the
+container's process limit ("fork failed"), so the 35–47 s at 40 parallel (Lane A, laptop) is not reproduced
+here; re-measure it on the rewrite with the same load from a host without that limit.
+
 
 #### Terminal: review and fixes (Lane K lead; Lane C web, Lane V server + edge; user priority 2026-10-26)
 
