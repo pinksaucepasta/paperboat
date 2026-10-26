@@ -8,20 +8,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/spf13/cobra"
 )
 
@@ -44,38 +40,6 @@ func (e *workflowAcceptanceEvents) snapshot() []string {
 	return append([]string(nil), e.values...)
 }
 
-type workflowAcceptanceEnrollment struct {
-	harness *workflowAcceptanceHarness
-	fail    error
-}
-
-func (e *workflowAcceptanceEnrollment) Enroll(ctx context.Context, tunnelID, requestID string) (tunnelenrollment.Projection, error) {
-	if e.harness.event("hostd.connector.enroll") {
-		return tunnelenrollment.Projection{}, ctx.Err()
-	}
-	parsed, parseErr := uuid.Parse(strings.TrimPrefix(requestID, "operation_"))
-	if tunnelID != "tun_workflow" || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "operation_"+parsed.String() != requestID {
-		return tunnelenrollment.Projection{}, tunnelenrollment.ErrInvalid
-	}
-	if e.fail != nil {
-		err := e.fail
-		e.fail = nil
-		return tunnelenrollment.Projection{}, err
-	}
-	if e.harness.event("hostd.connector.activate") {
-		return tunnelenrollment.Projection{}, ctx.Err()
-	}
-	e.harness.events.add("hostd.connector.ready")
-	e.harness.connectorReady.Store(true)
-	ready := time.Unix(30, 0).UTC()
-	return tunnelenrollment.Projection{
-		Schema: tunnelenrollment.Schema, Kind: "tunnel_connector", TunnelID: tunnelID,
-		HostID: "host_workflow", ConnectorID: "connector_workflow", OperationID: "operation_connector_workflow",
-		State: "ready", CredentialReference: "protected-file://paperboat/" + workflowAcceptanceSecret,
-		CredentialGeneration: 1, ReadyAt: &ready,
-	}, nil
-}
-
 type recordingTunnelCreateWorkflow struct {
 	harness *workflowAcceptanceHarness
 	session *tunnelcreatejournal.Session
@@ -90,13 +54,6 @@ func (w *recordingTunnelCreateWorkflow) RecordTunnel(ctx context.Context, tunnel
 		return ctx.Err()
 	}
 	return w.session.RecordTunnel(ctx, tunnelID, operationID)
-}
-
-func (w *recordingTunnelCreateWorkflow) RecordConnectorReady(ctx context.Context) error {
-	if w.harness.event("workflow.connector") {
-		return ctx.Err()
-	}
-	return w.session.RecordConnectorReady(ctx)
 }
 
 func (w *recordingTunnelCreateWorkflow) RecordDomain(ctx context.Context, index int, domainID string) error {
@@ -130,7 +87,7 @@ type workflowAcceptanceStderr struct {
 }
 
 func (w *workflowAcceptanceStderr) Write(body []byte) (int, error) {
-	if w.harness.domainWaitForConnector {
+	if w.harness.trackWait {
 		w.harness.events.add("stderr.progress")
 	}
 	return w.buffer.Write(body)
@@ -147,49 +104,43 @@ func (w *workflowAcceptanceWriter) Write(body []byte) (int, error) {
 }
 
 type workflowAcceptanceHarness struct {
-	t                      *testing.T
-	events                 workflowAcceptanceEvents
-	stateRoot              string
-	server                 *httptest.Server
-	ready                  bool
-	selfhost               bool
-	dnsVerified            bool
-	domainWaitForConnector bool
-	connectorReady         atomic.Bool
-	keySequence            int
-	createCalls            int
-	completedReplay        bool
-	failedReplay           bool
-	wrongReplayOperation   bool
-	wrongReplayTunnel      bool
-	domainCalls            int
-	cancelAt               string
-	cancel                 context.CancelFunc
-	commandContext         context.Context
-	lastRequest            tunnelCreateWorkflowRequest
-	hasRequest             bool
-	enrollment             *workflowAcceptanceEnrollment
+	t                    *testing.T
+	events               workflowAcceptanceEvents
+	stateRoot            string
+	server               *httptest.Server
+	ready                bool
+	selfhost             bool
+	dnsVerified          bool
+	trackWait            bool
+	keySequence          int
+	createCalls          int
+	completedReplay      bool
+	failedReplay         bool
+	wrongReplayOperation bool
+	wrongReplayTunnel    bool
+	domainCalls          int
+	cancelAt             string
+	cancel               context.CancelFunc
+	commandContext       context.Context
+	lastRequest          tunnelCreateWorkflowRequest
+	hasRequest           bool
+	interruptFirstCreate bool
 }
 
 func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 	t.Helper()
 	h := &workflowAcceptanceHarness{t: t, stateRoot: t.TempDir()}
-	h.enrollment = &workflowAcceptanceEnrollment{harness: h}
 	h.server = httptest.NewServer(http.HandlerFunc(h.serveControlPlane))
 	t.Cleanup(h.server.Close)
 
 	oldClient := tunnelClientForCommand
 	oldWorkflow := beginTunnelCreateWorkflowForCommand
 	oldKey := newTunnelIdempotencyKey
-	oldRuntime := tunnelConnectorAddRuntime
-	oldEnrollment := connectorEnrollmentLocalClient
 	oldProbe, oldRepair := tunnelHostRuntimeProbe, tunnelHostRuntimeRepair
 	t.Cleanup(func() {
 		tunnelClientForCommand = oldClient
 		beginTunnelCreateWorkflowForCommand = oldWorkflow
 		newTunnelIdempotencyKey = oldKey
-		tunnelConnectorAddRuntime = oldRuntime
-		connectorEnrollmentLocalClient = oldEnrollment
 		tunnelHostRuntimeProbe, tunnelHostRuntimeRepair = oldProbe, oldRepair
 	})
 
@@ -238,11 +189,6 @@ func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 		}
 		return &recordingTunnelCreateWorkflow{harness: h, session: session}, nil
 	}
-	connectorEnrollmentLocalClient = func(string) (tunnelConnectorEnrollmentClient, error) {
-		h.events.add("hostd.client")
-		return h.enrollment, nil
-	}
-	tunnelConnectorAddRuntime = runProductionTunnelConnectorAdd
 	return h
 }
 
@@ -293,6 +239,9 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
 		} else {
 			operation.State, operation.Phase = "running", "connecting"
+			if h.interruptFirstCreate && h.createCalls == 1 {
+				operation.State, operation.Phase = "failed", "failed" // interrupts the first attempt after the journal records the tunnel
+			}
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
 		}
@@ -310,19 +259,19 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 		w.Header().Set("ETag", tunnel.ETag)
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/operations/operation_workflow":
-		if h.domainWaitForConnector {
+		if h.trackWait {
 			h.events.add("control.operation.tunnel")
 		}
 		operation := validCommandOperation("tunnel", "tun_workflow")
 		operation.ID = "operation_workflow"
 		if h.failedReplay {
 			operation.State, operation.Phase = "failed", "failed"
-		} else if h.domainWaitForConnector && h.connectorReady.Load() {
+		} else if h.trackWait {
 			operation.State, operation.Phase, operation.Progress = "succeeded", "ready", 100
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/operations/operation_domain_workflow":
-		if !h.domainWaitForConnector {
+		if !h.trackWait {
 			h.t.Errorf("unexpected domain operation poll")
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -330,9 +279,7 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 		h.events.add("control.operation.domain")
 		operation := validCommandOperation("domain_binding", "domain_workflow")
 		operation.ID = "operation_domain_workflow"
-		if h.connectorReady.Load() {
-			operation.State, operation.Phase, operation.Progress = "succeeded", "ready", 100
-		}
+		operation.State, operation.Phase, operation.Progress = "succeeded", "ready", 100
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_workflow/routes":
 		if h.event("control.routes.list") {
@@ -404,7 +351,7 @@ func (h *workflowAcceptanceHarness) executeWithWait(jsonOutput, withDomain, wait
 	command := tunnelCobraCommandV1()
 	command.SetContext(ctx)
 	command.SetOut(out)
-	if h.domainWaitForConnector {
+	if h.trackWait {
 		command.SetErr(&workflowAcceptanceStderr{harness: h, buffer: &stderr})
 	} else {
 		command.SetErr(&stderr)
@@ -454,7 +401,7 @@ func assertWorkflowAcceptanceSecretSafe(t *testing.T, values ...string) {
 	}
 }
 
-func TestTunnelCreateWorkflowOrdersServiceControlConnectorDomainAndOutput(t *testing.T) {
+func TestTunnelCreateWorkflowOrdersServiceControlDomainAndOutput(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
 	stdout, stderr, err := h.execute(true, true)
 	if err != nil {
@@ -463,13 +410,12 @@ func TestTunnelCreateWorkflowOrdersServiceControlConnectorDomainAndOutput(t *tes
 	wantOrder := []string{
 		"hostd.probe.unready", "service.install", "service.start", "hostd.readiness", "workflow.begin",
 		"control.tunnel.create", "workflow.tunnel", "control.routes.list", "control.domain.create", "workflow.domain",
-		"control.domain.instructions", "hostd.readiness", "hostd.client", "hostd.connector.enroll", "hostd.connector.activate",
-		"hostd.connector.ready", "workflow.connector", "output", "workflow.complete", "workflow.close",
+		"control.domain.instructions", "output", "workflow.complete", "workflow.close",
 	}
 	if got := h.events.snapshot(); strings.Join(got, "|") != strings.Join(wantOrder, "|") {
 		t.Fatalf("order=\n%s\nwant=\n%s", strings.Join(got, "\n"), strings.Join(wantOrder, "\n"))
 	}
-	if stderr != "" || !json.Valid([]byte(stdout)) || !strings.Contains(stdout, `"kind":"tunnel_create"`) || !strings.Contains(stdout, `"connector_id":"connector_workflow"`) || !strings.Contains(stdout, `"hostname":"app.example.test"`) || !strings.Contains(stdout, `"edge.example.test"`) {
+	if stderr != "" || !json.Valid([]byte(stdout)) || !strings.Contains(stdout, `"kind":"tunnel_create"`) || !strings.Contains(stdout, `"hostname":"app.example.test"`) || !strings.Contains(stdout, `"edge.example.test"`) {
 		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
 	}
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
@@ -482,18 +428,18 @@ func TestTunnelCreateWorkflowHumanOutputIsFinalAndSecretSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Created tunnel workflow (tun_workflow)", "Connector connector_workflow is ready", "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test -> http://127.0.0.1:8080", "DNS for app.example.test:", "app.example.test\tCNAME\tedge.example.test\t300"} {
+	for _, expected := range []string{"Created tunnel workflow (tun_workflow)", "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test -> http://127.0.0.1:8080", "DNS for app.example.test:", "app.example.test\tCNAME\tedge.example.test\t300"} {
 		if !strings.Contains(stdout, expected) {
 			t.Fatalf("output missing %q: %s", expected, stdout)
 		}
 	}
-	if stderr != "Creating tunnel… Ctrl+C to cancel.\nWaiting for the tunnel connector to become ready…\n" {
+	if stderr != "Creating tunnel… Ctrl+C to cancel.\n" {
 		t.Fatalf("stderr=%q", stderr)
 	}
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
 }
 
-func TestTunnelCreateSelfhostShowsDNSBeforeConnectorAndResumesAfterVerification(t *testing.T) {
+func TestTunnelCreateSelfhostShowsDNSBeforeReadinessAndResumesAfterVerification(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
 	h.selfhost = true
 	firstOut, firstErrOut, err := h.execute(true, true)
@@ -504,15 +450,15 @@ func TestTunnelCreateSelfhostShowsDNSBeforeConnectorAndResumesAfterVerification(
 	if err := json.Unmarshal([]byte(firstOut), &pending); err != nil {
 		t.Fatal(err)
 	}
-	if !pending.Pending || pending.Tunnel.StableEndpoint != "" || pending.Tunnel.SummaryCode != "custom_domain_required" || pending.Connector != nil || len(pending.Domains) != 1 || pending.Domains[0].Instructions.VerificationState != "waiting_dns" || !strings.Contains(pending.Recovery, "pb tunnel domain verify tun_workflow app.example.test") {
+	if !pending.Pending || pending.Tunnel.StableEndpoint != "" || pending.Tunnel.SummaryCode != "custom_domain_required" || len(pending.Domains) != 1 || pending.Domains[0].Instructions.VerificationState != "waiting_dns" || !strings.Contains(pending.Recovery, "pb tunnel domain verify tun_workflow app.example.test") {
 		t.Fatalf("pending result=%+v", pending)
 	}
 	if len(pending.Domains[0].Instructions.Records) != 1 || pending.Domains[0].Instructions.Records[0] != (api.TunnelDNSRecord{Name: "app.example.test", Type: "CNAME", Value: "edge.example.test", TTL: 300}) {
 		t.Fatalf("pending DNS instructions=%+v", pending.Domains[0].Instructions.Records)
 	}
 	firstEvents := h.events.snapshot()
-	if strings.Contains(strings.Join(firstEvents, "|"), "hostd.connector.enroll") || !strings.Contains(strings.Join(firstEvents, "|"), "control.domain.instructions|output|workflow.close") {
-		t.Fatalf("pending activation ordering=%v", firstEvents)
+	if !strings.Contains(strings.Join(firstEvents, "|"), "control.domain.instructions|output|workflow.close") {
+		t.Fatalf("pending ordering=%v", firstEvents)
 	}
 	nameDigest := sha256.Sum256([]byte(h.lastRequest.Name))
 	journal, err := tunnelcreatejournal.Begin(t.Context(), tunnelcreatejournal.Config{
@@ -527,7 +473,7 @@ func TestTunnelCreateSelfhostShowsDNSBeforeConnectorAndResumesAfterVerification(
 	if err := journal.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if firstJournal.Stage != tunnelcreatejournal.StageTunnelCreated || firstJournal.TunnelID != "tun_workflow" || firstJournal.Domains[0].ID != "domain_workflow" {
+	if firstJournal.Stage != tunnelcreatejournal.StageDomainsReady || firstJournal.TunnelID != "tun_workflow" || firstJournal.Domains[0].ID != "domain_workflow" {
 		t.Fatalf("pending journal=%+v", firstJournal)
 	}
 
@@ -540,28 +486,18 @@ func TestTunnelCreateSelfhostShowsDNSBeforeConnectorAndResumesAfterVerification(
 	if err := json.Unmarshal([]byte(secondOut), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Pending || ready.Tunnel.StableEndpoint != "https://app.example.test" || ready.Connector == nil || ready.Connector.State != "ready" || ready.Connector.ReadyAt == nil || !ready.Domains[0].Replayed {
+	if ready.Pending || ready.Tunnel.StableEndpoint != "https://app.example.test" || !ready.Domains[0].Replayed {
 		t.Fatalf("resumed result=%+v", ready)
 	}
-	events := h.events.snapshot()
-	lastInstructions, connectorEnroll := -1, -1
-	for index, event := range events {
-		if event == "control.domain.instructions" {
-			lastInstructions = index
-		}
-		if event == "hostd.connector.enroll" && connectorEnroll == -1 {
-			connectorEnroll = index
-		}
-	}
-	if connectorEnroll < 0 || lastInstructions < 0 || lastInstructions > connectorEnroll || h.createCalls != 2 || h.domainCalls != 1 {
-		t.Fatalf("resume ordering/events=%v creates=%d domains=%d", events, h.createCalls, h.domainCalls)
+	if events := h.events.snapshot(); h.createCalls != 2 || h.domainCalls != 1 {
+		t.Fatalf("resume events=%v creates=%d domains=%d", events, h.createCalls, h.domainCalls)
 	}
 	h.assertJournalLockReleased(t)
 }
 
-func TestTunnelCreateWaitActivatesConnectorBeforeWaitingForDomainOperation(t *testing.T) {
+func TestTunnelCreateWaitShowsDNSThenWaitsForTunnelThenDomainOperation(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
-	h.domainWaitForConnector = true
+	h.trackWait = true
 	stdout, stderr, err := h.executeWithWait(true, true, true)
 	if err != nil {
 		t.Fatalf("create with --wait: stdout=%q stderr=%q error=%v", stdout, stderr, err)
@@ -571,39 +507,37 @@ func TestTunnelCreateWaitActivatesConnectorBeforeWaitingForDomainOperation(t *te
 		t.Fatalf("DNS records were not shown before waiting: %q", stderr)
 	}
 	events := h.events.snapshot()
-	dnsProgress, connectorReady, tunnelWait, domainWait := -1, -1, -1, -1
+	dnsProgress, tunnelWait, domainWait := -1, -1, -1
 	for index, event := range events {
 		switch event {
 		case "stderr.progress":
 			if dnsProgress == -1 {
 				dnsProgress = index
 			}
-		case "hostd.connector.ready":
-			connectorReady = index
 		case "control.operation.tunnel":
 			tunnelWait = index
 		case "control.operation.domain":
 			domainWait = index
 		}
 	}
-	if dnsProgress < 0 || connectorReady <= dnsProgress || tunnelWait <= connectorReady || domainWait <= tunnelWait {
+	if dnsProgress < 0 || tunnelWait <= dnsProgress || domainWait <= tunnelWait {
 		t.Fatalf("readiness wait order=%v", events)
 	}
 	var result tunnelCreateOutput
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Pending || result.Connector == nil || result.Connector.State != "ready" || len(result.Domains) != 1 || result.Domains[0].Operation.State != "succeeded" || result.Domains[0].Instructions.VerificationState != "waiting_dns" {
+	if result.Pending || len(result.Domains) != 1 || result.Domains[0].Operation.State != "succeeded" || result.Domains[0].Instructions.VerificationState != "waiting_dns" {
 		t.Fatalf("create result=%+v", result)
 	}
 }
 
-func TestTunnelCreateWorkflowResumesExactIdempotentRequestAfterConnectorCrash(t *testing.T) {
+func TestTunnelCreateWorkflowResumesExactIdempotentRequestAfterInterruptedOperation(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
-	h.enrollment.fail = tunnelenrollment.ErrUnavailable
+	h.interruptFirstCreate = true
 	firstOut, firstErrOut, err := h.execute(true, false)
-	var changed *TunnelCreateChangedError
-	if !errors.As(err, &changed) || changed.TunnelID != "tun_workflow" || changed.Stage != "connector activation" || changed.RecoveryCommand != "pb tunnel connector add tun_workflow" {
+	var outcome *TunnelOperationOutcomeError
+	if !errors.As(err, &outcome) {
 		t.Fatalf("first error=%T %v", err, err)
 	}
 	if firstOut != "" || firstErrOut != "" {
@@ -630,7 +564,7 @@ func TestTunnelCreateWorkflowCancellationStopsAtEveryBoundaryAndReleasesOwnershi
 	boundaries := []string{
 		"service.start", "hostd.readiness", "control.tunnel.create", "workflow.tunnel",
 		"control.routes.list", "control.domain.create", "workflow.domain", "control.domain.instructions",
-		"hostd.connector.enroll", "hostd.connector.activate", "workflow.connector", "output", "workflow.complete",
+		"output", "workflow.complete",
 	}
 	for _, boundary := range boundaries {
 		t.Run(boundary, func(t *testing.T) {
@@ -650,8 +584,6 @@ func TestTunnelCreateWorkflowCancellationStopsAtEveryBoundaryAndReleasesOwnershi
 }
 
 func TestTunnelCreateWorkflowHarnessRejectsTrailingOutputSecrets(t *testing.T) {
-	// The command's connector projection must remain the safe, deliberately
-	// smaller output even though hostd returns a credential reference.
 	h := newWorkflowAcceptanceHarness(t)
 	stdout, stderr, err := h.execute(true, false)
 	if err != nil {
@@ -661,7 +593,7 @@ func TestTunnelCreateWorkflowHarnessRejectsTrailingOutputSecrets(t *testing.T) {
 	var output tunnelCreateOutput
 	decoder := json.NewDecoder(strings.NewReader(stdout))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&output); err != nil || decoder.Decode(&struct{}{}) != io.EOF || output.Connector == nil || output.Connector.ConnectorID != "connector_workflow" {
+	if err := decoder.Decode(&output); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		t.Fatalf("unsafe output=%q decode=%v", stdout, err)
 	}
 }
@@ -675,10 +607,10 @@ func TestTunnelCreateWorkflowCanonicalReplayIdentity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newWorkflowAcceptanceHarness(t)
-			h.enrollment.fail = tunnelenrollment.ErrUnavailable
+			h.interruptFirstCreate = true
 			_, _, err := h.execute(true, false)
-			var changed *TunnelCreateChangedError
-			if !errors.As(err, &changed) {
+			var interrupted *TunnelOperationOutcomeError
+			if !errors.As(err, &interrupted) {
 				t.Fatalf("first create: %v", err)
 			}
 			h.completedReplay, h.wrongReplayOperation, h.wrongReplayTunnel = tc.completed, tc.wrongOperation, tc.wrongTunnel

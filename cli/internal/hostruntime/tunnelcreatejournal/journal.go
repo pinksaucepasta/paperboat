@@ -38,7 +38,6 @@ type Stage string
 const (
 	StagePrepared       Stage = "prepared"
 	StageTunnelCreated  Stage = "tunnel_created"
-	StageConnectorReady Stage = "connector_ready"
 	StageDomainsReady   Stage = "domains_ready"
 )
 
@@ -167,28 +166,9 @@ func (s *Session) RecordTunnel(ctx context.Context, tunnelID, operationID string
 	})
 }
 
-func (s *Session) RecordConnectorReady(ctx context.Context) error {
-	return s.update(ctx, func(journal *Journal) error {
-		if journal.TunnelID == "" || journal.Stage == StagePrepared {
-			return ErrInvalid
-		}
-		if journal.Stage == StageTunnelCreated {
-			journal.Stage = StageConnectorReady
-			allReady := len(journal.Domains) > 0
-			for _, domain := range journal.Domains {
-				allReady = allReady && domain.ID != ""
-			}
-			if allReady {
-				journal.Stage = StageDomainsReady
-			}
-		}
-		return nil
-	})
-}
-
 func (s *Session) RecordDomain(ctx context.Context, index int, domainID string) error {
 	return s.update(ctx, func(journal *Journal) error {
-		if journal.Stage != StageTunnelCreated && journal.Stage != StageConnectorReady && journal.Stage != StageDomainsReady || index < 0 || index >= len(journal.Domains) || !validToken(domainID) {
+		if journal.Stage != StageTunnelCreated && journal.Stage != StageDomainsReady || index < 0 || index >= len(journal.Domains) || !validToken(domainID) {
 			return ErrInvalid
 		}
 		if journal.Domains[index].ID != "" && journal.Domains[index].ID != domainID {
@@ -200,7 +180,7 @@ func (s *Session) RecordDomain(ctx context.Context, index int, domainID string) 
 		for _, domain := range journal.Domains {
 			allReady = allReady && domain.ID != ""
 		}
-		if allReady && journal.Stage != StageTunnelCreated {
+		if allReady {
 			journal.Stage = StageDomainsReady
 		}
 		return nil
@@ -346,12 +326,9 @@ func validateJournal(journal Journal) error {
 			return ErrInvalid
 		}
 	case StageTunnelCreated:
-		// Customer DNS setup can precede connector activation. Domain IDs may
-		// be recorded here so a DNS-pending create can resume without creating
-		// duplicate bindings.
-	case StageConnectorReady:
 		// Domain IDs are recorded one at a time. Partial progress is durable
-		// and is the expected restart/retry state for multi-domain creates.
+		// and lets a DNS-pending or multi-domain create resume without
+		// creating duplicate bindings.
 	case StageDomainsReady:
 		if len(journal.Domains) == 0 || readyDomains != len(journal.Domains) {
 			return ErrInvalid
@@ -366,22 +343,19 @@ func canComplete(journal Journal) bool {
 	// A prepared journal represents an attempt that has not changed durable
 	// control-plane state yet. It is safe to remove after a deterministic
 	// request rejection such as a name conflict. Once a tunnel ID exists, the
-	// journal must only be completed after the connector and every requested
-	// domain have reached their recorded terminal creation stages.
+	// journal must only be completed after every requested
+	// domain has reached their recorded terminal creation stages.
 	if journal.TunnelID == "" {
 		return journal.Stage == StagePrepared
 	}
-	if journal.Stage == StagePrepared || journal.Stage == StageTunnelCreated {
-		return false
-	}
 	if len(journal.Domains) == 0 {
-		return journal.Stage == StageConnectorReady
+		return journal.Stage == StageTunnelCreated
 	}
 	return journal.Stage == StageDomainsReady
 }
 
 func validStage(stage Stage) bool {
-	return stage == StagePrepared || stage == StageTunnelCreated || stage == StageConnectorReady || stage == StageDomainsReady
+	return stage == StagePrepared || stage == StageTunnelCreated || stage == StageDomainsReady
 }
 
 func validToken(value string) bool {

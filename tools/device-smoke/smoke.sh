@@ -1001,7 +1001,7 @@ elif sys.argv[2]=="tunnel-failures":
 elif sys.argv[2]=="network-inventory":
  assert r["edges_and_verified_relays"]
 elif sys.argv[2]=="tunnel-lifecycle":
- assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "connector_lifecycle", "credentials_rotate", "rotate_without_downtime", "port_policy"))
+ assert all(r[k] for k in ("status_doctor_logs", "capture_replay", "pause_resume", "port_policy"))
 elif sys.argv[2]=="config-sync":
  assert all(r[k] for k in ("repository_connect_list", "validate_apply", "status_assignment", "force_pull", "unassign"))
 elif sys.argv[2]=="config-survival":

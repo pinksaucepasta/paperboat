@@ -8,8 +8,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
-	"github.com/spf13/cobra"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -334,7 +332,6 @@ func TestTunnelCreateHumanOutputExplainsPendingCustomerDomain(t *testing.T) {
 	route.TunnelID = tunnel.ID
 	output := tunnelCreateHumanOutput(tunnelCreateOutput{
 		Tunnel:    tunnel,
-		Connector: &tunnelConnectorCreateOutput{ConnectorID: "connector_1"},
 		Operation: validCommandOperation("tunnel", tunnel.ID),
 		Route:     &route,
 	}, "http://127.0.0.1:8080")
@@ -429,49 +426,11 @@ func TestTunnelCreateReportsPartialDomainFailureAndUsesFreshKeys(t *testing.T) {
 	}
 }
 
-func TestTunnelCreateConnectorOutcomeIsTypedAndPreservesRecovery(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		runtimeErr  error
-		wantOutcome string
-	}{
-		{name: "known failure", runtimeErr: tunnelenrollment.ErrForbidden, wantOutcome: "failed"},
-		{name: "uncertain local RPC", runtimeErr: tunnelenrollment.ErrUnavailable, wantOutcome: "has an uncertain outcome"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels" {
-					t.Fatalf("request=%s %s", r.Method, r.URL.Path)
-				}
-				value := validCommandTunnel()
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Changed: true}})
-			})
-			tunnelConnectorAddRuntime = func(*cobra.Command, string) error { return test.runtimeErr }
-			command := tunnelCobraCommandV1()
-			command.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-			err := command.Execute()
-			var changed *TunnelCreateChangedError
-			if !errors.As(err, &changed) || changed.TunnelID != "tun_1" || changed.Outcome != test.wantOutcome || changed.RecoveryCommand != "pb tunnel connector add tun_1" || !errors.Is(err, test.runtimeErr) {
-				t.Fatalf("error=%#v typed=%#v", err, changed)
-			}
-			if !strings.Contains(err.Error(), "tunnel was preserved") || !strings.Contains(err.Error(), "pb tunnel connector add tun_1") {
-				t.Fatalf("error=%v", err)
-			}
-		})
-	}
-}
-
-func TestTunnelCreateReplayResumesConnectorAndEmitsOneCanonicalDocument(t *testing.T) {
+func TestTunnelCreateReplayEmitsOneCanonicalDocument(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 		value := validCommandTunnel()
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Replayed: true}})
 	})
-	runtimeCalls := 0
-	originalRuntime := tunnelConnectorAddRuntime
-	tunnelConnectorAddRuntime = func(command *cobra.Command, tunnelID string) error {
-		runtimeCalls++
-		return originalRuntime(command, tunnelID)
-	}
 	var output bytes.Buffer
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
@@ -479,13 +438,12 @@ func TestTunnelCreateReplayResumesConnectorAndEmitsOneCanonicalDocument(t *testi
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if runtimeCalls != 1 || strings.Count(strings.TrimSpace(output.String()), "\n") != 0 || !strings.Contains(output.String(), `"kind":"tunnel_create"`) || !strings.Contains(output.String(), `"replayed":true`) {
-		t.Fatalf("calls=%d output=%q", runtimeCalls, output.String())
+	if strings.Count(strings.TrimSpace(output.String()), "\n") != 0 || !strings.Contains(output.String(), `"kind":"tunnel_create"`) || !strings.Contains(output.String(), `"replayed":true`) {
+		t.Fatalf("output=%q", output.String())
 	}
 }
 
-func TestTunnelCreateProcessRetryReportsExactExistingTunnelWithoutAttaching(t *testing.T) {
-	connectorCalls := 0
+func TestTunnelCreateProcessRetryReportsExactExistingTunnel(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
@@ -499,10 +457,6 @@ func TestTunnelCreateProcessRetryReportsExactExistingTunnelWithoutAttaching(t *t
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
 	})
-	tunnelConnectorAddRuntime = func(*cobra.Command, string) error {
-		connectorCalls++
-		return nil
-	}
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"create", "demo", "--port", "8080"})
 	err := command.Execute()
@@ -510,8 +464,8 @@ func TestTunnelCreateProcessRetryReportsExactExistingTunnelWithoutAttaching(t *t
 	if !errors.As(err, &existing) || existing.TunnelID != "tun_1" || existing.Name != "demo" || existing.RecoveryCommand != "pb tunnel show tun_1" {
 		t.Fatalf("error=%#v existing=%#v", err, existing)
 	}
-	if connectorCalls != 0 || !strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(err.Error(), "pb tunnel show tun_1") {
-		t.Fatalf("connector calls=%d error=%v", connectorCalls, err)
+	if !strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(err.Error(), "pb tunnel show tun_1") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -525,16 +479,17 @@ func TestTunnelCreateInterruptedRetryReusesJournalAndCanonicalOutput(t *testing.
 		createCalls++
 		keys = append(keys, r.Header.Get("Idempotency-Key"))
 		value := validCommandTunnel()
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Replayed: createCalls > 1, Changed: createCalls == 1}})
+		operation := validCommandOperation("tunnel", value.ID)
+		if createCalls == 1 {
+			operation.State = "failed" // interrupts the first attempt after the journal records the tunnel
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: operation, Replayed: createCalls > 1, Changed: createCalls == 1}})
 	})
-	readyRuntime := tunnelConnectorAddRuntime
-	tunnelConnectorAddRuntime = func(*cobra.Command, string) error { return tunnelenrollment.ErrUnavailable }
 	first := tunnelCobraCommandV1()
 	first.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
 	if err := first.Execute(); err == nil {
 		t.Fatal("interrupted create unexpectedly succeeded")
 	}
-	tunnelConnectorAddRuntime = readyRuntime
 	var output bytes.Buffer
 	second := tunnelCobraCommandV1()
 	second.SetOut(&output)
@@ -555,9 +510,10 @@ func TestTunnelCreateInterruptedRetryWithDifferentInputFailsBeforeNetwork(t *tes
 	withTunnelCommandClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		createCalls++
 		value := validCommandTunnel()
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Changed: true}})
+		operation := validCommandOperation("tunnel", value.ID)
+		operation.State = "failed" // interrupts the first attempt after the journal records the tunnel
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: operation, Changed: true}})
 	})
-	tunnelConnectorAddRuntime = func(*cobra.Command, string) error { return tunnelenrollment.ErrUnavailable }
 	first := tunnelCobraCommandV1()
 	first.SetArgs([]string{"create", "demo", "--port", "8080"})
 	if err := first.Execute(); err == nil {

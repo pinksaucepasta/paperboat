@@ -35,8 +35,7 @@ func tunnelCobraCommandV1() *cobra.Command {
 	for _, action := range []string{"pause", "resume", "delete"} {
 		root.AddCommand(tunnelStateCommand(action))
 	}
-	root.AddCommand(tunnelRouteCommand(), tunnelDomainCommand(), tunnelConnectorCommand())
-	root.AddCommand(tunnelCredentialsCommand())
+	root.AddCommand(tunnelRouteCommand(), tunnelDomainCommand())
 	root.AddCommand(tunnelPolicyCommand())
 	stop := &cobra.Command{Use: "stop <preview>", Short: "Stop an ephemeral tunnel", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
 		if strings.HasPrefix(args[0], "tunnel_") {

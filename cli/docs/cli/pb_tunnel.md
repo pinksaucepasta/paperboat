@@ -40,9 +40,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb tunnel connector](pb_tunnel_connector.md)	 - Manage tunnel connectors
 * [pb tunnel create](pb_tunnel_create.md)	 - Create a durable tunnel
-* [pb tunnel credentials](pb_tunnel_credentials.md)	 - Manage tunnel credentials
 * [pb tunnel delete](pb_tunnel_delete.md)	 - Delete endpoints and routes and revoke connectors while preserving user DNS records
 * [pb tunnel doctor](pb_tunnel_doctor.md)	 - Diagnose tunnel health
 * [pb tunnel domain](pb_tunnel_domain.md)	 - Manage tunnel domains

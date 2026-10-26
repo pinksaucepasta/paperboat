@@ -41,7 +41,7 @@ def main():
                            '--duration', '5m', '--wait', '--timeout', '60s')
             identifier = created['tunnel']['id']
             assert created['tunnel']['account_id'] == before['account_id']
-            assert created['connector']['state'] == 'ready' and not created.get('pending', False)
+            assert created['operation']['state'] == 'succeeded' and not created.get('pending', False)
             shown = call('show', identifier)
             assert shown['id'] == identifier and shown['name'] == name
             assert any(item['id'] == identifier for item in owned())

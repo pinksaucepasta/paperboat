@@ -12,7 +12,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/supportbundle"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/spf13/cobra"
 	"io"
 	"net/http"
@@ -64,13 +63,6 @@ func withTunnelCommandClient(t *testing.T, handler http.HandlerFunc) {
 		return tunnelcreatejournal.Begin(ctx, tunnelcreatejournal.Config{StateRoot: workflowRoot, HostID: "host_1", NameDigest: hex.EncodeToString(nameDigest[:]), RequestDigest: request.RequestDigest, DomainCount: request.DomainCount, ExpiresAt: request.ExpiresAt, NewKey: tunnelKey})
 	}
 	t.Cleanup(func() { beginTunnelCreateWorkflowForCommand = oldWorkflow })
-	oldRuntime := tunnelConnectorAddRuntime
-	tunnelConnectorAddRuntime = func(command *cobra.Command, tunnelID string) error {
-		ready := time.Unix(3, 0).UTC()
-		projection := tunnelenrollment.Projection{Schema: tunnelenrollment.Schema, Kind: "tunnel_connector", TunnelID: tunnelID, HostID: "host_1", ConnectorID: "connector_1", OperationID: "operation_connector_1", State: "ready", CredentialReference: "protected-file://paperboat/connector_1", CredentialGeneration: 1, ReadyAt: &ready}
-		return tunnelOutput(command, projection, "connector ready")
-	}
-	t.Cleanup(func() { tunnelConnectorAddRuntime = oldRuntime })
 }
 
 func validCommandTunnel() api.Tunnel {
@@ -83,28 +75,17 @@ func validCommandOperation(kind, id string) api.TunnelOperation {
 
 func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 	root := tunnelCobraCommandV1()
-	for _, name := range []string{"create", "list", "show", "pause", "resume", "delete", "status", "doctor", "logs", "route", "domain", "connector", "credentials"} {
+	for _, name := range []string{"create", "list", "show", "pause", "resume", "delete", "status", "doctor", "logs", "route", "domain"} {
 		if child, _, _ := root.Find([]string{name}); child == nil || child == root {
 			t.Fatalf("missing %s", name)
 		}
 	}
-	connector, _, _ := root.Find([]string{"connector"})
-	for _, name := range []string{"list", "add", "drain", "revoke"} {
-		if child, _, _ := connector.Find([]string{name}); child == nil || child == connector {
-			t.Fatalf("missing connector %s", name)
-		}
-	}
-	for _, path := range [][]string{{"route", "add"}, {"route", "update"}, {"route", "remove"}, {"domain", "add"}, {"domain", "verify"}, {"domain", "remove"}, {"domain", "instructions"}, {"credentials", "rotate"}} {
+	for _, path := range [][]string{{"route", "add"}, {"route", "update"}, {"route", "remove"}, {"domain", "add"}, {"domain", "verify"}, {"domain", "remove"}, {"domain", "instructions"}} {
 		if child, _, _ := root.Find(path); child == nil || child == root {
 			t.Fatalf("missing %v", path)
 		}
 	}
-	for _, forbidden := range []string{"enroll", "enrollment", "token", "secret"} {
-		if child, _, _ := connector.Find([]string{forbidden}); child != connector {
-			t.Fatalf("unsafe connector command %q exists", forbidden)
-		}
-	}
-	wantRoot := []string{"connector", "create", "credentials", "delete", "doctor", "domain", "inspect", "list", "logs", "pause", "policy", "rename", "replay", "resume", "route", "show", "status", "stop"}
+	wantRoot := []string{"create", "delete", "doctor", "domain", "inspect", "list", "logs", "pause", "policy", "rename", "replay", "resume", "route", "show", "status", "stop"}
 	var gotRoot []string
 	for _, child := range root.Commands() {
 		if !child.Hidden {
@@ -121,8 +102,6 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 	}{
 		{path: []string{"route"}, want: []string{"add", "list", "remove", "update"}},
 		{path: []string{"domain"}, want: []string{"add", "instructions", "list", "remove", "verify"}},
-		{path: []string{"connector"}, want: []string{"add", "drain", "list", "revoke"}},
-		{path: []string{"credentials"}, want: []string{"rotate"}},
 	} {
 		parent, _, _ := root.Find(expected.path)
 		var got []string
@@ -136,7 +115,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 			t.Fatalf("%v commands=%v want=%v", expected.path, got, expected.want)
 		}
 	}
-	for _, path := range [][]string{{"route", "get"}, {"connector", "get"}} {
+	for _, path := range [][]string{{"route", "get"}} {
 		child, _, _ := root.Find(path)
 		if child != nil && child.Name() == path[len(path)-1] {
 			t.Fatalf("undocumented command is exposed: %v", path)
@@ -218,39 +197,15 @@ func TestTunnelCompletionUsesTheCanonicalSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	completion := output.String()
-	for _, required := range []string{"create\t", "list\t", "route\t", "domain\t", "connector\t", "credentials\t"} {
+	for _, required := range []string{"create\t", "list\t", "route\t", "domain\t"} {
 		if !strings.Contains(completion, required) {
 			t.Fatalf("completion missing %q: %s", required, completion)
 		}
 	}
-	for _, forbidden := range []string{"enroll\t", "token\t"} {
+	for _, forbidden := range []string{"enroll\t", "token\t", "connector\t", "credentials\t"} {
 		if strings.Contains(completion, forbidden) {
 			t.Fatalf("unsafe completion %q: %s", forbidden, completion)
 		}
-	}
-}
-
-func TestConnectorAddUsesInjectedRuntimeAndFailsTypedWhenAbsent(t *testing.T) {
-	withTunnelCommandClient(t, func(_ http.ResponseWriter, request *http.Request) {
-		t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
-	})
-	old := tunnelConnectorAddRuntime
-	t.Cleanup(func() { tunnelConnectorAddRuntime = old })
-	tunnelConnectorAddRuntime = nil
-	command := tunnelCobraCommandV1()
-	command.SetArgs([]string{"connector", "add", "tun_1"})
-	if err := command.Execute(); !errors.Is(err, ErrTunnelConnectorAddRequiresRuntime) {
-		t.Fatalf("error=%v", err)
-	}
-	called := ""
-	tunnelConnectorAddRuntime = func(_ *cobra.Command, tunnel string) error { called = tunnel; return nil }
-	command = tunnelCobraCommandV1()
-	command.SetArgs([]string{"connector", "add", "tun_1"})
-	if err := command.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if called != "tun_1" {
-		t.Fatalf("called=%q", called)
 	}
 }
 

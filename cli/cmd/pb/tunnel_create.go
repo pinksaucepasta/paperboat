@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -18,94 +16,9 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/spf13/cobra"
 )
-
-func activateCreatedTunnelConnector(command *cobra.Command, tunnelID string) (tunnelConnectorCreateOutput, error) {
-	if tunnelConnectorAddRuntime == nil {
-		return tunnelConnectorCreateOutput{}, ErrTunnelConnectorAddRequiresRuntime
-	}
-	var output bytes.Buffer
-	runtimeCommand := &cobra.Command{}
-	runtimeCommand.SetContext(command.Context())
-	runtimeCommand.SetOut(&output)
-	runtimeCommand.SetErr(command.ErrOrStderr())
-	runtimeCommand.Flags().Bool("json", true, "")
-	if err := tunnelConnectorAddRuntime(runtimeCommand, tunnelID); err != nil {
-		return tunnelConnectorCreateOutput{}, err
-	}
-	var projection tunnelenrollment.Projection
-	decoder := json.NewDecoder(bytes.NewReader(output.Bytes()))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&projection) != nil || decoder.Decode(&struct{}{}) != io.EOF || projection.Schema != tunnelenrollment.Schema || projection.Kind != "tunnel_connector" || projection.TunnelID != tunnelID || !validTunnelCLIResourceID(projection.HostID) || !validTunnelCLIResourceID(projection.ConnectorID) || !validTunnelCLIResourceID(projection.OperationID) || projection.State != "ready" || projection.CredentialGeneration == 0 || projection.ReadyAt == nil || projection.ReadyAt.IsZero() {
-		return tunnelConnectorCreateOutput{}, api.ErrUnsafeTunnelResponse
-	}
-	return tunnelConnectorCreateOutput{Schema: projection.Schema, Kind: projection.Kind, TunnelID: projection.TunnelID, HostID: projection.HostID, ConnectorID: projection.ConnectorID, OperationID: projection.OperationID, State: projection.State, CredentialGeneration: projection.CredentialGeneration, ReadyAt: projection.ReadyAt}, nil
-}
-
-// resumeCreatedTunnelConnector reconstructs the stable connector projection
-// from the control plane after a process crash. The local enrollment endpoint
-// is intentionally not called again: an already-recorded ready stage means a
-// second enrollment could create a duplicate host attachment.
-func resumeCreatedTunnelConnector(ctx context.Context, client *api.Client, journal tunnelcreatejournal.Journal) (tunnelConnectorCreateOutput, error) {
-	if ctx == nil || client == nil || !validTunnelCLIResourceID(journal.TunnelID) || !validTunnelCLIResourceID(journal.HostID) {
-		return tunnelConnectorCreateOutput{}, api.ErrUnsafeTunnelResponse
-	}
-	var matches []api.TunnelConnector
-	cursor := ""
-	seen := map[string]struct{}{cursor: {}}
-	for pageNumber := 0; pageNumber < 10; pageNumber++ {
-		page, err := retryTunnelRead(ctx, func() (api.TunnelConnectorPage, error) {
-			return client.ListTunnelConnectorsV1(ctx, journal.TunnelID, cursor, 200)
-		})
-		if err != nil {
-			return tunnelConnectorCreateOutput{}, err
-		}
-		for _, connector := range page.Items {
-			if connector.TunnelID != journal.TunnelID || connector.HostID != journal.HostID || connector.DesiredState != "active" || connector.ReadyAt == nil || connector.ReadyAt.IsZero() || connector.RotationGeneration <= 0 || connector.CredentialReference == "" {
-				continue
-			}
-			matches = append(matches, connector)
-		}
-		if page.NextCursor == "" {
-			break
-		}
-		if _, exists := seen[page.NextCursor]; exists {
-			return tunnelConnectorCreateOutput{}, api.ErrUnsafeTunnelResponse
-		}
-		seen[page.NextCursor] = struct{}{}
-		cursor = page.NextCursor
-	}
-	if len(matches) != 1 || !validTunnelCLIResourceID(journal.OperationID) {
-		if len(matches) > 1 {
-			return tunnelConnectorCreateOutput{}, api.ErrUnsafeTunnelResponse
-		}
-		return tunnelConnectorCreateOutput{}, tunnelenrollment.ErrUnavailable
-	}
-	connector := matches[0]
-	return tunnelConnectorCreateOutput{
-		Schema:               tunnelenrollment.Schema,
-		Kind:                 "tunnel_connector",
-		TunnelID:             connector.TunnelID,
-		HostID:               connector.HostID,
-		ConnectorID:          connector.ID,
-		OperationID:          journal.OperationID,
-		State:                "ready",
-		CredentialGeneration: uint64(connector.RotationGeneration),
-		ReadyAt:              connector.ReadyAt,
-	}, nil
-}
-
-func tunnelCreateConnectorError(tunnelID string, err error) error {
-	outcome := "failed"
-	if errors.Is(err, tunnelenrollment.ErrUnavailable) || errors.Is(err, tunnelenrollment.ErrActivation) || errors.Is(err, context.DeadlineExceeded) {
-		outcome = "has an uncertain outcome"
-	}
-	return &TunnelCreateChangedError{TunnelID: tunnelID, Stage: "connector activation", Outcome: outcome, OutcomeUncertain: outcome != "failed", RecoveryCommand: "pb tunnel connector add " + tunnelID, Cause: err}
-}
 
 func tunnelCreateDomainError(tunnelID, hostname, routeID, stage string, err error) error {
 	return &TunnelCreateChangedError{TunnelID: tunnelID, Stage: "custom domain " + hostname + " " + stage, Outcome: "failed", RecoveryCommand: fmt.Sprintf("pb tunnel domain add %s %s --route %s", tunnelID, hostname, routeID), Cause: err}
@@ -129,10 +42,8 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	}
 	var output strings.Builder
 	fmt.Fprintf(&output, "%s tunnel %s (%s)\n", verb, result.Tunnel.Name, result.Tunnel.ID)
-	if result.Connector != nil {
-		fmt.Fprintf(&output, "Connector %s is ready\n", result.Connector.ConnectorID)
-	} else if result.Pending {
-		fmt.Fprintln(&output, "Connector activation is pending until a customer domain is verified")
+	if result.Pending {
+		fmt.Fprintln(&output, "Serving is pending until a customer domain is verified")
 	}
 	if result.Tunnel.StableEndpoint != "" {
 		fmt.Fprintf(&output, "%s -> %s\n", result.Tunnel.StableEndpoint, origin)
@@ -382,8 +293,8 @@ func tunnelCreateCommand() *cobra.Command {
 
 		// A self-hosted tunnel has no usable public URL until a customer domain
 		// is verified. Persist its domain IDs and show the exact DNS records
-		// before attempting connector activation, which cannot become ready
-		// while that customer route is ineligible.
+		// before waiting for readiness, which cannot complete while that
+		// customer route is ineligible.
 		if out.Tunnel.StableEndpoint == "" {
 			if len(result.Domains) > 0 && !tunnelCreateDomainsVerified(result.Domains) {
 				result.Pending = true
@@ -428,24 +339,6 @@ func tunnelCreateCommand() *cobra.Command {
 			}
 			return &TunnelCreateChangedError{TunnelID: out.Tunnel.ID, Stage: "showing customer DNS instructions", Outcome: "could not be printed", RecoveryCommand: recovery, Cause: err}
 		}
-		var connector tunnelConnectorCreateOutput
-		if journal.Stage == tunnelcreatejournal.StageConnectorReady || journal.Stage == tunnelcreatejournal.StageDomainsReady {
-			connector, err = resumeCreatedTunnelConnector(ctx, client, journal)
-			if err != nil {
-				return tunnelCreateConnectorError(out.Tunnel.ID, err)
-			}
-		} else {
-			if !jsonOutputRequested(command) {
-				fmt.Fprintln(command.ErrOrStderr(), "Waiting for the tunnel connector to become ready…")
-			}
-			connector, err = activateCreatedTunnelConnector(command, out.Tunnel.ID)
-			if err != nil {
-				return tunnelCreateConnectorError(out.Tunnel.ID, err)
-			}
-			if err := workflow.RecordConnectorReady(ctx); err != nil {
-				return tunnelCreateJournalError(out.Tunnel.ID, "recording connector readiness", "pb tunnel connector add "+out.Tunnel.ID, err)
-			}
-		}
 		out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
 		if err != nil {
 			return tunnelCreateJournalError(out.Tunnel.ID, "tunnel readiness", "pb tunnel status "+out.Tunnel.ID, err)
@@ -461,7 +354,7 @@ func tunnelCreateCommand() *cobra.Command {
 			}
 			result.Domains[index] = domain
 		}
-		result.Tunnel, result.Operation, result.Connector = out.Tunnel, out.Operation, &connector
+		result.Tunnel, result.Operation = out.Tunnel, out.Operation
 		if err := tunnelOutput(command, result, tunnelCreateHumanOutput(result, origin)); err != nil {
 			return err
 		}

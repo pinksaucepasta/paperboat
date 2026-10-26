@@ -447,7 +447,7 @@ and tunnels" (no stop time, no ETag in preview leases, `team` access mode not ex
 
 **What:** durable public endpoints with routes, renamable names and custom domains.
 **Surfaces:** `pb tunnel …` (create, list, show, status, doctor, logs, pause, resume, stop,
-delete, route, domain, connector, credentials, policy, inspect, replay); console tunnels,
+delete, route, domain, policy, inspect, replay); console tunnels,
 routes, domains.
 **Known:** console tunnel create and subdomain edit are UI-only today; `GET /v1/tunnels`
 ignores `state` and returns deleted tombstones (console/NOTES.md).
@@ -455,7 +455,6 @@ ignores `state` and returns deleted tombstones (console/NOTES.md).
 - F8-01: Create a tunnel, add/update/remove routes, rename it, delete it — on L, M, W.
 - F8-02: Custom domain add → DNS instructions → verify → serves with TLS → remove.
 - F8-03: Tunnel survives daemon restart, machine reboot and update; pause/resume; stop.
-- F8-04: Connectors add/list/drain/revoke and credential rotation without downtime.
 - F8-05: On-demand port policy (`pb tunnel policy allow/get/revoke`).
 - F8-06: HTTP/1.1, HTTP/2, HTTP/3, WebSocket, large uploads/downloads.
 - F8-07: `pb tunnel doctor/logs/status` explain real failures.

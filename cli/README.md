@@ -248,7 +248,7 @@ pb preview 3000 --private
 Preview and tunnel list commands accept `--cursor` and `--limit`, with `--q`, `--state`, and `--owner`
 filters for preview and tunnel inventories. Human output prints an exact next-page
 invocation when more results exist; JSON preserves `next_cursor`. Interactive
-preview, tunnel, route, domain, and connector inventories offer page navigation.
+preview, tunnel, route, and domain inventories offer page navigation.
 
 Use `pb send list --on MACHINE --offset OFFSET --limit 50` for native transfer
 history. Optional `--q` and `--state` filters apply before pagination. History
@@ -467,7 +467,7 @@ the machine's authorized ports, available only while the team allows private acc
 and future accepted members; selected-member grants apply to one accepted account.
 Their capabilities combine. Saving a grant replaces that audience's capability list;
 `--active=false` revokes it. Machine incoming toggles must also allow the requested operation.
-Tunnel management covers existing private/team tunnels: routes, desired state, deletion, and connector status and controls. Create tunnels locally on the target machine; a teammate’s grant does not copy its enrollment proof or launch a remote connector. Public publication, domains, and connector enrollment require separate owner authority.
+Tunnel management covers existing private/team tunnels: routes, desired state and deletion. Create tunnels locally on the target machine; it serves them on its own connection, and a teammate’s grant cannot start one remotely. Public publication and domains require separate owner authority.
 
 No machine grant implies ENV administration, public publication or resharing.
 

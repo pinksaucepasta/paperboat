@@ -135,7 +135,6 @@ var tunnelDoctorDNSCheckForCommand = func(ctx context.Context) bool {
 type tunnelCreateWorkflow interface {
 	Snapshot() tunnelcreatejournal.Journal
 	RecordTunnel(context.Context, string, string) error
-	RecordConnectorReady(context.Context) error
 	RecordDomain(context.Context, int, string) error
 	Complete(context.Context) error
 	Close() error
@@ -287,18 +286,6 @@ func (e *TunnelCreateChangedError) Unwrap() error {
 	return e.Cause
 }
 
-type tunnelConnectorCreateOutput struct {
-	Schema               string     `json:"schema"`
-	Kind                 string     `json:"kind"`
-	TunnelID             string     `json:"tunnel_id"`
-	HostID               string     `json:"host_id"`
-	ConnectorID          string     `json:"connector_id"`
-	OperationID          string     `json:"operation_id"`
-	State                string     `json:"state"`
-	CredentialGeneration uint64     `json:"credential_generation"`
-	ReadyAt              *time.Time `json:"ready_at,omitempty"`
-}
-
 type tunnelCreateDomainOutput struct {
 	Domain       api.TunnelDomain          `json:"domain"`
 	Operation    api.TunnelOperation       `json:"operation"`
@@ -308,17 +295,16 @@ type tunnelCreateDomainOutput struct {
 }
 
 type tunnelCreateOutput struct {
-	Schema    string                       `json:"schema"`
-	Kind      string                       `json:"kind"`
-	Tunnel    api.Tunnel                   `json:"tunnel"`
-	Operation api.TunnelOperation          `json:"operation"`
-	Connector *tunnelConnectorCreateOutput `json:"connector,omitempty"`
-	Route     *api.TunnelRoute             `json:"route,omitempty"`
-	Domains   []tunnelCreateDomainOutput   `json:"domains"`
-	Pending   bool                         `json:"pending,omitempty"`
-	Recovery  string                       `json:"recovery,omitempty"`
-	Replayed  bool                         `json:"replayed"`
-	Changed   bool                         `json:"changed"`
+	Schema    string                     `json:"schema"`
+	Kind      string                     `json:"kind"`
+	Tunnel    api.Tunnel                 `json:"tunnel"`
+	Operation api.TunnelOperation        `json:"operation"`
+	Route     *api.TunnelRoute           `json:"route,omitempty"`
+	Domains   []tunnelCreateDomainOutput `json:"domains"`
+	Pending   bool                       `json:"pending,omitempty"`
+	Recovery  string                     `json:"recovery,omitempty"`
+	Replayed  bool                       `json:"replayed"`
+	Changed   bool                       `json:"changed"`
 }
 
 func tunnelCommand(use, short string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {

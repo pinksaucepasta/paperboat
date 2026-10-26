@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/spf13/cobra"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -247,93 +245,6 @@ func TestTunnelRouteAddRejectsHTTPOverTCPOrigin(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Fatalf("requests=%d", requests)
-	}
-}
-
-type readyConnectorRecoveryWorkflow struct {
-	journal   tunnelcreatejournal.Journal
-	completed bool
-}
-
-func (w *readyConnectorRecoveryWorkflow) Snapshot() tunnelcreatejournal.Journal {
-	return w.journal
-}
-
-func (w *readyConnectorRecoveryWorkflow) RecordTunnel(_ context.Context, tunnelID, operationID string) error {
-	if tunnelID != w.journal.TunnelID || operationID != w.journal.OperationID {
-		return tunnelcreatejournal.ErrRequestMismatch
-	}
-	return nil
-}
-
-func (w *readyConnectorRecoveryWorkflow) RecordConnectorReady(context.Context) error {
-	return tunnelcreatejournal.ErrInvalid
-}
-
-func (w *readyConnectorRecoveryWorkflow) RecordDomain(_ context.Context, _ int, _ string) error {
-	return tunnelcreatejournal.ErrInvalid
-}
-
-func (w *readyConnectorRecoveryWorkflow) Complete(context.Context) error {
-	w.completed = true
-	return nil
-}
-
-func (*readyConnectorRecoveryWorkflow) Close() error { return nil }
-
-func TestTunnelCreateReadyConnectorJournalRecoversWithoutReenrollment(t *testing.T) {
-	var requests []string
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.Path)
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
-			value := validCommandTunnel()
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Replayed: true}})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/connectors":
-			readyAt := time.Unix(4, 0).UTC()
-			connector := api.TunnelConnector{
-				Schema: api.TunnelV1Schema, Kind: "connector", ID: "connector_1", TunnelID: "tun_1", HostID: "host_1",
-				CredentialReference: "protected-file://paperboat/connector_1", RotationGeneration: 1, ProtocolVersion: "1.0",
-				DesiredState: "active", DrainState: "accepting", Generation: 1, ETag: `"connector:connector_1:1"`, ReadyAt: &readyAt,
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelConnectorPage{Items: []api.TunnelConnector{connector}}})
-		default:
-			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
-		}
-	})
-	workflow := &readyConnectorRecoveryWorkflow{}
-	oldWorkflow := beginTunnelCreateWorkflowForCommand
-	beginTunnelCreateWorkflowForCommand = func(_ context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
-		workflow.journal = tunnelcreatejournal.Journal{
-			Schema: tunnelcreatejournal.Schema, HostID: "host_1", RequestDigest: request.RequestDigest, TunnelKey: "idem_test",
-			TunnelID: "tun_1", OperationID: "operation_1", Stage: tunnelcreatejournal.StageConnectorReady,
-			ExpiresAt: request.ExpiresAt, Domains: nil,
-		}
-		return workflow, nil
-	}
-	t.Cleanup(func() { beginTunnelCreateWorkflowForCommand = oldWorkflow })
-	runtimeCalls := 0
-	oldRuntime := tunnelConnectorAddRuntime
-	tunnelConnectorAddRuntime = func(*cobra.Command, string) error {
-		runtimeCalls++
-		return errors.New("unexpected connector re-enrollment")
-	}
-	t.Cleanup(func() { tunnelConnectorAddRuntime = oldRuntime })
-	var output bytes.Buffer
-	command := tunnelCobraCommandV1()
-	command.SetOut(&output)
-	command.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-	if err := command.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if runtimeCalls != 0 || !workflow.completed {
-		t.Fatalf("runtime calls=%d workflow completed=%v", runtimeCalls, workflow.completed)
-	}
-	if strings.Join(requests, ",") != "POST /v1/tunnels,GET /v1/tunnels/tun_1/connectors" {
-		t.Fatalf("requests=%v", requests)
-	}
-	if !strings.Contains(output.String(), `"connector_id":"connector_1"`) || !strings.Contains(output.String(), `"replayed":true`) {
-		t.Fatalf("output=%q", output.String())
 	}
 }
 

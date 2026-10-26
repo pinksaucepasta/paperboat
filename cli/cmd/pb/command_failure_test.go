@@ -100,17 +100,17 @@ func TestCommandTypedOutputsDoNotFormatPrivateCause(t *testing.T) {
 func TestTunnelCreatePartialFailureExportsExactSafeResourceAndRecovery(t *testing.T) {
 	err := &TunnelCreateChangedError{
 		TunnelID:         "tunnel_12345678",
-		RecoveryCommand:  "pb tunnel connector add tunnel_12345678",
-		Stage:            "connector activation",
+		RecoveryCommand:  "pb tunnel status tunnel_12345678",
+		Stage:            "tunnel readiness",
 		Outcome:          "failed",
 		OutcomeUncertain: false,
 	}
 	value := classifyCLIJSONError(err)
-	if value.Code != "tunnel_create_partial" || value.Target != "tunnel_12345678" || value.Recovery != "Run `pb tunnel connector add tunnel_12345678`." {
+	if value.Code != "tunnel_create_partial" || value.Target != "tunnel_12345678" || value.Recovery != "Run `pb tunnel status tunnel_12345678`." {
 		t.Fatalf("partial result = %+v", value)
 	}
 	message := userFacingError(err)
-	if !strings.Contains(message, "tunnel_12345678") || !strings.Contains(message, "pb tunnel connector add tunnel_12345678") {
+	if !strings.Contains(message, "tunnel_12345678") || !strings.Contains(message, "pb tunnel status tunnel_12345678") {
 		t.Fatalf("partial human recovery = %q", message)
 	}
 

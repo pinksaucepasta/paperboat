@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"strings"
 	"testing"
 )
@@ -20,16 +19,5 @@ func TestAccessMachineFailureNamesTheStepAndCause(t *testing.T) {
 	}
 	if strings.Contains(message, "could not finish the command") {
 		t.Fatalf("the generic message hid the cause: %q", message)
-	}
-}
-
-// Staging, 2026-10-26: connector add showed local_io when the server refused the connector's carrier.
-func TestConnectorAddNamesTheServerRefusal(t *testing.T) {
-	err := connectorEnrollFailure(&tunnelenrollment.CarrierBootstrapError{StatusCode: 503, Code: "carrier_unavailable"})
-	message := commandFailureMessage(err, classifyCommandFailure(err))
-	for _, want := range []string{"starting the connector's carrier", "carrier_unavailable", "edge pool"} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("message %q lacks %q", message, want)
-		}
 	}
 }

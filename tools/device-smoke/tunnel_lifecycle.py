@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise durable tunnel health, capture, pause/resume, connector, credential and policy commands."""
+"""Exercise durable tunnel health, capture, pause/resume and policy commands."""
 import functools
 import http.server
 import json
@@ -90,41 +90,6 @@ def main():
             assert run('tunnel', 'status', identifier)['overall_code'] == 'tunnel_paused'
             resumed = run('tunnel', 'resume', identifier, '--wait')
             assert resumed['tunnel']['desired_state'] == 'active' and resumed['tunnel']['id'] == identifier
-            # Connectors: list/add are idempotent for this host; rotate, drain, revoke.
-            connectors = run('tunnel', 'connector', 'list', identifier)['items']
-            assert len(connectors) == 1 and connectors[0]['desired_state'] == 'active'
-            connector = connectors[0]['id']
-            added = run('tunnel', 'connector', 'add', identifier)
-            assert added['connector_id'] == connector and added['state'] == 'ready'
-            # Credential rotation must not interrupt traffic: sample the public URL throughout.
-            samples = []
-            sampling = threading.Event()
-
-            def sample():
-                while not sampling.is_set():
-                    try:
-                        samples.append(urllib.request.urlopen(endpoint + '/', timeout=15).status)
-                    except OSError as error:
-                        samples.append(getattr(error, 'code', 0))
-                    sampling.wait(0.5)
-
-            sampler = threading.Thread(target=sample, daemon=True)
-            sampler.start()
-            try:
-                rotated = confirmed('tunnel', 'credentials', 'rotate', identifier)
-                time.sleep(5)
-            finally:
-                sampling.set()
-                sampler.join(timeout=20)
-            assert rotated['resource_id'] == identifier
-            assert len(samples) >= 5 and set(samples) == {200}, 'rotation interrupted traffic: %s' % samples
-            drained = run('tunnel', 'connector', 'drain', identifier, connector)
-            assert drained['connector']['id'] == connector
-            assert wait(lambda: next(c for c in run('tunnel', 'connector', 'list', identifier)['items']
-                                     if c['id'] == connector)['drain_state'] in ('draining', 'drained'),
-                        'connector drain')
-            revoked = confirmed('tunnel', 'connector', 'revoke', identifier, connector)
-            assert revoked
             # On-demand port policy lives on the machine, not on the tunnel.
             policy = run('tunnel', 'policy', 'allow', before['machine_id'], port, '--access', 'private',
                          '--expires', '30m')
@@ -155,8 +120,8 @@ def main():
                 worker.join(timeout=5)
     assert registration() == before
     print(json.dumps({'check': 'tunnel-lifecycle', 'status': 'PASS', 'status_doctor_logs': True,
-                      'capture_replay': True, 'pause_resume': True, 'connector_lifecycle': True,
-                      'credentials_rotate': True, 'rotate_without_downtime': True, 'port_policy': True, 'enrollment_preserved': True}))
+                      'capture_replay': True, 'pause_resume': True,
+                      'port_policy': True, 'enrollment_preserved': True}))
 
 
 if __name__ == '__main__':

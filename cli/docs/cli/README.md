@@ -235,14 +235,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team sso status](pb_team_sso_status.md) | Show SSO connection, verified domains, Require SSO and exemptions |
 | [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
 | [pb tunnel](pb_tunnel.md) | Manage durable tunnels or start an ephemeral tunnel |
-| [pb tunnel connector](pb_tunnel_connector.md) | Manage tunnel connectors |
-| [pb tunnel connector add](pb_tunnel_connector_add.md) | Add a connector on this host |
-| [pb tunnel connector drain](pb_tunnel_connector_drain.md) | Drain a tunnel connector |
-| [pb tunnel connector list](pb_tunnel_connector_list.md) | List tunnel connectors |
-| [pb tunnel connector revoke](pb_tunnel_connector_revoke.md) | Revoke a tunnel connector |
 | [pb tunnel create](pb_tunnel_create.md) | Create a durable tunnel |
-| [pb tunnel credentials](pb_tunnel_credentials.md) | Manage tunnel credentials |
-| [pb tunnel credentials rotate](pb_tunnel_credentials_rotate.md) | Rotate tunnel connector credentials |
 | [pb tunnel delete](pb_tunnel_delete.md) | Delete endpoints and routes and revoke connectors while preserving user DNS records |
 | [pb tunnel doctor](pb_tunnel_doctor.md) | Diagnose tunnel health |
 | [pb tunnel domain](pb_tunnel_domain.md) | Manage tunnel domains |

@@ -263,7 +263,7 @@ func actionHomeTunnelList(command *cobra.Command) error {
 		for _, tunnel := range page.Items {
 			items = append(items, selector.Item{ID: tunnel.ID, Title: tunnel.Name, Description: preferenceDetails(command.Context(), "tunnels", map[string]string{"state": tunnel.DesiredState, "access": tunnel.AccessMode, "endpoint": tunnel.StableEndpoint})})
 		}
-		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true}, selector.Item{ID: "advanced", Title: "All tunnel commands", Description: "Routes, domains, policies, connectors, credentials, and inspector", Action: true})
+		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true}, selector.Item{ID: "advanced", Title: "All tunnel commands", Description: "Routes, domains, policies, and inspector", Action: true})
 		items = append(items, selector.Item{ID: "filter", Title: "Filter inventory", Description: "Name, state and owner", Action: true})
 		if len(history) > 0 {
 			items = append(items, selector.Item{ID: "previous", Title: "Previous page", Action: true})

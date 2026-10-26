@@ -25,9 +25,6 @@ func TestJournalResumesStableKeysAndStagesThenCompletes(t *testing.T) {
 	if err := first.RecordTunnel(t.Context(), "tun_1", "operation_1"); err != nil {
 		t.Fatalf("RecordTunnel: %v", err)
 	}
-	if err := first.RecordConnectorReady(t.Context()); err != nil {
-		t.Fatalf("RecordConnectorReady: %v", err)
-	}
 	if err := first.RecordDomain(t.Context(), 0, "domain_1"); err != nil {
 		t.Fatalf("RecordDomain: %v", err)
 	}
@@ -272,7 +269,7 @@ func TestJournalEnforcesWorkflowOrderAndPartialDomainProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := session.RecordDomain(t.Context(), 0, "domain_1"); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("RecordDomain before connector ready = %v", err)
+		t.Fatalf("RecordDomain before the tunnel exists = %v", err)
 	}
 	if got := session.Snapshot(); got.Stage != StagePrepared || got.Domains[0].ID != "" {
 		t.Fatalf("failed early domain write changed journal: %#v", got)
@@ -281,27 +278,21 @@ func TestJournalEnforcesWorkflowOrderAndPartialDomainProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := session.RecordDomain(t.Context(), 0, "domain_1"); err != nil {
-		t.Fatalf("RecordDomain before connector ready: %v", err)
+		t.Fatalf("RecordDomain after tunnel: %v", err)
 	}
 	partial := session.Snapshot()
 	if partial.Stage != StageTunnelCreated || partial.Domains[0].ID != "domain_1" || partial.Domains[1].ID != "" {
-		t.Fatalf("pre-connector domain journal = %#v", partial)
+		t.Fatalf("partial domain journal = %#v", partial)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
 	session, err = Begin(t.Context(), config)
 	if err != nil {
-		t.Fatalf("resume before connector ready: %v", err)
+		t.Fatalf("resume with partial domains: %v", err)
 	}
 	if resumed := session.Snapshot(); resumed.Stage != StageTunnelCreated || resumed.Domains[0].ID != "domain_1" {
-		t.Fatalf("resumed pre-connector journal = %#v", resumed)
-	}
-	if err := session.RecordConnectorReady(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if afterConnector := session.Snapshot(); afterConnector.Stage != StageConnectorReady || afterConnector.Domains[0].ID != "domain_1" || afterConnector.Domains[1].ID != "" {
-		t.Fatalf("post-connector partial domain journal = %#v", afterConnector)
+		t.Fatalf("resumed partial journal = %#v", resumed)
 	}
 	if err := session.RecordDomain(t.Context(), 1, "domain_2"); err != nil {
 		t.Fatal(err)
@@ -343,12 +334,6 @@ func TestJournalCompletesTunnelWithoutDomains(t *testing.T) {
 	}
 	defer session.Close()
 	if err := session.RecordTunnel(t.Context(), "tun_1", "operation_1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := session.Complete(t.Context()); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("Complete before connector ready = %v", err)
-	}
-	if err := session.RecordConnectorReady(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := session.Complete(t.Context()); err != nil {

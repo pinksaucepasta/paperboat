@@ -111,7 +111,7 @@ name the failing step and what to do about it; `--json` carries the code in
 
 | Code | Meaning | What to do |
 |---|---|---|
-| `connector_missing` | No connector serves this tunnel | `pb tunnel connector add <tunnel>` on the machine that runs the app |
+| `connector_missing` | No agent serves this tunnel | Make sure the machine that runs the app is online (`pb environments`) and run `pb doctor` on it |
 | `connector_offline` | The host that runs the tunnel is off or its service is stopped | Make sure the machine is on (`pb environments`) and run `pb doctor` on it; the tunnel reconnects by itself |
 | `edge_unavailable` | The host is connected but no edge is ready | Nothing to change; if it lasts several minutes run `pb tunnel doctor` and send the support reference |
 | `dns_pending` | A custom domain is not verified yet | Add the records from `pb tunnel domain instructions`, then `pb tunnel domain verify` |
@@ -156,7 +156,7 @@ the defaults; use `--tls-verification insecure` only with an explicit reviewed
 exception.
 
 Change or remove a route with `pb tunnel route update api web ...` and
-`pb tunnel route remove api web --wait`; the tunnel and its connectors stay.
+`pb tunnel route remove api web --wait`; the tunnel stays.
 
 Exact hosts beat one-label wildcards. Within one host, the longest path prefix
 then route priority wins. A public `tcp` route reserves a stable managed-hostname
@@ -186,28 +186,6 @@ wildcard without another Paperboat route change.
 Paperboat keeps the previous valid certificate active until ownership,
 issuance, and distribution to every captured edge generation succeed. Removing
 a binding never deletes user-owned DNS records.
-
-## Connectors and credential rotation
-
-Add and inspect connectors without copying enrollment secrets:
-
-```console
-pb tunnel connector add api --json
-pb tunnel connector list api
-```
-
-Make a replacement ready before draining the old connector:
-
-```console
-pb tunnel connector drain api <connector> --wait --timeout 10m
-pb tunnel credentials rotate api --wait --timeout 10m
-pb tunnel connector revoke api <connector> --wait --timeout 10m
-```
-
-Rotation captures an immutable target set, proves the new key for each target,
-keeps the old generation only for a bounded overlap, and completes after every
-target is ready. Revocation is for compromise or permanent retirement; it does
-not delete the tunnel, routes, domains, or certificates.
 
 ## Private TCP
 

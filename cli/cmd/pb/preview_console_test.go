@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -275,47 +274,34 @@ func TestPreviewConsolePollFailureObservationRecoversAndAvoidsOwnedHTTPDuplicate
 	}
 }
 
-func TestPreviewMakeTunnelWaitsForDurableReadinessAndRetainsRecovery(t *testing.T) {
-	for _, failConnector := range []bool{false, true} {
-		t.Run(fmt.Sprint(failConnector), func(t *testing.T) {
-			h := newWorkflowAcceptanceHarness(t)
-			h.commandContext, h.cancel = context.WithCancel(context.Background())
-			defer h.cancel()
-			if failConnector {
-				h.enrollment.fail = fmt.Errorf("connector unavailable")
-			}
-			handler := h.server.Config.Handler
-			h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/operation_workflow") {
-					h.events.add("control.operation.ready")
-					operation := validCommandOperation("tunnel", "tun_workflow")
-					operation.ID = "operation_workflow"
-					operation.State = "succeeded"
-					operation.Phase = "ready"
-					operation.Progress = 100
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
-					return
-				}
-				handler.ServeHTTP(w, r)
-			})
-			parent := &cobra.Command{}
-			output, err := createTunnelFromPreview(h.commandContext, parent, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, "public", "workflow")
-			if failConnector {
-				if err == nil || !strings.Contains(err.Error(), "pb tunnel connector add tun_workflow") || output != "" {
-					t.Fatalf("missing recoverable failure: output=%q error=%v", output, err)
-				}
-			} else {
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(output, "tun_workflow") || !strings.Contains(strings.Join(h.events.snapshot(), "|"), "control.operation.ready|workflow.complete") {
-					t.Fatalf("returned before readiness: %q %v", output, h.events.snapshot())
-				}
-			}
-			h.assertJournalLockReleased(t)
-		})
+func TestPreviewMakeTunnelWaitsForDurableReadiness(t *testing.T) {
+	h := newWorkflowAcceptanceHarness(t)
+	h.commandContext, h.cancel = context.WithCancel(context.Background())
+	defer h.cancel()
+	handler := h.server.Config.Handler
+	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/operation_workflow") {
+			h.events.add("control.operation.ready")
+			operation := validCommandOperation("tunnel", "tun_workflow")
+			operation.ID = "operation_workflow"
+			operation.State = "succeeded"
+			operation.Phase = "ready"
+			operation.Progress = 100
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+	parent := &cobra.Command{}
+	output, err := createTunnelFromPreview(h.commandContext, parent, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, "public", "workflow")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if !strings.Contains(output, "tun_workflow") || !strings.Contains(strings.Join(h.events.snapshot(), "|"), "control.operation.ready|workflow.complete") {
+		t.Fatalf("returned before readiness: %q %v", output, h.events.snapshot())
+	}
+	h.assertJournalLockReleased(t)
 }
 
 func TestPreviewConsoleResizesSanitizesAndPreservesActionErrors(t *testing.T) {

@@ -15,23 +15,6 @@ import (
 
 const tunnelMutationSecretCanary = "pb_secret_mutation_canary_7f0d"
 
-func validAdversarialConnector(tunnelID string) api.TunnelConnector {
-	return api.TunnelConnector{
-		Schema:              api.TunnelV1Schema,
-		Kind:                "connector",
-		ID:                  "connector_1",
-		TunnelID:            tunnelID,
-		HostID:              "host_1",
-		CredentialReference: "protected-file://paperboat/connector_1",
-		RotationGeneration:  1,
-		DesiredState:        "active",
-		ProtocolVersion:     "1.0",
-		DrainState:          "accepting",
-		Generation:          1,
-		ETag:                `"connector:connector_1:1"`,
-	}
-}
-
 func executeAdversarialTunnelCommand(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
@@ -140,15 +123,6 @@ func TestTunnelMutationsRequireCurrentETagAndMapStaleWrites(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{validCommandDomain("domain_1", "app.example.test")}}})
 			},
 		},
-		{
-			name: "connector", args: []string{"connector", "drain", "tun_1", "connector_1", "--json"},
-			readMethod: http.MethodGet, readPath: "/v1/tunnels/tun_1/connectors/connector_1", mutMethod: http.MethodPost, mutPath: "/v1/tunnels/tun_1/connectors/connector_1/drain",
-			writeRead: func(w http.ResponseWriter) {
-				connector := validAdversarialConnector("tun_1")
-				w.Header().Set("ETag", connector.ETag)
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": connector})
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -182,20 +156,6 @@ func TestTunnelMutationsRequireCurrentETagAndMapStaleWrites(t *testing.T) {
 		})
 	}
 
-	t.Run("missing connector response ETag", func(t *testing.T) {
-		mutations := 0
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1/connectors/connector_1" {
-				mutations++
-				t.Fatalf("unexpected mutation=%s %s", r.Method, r.URL.Path)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": validAdversarialConnector("tun_1")})
-		})
-		stdout, stderr, err := executeAdversarialTunnelCommand(t, "connector", "drain", "tun_1", "connector_1", "--json")
-		if !errors.Is(err, api.ErrUnsafeTunnelResponse) || mutations != 0 || stdout != "" || stderr != "" {
-			t.Fatalf("error=%v mutations=%d stdout=%q stderr=%q", err, mutations, stdout, stderr)
-		}
-	})
 }
 
 func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
@@ -218,17 +178,6 @@ func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
 				domain := validCommandDomain("domain_other", "other.example.test")
 				domain.TunnelID = "tun_other"
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{domain}}})
-			},
-		},
-		{
-			name: "connector", args: []string{"connector", "revoke", "tun_1", "connector_other", "--json"},
-			serve: func(w http.ResponseWriter, _ *http.Request) {
-				connector := validAdversarialConnector("tun_other")
-				connector.ID = "connector_other"
-				connector.CredentialReference = "protected-file://paperboat/connector_other"
-				connector.ETag = `"connector:connector_other:1"`
-				w.Header().Set("ETag", connector.ETag)
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": connector})
 			},
 		},
 	}
@@ -260,24 +209,6 @@ func TestTunnelMutationSelectorsRejectCursorCyclesAndOversizePages(t *testing.T)
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{NextCursor: "cycle"}})
 		})
 		stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "update", "tun_1", "missing", "--name", "renamed", "--json")
-		if !errors.Is(err, api.ErrUnsafeTunnelResponse) || stdout != "" || stderr != "" {
-			t.Fatalf("error=%v stdout=%q stderr=%q", err, stdout, stderr)
-		}
-	})
-
-	t.Run("connector page exceeds requested bound", func(t *testing.T) {
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1/connectors" || r.URL.Query().Get("limit") != "200" {
-				t.Fatalf("request=%s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-			}
-			connector := validAdversarialConnector("tun_1")
-			items := make([]api.TunnelConnector, 201)
-			for i := range items {
-				items[i] = connector
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelConnectorPage{Items: items}})
-		})
-		stdout, stderr, err := executeAdversarialTunnelCommand(t, "connector", "list", "tun_1", "--limit", "200", "--json")
 		if !errors.Is(err, api.ErrUnsafeTunnelResponse) || stdout != "" || stderr != "" {
 			t.Fatalf("error=%v stdout=%q stderr=%q", err, stdout, stderr)
 		}

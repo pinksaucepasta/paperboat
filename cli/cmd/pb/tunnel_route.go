@@ -418,7 +418,7 @@ func routeRemoveCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		if e := confirmMutation(command, "tunnel-route-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove route %s from tunnel %s? Matching traffic will stop; the tunnel, domains, and connectors remain.", current.ID, tunnelID)); e != nil {
+		if e := confirmMutation(command, "tunnel-route-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove route %s from tunnel %s? Matching traffic will stop; the tunnel and domains remain.", current.ID, tunnelID)); e != nil {
 			return e
 		}
 		key, e := tunnelKey()
@@ -435,7 +435,7 @@ func routeRemoveCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("Removed route %s; tunnel and connector are preserved; status: %s", out.Route.ID, tunnelOperationHuman(out.Operation)))
+		return tunnelOutput(command, out, fmt.Sprintf("Removed route %s; the tunnel is preserved; status: %s", out.Route.ID, tunnelOperationHuman(out.Operation)))
 	})
 	command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	tunnelMutationWaitFlags(command)

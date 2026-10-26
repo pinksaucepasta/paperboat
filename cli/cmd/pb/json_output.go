@@ -398,8 +398,6 @@ func safeTunnelCreateRecoveryCommand(tunnelID, recovery string) string {
 	switch {
 	case len(parts) == 4 && (parts[2] == "show" || parts[2] == "status") && parts[3] == tunnelID:
 		return recovery
-	case len(parts) == 5 && parts[2] == "connector" && parts[3] == "add" && parts[4] == tunnelID:
-		return recovery
 	case len(parts) == 8 && parts[2] == "domain" && parts[3] == "add" && parts[4] == tunnelID && validTunnelCLIHostname(parts[5]) && parts[6] == "--route" && safeTunnelCreateIdentifier(parts[7], "route_"):
 		return recovery
 	case len(parts) == 6 && parts[2] == "domain" && (parts[3] == "instructions" || parts[3] == "verify") && parts[4] == tunnelID && validTunnelCLIHostname(parts[5]):
