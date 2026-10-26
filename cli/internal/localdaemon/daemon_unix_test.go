@@ -352,7 +352,14 @@ func TestDaemonSurfacesManagedSSHStartupFailureWithoutStopping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := client.Snapshot(context.Background())
+	// While managed SSH starts there is no health item; its failure shows once startup reports it.
+	var snapshot localapi.Snapshot
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		snapshot, err = client.Snapshot(context.Background())
+		if err == nil && len(snapshot.Machines) == 1 && len(snapshot.Machines[0].Health) > 0 || time.Now().After(deadline) {
+			break
+		}
+	}
 	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Machines) != 1 {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}

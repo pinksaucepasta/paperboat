@@ -371,6 +371,12 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}
 			return value
 		}(), readiness: "ready"},
+		{name: "local integration starting", machine: func() api.UserMachine {
+			value := base
+			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}
+			value.SSHLocalReady = false
+			return value
+		}(), readiness: "degraded"},
 		{name: "local integration unavailable", machine: func() api.UserMachine {
 			value := base
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}

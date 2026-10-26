@@ -436,11 +436,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			status.Health = []localapi.HealthItem{{Code: "machine_unavailable", Severity: "error", Title: "Machine is unavailable", Recovery: "Set up the machine again", ETag: "machine_unavailable"}}
 		} else if !machine.Online && generation > 0 {
 			status.Health = []localapi.HealthItem{{Code: "runtime_offline", Severity: "warning", Title: "Machine runtime is offline", Recovery: "Check the Paperboat service on the machine", ETag: "runtime_offline"}}
-		} else if generation > 0 && !machine.SSHLocalReady {
+		} else if generation > 0 && !machine.SSHLocalReady && machine.SSHLocalCode != "" {
+			// Without a code this computer's managed SSH is still starting: nothing to report or refuse yet.
 			code := machine.SSHLocalCode
-			if code == "" {
-				code = "ssh_target_not_ready"
-			}
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
