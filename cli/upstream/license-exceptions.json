@@ -1,0 +1,14 @@
+{
+  "modernc.org/mathutil@v1.7.1": {
+    "spdx": "BSD-3-Clause",
+    "license_file": "licenses/mathutil-LICENSE.txt",
+    "module_license_file": "LICENSE",
+    "sha256": "bfa9bf72a72ca009fd62a8f84fca3dca67e51d93af96352723646599898b6cf5"
+  },
+  "github.com/segmentio/asm@v1.2.1": {
+    "spdx": "MIT-0",
+    "license_file": "licenses/segmentio-asm-LICENSE.txt",
+    "module_license_file": "LICENSE",
+    "sha256": "cca993712df289a5958bdef69031a5dac0f951ac15afeb313f9eeea55ed59443"
+  }
+}

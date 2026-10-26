@@ -11,3 +11,8 @@ Paperboat fork or binary distribution does not lose the upstream attribution bou
 
 These notices cover the upstream source boundary. Transitive Go module licenses remain
 subject to the owning repository's license check after the modules are integrated.
+
+Reviewed classifier exceptions live in [license-exceptions.json](license-exceptions.json).
+The verifier checks the selected module version and both the recorded and downloaded
+license SHA256 before excluding classification; upgrades and replacements require review.
+Paperboat's own packages are excluded while their third-party dependencies remain checked.
