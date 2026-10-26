@@ -9,6 +9,7 @@ large paste. Each row prints PASS/FAIL/SKIP with a short reason; output content 
 printed. Only sessions named smoke-matrix-* are created, and all are closed and deleted.
 
 Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD --team TEAM --member ID]
+       [--restart-target-cmd CMD --restart-client-cmd CMD]   (N14: commands that restart the target host runtime / this daemon)
 """
 import argparse
 import hashlib
@@ -117,7 +118,8 @@ def exactly_once(out, prefix, first, last):
         return True, ''
     dup = len(got) - len(set(got))
     missing = len(set(want) - set(got))
-    return False, f'{len(got)} lines, {dup} duplicated, {missing} missing'
+    gone = sorted(set(want) - set(got))[:5]
+    return False, f'{len(got)} lines, {dup} duplicated, {missing} missing' + (f' (first missing: {gone})' if gone else '')
 
 
 def has_iptables():
@@ -276,6 +278,109 @@ def control_plane_down(a, sessions):
         finally:
             for ip in addrs:
                 iptables('-D', 'OUTPUT', '-d', ip, '-j', 'DROP')
+    finally:
+        c1.close()
+
+
+def black_hole(a, sessions):
+    """N13 (F3-15): the network silently drops every packet for 60 s (no reset, no link-down). Output continues on
+    the host and a command is typed meanwhile: it resumes on its own, nothing lost or doubled, the keys run once."""
+    if not has_iptables():
+        row('N13 black hole: session resumes, nothing lost or doubled', None, 'no iptables on this machine')
+        return
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name)
+    try:
+        c1.send("for i in $(seq 1 90); do echo BH$i; sleep 1; done\r")
+        time.sleep(5)
+        iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
+        iptables('-I', 'OUTPUT', '2', '-j', 'DROP')
+        iptables('-I', 'INPUT', '-i', 'lo', '-j', 'ACCEPT')
+        iptables('-I', 'INPUT', '2', '-j', 'DROP')
+        key = uuid.uuid4().hex
+        dropped, seen, detected, typed = time.monotonic(), len(c1.output), None, False
+        try:
+            while time.monotonic() - dropped < 60:
+                time.sleep(0.5)
+                if detected is None and b'reconnect' in bytes(c1.output)[seen:].lower():
+                    detected = time.monotonic() - dropped
+                if not typed and time.monotonic() - dropped >= 20:
+                    c1.send("printf '\\nPB_KEY_%s\\n' '" + key + "'\r")  # typed into the black hole
+                    typed = True
+        finally:
+            for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
+                iptables('-D', chain, '-j', 'DROP')
+                iptables('-D', chain, iface, 'lo', '-j', 'ACCEPT')
+        row('N13 black hole 60 s: the client shows it is reconnecting within 30 s', detected is not None and detected < 30,
+            f'{detected:.1f} s' if detected is not None else 'never shown while the network was down')
+        t0 = time.monotonic()
+        try:
+            c1.expect('BH90', 150)
+            row('N13 black hole 60 s: session resumes on its own', True, f'{time.monotonic() - t0:.1f} s after the network returned')
+        except RuntimeError:
+            row('N13 black hole 60 s: session resumes on its own', False, 'no output 150 s after the network returned')
+            return
+        c1.settle(3)
+        out = bytes(c1.output)
+        ok, why = exactly_once(out, b'BH', 1, 90)
+        row('N13 black hole 60 s: output during the gap arrives exactly once', ok, why)
+        count = out.count(b'PB_KEY_' + key.encode())
+        row('N13 black hole 60 s: keys typed meanwhile ran exactly once', count == 1, f'{count} times')
+    finally:
+        c1.close()
+
+
+def run_shell(command, timeout=120):
+    result = subprocess.run(command, shell=True, capture_output=True, timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(f'restart command failed ({result.returncode})')
+
+
+def restarts(a, sessions):
+    """N14 (F3-18): the host runtime, then this machine's daemon, restart while a terminal runs: the shell and its
+    scrollback survive, the terminal recovers on its own, nothing typed or printed is lost or repeated."""
+    if not a.restart_target_cmd or not a.restart_client_cmd:
+        row('N14 runtime and daemon restarts', None, 'needs --restart-target-cmd and --restart-client-cmd')
+        return
+    deadline = time.monotonic() + 180  # a target still recovering from an earlier restart is not this row's fault
+    while subprocess.run([PB, 'exec', a.target, '--', 'true'], capture_output=True, timeout=60).returncode != 0:
+        if time.monotonic() > deadline:
+            row('N14 restarts: target answers before the row starts', False, 'pb exec failed for 180 s')
+            return
+        time.sleep(5)
+    name = fresh_name(); sessions.append(name)
+    c1 = connect(a.target, name)
+    try:
+        mark = uuid.uuid4().hex[:12]
+        c1.run(f'export PB_RESTART_MARK={mark}')
+        c1.send("for i in $(seq 1 120); do echo RS$i; sleep 1; done\r")
+        gap_keys = []
+        for step, command in (('host runtime', a.restart_target_cmd), ('client daemon', a.restart_client_cmd)):
+            time.sleep(10)
+            t0 = time.monotonic()
+            run_shell(command)
+            print(f'  {step} restarted after {time.monotonic() - t0:.1f} s', flush=True)
+            gap_keys.append(uuid.uuid4().hex)
+            c1.send("printf '\\nPB_GAP_%s\\n' '" + gap_keys[-1] + "'\r")  # typed right after the restart
+        t0 = time.monotonic()
+        try:
+            c1.expect('RS120', 240)
+            row('N14 restarts: the terminal recovers on its own', True, f'{time.monotonic() - t0:.1f} s after the last restart')
+        except RuntimeError:
+            row('N14 restarts: the terminal recovers on its own', False, 'no output 240 s after the last restart')
+            return
+        c1.settle(3)
+        ok, why = exactly_once(bytes(c1.output), b'RS', 1, 120)
+        row('N14 restarts: output arrives exactly once', ok, why)
+        counts = [bytes(c1.output).count(b'PB_GAP_' + k.encode()) for k in gap_keys]
+        row('N14 restarts: keys typed right after each restart ran exactly once', counts == [1] * len(counts), f'{counts}')
+        key = uuid.uuid4().hex
+        c1.send("printf '\\nPB_KEY_%s_%s\\n' \"$PB_RESTART_MARK\" '" + key + "'\r")
+        try:
+            c1.expect('PB_KEY_' + mark + '_' + key, 60)
+            row('N14 restarts: the same shell answers (its environment survived)', True)
+        except RuntimeError:
+            row('N14 restarts: the same shell answers (its environment survived)', False, 'no answer or a different shell')
     finally:
         c1.close()
 
@@ -526,7 +631,7 @@ def shared(a, sessions):
 
 
 ROWS = {'two': two_clients, 'rejoin': leave_rejoin, 'sleep': sleep_wake, 'net': network_drop,
-        'server': control_plane_down, 'fast': fast_output, 'resize': resize_storm,
+        'server': control_plane_down, 'blackhole': black_hole, 'restart': restarts, 'fast': fast_output, 'resize': resize_storm,
         'paste': large_paste, 'many': many_sessions, 'keys': keystrokes, 'latency': echo_latency, 'shared': shared}
 
 
@@ -534,6 +639,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('target')
     p.add_argument('--only', default=','.join(ROWS))
+    p.add_argument('--restart-target-cmd', default='', help='shell command that restarts the TARGET machine\'s host runtime (N14)')
+    p.add_argument('--restart-client-cmd', default='', help="shell command that restarts this machine's daemon (N14)")
     p.add_argument('--member-cmd', default='')
     p.add_argument('--team', default='')
     p.add_argument('--member', default='', help='member account ID')
