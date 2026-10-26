@@ -179,7 +179,7 @@ func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *te
 	}
 	list := []runtimewire.EngineTunnel{
 		tunnel("tunnel_tcp", "public", route("route_tcp", "tcp", "tcp", tcpOrigin.Addr().String())),
-		tunnel("tunnel_private", "private", route("route_private", "http", "http", strings.TrimPrefix(httpOrigin.URL, "http://"))),
+		tunnel("tunnel_private", "private", route("route_private", "http", "http", strings.TrimPrefix(httpOrigin.URL, "http://"))+","+route("route_ptcp", "tcp_private", "tcp", tcpOrigin.Addr().String())),
 	}
 	tunnels := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		body, _ := json.Marshal(map[string]any{"data": map[string]any{"tunnels": list}})
@@ -215,6 +215,15 @@ func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *te
 		t.Fatalf("public TCP through the engine: %q %v", echo, err)
 	}
 	_ = tcp.Close()
+	// A private TCP stream (opened by the edge for an authorized accessor grant) reaches its origin.
+	private := open("route_ptcp", "tcp_private")
+	if _, err := io.WriteString(private, "pong"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(private, echo); err != nil || string(echo) != "pong" {
+		t.Fatalf("private TCP through the engine: %q %v", echo, err)
+	}
+	_ = private.Close()
 	plain := open("route_private", "https")
 	_, _ = io.WriteString(plain, "GET / HTTP/1.1\r\nHost: brave-blue-beacon-0421.tunnel.example.test\r\nConnection: close\r\n\r\n")
 	if response, err := http.ReadResponse(bufio.NewReader(plain), nil); err == nil {

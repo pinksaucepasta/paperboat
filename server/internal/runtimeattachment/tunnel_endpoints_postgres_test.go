@@ -327,12 +327,20 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}
 	f.exec(t, `UPDATE tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE id=$1`, publicTCP)
 	sync()
-	// A private TCP route keeps the whole tunnel on its connector until the accessor path moves.
+	// A private TCP route is valid only on a private tunnel: a public one keeps its connector.
 	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'db',2,'private_tcp','catch_all','tcp','127.0.0.1:5432','not_applicable',1,'active',$3,$3,now(),now())`, tcpRoute, tunnel, f.account)
 	sync()
 	if endpoint, _, assignments := state(); endpoint || assignments != 0 {
-		t.Fatal("a tunnel with a private TCP route moved onto the engine")
+		t.Fatal("a public tunnel with a private TCP route moved onto the engine")
 	}
+	// On a private tunnel the private TCP route rides the engine with the HTTP route.
+	f.exec(t, `UPDATE tunnels SET access_mode='private' WHERE id=$1`, tunnel)
+	sync()
+	if endpoint, routes, _ := state(); !endpoint || len(routes) != 2 {
+		t.Fatalf("private tunnel with private TCP: engine tunnel = %v %v", endpoint, routes)
+	}
+	f.exec(t, `UPDATE tunnels SET access_mode='public' WHERE id=$1`, tunnel)
+	sync()
 	f.exec(t, `UPDATE tunnel_routes SET desired_state='deleted',deleted_at=now() WHERE id=$1`, tcpRoute)
 	sync()
 	if endpoint, routes, _ := state(); !endpoint || len(routes) != 1 {

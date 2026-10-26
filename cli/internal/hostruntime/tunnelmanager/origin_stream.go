@@ -65,9 +65,20 @@ type OriginStreamForwarder struct {
 	Restricted bool
 }
 
-// opaqueTCP reports a public TCP or TLS passthrough route: its streams are bytes to a tcp origin.
+// opaqueTCP reports a TCP, TLS passthrough or private TCP route: its streams are bytes to a tcp origin.
 func opaqueTCP(route hoststate.TunnelConfigRoute) bool {
-	return route.Protocol == "tcp" || route.Protocol == "tls"
+	return route.Protocol == "tcp" || route.Protocol == "tls" || route.Protocol == "tcp_private"
+}
+
+// tcpStreamKind is the stream kind the edge opens for an opaque TCP route. A private TCP stream is
+// opened only after the edge authorized the accessor's signed grant for exactly this route.
+// shortcut: the agent does not re-check a private TCP grant with the server (the edge sends no
+// decision for TCP); add it when the server projects TCP ingress decisions.
+func tcpStreamKind(route hoststate.TunnelConfigRoute) string {
+	if route.Protocol == "tcp_private" {
+		return "tcp_private"
+	}
+	return "tcp_public"
 }
 
 // CaptureIdentity is the product resource identity for inspector capture and
@@ -189,12 +200,12 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 			_ = stream.Close()
 			continue
 		}
-		if !ok || !(route.Protocol == "http" && validOriginStreamKind(open.Kind) || opaqueTCP(route) && open.Kind == "tcp_public" && (f.IngressAuthority != nil || f.EngineRoutes)) {
+		if !ok || !(route.Protocol == "http" && validOriginStreamKind(open.Kind) || opaqueTCP(route) && open.Kind == tcpStreamKind(route) && (f.IngressAuthority != nil || f.EngineRoutes)) {
 			logOriginStreamFailure(ctx, "route_binding", ErrInvalidConfig)
 			_ = stream.Close()
 			continue
 		}
-		if open.Kind == "http_browser" && f.IngressAuthority == nil || f.Restricted && open.Kind != "http_browser" {
+		if open.Kind == "http_browser" && f.IngressAuthority == nil || f.Restricted && route.Protocol == "http" && open.Kind != "http_browser" {
 			_ = stream.Close()
 			continue
 		}

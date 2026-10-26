@@ -4731,7 +4731,7 @@ SELECT ('epa_' || x.route_id)::text,
        x.edge_node_id,
        x.edge_process_epoch,
        node.failure_domain::text,
-       (CASE tr.protocol WHEN 'tls' THEN 'tunnel_tls' WHEN 'tcp' THEN 'tunnel_tcp' ELSE 'tunnel_http_wss' END)::text,
+       (CASE tr.protocol WHEN 'tls' THEN 'tunnel_tls' WHEN 'tcp' THEN 'tunnel_tcp' WHEN 'private_tcp' THEN 'tunnel_private_tcp' ELSE 'tunnel_http_wss' END)::text,
        (CASE WHEN tr.match_type = 'one_label_wildcard' THEN '*.' || tr.wildcard_suffix
              WHEN tr.match_type = 'catch_all' THEN substring(t.stable_endpoint from 9)
              ELSE COALESCE(tr.match_hostname, '') END)::text,
@@ -4786,7 +4786,7 @@ WHERE x.edge_node_id = $1
   AND node.tunnel_endpoints_epoch = x.edge_process_epoch
   AND t.desired_state = 'active' AND t.deleted_at IS NULL
   AND (t.expires_at IS NULL OR t.expires_at > $3)
-  AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol IN ('http', 'tcp', 'tls')
+  AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol IN ('http', 'tcp', 'tls', 'private_tcp')
   AND paperboat.runtime_carrier_valid(ra.route_id, ra.edge_node_id, ra.edge_process_epoch, false)
   AND node.process_epoch = x.edge_process_epoch
   AND node.state = 'ready' AND node.ready = true

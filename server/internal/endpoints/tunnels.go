@@ -19,12 +19,12 @@ AND NOT EXISTS(SELECT 1 FROM runtime_carrier_attachments a LEFT JOIN control_tun
 
 // engineTunnel is the SQL predicate (over tunnels t) for a live tunnel the engine can serve now:
 // its routes are HTTP (any access; a restricted stream carries the edge's browser decision, which
-// the agent re-checks) or public TCP or TLS passthrough. Private TCP keeps its connector until the
-// accessor path moves (3a step 4.4). A tunnel moves as a whole.
+// the agent re-checks), public TCP or TLS passthrough, or private TCP (opened only for an accessor
+// grant the edge authorized). A tunnel moves as a whole.
 const engineTunnel = liveTunnel + ` AND t.stable_endpoint LIKE 'https://_%' AND NOT EXISTS(SELECT 1 FROM tunnel_routes o
 LEFT JOIN current_tunnel_route_viewer_policy v ON v.route_id=o.id
 WHERE o.tunnel_id=t.id AND o.desired_state='active' AND o.deleted_at IS NULL
-AND o.protocol<>'http' AND (o.protocol NOT IN ('tcp','tls') OR coalesce(v.effective_access_mode,t.access_mode)<>'public'))`
+AND o.protocol<>'http' AND (o.protocol='private_tcp')=(coalesce(v.effective_access_mode,t.access_mode)='public'))`
 
 // SyncAgentTunnelsTx makes the machine's tunnel endpoints match its tunnels: while its agent serves
 // tunnels, every live tunnel it created is an endpoint with one endpoint route per active route;
