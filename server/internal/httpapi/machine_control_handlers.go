@@ -65,7 +65,10 @@ func machineControlRenew(service *usermachines.Service) http.HandlerFunc {
 		result, err := service.RenewMachineControl(r.Context(), strings.TrimSpace(credential), proof, body, r.Method, r.URL.Path)
 		if err != nil {
 			var rejection usermachines.ControlRejection
-			if errors.As(err, &rejection) || expectedHTTPErrorOnly(err, usermachines.ErrMachineControlInvalid) {
+			if usermachines.ControlRejectionReason(err) == usermachines.ProofClockSkewReason {
+				logHTTPRejection(r, http.StatusBadRequest, "clock_skew", err)
+				writeClockSkewAnswer(w, r)
+			} else if errors.As(err, &rejection) || expectedHTTPErrorOnly(err, usermachines.ErrMachineControlInvalid) {
 				// A fixed reason code (no credential or request content) names the check that refused it.
 				serverdiagnostics.LoggerWithRequest(r.Context(), slog.Default()).WarnContext(r.Context(), "machine control renewal rejected", "reason", usermachines.ControlRejectionReason(err))
 				logHTTPRejection(r, http.StatusUnauthorized, "machine_control_credential_invalid", err)

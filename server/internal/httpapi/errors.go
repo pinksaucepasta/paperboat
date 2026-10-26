@@ -242,7 +242,12 @@ func writeClockSkew(w http.ResponseWriter, r *http.Request, err error) bool {
 		return false
 	}
 	logHTTPRejection(r, http.StatusBadRequest, "clock_skew", err)
+	writeClockSkewAnswer(w, r)
+	return true
+}
+
+// writeClockSkewAnswer is the one clock_skew answer every machine-proof verifier gives (F21-02).
+func writeClockSkewAnswer(w http.ResponseWriter, r *http.Request) {
 	writeErrorDetails(w, r, http.StatusBadRequest, "clock_skew", "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.",
 		map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)})
-	return true
 }

@@ -177,6 +177,9 @@ type ControlRejection struct{ Reason string }
 func (e ControlRejection) Error() string        { return "machine control rejected: " + e.Reason }
 func (e ControlRejection) Is(target error) bool { return target == ErrMachineControlInvalid }
 
+// ProofClockSkewReason is the rejection of a signed proof made with a clock outside the window.
+const ProofClockSkewReason = "proof_clock_skew"
+
 func controlRejected(reason string) error { return ControlRejection{Reason: reason} }
 
 // controlReason tags an untyped ErrMachineControlInvalid from a stage with that stage; other errors pass.
@@ -375,8 +378,13 @@ func verifyMachineProof(machine dbsqlc.UserMachine, encoded []byte, method, path
 	}
 	var claims MachineProofClaims
 	bodyHash := sha256.Sum256(body)
-	if strictMachineJSON(payload, &claims) != nil || claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || claims.InstallationGeneration != machine.InstallationGeneration || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != method || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(bodyHash[:]) || claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || !claims.ExpiresAt.After(claims.IssuedAt) || claims.ExpiresAt.Sub(claims.IssuedAt) > time.Minute || claims.IssuedAt.After(now.Add(time.Minute)) || !claims.ExpiresAt.After(now) {
+	if strictMachineJSON(payload, &claims) != nil || claims.MachineID != machine.ID || claims.EnvironmentID != machine.EnvironmentID || claims.InstallationGeneration != machine.InstallationGeneration || len(claims.OperationID) < 8 || len(claims.OperationID) > 128 || claims.Method != method || claims.Path != path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(bodyHash[:]) || claims.IssuedAt.IsZero() || claims.ExpiresAt.IsZero() || !claims.ExpiresAt.After(claims.IssuedAt) || claims.ExpiresAt.Sub(claims.IssuedAt) > time.Minute {
 		return MachineProofClaims{}, ErrMachineControlInvalid
+	}
+	// A correctly signed proof whose window misses the server's clock is a clock problem, not a bad
+	// credential (F21-02): the machine stays signed in and corrects its time from the answer.
+	if claims.IssuedAt.After(now.Add(time.Minute)) || !claims.ExpiresAt.After(now) {
+		return MachineProofClaims{}, controlRejected(ProofClockSkewReason)
 	}
 	return claims, nil
 }

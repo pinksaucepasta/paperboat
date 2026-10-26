@@ -2746,6 +2746,21 @@ func TestMachineControlInitialReplayRotatesAfterExpiryWithoutCrossMachineCollisi
 	if err != nil {
 		t.Fatal("renewal with a nonce-bearing proof rejected", err)
 	}
+	// F21-02: a correctly signed proof from a clock 10 minutes ahead is a clock_skew refusal, not a bad
+	// credential, so the machine corrects its time instead of being treated as signed out.
+	skewClaims := claims
+	skewClaims.OperationID, skewClaims.IssuedAt, skewClaims.ExpiresAt = "renew-skew-"+suffix, now.Add(10*time.Minute), now.Add(11*time.Minute)
+	skewPayload, err := json.Marshal(skewClaims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skewProof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(skewPayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, skewPayload))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RenewMachineControl(ctx, renewed.Credential, skewProof, body, "POST", claims.Path); ControlRejectionReason(err) != ProofClockSkewReason {
+		t.Fatalf("skewed proof = %v, want reason %s", err, ProofClockSkewReason)
+	}
 	if err := service.Delete(ctx, userID, machineID); err != nil {
 		t.Fatal(err)
 	}
