@@ -183,4 +183,25 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	if _, err = act(owner, MachineRequest{MachineID: m7, Action: "share"}); err != nil || !bound(m7) {
 		t.Fatalf("a team full of ended entries refused a machine: %v", err)
 	}
+	// A revoked machine leaves the team on any revoke path, and unsharing it afterwards is done,
+	// not not_found (paperboat-smoke-paid could never free its revoked machines).
+	exec(`UPDATE paperboat.user_machines SET state='revoked',revoked_at=now(),seat_state='released' WHERE id=$1`, m7)
+	if bound(m7) {
+		t.Fatal("a revoked machine kept its team share")
+	}
+	if _, err = act(owner, MachineRequest{MachineID: m7, Action: "unshare"}); err != nil {
+		t.Fatalf("unsharing a revoked machine: %v", err)
+	}
+	m8 := machine("ma_m8", member2)
+	if state, err = act(member2, MachineRequest{MachineID: m8, Action: "share"}); err != nil || len(state.MachineRequests) == 0 {
+		t.Fatalf("pending request for m8: %v", err)
+	}
+	exec(`UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, m8)
+	var pending int
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_machine_requests WHERE machine_id=$1`, m8).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("a deleted machine kept its share request: %d %v", pending, err)
+	}
+	if _, err = act(owner, MachineRequest{MachineID: "ma_never_" + suffix, Action: "unshare"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unsharing a machine that never was in the team: %v", err)
+	}
 }

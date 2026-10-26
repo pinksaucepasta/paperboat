@@ -137,6 +137,28 @@ func (s *Service) GrantMachine(ctx context.Context, account, team string, r Mach
 		return ApplyMachineAccessTx(ctx, tx, s.policy, team, account, r)
 	})
 }
+// unshareEndedMachineTx answers an unshare of a machine that is revoked or deleted: its owner or a
+// settings manager may end any binding still left in this team; another member gets not_found.
+func unshareEndedMachineTx(ctx context.Context, tx *db.Tx, team, machine, account string, actor Member) error {
+	var owner string
+	var bound bool
+	err := tx.QueryRow(ctx, `SELECT m.user_id,EXISTS(SELECT 1 FROM team_resource_bindings b WHERE b.team_id=$2 AND b.resource_kind='machine' AND b.resource_id=m.id)
+FROM user_machines m WHERE m.id=$1 AND (m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL)`, machine, team).Scan(&owner, &bound)
+	if err == pgx.ErrNoRows || err == nil && !bound {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if owner != account && !Allowed(actor.Role, PermissionSettingsManage) {
+		return ErrForbidden
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, machine); err != nil {
+		return err
+	}
+	return unbindMachineTx(ctx, tx, team, machine)
+}
+
 func machineOwnerTx(ctx context.Context, tx *db.Tx, machine string) (string, string, error) {
 	var owner, team string
 	err := tx.QueryRow(ctx, `SELECT user_id,coalesce(owner_team_id,'') FROM user_machines WHERE id=$1 AND revoked_at IS NULL AND deleted_at IS NULL FOR UPDATE`, machine).Scan(&owner, &team)
@@ -158,6 +180,10 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 	}
 	return s.mutate(ctx, account, team, r.OperationID, kind, r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, actor Member) error {
 		owner, ownerTeam, err := machineOwnerTx(ctx, tx, r.MachineID)
+		if errors.Is(err, ErrNotFound) && r.Action == "unshare" {
+			// A revoked or deleted machine has already left the team; unsharing it is done.
+			return unshareEndedMachineTx(ctx, tx, team, r.MachineID, account, actor)
+		}
 		if err != nil {
 			return err
 		}
