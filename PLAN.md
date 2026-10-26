@@ -4957,3 +4957,6 @@ Exact machine_b2b6cfd1-63b1-45f6-bc59-e74f07f1440b revoked; container/tunnel/pol
 
 2026-10-27 | SDK lane tunnel rerun | C106/C114 L PASS main+error on dev-9525ef32/server .112, retained pbvm3 pair lanesdktunnel-a/b; result tools/device-smoke/results/tunnel-command-focused-20261027.json.
 Capture listing/detail and replay/purge/disable passed; test tunnel/captures/probe files removed, paired identities retained per user rule. All 27 assigned tunnel command L rows now ticked; M/W skipped.
+
+2026-10-27 | SDK lane command verification | C089 L PASS `tunnel_entry.py`; C126 waits for Merger: ready private route but access returns local_io/unreachable before listener on dev-9525ef32/server .112/edge .26.9.
+Results: tools/device-smoke/results/tunnel-entry-20261027.json and tunnel-private-access-20261027.json; exact failures sent to Merger. Tunnel/origin/probe files removed; kept pair retained. M/W and C126 echo not checked.
