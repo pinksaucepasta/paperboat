@@ -119,59 +119,40 @@ func (r *SQLResolver) resolveTunnel(ctx context.Context, lookup Lookup, now time
 	}, nil
 }
 
+// resolvePrivateTunnelSQL reads a private tunnel route served on the endpoint engine (PLAN 3a): the
+// "connector" and session are the agent's runtime carrier on that edge, as the edge's stream carries.
 const resolvePrivateTunnelSQL = `
-SELECT t.account_id, t.id, r.id, c.id, s.id,
-       t.generation, r.generation, assignment.connector_generation, s.process_generation,
-	       c.last_applied_config_generation, assignment.assignment_generation, r.protocol, t.access_mode,
-       t.desired_state, r.desired_state, c.desired_state, c.drain_state, s.state,
-       LEAST(COALESCE(t.expires_at, $7), s.lease_deadline),
+SELECT t.account_id, t.id, r.id, (ra.admission->'binding'->>'connector_id'), ra.session_id,
+       t.generation, r.generation, 1::bigint, ra.worker_generation,
+       (ra.admission->'binding'->>'config_generation')::bigint, x.generation, r.protocol, v.effective_access_mode,
+       t.desired_state, r.desired_state, 'active', 'accepting', 'ready',
+       LEAST(COALESCE(t.expires_at, $7), ra.expires_at, $7),
        COALESCE(r.match_hostname, t.stable_endpoint), COALESCE(r.path_prefix, ''),
-       assignment.edge_node_id, assignment.edge_process_epoch
-FROM tunnels AS t
-JOIN tunnel_routes AS r ON r.tunnel_id = t.id
-JOIN tunnel_connectors AS c ON c.tunnel_id = t.id
-	JOIN tunnel_connector_sessions AS s ON s.connector_id = c.id
-	JOIN tunnel_config_generations AS config
-	  ON config.tunnel_id = t.id
-	 AND config.generation = c.last_applied_config_generation
-	 AND config.activation_state = 'active'
-	JOIN tunnel_edge_route_assignments AS assignment
-	  ON assignment.route_id = r.id
-	 AND assignment.account_id = t.account_id
-	 AND assignment.tunnel_id = t.id
-	 AND assignment.connector_id = c.id
-	 AND assignment.host_id = c.host_id
-	 AND assignment.connector_generation = c.generation
-	 AND assignment.connector_session_id = s.id
-	 AND assignment.connector_process_generation = s.process_generation
-	 AND assignment.config_generation = config.generation
-	 AND assignment.config_content_hash = config.content_hash
-	 AND assignment.access_mode = t.access_mode
-	 AND assignment.route_generation = r.generation
-	 AND assignment.route_revision = r.generation
-	 AND assignment.edge_node_id = $8
-	 AND assignment.edge_process_epoch = $9
-	 AND assignment.state = 'active'
-	 AND assignment.observed_state = 'ready'
-	JOIN control_tunnel_nodes AS edge_node
-	  ON edge_node.id = assignment.edge_node_id
-	 AND edge_node.process_epoch = assignment.edge_process_epoch
-	JOIN user_machines AS machine
-	  ON machine.id = c.host_id
-	 AND machine.user_id = t.account_id
+       x.edge_node_id, x.edge_process_epoch
+FROM endpoint_edge_assignments AS x
+JOIN endpoints AS e ON e.id = x.endpoint_id AND e.kind = 'tunnel' AND e.desired_state = 'active'
+JOIN tunnels AS t ON t.id = e.tunnel_id
+JOIN endpoint_routes AS er ON er.id = x.route_id
+JOIN tunnel_routes AS r ON r.id = er.tunnel_route_id AND r.tunnel_id = t.id
+JOIN current_tunnel_route_viewer_policy AS v ON v.route_id = r.id
+JOIN runtime_carrier_attachments AS ra
+  ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
+ AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
+JOIN control_tunnel_nodes AS edge_node
+  ON edge_node.id = x.edge_node_id AND edge_node.process_epoch = x.edge_process_epoch
+JOIN user_machines AS machine ON machine.id = e.agent_machine_id AND machine.user_id = t.account_id
 WHERE t.account_id = $1
   AND t.id = $2
   AND r.id = $3
-  AND c.id = $4
-  AND s.id = $5
-  AND t.access_mode = 'private'
+  AND ra.admission->'binding'->>'connector_id' = $4
+  AND ra.session_id = $5
+  AND x.edge_node_id = $8
+  AND x.edge_process_epoch = $9
+  AND x.desired = 'active' AND x.observed_ready
+  AND v.effective_access_mode = 'private'
   AND t.deleted_at IS NULL
   AND r.deleted_at IS NULL
-  AND c.revoked_at IS NULL
-	AND c.last_session_id = s.id
-	AND c.last_applied_config_generation = s.applied_config_generation
-	AND c.ready_at IS NOT NULL
-	AND s.ready_at IS NOT NULL
+  AND ra.expires_at > $6
 	AND machine.state = 'online'
 	AND machine.online
 	AND machine.deleted_at IS NULL
@@ -180,8 +161,5 @@ WHERE t.account_id = $1
 	AND edge_node.ready = true
 	AND edge_node.last_heartbeat_at IS NOT NULL
 	AND edge_node.last_heartbeat_at > $6::timestamptz - interval '2 minutes'
-	AND s.lease_deadline > $6
   AND (t.expires_at IS NULL OR t.expires_at > $6)
-	AND c.last_heartbeat_at > $6::timestamptz - interval '2 minutes'
-	AND s.last_heartbeat_at > $6::timestamptz - interval '2 minutes'
-FOR SHARE OF t, r, c, s`
+FOR SHARE OF t, r`

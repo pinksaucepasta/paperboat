@@ -33,33 +33,46 @@ WITH private_routes AS (
     AND n.state = 'ready' AND n.ready = true
     AND n.last_heartbeat_at > $4 - interval '2 minutes'
   UNION ALL
-  SELECT a.account_id, 'tunnel'::text AS resource_kind, a.tunnel_id AS resource_id,
+  -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
+  SELECT t.account_id, 'tunnel'::text AS resource_kind, t.id AS resource_id,
          t.name AS tunnel_name, r.name AS route_name,
-         ''::text AS operation_id, a.connector_id, a.connector_session_id AS carrier_session_id,
-         a.route_id, a.route_generation, a.connector_generation AS session_generation,
-         a.connector_process_generation AS process_generation, a.config_generation, a.assignment_generation,
-         a.edge_node_id, a.edge_process_epoch, r.protocol,
-	         CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
+         ''::text AS operation_id, (ra.admission->'binding'->>'connector_id')::text AS connector_id,
+         ra.session_id AS carrier_session_id,
+         r.id AS route_id, r.generation AS route_generation, 1::bigint AS session_generation,
+         ra.worker_generation AS process_generation,
+         (ra.admission->'binding'->>'config_generation')::bigint AS config_generation,
+         x.generation AS assignment_generation,
+         x.edge_node_id, x.edge_process_epoch, r.protocol,
+         CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
          ARRAY['h2://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_tcp_port::text,
                'h3://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_quic_port::text]::text[] AS edge_endpoints,
-         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), s.lease_deadline) AS expires_at,
-	         a.tunnel_id, a.connector_id AS carrier_connector_id,
-	         a.assignment_id, 'sha256:' || encode(a.config_content_hash, 'hex') AS config_content_hash,
-	         CASE WHEN r.match_type = 'managed' THEN 'managed_exact' ELSE r.match_type END AS match_type,
-	         CASE WHEN r.match_type = 'one_label_wildcard' THEN regexp_replace(r.match_hostname, '^\\*\\.', '') ELSE '' END AS wildcard_suffix
-	         ,n.carrier_server_spki_sha256 AS edge_carrier_server_spki_sha256
-	         ,n.carrier_server_certificate_chain_pem AS edge_carrier_server_certificate_chain_pem
-  FROM tunnel_edge_route_assignments AS a
-  JOIN tunnels AS t ON t.id = a.tunnel_id AND t.account_id = a.account_id
-  JOIN tunnel_routes AS r ON r.id = a.route_id AND r.tunnel_id = a.tunnel_id
-  JOIN tunnel_connector_sessions AS s ON s.id = a.connector_session_id AND s.connector_id = a.connector_id
-  JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
-  WHERE a.edge_node_id = $2 AND a.edge_process_epoch = $3
-    AND a.access_mode = 'private' AND a.state = 'active' AND a.observed_state = 'ready'
-    AND t.desired_state = 'active' AND r.desired_state = 'active'
-    AND s.state = 'ready' AND s.lease_deadline > $4
+         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), ra.expires_at, $4 + interval '10 minutes') AS expires_at,
+         (ra.admission->'binding'->>'tunnel_id')::text AS tunnel_id,
+         (ra.admission->'binding'->>'connector_id')::text AS carrier_connector_id,
+         ('epa_' || x.route_id)::text AS assignment_id, (ra.admission->>'config_content_hash')::text AS config_content_hash,
+         CASE WHEN r.match_type = 'managed' THEN 'managed_exact' ELSE r.match_type END AS match_type,
+         CASE WHEN r.match_type = 'one_label_wildcard' THEN regexp_replace(r.match_hostname, '^\\*\\.', '') ELSE '' END AS wildcard_suffix
+         ,n.carrier_server_spki_sha256 AS edge_carrier_server_spki_sha256
+         ,n.carrier_server_certificate_chain_pem AS edge_carrier_server_certificate_chain_pem
+  FROM endpoint_edge_assignments AS x
+  JOIN endpoints AS e ON e.id = x.endpoint_id AND e.kind = 'tunnel' AND e.desired_state = 'active'
+  JOIN tunnels AS t ON t.id = e.tunnel_id
+  JOIN endpoint_routes AS er ON er.id = x.route_id
+  JOIN tunnel_routes AS r ON r.id = er.tunnel_route_id AND r.tunnel_id = t.id
+  JOIN current_tunnel_route_viewer_policy AS v ON v.route_id = r.id
+  JOIN runtime_carrier_attachments AS ra
+    ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
+   AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
+  JOIN control_tunnel_nodes AS n ON n.id = x.edge_node_id AND n.process_epoch = x.edge_process_epoch
+  WHERE x.edge_node_id = $2 AND x.edge_process_epoch = $3
+    AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
+    AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
+    AND ra.expires_at > $4
     AND n.state = 'ready' AND n.ready = true
     AND n.last_heartbeat_at > $4 - interval '2 minutes'
+    AND n.carrier_endpoint_host IS NOT NULL
+    AND n.carrier_endpoint_tcp_port IS NOT NULL
+    AND n.carrier_endpoint_quic_port IS NOT NULL
 )
 SELECT routes.account_id, routes.resource_kind, routes.resource_id, routes.tunnel_name, routes.route_name, routes.operation_id, routes.connector_id, routes.carrier_session_id, routes.route_id, routes.route_generation, routes.session_generation, routes.process_generation, routes.config_generation, routes.assignment_generation, routes.edge_node_id, routes.edge_process_epoch, routes.protocol, routes.hostname, routes.edge_endpoints, routes.expires_at, routes.tunnel_id, routes.carrier_connector_id, routes.assignment_id, routes.config_content_hash, routes.match_type, routes.wildcard_suffix, routes.edge_carrier_server_spki_sha256, routes.edge_carrier_server_certificate_chain_pem,
        machine.id AS accessor_machine_id,
@@ -216,47 +229,41 @@ WITH private_routes AS (
     AND n.state = 'ready' AND n.ready = true
     AND n.last_heartbeat_at > $4 - interval '2 minutes'
   UNION ALL
-  SELECT a.account_id,
-         'tunnel'::text AS resource_kind,
-         a.tunnel_id AS resource_id,
-         t.name AS tunnel_name,
-         r.name AS route_name,
-         ''::text AS operation_id,
-         a.connector_id,
-         a.connector_session_id AS carrier_session_id,
-         a.route_id,
-         a.route_generation,
-         a.connector_generation AS session_generation,
-         a.connector_process_generation AS process_generation,
-         a.config_generation,
-         a.assignment_generation,
-         a.edge_node_id,
-         a.edge_process_epoch,
-         r.protocol,
-	         CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
-         ARRAY[
-           'h2://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_tcp_port::text,
-           'h3://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_quic_port::text
-         ]::text[] AS edge_endpoints,
-         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), s.lease_deadline) AS expires_at,
-         a.tunnel_id,
-	         a.connector_id AS carrier_connector_id,
-	         a.assignment_id,
-	         'sha256:' || encode(a.config_content_hash, 'hex') AS config_content_hash,
-	         CASE WHEN r.match_type = 'managed' THEN 'managed_exact' ELSE r.match_type END AS match_type,
-	         CASE WHEN r.match_type = 'one_label_wildcard' THEN regexp_replace(r.match_hostname, '^\\*\\.', '') ELSE '' END AS wildcard_suffix
-	         ,n.carrier_server_spki_sha256 AS edge_carrier_server_spki_sha256
-	         ,n.carrier_server_certificate_chain_pem AS edge_carrier_server_certificate_chain_pem
-  FROM tunnel_edge_route_assignments AS a
-  JOIN tunnels AS t ON t.id = a.tunnel_id AND t.account_id = a.account_id
-  JOIN tunnel_routes AS r ON r.id = a.route_id AND r.tunnel_id = a.tunnel_id
-  JOIN tunnel_connector_sessions AS s ON s.id = a.connector_session_id AND s.connector_id = a.connector_id
-  JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
-  WHERE a.account_id = $3
-    AND a.access_mode = 'private'
-    AND a.state = 'active' AND a.observed_state = 'ready'
-    AND t.desired_state = 'active' AND r.desired_state = 'active'
-    AND s.state = 'ready' AND s.lease_deadline > $4
+  -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
+  SELECT t.account_id, 'tunnel'::text AS resource_kind, t.id AS resource_id,
+         t.name AS tunnel_name, r.name AS route_name,
+         ''::text AS operation_id, (ra.admission->'binding'->>'connector_id')::text AS connector_id,
+         ra.session_id AS carrier_session_id,
+         r.id AS route_id, r.generation AS route_generation, 1::bigint AS session_generation,
+         ra.worker_generation AS process_generation,
+         (ra.admission->'binding'->>'config_generation')::bigint AS config_generation,
+         x.generation AS assignment_generation,
+         x.edge_node_id, x.edge_process_epoch, r.protocol,
+         CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
+         ARRAY['h2://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_tcp_port::text,
+               'h3://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_quic_port::text]::text[] AS edge_endpoints,
+         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), ra.expires_at, $4 + interval '10 minutes') AS expires_at,
+         (ra.admission->'binding'->>'tunnel_id')::text AS tunnel_id,
+         (ra.admission->'binding'->>'connector_id')::text AS carrier_connector_id,
+         ('epa_' || x.route_id)::text AS assignment_id, (ra.admission->>'config_content_hash')::text AS config_content_hash,
+         CASE WHEN r.match_type = 'managed' THEN 'managed_exact' ELSE r.match_type END AS match_type,
+         CASE WHEN r.match_type = 'one_label_wildcard' THEN regexp_replace(r.match_hostname, '^\\*\\.', '') ELSE '' END AS wildcard_suffix
+         ,n.carrier_server_spki_sha256 AS edge_carrier_server_spki_sha256
+         ,n.carrier_server_certificate_chain_pem AS edge_carrier_server_certificate_chain_pem
+  FROM endpoint_edge_assignments AS x
+  JOIN endpoints AS e ON e.id = x.endpoint_id AND e.kind = 'tunnel' AND e.desired_state = 'active'
+  JOIN tunnels AS t ON t.id = e.tunnel_id
+  JOIN endpoint_routes AS er ON er.id = x.route_id
+  JOIN tunnel_routes AS r ON r.id = er.tunnel_route_id AND r.tunnel_id = t.id
+  JOIN current_tunnel_route_viewer_policy AS v ON v.route_id = r.id
+  JOIN runtime_carrier_attachments AS ra
+    ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
+   AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
+  JOIN control_tunnel_nodes AS n ON n.id = x.edge_node_id AND n.process_epoch = x.edge_process_epoch
+  WHERE t.account_id = $3
+    AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
+    AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
+    AND ra.expires_at > $4
     AND n.state = 'ready' AND n.ready = true
     AND n.last_heartbeat_at > $4 - interval '2 minutes'
     AND n.carrier_endpoint_host IS NOT NULL

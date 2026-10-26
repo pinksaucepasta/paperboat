@@ -14,9 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
-	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -58,7 +56,6 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		}
 	})
 	f.insert(t, database)
-	tcpAssignment := f.stageAndActivatePrivateTCP(t, database)
 	repository, err := NewAccessorRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -69,101 +66,20 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routes) != 3 {
-		t.Fatalf("same-account routes=%d, want preview, durable HTTP, and private TCP route: %#v", len(routes), routes)
+	// Tunnel routes ride the endpoint engine; runtimeattachment's
+	// TestPrivateEngineTunnelRouteIsDiscoveredAndResolvedOnPostgres covers them.
+	if len(routes) != 1 {
+		t.Fatalf("same-account routes=%d, want the preview route: %#v", len(routes), routes)
 	}
-	assertAccessorBindings(t, routes, f, tcpAssignment)
-
-	t.Run("owner preview uses its owner carrier instead of accessor discovery", func(t *testing.T) {
-		ownerRoutes, err := repository.MachineRoutes(ctx, f.accountID, f.hostID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(ownerRoutes) != 2 {
-			t.Fatalf("owner accessor routes=%d, want durable HTTP and private TCP only", len(ownerRoutes))
-		}
-		protocols := map[string]bool{}
-		for _, route := range ownerRoutes {
-			if route.ResourceKind != ResourceTunnel || route.ResourceID != f.tunnelID || route.MachineID != f.hostID || route.InstallationGeneration != 1 || route.AccessorPublicKey != f.hostPublicKey {
-				t.Fatal("owner discovery changed exact durable authority or duplicated owner preview")
-			}
-			protocols[route.Protocol] = true
-		}
-		if !protocols[ProtocolHTTP] || !protocols["private_tcp"] {
-			t.Fatal("owner discovery omitted a durable protocol")
-		}
-	})
-	t.Run("durable resolver timestamp parameter", func(t *testing.T) {
-		var current AccessorAdmission
-		for _, row := range routes {
-			if row.ResourceKind == ResourceTunnel && row.Protocol == "http" {
-				current = row
-			}
-		}
-		request := testRequest(now)
-		request.AccountID, request.MachineID, request.ResourceKind, request.ResourceID, request.RouteID = f.accountID, f.accessorID, ResourceTunnel, current.ResourceID, current.RouteID
-		request.ConnectorID, request.OperationID, request.CarrierSessionID = current.ConnectorID, "", current.CarrierSessionID
-		request.Audience, request.Host, request.Path = AudienceTunnelHTTP, current.Hostname, "/app"
-		request.InstallationGeneration, request.RouteGeneration, request.SessionGeneration, request.ProcessGeneration, request.ConfigGeneration, request.AssignmentGeneration = current.InstallationGeneration, current.RouteGeneration, current.SessionGeneration, current.ProcessGeneration, current.ConfigGeneration, current.AssignmentGeneration
-		request.EdgeNodeID, request.EdgeProcessEpoch = f.nodeID, f.epoch
-		resolver := &SQLResolver{db: database}
-		binding, err := resolver.ResolvePrivate(ctx, Lookup{AccountID: f.accountID, Request: request, Edge: EdgeIdentity{NodeID: f.nodeID, ProcessEpoch: f.epoch}, Now: now})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := exactBinding(request, binding); err != nil {
-			t.Fatal(err)
-		}
-		if binding.Protocol != ProtocolHTTP || binding.Hostname != current.Hostname {
-			t.Fatal("current durable HTTP binding changed")
-		}
-		missing := request
-		missing.ResourceID = "tun_missing_" + f.suffix
-		if _, err := resolver.ResolvePrivate(ctx, Lookup{AccountID: f.accountID, Request: missing, Edge: EdgeIdentity{NodeID: f.nodeID, ProcessEpoch: f.epoch}, Now: now}); err != ErrResourceNotFound {
-			t.Fatalf("missing exact resource error = %v, want expected not-found denial", err)
-		}
-	})
+	assertAccessorBindings(t, routes, f)
 
 	admissions, err := repository.EdgeAdmissions(ctx, f.nodeID, f.epoch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(admissions) != 6 { // three routes for accessor and connector-host machines
-		t.Fatalf("edge admissions=%d, want three routes for two eligible machines", len(admissions))
+	if len(admissions) != 2 { // the preview route for the accessor and host machines
+		t.Fatalf("edge admissions=%d, want the preview route for two eligible machines", len(admissions))
 	}
-
-	t.Run("managed HTTP match projects canonical wire type", func(t *testing.T) {
-		if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_routes SET match_type='managed' WHERE id=$1`, f.routeID); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_routes SET match_type='exact' WHERE id=$1`, f.routeID); err != nil {
-				t.Fatal(err)
-			}
-		}()
-		machineRoutes, err := repository.MachineRoutes(ctx, f.accountID, f.accessorID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		edgeRoutes, err := repository.EdgeAdmissions(ctx, f.nodeID, f.epoch)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, rows := range [][]AccessorAdmission{machineRoutes, edgeRoutes} {
-			found := false
-			for _, row := range rows {
-				if row.RouteID == f.routeID {
-					found = true
-					if row.MatchType != "managed_exact" {
-						t.Fatalf("managed route wire match type=%q", row.MatchType)
-					}
-				}
-			}
-			if !found {
-				t.Fatal("managed route missing from complete snapshot")
-			}
-		}
-	})
 
 	if wrong, err := repository.MachineRoutes(ctx, f.otherAccountID, f.accessorID); err != nil || len(wrong) != 0 {
 		t.Fatalf("wrong-account routes=%#v err=%v", wrong, err)
@@ -189,7 +105,7 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := repository.MachineRoutes(ctx, f.accountID, f.accessorID)
-	if err != nil || len(current) != 3 || current[0].InstallationGeneration != f.installationGeneration+1 {
+	if err != nil || len(current) != 1 || current[0].InstallationGeneration != f.installationGeneration+1 {
 		t.Fatalf("renewed installation projection=%#v err=%v", current, err)
 	}
 
@@ -206,19 +122,8 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_edge_route_assignments SET state='detached',observed_state='detached',released_at=$2,updated_at=$2 WHERE assignment_id=$1`, tcpAssignment.assignmentID, now); err != nil {
-		t.Fatal(err)
-	}
-	withoutTCP, err := repository.MachineRoutes(ctx, f.accountID, f.accessorID)
-	if err != nil || len(withoutTCP) != 2 {
-		t.Fatalf("detached private TCP withdrawal=%#v err=%v", withoutTCP, err)
-	}
-
-	// One current route multiplied by limit+1 current accessors must be rejected
-	// rather than returned as an incomplete complete=true snapshot.
-	if _, err := database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=$2 WHERE id=$1`, f.previewID, now); err != nil {
-		t.Fatal(err)
-	}
+	// One current route (the preview) multiplied by limit+1 current accessors must be
+	// rejected rather than returned as an incomplete complete=true snapshot.
 	type limitMachine struct {
 		ID            string `json:"id"`
 		EnvironmentID string `json:"environment_id"`
@@ -266,10 +171,7 @@ func newAccessorAcceptanceFixture(suffix string, now time.Time) accessorAcceptan
 func (f accessorAcceptanceFixture) insert(t *testing.T, database *db.DB) {
 	t.Helper()
 	ctx := context.Background()
-	hash := sha256.Sum256([]byte("trk17-config:" + f.suffix))
 	requestHash := sha256.Sum256([]byte("trk17-request:" + f.suffix))
-	endpointID := testutil.EndpointID("accessor-routes:" + f.suffix)
-	endpoint := "https://" + testutil.EndpointLabel(endpointID) + ".tunnels.example.test"
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := database.SQL().ExecContext(ctx, query, args...); err != nil {
@@ -282,48 +184,9 @@ func (f accessorAcceptanceFixture) insert(t *testing.T, database *db.DB) {
 	exec(`INSERT INTO paperboat.preview_leases (owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,allocation_state,edge_state,origin_state,terminal_state,created_at,last_renewed_at) VALUES ('foreground',$1,$2,$3,$3,$4,$5,'http','127.0.0.1:3000','private',$6,'ready','ready','ready','active',$7,$7)`, f.previewID, "https://preview-"+f.suffix+".preview.example.test", f.accountID, f.hostID, "owner_"+f.suffix, f.now.Add(time.Hour), f.now)
 	exec(`INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,retrying,outcome,correlation_id,created_at,updated_at,completed_at) VALUES ($1,$2,$1,$3,'preview.create','preview_lease',$4,'ready','succeeded',100,false,'changed',$5,$6,$6,$6)`, f.operationID, f.accountID, requestHash[:], f.previewID, "cor_"+f.suffix, f.now)
 	exec(`INSERT INTO paperboat.preview_lease_carrier_attachments (account_id,preview_id,operation_id,idempotency_key,request_id,correlation_id,request_hash,owner_machine_id,owner_session_id,host_id,edge_node_id,edge_process_epoch,edge_carrier_server_spki_sha256,edge_carrier_server_certificate_chain_pem,machine_identity_public_key,machine_identity_thumbprint,lease_generation,tunnel_id,connector_id,connector_session_id,process_generation,config_generation,route_id,route_generation,config_content_hash,edge_endpoints,state,edge_ready,origin_ready,issued_at,expires_at,ready_at) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$7,$9,$10,'sha256:' || repeat('b',64),'test-public-certificate-chain',$11,$12,4,$13,$14,$15,2,3,$16,7,$17,ARRAY['h2://edge.example.test:25001','h3://edge.example.test:25002'],'ready',true,true,$18,$19,$18)`, f.accountID, f.previewID, f.operationID, "req_"+f.suffix, "cor_"+f.suffix, requestHash[:], f.hostID, "owner_"+f.suffix, f.nodeID, f.epoch, f.hostPublicKey, "sha256:"+strings.TrimPrefix(f.hostThumbprint, "sha256:"), "pvc_"+f.suffix, "pcc_"+f.suffix, "pcs_"+f.suffix, "proute_"+f.suffix, "sha256:"+strings.Repeat("a", 64), f.now, f.now.Add(30*time.Minute))
-	exec(`INSERT INTO paperboat.tunnels (id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code,created_at,updated_at) VALUES ($1,$2,'trk17','active','private',5,$3,$4,$5,$2,'ready',$6,$6)`, f.tunnelID, f.accountID, endpointID, endpoint, f.hostID, f.now)
-	exec(`INSERT INTO paperboat.tunnel_routes (id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES ($1,$2,'web','http','exact',$3,'/app','http','127.0.0.1:3000',7,'active',$4,$4,$5,$5)`, f.routeID, f.tunnelID, "durable-"+f.suffix+".example.test", f.accountID, f.now)
-	exec(`INSERT INTO paperboat.tunnel_routes (id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES ($1,$2,'tcp','private_tcp','catch_all','tcp','127.0.0.1:5432',8,'active',$3,$3,$4,$4)`, f.tcpRouteID, f.tunnelID, f.accountID, f.now)
-	exec(`INSERT INTO paperboat.tunnel_config_generations (tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,created_at,activated_at,retained_until) VALUES ($1,3,$2,convert_to(jsonb_build_object('routes',jsonb_build_array(jsonb_build_object('id',$6::text),jsonb_build_object('id',$7::text)))::text,'UTF8'),'active',$3,$4,$4,$5)`, f.tunnelID, hash[:], f.accountID, f.now, f.now.Add(time.Hour), f.routeID, f.tcpRouteID)
-	exec(`INSERT INTO paperboat.tunnel_connectors (id,tunnel_id,host_id,credential_reference,credential_thumbprint,rotation_generation,desired_state,protocol_version,last_session_id,last_heartbeat_at,ready_at,last_applied_config_generation,drain_state,generation,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,1,'active','1.0',$6,$7,$7,3,'accepting',4,$7,$7)`, f.connectorID, f.tunnelID, f.hostID, "keychain://trk17/"+f.connectorID, f.thumbprint+f.connectorID, f.sessionID, f.now)
-	exec(`INSERT INTO paperboat.tunnel_connector_sessions (id,connector_id,process_generation,protocol_version,capabilities,credential_generation,state,lease_deadline,last_heartbeat_at,ready_at,applied_config_generation,retained_until,created_at) VALUES ($1,$2,2,'1.0',ARRAY['config.snapshot.v1'],1,'ready',$3,$4,$4,3,$5,$4)`, f.sessionID, f.connectorID, f.now.Add(time.Hour), f.now, f.now.Add(2*time.Hour))
-	exec(`INSERT INTO paperboat.tunnel_edge_route_assignments (assignment_id,route_id,assignment_generation,account_id,tunnel_id,connector_id,host_id,machine_identity_public_key,machine_identity_thumbprint,connector_generation,connector_session_id,connector_process_generation,config_generation,config_content_hash,access_mode,route_generation,route_revision,viewer_policy_generation,edge_node_id,edge_process_epoch,edge_failure_domain,state,observed_state,assigned_at,observed_at,created_at,updated_at) VALUES ($1,$2,9,$3,$4,$5,$6,$7,$8,4,$9,2,3,$10,'private',7,7,1,$11,$12,'test','active','ready',$13,$13,$13,$13)`, "asg_"+f.suffix, f.routeID, f.accountID, f.tunnelID, f.connectorID, f.hostID, f.hostPublicKey, strings.TrimPrefix(f.hostThumbprint, "sha256:"), f.sessionID, hash[:], f.nodeID, f.epoch, f.now)
 }
 
-type tcpAssignmentEvidence struct {
-	assignmentID, configContentHash string
-	assignmentGeneration            uint64
-}
-
-func (f accessorAcceptanceFixture) stageAndActivatePrivateTCP(t *testing.T, database *db.DB) tcpAssignmentEvidence {
-	t.Helper()
-	ctx := context.Background()
-	service := controlplane.NewEdgeService(database, "trk17-acceptance")
-	service.SetClock(func() time.Time { return f.now })
-	staged, err := service.ReconcileTunnelEdgeRouteAssignments(ctx, 10)
-	if err != nil || staged != 1 {
-		t.Fatalf("private TCP reconcile=%d,%v, want one staged assignment", staged, err)
-	}
-	var assignmentID, accessMode string
-	var viewerPolicyGeneration int64
-	var assignmentGeneration, routeRevision, connectorGeneration, processGeneration, configGeneration int64
-	var configHash []byte
-	if err := database.SQL().QueryRowContext(ctx, `SELECT assignment_id,assignment_generation,route_revision,connector_generation,connector_process_generation,config_generation,config_content_hash,access_mode,viewer_policy_generation FROM paperboat.tunnel_edge_route_assignments WHERE route_id=$1 AND state='staged'`, f.tcpRouteID).Scan(&assignmentID, &assignmentGeneration, &routeRevision, &connectorGeneration, &processGeneration, &configGeneration, &configHash, &accessMode, &viewerPolicyGeneration); err != nil {
-		t.Fatal(err)
-	}
-	observation := controlplane.RouteObservation{RouteID: f.tcpRouteID, AssignmentID: assignmentID, AssignmentGeneration: assignmentGeneration, RouteRevision: routeRevision, EdgeNodeID: f.nodeID, EdgeProcessEpoch: f.epoch, ConnectorID: f.connectorID, HostID: f.hostID, ConnectorGeneration: connectorGeneration, ConnectorSessionID: f.sessionID, ConnectorProcessGeneration: processGeneration, ConfigGeneration: configGeneration, ConfigContentHash: fmt.Sprintf("sha256:%x", configHash), State: "ready", AccessMode: accessMode, ViewerPolicyGeneration: viewerPolicyGeneration}
-	if err := service.ObserveRoutes(ctx, f.nodeID, []controlplane.RouteObservation{observation}); err != nil {
-		t.Fatalf("activate private TCP assignment: %v", err)
-	}
-	var state, observed string
-	if err := database.SQL().QueryRowContext(ctx, `SELECT state,observed_state FROM paperboat.tunnel_edge_route_assignments WHERE assignment_id=$1`, assignmentID).Scan(&state, &observed); err != nil || state != "active" || observed != "ready" {
-		t.Fatalf("private TCP assignment state=%s/%s err=%v", state, observed, err)
-	}
-	return tcpAssignmentEvidence{assignmentID: assignmentID, assignmentGeneration: uint64(assignmentGeneration), configContentHash: fmt.Sprintf("sha256:%x", configHash)}
-}
-
-func assertAccessorBindings(t *testing.T, routes []AccessorAdmission, f accessorAcceptanceFixture, tcp tcpAssignmentEvidence) {
+func assertAccessorBindings(t *testing.T, routes []AccessorAdmission, f accessorAcceptanceFixture) {
 	t.Helper()
 	byKind := map[string]AccessorAdmission{}
 	for _, v := range routes {
@@ -335,15 +198,6 @@ func assertAccessorBindings(t *testing.T, routes []AccessorAdmission, f accessor
 	p := byKind["preview\x00http"]
 	if p.RouteGeneration != 7 || p.SessionGeneration != 4 || p.ProcessGeneration != 2 || p.ConfigGeneration != 3 || p.AssignmentGeneration != 4 || p.AssignmentID != f.operationID || p.ConfigContentHash != "sha256:"+strings.Repeat("a", 64) || p.MatchType != "exact" {
 		t.Fatalf("preview generations=%#v", p)
-	}
-	d := byKind["tunnel\x00http"]
-	hash := sha256.Sum256([]byte("trk17-config:" + f.suffix))
-	if d.TunnelName != "trk17" || d.RouteName != "web" || d.RouteGeneration != 7 || d.SessionGeneration != 4 || d.ProcessGeneration != 2 || d.ConfigGeneration != 3 || d.AssignmentGeneration != 9 || d.CarrierSessionID != f.sessionID || d.ConnectorID != f.connectorID || d.AssignmentID != "asg_"+f.suffix || d.ConfigContentHash != fmt.Sprintf("sha256:%x", hash) || d.MatchType != "exact" {
-		t.Fatalf("durable generations=%#v", d)
-	}
-	privateTCP := byKind["tunnel\x00private_tcp"]
-	if privateTCP.TunnelName != "trk17" || privateTCP.RouteName != "tcp" || privateTCP.RouteID != f.tcpRouteID || privateTCP.Hostname != "" || privateTCP.MatchType != "catch_all" || privateTCP.AssignmentID != tcp.assignmentID || privateTCP.AssignmentGeneration != tcp.assignmentGeneration || privateTCP.ConfigContentHash != tcp.configContentHash {
-		t.Fatalf("private TCP authoritative binding=%#v", privateTCP)
 	}
 }
 
