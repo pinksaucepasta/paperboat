@@ -36,6 +36,8 @@ class Clock:
 
 clock = Clock()
 READY_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_READY_SECONDS', '600'))
+# A new version is not 'activation complete' until its stability window (about 10 minutes) passes; settings are refused until then.
+ACTIVATION_SECONDS = int(os.environ.get('PAPERBOAT_SMOKE_ACTIVATION_SECONDS', '900'))
 
 
 def run(*args, timeout=90):
@@ -112,7 +114,7 @@ def scheduled_phase(lead, before, latest):
         guard = [c for c in report.get('checks', []) if c.get('code') == 'machine_guard_version']
         return (state['runtime_version'] == latest and state['activation_pending'] is False
                 and report.get('overall') == 'healthy' and (not guard or guard[0].get('status') == 'pass'))
-    wait_until(clock.now() + datetime.timedelta(seconds=240), settled, 'doctor healthy, activation done and the guard on %s' % latest)
+    wait_until(clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS), settled, 'doctor healthy, activation done and the guard on %s' % latest)
     next_run = status()['next_maintenance_at']
     assert next_run[:16] > utc_minute(target + datetime.timedelta(hours=1)), \
         'next maintenance did not move to the next day: %r' % next_run
@@ -122,7 +124,7 @@ def scheduled_phase(lead, before, latest):
 def restore(original):
     """Put the original schedule back; the updater may still be restarting, so retry for a while."""
     flags = ['--auto=true' if original['automatic_updates'] else '--auto=false', '--time', original['local_time']]
-    deadline = clock.now() + datetime.timedelta(seconds=240)
+    deadline = clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS)
     while True:
         try:
             run('update', 'settings', *flags)

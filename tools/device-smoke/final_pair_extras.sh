@@ -8,11 +8,15 @@
 #            (background preview, tunnel, a held terminal, a transfer in flight), then `pb update --from BINARY` while
 #            all of it runs: transfer byte-identical, preview and tunnel on the same URLs, the same shell answers
 #            (update_survival.py --terminal).
+#   scheduled one machine installed with the PUBLISHED one-liner, then update_scheduled.py: `pb update settings` disables and
+#            enables the automatic update, and at the configured time the machine reaches the newest official release by
+#            itself (about 15 minutes). The official Latest must be older than the newest release: cut the candidate as a
+#            release first; otherwise this FAILS with that reason.
 #
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and the
 # containers removed on every exit path; enrollment tokens stay in files.
 set -uo pipefail
-MODE=${1:?exec|history} HOST=${2:?host} BIN=${3:?binary}
+MODE=${1:?exec|history|scheduled} HOST=${2:?host} BIN=${3:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
 T=final-$MODE-t-$STAMP P=final-$MODE-p-$STAMP ALIAS=lanea-fx-$STAMP
@@ -44,6 +48,27 @@ EOF
 )
   MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
   grep -qx EXEC_OK <<<"$out" && finish PASS "pb exec worked as the first command after a fresh pair, no retry"
+  finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 3 | cut -c1-300 | tr "\n" " ")"
+fi
+
+if [ "$MODE" = scheduled ]; then
+  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T ALIAS=$ALIAS"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+set -euo pipefail
+X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+start_ct $T
+sudo -n docker exec $T bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
+${FRESH_MINT:-$HOME/.local/bin/pb} machine add --name $ALIAS --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["linux_macos_command"])' > /tmp/$T-cmd
+sudo -n docker cp /tmp/$T-cmd $T:/home/pbt/install-cmd; rm -f /tmp/$T-cmd
+$X $T bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
+$X $T python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
+sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
+$X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
+if res=$($X $T bash -c "cd ~/ds && python3 update_scheduled.py" 2>&1); then echo SCHEDULED_OK; else echo SCHEDULED_FAILED; fi
+echo "$res" | tail -n 3
+EOF
+)
+  MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
+  grep -qx SCHEDULED_OK <<<"$out" && finish PASS "official install: settings disable/enable persisted; at the configured time it reached the newest release by itself"
   finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 3 | cut -c1-300 | tr "\n" " ")"
 fi
 

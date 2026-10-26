@@ -16,6 +16,13 @@ from pairing_lifecycle import command_diagnostic, invoke
 
 
 OUTPUT_BYTES = 16 << 20
+# The CLI's own stderr line when the account's ENV values are not yet delivered to the target (an account with ENV
+# variables and a locked vault says so on every exec); the checks compare the remote command's stderr, not it.
+ENV_NOTICE = b'Paperboat ENV not applied:'
+
+
+def without_env_notice(errors):
+    return b''.join(line for line in errors.splitlines(keepends=True) if not line.startswith(ENV_NOTICE))
 
 
 def run(binary, *arguments, input=b'', expected=0):
@@ -29,7 +36,7 @@ def run(binary, *arguments, input=b'', expected=0):
         if stdout.tell() > OUTPUT_BYTES + (1 << 20) or stderr.tell() > 1 << 20:
             raise RuntimeError('exec fixture exceeded its output bound')
         stdout.seek(0); stderr.seek(0)
-        output, errors = stdout.read(), stderr.read()
+        output, errors = stdout.read(), without_env_notice(stderr.read())
     if result.returncode != expected:
         diagnostic = command_diagnostic(command, output, errors)
         raise RuntimeError('remote exit status differs; private diagnostics: ' + str(diagnostic))

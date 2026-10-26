@@ -11,7 +11,7 @@
 command-rows	device	@command_rows.py	python3 command_rows.py {self} --peer {peer}
 console-previews	console	F7-06	check-previews.js /previews '{{"__port":"8080","__machine":"{self}"}}'
 extra-exec-after-pair	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh exec {host} {binary}
-extra-update-history	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh history {host} {binary}
+extra-update-history	cmd	EXTRA,F14-01	tools/device-smoke/final_pair_extras.sh history {host} {binary}
 extra-published-install	cmd	EXTRA	tar czf - -C tools/device-smoke $(cd tools/device-smoke && ls *.py) | ssh {host} 'rm -rf /tmp/pbds && mkdir /tmp/pbds && tar xzf - -C /tmp/pbds' && echo "$HP_SUDO_PASS" | ssh {host} 'cd /tmp/pbds && python3 published_install.py --expect-release {release} --keep-official'
 status-bar	device	@status_bar_lifecycle.py	python3 status_bar_lifecycle.py {peer}
 terminal-entry	device	@terminal_entry.py	python3 terminal_entry.py {peer}
@@ -81,3 +81,4 @@ config-command-c177	device	C177	python3 config_commands.py --rows C177
 config-command-c179	device	C179	python3 config_commands.py --rows C179
 config-command-c180	device	C180	python3 config_commands.py --rows C180
 config-command-c181	device	C181	python3 config_commands.py --rows C181
+extra-update-scheduled	cmd	F14-06	tools/device-smoke/final_pair_extras.sh scheduled {host} {binary}

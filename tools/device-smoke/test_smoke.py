@@ -787,6 +787,8 @@ class ScheduledUpdateCheck(unittest.TestCase):
             if args[1] == 'check':
                 return {'data': {'installed_version': self.version, 'latest_version': self.latest,
                                  'update_available': self.version != self.latest, 'verified': True}}
+            if args[1] == 'download':  # fetches the release ahead only; it installs nothing
+                return {'data': {'downloaded': True}}
             raise AssertionError('the check must never install an update itself: %r' % (args,))
 
         def doctor(self, *args, **kwargs):
