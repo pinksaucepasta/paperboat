@@ -85,7 +85,7 @@ func TestMCPInventoryUsesBoundedAuthenticatedPage(t *testing.T) {
 	_, configPath := localDaemonReadinessTestConfig(t, true)
 	directory := filepath.Dir(configPath)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/machines" || r.URL.Query().Get("limit") != "100" || r.URL.Query().Get("offset") != "0" || r.Header.Get("Authorization") == "" {
+		if r.URL.Path != "/v1/machines" || r.URL.Query().Get("limit") != "100" || r.URL.Query().Has("offset") || r.URL.Query().Has("cursor") || r.Header.Get("Authorization") == "" {
 			t.Errorf("inventory did not use bounded account access: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected inventory request", http.StatusBadRequest)
 			return
@@ -94,8 +94,8 @@ func TestMCPInventoryUsesBoundedAuthenticatedPage(t *testing.T) {
 		for i := range machines {
 			machines[i] = api.UserMachine{ID: fmt.Sprintf("machine_%d", i), Alias: "build", Online: true}
 		}
-		next := 100
-		writeAPIData(t, w, api.UserMachinePage{Items: machines, Pagination: api.Pagination{Limit: 100, Total: 101, NextOffset: &next}})
+		// Like the real server: one keyset page with the total and the next cursor.
+		writeAPIData(t, w, map[string]any{"items": machines, "total": 101, "next_cursor": "after_machine_99"})
 	}))
 	defer server.Close()
 	writeTestProfile(t, directory, configPath, server.URL)
