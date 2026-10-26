@@ -76,7 +76,9 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	// Reuse the exact capability-only session. Resolving current authority must not
 	// extend its lifetime; issuance can create a replacement after expiration.
 	e = tx.QueryRowContext(ctx, `SELECT id FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND user_machine_id=$2 AND cli_client_session_id=$3 AND machine_service_port=$4 AND machine_service_source_kind=$5 AND machine_service_source_id=$6 AND machine_service_source_generation=$7 AND team_id IS NOT DISTINCT FROM nullif($8,'') AND state='active' AND revoked_at IS NULL AND expires_at>$9 AND machine_service_team_fence=paperboat.machine_service_team_fence(user_id,user_machine_id,machine_service_source_kind,machine_service_source_id,team_id) ORDER BY created_at DESC LIMIT 1`, in.UserID, in.ResourceID, in.CLIClientSessionID, port, authority.SourceKind, authority.SourceID, authority.Generation, authority.TeamID, now).Scan(&out.AccessSessionID)
+	inserted := false
 	if pureNativeRejection(e, sql.ErrNoRows) {
+		inserted = true
 		out.AccessSessionID = "session_" + uuid.NewString()
 		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,team_id,capabilities,operation_id,machine_service_port,machine_service_source_kind,machine_service_source_id,machine_service_source_generation,machine_service_team_fence) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'',$6,nullif($7,''),ARRAY['private_access'],$8,$9,$10,$11,$12,paperboat.machine_service_team_fence($3,$2,$10,$11,nullif($7,'')))`, out.AccessSessionID, in.ResourceID, in.UserID, out.EnvironmentID, in.CLIClientSessionID, admission.Deadline(now, r.AdmissionLifetime), authority.TeamID, in.OperationID, port, authority.SourceKind, authority.SourceID, authority.Generation)
 	}
@@ -85,6 +87,13 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	}
 	if e = tx.Commit(); e != nil {
 		return Target{}, e
+	}
+	if inserted {
+		// Published after the commit, not by a trigger inside the SERIALIZABLE transaction: every session of one
+		// machine bumps the same topic row (see usermachines.publishAccessSession).
+		if _, e = r.database.ExecContext(ctx, `SELECT paperboat.publish_machine_topic($1::text[],'machine_access')`, "{"+out.MachineID+"}"); e != nil {
+			return Target{}, e
+		}
 	}
 	return out, nil
 }

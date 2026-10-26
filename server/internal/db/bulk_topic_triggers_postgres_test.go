@@ -86,19 +86,21 @@ helper_terminal_session_id,expires_at,capabilities,operation_id)
 SELECT 'external_issuer',$1||'_access_'||g,$2,$1,$1||'_env_0',$3,'https://invalid.test','jti_'||$1||'_'||g,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1||'_'||g
 FROM generate_series(1,1000) g`, user, machine, cli)
 	m, c := generations()
-	if got := machineTopic(machine, "machine_access"); got != access+1 || m != machineConfig+1 || c != cliConfig+1 {
-		t.Fatalf("inserting 1,000 sessions: machine_access +%d, identities +%d/+%d; want +1 each", got-access, m-machineConfig, c-cliConfig)
+	// An insert does not publish machine_access from a trigger: the code paths that create a session publish it
+	// after their commit (migration 200), so concurrent sessions of one machine do not conflict on the topic row.
+	if got := machineTopic(machine, "machine_access"); got != access || m != machineConfig+1 || c != cliConfig+1 {
+		t.Fatalf("inserting 1,000 sessions: machine_access +%d (want 0), identities +%d/+%d; want +1 each", got-access, m-machineConfig, c-cliConfig)
 	}
 	exec(`UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now() WHERE user_id=$1`, user)
 	m2, c2 := generations()
-	if got := machineTopic(machine, "machine_access"); got != access+2 || m2 != m+1 || c2 != c+1 {
-		t.Fatalf("revoking 1,000 sessions: machine_access +%d, identities +%d/+%d; want +1 each", got-access-1, m2-m, c2-c)
+	if got := machineTopic(machine, "machine_access"); got != access+1 || m2 != m+1 || c2 != c+1 {
+		t.Fatalf("revoking 1,000 sessions: machine_access +%d, identities +%d/+%d; want +1 each", got-access, m2-m, c2-c)
 	}
 	if relay := value(`SELECT relay_revocation_generation FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, user, cli); relay != c2 {
 		t.Fatalf("a revocation left the relay revocation generation at %d, want %d", relay, c2)
 	}
 	exec(`UPDATE paperboat.user_machine_access_sessions SET http_base_url=http_base_url WHERE user_id=$1`, user)
-	if m3, _ := generations(); machineTopic(machine, "machine_access") != access+2 || m3 != m2 {
+	if m3, _ := generations(); machineTopic(machine, "machine_access") != access+1 || m3 != m2 {
 		t.Fatal("an update of no watched column published")
 	}
 

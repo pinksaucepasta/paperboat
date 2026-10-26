@@ -10,7 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -343,7 +342,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 }
 
 func (s *Service) createSharedTerminalAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams, sourceMachineID string, want teams.TerminalSessionDecision) error {
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -370,13 +369,14 @@ func (s *Service) createSharedTerminalAccessSession(ctx context.Context, in dbsq
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
 			return err
 		}
-		// Neither endpoint has the other in its signed peer network yet: wake both refreshes now
-		// instead of leaving the join to wait for the next periodic refresh.
-		if err := machineevents.Publish(ctx, tx, []string{in.UserMachineID, sourceMachineID}, machineevents.TopicPeerNetwork); err != nil {
-			return err
-		}
 		return teams.AuditTx(ctx, tx, in.UserID, want.TeamID, "terminal_session_access_authorized", in.ID, map[string]any{"terminal_session_id": want.SessionID, "role": want.Role, "access_session_id": in.ID})
 	})
+	if err != nil {
+		return err
+	}
+	// Neither endpoint has the other in its signed peer network yet: wake both refreshes now instead of leaving the
+	// join to wait for the next periodic refresh.
+	return s.publishAccessSession(ctx, []string{in.UserMachineID, sourceMachineID}, true)
 }
 
 func (s *Service) Connect(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID string) (ConnectionDescriptor, error) {

@@ -251,15 +251,24 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		wakePeers = true
 		return nil
 	})
-	if err != nil || !wakePeers {
+	if err != nil {
 		return err
 	}
-	// Team access can come from another account, new to the host's signed peer network: wake its refresh now
-	// instead of leaving the connection to wait for the periodic one. Published after the commit, not inside it:
-	// every team session of one machine updates the same topic row, which under SERIALIZABLE made concurrent
-	// sessions conflict until their retries ran out (40001 to the caller). A crash between commit and publish
-	// leaves the host to its periodic refresh.
-	return machineevents.Publish(ctx, s.db.Pool(), []string{in.UserMachineID}, machineevents.TopicPeerNetwork)
+	// The host's access list changed, and team access can come from another account, new to its signed peer
+	// network: wake both refreshes now instead of leaving the connection to wait for the periodic ones.
+	return s.publishAccessSession(ctx, []string{in.UserMachineID}, wakePeers)
+}
+
+// publishAccessSession wakes the hosts of a just-committed access session. It runs after the commit, not in the
+// session's SERIALIZABLE transaction (and not in a trigger): every session of one machine bumps the same topic
+// row, so concurrent setups conflicted on it, replaying until their retries ran out (40001 to the caller; 20
+// concurrent setups of one machine needed ~4 replays each). Autocommit statements just queue on the row lock.
+// A crash between commit and publish leaves the host to its periodic refresh.
+func (s *Service) publishAccessSession(ctx context.Context, machineIDs []string, peers bool) error {
+	if err := machineevents.Publish(ctx, s.db.Pool(), machineIDs, machineevents.TopicMachineAccess); err != nil || !peers {
+		return err
+	}
+	return machineevents.Publish(ctx, s.db.Pool(), machineIDs, machineevents.TopicPeerNetwork)
 }
 
 func workspaceTeamArgument(ctx context.Context) (bool, sql.NullString) {

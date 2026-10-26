@@ -79,6 +79,11 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 		})
 	}()
 	<-held
+	generation := func() (n int64) {
+		_ = store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'),0)`, machine).Scan(&n)
+		return n
+	}
+	before := generation()
 	errs := make(chan error, 20)
 	for i := range 10 {
 		go func() {
@@ -100,6 +105,14 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Errorf("access session while the team lock is held: %v", err)
 		}
+	}
+	if after := generation(); after <= before {
+		t.Errorf("machine_access topic generation %d -> %d: new access sessions did not wake the host", before, after)
+	}
+	// Sessions of one machine must not conflict with each other: they used to replay ~4 times each on the machine's
+	// topic row (bumped by an insert trigger), and 20 at once ran out of retries (40001 to the caller).
+	if stats := store.TransactionStats().Serializable; stats.Retries > 2 || stats.Exhausted != 0 {
+		t.Errorf("20 concurrent access sessions of one machine replayed %d times (%+v); they must not conflict", stats.Retries, stats)
 	}
 	close(release)
 	if err := <-holder; err != nil {
