@@ -4980,3 +4980,6 @@ with resyncs 0. Host serves the screen requests about once a second (ad441296 di
 
 2026-10-27 | Managed SSH | peer-network/config rate per carrier machine (server-side): dev-2be3e739 ~2 req/s (1 s retry before first config; d469e97a) -> d469e97a ~22/min -> 3e01ffd6 7.3/min, 0 x 429 (accepted). 49105093 gate regressed to ~75/min (revert c64bb81e).
 Remaining 7.3/min is relay observations valid 15 s vs a 30 s renewal cadence; not widening the window. Real fix: push model (refresh only on change, longer-lived signatures), first scale item after Linux approval.
+
+2026-10-27 | SDK lane C126 | L PASS official tunnel_private_access.py on hp dev-785d6f16/server .117/edge .26.15: both selectors exact4118-byte echo, correct resource identity, listeners close; help/error paths PASS. Result tunnel-private-access-785d6f16-edge15-20261027.json.
+Public TCP from oracle PASS4120 bytes, status ready/logs2, cleaned; result tunnel-public-tcp-785d6f16-edge15-20261027.json. Earlier346 manage/preview/TLS creation failures sent to Merger; upgraded TLS passthrough PASS (oracle openssl CN=mgtls.test). Pair retained, Merger mgc126 untouched.
