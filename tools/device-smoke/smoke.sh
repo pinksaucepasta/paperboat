@@ -869,11 +869,30 @@ test_fresh_pair_access() {
   fi
 }
 
+# team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account) on the device that
+# runs them. A disposable container can never hold one (it would need that account's sign-in), so they never run
+# there. In the lab ubuntu24 holds the profile and its own account is the fixture team's independent teammate: it
+# always runs both checks in the member role (ids team-lifecycle:ubuntu24, team-roles:ubuntu24), and so does every
+# non-container device in the run (owner role). A run therefore always covers them, without a hand judgement.
+test_team_checks() {
+  local spec group script flags device devices
+  for spec in "team-lifecycle team_lifecycle.py" "team-roles team_lifecycle.py --roles"; do
+    set -- $spec; group=$1; script=$2; flags=${3:-}
+    devices=()
+    for device in "${TLIST[@]}"; do ct_of "$device" >/dev/null || devices+=("$device"); done
+    [[ " ${devices[*]:-} " == *" ubuntu24 "* ]] || devices+=(ubuntu24)
+    test_device_application "$group" "$script" "$flags" "${devices[@]}"
+  done
+}
+
 test_device_application() {
-  local group=$1 script=$2 flags=${3:-}
+  local group=$1 script=$2 base_flags=${3:-} flags
   skipped "$group" && return
-  local device id out status t0
-  for device in "${TLIST[@]}"; do
+  shift 3 2>/dev/null || shift $#
+  local devices=("$@") device id out status t0
+  [ ${#devices[@]} -gt 0 ] || devices=("${TLIST[@]}")
+  for device in "${devices[@]}"; do
+    flags=$base_flags
     id="$group:$device"
     skipped "$id" && continue
     t0=$(now)
@@ -882,7 +901,9 @@ test_device_application() {
       continue
     fi
     case "$group" in
-      team-lifecycle|team-roles) flags+=" --team $SMOKE_TEAM" ;;
+      team-lifecycle|team-roles)
+        flags+=" --team $SMOKE_TEAM"
+        [ "$device" != ubuntu24 ] || flags+=" --device-role member" ;;
       doctor-lifecycle|session-limit) flags=$device ;;
     esac
     out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?
@@ -1021,8 +1042,7 @@ test_application_pairs preview-manage preview_manage.py
 test_application_pairs preview-inspect preview_inspect.py
 test_application_pairs send-self send_self.py
 test_application_pairs preview-access preview_access.py
-test_device_application team-lifecycle team_lifecycle.py
-test_device_application team-roles team_lifecycle.py --roles
+test_team_checks
 test_device_application tunnel-manage tunnel_manage.py
 test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain

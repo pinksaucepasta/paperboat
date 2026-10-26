@@ -525,6 +525,41 @@ esac
             self.assertNotEqual(no_ping.returncode, 0)
             self.assertIn('pb ping peer', no_ping.stdout + no_ping.stderr)
 
+    def test_team_checks_never_run_in_a_container_and_always_run_on_ubuntu24_as_the_member(self):
+        # A container cannot hold the controlled teammate profile, so team-lifecycle/team-roles run on ubuntu24
+        # (member role) for every run, plus on every non-container device (owner role).
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        body = (prefix + r"""
+stage_terminal_fixtures() { return 0; }
+on() {
+  device=$1; shift
+  printf '%s %s\n' "$device" "$*" >> "$CALLS"
+  group=team-lifecycle; case "$*" in *--roles*) group=team-roles ;; esac
+  printf '{"check":"%s","status":"PASS","create_get_list_delete":true,"invite_accept_decline_cancel":true,"independent_verified_recipient":true,"roles_remove_leave_transfer":true,"enrollment_preserved":true}' "$group"
+}
+TLIST=($TEAM_TARGETS)
+test_team_checks
+""")
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'smoke.sh'
+            self.write_script(script, body)
+            for targets, expected_devices in (('boxa boxb', {'ubuntu24'}), ('hp', {'hp', 'ubuntu24'}), ('ubuntu24', {'ubuntu24'})):
+                calls = pathlib.Path(directory) / ('calls-' + targets.replace(' ', '-'))
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                        env=dict(os.environ, CALLS=str(calls), TEAM_TARGETS=targets,
+                                                 SMOKE_CT_MAP='boxa=h:c1,boxb=h:c2'),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                lines = calls.read_text().splitlines()
+                devices = {line.split()[0] for line in lines if 'team_lifecycle.py' in line}
+                self.assertEqual(devices, expected_devices, (targets, lines))
+                for line in lines:
+                    if 'team_lifecycle.py' in line:
+                        self.assertEqual('--device-role member' in line, line.split()[0] == 'ubuntu24', line)
+                for group in ('team-lifecycle', 'team-roles'):
+                    for device in expected_devices:
+                        self.assertRegex(result.stdout, group + ':' + device + r'\s+PASS')
+
     def test_private_https_reads_the_domain_where_local_access_show_reports_it(self):
         # `pb config local-access show --json` carries the domain at the top level, beside local_access
         # (the machine guard owns it); the check used to read local_access.domain and died on a KeyError.
