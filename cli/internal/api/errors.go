@@ -214,6 +214,7 @@ var publicAPIMessages = map[string]string{
 	"preview_limit_reached":           "This workspace's plan limit for running previews and tunnels is reached. Stop one you no longer need, or upgrade under Billing in the Paperboat console.",
 	"bandwidth_quota_exhausted":       "This workspace's hosted relay and edge bandwidth is used up. Direct machine-to-machine access still works. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period.",
 	"conflict":                        "The resource state changed. Refresh it and try again.",
+	"route_conflict":                  "The route conflicts with an existing route on this hostname (one hostname serves either HTTP or TLS passthrough, and its TCP route once). Remove that route, or create a separate tunnel with `pb tunnel create <name> --from tcp://<host:port>`.",
 	"config_compare_stale":            "The conflict changed before it could be compared. Run `pb config conflict list` and compare the current conflict.",
 	"config_compare_host_unavailable": "The machine with the conflict is offline or not connected. Start Paperboat on it, then compare again.",
 	"terminal_session_limit_reached":  hostconfig.TerminalCeilingMessage(),

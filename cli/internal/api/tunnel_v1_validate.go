@@ -232,7 +232,7 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	if in.Protocol == "tcp_private" && (in.HostMatch.Type != "catch_all" || in.PathPrefix != nil || in.Origin.Scheme != "tcp") {
 		return errors.New("private TCP routes require catch-all matching and a tcp origin")
 	}
-	if (in.Protocol == "tcp" || in.Protocol == "tls") && (in.HostMatch.Type != "managed_exact" || in.HostMatch.Hostname == "" || in.PathPrefix != nil || in.Origin.Scheme != "tcp") {
+	if (in.Protocol == "tcp" || in.Protocol == "tls") && (in.HostMatch.Type != "managed_exact" || in.HostMatch.Hostname == "" || in.PathPrefix != nil || in.Origin.Scheme != "tcp" || in.Origin.PreserveHost) {
 		return errors.New("public TCP routes require managed hostname matching and a tcp origin")
 	}
 	if err := validateRouteOrigin(in.Origin); err != nil {

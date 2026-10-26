@@ -134,7 +134,7 @@ func routeAddCommand() *cobra.Command {
 			return errors.New("HTTP routes cannot target a tcp origin")
 		}
 		preserveHost, _ := command.Flags().GetBool("preserve-host")
-		originValue := api.TunnelRouteOrigin{Scheme: scheme, Address: address, PreserveHost: preserveHost}
+		originValue := api.TunnelRouteOrigin{Scheme: scheme, Address: address, PreserveHost: preserveHost && scheme != "tcp"} // a raw TCP origin has no Host header
 		if scheme == "https" {
 			originValue.TLS = &api.TunnelRouteTLS{Verification: "system"}
 		}
