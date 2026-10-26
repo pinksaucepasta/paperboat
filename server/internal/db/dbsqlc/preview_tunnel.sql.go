@@ -494,7 +494,7 @@ VALUES
    $8, $9, $10::jsonb,
    $11, $12, $13,
    $14, $15, 1, $16, $16)
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts
 `
 
 type CreatePreviewTunnelDomainParams struct {
@@ -567,6 +567,8 @@ func (q *Queries) CreatePreviewTunnelDomain(ctx context.Context, arg CreatePrevi
 		&i.DnsTtlSeconds,
 		&i.VerificationAttempts,
 		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
 	)
 	return i, err
 }

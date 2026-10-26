@@ -50,7 +50,7 @@ WHERE id = $7
   AND generation = $8
   AND ownership_state = 'verified'
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts
 `
 
 type ApplyTunnelDomainCertificateObservationV1Params struct {
@@ -107,6 +107,8 @@ func (q *Queries) ApplyTunnelDomainCertificateObservationV1(ctx context.Context,
 		&i.DnsTtlSeconds,
 		&i.VerificationAttempts,
 		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
 	)
 	return i, err
 }
@@ -130,7 +132,7 @@ SET observed_records = $1::jsonb,
 WHERE id = $8
   AND generation = $9
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts
 `
 
 type ApplyTunnelDomainDNSObservationV1Params struct {
@@ -189,6 +191,8 @@ func (q *Queries) ApplyTunnelDomainDNSObservationV1(ctx context.Context, arg App
 		&i.DnsTtlSeconds,
 		&i.VerificationAttempts,
 		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
 	)
 	return i, err
 }
@@ -219,7 +223,7 @@ func (q *Queries) CompleteTunnelDomainVerificationOperationsV1(ctx context.Conte
 }
 
 const listDueTunnelDomainsV1 = `-- name: ListDueTunnelDomainsV1 :many
-SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.ownership_state, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.last_verified_at, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until
+SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.ownership_state, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.last_verified_at, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until, tunnel_domains.certificate_retry_at, tunnel_domains.certificate_failure_attempts
 FROM tunnel_domains
 WHERE deleted_at IS NULL
   AND ownership_state IN ('pending','failed','verified')
@@ -273,6 +277,8 @@ func (q *Queries) ListDueTunnelDomainsV1(ctx context.Context, arg ListDueTunnelD
 			&i.DnsTtlSeconds,
 			&i.VerificationAttempts,
 			&i.QuarantineUntil,
+			&i.CertificateRetryAt,
+			&i.CertificateFailureAttempts,
 		); err != nil {
 			return nil, err
 		}

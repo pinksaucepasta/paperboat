@@ -635,7 +635,11 @@ func (s *Service) processDueTerminalSessionOperations(ctx context.Context) error
 	}
 	var errs []error
 	for _, item := range items {
-		if err := s.applyTerminalSessionOperation(ctx, item.ID, item.UserMachineID, item.TerminalSessionID, item.Operation, item.Attempts, item.UserID, item.EnvironmentID, item.ProviderRouteHttpBaseUrl); err != nil {
+		err := s.applyTerminalSessionOperation(ctx, item.ID, item.UserMachineID, item.TerminalSessionID, item.Operation, item.Attempts, item.UserID, item.EnvironmentID, item.ProviderRouteHttpBaseUrl)
+		// A host that cannot be reached yet is not a worker failure: the operation is rescheduled with its cause in
+		// last_error. Only a failure to record the outcome is.
+		var rescheduled terminalOperationRescheduled
+		if err != nil && !errors.As(err, &rescheduled) {
 			errs = append(errs, err)
 		}
 	}
@@ -643,6 +647,11 @@ func (s *Service) processDueTerminalSessionOperations(ctx context.Context) error
 }
 
 func (s *Service) expireClosedTerminalSessions(ctx context.Context) error {
+	if _, err := s.db.Queries().DeleteFinishedUserMachineTerminalSessionOperations(ctx, dbsqlc.DeleteFinishedUserMachineTerminalSessionOperationsParams{
+		CompletedBefore: sql.NullTime{Time: s.now().UTC().Add(-terminalOperationRetention), Valid: true}, BatchSize: 500,
+	}); err != nil {
+		return err
+	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		expired, err := tx.Queries().ExpireClosedUserMachineTerminalSessions(ctx, dbsqlc.ExpireClosedUserMachineTerminalSessionsParams{
 			ExpiredBefore: sql.NullTime{Time: s.now().UTC().Add(-terminalSessionClosedRecordRetention), Valid: true},
@@ -664,7 +673,7 @@ func (s *Service) expireClosedTerminalSessions(ctx context.Context) error {
 
 func (s *Service) applyTerminalSessionOperation(ctx context.Context, operationID, userMachineID, terminalSessionID, operation string, attempts int32, userID, environmentID, route string) error {
 	if s.controlSigner == nil || s.controlRuntime == nil || strings.TrimSpace(route) == "" || strings.TrimSpace(s.issuer) == "" {
-		return s.retryTerminalSessionOperation(ctx, operationID, attempts, errors.New("user-machine terminal control is unavailable"))
+		return s.terminalSessionOperationFailed(ctx, operationID, terminalSessionID, operation, attempts, errors.New("user-machine terminal control is unavailable"))
 	}
 	now := s.now().UTC()
 	credential, err := s.signProcessCredential(ctx, mint.CredentialInput{
@@ -710,19 +719,49 @@ func (s *Service) applyTerminalSessionOperation(ctx context.Context, operationID
 		}
 	}
 	if err != nil {
-		return s.retryTerminalSessionOperation(ctx, operationID, attempts, err)
+		return s.terminalSessionOperationFailed(ctx, operationID, terminalSessionID, operation, attempts, err)
 	}
 	return s.db.Queries().MarkUserMachineTerminalSessionOperationApplied(ctx, operationID)
 }
 
-func (s *Service) retryTerminalSessionOperation(ctx context.Context, id string, attempts int32, cause error) error {
-	multiplier := 1 << minInt(8, int(attempts))
-	backoff := multiplier
-	if backoff > 300 {
-		backoff = 300
+// terminalSessionOperationFailed reschedules an attempt the host did not apply, or ends a creation that reached the
+// configured attempts.
+func (s *Service) terminalSessionOperationFailed(ctx context.Context, operationID, terminalSessionID, operation string, attempts int32, cause error) error {
+	if operation == "create" && s.policy.TerminalCreateMaxAttempts > 0 && int(attempts)+1 >= s.policy.TerminalCreateMaxAttempts {
+		return s.failTerminalSessionCreation(ctx, operationID, terminalSessionID, cause)
 	}
-	err := s.db.Queries().RetryUserMachineTerminalSessionOperation(ctx, dbsqlc.RetryUserMachineTerminalSessionOperationParams{ID: id, RetrySeconds: float64(backoff), LastError: sql.NullString{String: terminalErrorSummary(ctx, cause), Valid: true}})
-	return errors.Join(cause, err)
+	return s.retryTerminalSessionOperation(ctx, operationID, attempts, cause)
+}
+
+// failTerminalSessionCreation ends a creation the host never accepted: the operation is failed and the session shows
+// "failed" instead of waiting forever. Close and delete keep retrying, because they become true when the host returns.
+func (s *Service) failTerminalSessionCreation(ctx context.Context, operationID, terminalSessionID string, cause error) error {
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := tx.Queries().FailUserMachineTerminalSessionOperation(ctx, dbsqlc.FailUserMachineTerminalSessionOperationParams{ID: operationID, LastError: sql.NullString{String: terminalErrorSummary(ctx, cause), Valid: true}}); err != nil {
+			return err
+		}
+		return tx.Queries().MarkUserMachineTerminalSessionRuntimeFailed(ctx, terminalSessionID)
+	})
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	// Reported once, when the creation is given up.
+	return fmt.Errorf("terminal creation ended after %d attempts: %w", s.policy.TerminalCreateMaxAttempts, cause)
+}
+
+// terminalOperationRescheduled is the outcome of an operation the host could not apply yet; it carries the cause so a
+// synchronous caller can still report it.
+type terminalOperationRescheduled struct{ cause error }
+
+func (e terminalOperationRescheduled) Error() string { return e.cause.Error() }
+func (e terminalOperationRescheduled) Unwrap() error { return e.cause }
+
+func (s *Service) retryTerminalSessionOperation(ctx context.Context, id string, attempts int32, cause error) error {
+	backoff := 1 << minInt(8, int(attempts)) // 1 s doubling to 256 s
+	if err := s.db.Queries().RetryUserMachineTerminalSessionOperation(ctx, dbsqlc.RetryUserMachineTerminalSessionOperationParams{ID: id, RetrySeconds: float64(backoff), LastError: sql.NullString{String: terminalErrorSummary(ctx, cause), Valid: true}}); err != nil {
+		return errors.Join(cause, err)
+	}
+	return terminalOperationRescheduled{cause: cause}
 }
 
 func terminalErrorSummary(ctx context.Context, err error) string {

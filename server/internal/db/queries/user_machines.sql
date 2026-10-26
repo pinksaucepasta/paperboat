@@ -1256,6 +1256,24 @@ UPDATE user_machine_terminal_session_operations
 SET state='applied',completed_at=now(),updated_at=now(),last_error=NULL
 WHERE id=sqlc.arg(id) AND state='pending';
 
+-- name: FailUserMachineTerminalSessionOperation :exec
+UPDATE user_machine_terminal_session_operations
+SET state='failed',attempts=attempts+1,completed_at=now(),updated_at=now(),last_error=sqlc.arg(last_error)
+WHERE id=sqlc.arg(id) AND state='pending';
+
+-- name: MarkUserMachineTerminalSessionRuntimeFailed :exec
+UPDATE user_machine_terminal_sessions
+SET runtime_state='failed',updated_at=now(),version=version+1
+WHERE id=sqlc.arg(id) AND deleted_at IS NULL AND runtime_state NOT IN ('closed','exited','deleted');
+
+-- name: DeleteFinishedUserMachineTerminalSessionOperations :execrows
+DELETE FROM user_machine_terminal_session_operations
+WHERE id IN (
+  SELECT finished.id FROM user_machine_terminal_session_operations AS finished
+  WHERE finished.state IN ('applied','failed') AND finished.completed_at < sqlc.arg(completed_before)
+  ORDER BY finished.completed_at LIMIT sqlc.arg(batch_size)
+);
+
 -- name: MarkUserMachineTerminalSessionRuntimeClosed :exec
 UPDATE user_machine_terminal_sessions
 SET runtime_state='closed',closed_at=coalesce(closed_at,now()),updated_at=now(),version=version+1

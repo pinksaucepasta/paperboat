@@ -90,6 +90,9 @@ var execOperationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
 const installationRecoveryGrace = 24 * time.Hour
 const terminalSessionClosedRecordRetention = 30 * 24 * time.Hour
 
+// terminalOperationRetention keeps a finished terminal operation for support, then deletes it.
+const terminalOperationRetention = 7 * 24 * time.Hour
+
 func installationRecoveryOperationKey(pairingID string, expiresAt time.Time) string {
 	return fmt.Sprintf("machine-recovery:%s:%d", pairingID, expiresAt.UTC().UnixNano())
 }
@@ -244,6 +247,8 @@ type Policy struct {
 	AllowedPlatforms []string
 	// ExpiredAccessSessionRetention is how long an expired access session may still be admitted.
 	ExpiredAccessSessionRetention time.Duration
+	// TerminalCreateMaxAttempts ends a terminal creation the host never accepted (terminal_sessions.max_attempts_before_alert).
+	TerminalCreateMaxAttempts int
 }
 type Service struct {
 	inventoryFlights            inventoryFlights

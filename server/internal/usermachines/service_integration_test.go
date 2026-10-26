@@ -3867,3 +3867,72 @@ func TestObservedFileTransferModesIsAcceptedPostgres(t *testing.T) {
 		t.Fatal("an unknown observed capability was accepted")
 	}
 }
+
+// Slice 8 (Lane K terminal plan): a host that cannot be reached yet reschedules its operations without failing the
+// worker; a creation the host never accepts ends as failed after the configured attempts; finished operations are
+// deleted after their retention.
+func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID, machineID := "usr_um_opsend_"+suffix, "um_opsend_"+suffix
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v: %s", err, query)
+		}
+	}
+	exec(`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_opsend_"+suffix, "opsend-"+suffix+"@example.test")
+	exec(`INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'linux','amd64','/home/test','online','occupied',false,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machineID, userID, "env_opsend_"+suffix)
+	created, closing := "umts_opsend_create_"+suffix, "umts_opsend_close_"+suffix
+	exec(`INSERT INTO paperboat.user_machine_terminal_sessions (id,user_machine_id,name,owner_account,launch_cwd,desired_state,runtime_state) VALUES ($1,$3,'a',$4,'/w','open','unknown'),($2,$3,'b',$4,'/w','closed','running')`, created, closing, machineID, userID)
+	exec(`INSERT INTO paperboat.user_machine_terminal_session_operations (id,user_machine_id,terminal_session_id,operation,attempts) VALUES ($1,$3,$4,'create',2),($2,$3,$5,'close',2)`, "op_create_"+suffix, "op_close_"+suffix, machineID, created, closing)
+	old := "op_old_" + suffix
+	exec(`INSERT INTO paperboat.user_machine_terminal_session_operations (id,user_machine_id,terminal_session_id,operation,state,completed_at) VALUES ($1,$2,$3,'close','applied',now()-interval '8 days')`, old, machineID, closing)
+
+	// No terminal control is configured, so every operation is a host that cannot be reached yet.
+	service := New(store, audit.NewWriter(store), Policy{TerminalCreateMaxAttempts: 4}, nil)
+	state := func(id string) (string, int) {
+		t.Helper()
+		var s string
+		var attempts int
+		if err := store.SQL().QueryRowContext(ctx, `SELECT state,attempts FROM paperboat.user_machine_terminal_session_operations WHERE id=$1`, id).Scan(&s, &attempts); err != nil {
+			t.Fatal(err)
+		}
+		return s, attempts
+	}
+	if err := service.processDueTerminalSessionOperations(ctx); err != nil {
+		t.Fatalf("an unreachable host failed the worker: %v", err)
+	}
+	if s, attempts := state("op_create_" + suffix); s != "pending" || attempts != 3 {
+		t.Fatalf("create after one unreachable attempt = %s/%d, want pending/3", s, attempts)
+	}
+	exec(`UPDATE paperboat.user_machine_terminal_session_operations SET next_attempt_at=now() WHERE user_machine_id=$1`, machineID)
+	if err := service.processDueTerminalSessionOperations(ctx); err == nil || !strings.Contains(err.Error(), "terminal creation ended") {
+		t.Fatalf("the creation given up was not reported once: %v", err)
+	}
+	if s, _ := state("op_create_" + suffix); s != "failed" {
+		t.Fatalf("create at the attempt limit = %s, want failed", s)
+	}
+	var runtime string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_state FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, created).Scan(&runtime); err != nil {
+		t.Fatal(err)
+	}
+	if runtime != "failed" {
+		t.Fatalf("session of a failed creation shows %q, want failed", runtime)
+	}
+	if s, _ := state("op_close_" + suffix); s != "pending" {
+		t.Fatalf("close past the creation limit = %s, want pending (it applies when the host returns)", s)
+	}
+
+	if err := service.expireClosedTerminalSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_terminal_session_operations WHERE id=$1`, old).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Fatal("an operation finished 8 days ago was kept")
+	}
+}

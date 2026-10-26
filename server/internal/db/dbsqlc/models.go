@@ -867,6 +867,7 @@ type ControlSyncLease struct {
 	AddressSlot int32
 	Tags        []byte
 	ReleasedAt  sql.NullTime
+	AccountID   sql.NullString
 }
 
 type ControlTunnelNode struct {
@@ -1701,6 +1702,13 @@ type ManagedSshOperation struct {
 	CreatedAt      time.Time
 }
 
+type MintWithdrawnKey struct {
+	KeyID       string
+	ActorUserID string
+	Reason      string
+	WithdrawnAt time.Time
+}
+
 type NativeUsageAuthority struct {
 	AccessSessionID        string
 	MachineID              string
@@ -1900,6 +1908,11 @@ type PeerNetworkIdentity struct {
 	UpdatedAt                  time.Time
 	DiscoPublicKey             []byte
 	RelayRevocationGeneration  int64
+	Endpoints                  []string
+	EndpointsCapable           bool
+	PublishedEndpoints         []string
+	EndpointsPublishedAt       sql.NullTime
+	EndpointsDueAt             sql.NullTime
 }
 
 type PeerNetworkRegistrationOperation struct {
@@ -2531,6 +2544,54 @@ type TeamTerminalSessionGrant struct {
 }
 
 type TeamWriteFence struct {
+}
+
+type TeamWriteFence00 struct {
+}
+
+type TeamWriteFence01 struct {
+}
+
+type TeamWriteFence02 struct {
+}
+
+type TeamWriteFence03 struct {
+}
+
+type TeamWriteFence04 struct {
+}
+
+type TeamWriteFence05 struct {
+}
+
+type TeamWriteFence06 struct {
+}
+
+type TeamWriteFence07 struct {
+}
+
+type TeamWriteFence08 struct {
+}
+
+type TeamWriteFence09 struct {
+}
+
+type TeamWriteFence10 struct {
+}
+
+type TeamWriteFence11 struct {
+}
+
+type TeamWriteFence12 struct {
+}
+
+type TeamWriteFence13 struct {
+}
+
+type TeamWriteFence14 struct {
+}
+
+type TeamWriteFence15 struct {
 }
 
 type TerminalBrowserAccessPolicy struct {

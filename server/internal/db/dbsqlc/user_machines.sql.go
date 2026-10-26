@@ -1344,6 +1344,28 @@ func (q *Queries) DeleteExpiredMachineControlRenewals(ctx context.Context, cutof
 	return result.RowsAffected(), nil
 }
 
+const deleteFinishedUserMachineTerminalSessionOperations = `-- name: DeleteFinishedUserMachineTerminalSessionOperations :execrows
+DELETE FROM user_machine_terminal_session_operations
+WHERE id IN (
+  SELECT finished.id FROM user_machine_terminal_session_operations AS finished
+  WHERE finished.state IN ('applied','failed') AND finished.completed_at < $1
+  ORDER BY finished.completed_at LIMIT $2
+)
+`
+
+type DeleteFinishedUserMachineTerminalSessionOperationsParams struct {
+	CompletedBefore sql.NullTime
+	BatchSize       int32
+}
+
+func (q *Queries) DeleteFinishedUserMachineTerminalSessionOperations(ctx context.Context, arg DeleteFinishedUserMachineTerminalSessionOperationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFinishedUserMachineTerminalSessionOperations, arg.CompletedBefore, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUserMachine = `-- name: DeleteUserMachine :execrows
 UPDATE user_machines
 SET state = 'deleted', online = false, seat_state = 'released', deleted_at = now(),
@@ -1655,6 +1677,22 @@ func (q *Queries) FailPairingInstallationForHelper(ctx context.Context, arg Fail
 		&i.RevokedGrantCount,
 	)
 	return i, err
+}
+
+const failUserMachineTerminalSessionOperation = `-- name: FailUserMachineTerminalSessionOperation :exec
+UPDATE user_machine_terminal_session_operations
+SET state='failed',attempts=attempts+1,completed_at=now(),updated_at=now(),last_error=$1
+WHERE id=$2 AND state='pending'
+`
+
+type FailUserMachineTerminalSessionOperationParams struct {
+	LastError sql.NullString
+	ID        string
+}
+
+func (q *Queries) FailUserMachineTerminalSessionOperation(ctx context.Context, arg FailUserMachineTerminalSessionOperationParams) error {
+	_, err := q.db.Exec(ctx, failUserMachineTerminalSessionOperation, arg.LastError, arg.ID)
+	return err
 }
 
 const getActiveUserMachineForControl = `-- name: GetActiveUserMachineForControl :one
@@ -4814,6 +4852,17 @@ WHERE id=$1 AND deleted_at IS NULL
 
 func (q *Queries) MarkUserMachineTerminalSessionRuntimeClosed(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, markUserMachineTerminalSessionRuntimeClosed, id)
+	return err
+}
+
+const markUserMachineTerminalSessionRuntimeFailed = `-- name: MarkUserMachineTerminalSessionRuntimeFailed :exec
+UPDATE user_machine_terminal_sessions
+SET runtime_state='failed',updated_at=now(),version=version+1
+WHERE id=$1 AND deleted_at IS NULL AND runtime_state NOT IN ('closed','exited','deleted')
+`
+
+func (q *Queries) MarkUserMachineTerminalSessionRuntimeFailed(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, markUserMachineTerminalSessionRuntimeFailed, id)
 	return err
 }
 
