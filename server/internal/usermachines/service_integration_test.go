@@ -3890,6 +3890,9 @@ func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {
 	old := "op_old_" + suffix
 	exec(`INSERT INTO paperboat.user_machine_terminal_session_operations (id,user_machine_id,terminal_session_id,operation,state,completed_at) VALUES ($1,$2,$3,'close','applied',now()-interval '8 days')`, old, machineID, closing)
 
+	// The worker takes the oldest 32 due operations; operations other tests left pending in this shared database
+	// would fill that batch before this test's own (red in CI runs of the whole package).
+	exec(`UPDATE paperboat.user_machine_terminal_session_operations SET next_attempt_at=now()+interval '1 day' WHERE user_machine_id<>$1 AND state='pending'`, machineID)
 	// No terminal control is configured, so every operation is a host that cannot be reached yet.
 	service := New(store, audit.NewWriter(store), Policy{TerminalCreateMaxAttempts: 4}, nil)
 	state := func(id string) (string, int) {
