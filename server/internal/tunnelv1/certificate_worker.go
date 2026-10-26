@@ -95,9 +95,18 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		if err != nil {
 			return changed, err
 		}
+		// A failure of one domain backs that domain off and the pass goes on,
+		// so one bad row at the front cannot stop the rows after it.
 		domain, err := certificateDomainWithConfig(row, edges, now, w.renewBefore, w.issuerName)
 		if err != nil {
-			return changed, err
+			retryAt := certificateRetryAt(now, row.CertificateFailureAttempts+1, err)
+			if markErr := w.markDomainCertificateFailure(ctx, row, "certificate_domain_invalid", now, retryAt); markErr != nil && !isSolePostgresNoRows(markErr) {
+				return changed, errors.Join(err, markErr)
+			}
+			workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", err)
+			changed++
+			w.emitTelemetry(ctx, row.ID, "", certificateOperation(row.CertificateReference.Valid), "failed", retryAt)
+			continue
 		}
 		finishStage := certificateWorkerStage(ctx, "ensure")
 		result, ensureErr := w.coordinator.Ensure(ctx, domain)
@@ -105,11 +114,10 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		if ensureErr != nil {
 			failureCode := certificateFailureCode(ensureErr)
 			if failureCode == "" {
-				w.emitTelemetry(ctx, row.ID, "", certificateOperation(row.CertificateReference.Valid), "failed", now.Add(time.Minute))
-				return changed, ensureErr
+				failureCode = "certificate_issuance_failed"
 			}
 			retryAt := certificateRetryAt(now, row.CertificateFailureAttempts+1, ensureErr)
-			_, markErr := w.db.Queries().MarkTunnelDomainCertificateFailureV1(ctx, dbsqlc.MarkTunnelDomainCertificateFailureV1Params{Now: sql.NullTime{Time: now, Valid: true}, FailureCode: sql.NullString{String: failureCode, Valid: true}, RetryAt: sql.NullTime{Time: retryAt, Valid: true}, DomainID: row.ID, ExpectedGeneration: row.Generation})
+			markErr := w.markDomainCertificateFailure(ctx, row, failureCode, now, retryAt)
 			if markErr != nil && !isSolePostgresNoRows(markErr) {
 				return changed, errors.Join(ensureErr, markErr)
 			}
@@ -124,8 +132,10 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		if currentErr != nil {
 			return changed, currentErr
 		}
+		// A generation conflict is per row: the next tick re-reads this domain.
 		if !found || certificate.State != tunnelcert.StateActive || certificate.CertificateReference != result.Certificate.Reference || certificate.CertificateGeneration == 0 {
-			return changed, tunnelcert.ErrGenerationConflict
+			workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", tunnelcert.ErrGenerationConflict)
+			continue
 		}
 		// New issuance completes the domain.create aggregate. Redistribution
 		// only repairs a degraded projection after current edge coverage is
@@ -133,7 +143,8 @@ func (w *CertificateWorker) Reconcile(ctx context.Context, limit int) (int, erro
 		if result.Issued {
 			err = w.coordinator.CommitDomainCertificateReady(ctx, row.AccountID, row.ID, uint64(row.Generation), certificate, now)
 			if isSolePostgresNoRows(err) {
-				return changed, ErrGenerationConflict
+				workers.IterationFailure(ctx, "certificate_reconciliation", "worker_iteration_failed", ErrGenerationConflict)
+				continue
 			}
 			if err != nil {
 				return changed, err
@@ -491,6 +502,14 @@ func certificateStrategy(value string) (tunnelcert.Strategy, error) {
 	default:
 		return "", fmt.Errorf("%w: unsupported certificate strategy", ErrInvalidInput)
 	}
+}
+
+// markDomainCertificateFailure records a failed durable-route certificate attempt and the time
+// before which the domain is not due again. The row's generation fence makes a concurrent change a
+// no-rows result, which the caller treats as a benign conflict.
+func (w *CertificateWorker) markDomainCertificateFailure(ctx context.Context, row dbsqlc.TunnelDomain, failureCode string, now, retryAt time.Time) error {
+	_, err := w.db.Queries().MarkTunnelDomainCertificateFailureV1(ctx, dbsqlc.MarkTunnelDomainCertificateFailureV1Params{Now: sql.NullTime{Time: now, Valid: true}, FailureCode: sql.NullString{String: failureCode, Valid: true}, RetryAt: sql.NullTime{Time: retryAt, Valid: true}, DomainID: row.ID, ExpectedGeneration: row.Generation})
+	return err
 }
 
 func (w *CertificateWorker) recordPreviewCertificateFailure(ctx context.Context, row dbsqlc.PreviewDomain, failureCode string, now time.Time) error {
