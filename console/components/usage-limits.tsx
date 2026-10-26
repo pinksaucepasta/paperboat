@@ -215,7 +215,6 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
   const allowance = billing.allowance_bytes
   const window = allowanceWindow(billing)
   const time = useTimeFormat()
-  const resets = window.end ? `Resets ${time.date(window.end, "day")}` : null
   // The period's hosted traffic by path, from the same start as the bandwidth card's default.
   const usage = useApiQuery(usageSinceQuery(workspace, usageWindowStart(billing)))
   const split = usage.data && trafficBreakdown(usage.data.totals.by_path, "managed").byPath
@@ -224,25 +223,14 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
   const out = allowance !== null && used >= allowance
 
   return (
-    <div className="flex flex-1 flex-col gap-1.5">
-      {allowance === null ? (
-        <>
-          <Figure>{formatBytes(used)}</Figure>
-          <span className="text-xs text-muted-foreground">Used, no limit{resets && ` · ${resets}`}</span>
-        </>
-      ) : (
-        <>
-          <span className="flex items-baseline gap-2">
-            <Figure>{formatBytes(Math.max(0, allowance - used))}</Figure>
-            <span className="text-sm text-muted-foreground">left</span>
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {formatBytes(used)} of {formatBytes(allowance)} used{resets && ` · ${resets}`}
-          </span>
-        </>
-      )}
-      {/* The floor: the meter, split by path in the bandwidth card's colours, and its legend. */}
-      <div className="mt-auto flex flex-col gap-2.5">
+    <div className="flex flex-1 flex-col gap-3">
+      <span className="flex items-baseline gap-2">
+        <Figure>{formatBytes(allowance === null ? used : Math.max(0, allowance - used))}</Figure>
+        <span className="text-sm text-muted-foreground">{allowance === null ? "used" : "left"}</span>
+      </span>
+      {/* The floor: the meter, split by path in the bandwidth card's colours, then one row per fact,
+          label left and value right, so no line depends on the card's width. */}
+      <div className="mt-auto flex flex-col gap-3">
         {allowance !== null && (
           <div
             role="meter"
@@ -268,25 +256,39 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
             )}
           </div>
         )}
-        <span className="flex items-start gap-8 text-xs text-muted-foreground">
+        <dl className="flex flex-col gap-2 text-xs">
           {paths
             .filter((path) => path.mode !== "direct")
             .map((path) => (
-              // Name over amount, so the amount always shows and the row never outgrows the card.
-              <span key={path.mode} className="flex flex-col gap-1.5">
-                {/* Colour keys only when there is a meter for them to key. */}
-                {allowance === null ? (
-                  <span className="trim-cap">{path.label}</span>
-                ) : (
-                  <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>{path.label}</Mark>
-                )}
-                <span className={cn("text-foreground tabular-nums trim-cap", allowance !== null && "pl-[18px]")}>
-                  {split ? formatBytes(split[path.mode]) : "…"}
-                </span>
-              </span>
+              <AllowanceRow
+                key={path.mode}
+                label={
+                  allowance === null ? (
+                    path.label
+                  ) : (
+                    <Mark icon={<span className={cn("size-2 rounded-full", path.dot)} />}>{path.label}</Mark>
+                  )
+                }
+                value={split ? formatBytes(split[path.mode]) : "…"}
+              />
             ))}
-        </span>
+          <AllowanceRow
+            label="Used"
+            value={allowance === null ? "No limit" : `${formatBytes(used)} of ${formatBytes(allowance)}`}
+          />
+          {window.end && <AllowanceRow label="Resets" value={time.date(window.end, "day")} />}
+        </dl>
       </div>
+    </div>
+  )
+}
+
+/** One fact of the allowance card: label left, value right, each truncating on its own. */
+function AllowanceRow({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <dt className="min-w-0 truncate text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 truncate text-foreground tabular-nums">{value}</dd>
     </div>
   )
 }
