@@ -196,6 +196,12 @@ func (i *Inventory) Run(ctx context.Context) error {
 			}
 			refresh()
 		case <-i.events.Changed():
+			// A wake while the stream is unhealthy is its refused wait (this machine revoked or signed out):
+			// refresh now, so pb status says so at once instead of after the spacing (C036).
+			if !i.events.Healthy() {
+				refresh()
+				continue
+			}
 			if pending != nil {
 				continue
 			}

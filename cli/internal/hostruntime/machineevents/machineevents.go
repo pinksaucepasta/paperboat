@@ -232,6 +232,11 @@ func (h *Hub) run(ctx context.Context) {
 				return
 			}
 			h.setHealthy(false)
+			// A refused wait (401) is this machine being revoked or signed out: every consumer refreshes now
+			// and learns it, instead of on its next periodic check seconds later (C036).
+			if errorreport.ProjectFault(ctx, "paperboat-daemon", "machine_events", "delivery", "control_request_failed", err).HTTPStatus == http.StatusUnauthorized {
+				h.wakeAll()
+			}
 			if !failing {
 				failing = true
 				errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "machine_events", "delivery", "control_request_failed", err)
@@ -260,6 +265,16 @@ func (h *Hub) snapshot() (map[Topic]int64, <-chan struct{}) {
 		topics[topic] = generation
 	}
 	return topics, h.changed
+}
+
+func (h *Hub) wakeAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, subs := range h.subs {
+		for _, sub := range subs {
+			sub.notify()
+		}
+	}
 }
 
 func (h *Hub) setHealthy(value bool) {

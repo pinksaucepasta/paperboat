@@ -211,3 +211,21 @@ func TestSubscriptionToSeveralTopicsWakesOnEach(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// A wait refused with 401 (this machine was just revoked) wakes every subscriber within a second, so the
+// daemon's inventory refreshes and says signed out at once instead of on its next periodic check (C036).
+func TestRefusedWaitWakesEverySubscriberAtOnce(t *testing.T) {
+	_, subs, plane := eventstest.Start(t, time.Hour, machineevents.TopicPreviews, machineevents.TopicMachineAccess)
+	waits := []<-chan time.Duration{waitReturns(subs[0], time.Hour), waitReturns(subs[1], time.Hour)}
+	plane.FailNextWith(1, http.StatusUnauthorized)
+	for i, done := range waits {
+		select {
+		case elapsed := <-done:
+			if elapsed > time.Second {
+				t.Fatalf("subscriber %d woke after %v", i, elapsed)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("subscriber %d was not woken by the refused wait", i)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -860,5 +861,35 @@ func TestInventoryRetriesAFailedRefreshWhileTheChangeStreamIsHealthy(t *testing.
 			t.Fatalf("daemon state %q after %d reconciles, 4 s after a failed first refresh with a 1 s interval; want ready on the outage retry", snapshot.DaemonState, reconciles.Load())
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A machine revoked a moment ago: its events wait is refused with 401, and the inventory refreshes within a
+// second although the event spacing is an hour, so pb status says signed out at once (C036).
+func TestInventoryRefreshesAtOnceWhenTheEventWaitIsRefused(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	refreshed := make(chan struct{}, 8)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory)
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second, Events: subscriptions[0], EventRefreshSpacing: time.Hour, OnRefresh: func(error) { refreshed <- struct{}{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = inventory.Run(ctx) }()
+	select {
+	case <-refreshed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no first refresh")
+	}
+	plane.FailNextWith(1, http.StatusUnauthorized)
+	select {
+	case <-refreshed:
+	case <-time.After(time.Second):
+		t.Fatal("a refused event wait did not refresh the inventory within a second")
 	}
 }

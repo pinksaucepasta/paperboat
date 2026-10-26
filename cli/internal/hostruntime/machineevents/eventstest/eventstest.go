@@ -41,6 +41,7 @@ type Plane struct {
 	requests    []map[string]int64
 	headers     []http.Header
 	failures    atomic.Int32
+	failStatus  atomic.Int32
 	proofs      chan Proof
 }
 
@@ -53,7 +54,13 @@ func (p *Plane) Publish(topic machineevents.Topic) {
 }
 
 // FailNext makes the next n requests answer 503, including a wait that is being held now.
-func (p *Plane) FailNext(n int32) { p.failures.Store(n) }
+func (p *Plane) FailNext(n int32) { p.FailNextWith(n, http.StatusServiceUnavailable) }
+
+// FailNextWith answers the next n waits with status (401: this machine was revoked).
+func (p *Plane) FailNextWith(n int32, status int) {
+	p.failStatus.Store(int32(status))
+	p.failures.Store(n)
+}
 
 // PendingFailures is how many scripted failures have not been served yet.
 func (p *Plane) PendingFailures() int32 { return p.failures.Load() }
@@ -92,7 +99,7 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// then publishes gets the outage it asked for whichever request was in flight.
 		if p.failures.Load() > 0 {
 			p.failures.Add(-1)
-			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			http.Error(w, "refused", int(p.failStatus.Load()))
 			return
 		}
 		p.mu.Lock()
