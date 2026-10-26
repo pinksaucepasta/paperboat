@@ -119,7 +119,21 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 		}
 	}
 	if newNames > 0 && (len(g.reserved.Names)+newNames > 4096 || ownedNames+newNames > 512) {
-		return errors.New("machine guard reservation limit reached for this OS user")
+		g.pruneNames(uid)
+		newNames, ownedNames = 0, 0
+		for _, owner := range g.reserved.Names {
+			if owner == uid {
+				ownedNames++
+			}
+		}
+		for name := range aliases {
+			if !has(g.reserved.Names, nameKey(uid, name)) {
+				newNames++
+			}
+		}
+		if newNames > 0 && (len(g.reserved.Names)+newNames > 4096 || ownedNames+newNames > 512) {
+			return errors.New("machine guard reservation limit reached for this OS user")
+		}
 	}
 	previousReservations := maps.Clone(g.reserved.Names)
 	for name := range aliases {

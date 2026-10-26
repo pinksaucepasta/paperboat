@@ -74,6 +74,8 @@ func TestBrowserAliasesRequireOwnedHTTPSListenerAndReservationLimits(t *testing.
 		leases:   map[string]*guardedLease{"gateway": gateway},
 		aliases:  map[controlConn]map[string]string{},
 		names:    map[controlConn]map[string]string{},
+		// The owner's live aliases survive pruning; the cap here is filled by other users' names.
+		connections: map[controlConn]string{owner: "owner"},
 	}
 	valid := map[string]string{"3000.hp." + testBrowserDomain: splitdns.BrowserGatewayHostname}
 	if err := g.replaceAliases(context.Background(), owner, "owner", valid); err != nil {

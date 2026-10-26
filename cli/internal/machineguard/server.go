@@ -907,18 +907,57 @@ func (g *guardServer) sameNamespace(conn controlConn, uid string) bool {
 // bounding how many names one user and the host keep.
 func (g *guardServer) reserveName(uid, hostname string) error {
 	key := nameKey(uid, hostname)
-	ownedNames := 0
-	for _, owner := range g.reserved.Names {
-		if owner == uid {
-			ownedNames++
+	atLimit := func() bool {
+		ownedNames := 0
+		for _, owner := range g.reserved.Names {
+			if owner == uid {
+				ownedNames++
+			}
 		}
+		return !has(g.reserved.Names, key) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512)
 	}
-	if len(g.leases) >= 8192 || !has(g.reserved.Names, key) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
+	if len(g.leases) >= 8192 {
 		return listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
+	}
+	if atLimit() {
+		g.pruneNames(uid)
+		if atLimit() {
+			return listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
+		}
 	}
 	if owner, exists := g.reserved.Names[key]; exists && owner != uid {
 		return listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
 	}
 	g.reserved.Names[key] = uid
 	return nil
+}
+
+// pruneNames forgets uid's reservations of names nothing serves any more (a machine that left the account), so a
+// long-lived machine with peer churn never fills its per-user cap with dead names. Called at the cap, under g.mu.
+func (g *guardServer) pruneNames(uid string) {
+	live := map[string]bool{}
+	for _, lease := range g.leases {
+		if lease.uid == uid {
+			live[lease.hostname] = true
+		}
+	}
+	for conn, names := range g.names {
+		if g.connections[conn] == uid {
+			for name := range names {
+				live[name] = true
+			}
+		}
+	}
+	for conn, aliases := range g.aliases {
+		if g.connections[conn] == uid {
+			for name := range aliases {
+				live[name] = true
+			}
+		}
+	}
+	for key, owner := range g.reserved.Names {
+		if owner == uid && !live[strings.TrimPrefix(key, uid+":")] {
+			delete(g.reserved.Names, key)
+		}
+	}
 }
