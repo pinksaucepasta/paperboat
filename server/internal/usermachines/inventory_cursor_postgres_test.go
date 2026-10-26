@@ -82,6 +82,10 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
 			t.Fatalf("machine %s update observation %+v", item.ID, item.Update)
 		}
 	}
+	// The machine page reads the same observation from GET /v1/machines/{id}.
+	if one, err := service.Get(personal, user, user+"_m1"); err != nil || one.Update == nil || one.Update.CurrentVersion != "2026.10.25.1" {
+		t.Fatalf("single machine update observation %+v, %v", one.Update, err)
+	}
 	var walked []string
 	opts := InventoryOptions{Limit: 2}
 	for page := 0; ; page++ {
