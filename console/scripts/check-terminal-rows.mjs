@@ -1,12 +1,15 @@
 // Headless checks for the browser terminal rows F3-13 (hidden tab), F3-14 (two windows) and F3-19
 // (truthful errors) on a Linux machine. Run with playwright-core installed:
 //   STATE=<storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> MACHINE=<machine id>
-//   ROW=<f313|f314|f319> [CHROME_ARG=<one extra Chromium flag>] [HIDDEN_MS=<frozen time, default 125000>] node check-terminal-rows.mjs
+//   ROW=<f313|f314|f319|w15> [CHROME_ARG=<one extra Chromium flag>] [HIDDEN_MS=<frozen time, default 125000>] node check-terminal-rows.mjs
 // A row passes only when data-terminal-phase is "attached" and an echoed marker shows on screen.
 // Screenshots: /tmp/terminal-rows-<row>-*.png. The terminal it opens is closed at the end.
 import { chromium } from "playwright-core"
+import { execSync } from "node:child_process"
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, MACHINE: machine, ROW: row, CHROME_ARG } = process.env
+// w15 cuts the machine off and restores it with these shell commands (a firewall rule on the machine).
+const { MACHINE_BLOCK, MACHINE_UNBLOCK } = process.env
 const hiddenMs = Number(process.env.HIDDEN_MS ?? 125000) 
 const browser = await chromium.launch({ executablePath: CHROME, args: CHROME_ARG ? [CHROME_ARG] : [] })
 const ctx = await browser.newContext({ storageState: STATE, ignoreHTTPSErrors: true, viewport: { width: 1200, height: 760 } })
@@ -100,6 +103,36 @@ async function f313() {
   return id
 }
 
+// W15: a drained carrier says "machine unavailable" within 5 s (never "No access") and recovers by itself.
+async function w15() {
+  const { p, id } = await open()
+  if (!(await live(p, "before"))) return id
+  const run = (command) => execSync(command, { timeout: 60000 })
+  let extra = ""
+  try {
+    run(MACHINE_BLOCK)
+    await p.waitForTimeout(60000)
+    const q = await ctx.newPage()
+    const start = Date.now()
+    await q.goto(`${origin}/terminals/new?machine=${machine}&workspace=personal`, { timeout: 280000 })
+    await q.waitForURL(/\/terminals\/(?!new)[^/?]+/, { timeout: 60000 }).catch(() => {})
+    const second = q.url().match(/\/terminals\/([^/?]+)/)?.[1]
+    const said = await q
+      .waitForFunction(() => /machine is unavailable/i.test(document.querySelector("[data-terminal-phase]")?.innerText ?? ""), null, { timeout: 15000 })
+      .then(() => (Date.now() - start) / 1000, () => null)
+    const text = (await q.evaluate(() => document.querySelector("[data-terminal-phase]")?.innerText ?? "")).replace(/\s+/g, " ")
+    log(said !== null && said < 5 + 2, "a drained machine says 'machine unavailable' within 5 s of the page opening", `${said ?? "-"} s`)
+    log(!/No access/i.test(text), "and never says 'No access'", text.slice(0, 100))
+    run(MACHINE_UNBLOCK)
+    const back = Date.now()
+    log(await phaseIs(q, "attached", 180000), "it attaches by itself when the machine returns", `${((Date.now() - back) / 1000).toFixed(0)} s`)
+    extra = second
+  } finally {
+    run(MACHINE_UNBLOCK) // never leave the machine cut off
+  }
+  return [id, extra]
+}
+
 async function f314() {
   const { p: a, id } = await open()
   if (!(await live(a, "a"))) return id
@@ -149,8 +182,8 @@ async function f319() {
   return id
 }
 
-const id = await { f313, f314, f319 }[row]()
-if (id && id !== "new") {
+for (const id of [await { f313, f314, f319, w15 }[row]()].flat()) {
+  if (!id || id === "new") continue
   const p = await ctx.newPage()
   await p.goto(`${origin}/terminals/${id}`, { timeout: 280000 })
   await p.getByRole("button", { name: "Close terminal" }).first().click({ timeout: 30000 }).catch(() => {})
