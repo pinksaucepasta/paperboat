@@ -146,6 +146,61 @@ func TestEndpointCarrierServesThePreviewOnEveryAgentCarrier(t *testing.T) {
 	_ = secondaryHub.Close()
 }
 
+// A readiness attempt that fails because its hub closed must not consume the report: the
+// replacement hub's route reports again (prod 2026-10-26: previews stalled until the CLI timed out).
+func TestEndpointCarrierRetriesReadinessOnTheReplacementHub(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer origin.Close()
+	identity := testPreviewCarrierIdentity(1)
+	first, second := newPreviewCarrierPair(t, ctx, identity), newPreviewCarrierPair(t, ctx, identity)
+	defer first.close()
+	defer second.close()
+	hub := func(pair *previewCarrierPair) *DataCarrierPreviewHub {
+		h, err := NewDataCarrierPreviewHub(ctx, DataCarrierPreviewHubConfig{Active: pair.active, Identity: identity})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	firstHub, secondHub := hub(first), hub(second)
+	defer secondHub.Close()
+	agent := &agentCarriersFake{hubs: []*DataCarrierPreviewHub{firstHub}, changed: make(chan struct{})}
+	carrier, err := NewEndpointCarrier(agent, func(h *DataCarrierPreviewHub) (*DataCarrierPreviewCarrier, error) {
+		return NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{Hub: h, DialOrigin: func(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer carrier.Close(context.Background())
+	lease := Lease{ID: "preview_retry", AccountID: identity.AccountID, Generation: 1, AccessMode: "public", Endpoint: "https://retry.example.test", Target: LeaseTarget{Scheme: "http", Address: origin.Listener.Addr().String()}, LeaseDeadline: time.Now().UTC().Add(time.Hour)}
+	var calls atomic.Int32
+	firstCalled := make(chan struct{})
+	reported := make(chan struct{})
+	go func() {
+		_ = carrier.Run(ctx, lease, func(Lease) error {
+			if calls.Add(1) == 1 {
+				close(firstCalled)
+				<-firstHub.Done()
+				return readinessFailed("POST", "http_status", http.StatusBadRequest, ErrDispatchInvalid, nil)
+			}
+			close(reported)
+			return nil
+		})
+	}()
+	<-firstCalled
+	_ = firstHub.Close()
+	agent.set(secondHub)
+	select {
+	case <-reported:
+	case <-ctx.Done():
+		t.Fatal("the replacement hub never reported readiness")
+	}
+}
+
 func (c *EndpointCarrier) serving(hub *DataCarrierPreviewHub) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

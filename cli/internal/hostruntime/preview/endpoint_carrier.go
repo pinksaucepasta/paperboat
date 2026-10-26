@@ -50,10 +50,18 @@ func (c *EndpointCarrier) Run(ctx context.Context, lease Lease, ready func(Lease
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	failures := make(chan error, 1)
-	var once sync.Once
+	// Only a success is final: a failed attempt (its hub closed, say) must be retried by the
+	// next hub's route, or the session never sees the preview ready.
+	var readyMu sync.Mutex
+	var reported bool
 	reportReady := func(observed Lease) error {
-		var err error
-		once.Do(func() { err = readyWhenServed(runCtx, observed, ready) })
+		readyMu.Lock()
+		defer readyMu.Unlock()
+		if reported {
+			return nil
+		}
+		err := readyWhenServed(runCtx, observed, ready)
+		reported = err == nil
 		return err
 	}
 	var wg sync.WaitGroup
