@@ -35,6 +35,19 @@ points at the resource's own managed name. Edges do not forward, so a route is r
 edge serves it. When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
 the wildcards are static, so until you do, about half of new connections go to the dead edge.
 
+## Public TCP tunnel ports on the managed edges
+
+Raw TCP tunnels get a port from 20000-29999 on every managed edge, and the edge listens only on ports owned by a
+live public TCP tunnel. Both edge hosts therefore accept inbound TCP 20000-29999 (iptables rule
+`paperboat-public-tcp-tunnels`, inserted before the final `REJECT`, persisted in `/etc/iptables/rules.v4`; the
+previous file is kept as `rules.v4.bak-publictcp`). The cloud security lists already allow these ports; nothing
+else was opened. Re-check from outside the cloud (any host that is neither edge) with a live tunnel port:
+`nc -vz <edge-ip> <port>` succeeds for a listening tunnel port, answers `Connection refused` for an unused port
+inside the range and `No route to host` outside it (30000), which is the host `REJECT`. A timeout instead means a
+security list or the host rule is missing. If `pbh install` or a reinstall resets iptables, re-apply the rule and
+`iptables-restore --test < /etc/iptables/rules.v4`. Verified 2026-10-26 from the Hetzner control host against
+140.245.11.41 and 152.67.0.60 (port 20000 open, 25000 and 29999 refused, 30000 no route).
+
 ## DNS ownership or certificate failure
 
 1. Separate `dns` health from `certificate` health. A DNS mismatch must not
