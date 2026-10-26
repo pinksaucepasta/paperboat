@@ -15,6 +15,13 @@ UDP is deferred, not part of the current HTTP/HTTPS/WebSocket and raw TCP delive
 Internal QUIC support does not constitute generic UDP forwarding. Define actual client UX,
 limits and acceptance before implementation; this note is not implementation/deployment evidence.
 
+
+## Managed SSH: more OS users, session recording — not now (2026-10-26)
+
+From PLAN 3b "Managed SSH: review and fixes" (D3, D4). SSH as more than one OS user per machine (Tailscale
+SSHUsers, "=" never root; Teleport role logins) and session recording (Tailscale recorders, Teleport
+best-effort/strict recording). Both are new features; the slice-7 session audit events cover who and when.
+
 ## CLI UX review and fixes — before customizable shortcuts
 
 Recorded 2026-09-08 by Codex from the user's direction.

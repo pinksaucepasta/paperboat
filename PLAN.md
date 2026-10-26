@@ -3045,11 +3045,13 @@ Slices (each with its check; Lane A reviews cli/):
 8. **Tools and IDEs**: scp, sftp, rsync, VS Code Remote-SSH connect + reconnect, JetBrains Gateway connect. Check: smoke ids per tool; IDEs as a recorded manual step re-run at the switch.
 Switch-over: when slices 2–8 pass on L and M, one commit deletes the old path; the full SSH smoke set (existing ssh checks + the new ones) must pass on that build.
 
-Decisions for the coordinator/user:
-- D1: authorize every SSH stream from the host-held F21-11 access rules and delete the per-connection descriptor for SSH (Lane B/R own F21-11). Recommended: yes; one admission path.
-- D2: forwarding policy (port, agent, X11) is the machine's sshd on Linux/macOS but off on Windows. Recommended: same on every platform, i.e. the machine's sshd decides, and the Windows config stops disabling forwarding; or all off everywhere. User's call.
-- D3: SSH as more than one OS user per machine (Tailscale SSHUsers). New feature; recommended: not now.
-- D4: session recording. New feature; recommended: not now (audit events in slice 7 cover who/when).
+Decisions (coordinator, 2026-10-26):
+- D1 yes: every SSH stream is admitted from the host-held F21-11 access rules, online or offline; the per-connection descriptor for SSH is deleted; the OpenSSH helpers read only from the daemon (zero control calls per connection). Coordinated with Lane W (F21-11 server) and Lane R (offline admission).
+- D2: one forwarding policy on every platform: sshd's defaults (port and agent forwarding as OpenSSH allows, X11 off). The Windows sshd_config follows in the Windows phase.
+- D3, D4: not now; parked in WHITEBOARD.md ("Managed SSH: more OS users, session recording").
+- A failed refresh never empties authorized_keys: the host keeps its last verified keys until an explicit revocation it received.
+- Live sessions are closed on revocation (slice 6, required).
+Order: slice 1 first, then 2–8. Nothing is ticked until the full SSH check set passes on L.
 
 ## 4. Handoff notes
 
