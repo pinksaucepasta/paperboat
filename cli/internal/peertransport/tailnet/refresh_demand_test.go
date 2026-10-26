@@ -6,6 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"tailscale.com/tailcfg"
+	"tailscale.com/types/key"
 )
 
 // The retry doubles to about a minute and is spread over half to one and a half times its base, so a
@@ -99,4 +102,42 @@ func TestStaleRelayObservationsMakeAHostRenewInsteadOfIgnoringTheProbe(t *testin
 	}
 	cancel()
 	<-finished
+}
+
+type idleRelayEngine struct{}
+
+func (idleRelayEngine) SetRelayRegions([]*tailcfg.DERPRegion) error                   { return nil }
+func (idleRelayEngine) SetPeerRelayNodes([]*tailcfg.Node) error                       { return nil }
+func (idleRelayEngine) RelayTransport(tailcfg.DERPRegionID) string                    { return "" }
+func (idleRelayEngine) PrepareRelay(context.Context, tailcfg.DERPRegionID) error      { return nil }
+func (idleRelayEngine) SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error { return nil }
+func (idleRelayEngine) SendRelayControl(key.NodePublic, tailcfg.DERPRegionID, []byte) error {
+	return nil
+}
+
+// Prod 2026-10-27: relay observations age out ~15 s after every renewal, and the recovery loop then asked for a
+// renewal at once: one per ~15 s per engine with direct peers. It asks only while a peer is on a regional relay.
+func TestStaleRelayObservationsRenewOnlyWhileARelayIsInUse(t *testing.T) {
+	for _, inUse := range []bool{false, true} {
+		relayInUse(t, inUse)
+		a, c, signer, _ := networkTestAuthority(t)
+		if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+			t.Fatal(err)
+		}
+		r := &regionalRecovery{authority: a, control: newRegionalControl(a.private, time.Now), done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 4), engine: idleRelayEngine{}}
+		ctx, cancel := context.WithCancel(t.Context())
+		go r.run(ctx) // no regional candidates: every look finds no usable relay
+		select {
+		case <-a.refreshNow:
+			if !inUse {
+				t.Fatal("stale relay observations asked for a renewal with no peer on a relay")
+			}
+		case <-time.After(500 * time.Millisecond):
+			if inUse {
+				t.Fatal("stale relay observations did not ask for a renewal while a peer uses a relay")
+			}
+		}
+		cancel()
+		<-r.done
+	}
 }

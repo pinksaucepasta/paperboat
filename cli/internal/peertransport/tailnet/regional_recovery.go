@@ -490,7 +490,10 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			// state, which costs no request; the authority's own renewal schedule brings later
 			// configurations. Asking on every look made every engine fetch its configuration every second
 			// for as long as no relay was usable (a relay outage, or relays withheld).
-			if !stale {
+			// Only while a peer is reached through a regional relay: otherwise the observations ageing out after
+			// every renewal asked for one every ~15 s per engine (prod 2026-10-27); a peer probing for a relay
+			// route still renews at once (receive).
+			if !stale && regionalRelayInUse(r.authority) {
 				stale = true
 				r.authority.RequestRefresh()
 			}
