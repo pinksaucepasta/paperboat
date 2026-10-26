@@ -93,12 +93,7 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.Sum256([]byte(`{}`))
-	connector, session, assignment := "con_link_"+suffix, "ses_link_"+suffix, "asg_link_"+suffix
-	exec(`INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,activated_at,retained_until) VALUES($1,1,$2,$3,'active',$4,now(),now()+interval '1 hour')`, tunnel, hash[:], []byte(`{}`), owner)
-	exec(`INSERT INTO paperboat.tunnel_connectors(id,tunnel_id,host_id,credential_reference,credential_thumbprint,protocol_version,last_session_id,last_applied_config_generation) VALUES($1,$2,$3,$4,$4,'1.0',$5,1)`, connector, tunnel, machine, "ref_link_"+suffix, session)
-	exec(`INSERT INTO paperboat.tunnel_connector_sessions(id,connector_id,process_generation,protocol_version,state,lease_deadline,retained_until,applied_config_generation) VALUES($1,$2,1,'1.0','ready',now()+interval '1 hour',now()+interval '1 hour',1)`, session, connector)
-	exec(`INSERT INTO paperboat.tunnel_edge_route_assignments(assignment_id,route_id,assignment_generation,account_id,tunnel_id,connector_id,host_id,machine_identity_public_key,machine_identity_thumbprint,connector_generation,connector_session_id,connector_process_generation,config_generation,config_content_hash,access_mode,route_generation,route_revision,edge_node_id,edge_process_epoch,edge_failure_domain,state,observed_state,viewer_policy_generation) VALUES($1,$2,1,$3,$4,$5,$6,$7,$8,1,$9,1,1,$10,'team',7,7,$11,$12,'test','active','ready',3)`, assignment, route, owner, tunnel, connector, machine, base64.RawURLEncoding.EncodeToString(public), base64.RawURLEncoding.EncodeToString(thumb[:]), session, hash[:], node, epoch)
+	insertEngineTunnelCarrier(t, database, owner, machine, tunnel, route, node, epoch, suffix)
 	var previewEndpoint, tunnelEndpoint string
 	if err = database.SQL().QueryRowContext(ctx, `SELECT p.endpoint,t.stable_endpoint FROM paperboat.preview_leases p CROSS JOIN paperboat.tunnels t WHERE p.id=$1 AND t.id=$2`, lease, tunnel).Scan(&previewEndpoint, &tunnelEndpoint); err != nil {
 		t.Fatal(err)
@@ -166,7 +161,6 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 			case <-lifetime.Done():
 				return
 			case <-tick.C:
-				_, _ = database.SQL().ExecContext(lifetime, `UPDATE paperboat.tunnel_connector_sessions SET last_heartbeat_at=now() WHERE id=$1`, session)
 				_, _ = database.SQL().ExecContext(lifetime, `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id=$1`, node)
 			}
 		}
@@ -174,7 +168,6 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 	t.Cleanup(func() {
 		cancel()
 		<-done
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnel_edge_route_assignments WHERE assignment_id=$1`, assignment)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.machine_control_sessions WHERE machine_id=$1`, machine)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.machine_control_renewals WHERE machine_id=$1`, machine)
 	})

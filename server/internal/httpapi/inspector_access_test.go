@@ -94,19 +94,10 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 		t.Fatalf("durable native routing: %v", e)
 	}
 
-	hash := sha256.Sum256([]byte(`{}`))
-	connector := "con_ir_" + suffix
-	carrierSession := "ses_ir_" + suffix
-	assignment := "asg_ir_" + suffix
-	exec(`INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,activated_at,retained_until) VALUES($1,1,$2,$3,'active',$4,now(),now()+interval '1 hour')`, tunnel, hash[:], []byte(`{}`), owner)
-	exec(`INSERT INTO paperboat.tunnel_connectors(id,tunnel_id,host_id,credential_reference,credential_thumbprint,protocol_version,last_session_id,last_applied_config_generation) VALUES($1,$2,$3,$4,$4,'1.0',$5,1)`, connector, tunnel, access.MachineID, "ref_ir_"+suffix, carrierSession)
-	exec(`INSERT INTO paperboat.tunnel_connector_sessions(id,connector_id,process_generation,protocol_version,state,lease_deadline,retained_until,applied_config_generation) VALUES($1,$2,1,'1.0','ready',now()+interval '1 hour',now()+interval '1 hour',1)`, carrierSession, connector)
-	exec(`INSERT INTO paperboat.tunnel_edge_route_assignments(assignment_id,route_id,assignment_generation,account_id,tunnel_id,connector_id,host_id,machine_identity_public_key,machine_identity_thumbprint,connector_generation,connector_session_id,connector_process_generation,config_generation,config_content_hash,access_mode,route_generation,route_revision,edge_node_id,edge_process_epoch,edge_failure_domain,state,observed_state,viewer_policy_generation) SELECT $1,$2,1,$3,$4,$5,m.id,m.public_identity_key,m.public_identity_key,1,$6,1,1,$7,'team',7,7,$8,$9,'test','active','ready',3 FROM paperboat.user_machines m WHERE m.id=$10`, assignment, route, owner, tunnel, connector, carrierSession, hash[:], node, "epoch-ih-"+suffix, access.MachineID)
-	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnel_edge_route_assignments WHERE assignment_id=$1`, assignment)
-	})
+	connector, carrierSession, contentHash := insertEngineTunnelCarrier(t, database, owner, access.MachineID, tunnel, route, node, "epoch-ih-"+suffix, suffix)
+	assignment := "epa_" + route
 	edgeDurable, e := service.ResolveAccess(ctx, inspectaccess.AccessRequest{AccountID: owner, Token: durableGrant.Token, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route, Action: "inspect", Transport: "edge", EdgeNodeID: node, EdgeProcessEpoch: "epoch-ih-" + suffix})
-	if e != nil || edgeDurable.Carrier.AssignmentID != assignment || edgeDurable.Carrier.ConfigContentHash != fmt.Sprintf("sha256:%x", hash) {
+	if e != nil || edgeDurable.Carrier.AssignmentID != assignment || edgeDurable.Carrier.ConfigContentHash != contentHash || edgeDurable.Carrier.ConnectorID != connector || edgeDurable.Carrier.SessionID != carrierSession {
 		t.Fatalf("durable edge routing: %v", e)
 	}
 	targets, e := service.Targets(ctx, mate, tunnel, "inspect")
@@ -149,4 +140,34 @@ func TestInspectorRemoteAccessPostgres(t *testing.T) {
 	if err = database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.inspector_native_admissions WHERE credential_id=$1`, grant.CredentialID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("revoked network admission count=%d err=%v", count, err)
 	}
+}
+
+// insertEngineTunnelCarrier serves the tunnel's route on the endpoint engine (PLAN 3a): an agent
+// runtime carrier on the edge and a ready assignment of the route to it. It returns the carrier's
+// connector, session and config content hash, the identity the edge names the route by.
+func insertEngineTunnelCarrier(t *testing.T, database *db.DB, owner, machine, tunnel, route, node, epoch, suffix string) (connector, session, contentHash string) {
+	t.Helper()
+	ctx := context.Background()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := database.SQL().ExecContext(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	connector = "con_engine_" + suffix
+	session = fmt.Sprintf("session_00000000-0000-4000-8000-%012d", time.Now().UnixNano()%1e12)
+	contentHash = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(`{}`)))
+	admission, _ := json.Marshal(map[string]any{"binding": map[string]any{"tunnel_id": "carrier_" + tunnel, "connector_id": connector, "config_generation": 1}, "config_content_hash": contentHash})
+	carrierRoute := "runtime_engine_" + suffix
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) SELECT environment_id,environment_id,user_id,'active' FROM paperboat.user_machines WHERE id=$1 ON CONFLICT DO NOTHING`, machine)
+	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) SELECT $1,environment_id,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080 FROM paperboat.user_machines WHERE id=$2`, carrierRoute, machine)
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,m.installation_generation,1,'process_engine',1,$2,$3,m.public_identity_key,1,$4,$4,$5::jsonb,now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$6`, carrierRoute, node, epoch, session, string(admission), machine)
+	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'team','persistent',$1)`, tunnel, owner, machine)
+	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,'engine.tunnels.example.test','http',$1)`, route, tunnel)
+	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,$4,$5,true,now())`, route, tunnel, node, epoch, session)
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.endpoints WHERE id=$1`, tunnel)
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_routes WHERE id=$1`, carrierRoute)
+	})
+	return connector, session, contentHash
 }
