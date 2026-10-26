@@ -2,6 +2,7 @@
 
 import { CircleNotchIcon, UploadSimpleIcon, XIcon } from "@phosphor-icons/react"
 import { cn } from "@/lib/utils"
+import { terminalDataAttributes } from "@/lib/terminal/connection-types"
 import type { TerminalConnection } from "@/lib/terminal/use-terminal-connection"
 import type { MobileKey } from "@/lib/terminal/mobile-keys"
 import { terminalThemeStyle, type TerminalTheme } from "@/lib/terminal/themes"
@@ -49,7 +50,8 @@ export function TerminalSurface({
 }) {
   const { phase, catchingUp, error, upload, role, mobile } = connection
   const busy = phase === "connecting" || phase === "reconnecting" || (phase === "attached" && catchingUp)
-  const stopped = phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota" || phase === "limit"
+  const stopped =
+    phase === "denied" || phase === "closed" || phase === "transport-error" || phase === "quota" || phase === "limit"
   // Overlays take the theme's colours, so they belong to the terminal rather than the page.
   const overlay = {
     background: `color-mix(in oklab, ${theme.background} 92%, transparent)`,
@@ -59,7 +61,11 @@ export function TerminalSurface({
   const muted = { color: `color-mix(in oklab, ${theme.foreground} 62%, transparent)` }
 
   return (
-    <div className={cn("relative flex min-h-0 flex-col", className)} style={{ background: theme.background }}>
+    <div
+      className={cn("relative flex min-h-0 flex-col", className)}
+      style={{ background: theme.background }}
+      {...terminalDataAttributes(connection)}
+    >
       <div className="relative min-h-0 flex-1 px-3 pt-2 pb-1">
         <div
           ref={hostRef}
@@ -109,10 +115,12 @@ export function TerminalSurface({
                 <div className="mt-1.5">
                   <LimitReached error={connection.limit} />
                 </div>
-              ) : error && (
-                <p className="mt-1.5" style={muted}>
-                  {error}
-                </p>
+              ) : (
+                error && (
+                  <p className="mt-1.5" style={muted}>
+                    {error}
+                  </p>
+                )
               )}
               <div className="mt-4 flex gap-2">
                 {phase === "transport-error" && (
