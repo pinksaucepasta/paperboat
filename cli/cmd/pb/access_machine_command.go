@@ -213,7 +213,7 @@ func waitForMachineService(ctx context.Context, locator machineLocator, machine 
 			return daemoncmd.DaemonRequestFailure(err)
 		case status.Code(err) == codes.NotFound:
 			return fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, machine)
-		case err != nil && ctx.Err() == nil:
+		case err != nil && ctx.Err() == nil && status.Code(err) != codes.DeadlineExceeded:
 			return &accessMachineStepError{step: "reading the machine from the local Paperboat service", action: "Run `pb status` and `pb doctor`, then retry.", cause: err}
 		case err == nil && slices.Contains(address.GetForwardedPorts(), int32(port)):
 			return nil

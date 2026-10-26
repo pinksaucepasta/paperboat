@@ -351,3 +351,18 @@ func TestTeamMemberIsToldWhyASharedMachinePortIsNotOffered(t *testing.T) {
 		}
 	}
 }
+
+// Round 29, lanea-r1: a port with no service ended "while reading the machine from the local Paperboat
+// service: DeadlineExceeded" when the daemon call hit the same deadline; it is the wait for the port.
+func TestMachineServiceWaitNamesTheWaitWhenTheDaemonCallTimesOut(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel()
+	locator := &fakeMachineLocator{answers: []func() (*daemonpb.MachineAddress, error){func() (*daemonpb.MachineAddress, error) {
+		return nil, status.Error(codes.DeadlineExceeded, "context deadline exceeded")
+	}}}
+	err := waitForMachineService(ctx, locator, "machine_target", 4321)
+	var step *accessMachineStepError
+	if !errors.As(err, &step) || !strings.Contains(step.step, "waiting for the machine to offer port 4321") {
+		t.Fatalf("err=%v, want the wait for the port named", err)
+	}
+}
