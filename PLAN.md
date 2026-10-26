@@ -4977,3 +4977,6 @@ Exact outputs sent; result tools/device-smoke/results/tunnel-preview-manage-stab
 2026-10-27 | Terminal core | F3-13 browser flood fixed (1ca96afb, fbcf681b; web lane W16 running). W9 (50 MB in a browser) [!]: the page stops after ~70-110 KB
 with resyncs 0. Host serves the screen requests about once a second (ad441296 diag), worker credits balanced, yet no event leaves the WASM after ~3 s.
 1207b242 fixed one silent-drop case, not this. Next: a js/wasm harness for readBroadcast/finishResync. F3-16 N12 waits for the client input queue (Terminal viewers, F3-15).
+
+2026-10-27 | Managed SSH | peer-network/config rate per carrier machine (server-side): dev-2be3e739 ~2 req/s (1 s retry before first config; d469e97a) -> d469e97a ~22/min -> 3e01ffd6 7.3/min, 0 x 429 (accepted). 49105093 gate regressed to ~75/min (revert c64bb81e).
+Remaining 7.3/min is relay observations valid 15 s vs a 30 s renewal cadence; not widening the window. Real fix: push model (refresh only on change, longer-lived signatures), first scale item after Linux approval.
