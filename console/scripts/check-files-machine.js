@@ -3,7 +3,10 @@
 // `pb send --to <machine>`); window.__offline: an offline machine id. Checks: /files without a
 // machine asks to choose one and offers no "All machines"; ?machine=<online> lists the file (read
 // from GET /v1/machines/{id}/inbox); ?machine=<offline> says "machine offline, Inbox unavailable"
-// and lists nothing; no request goes to /v1/inbox. Changes nothing. Prints the steps.
+// and lists nothing; no request goes to /v1/inbox. Prints the steps.
+// With window.__content (the file's exact text) the file's download link must return exactly that; with window.__delete
+// the file is then removed through its row menu and its confirm dialog, and must be gone from the list and the machine's
+// Inbox. Without them nothing is changed.
 ;(async () => {
   const steps = []
   const pass = (step, ok, detail = "") => steps.push({ step, ok, detail })
@@ -39,6 +42,24 @@
     const off = await until(() => /machine offline, Inbox unavailable/.test(text()))
     pass("an offline machine says so and lists nothing", Boolean(off) && !main().querySelector("tbody tr"), text().slice(0, 120))
     pass("no workspace-wide Inbox request", !asked.includes("/api/v1/inbox"))
+    if (window.__content) {
+      window.next.router.push(`/files?machine=${online}`)
+      const link = await until(() => [...main().querySelectorAll("a[download]")].find((a) => a.textContent.trim() === name))
+      const body = link ? await (await realFetch(link.href, { credentials: "include" })).text() : null
+      pass("the file's download returns its exact content", body === window.__content, body === null ? "no download link" : `${body.length} bytes`)
+    }
+    if (window.__delete) {
+      const rowOf = () => [...main().querySelectorAll("tbody tr")].find((tr) => tr.innerText.includes(name))
+      const menu = rowOf()?.querySelector(`button[aria-label="Actions for ${name}"]`)
+      menu?.click()
+      const item = await until(() => [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim() === "Delete"))
+      item?.click()
+      const confirm = await until(() => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].flatMap((d) => [...d.querySelectorAll("button")]).find((b) => b.textContent.trim() === "Delete"))
+      confirm?.click()
+      pass("Delete asks for confirmation and removes the file from the list", Boolean(await until(() => !rowOf())), item && confirm ? "" : "menu or confirm button not found")
+      const listed = await (await realFetch(`/api/v1/machines/${online}/inbox`, { credentials: "include" })).text()
+      pass("the machine's Inbox no longer holds it", !listed.includes(name))
+    }
   } finally {
     window.fetch = realFetch
   }

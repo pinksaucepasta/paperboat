@@ -21,12 +21,14 @@ set -uo pipefail
 MODE=${1:?exec|revoke|history|scheduled} HOST=${2:?host} BIN=${3:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
+# A Docker host whose user needs no sudo for docker (hp): SMOKE_CT_DOCKER=docker turns the scripts' `sudo -n docker` into `docker`.
+SHIM=; [ "${SMOKE_CT_DOCKER:-}" = docker ] && SHIM='sudo() { shift; "$@"; }'
 T=final-$MODE-t-$STAMP P=final-$MODE-p-$STAMP ALIAS=lanea-fx-$STAMP
 MACHINE_IDS=
 
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-pb /tmp/$T-ds.tgz" || true
+  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-pb /tmp/$T-ds.tgz" || true
   for id in $MACHINE_IDS; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -39,7 +41,7 @@ scp -q "$BIN" "$HOST:/tmp/$T-pb" || finish FAIL "could not copy the build to $HO
 tar czf /tmp/$T-ds.tgz -C "$HERE" $(cd "$HERE" && ls *.py *.sh) && scp -q /tmp/$T-ds.tgz "$HOST:/tmp/$T-ds.tgz"; rm -f /tmp/$T-ds.tgz
 
 if [ "$MODE" = exec ]; then
-  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 fresh $T $ALIAS
 fresh $P $ALIAS-p
@@ -54,7 +56,7 @@ EOF
 fi
 
 if [ "$MODE" = scheduled ]; then
-  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T ALIAS=$ALIAS"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 start_ct $T
@@ -92,7 +94,7 @@ EOF
 fi
 
 # history: the official Latest comes from the server's own published enrollment command, run inside each container.
-out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 for ct in $T $P; do
