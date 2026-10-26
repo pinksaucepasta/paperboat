@@ -313,14 +313,14 @@ func TestPrivateAccessStreamBridgeMapsAuthorizationFailures(t *testing.T) {
 	}
 }
 
-func TestPrivateTCPRuleRequiresExactDurableGenerationTuple(t *testing.T) {
+func TestPrivateTCPRuleMatchesTheEngineRouteRuleAndRequiresExactGenerations(t *testing.T) {
 	request := edgePrivateAccessRequest(time.Now().UTC())
 	request.ResourceKind = "tunnel"
 	request.ResourceID = "tunnel_1"
 	request.Audience = "paperboat-tunnel-tcp"
 	request.Protocol = "tcp"
 	request.Method, request.Host, request.Path = "", "", ""
-	rule := route.RouteRule{RouteID: request.RouteID, RouteGeneration: request.RouteGeneration, AssignmentGeneration: request.AssignmentGeneration, ResourceKind: "tunnel", SessionGeneration: request.SessionGeneration, AccountID: request.AccountID, TunnelID: request.ResourceID, ConnectorID: request.ConnectorID, ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration, ConfigGeneration: request.ConfigGeneration, Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, Kind: route.TunnelPrivateTCP, Protocol: "private_tcp", AccessMode: "private"}
+	rule := route.RouteRule{RouteID: request.RouteID, RouteGeneration: request.RouteGeneration, AssignmentGeneration: request.AssignmentGeneration, ResourceKind: "tunnel", AccountID: request.AccountID, TunnelID: "route_runtime_carrier_binding", ConnectorID: request.ConnectorID, ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration, ConfigGeneration: request.ConfigGeneration, Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, Kind: route.TunnelPrivateTCP, Protocol: "private_tcp", AccessMode: "private"}
 	if got, err := privateTCPRule([]route.RouteRule{rule}, request); err != nil || got.RouteID != rule.RouteID {
 		t.Fatalf("exact route got=%+v err=%v", got, err)
 	}

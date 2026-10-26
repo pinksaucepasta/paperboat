@@ -374,8 +374,11 @@ func privateTCPRule(rules []route.RouteRule, request connectorprotocol.PrivateAc
 	return *matched, nil
 }
 
+// An engine route's TunnelID is its carrier binding (not the tunnel) and it has no lease session
+// generation; the route id, carrier session and generations pin it, and the server already bound the
+// route to the granted tunnel when it authorized the grant.
 func privateTCPRuleMatches(rule route.RouteRule, request connectorprotocol.PrivateAccessRequest) bool {
-	return rule.RouteID == request.RouteID && rule.Kind == route.TunnelPrivateTCP && rule.AccountID == request.AccountID && rule.TunnelID == request.ResourceID && rule.ConnectorID == request.ConnectorID && rule.ConnectorSessionID == request.CarrierSessionID && rule.RouteGeneration == request.RouteGeneration && rule.SessionGeneration == request.SessionGeneration && rule.ConnectorProcessGeneration == request.ProcessGeneration && rule.ConfigGeneration == request.ConfigGeneration && rule.AssignmentGeneration == request.AssignmentGeneration && rule.Node == request.EdgeNodeID && rule.EdgeProcessEpoch == request.EdgeProcessEpoch && rule.AccessMode == "private" && rule.Protocol == "private_tcp"
+	return rule.RouteID == request.RouteID && rule.Kind == route.TunnelPrivateTCP && rule.AccountID == request.AccountID && rule.ConnectorID == request.ConnectorID && rule.ConnectorSessionID == request.CarrierSessionID && rule.RouteGeneration == request.RouteGeneration && rule.ConnectorProcessGeneration == request.ProcessGeneration && rule.ConfigGeneration == request.ConfigGeneration && rule.AssignmentGeneration == request.AssignmentGeneration && rule.Node == request.EdgeNodeID && rule.EdgeProcessEpoch == request.EdgeProcessEpoch && rule.AccessMode == "private" && rule.Protocol == "private_tcp"
 }
 
 var _ PrivateAccessTarget = PrivateAccessRouteTarget{}
