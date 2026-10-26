@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"path/filepath"
 	"strings"
@@ -449,6 +450,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				return s.Next(ctx)
 			case epoch, ok := <-s.keyUpdates:
 				if !ok {
+					diagnosticlog.TryInfo("browser terminal stream ended: its shared output stopped")
 					return protocol.BinaryFrame{}, ErrStreamClosed
 				}
 				data := make([]byte, 1+len(epoch.ID)+len(epoch.Key))
@@ -459,7 +461,8 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			case <-time.After(time.Second):
 				snapshot, err := s.snapshot()
 				if err != nil {
-					return protocol.BinaryFrame{}, ErrStreamClosed
+					diagnosticlog.TryInfo("browser terminal stream ended: session check failed")
+					return protocol.BinaryFrame{}, errors.Join(ErrStreamClosed, err)
 				}
 				if snapshot.State == session.Exited || snapshot.State == session.Closed {
 					payload, marshalErr := json.Marshal(struct {

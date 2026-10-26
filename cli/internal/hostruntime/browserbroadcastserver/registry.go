@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"sync"
 
@@ -199,6 +200,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 
 func (r *Registry) stop(p *publication) {
 	p.stopOnce.Do(func() {
+		diagnosticlog.TryInfo("browser output publisher stopped")
 		p.cancel()
 		closeErr := p.stream.Close()
 		p.mu.Lock()
@@ -229,6 +231,7 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 			continue // records skip ahead; each browser sees the gap and restores its screen in-band
 		}
 		if err != nil {
+			diagnosticlog.TryInfo("browser output publisher ended: waiting for output failed")
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
 			return
 		}
@@ -251,6 +254,7 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 		received = event.EndSequence
 		event.Release()
 		if encodeErr != nil {
+			diagnosticlog.TryInfo("browser output publisher ended: writing to the edge failed")
 			reportPublisherFailure(p.diagnosticCtx, deliveryStage, encodeErr)
 			return
 		}
