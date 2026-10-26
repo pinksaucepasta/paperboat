@@ -528,20 +528,32 @@ func TestNetworkAuthorityRotationReplayRestartAndFailedWrite(t *testing.T) {
 	}
 }
 
-func TestNetworkAuthorityPartitionExpiry(t *testing.T) {
+// F21-01 (offline until revoked): past the configuration's exp, a partition keeps the last verified state. Each
+// scope still ends at its own expiry, and an expired token is never installed (replay).
+func TestNetworkAuthorityPartitionKeepsVerifiedStatePastRefreshHint(t *testing.T) {
 	a, c, priv, _ := networkTestAuthority(t)
 	// Unix timestamps truncate fractional seconds. Leave at least one full
 	// second for signing and applying before testing the actual expiry.
 	c.ExpiresAt = time.Now().Unix() + 2
+	c.Peers[0].Scopes = append(c.Peers[0].Scopes, NetworkScope{ResourceKind: "machine_access", ResourceID: "grant_short", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: c.ExpiresAt})
 	if err := a.Apply(context.Background(), networkToken(t, priv, c)); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for a.Allows("machine_test", "grant_test", "terminal", "dial") && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	if a.OutOfSync() {
+		t.Fatal("a fresh configuration reported out of sync")
 	}
-	if a.Allows("machine_test", "grant_test", "terminal", "dial") {
-		t.Fatal("partition extended authority")
+	time.Sleep(time.Until(time.Unix(c.ExpiresAt, 0)) + 50*time.Millisecond)
+	if !a.Allows("machine_test", "grant_test", "terminal", "dial") {
+		t.Fatal("partition past the refresh hint dropped a grant that has not expired")
+	}
+	if _, err := a.Peer("machine_test"); err != nil {
+		t.Fatal("partition past the refresh hint dropped the peer:", err)
+	}
+	if a.Allows("machine_test", "grant_short", "terminal", "dial") {
+		t.Fatal("partition extended a grant past its own expiry")
+	}
+	if !a.OutOfSync() {
+		t.Fatal("configuration past its refresh hint not reported out of sync")
 	}
 	if !errors.Is(a.Apply(context.Background(), networkToken(t, priv, c)), ErrExpiredAuthority) {
 		t.Fatal("expired replay accepted")
@@ -551,6 +563,7 @@ func TestNetworkAuthorityPartitionExpiry(t *testing.T) {
 func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 	a, c, signer, store := networkTestAuthority(t)
 	c.ExpiresAt = time.Now().Unix() + 1
+	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
 	}
@@ -922,7 +935,7 @@ func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T)
 		c.Generation++
 		c.IssuedAt = time.Now().Unix()
 		c.ExpiresAt = c.IssuedAt + 3
-		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt + 60
+		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
 		token := networkToken(t, signer, c)
 		renewed <- c.ExpiresAt
 		return token, nil
@@ -966,10 +979,10 @@ func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T)
 	defer deadline.Stop()
 	<-deadline.C
 	if a.Allows("machine_test", "grant_test", "terminal", "dial") {
-		t.Fatal("failed renewal extended signed authority")
+		t.Fatal("failed renewal extended a grant past its own expiry")
 	}
-	if _, err := a.Descriptor("machine_test"); !errors.Is(err, ErrAuthority) || !errors.Is(err, ErrExpiredAuthority) {
-		t.Fatalf("expired authority lost typed lifetime cause: %T", err)
+	if _, err := a.Descriptor("machine_test"); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("expired grant lost its typed admission cause: %T", err)
 	}
 	select {
 	case <-stalled:

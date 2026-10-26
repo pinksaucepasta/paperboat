@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/netip"
 	"sort"
 	"time"
@@ -228,7 +229,7 @@ func (a *Authority) Descriptor(peerID string) (mesh.Addr, error) {
 		}
 		live := false
 		for _, scope := range peer.Scopes {
-			live = live || scope.ExpiresAt > time.Now().Unix()
+			live = live || scopeLive(scope, time.Now().Unix())
 		}
 		if !live {
 			return "", authorityPeerAdmissionError{}
@@ -438,9 +439,18 @@ func (authorityPeerAdmissionError) Unwrap() error { return ErrAdmission }
 func peerAdmissionExpiry(peer NetworkPeer) int64 {
 	var expiry int64
 	for _, scope := range peer.Scopes {
+		if scope.ExpiresAt == 0 {
+			return math.MaxInt64
+		}
 		expiry = max(expiry, scope.ExpiresAt)
 	}
 	return expiry
+}
+
+// scopeLive reports whether scope admits work at now. A machine_network scope with expires_at 0 lasts until
+// revoked (F21-01): only a newer verified configuration without it ends it, never the clock.
+func scopeLive(scope NetworkScope, now int64) bool {
+	return scope.ExpiresAt == 0 || scope.ExpiresAt > now
 }
 func (a *Authority) peerAdmissionExpiriesLocked() map[netip.Addr]int64 {
 	result := make(map[netip.Addr]int64, len(a.current.Peers))

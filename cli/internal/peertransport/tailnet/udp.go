@@ -227,5 +227,6 @@ func (c *UDPClient) Close() error {
 // A nil fence is used only by isolated engine fixtures. Production leases always
 // share their authority's atomically refreshed expiry.
 func validExpiry(deadline *atomic.Int64) bool {
-	return deadline == nil || time.Now().Unix() < deadline.Load()
+	// The deadline is set while a verified configuration is in force and cleared when it is dropped.
+	return deadline == nil || deadline.Load() != 0
 }

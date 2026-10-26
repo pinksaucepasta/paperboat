@@ -21,9 +21,10 @@ func TestPeerUsagePathAuthorization(t *testing.T) {
 		t.Fatalf("foreign peer error = %v", err)
 	}
 	a.mu.Lock()
+	// Past exp the configuration stays in force (F21-01): usage is still classified.
 	configuration.ExpiresAt = 1
 	a.mu.Unlock()
-	if _, err := a.PeerUsagePath("machine_test"); !errors.Is(err, ErrAuthority) {
-		t.Fatalf("expired authority error = %v", err)
+	if _, err := a.PeerUsagePath("machine_test"); err != nil {
+		t.Fatalf("configuration past its refresh hint refused: %v", err)
 	}
 }

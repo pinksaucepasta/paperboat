@@ -331,7 +331,9 @@ func (a *Authority) refreshDelay(cadence time.Duration) time.Duration {
 		if margin > 10*time.Second {
 			margin = 10 * time.Second
 		}
-		if due := remaining - margin; due < cadence {
+		// Past exp (Paperboat unreachable) the configuration stays in force; retry at the normal cadence
+		// instead of every 100 ms.
+		if due := remaining - margin; due > 0 && due < cadence {
 			cadence = due
 		}
 	}

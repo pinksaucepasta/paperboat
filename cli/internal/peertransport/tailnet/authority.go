@@ -147,6 +147,7 @@ type Authority struct {
 	stunTimer    *time.Timer
 	closed       bool
 	expired      bool
+	lastVerified time.Time
 	relayDenied  *api.APIError
 	done         chan struct{}
 	server       *UDPServer
@@ -324,7 +325,11 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
 			validResource := networkOnly || scope.ResourceKind == "config_compare" && scope.Capability == "config_compare" || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
-			if scopes > MaxConfigurationScopes || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt <= 0 || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
+			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, and a host's offline session
+			// rights (machine_access accept), whose generation is the deciding policy version.
+			sessionRight := scope.ResourceKind == "machine_access" && scope.Direction == "accept" && scope.Capability != "private_access"
+			validGeneration := scope.ResourceGeneration == 1 || sessionRight && scope.ResourceGeneration >= 1 && scope.ResourceGeneration <= 1<<53-1
+			if scopes > MaxConfigurationScopes || !validResource || !validID(scope.ResourceID) || !validGeneration || scope.Port != NetworkPort || scope.ExpiresAt < 0 || scope.ExpiresAt == 0 && !networkOnly && !sessionRight || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
 			}
 			k := scope.ResourceID + "\x00" + scope.Capability + "\x00" + scope.Direction
@@ -477,6 +482,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	}
 	a.expired = false
 	a.current = &cfg
+	a.lastVerified = time.Now()
 	a.expiresAt.Store(cfg.ExpiresAt)
 	select {
 	case a.refreshWake <- struct{}{}:
@@ -534,14 +540,31 @@ func (a *Authority) Close() error {
 	a.recoveryWorkers.Wait()
 	return nil
 }
+// OutOfSync reports whether the configuration in force is past its refresh hint: Paperboat has not answered
+// since, and the daemon is running on its last verified state (pb status/doctor "out of sync with Paperboat").
+func (a *Authority) OutOfSync() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.current != nil && time.Now().Unix() >= a.current.ExpiresAt
+}
+
+// LastVerifiedAt is when the configuration in force was verified and installed; zero without one.
+func (a *Authority) LastVerifiedAt() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.current == nil {
+		return time.Time{}
+	}
+	return a.lastVerified
+}
+
 func (a *Authority) usableLocked() bool {
 	if a.current == nil {
 		return false
 	}
-	if time.Now().Unix() >= a.current.ExpiresAt {
-		a.expired = true
-		return false
-	}
+	// Past exp the last verified configuration stays in force while Paperboat is unreachable (offline until
+	// revoked, F21-01): scopes end at their own expiry or by a newer configuration, never by the refresh hint.
+	a.expired = time.Now().Unix() >= a.current.ExpiresAt
 	return true
 }
 
@@ -555,7 +578,7 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 	for _, p := range a.current.Peers {
 		if p.Identity.EndpointID == peerID {
 			for _, s := range p.Scopes {
-				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction && s.ExpiresAt > time.Now().Unix() {
+				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction && scopeLive(s, time.Now().Unix()) {
 					return true
 				}
 			}

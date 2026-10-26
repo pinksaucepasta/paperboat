@@ -346,7 +346,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	for _, p := range a.current.Peers {
 		active := false
 		for _, scope := range p.Scopes {
-			if scope.Port == NetworkPort && scope.ExpiresAt > time.Now().Unix() {
+			if scope.Port == NetworkPort && scopeLive(scope, time.Now().Unix()) {
 				active = true
 				break
 			}
@@ -777,7 +777,7 @@ func (r *regionalRecovery) authorityGeneration(self NetworkBinding, peers map[ke
 	for _, peer := range peers {
 		scopes := make(map[NetworkScope]struct{})
 		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt <= now {
+			if !scopeLive(scope, now) {
 				continue
 			}
 			scope.ExpiresAt = 0

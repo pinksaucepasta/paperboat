@@ -22,7 +22,7 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 			continue
 		}
 		for _, scope := range peer.Scopes {
-			if scope.ResourceID != resourceID || scope.Capability != capability || scope.Direction != direction || scope.ExpiresAt <= time.Now().Unix() {
+			if scope.ResourceID != resourceID || scope.Capability != capability || scope.Direction != direction || !scopeLive(scope, time.Now().Unix()) {
 				continue
 			}
 			switch scope.ResourceKind {
@@ -49,7 +49,7 @@ func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, e
 		}
 		var backing NetworkScope
 		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt <= time.Now().Unix() {
+			if !scopeLive(scope, time.Now().Unix()) {
 				continue
 			}
 			switch scope.ResourceKind {
