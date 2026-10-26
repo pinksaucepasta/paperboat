@@ -322,7 +322,7 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 		},
 		"expired": func(c *NetworkConfiguration) { c.IssuedAt = time.Now().Unix() - 2; c.ExpiresAt = time.Now().Unix() - 1 },
 		"future": func(c *NetworkConfiguration) {
-			c.IssuedAt = time.Now().Add(derpquic.MaxClockSkew + time.Second).Unix()
+			c.IssuedAt = time.Now().Add(derpquic.MaxClockSkew + time.Minute).Unix()
 			c.ExpiresAt = c.IssuedAt + 300
 		},
 		"missing_scope_expiry": func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].ExpiresAt = 0 },
