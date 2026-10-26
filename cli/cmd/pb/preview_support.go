@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -65,6 +66,12 @@ func previewFailure(message string, causes ...error) error {
 	}
 	if len(filtered) == 0 {
 		return nil
+	}
+	// A lone server answer stays the one cause of the failure, so the command reports it (team_limit, forbidden)
+	// instead of a generic failure; with a sibling cause the failure stays unexpected.
+	var refusal *api.APIError
+	if len(filtered) == 1 && errors.As(filtered[0], &refusal) {
+		return fmt.Errorf("%s: %w", message, filtered[0])
 	}
 	return previewFailureError{message: message, causes: filtered}
 }

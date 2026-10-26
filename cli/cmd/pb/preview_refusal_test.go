@@ -1,52 +1,28 @@
 package main
 
 import (
-	"bytes"
 	"errors"
-	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
-// A device run showed `pb preview --ttl 30s` ending with the generic
-// "could not finish the command" text because the lease expired before
-// publication finished, and a closed origin port did the same.
-func TestPreviewRefusalsStateWhatToDo(t *testing.T) {
-	expired := fmt.Errorf("create preview: %w", errors.Join(preview.ErrLeaseExpired))
-	for _, test := range []struct {
-		name     string
-		err      error
-		contains string
-		sentinel error
-	}{
-		{"origin", commandRejection{reason: commandRejectPreviewOrigin}, "Start your app", ErrPreviewOriginUnavailable},
-		{"expired", commandRejection{reason: commandRejectPreviewExpired}, "longer --ttl", preview.ErrLeaseExpired},
-		{"timeout", commandRejection{reason: commandRejectPreviewTimeout}, "did not become ready", servepkg.ErrPreviewReadinessTimeout},
-		{"domain", commandRejection{reason: commandRejectPreviewDomainTimeout}, "DNS records", servepkg.ErrPreviewReadinessTimeout},
-	} {
-		failure := classifyCommandFailure(test.err)
-		if failure.kind != commandRejected {
-			t.Fatalf("%s: kind = %v, want rejected", test.name, failure.kind)
-		}
-		if message := userFacingError(test.err); !strings.Contains(message, test.contains) {
-			t.Fatalf("%s: message %q lacks %q", test.name, message, test.contains)
-		}
-		if !errors.Is(test.err, test.sentinel) {
-			t.Fatalf("%s: refusal does not match its sentinel", test.name)
-		}
-		var output bytes.Buffer
-		_ = writeCLIJSONError(&output, test.err)
-		if !strings.Contains(output.String(), `"operation_refused"`) || !strings.Contains(output.String(), test.contains) {
-			t.Fatalf("%s: JSON = %q", test.name, output.String())
-		}
+// pb preview reports the server's answer when it is the only cause (team_limit on a full team workspace), keeps a
+// sibling failure unexpected, and still never echoes an unknown server code or message.
+func TestPreviewFailureReportsALoneServerRefusal(t *testing.T) {
+	full := &api.APIError{Status: http.StatusConflict, Code: "team_limit", Message: api.PublicMessage("team_limit")}
+	err := previewFailure("preview could not be started", full)
+	if got := classifyCLIJSONError(err); got.Code != "team_limit" || !strings.Contains(got.Message, "Team capacity reached") {
+		t.Fatalf("lone refusal: %#v", got)
 	}
-	if !onlyCause(expired, preview.ErrLeaseExpired) {
-		t.Fatal("a lone lease-expired cause must become the refusal")
+	mixed := previewFailure("preview setup failed and carrier cleanup was incomplete", full, errors.New("carrier close failed"))
+	if got := classifyCLIJSONError(mixed); got.Code != "operation_failed" || got.StateChanged != "unknown" {
+		t.Fatalf("a sibling failure must stay unexpected: %#v", got)
 	}
-	if onlyCause(errors.Join(expired, errors.New("lease release failed")), preview.ErrLeaseExpired) {
-		t.Fatal("a cleanup failure joined beside the cause must not be hidden")
+	unknown := previewFailure("preview could not be started", &api.APIError{Status: http.StatusBadRequest, Code: "private_api_token_value", Message: "private response body"})
+	if got := classifyCLIJSONError(unknown); got.Code != "api_error" || strings.Contains(got.Message, "private") {
+		t.Fatalf("unknown server code echoed: %#v", got)
 	}
 }
