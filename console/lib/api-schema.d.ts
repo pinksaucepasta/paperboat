@@ -1168,85 +1168,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/previews/{preview_id}/carrier-attachment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Allocate a canonical preview carrier attachment
-         * @description Allocates a short-lived machine-owned preview carrier binding without creating a durable tunnel. The request is authenticated by the renewable machine identity and exact create operation.
-         */
-        post: operations["post_v1_previews_preview_id_carrier_attachment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/previews/{preview_id}/carrier-attachment/renew": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Renew a preview carrier attachment */
-        post: operations["post_v1_previews_preview_id_carrier_attachment_renew"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/previews/{preview_id}/carrier-attachment/readiness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Report preview origin readiness */
-        post: operations["post_v1_previews_preview_id_carrier_attachment_readiness"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/previews/{preview_id}/carrier-attachment/release": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Release a preview carrier attachment */
-        post: operations["post_v1_previews_preview_id_carrier_attachment_release"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/previews/{preview_id}/events": {
         parameters: {
             query?: never;
@@ -1575,72 +1496,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tunnels/{tunnel_id}/connectors": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        /** List tunnel connectors */
-        get: operations["get_v1_tunnels_tunnel_id_connectors"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        /** Get a tunnel connector */
-        get: operations["get_v1_tunnels_tunnel_id_connectors_connector_id"];
-        put?: never;
-        post?: never;
-        /**
-         * Revoke a tunnel connector
-         * @description Idempotently revokes a connector and leaves bounded session cleanup to the operation.
-         */
-        delete: operations["delete_v1_tunnels_tunnel_id_connectors_connector_id"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/control": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Open the connector control WebSocket
-         * @description Upgrades WSS using paperboat.connector.v1. The first binary connector-v1 frame must be a signed Hello and is the sole authentication exchange. Query parameters, cookies, browser sessions, bearer authorization, and alternate authentication headers are not accepted. The path identities are routing fences and must equal the signed Hello identity.
-         */
-        get: operations["get_v1_tunnels_tunnel_id_connectors_connector_id_control"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/machine-events/wait": {
         parameters: {
             query?: never;
@@ -1677,141 +1532,6 @@ export interface paths {
          * @description The same wait as /v1/machine-events/wait for the signed-in CLI daemon, which holds the user's credential rather than a machine identity. The user may wait only on a machine of their own account. Answers 200 with the topics that moved past the sent generations, or 204 after up to 30 seconds. Generations only, never data.
          */
         post: operations["post_v1_user_machines_machine_id_events_wait"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/origin-health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report whether the local app behind each route is reachable
-         * @description Host-only, authenticated like carrier bootstrap by the current renewable machine identity and a detached proof over the exact method, path and body; Idempotency-Key binds the proof operation. The host reports a change between reachable and unreachable immediately and repeats an unreachable state every 30 seconds; a report older than 60 seconds no longer holds the tunnel's origin down. The latest state per route is stored; routes that do not belong to the tunnel are ignored.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/carrier-bootstrap": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get exact-session connector carrier endpoints
-         * @description Host-only, no-store bootstrap authenticated by the current renewable machine identity and detached proof over the exact method, path, and body. Idempotency-Key binds the proof operation. Browser sessions, cookies, bearer credentials, and query credentials cannot authorize it. The response binds every identity and generation fence to the active signed control session and contains no private key, token, cookie, authorization value, or reusable proof.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_connectors_connector_id_carrier_bootstrap"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/enrollments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Issue a single-use connector enrollment
-         * @description Host-only machine enrollment. Requires the renewable machine_control bearer credential, X-Paperboat-Machine-Identity, X-Paperboat-Machine-Proof, and Idempotency-Key. The proof is verified over the exact POST path, body, and idempotency key; the verified machine claims supply the account, user, host, and machine actor and must match host_id. Browser sessions, cookies, CSRF tokens, and client-session bearers are not accepted. Returns a short-lived single-use secret once; only its hash and scope are persisted.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_connectors_enrollments"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/enrollments/exchange": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Exchange a connector enrollment
-         * @description Host-only exchange requiring the renewable machine_control bearer credential, X-Paperboat-Machine-Identity, and signed machine proof bound to the exact POST path, body, and idempotency key. The verified machine claims must match host_id and the enrollment's account and host binding. Browser sessions, cookies, CSRF tokens, and client-session bearers are not accepted. Returns the secret-free, server-reserved credential and process generations for the first signed Hello. Both are immutable and bound to the running connector operation; the host must never guess either value. An exact idempotent replay returns identical activation data. The obsolete operation-only response is not returned.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_connectors_enrollments_exchange"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/connectors/{connector_id}/drain": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Drain a tunnel connector
-         * @description Stops new work while allowing bounded existing sessions to complete. Forced close is reported explicitly when the deadline is exceeded.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_connectors_connector_id_drain"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/credentials/rotate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Request connector credential rotation
-         * @description Schedules a proven host identity rotation and retains the current credential until the replacement is verified. The response is operation-only; no fabricated secret or host-local key reference is returned.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_credentials_rotate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3075,28 +2795,6 @@ export interface paths {
          * @description Returns a short-lived credential bound to one exact remote execution operation.
          */
         post: operations["post_v1_machines_machine_id_exec_descriptor"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/machines/{machine_id}/ssh-descriptor": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create a machine SSH descriptor
-         * @description Returns a short-lived credential bound to one exact SSH carrier operation.
-         */
-        post: operations["post_v1_machines_machine_id_ssh_descriptor"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6070,6 +5768,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/endpoint-tunnels/origin-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report whether the machine's tunnel origins are reachable
+         * @description Records, per route of a tunnel this machine serves, whether the local app answers. An unreachable origin turns the tunnel's status to origin_unreachable until a newer report or one minute passes. Reports for routes the machine does not serve or at a stale generation are ignored. Requires renewable machine proof.
+         */
+        post: operations["post_v1_runtime_endpoint_tunnels_origin_health"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime/carrier-attachment": {
         parameters: {
             query?: never;
@@ -7695,20 +7413,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/inbox": {
+    "/v1/machines/{id}/audit-backlog": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List received files across the selected workspace's machines
-         * @description Read live from the machines (the server stores no file names), at most a bounded number of machines per request in machine id order. Totals are of the machines checked so far.
-         */
-        get: operations["get_v1_inbox"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Upload a host's session audit events
+         * @description A host uploads the sessions it started, refused and ended (F21-11, PLAN 3b D1). Kinds: offline_session_started and offline_session_refused (terminal, exec, managed_ssh, files; decided while Paperboat was unreachable), and ssh_session_started, ssh_session_refused (busy, no_access, wrong_user, not_set_up) and ssh_session_ended (closed, revoked, failed, with bytes and the started event's id), which carry origin online or offline because managed SSH has no server-side admission. Authenticated with the machine-control bearer credential and a signed machine proof over the exact body; a machine uploads only its own events. 1 to 500 events of the last 7 days per request; each event lands once (deduplicated by event id) in the deciding workspace's audit log.
+         */
+        post: operations["post_v1_machines_id_audit_backlog"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8362,115 +8080,6 @@ export interface components {
             route_id: string;
             /** @enum {unknown} */
             provider?: "generic" | "cloudflare" | "route53" | "google_cloud_dns" | "digitalocean" | "namecheap";
-        };
-        TunnelConnector: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "connector";
-            id: string;
-            tunnel_id: string;
-            host_id: string;
-            credential_reference: string;
-            rotation_generation: number;
-            /** @enum {unknown} */
-            desired_state: "active" | "draining" | "revoked";
-            software_version?: string;
-            /** @constant */
-            protocol_version: "1.0";
-            operating_system?: string;
-            architecture?: string;
-            last_session_id?: string;
-            /** Format: date-time */
-            last_heartbeat_at?: string;
-            /** Format: date-time */
-            ready_at?: string;
-            last_applied_config_generation?: number;
-            /** @enum {unknown} */
-            drain_state: "accepting" | "draining" | "drained" | "forced_closed";
-            generation: number;
-            etag: string;
-        };
-        TunnelConnectorPage: {
-            items: components["schemas"]["TunnelConnector"][];
-            next_cursor?: string;
-        };
-        TunnelConnectorPageResponse: {
-            data: components["schemas"]["TunnelConnectorPage"];
-        };
-        TunnelConnectorResponse: {
-            data: components["schemas"]["TunnelConnector"];
-        };
-        ConnectorMutationResponse: {
-            data: components["schemas"]["TunnelConnector"] | components["schemas"]["PreviewTunnelOperation"];
-        };
-        ConnectorActivation: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "connector_activation";
-            account_id: string;
-            tunnel_id: string;
-            connector_id: string;
-            host_id: string;
-            /** @description Server-owned immutable endpoint_UUIDv4 identity; independent of the readable hostname. */
-            stable_endpoint_id: string;
-            /** @description Server-reserved immutable generation bound to operation; the host must never guess it. */
-            credential_generation: number;
-            /** @description Server-reserved immutable generation bound to operation; the host must never guess it. */
-            process_generation: number;
-            operation: components["schemas"]["PreviewTunnelOperation"] & {
-                /** @constant */
-                resource_kind: "connector";
-                /** @constant */
-                phase: "connecting";
-                /** @constant */
-                state: "running";
-            };
-        };
-        ConnectorActivationResponse: {
-            data: components["schemas"]["ConnectorActivation"];
-        };
-        ConnectorEnrollmentRequest: {
-            host_id: string;
-            capabilities: string[];
-            ttl_seconds?: number;
-        };
-        ConnectorEnrollment: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "connector_enrollment";
-            id: string;
-            tunnel_id: string;
-            host_id: string;
-            operation: components["schemas"]["PreviewTunnelOperation"];
-            enrollment_token: string;
-            /** Format: date-time */
-            expires_at: string;
-            capabilities: string[];
-            replayed: boolean;
-        };
-        ConnectorEnrollmentResponse: {
-            data: components["schemas"]["ConnectorEnrollment"];
-        };
-        ConnectorEnrollmentExchangeRequest: {
-            token: string;
-            host_id: string;
-            /** @default 1.0 */
-            protocol_version: string;
-            software_version?: string | null;
-            credential_reference: string;
-            /** @description RFC 7638 Ed25519 JWK thumbprint without the ed25519: key-ID prefix. */
-            credential_thumbprint: string;
-            /** @constant */
-            credential_verifier_algorithm: "ed25519";
-            /** @description Unpadded base64url Ed25519 public key. */
-            credential_verifier_public_key: string;
-            /** @description Unpadded base64url Ed25519 proof over the enrollment transcript. */
-            credential_proof: string;
-            operating_system?: string | null;
-            architecture?: string | null;
         };
         TunnelLogEntry: {
             /** @constant */
@@ -9418,95 +9027,6 @@ export interface components {
             topics: {
                 [key: string]: number;
             };
-        };
-        ConnectorOriginHealthRequest: {
-            /** @constant */
-            schema: "paperboat.origin-health/v1";
-            session_id: string;
-            process_generation: number;
-            config_generation: number;
-            content_hash: string;
-            routes: {
-                route_id: string;
-                /** @enum {string} */
-                state: "ready" | "unreachable";
-                /**
-                 * @description Required when state is unreachable, absent when ready.
-                 * @enum {string}
-                 */
-                code?: "refused" | "timeout" | "unreachable" | "tls";
-                /** Format: date-time */
-                observed_at: string;
-            }[];
-        };
-        ConnectorCarrierBootstrapRequest: {
-            /** @constant */
-            schema: "paperboat.connector-bootstrap/v1";
-            /** @constant */
-            kind: "carrier_bootstrap_request";
-            session_id: string;
-            process_generation: number;
-            config_generation: number;
-            config_content_hash: string;
-        };
-        ConnectorCarrierBootstrapNode: {
-            edge_node_id: string;
-            edge_process_epoch: string;
-            failure_domain: string;
-            /** @description Exactly one authority-only h2:// endpoint and one authority-only h3:// endpoint. */
-            endpoints: string[] & (unknown & unknown);
-            server_spki_sha256: string;
-            server_certificate_chain_pem: string;
-        };
-        ConnectorCarrierBootstrapDescriptor: {
-            /** @constant */
-            schema: "paperboat.connector-bootstrap/v1";
-            /** @constant */
-            kind: "carrier_bootstrap_descriptor";
-            account_id: string;
-            tunnel_id: string;
-            connector_id: string;
-            host_id: string;
-            /** @description Server-owned immutable endpoint_UUIDv4 identity; independent of the readable hostname. */
-            stable_endpoint_id: string;
-            session_id: string;
-            process_generation: number;
-            credential_generation: number;
-            config_generation: number;
-            config_content_hash: string;
-            /** @description One to four carriers with distinct failure_domain values and distinct edge_node_id/edge_process_epoch pairs. */
-            carriers: components["schemas"]["ConnectorCarrierBootstrapNode"][];
-            /** Format: date-time */
-            issued_at: string;
-            /**
-             * Format: date-time
-             * @description Strictly after issued_at and no more than two minutes later.
-             */
-            expires_at: string;
-        };
-        ConnectorCarrierBootstrapResponse: {
-            data: components["schemas"]["ConnectorCarrierBootstrapDescriptor"];
-        };
-        ConnectorCarrierBootstrapError: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "error";
-            /** @enum {unknown} */
-            code: "invalid_content_type" | "invalid_request" | "machine_identity_required" | "machine_identity_invalid" | "connector_access_forbidden" | "connector_session_stale" | "carrier_unavailable" | "connector_control_invalid" | "connector_control_unavailable";
-            /** @constant */
-            component: "control";
-            message: string;
-            /** @enum {unknown} */
-            outcome: "unchanged" | "changed" | "uncertain";
-            retryable: boolean;
-            retry_at?: string | null;
-            repair_action: string;
-            request_id: string;
-            correlation_id: string;
-        };
-        ConnectorCarrierBootstrapErrorResponse: {
-            error: components["schemas"]["ConnectorCarrierBootstrapError"];
         };
         EnvironmentPasswordVault: {
             issuer: string;
@@ -10554,7 +10074,6 @@ export interface components {
             summary_code: string;
             /** Format: date-time */
             summary_transitioned_at: string;
-            connector_sessions: components["schemas"]["OperatorObservationLayer"];
             edge_assignments: components["schemas"]["OperatorObservationLayer"];
             dns_publications: components["schemas"]["OperatorObservationLayer"];
             certificates: components["schemas"]["OperatorObservationLayer"];
@@ -11738,37 +11257,6 @@ export interface components {
                 next_cursor?: string;
             };
         };
-        WorkspaceInboxFile: {
-            id: string;
-            name: string;
-            size: number;
-            /** Format: date-time */
-            received_at: string;
-            machine: {
-                id: string;
-                alias: string;
-            };
-        };
-        WorkspaceInboxResponse: {
-            data: {
-                /** @description Files of the machines checked by this request, newest first; q filters them. */
-                items: components["schemas"]["WorkspaceInboxFile"][];
-                /** @description How many machines this request covered (at most the server's bound). */
-                machines_checked: number;
-                /** @description Files on the machines checked by this request, as they counted them. Not a total of the workspace. */
-                files_on_checked_machines: number;
-                /** @description Machines whose listing held only their newest files. */
-                truncated: string[];
-                unavailable: {
-                    machine_id: string;
-                    alias: string;
-                    /** @enum {string} */
-                    reason: "machine_offline" | "machine_update_required" | "inbox_unavailable" | "machine_unreachable" | "timeout";
-                }[];
-                /** @description Present when more machines follow; pass it as machine_cursor for the next batch. */
-                next_machine_cursor?: string;
-            };
-        };
         InventoryCursorPagination: {
             limit: number;
             offset: number;
@@ -11776,6 +11264,10 @@ export interface components {
             next_offset: number | null;
             /** @description Keyset position of the next page (cursor); absent on the last page. */
             next_cursor?: string;
+            /** @description Rows of the filtered list per state (states with none are absent). */
+            counts?: {
+                [key: string]: number;
+            };
         };
     };
     responses: {
@@ -13870,172 +13362,6 @@ export interface operations {
             428: components["responses"]["Error"];
         };
     };
-    post_v1_previews_preview_id_carrier_attachment: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Allocated or replayed attachment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_previews_preview_id_carrier_attachment_renew: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Renewed attachment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_previews_preview_id_carrier_attachment_readiness: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Updated attachment readiness. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_previews_preview_id_carrier_attachment_release: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Released attachment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
     get_v1_previews_preview_id_events: {
         parameters: {
             query?: {
@@ -14949,152 +14275,6 @@ export interface operations {
             501: components["responses"]["Error"];
         };
     };
-    get_v1_tunnels_tunnel_id_connectors: {
-        parameters: {
-            query?: {
-                cursor?: components["parameters"]["EventCursor"];
-                limit?: components["parameters"]["PageLimit"];
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Connector page. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TunnelConnectorPageResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-        };
-    };
-    get_v1_tunnels_tunnel_id_connectors_connector_id: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Connector read model. Credential material is write-only. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TunnelConnectorResponse"];
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-        };
-    };
-    delete_v1_tunnels_tunnel_id_connectors_connector_id: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TunnelStateMutationRequest"];
-            };
-        };
-        responses: {
-            /** @description Connector revoked or idempotent replay. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TunnelConnectorResponse"];
-                };
-            };
-            /** @description Connector revocation is draining. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    get_v1_tunnels_tunnel_id_connectors_connector_id_control: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                /** @description The only accepted connector control WebSocket subprotocol. */
-                "Sec-WebSocket-Protocol": components["parameters"]["ConnectorControlSubprotocol"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description WebSocket upgraded. Binary messages carry connector-v1 length-prefixed frames without compression. */
-            101: {
-                headers: {
-                    "Sec-WebSocket-Protocol": "paperboat.connector.v1";
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The path, query, upgrade request, or required subprotocol is invalid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     post_v1_machine_events_wait: {
         parameters: {
             query?: never;
@@ -15186,313 +14366,6 @@ export interface operations {
             404: components["responses"]["Error"];
             415: components["responses"]["Error"];
             503: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_connectors_connector_id_origin_health: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConnectorOriginHealthRequest"];
-            };
-        };
-        responses: {
-            /** @description The report was recorded. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            415: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_connectors_connector_id_carrier_bootstrap: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConnectorCarrierBootstrapRequest"];
-            };
-        };
-        responses: {
-            /** @description One-to-four current failure-domain carrier bindings for the exact active session. */
-            200: {
-                headers: {
-                    "Cache-Control": "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapResponse"];
-                };
-            };
-            /** @description Malformed, unknown, missing, or invalid request field. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-            /** @description The renewable machine identity or proof is missing or malformed. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-            /** @description The proven machine, account, host, or operation is not authorized for the active session. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-            /** @description The session, process, config generation, or content hash is stale; reconnect before retry. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-            /** @description Content-Type is not application/json. */
-            415: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-            /** @description No valid current carrier is ready or connector control is unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorCarrierBootstrapErrorResponse"];
-                };
-            };
-        };
-    };
-    post_v1_tunnels_tunnel_id_connectors_enrollments: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConnectorEnrollmentRequest"];
-            };
-        };
-        responses: {
-            /** @description Single-use enrollment issued. */
-            201: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    Location: components["headers"]["Location"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorEnrollmentResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_connectors_enrollments_exchange: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                /** @description Durable host identity credential used with the signed machine proof. */
-                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
-                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
-                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConnectorEnrollmentExchangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Authoritative connector activation reserved and awaiting the first exact signed Hello. */
-            202: {
-                headers: {
-                    "Cache-Control": "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConnectorActivationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_connectors_connector_id_drain: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                connector_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TunnelStateMutationRequest"];
-            };
-        };
-        responses: {
-            /** @description Connector drain requested or idempotent replay. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TunnelConnectorResponse"];
-                };
-            };
-            /** @description Connector is draining. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_credentials_rotate: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TunnelStateMutationRequest"];
-            };
-        };
-        responses: {
-            /** @description No active connector required rotation. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            /** @description Rotation requested and awaiting host proof/readiness. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            428: components["responses"]["Error"];
         };
     };
     get_v1_tunnels_tunnel_id_logs: {
@@ -16319,7 +15192,8 @@ export interface operations {
                 offset?: number;
                 /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
-                state?: "disabled" | "revoked" | "consent_required" | "pending" | "offline" | "conflict" | "error" | "syncing" | "healthy" | "watching" | "restoring" | "warning" | "sync_uncertain";
+                /** @description One state, or a group: configured (every state but disabled), attention (error, conflict, warning, consent_required, sync_uncertain), settled (configured without attention). */
+                state?: "configured" | "attention" | "settled" | "disabled" | "revoked" | "consent_required" | "pending" | "offline" | "conflict" | "error" | "syncing" | "healthy" | "watching" | "restoring" | "warning" | "sync_uncertain";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
                 /** @description Keyset position from pagination.next_cursor: the page after it in alias order. Not with offset. */
@@ -17996,40 +16870,6 @@ export interface operations {
         };
         responses: {
             /** @description Fresh execution descriptor. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    post_v1_machines_machine_id_ssh_descriptor: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                machine_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    source_machine_id: string;
-                    operation_id: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Fresh SSH descriptor. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -25003,6 +23843,8 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -25206,6 +24048,45 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_runtime_endpoint_tunnels_origin_health: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Durable host identity credential used with the signed machine proof. */
+                "X-Paperboat-Machine-Identity": components["parameters"]["MachineIdentity"];
+                /** @description Strict unpadded base64url proof over the exact request body and idempotency key. */
+                "X-Paperboat-Machine-Proof": components["parameters"]["MachineProof"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    routes: {
+                        tunnel_id: string;
+                        route_id: string;
+                        /** @enum {string} */
+                        state: "reachable" | "unreachable";
+                        /** @enum {string} */
+                        code?: "refused" | "timeout" | "unreachable" | "tls";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Origin health recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -28497,39 +27378,36 @@ export interface operations {
             };
         };
     };
-    get_v1_inbox: {
+    post_v1_machines_id_audit_backlog: {
         parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-                machine_cursor?: string;
-                /** @description Only this machine's Inbox. */
-                machine_id?: string;
-                /** @description File name substring. */
-                q?: string;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: string;
+            };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    events: Record<string, never>[];
+                };
+            };
+        };
         responses: {
-            /** @description A batch of machines' Inboxes. */
+            /** @description Backlog stored; the receipt names the events recorded and those already recorded. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceInboxResponse"];
+                    "application/json": Record<string, never>;
                 };
             };
-            /** @description Invalid query. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

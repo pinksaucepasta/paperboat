@@ -34,7 +34,7 @@ export function NewTunnelButton({ machine }: { machine?: Machine }) {
 }
 
 /**
- * A tunnel is created on its machine: its Paperboat service holds the connector and proves the
+ * A tunnel is created on its machine: its Paperboat service holds the tunnel's runtime connection and proves the
  * machine's identity, which the control plane requires. The dialog builds the exact command to run
  * there; the tunnel then appears in the list. Hostnames and your own domains are added on its page.
  */
