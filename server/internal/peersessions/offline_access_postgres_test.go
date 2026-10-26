@@ -172,10 +172,31 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 			t.Fatalf("%s granted terminal only has %v", account, got)
 		}
 	}
+	// Each change that decides an offline right moves the host's peer_network topic (migration 193), so the host
+	// refreshes its document; an update that leaves the deciding column as it was moves nothing (no flapping).
+	topic := func() int64 {
+		t.Helper()
+		var g int64
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='peer_network'),0)
+ + coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$2 AND topic='peer_network'),0)`, host, owner).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	moves := func(what string, want bool, change func()) {
+		t.Helper()
+		before := topic()
+		change()
+		if moved := topic() != before; moved != want {
+			t.Errorf("%s: host peer_network moved=%v, want %v", what, moved, want)
+		}
+	}
+	moves("same status written again", false, func() { exec(`UPDATE paperboat.users SET status=status WHERE id=$1`, member) })
+	moves("same suspension written again", false, func() { exec(`UPDATE paperboat.teams SET suspended=suspended WHERE team_id=$1`, team) })
 	// A disabled account has no offline rights (online, its sessions are refused).
-	exec(`UPDATE paperboat.users SET status='disabled' WHERE id=$1`, member)
+	moves("member disabled", true, func() { exec(`UPDATE paperboat.users SET status='disabled' WHERE id=$1`, member) })
 	// A revoked grant leaves the member's next document without the scope.
-	teamstest.SetMachineAccess(t, store, team, host, revokedMember)
+	moves("grant revoked", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember) })
 	after, _ := read(AuthorityUntilRevoked)
 	if got := after["offline_cli_"+member]; len(got) != 0 {
 		t.Errorf("a disabled member still has offline scopes %v", got)
@@ -187,7 +208,9 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		t.Fatalf("an unaffected member lost its scopes: %v", got)
 	}
 	// A suspended team gives none (no trigger stands behind an offline right).
-	exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
+	moves("team suspended", true, func() {
+		exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
+	})
 	if after, _ := read(AuthorityUntilRevoked); len(after["offline_cli_"+suspendedMember]) != 0 {
 		t.Errorf("a suspended team's member still has offline scopes %v", after["offline_cli_"+suspendedMember])
 	}
