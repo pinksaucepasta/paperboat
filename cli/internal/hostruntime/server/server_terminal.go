@@ -384,3 +384,31 @@ func addStreamID(result json.RawMessage, streamID uint32) (json.RawMessage, erro
 	value["stream_id"] = streamID
 	return json.Marshal(value)
 }
+
+// interruptTerminalInput runs on the read loop while the frame worker is busy: a lone byte for a terminal stream
+// may be the user's interrupt for the input the worker is stuck writing. The frame still goes to the worker in
+// order, where the journal answers it; nothing here can end the connection.
+func (s *Server) interruptTerminalInput(ctx context.Context, message []byte, state *terminalConnectionState) {
+	handler, ok := s.config.Handler.(TerminalInterruptHandler)
+	if !ok {
+		return
+	}
+	if opcode, err := protocol.TerminalOpcode(message); err != nil || opcode != protocol.TerminalInputOpcode {
+		return
+	}
+	frame, err := protocol.DecodeTerminalInput(message)
+	if err != nil || len(frame.Data) != 1 {
+		return
+	}
+	binding, err := state.binding(frame.StreamID)
+	if err != nil {
+		return
+	}
+	state.mu.RLock()
+	written := binding.inputSequence
+	state.mu.RUnlock()
+	if binding.kind != "" && binding.kind != "terminal" || frame.Sequence <= written || validateTerminalBinding(binding) != nil {
+		return
+	}
+	handler.InterruptTerminalInput(ctx, binding.authorization, binding.sessionID, binding.attachmentID, binding.generation, frame.Sequence, frame.Data[0])
+}

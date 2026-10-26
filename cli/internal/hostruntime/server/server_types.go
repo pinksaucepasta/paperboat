@@ -162,6 +162,11 @@ type TerminalInputHandler interface {
 	HandleTerminalInput(context.Context, Authorization, string, string, uint64, uint64, []byte) (session.InputDecision, error)
 }
 
+// TerminalInterruptHandler delivers a lone interrupt key while earlier input of its stream is still being written.
+type TerminalInterruptHandler interface {
+	InterruptTerminalInput(context.Context, Authorization, string, string, uint64, uint64, byte) bool
+}
+
 // legacyTerminalInputHandler is test-only compatibility for non-session data
 // handlers. The production dispatcher implements TerminalInputHandler and
 // never uses this path.

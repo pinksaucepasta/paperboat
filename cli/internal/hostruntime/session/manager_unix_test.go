@@ -743,8 +743,8 @@ func TestInputReachesThePTYWhileOutputHoldsTheSessionLock(t *testing.T) {
 	waitState(t, manager, created.ID, Exited)
 }
 
-// F3-11: a paste into a program that never reads stdin holds the input lock on a blocked PTY write. Ctrl-C must
-// overtake it, stop the program within a second and keep its own journal entry.
+// F3-11: a paste into a program that never reads stdin holds the input lock on a blocked PTY write, with more of it
+// queued. Ctrl-C must overtake both, stop the program within a second, and every key keeps a final journal entry.
 func TestCtrlCOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	manager, root, shell := realManager(t)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "paste", Command: shellCommand(shell, root, "exec sleep 30")})
@@ -755,25 +755,33 @@ func TestCtrlCOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	if _, err := manager.Attach(created.ID, "att_paste", 0); err != nil {
 		t.Fatal(err)
 	}
-	paste := bytes.Repeat([]byte("x\n"), 128<<10)
-	pasted := make(chan InputDecision, 1)
+	key := func(sequence uint64) InputKey {
+		return InputKey{ClientID: "cli", AttachmentID: "att_paste", Generation: created.Generation, InputSequence: sequence}
+	}
+	chunk := bytes.Repeat([]byte("x\n"), 64<<10)
+	decisions := make(chan InputDecision, 2)
 	go func() {
-		key := InputKey{ClientID: "cli", AttachmentID: "att_paste", Generation: created.Generation, InputSequence: 1}
-		decision, _ := manager.WriteContext(context.Background(), created.ID, key, paste)
-		pasted <- decision
+		decision, _ := manager.WriteContext(context.Background(), created.ID, key(1), chunk)
+		decisions <- decision
+		decision, _ = manager.WriteContext(context.Background(), created.ID, key(2), chunk)
+		decisions <- decision
 	}()
 	time.Sleep(300 * time.Millisecond)
+	started := time.Now()
+	if !manager.Interrupt(created.ID, key(3), 3) {
+		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
+	}
+	// The stream worker writes in order: the stuck chunk ends, the queued one, then the Ctrl-C itself.
+	stuck, queued := <-decisions, <-decisions
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	started := time.Now()
-	key := InputKey{ClientID: "cli", AttachmentID: "att_paste", Generation: created.Generation, InputSequence: 2}
-	decision, err := manager.WriteContext(ctx, created.ID, key, []byte{3})
-	if err != nil || decision.Status != InputAccepted || time.Since(started) > time.Second {
-		t.Fatalf("Ctrl-C behind a stuck paste: decision=%#v err=%v after %s", decision, err, time.Since(started))
+	interrupt, err := manager.WriteContext(ctx, created.ID, key(3), []byte{3})
+	if err != nil || interrupt.Status != InputAccepted || time.Since(started) > time.Second {
+		t.Fatalf("Ctrl-C behind a stuck paste: decision=%#v err=%v after %s", interrupt, err, time.Since(started))
 	}
-	// Final, so the client never resends a paste the user interrupted.
-	if paste := <-pasted; paste.Status != InputAccepted || paste.WriteError != "interrupted" || paste.BytesWritten >= 256<<10 {
-		t.Fatalf("interrupted paste decision: %#v", paste)
+	// Final, so the client never resends a paste the user interrupted; nothing of the queued chunk was written.
+	if stuck.Status != InputAccepted || stuck.WriteError != "interrupted" || queued.Status != InputAccepted || queued.WriteError != "interrupted" || queued.BytesWritten != 0 {
+		t.Fatalf("interrupted paste decisions: %#v %#v", stuck, queued)
 	}
 	waitState(t, manager, created.ID, Exited)
 }

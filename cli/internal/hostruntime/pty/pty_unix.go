@@ -186,8 +186,9 @@ func (p *Process) writeInterruptible(data []byte, deadline time.Time) (int, erro
 // reads fills the tty queue and the interrupt key would wait behind it forever. With ISIG on and key the VINTR
 // character it stops the pending write, discards the queued input (unless NOFLSH) and sends SIGINT to the
 // foreground process group. It reports false, changing nothing, when the terminal would not treat key as an
-// interrupt (raw mode, another VINTR), so the caller writes the byte normally.
-func (p *Process) Interrupt(key byte) (bool, error) {
+// interrupt (raw mode, another VINTR), so the caller writes the byte normally. accepted runs once the key is known
+// to be an interrupt, before the pending write is stopped, so the caller can mark later queued input as discarded.
+func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	raw, err := p.file.SyscallConn()
 	if err != nil {
 		return false, err
@@ -202,6 +203,9 @@ func (p *Process) Interrupt(key byte) (bool, error) {
 	}
 	if termios.Lflag&unix.ISIG == 0 || termios.Cc[unix.VINTR] != key {
 		return false, nil
+	}
+	if accepted != nil {
+		accepted()
 	}
 	p.interrupts.Add(1)
 	if err := p.file.SetWriteDeadline(time.Now()); err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -770,5 +771,67 @@ func TestServeAnswersAProbeHeartbeat(t *testing.T) {
 	}
 	if frame.Type != "heartbeat" || frame.RequestID != "probe_7" {
 		t.Fatalf("first frame after the probe = %s %q, want the probe's heartbeat (and none for the plain heartbeat)", frame.Type, frame.RequestID)
+	}
+}
+
+type blockingControl struct {
+	handlerFunc
+	release chan struct{}
+}
+
+func (h blockingControl) HandleControl(context.Context, Authorization, protocol.Frame) operation.Outcome {
+	<-h.release
+	return operation.Outcome{Result: json.RawMessage(`{}`)}
+}
+
+// A frame whose handling blocks (a PTY write behind a program that does not read) must not stop the connection
+// reading: a probe heartbeat is still answered at once.
+func TestBlockedFrameDoesNotStopTheConnectionReading(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	handler := blockingControl{handlerFunc: func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+		return operation.Outcome{}
+	}, release: release}
+	journal, err := operation.NewJournal(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Journal:    journal,
+		Authorizer: authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
+			return Authorization{JournalBinding: "blocked-test"}, nil
+		}),
+		Handler: handler, MaxConcurrent: 1, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, peer := net.Pipe()
+	defer client.Close()
+	go func() { _ = server.Serve(peer) }()
+	hello(t, client)
+	if err := protocol.WriteFrame(client, protocol.Frame{Type: "detach", RequestID: "req_detach", Version: "1.0", Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	probe := make(chan error, 1)
+	go func() {
+		if err := protocol.WriteFrame(client, protocol.Frame{Type: "heartbeat", RequestID: "probe_1", Version: "1.0"}); err != nil {
+			probe <- err
+			return
+		}
+		frame, err := protocol.ReadFrame(client)
+		if err == nil && (frame.Type != "heartbeat" || frame.RequestID != "probe_1") {
+			err = fmt.Errorf("got %#v", frame)
+		}
+		probe <- err
+	}()
+	select {
+	case err := <-probe:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe not answered while a frame was blocked")
 	}
 }

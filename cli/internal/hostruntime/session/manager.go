@@ -88,6 +88,7 @@ type managedSession struct {
 	inputMu          sync.Mutex
 	persistMu        sync.Mutex
 	liveProcess      atomic.Pointer[liveProcess]
+	interrupt        atomic.Pointer[InputKey] // the interrupt key Interrupt delivered ahead of stuck input
 	id               string
 	name             string
 	supportReference atomic.Pointer[string]

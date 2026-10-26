@@ -277,6 +277,16 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 			return nil, err
 		}
 		return json.Marshal(struct{ V0 InputDecision }{v0})
+	case "Interrupt":
+		var args struct {
+			Sessionid string
+			Key       InputKey
+			Data      byte
+		}
+		if err := decodeRemoteRequest(body, &args); err != nil {
+			return nil, ErrInvalidSession
+		}
+		return json.Marshal(struct{ V0 bool }{m.Interrupt(args.Sessionid, args.Key, args.Data)})
 	case "InputSequence":
 		var args struct {
 			Sessionid    string

@@ -172,7 +172,7 @@ func (r *Router) Call(ctx context.Context, op string, body json.RawMessage) (jso
 		return r.attach(ctx, op, body)
 	case "Snapshot", "SnapshotAtGeneration":
 		return r.snapshot(ctx, op, body)
-	case "BrowserScreenAttachment", "Detach", "DetachParticipantAtGeneration", "AttachmentOwnedBy", "Next", "WaitNext", "Acknowledge", "AcknowledgeAtGeneration", "AttachmentStatus", "Write", "InputSequence", "WriteStream", "QueryInput", "Resize", "ResizeParticipantAtGeneration", "Signal", "Clear", "ClearAtGeneration", "Close", "CloseAtGeneration":
+	case "BrowserScreenAttachment", "Detach", "DetachParticipantAtGeneration", "AttachmentOwnedBy", "Next", "WaitNext", "Acknowledge", "AcknowledgeAtGeneration", "AttachmentStatus", "Write", "Interrupt", "InputSequence", "WriteStream", "QueryInput", "Resize", "ResizeParticipantAtGeneration", "Signal", "Clear", "ClearAtGeneration", "Close", "CloseAtGeneration":
 		return r.forwardBySession(ctx, op, body)
 	default:
 		return nil, session.ErrInvalidSession

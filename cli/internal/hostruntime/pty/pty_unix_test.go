@@ -239,7 +239,7 @@ func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	go func() { _, err := process.Write(paste); written <- err }()
 	time.Sleep(300 * time.Millisecond)
 	start := time.Now()
-	handled, err := process.Interrupt(0x03)
+	handled, err := process.Interrupt(0x03, nil)
 	if err != nil || !handled {
 		t.Fatalf("interrupt: handled=%v err=%v", handled, err)
 	}
@@ -270,7 +270,7 @@ func TestInterruptLeavesRawModeInputAlone(t *testing.T) {
 	process, _ := startShell(t, `stty raw -isig; sleep 30`)
 	defer process.Terminate(context.Background(), time.Second)
 	time.Sleep(300 * time.Millisecond)
-	if handled, err := process.Interrupt(0x03); handled || err != nil {
+	if handled, err := process.Interrupt(0x03, nil); handled || err != nil {
 		t.Fatalf("raw mode interrupt: handled=%v err=%v", handled, err)
 	}
 }

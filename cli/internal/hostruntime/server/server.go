@@ -143,6 +143,24 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 	readerDone := make(chan struct{})
 	defer close(readerDone)
 	go readFrames(conn, frames, readerDone)
+	// One worker handles frames in arrival order, so a PTY write stuck behind a program that does not read never
+	// stops this loop reading: heartbeats are still answered and an interrupt key can overtake the stuck input.
+	work := make(chan readResult, connectionWorkQueue)
+	failed := make(chan error, 1)
+	var busy atomic.Bool
+	defer close(work)
+	go func() {
+		for result := range work {
+			busy.Store(true)
+			err := s.serveFrame(result, connectionCtx, writer, authorizer, conn, terminalState, selected)
+			busy.Store(false)
+			if err != nil {
+				failed <- err
+				cancelConnection()
+				return
+			}
+		}
+	}()
 	heartbeat := time.NewTicker(s.config.HeartbeatInterval)
 	defer heartbeat.Stop()
 	for {
@@ -151,6 +169,8 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 			return ErrServerStopped
 		case <-terminalState.expired:
 			return &protocol.Error{Code: protocol.CredentialExpired, Cause: errors.New("terminal credential expired")}
+		case err := <-failed:
+			return err
 		case <-heartbeat.C:
 			requestID := "heartbeat"
 			if err := writer.write(protocol.Frame{Type: "heartbeat", RequestID: requestID, Version: protocol.ProtocolVersion}); err != nil {
@@ -160,14 +180,7 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 			if result.err != nil {
 				return result.err
 			}
-			if len(result.binary) != 0 {
-				if err := s.handleTerminalDataWithWriter(connectionCtx, result.binary, terminalState, writer); err != nil {
-					return err
-				}
-				continue
-			}
-			switch result.frame.Type {
-			case "heartbeat":
+			if len(result.binary) == 0 && result.frame.Type == "heartbeat" {
 				// A probe (a client checking its connection on resume, with its own deadline) gets the
 				// same heartbeat back at once, ahead of queued output. Other heartbeats, including a
 				// client's echo of ours, need no answer.
@@ -177,38 +190,62 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 					}
 				}
 				continue
-			case "ack", "detach":
-				s.handleControl(result.frame, writer, authorizer)
-			case "cancel":
-				cancelCtx, cancel := context.WithTimeout(s.ctx, min(s.config.MutationDeadline, 5*time.Second))
-				authorization, authErr := authorizer.Authorize(cancelCtx, result.frame)
-				authorityUnavailable := reportAuthorizationFailure(cancelCtx, authErr)
-				cancel()
-				if authErr != nil {
-					if authorityUnavailable {
-						_ = writer.write(errorFrame(result.frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
-					} else {
-						_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
-					}
-					continue
-				}
-				if authorization.JournalBinding == "" {
-					_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
-					continue
-				}
-				s.cancelOperation(operationKey(authorization.JournalBinding, result.frame.OperationID))
-				_ = writer.write(protocol.Frame{Type: "response", RequestID: result.frame.RequestID, Version: protocol.ProtocolVersion, OperationID: result.frame.OperationID, Payload: json.RawMessage(`{"canceled":true}`)})
-			case "request":
-				if !selected[result.frame.Capability] {
-					_ = writer.write(errorFrame(result.frame.RequestID, "capability_required", "capability was not negotiated", false))
-					continue
-				}
-				s.startRequest(result.frame, writer, authorizer, connectionCtx, conn, terminalState)
-			default:
-				_ = writer.write(errorFrame(result.frame.RequestID, "invalid_request", "unexpected frame", false))
+			}
+			if len(result.binary) != 0 && busy.Load() {
+				s.interruptTerminalInput(connectionCtx, result.binary, terminalState)
+			}
+			select {
+			case work <- result:
+			case err := <-failed:
+				return err
+			case <-s.ctx.Done():
+				return ErrServerStopped
 			}
 		}
 	}
+}
+
+// connectionWorkQueue holds more frames than a client leaves unanswered (256 input chunks), so only a client that
+// ignores its own window fills it; the read loop then waits for the worker, as it always did.
+const connectionWorkQueue = 512
+
+// serveFrame handles one frame of a connection, in arrival order.
+func (s *Server) serveFrame(result readResult, connectionCtx context.Context, writer *lockedWriter, authorizer Authorizer, conn Connection, terminalState *terminalConnectionState, selected map[string]bool) error {
+	if len(result.binary) != 0 {
+		return s.handleTerminalDataWithWriter(connectionCtx, result.binary, terminalState, writer)
+	}
+	switch result.frame.Type {
+	case "ack", "detach":
+		s.handleControl(result.frame, writer, authorizer)
+	case "cancel":
+		cancelCtx, cancel := context.WithTimeout(s.ctx, min(s.config.MutationDeadline, 5*time.Second))
+		authorization, authErr := authorizer.Authorize(cancelCtx, result.frame)
+		authorityUnavailable := reportAuthorizationFailure(cancelCtx, authErr)
+		cancel()
+		if authErr != nil {
+			if authorityUnavailable {
+				_ = writer.write(errorFrame(result.frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
+			} else {
+				_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
+			}
+			return nil
+		}
+		if authorization.JournalBinding == "" {
+			_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
+			return nil
+		}
+		s.cancelOperation(operationKey(authorization.JournalBinding, result.frame.OperationID))
+		_ = writer.write(protocol.Frame{Type: "response", RequestID: result.frame.RequestID, Version: protocol.ProtocolVersion, OperationID: result.frame.OperationID, Payload: json.RawMessage(`{"canceled":true}`)})
+	case "request":
+		if !selected[result.frame.Capability] {
+			_ = writer.write(errorFrame(result.frame.RequestID, "capability_required", "capability was not negotiated", false))
+			return nil
+		}
+		s.startRequest(result.frame, writer, authorizer, connectionCtx, conn, terminalState)
+	default:
+		_ = writer.write(errorFrame(result.frame.RequestID, "invalid_request", "unexpected frame", false))
+	}
+	return nil
 }
 
 func (s *Server) handleControl(frame protocol.Frame, writer *lockedWriter, authorizer Authorizer) {

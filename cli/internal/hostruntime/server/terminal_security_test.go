@@ -131,3 +131,36 @@ func TestRevokedTerminalBindingRejectsDataFrames(t *testing.T) {
 		t.Fatalf("handler calls: input=%d ack=%d resize=%d", handler.inputs, handler.acks, handler.resizes)
 	}
 }
+
+type interruptRecorder struct {
+	terminalSecurityHandler
+	keys []uint64
+}
+
+func (h *interruptRecorder) InterruptTerminalInput(_ context.Context, _ Authorization, _, _ string, _, sequence uint64, _ byte) bool {
+	h.keys = append(h.keys, sequence)
+	return true
+}
+
+// While the frame worker is stuck writing input, the read loop offers a lone byte of the next input frame as an
+// interrupt; longer input, already written sequences and other frames are left to the worker.
+func TestBusyStreamOffersALoneByteAsAnInterrupt(t *testing.T) {
+	handler := &interruptRecorder{}
+	server := &Server{config: Config{Handler: handler}}
+	state := boundTerminalState(7)
+	state.streams[7].inputSequence = 4
+	for _, frame := range []protocol.TerminalInputFrame{
+		{StreamID: 7, Sequence: 5, Data: []byte{3}},
+		{StreamID: 7, Sequence: 5, Data: []byte("ls")},
+		{StreamID: 7, Sequence: 4, Data: []byte{3}},
+		{StreamID: 9, Sequence: 5, Data: []byte{3}},
+	} {
+		message, _ := protocol.EncodeTerminalInput(frame, nil)
+		server.interruptTerminalInput(context.Background(), message, state)
+	}
+	resize, _ := protocol.EncodeTerminalResize(protocol.TerminalResizeFrame{StreamID: 7, Columns: 80, Rows: 24, Sequence: 1}, nil)
+	server.interruptTerminalInput(context.Background(), resize, state)
+	if len(handler.keys) != 1 || handler.keys[0] != 5 {
+		t.Fatalf("interrupts offered: %v", handler.keys)
+	}
+}

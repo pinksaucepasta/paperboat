@@ -209,8 +209,12 @@ type attachmentControl struct {
 	NextSequence uint64 `json:"next_sequence,omitempty"`
 }
 
+func (d *Dispatcher) mayType(authorization Authorization, sessionID, attachmentID string, generation uint64) bool {
+	return !(authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || isGenerationBoundTerminal(authorization) && generation != authorization.TerminalGeneration || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)))
+}
+
 func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Authorization, sessionID, attachmentID string, generation, inputSequence uint64, data []byte) (session.InputDecision, error) {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || isGenerationBoundTerminal(authorization) && generation != authorization.TerminalGeneration || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)) {
+	if !d.mayType(authorization, sessionID, attachmentID, generation) {
 		return session.InputDecision{InputSequence: inputSequence}, session.ErrInvalidInput
 	}
 	decision, err := d.config.Sessions.Write(sessionID, session.InputKey{ClientID: authorization.ClientID, AttachmentID: attachmentID, Generation: generation, InputSequence: inputSequence}, data)
@@ -221,6 +225,12 @@ func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Author
 		decision.InputSequence = inputSequence
 	}
 	return decision, err
+}
+
+// InterruptTerminalInput delivers a lone interrupt key ahead of input still queued for the stream; the key's own
+// input frame follows in order and is answered from the journal.
+func (d *Dispatcher) InterruptTerminalInput(_ context.Context, authorization Authorization, sessionID, attachmentID string, generation, inputSequence uint64, data byte) bool {
+	return d.mayType(authorization, sessionID, attachmentID, generation) && d.config.Sessions.Interrupt(sessionID, session.InputKey{ClientID: authorization.ClientID, AttachmentID: attachmentID, Generation: generation, InputSequence: inputSequence}, data)
 }
 
 func (d *Dispatcher) HandleTerminalACK(_ context.Context, authorization Authorization, sessionID, attachmentID string, nextSequence uint64) error {

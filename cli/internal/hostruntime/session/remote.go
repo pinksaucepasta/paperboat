@@ -218,6 +218,15 @@ func (m *RemoteManager) Write(sessionID string, key InputKey, data []byte) (Inpu
 	}{sessionID, key, data}, &out)
 	return out.V0, err
 }
+func (m *RemoteManager) Interrupt(sessionID string, key InputKey, data byte) bool {
+	var out struct{ V0 bool }
+	err := m.invoke(context.Background(), "Interrupt", struct {
+		Sessionid string
+		Key       InputKey
+		Data      byte
+	}{sessionID, key, data}, &out)
+	return err == nil && out.V0
+}
 func (m *RemoteManager) InputSequence(sessionID, clientID, attachmentID string, generation uint64) (uint64, error) {
 	var out struct{ V0 uint64 }
 	err := m.invoke(context.Background(), "InputSequence", struct {

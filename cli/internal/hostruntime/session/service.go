@@ -30,6 +30,7 @@ type Service interface {
 	AcknowledgeAtGeneration(sessionID, attachmentID string, nextSequence, expectedGeneration uint64) error
 	AttachmentStatus(sessionID, attachmentID string) (AttachmentState, uint64, error)
 	Write(sessionID string, key InputKey, data []byte) (InputDecision, error)
+	Interrupt(sessionID string, key InputKey, data byte) bool
 	InputSequence(sessionID, clientID, attachmentID string, generation uint64) (uint64, error)
 	WriteStream(sessionID, attachmentID string, generation uint64, data []byte) error
 	QueryInput(sessionID string, key InputKey) (InputDecision, error)

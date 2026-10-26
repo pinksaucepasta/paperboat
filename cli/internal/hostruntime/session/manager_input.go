@@ -26,16 +26,8 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	// every PTY chunk: under a flood (yes) a keystroke or Ctrl-C would never get it. The live
 	// process is published atomically and cleared before Closing, so a running generation is all
 	// input needs; the journal and fanout have their own locks.
-	// A lone interrupt key that finds input busy (a paste the program never reads) is delivered the way the line
-	// discipline would, ahead of the stuck write; it keeps its journal entry but its byte is not written again.
-	interrupted := false
-	if !session.inputMu.TryLock() {
-		if len(data) == 1 {
-			interrupted = interruptStuckInput(session, data[0])
-		}
-		if err := pty.LockInput(ctx, &session.inputMu); err != nil {
-			return InputDecision{}, err
-		}
+	if err := pty.LockInput(ctx, &session.inputMu); err != nil {
+		return InputDecision{}, err
 	}
 	defer session.inputMu.Unlock()
 	live := session.liveProcess.Load()
@@ -44,8 +36,17 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 		return InputDecision{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
 	var process io.Writer = live.process
-	if interrupted {
-		process = deliveredInput{}
+	if interrupt := session.interrupt.Load(); interrupt != nil && sameInputCursor(*interrupt, key) && key.InputSequence != 0 {
+		// Interrupt already delivered this key; input queued before it was discarded with the tty queue.
+		switch {
+		case key.InputSequence < interrupt.InputSequence:
+			process = discardedInput{}
+		case key.InputSequence == interrupt.InputSequence:
+			process = deliveredInput{}
+			session.interrupt.CompareAndSwap(interrupt, nil)
+		default:
+			session.interrupt.CompareAndSwap(interrupt, nil)
+		}
 	}
 	if attachmentState, _, err := session.fanout.Status(key.AttachmentID); err != nil || attachmentState != Attached {
 		return InputDecision{}, ErrInvalidInput
@@ -92,28 +93,47 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	return decision, nil
 }
 
-type interrupter interface{ Interrupt(byte) (bool, error) }
+type interrupter interface {
+	Interrupt(byte, func()) (bool, error)
+}
 
-func interruptStuckInput(session *managedSession, key byte) bool {
+// Interrupt delivers a lone interrupt key (key.InputSequence) ahead of input stuck behind a program that never reads:
+// a paste fills the tty queue and the key would wait behind it. When the terminal treats data as its interrupt, the
+// stuck write stops, the queue is flushed, the foreground group gets SIGINT, and the journal later records input
+// queued before key as discarded and key itself as delivered. It reports false when key must be written normally.
+func (m *Manager) Interrupt(sessionID string, key InputKey, data byte) bool {
+	session, err := m.get(sessionID)
+	if err != nil || key.InputSequence == 0 {
+		return false
+	}
 	live := session.liveProcess.Load()
-	if live == nil {
+	if live == nil || key.Generation != live.generation {
 		return false
 	}
 	process, ok := live.process.(interrupter)
 	if !ok {
 		return false
 	}
-	handled, err := process.Interrupt(key)
+	handled, err := process.Interrupt(data, func() { session.interrupt.Store(&key) })
 	if err != nil {
 		observeSessionFailure(session, "input", classifySessionFailure("input", err))
 	}
 	return handled
 }
 
+func sameInputCursor(a, b InputKey) bool {
+	return a.ClientID == b.ClientID && a.AttachmentID == b.AttachmentID && a.Generation == b.Generation
+}
+
 // deliveredInput stands in for the PTY once Interrupt has delivered the byte.
 type deliveredInput struct{}
 
 func (deliveredInput) Write(data []byte) (int, error) { return len(data), nil }
+
+// discardedInput stands in for the PTY for input an interrupt discarded before it was written.
+type discardedInput struct{}
+
+func (discardedInput) Write([]byte) (int, error) { return 0, pty.ErrInterrupted }
 
 // inputPruneBatch is how many sequenced writes pass between deletions of durable decisions that left
 // the window.
