@@ -1,12 +1,15 @@
 // Browser check for F7-06. Paste into the console of a signed-in tab on /previews (Personal
 // workspace) with a service listening on the machine (set window.__port, default 18088; the
-// machine is the dialog's default). Creates a preview from the New preview dialog, checks the
+// machine is the dialog's default, or the one named in window.__machine). Creates a preview from the New preview dialog, checks the
 // list (address, forwards-to, end time, Live), stops it from the row menu and checks the server
 // ends it, and leaves nothing running. The address stays in `window.__previewAddress` so a caller can
 // confirm from outside the page (curl) that it served before the stop and no longer serves after. Prints the steps.
 ;(async () => {
   const port = window.__port ?? "18088"
   delete window.__port
+  // Which machine's preview to create (its name); without it the dialog's default machine is used.
+  const wantedMachine = window.__machine
+  delete window.__machine
   const steps = []
   const pass = (step, ok, detail = "") => steps.push({ step, ok, detail })
   // Steps so far, readable while a long check runs or if it throws: window.__checkSteps.
@@ -46,6 +49,13 @@
   const create = await until(() => dialog()?.querySelector("#preview-port"))
   pass("New preview dialog opens", Boolean(create))
   if (!create) return steps
+  if (wantedMachine) {
+    dialog().querySelector("button.justify-between")?.click()
+    const option = await until(() => [...document.querySelectorAll("[role=option]")].find((o) => o.textContent.trim().startsWith(wantedMachine)))
+    option?.click()
+    await sleep(300)
+    pass("the preview's machine is the chosen one", Boolean(option) && dialog().innerText.includes(wantedMachine), wantedMachine)
+  }
   type(create, port)
   await sleep(300)
   button("Create preview", dialog())?.click()
