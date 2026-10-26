@@ -17,14 +17,14 @@ import (
 // offlineAdmission records every offline session decision before the host acts on it (F21-11):
 // a start that cannot be recorded is refused, so audit fails closed. A multi-account host
 // dispatches streams to per-account workers that hold no peer state of their own here, so it
-// refuses offline sessions.
+// refuses offline sessions, except SSH: the carrier serves SSH itself under its own signed rules.
 func offlineAdmission(queue *offlineaudit.Queue, dispatching bool) func(context.Context, native.OfflineAdmission) error {
 	if queue == nil {
 		return nil
 	}
 	return func(_ context.Context, request native.OfflineAdmission) error {
 		if request.Capability == sshCapability {
-			return admitOfflineSSH(queue, request, dispatching)
+			return admitOfflineSSH(queue, request)
 		}
 		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
 		var refusal error
@@ -88,16 +88,11 @@ const sshCapability = "managed_ssh"
 // admitOfflineSSH is the offline decision for a managed SSH stream. A refusal is recorded as an
 // ssh_session_refused (origin offline); an admitted session is recorded by managedssh.Host.Serve, which audits
 // every SSH session online or offline and refuses an offline one whose start cannot be recorded.
-func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission, dispatching bool) error {
-	var refusal error
-	switch {
-	case dispatching:
-		refusal = errors.New("this host does not start offline sessions")
-	case !request.Allowed:
-		refusal = errors.New("no signed scope allows this session")
-	default:
+func admitOfflineSSH(queue *offlineaudit.Queue, request native.OfflineAdmission) error {
+	if request.Allowed {
 		return nil
 	}
+	refusal := errors.New("no signed scope allows this session")
 	err := queue.Record(offlineaudit.Event{Kind: offlineaudit.KindSSHRefused, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: offlineaudit.OriginOffline, Reason: managedssh.RefusedNoAccess})
 	return errors.Join(refusal, err)
 }

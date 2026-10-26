@@ -117,7 +117,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	peer, err := newProductionNativePeerService(productionNativePeerConfig{
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
 		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(registration.InstallationGeneration),
-		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage,
+		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
 	})
 	if err != nil {
 		return nil, err

@@ -99,6 +99,10 @@ func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
 	if err := offlineAdmission(queue, false)(context.Background(), admission); err != nil {
 		t.Fatalf("a scoped offline SSH start was refused: %v", err)
 	}
+	// F5-08: a carrier (dispatching) serves SSH itself, so it admits a scoped offline SSH start too.
+	if err := offlineAdmission(queue, true)(context.Background(), admission); err != nil {
+		t.Fatalf("a carrier refused a scoped offline SSH start: %v", err)
+	}
 
 	events := queue.Oldest(20)
 	kinds := []string{}
