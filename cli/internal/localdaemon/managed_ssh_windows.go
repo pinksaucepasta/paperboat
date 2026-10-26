@@ -35,9 +35,9 @@ type ManagedSSHRuntime struct {
 	refresh func(context.Context, []api.UserMachine) error
 	// domain is the alias domain of the last installed OpenSSH configuration, guarded by mu after start.
 	domain *string
-	mu      sync.Mutex
-	once    sync.Once
-	err     error
+	mu     sync.Mutex
+	once   sync.Once
+	err    error
 }
 
 func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.UserMachine) (*ManagedSSHRuntime, error) {

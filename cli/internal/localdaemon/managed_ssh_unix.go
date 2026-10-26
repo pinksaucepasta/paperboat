@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
@@ -78,10 +80,14 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig, machines []api.U
 		if err != nil {
 			return err
 		}
+		knownHosts := filepath.Join(cfg.RuntimeDirectory, "ssh_known_hosts")
+		if err := atomicfile.Write(knownHosts, managedSSHKnownHosts(machines, configuration.LocalAccessBaseDomain), atomicfile.CurrentOwnerOptions(0o600)); err != nil {
+			return fmt.Errorf("write managed SSH known hosts: %w", err)
+		}
 		_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
 			Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasDomain: configuration.LocalAccessBaseDomain,
 			ProxyCommand:      managedSSHProxyCommand(command),
-			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
+			KnownHostsCommand: "/bin/cat " + strconv.Quote(knownHosts),
 			AgentSocket:       agent.Socket(),
 			IdentityFile:      managedssh.ManagedIdentityPublicKeyPath(cfg.Home),
 			Targets:           managedSSHAliasTargets(machines),
