@@ -318,30 +318,59 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 				return err
 			}
 		}
-		if request.ActiveEdgeNodeID != "" && (request.ActiveEdgeNodeID != activeNode || request.ActiveEdgeProcessEpoch != activeEpoch) {
+		readyAt := func(node, epoch string) (bool, error) {
 			var ready bool
+			err := tx.QueryRow(ctx, `SELECT paperboat.runtime_carrier_valid($1,$2,$3,true)`, route, node, epoch).Scan(&ready)
+			return ready, err
+		}
+		activate := func(node, epoch string) error {
+			if _, err := tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1 AND active`, route); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1 AND edge_node_id=$2 AND edge_process_epoch=$3`, route, node, epoch); err != nil {
+				return err
+			}
+			activeNode, activeEpoch = node, epoch
+			if _, err := tx.Exec(ctx, `UPDATE control_connector_generations SET state='admitted',edge_node_id=$2,version=version+1,updated_at=now() WHERE environment_id=$1 AND connector_id='runtime'`, environment, activeNode); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE control_routes SET applied_node_id=$2,applied_revision=desired_revision,applied_generation=(SELECT generation FROM control_connector_generations WHERE environment_id=$3 AND connector_id='runtime'),version=version+1,updated_at=now() WHERE id=$1`, route, activeNode, environment)
+			return err
+		}
+		if request.ActiveEdgeNodeID != "" && (request.ActiveEdgeNodeID != activeNode || request.ActiveEdgeProcessEpoch != activeEpoch) {
 			for _, edge := range selected {
 				if edge.node == request.ActiveEdgeNodeID && edge.epoch == request.ActiveEdgeProcessEpoch {
-					err = tx.QueryRow(ctx, `SELECT paperboat.runtime_carrier_valid($1,$2,$3,true)`, route, edge.node, edge.epoch).Scan(&ready)
+					ready, err := readyAt(edge.node, edge.epoch)
 					if err != nil {
 						return err
+					}
+					if ready {
+						if err = activate(edge.node, edge.epoch); err != nil {
+							return err
+						}
 					}
 					break
 				}
 			}
-			if ready {
-				if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1 AND active`, route); err != nil {
+		}
+		// An active carrier its edge reports not ready gives way to the pair's other edge when that
+		// one is ready; otherwise the machine is unreachable although one of its edges serves it.
+		if ready, err := readyAt(activeNode, activeEpoch); err != nil {
+			return err
+		} else if !ready {
+			for _, edge := range selected {
+				if edge.node == activeNode {
+					continue
+				}
+				other, err := readyAt(edge.node, edge.epoch)
+				if err != nil {
 					return err
 				}
-				if _, err = tx.Exec(ctx, `UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1 AND edge_node_id=$2 AND edge_process_epoch=$3`, route, request.ActiveEdgeNodeID, request.ActiveEdgeProcessEpoch); err != nil {
-					return err
-				}
-				activeNode, activeEpoch = request.ActiveEdgeNodeID, request.ActiveEdgeProcessEpoch
-				if _, err = tx.Exec(ctx, `UPDATE control_connector_generations SET state='admitted',edge_node_id=$2,version=version+1,updated_at=now() WHERE environment_id=$1 AND connector_id='runtime'`, environment, activeNode); err != nil {
-					return err
-				}
-				if _, err = tx.Exec(ctx, `UPDATE control_routes SET applied_node_id=$2,applied_revision=desired_revision,applied_generation=(SELECT generation FROM control_connector_generations WHERE environment_id=$3 AND connector_id='runtime'),version=version+1,updated_at=now() WHERE id=$1`, route, activeNode, environment); err != nil {
-					return err
+				if other {
+					if err = activate(edge.node, edge.epoch); err != nil {
+						return err
+					}
+					break
 				}
 			}
 		}

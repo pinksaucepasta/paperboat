@@ -483,6 +483,23 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err = database.SQL().QueryRowContext(ctx, `SELECT applied_node_id FROM control_routes WHERE id=$1`, route).Scan(&appliedNode); err != nil || appliedNode != backupNode {
 		t.Fatalf("late old-edge observation moved route to %q: %v", appliedNode, err)
 	}
+	// The active edge reports the carrier not ready while the other edge of the pair serves it: the
+	// next attachment moves the machine there although the agent still names the failed edge.
+	observation.Ready, backupObservation.Ready = true, false
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
+		t.Fatal(err)
+	}
+	failedOver, err := service.Attach(ctx, proof, request)
+	if err != nil || failedOver.ActiveEdgeNodeID != node {
+		t.Fatalf("not-ready active edge kept: active=%q err=%v", failedOver.ActiveEdgeNodeID, err)
+	}
+	if err = database.SQL().QueryRowContext(ctx, `SELECT applied_node_id FROM control_routes WHERE id=$1`, route).Scan(&appliedNode); err != nil || appliedNode != node {
+		t.Fatalf("route after failover=%q error=%v", appliedNode, err)
+	}
+	backupObservation.Ready = true
 	ready(true)
 	// Keep registry liveness independent of the admission-expiry scenario.
 	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, node, backupNode)
