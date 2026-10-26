@@ -35,18 +35,29 @@ points at the resource's own managed name. Edges do not forward, so a route is r
 edge serves it. When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
 the wildcards are static, so until you do, about half of new connections go to the dead edge.
 
-## Public TCP tunnel ports on the managed edges
+## Public TCP tunnel ports on the edges
 
-Raw TCP tunnels get a port from 20000-29999 on every managed edge, and the edge listens only on ports owned by a
-live public TCP tunnel. Both edge hosts therefore accept inbound TCP 20000-29999 (iptables rule
-`paperboat-public-tcp-tunnels`, inserted before the final `REJECT`, persisted in `/etc/iptables/rules.v4`; the
-previous file is kept as `rules.v4.bak-publictcp`). The cloud security lists already allow these ports; nothing
-else was opened. Re-check from outside the cloud (any host that is neither edge) with a live tunnel port:
-`nc -vz <edge-ip> <port>` succeeds for a listening tunnel port, answers `Connection refused` for an unused port
-inside the range and `No route to host` outside it (30000), which is the host `REJECT`. A timeout instead means a
-security list or the host rule is missing. If `pbh install` or a reinstall resets iptables, re-apply the rule and
-`iptables-restore --test < /etc/iptables/rules.v4`. Verified 2026-10-26 from the Hetzner control host against
-140.245.11.41 and 152.67.0.60 (port 20000 open, 25000 and 29999 refused, 30000 no route).
+Raw TCP tunnels get a port from 10000-59999 (`shared/edgeports`, the one value the server allocator, the edge
+listener, pbh and `pbh doctor` all use) and the edge listens only on ports owned by a live public TCP tunnel; it
+refuses and reports any port outside the range. The host needs three things, and `pbh install` (and every `pbh serve`
+start) sets up the first two:
+
+1. The outgoing port range above the public one: `/etc/sysctl.d/90-paperboat-edge.conf` with
+   `net.ipv4.ip_local_port_range = 60000 65535`, applied at once. pbh refuses, naming the cause, when another sysctl
+   setting overrides it.
+2. The host firewall: if ufw, firewalld, iptables/ip6tables or nftables is filtering inbound traffic, pbh adds an allow
+   rule for TCP 443 and 10000-59999 (comment `paperboat-edge`). iptables and nftables rules do not persist, so
+   `pbh serve` re-adds them on each start; ufw and firewalld keep theirs.
+3. The cloud firewall (security group, security list, VPC firewall): pbh cannot change it from the host; it prints
+   "allow inbound TCP 443 and TCP 10000-59999 from 0.0.0.0/0 (and ::/0)". Oracle Cloud lists on the managed edges
+   already allow these ports.
+
+`pbh uninstall` removes exactly what `/var/lib/paperboat-selfhost/hostnet.json` records pbh added (rules, sysctl
+file, and restores the previous outgoing range). `pbh doctor` reports each check and probes reachability of one test
+port through the control plane (`POST /v1/selfhost/port-probe`: the server connects to the node's registered public
+address and expects the nonce echoed): `timeout` means a cloud firewall drops it, `unreachable` that the host
+firewall rejects it, `refused` that the host answered with nothing listening. From outside the cloud you can also
+`nc -vz <edge-ip> <live tunnel port>`.
 
 ## DNS ownership or certificate failure
 
