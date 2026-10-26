@@ -97,6 +97,8 @@ func (s *Service) ReportOriginHealth(ctx context.Context, report tunnelmanager.O
 type EngineTunnels struct {
 	Service   *Service
 	Forwarder tunnelmanager.OriginStreamForwarder
+	// Prober checks each route's origin with the same TLS settings as Forwarder.
+	Prober tunnelmanager.OriginProber
 	// Events, when set, is the machine's tunnels topic; a tunnels change refetches at once.
 	Events *machineevents.Subscription
 
@@ -108,8 +110,8 @@ type EngineTunnels struct {
 	origins map[string]engineOrigins
 	// originInterval overrides the origin probe interval (tests); zero is the default.
 	originInterval time.Duration
-	cancel  context.CancelFunc
-	done    chan struct{}
+	cancel         context.CancelFunc
+	done           chan struct{}
 }
 
 type engineTunnel struct {
@@ -154,6 +156,11 @@ func (e *EngineTunnels) Start(ctx context.Context) error {
 	defer e.mu.Unlock()
 	if e.done != nil {
 		return errors.New("engine tunnels already started")
+	}
+	// Without an origin transport every route would be refused at serve time and no tunnel served
+	// (dev-099c1c94, 2026-10-26: step 5 dropped the wiring); fail at startup instead.
+	if e.Forwarder.Transport == nil || e.Prober == nil {
+		return errors.New("engine tunnels need an origin transport and prober")
 	}
 	browserIngress, err := tunnelmanager.NewBrowserIngressAuthority(e.Service.config.ControlURL, e.Service.auth, e.Service.config.Transport)
 	if err != nil {
@@ -357,7 +364,7 @@ func (e *EngineTunnels) reconcileOrigins(ctx context.Context) {
 			}
 			current.stop()
 		}
-		stop := tunnelmanager.StartOriginHealth(ctx, tunnelID, tunnel.routes, tunnelmanager.NetworkOriginProber{}, e.Service, cmp.Or(e.originInterval, originhealth.DefaultProbeInterval))
+		stop := tunnelmanager.StartOriginHealth(ctx, tunnelID, tunnel.routes, e.Prober, e.Service, cmp.Or(e.originInterval, originhealth.DefaultProbeInterval))
 		e.origins[tunnelID] = engineOrigins{generation: tunnel.generation, hash: tunnel.hash, stop: stop}
 	}
 	for tunnelID, current := range e.origins {

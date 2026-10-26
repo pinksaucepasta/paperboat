@@ -56,7 +56,7 @@ func TestEngineTunnelRouteRidesOnTheAgentRuntimeCarrier(t *testing.T) {
 	})
 	service, edge := startConnectedRuntimeCarrierWith(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK },
 		func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }, tunnels)
-	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}}
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, Prober: tunnelmanager.NetworkOriginProber{}}
 	if err := engine.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestEngineTunnelServesPublicTCPAndRefusesPlainStreamsOnPrivateTunnels(t *te
 	})
 	service, edge := startConnectedRuntimeCarrierWith(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK },
 		func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }, tunnels)
-	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}}
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, Prober: tunnelmanager.NetworkOriginProber{}}
 	if err := engine.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestEngineTunnelReportsAStoppedOriginAsUnreachable(t *testing.T) {
 	})
 	service, _ := startConnectedRuntimeCarrierWith(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK },
 		func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }, server)
-	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, originInterval: 20 * time.Millisecond}
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, Prober: tunnelmanager.NetworkOriginProber{}, originInterval: 20 * time.Millisecond}
 	if err := engine.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -281,5 +281,15 @@ func TestEngineTunnelReportsAStoppedOriginAsUnreachable(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("a stopped origin was never reported")
+	}
+}
+
+// dev-099c1c94 (2026-10-26): the daemon built EngineTunnels without an origin transport, so every
+// engine route was refused and no tunnel was served; Start refuses that configuration.
+func TestEngineTunnelsRefuseToStartWithoutAnOriginTransport(t *testing.T) {
+	engine := &EngineTunnels{Service: &Service{}}
+	if err := engine.Start(t.Context()); err == nil {
+		_ = engine.Shutdown(context.Background())
+		t.Fatal("engine tunnels started without an origin transport")
 	}
 }

@@ -48,6 +48,7 @@ import (
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
@@ -385,7 +386,14 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		dependencies.RuntimeAttachmentService = attachment
 		runtimeObservation.sender.carriers = attachment
-		engineTunnels = &runtimeattachment.EngineTunnels{Service: attachment, Events: machineEvents.Subscribe(machineevents.TopicTunnels)}
+		// Engine tunnels forward to their origins with the routes' TLS settings (custom CA, mTLS from
+		// the origin-credentials store) and the daemon's shared inspector store and registry.
+		prober, streams, originErr := tunnelmanager.NewOriginRuntime(tunnelmanager.CredentialStoreOriginSecretResolver{Store: clientconfig.FileSecretStore{Dir: filepath.Join(runtimeConfig.StateRoot, "origin-credentials")}}, false, nil)
+		if originErr != nil {
+			return nil, errors.Join(ErrProductionInvalid, originErr)
+		}
+		streams.Inspector, streams.Registry, streams.InspectorHTTP = inspectorStore, inspectorRegistry, inspectorService
+		engineTunnels = &runtimeattachment.EngineTunnels{Service: attachment, Forwarder: *streams, Prober: prober, Events: machineEvents.Subscribe(machineevents.TopicTunnels)}
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
 	if machineServiceObserver != nil {
