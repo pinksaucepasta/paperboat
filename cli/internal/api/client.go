@@ -318,7 +318,7 @@ func (c *Client) responseError(resp *http.Response, path, requestSupportReferenc
 	if decodeErr != nil {
 		cause = errors.Join(cause, &ResponseDecodeError{Err: decodeErr})
 	}
-	return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, RetryAfter: retryAfter(resp.Header), cause: cause})
+	return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessageFor(envelope.Error.Code, resp.StatusCode, envelope.Error.Details), ServerMessage: BoundedServerMessage(envelope.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, RetryAfter: retryAfter(resp.Header), cause: cause})
 }
 
 func safeRequestID(value string) string {

@@ -357,7 +357,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		if code == "" {
 			code = "server_error"
 		}
-		return c.workspaceRequestError(requestPath, &APIError{Status: resp.StatusCode, Code: code, Message: apiErrorMessage(code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details, cause: errorreport.HTTPStatusFailure(resp)})
+		return c.workspaceRequestError(requestPath, &APIError{Status: resp.StatusCode, Code: code, Message: apiErrorMessage(code, resp.StatusCode), ServerMessage: BoundedServerMessage(envelope.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details, cause: errorreport.HTTPStatusFailure(resp)})
 	}
 	if out == nil {
 		return nil

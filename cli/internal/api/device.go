@@ -206,7 +206,7 @@ func publicCall(ctx context.Context, baseURL, path string, body any, bearer stri
 			versionErr := &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
 			return &publicCallFailure{message: versionErr.Error(), cause: errors.Join(versionErr, statusFailure, responseCause)}
 		}
-		return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: apiErrorMessage(env.Error.Code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, env.Error.SupportReference, requestSupportReference), Details: env.Error.Details, cause: errors.Join(statusFailure, responseCause)}
+		return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: apiErrorMessage(env.Error.Code, resp.StatusCode), ServerMessage: BoundedServerMessage(env.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, env.Error.SupportReference, requestSupportReference), Details: env.Error.Details, cause: errors.Join(statusFailure, responseCause)}
 	}
 	if responseCause != nil {
 		if readErr == nil && !tooLarge && decodeErr == nil && closeErr != nil {

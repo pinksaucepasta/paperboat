@@ -506,15 +506,16 @@ func loneJoinedCause(err error) error {
 }
 
 func apiErrorFallback(err *api.APIError) string {
-	switch err.Status {
-	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusConflict:
-		return sentence(err.Error())
-	case http.StatusForbidden:
-		return "You do not have permission to perform this action. Check the selected account and target."
-	case http.StatusNotFound:
-		return "The requested Paperboat resource was not found. Refresh the available targets and retry."
-	case http.StatusTooManyRequests:
-		return "Paperboat is receiving too many requests. Wait a moment, then retry."
+	// A 4xx is the server's answer about this request: say it in its own words, with its code.
+	if code, message, ok := err.Refusal(); ok {
+		text := sentence(message)
+		if code != "" && !strings.Contains(text, code) {
+			text += " (" + code + ")"
+		}
+		if err.Status == http.StatusTooManyRequests {
+			text += " Wait a moment, then retry."
+		}
+		return text
 	}
 	if err.Status >= 500 || err.Status == 0 {
 		return "Paperboat is temporarily unavailable. Retry in a moment; if this continues, run `pb doctor`."

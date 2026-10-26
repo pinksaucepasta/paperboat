@@ -191,6 +191,9 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			break
 		}
 		result.Code = typed.PublicCode()
+		if refusal, _, ok := typed.Refusal(); ok && refusal != "" && result.Code == "api_error" {
+			result.Code = refusal // the server's own code for a 4xx
+		}
 		if supportref.Valid(typed.SupportReference) {
 			result.SupportReference = typed.SupportReference
 		}

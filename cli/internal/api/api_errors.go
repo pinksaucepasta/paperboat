@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // ErrUnauthenticated means the server rejected the reused credential. Callers
@@ -39,9 +42,12 @@ func responseRequestID(header http.Header) string {
 // server's stable error code so command logic can branch without string
 // matching on messages.
 type APIError struct {
-	Status           int
-	Code             string
-	Message          string
+	Status  int
+	Code    string
+	Message string
+	// ServerMessage is the message the server itself sent (bounded, control characters removed). Message is
+	// the client's authored text for the code; a 4xx shows the server's own words, see Refusal.
+	ServerMessage    string
 	RequestID        string
 	SupportReference string
 	Details          map[string]any
@@ -108,4 +114,37 @@ func Unreachable(err error) bool {
 	}
 	var response *APIError
 	return errors.As(err, &response) && response.Status == http.StatusServiceUnavailable
+}
+
+// BoundedServerMessage is a server error message safe to print on one line: trimmed, control characters
+// dropped, at most 256 characters.
+func BoundedServerMessage(message string) string {
+	var out []rune
+	for _, r := range strings.TrimSpace(message) {
+		if unicode.IsControl(r) {
+			continue
+		}
+		if out = append(out, r); len(out) == 256 {
+			break
+		}
+	}
+	return string(out)
+}
+
+var serverCodeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// Refusal is what the server said about a 4xx request: its own code and message, so a refusal is never hidden
+// behind a generic failure. The session refusal (401) and the update gate (426) have their own handling; the code
+// is returned only when it has the shape of a server constant; with no server message there is no refusal to show.
+func (e *APIError) Refusal() (code, message string, ok bool) {
+	if e == nil || e.Status < 400 || e.Status > 499 || e.Status == http.StatusUnauthorized || e.Status == http.StatusUpgradeRequired {
+		return "", "", false
+	}
+	if e.ServerMessage == "" {
+		return "", "", false
+	}
+	if serverCodeShape.MatchString(e.Code) {
+		code = e.Code
+	}
+	return code, e.ServerMessage, true
 }
