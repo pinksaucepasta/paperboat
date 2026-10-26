@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -525,7 +526,12 @@ func publishCredentialLocation(defaultDir, dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := atomicWrite(filepath.Join(filepath.Dir(defaultDir), "credentials-location.json"), append(b, '\n'), 0o600); err != nil {
+	path := filepath.Join(filepath.Dir(defaultDir), "credentials-location.json")
+	b = append(b, '\n')
+	if current, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(current, b) {
+		return nil // every command opens the store; rewriting (two fsyncs) an unchanged file only costs time
+	}
+	if err := atomicWrite(path, b, 0o600); err != nil {
 		return fmt.Errorf("publish shared credential location: %w", err)
 	}
 	return nil

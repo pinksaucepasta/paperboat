@@ -1032,4 +1032,19 @@ func TestPublishCredentialLocation(t *testing.T) {
 	if !configTestPathsEqual(string(b), customDir) {
 		t.Fatalf("location = %s", b)
 	}
+	// An unchanged location is not rewritten (atomicWrite would replace the file); a changed one is.
+	path := filepath.Join(root, "paperboat", "credentials-location.json")
+	before, _ := os.Stat(path)
+	if err := publishCredentialLocation(defaultDir, customDir); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.Stat(path); !os.SameFile(before, after) {
+		t.Fatal("an unchanged credential location was rewritten")
+	}
+	if err := publishCredentialLocation(defaultDir, defaultDir); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.Stat(path); os.SameFile(before, after) {
+		t.Fatal("a changed credential location was not written")
+	}
 }
