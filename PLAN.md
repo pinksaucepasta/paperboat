@@ -4963,3 +4963,6 @@ Results: tools/device-smoke/results/tunnel-entry-20261027.json and tunnel-privat
 
 2026-10-27 | SDK lane C126 diagnostics | Moved to own lanesdkhp-a/b on hp (pbvm3 unreachable), dev-6ca3b523 hash verified; C126 still fails local_io before listener. A lists B tunnel; doctor healthy, no matching hostd/runtime journal lines ±30s.
 Capture tools/device-smoke/results/tunnel-private-access-hp-20261027.json sent to Merger; fixture tunnel/origin removed, hp pair retained, no other containers touched. No product edits; waits for Merger fix.
+
+2026-10-27 | SDK lane C126 fix verification | dev-8f6a24c4 amd64 SHA62170556: hp in-place install/identity preservation PASS both; tunnel-manage/preview-manage PASS, C126 still refuses before listener.
+Exact output/result tunnel-private-access-8f6a24c4-20261027.json sent to Merger; C126 stays unticked. Recreating a ready fixture for their server discovery diagnosis; no product edits.
