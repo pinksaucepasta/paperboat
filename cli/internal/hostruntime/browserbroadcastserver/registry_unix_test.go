@@ -730,3 +730,58 @@ func waitPublisherClosed(t *testing.T, closed <-chan struct{}) {
 		t.Fatal("publisher stream was not closed")
 	}
 }
+
+// The browser that joins first does so inside a request with a deadline. The shared output stream must outlive
+// that request: the carrier resets a stream whose open context ends, and every browser then lost its terminal
+// about 10 s after attaching (web lane, prod 13:51Z).
+func TestPublisherStreamOutlivesTheJoiningRequest(t *testing.T) {
+	root := t.TempDir()
+	adapter, err := pty.NewAdapter(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := session.NewManager(session.ManagerConfig{Launch: func(command pty.Command) (session.PTYProcess, error) { return adapter.Start(command) }, MaxSessions: 1, MaxAttachments: 8, HistoryBytes: 1 << 20, AttachmentBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("requires /bin/sh")
+	}
+	created, err := manager.Create(context.Background(), session.CreateRequest{Name: "shared", Command: pty.Command{Path: "/bin/sh", Args: []string{"-c", "exec sleep 30"}, CWD: root, Env: []string{"PATH=/usr/bin:/bin", "TERM=xterm"}, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewRegistry(manager, func(context.Context) (ed25519.PrivateKey, error) { return private, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	opened := make(chan context.Context, 1)
+	r.SetPublisher(func(ctx context.Context, _ string) (io.WriteCloser, error) { opened <- ctx; return writer, nil })
+	browser := session.Participant{AttachmentID: "browser_a", AccountID: "account_a", ClientID: "browser_a", Role: "owner", ConnectedAt: time.Now(), Browser: true}
+	if _, err := manager.AttachLiveParticipantAtGeneration(created.ID, browser, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	request, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	if _, err := r.Join(request, created.ID, created.Generation, browser.AttachmentID); err != nil {
+		t.Fatal(err)
+	}
+	streamCtx := <-opened
+	<-request.Done()
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	if err := streamCtx.Err(); err != nil {
+		t.Fatalf("the shared output stream ended with the joining request: %v", err)
+	}
+	r.Leave(created.ID, browser.AttachmentID)
+}

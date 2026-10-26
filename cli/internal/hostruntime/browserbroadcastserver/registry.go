@@ -111,19 +111,23 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	if err != nil {
 		return nil, classifiedFailure(err, streamOpenStage, sessionCode)
 	}
-	publisher, err := r.open(ctx, sessionID)
-	if err != nil {
-		return nil, classifiedFailure(err, streamOpenStage, transportCode)
-	}
-	producerAttachment := "broadcast_" + hex.EncodeToString(epoch.ID[:])
-	if _, err = r.manager.AttachLive(sessionID, producerAttachment); err != nil {
-		return nil, classifiedFailure(errors.Join(err, publisher.Close()), streamOpenStage, sessionCode)
-	}
 	diagnosticCtx := context.WithoutCancel(ctx)
 	if !supportref.Valid(supportref.FromContext(diagnosticCtx)) {
 		diagnosticCtx = supportref.WithContext(diagnosticCtx, supportref.New())
 	}
 	runCtx, cancel := context.WithCancel(diagnosticCtx)
+	// The stream lives as long as the publication, not the joining browser's request: the carrier resets a
+	// stream whose open context ends, which dropped every browser 10 s after the first one attached.
+	publisher, err := r.open(runCtx, sessionID)
+	if err != nil {
+		cancel()
+		return nil, classifiedFailure(err, streamOpenStage, transportCode)
+	}
+	producerAttachment := "broadcast_" + hex.EncodeToString(epoch.ID[:])
+	if _, err = r.manager.AttachLive(sessionID, producerAttachment); err != nil {
+		cancel()
+		return nil, classifiedFailure(errors.Join(err, publisher.Close()), streamOpenStage, sessionCode)
+	}
 	updates := make(chan Epoch, 1)
 	updates <- epoch
 	p := &publication{sessionID: sessionID, generation: generation, attachmentID: producerAttachment, epoch: epoch, subscribers: map[string]chan Epoch{attachmentID: updates}, stream: publisher, cancel: cancel, diagnosticCtx: diagnosticCtx}
