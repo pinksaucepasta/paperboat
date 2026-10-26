@@ -87,7 +87,7 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 				response.Body.Close()
 			}
 		}
-		return BrowserTerminalAdmission{}, failure("transport", status, err)
+		return BrowserTerminalAdmission{}, failure("dial", status, err)
 	}
 	connection.SetReadLimit(16 << 10)
 	request, err := json.Marshal(struct {
@@ -101,10 +101,12 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 	}
 	defer clearControlBytes(request)
 	firstCtx, stopFirst := context.WithTimeout(ctx, 15*time.Second)
+	stage := "first_write"
 	err = connection.Write(firstCtx, websocket.MessageText, request)
 	var kind websocket.MessageType
 	var raw []byte
 	if err == nil {
+		stage = "first_read"
 		kind, raw, err = connection.Read(firstCtx)
 	}
 	stopFirst()
@@ -115,7 +117,7 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 	}
 	if err != nil || kind != websocket.MessageText {
 		connection.CloseNow()
-		return BrowserTerminalAdmission{}, failure("transport", 0, err)
+		return BrowserTerminalAdmission{}, failure(stage, 0, err)
 	}
 	defer clearControlBytes(raw)
 	var reply struct {

@@ -157,13 +157,15 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	kind, raw, err := connection.Read(firstCtx)
 	cancel()
 	if err != nil || kind != websocket.MessageText {
+		warnInvalidEdgeAdmission(r.Context(), "first_read", err)
 		_ = connection.Close(websocket.StatusPolicyViolation, "invalid admission")
 		return
 	}
 	var input EdgeControlRequest
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF {
+	if err := decoder.Decode(&input); err != nil || decoder.Decode(new(any)) != io.EOF {
+		warnInvalidEdgeAdmission(r.Context(), "decode", err)
 		_ = connection.Close(websocket.StatusPolicyViolation, "invalid admission")
 		return
 	}
@@ -308,6 +310,12 @@ func reportEdgeAdmissionFailure(ctx context.Context, err error) {
 		return
 	}
 	supportreport.CaptureFromContext(ctx, "paperboat-server", "http_terminal", "service_error", "terminal_host_unavailable", err)
+}
+
+// warnInvalidEdgeAdmission names the step at which the edge's first control message failed; the error text (which
+// could echo the ticket) is never logged, only whether the 5 s first-read deadline ran out.
+func warnInvalidEdgeAdmission(ctx context.Context, stage string, err error) {
+	serverdiagnostics.LoggerWithRequest(ctx, slog.Default()).WarnContext(ctx, "browser terminal edge admission invalid", "stage", stage, "deadline_exceeded", errors.Is(err, context.DeadlineExceeded))
 }
 
 func edgeAdmissionReason(err error) string {

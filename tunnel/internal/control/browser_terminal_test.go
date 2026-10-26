@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -137,5 +139,95 @@ func TestBrowserTerminalLiveAdmissionReportsWhyItEnded(t *testing.T) {
 	}
 	if reason := admission.EndReason(); reason != "revoked" {
 		t.Fatalf("end reason = %q, want revoked", reason)
+	}
+}
+
+// Production reaches the control plane through a reverse proxy. The server reads the edge's admission first and
+// gives up after 5 s, so the edge must write its request as soon as the upgrade completes, and the bytes must survive
+// a proxy that only forwards them.
+func TestBrowserTerminalAdmissionCrossesAByteForwardingProxy(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.CloseNow()
+		firstCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		kind, _, err := connection.Read(firstCtx)
+		cancel()
+		if err != nil || kind != websocket.MessageText {
+			_ = connection.Close(websocket.StatusPolicyViolation, "invalid admission")
+			return
+		}
+		if connection.Write(r.Context(), websocket.MessageText, []byte(`{"credential":"host-credential","terminal_session_id":"term_1","attachment_id":"attach_1"}`)) != nil {
+			return
+		}
+		_, _, _ = connection.Read(r.Context())
+	}))
+	defer server.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			downstream, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			upstream, err := net.Dial("tcp", server.Listener.Addr().String())
+			if err != nil {
+				downstream.Close()
+				continue
+			}
+			go func() { _, _ = io.Copy(upstream, downstream); upstream.Close() }()
+			go func() { _, _ = io.Copy(downstream, upstream); downstream.Close() }()
+		}
+	}()
+	httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: "https://" + listener.Addr().String(), Credential: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Timeout: 3 * time.Second, Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &BrowserTerminalClient{HTTP: httpClient, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	admission, err := client.Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test")
+	if err != nil || admission.Credential != "host-credential" {
+		t.Fatalf("admission through proxy: %v", err)
+	}
+	admission.Close()
+}
+
+// Each step of the admission fails with its own category, so a failure says where it stopped.
+func TestBrowserTerminalAdmissionFailureNamesItsStep(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"dial": func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		},
+		"first_read": func(w http.ResponseWriter, r *http.Request) {
+			connection, err := websocket.Accept(w, r, nil)
+			if err == nil {
+				_, _, _ = connection.Read(r.Context())
+				connection.CloseNow()
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewTLSServer(handler)
+			defer server.Close()
+			httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Timeout: 3 * time.Second, Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &BrowserTerminalClient{HTTP: httpClient, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			_, err = client.Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test")
+			var failure *RequestFailure
+			if !errors.As(err, &failure) || failure.Category != name {
+				t.Fatalf("got %#v, want category %s", err, name)
+			}
+		})
 	}
 }
