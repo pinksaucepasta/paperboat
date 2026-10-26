@@ -29,7 +29,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type runtimeObservationService struct {

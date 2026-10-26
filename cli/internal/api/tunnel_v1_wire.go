@@ -16,7 +16,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func redactTunnelMetadata(value map[string]any, depth int) (map[string]any, error) {

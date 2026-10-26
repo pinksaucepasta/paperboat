@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func TestAPIClientCarriesInvocationTraceAndSupportReference(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 const fileIndexSupportReference = "support_00000000-0000-4000-8000-000000000002"

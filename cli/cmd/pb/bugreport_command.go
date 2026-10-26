@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	bugreportpkg "github.com/pinksaucepasta/paperboat/internal/bugreport"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
 )
 

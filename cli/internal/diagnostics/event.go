@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 const EventSchemaV1 = "paperboat.diagnostic-event/v1"

@@ -29,7 +29,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)

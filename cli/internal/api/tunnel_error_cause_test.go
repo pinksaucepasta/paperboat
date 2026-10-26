@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func TestTunnelMalformedErrorResponseRetainsProtocolCauseAndReference(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	xterm "github.com/gitpod-io/xterm-go"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func (m *Manager) Close(ctx context.Context, sessionID string) (Snapshot, error) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"google.golang.org/grpc/metadata"
 )
 

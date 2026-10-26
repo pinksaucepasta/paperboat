@@ -22,9 +22,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/windows"
 )

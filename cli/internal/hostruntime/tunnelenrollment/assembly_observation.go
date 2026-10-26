@@ -7,7 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func openObservedProductionAssembly(ctx context.Context, config tunnelmanager.ProductionAssemblyConfig) (*tunnelmanager.ProductionAssembly, error) {

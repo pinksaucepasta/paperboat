@@ -6,7 +6,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func inventoryRefreshObserver(ctx context.Context, recorder *diagnostics.Recorder) func(error) {

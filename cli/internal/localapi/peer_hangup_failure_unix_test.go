@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type failedWatchConnection struct {

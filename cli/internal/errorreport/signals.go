@@ -12,8 +12,8 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type signalLimit struct {

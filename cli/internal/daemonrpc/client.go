@@ -4,7 +4,7 @@ import (
 	"context"
 
 	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )

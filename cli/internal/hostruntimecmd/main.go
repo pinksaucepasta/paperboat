@@ -14,8 +14,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 // MaintenanceBusyExitCode preserves a pre-stop refusal across Unix elevation.

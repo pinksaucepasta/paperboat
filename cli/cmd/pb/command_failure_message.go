@@ -19,8 +19,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 // boundedBrowserLoginFailure looks for a browserLoginFailure in an error chain without trusting its

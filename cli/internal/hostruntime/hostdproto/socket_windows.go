@@ -19,7 +19,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
 )
 

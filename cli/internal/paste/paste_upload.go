@@ -12,7 +12,7 @@ import (
 	"time"
 
 	transfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 // rewrite returns the paste body to emit. If the body is one-or-more local

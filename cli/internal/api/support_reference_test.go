@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func TestControlRequestPropagatesAndPreservesSupportReference(t *testing.T) {

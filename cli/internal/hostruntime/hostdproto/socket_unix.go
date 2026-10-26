@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 var (

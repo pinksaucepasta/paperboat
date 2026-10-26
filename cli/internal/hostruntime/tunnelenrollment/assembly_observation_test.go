@@ -19,7 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type recoveryOrigins struct{}

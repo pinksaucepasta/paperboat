@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"io"
 	"strings"
 	"syscall"

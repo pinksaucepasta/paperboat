@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 // Preserve only the finite bootstrap contract and non-secret binding tuple.

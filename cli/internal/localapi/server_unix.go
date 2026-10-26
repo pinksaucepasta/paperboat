@@ -17,7 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 var errLocalServiceStopping = errors.New("local Paperboat service is restarting")

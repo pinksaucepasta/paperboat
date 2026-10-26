@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 func TestReproductionMarkersRetainInvocationReference(t *testing.T) {

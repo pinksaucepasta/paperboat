@@ -15,7 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
 )
 

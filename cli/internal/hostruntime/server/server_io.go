@@ -10,7 +10,7 @@ import (
 	pberrors "github.com/pinksaucepasta/paperboat/internal/hostruntime/errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type readResult struct {

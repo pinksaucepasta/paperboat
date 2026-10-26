@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
 type supportRoundTripFunc func(*http.Request) (*http.Response, error)

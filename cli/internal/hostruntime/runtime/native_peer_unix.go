@@ -31,8 +31,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=optional-authorized-relay-region
 	"tailscale.com/tailcfg"
 )
