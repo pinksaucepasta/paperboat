@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -342,5 +343,41 @@ func TestRenewingTokenSourceRecordsRenewalFailure(t *testing.T) {
 	defer metric.mu.Unlock()
 	if metric.count != 1 {
 		t.Fatalf("renewal failure metric=%v", metric.count)
+	}
+}
+
+// A revoked machine's renewal is refused with 401: the error is that observed refusal, so the daemon says
+// signed out at once instead of "control plane unavailable" for ~45 s (C036).
+func TestRenewingTokenSourceKeepsTheRefusalOfARevokedMachine(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/helper-enrollments":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"helper_id": "hlp_1", "machine_id": "machine_1", "environment_id": "env_1", "credential": "initial-helper-credential-012345678901234567890", "expires_at": now.Add(5 * time.Minute)}})
+		case "/v1/helper-identity-renewals":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "machine_revoked", "message": "revoked"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	if err := makeEnrollmentStateRootPrivateForTest(root); err != nil {
+		t.Fatal("protect enrollment test state root")
+	}
+	client, _ := NewClient(server.Client().Transport, time.Second)
+	if _, err := client.Enroll(context.Background(), Config{ControlURL: server.URL, StateRoot: root, EnrollmentCredential: "grant-credential-012345678901234567890"}); err != nil {
+		t.Fatal(err)
+	}
+	source, err := NewRenewingTokenSource(RenewingTokenConfig{ControlURL: server.URL, StateRoot: root, Transport: server.Client().Transport, RenewBefore: 10 * time.Minute, Timeout: time.Second, Clock: func() time.Time { return now }, OperationID: func() (string, error) { return "op_renew_0002", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = source.Token(context.Background())
+	fault := errorreport.ProjectFault(context.Background(), "paperboatd", "machine_control", "control_request", "control_request_failed", err)
+	if err == nil || fault.HTTPStatus != http.StatusUnauthorized || fault.Outcome != "rejected" {
+		t.Fatalf("refused renewal err=%v status=%d outcome=%q", err, fault.HTTPStatus, fault.Outcome)
 	}
 }

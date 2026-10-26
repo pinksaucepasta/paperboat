@@ -172,7 +172,9 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			return "", ErrInvalid
+			// The observed refusal is the error: it is how the daemon tells a revoked machine (signed out
+			// now) from a control plane it cannot reach.
+			return "", errorreport.HTTPStatusFailure(response)
 		}
 		return "", unavailableEnrollment(errorreport.HTTPStatusFailure(response))
 	}
