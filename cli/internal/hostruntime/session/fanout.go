@@ -35,6 +35,7 @@ type attachmentCursor struct {
 	// backpressure: the controlling owner, whose queue holds the PTY back (WaitRoom) so it sees every byte. Any
 	// other attachment runs free and lags (backlog dropped, ErrAttachmentLagged) instead of slowing the program.
 	backpressure bool
+	owner        bool // may become the controller (SetController)
 	lagged       bool
 	progressAt   time.Time
 	maxBytes     uint64
@@ -72,9 +73,38 @@ func (f *Fanout) Attach(attachmentID string, maxPendingBytes uint64) error {
 	return f.attach(attachmentID, maxPendingBytes, true, false)
 }
 
-// AttachBackpressured attaches the controlling owner: the PTY waits for it instead of dropping its output.
+// AttachBackpressured attaches an owner terminal. It paces the PTY only while it is the controller: the first
+// owner attached becomes the controller, a later one only once it types (SetController). A reconnect never takes
+// control from the terminal in use, and a second, idle window never slows the first.
 func (f *Fanout) AttachBackpressured(attachmentID string, maxPendingBytes uint64) error {
-	return f.attach(attachmentID, maxPendingBytes, true, true)
+	if err := f.attach(attachmentID, maxPendingBytes, true, false); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attachments[attachmentID].owner = true
+	for _, cursor := range f.attachments {
+		if cursor.backpressure && cursor.state == Attached {
+			return nil
+		}
+	}
+	f.attachments[attachmentID].backpressure = true
+	return nil
+}
+
+// SetController makes attachmentID, an owner terminal that just typed, the one attachment that paces the PTY.
+func (f *Fanout) SetController(attachmentID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	target, ok := f.attachments[attachmentID]
+	if !ok || target.state != Attached || target.backpressure || !target.owner {
+		return
+	}
+	for _, cursor := range f.attachments {
+		cursor.backpressure = false
+	}
+	target.backpressure, target.progressAt = true, time.Now()
+	notify(f.room)
 }
 
 // WaitRoom holds the producer until every backpressured attachment has room for size more bytes. An owner

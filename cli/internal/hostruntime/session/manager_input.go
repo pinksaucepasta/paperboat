@@ -75,6 +75,8 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if err != nil {
 		return decision, err
 	}
+	// The owner terminal that types is the one in use: it paces the output from now on.
+	session.fanout.SetController(key.AttachmentID)
 	if m.config.Store != nil {
 		persisted := store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError}
 		if persistErr := m.config.Store.UpdateInputDecision(context.Background(), persisted); persistErr != nil {

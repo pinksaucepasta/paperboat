@@ -13,7 +13,7 @@ func FuzzFanoutMatchesQueueModel(f *testing.F) {
 		fanout := NewFanout()
 		type modelAttachment struct {
 			attached bool
-			evicted  bool
+			evicted  bool // lagged: told once on the next read
 			maxBytes uint64
 			queue    []history.Event
 		}
@@ -25,7 +25,7 @@ func FuzzFanoutMatchesQueueModel(f *testing.F) {
 			switch operation % 4 {
 			case 0:
 				maxBytes := uint64(operation/4%8 + 1)
-				err := fanout.AttachBackpressured(id, maxBytes)
+				err := fanout.Attach(id, maxBytes)
 				if state != nil && state.attached {
 					if err != ErrAttachmentExists {
 						t.Fatalf("attach existing %s: %v", id, err)
@@ -68,7 +68,7 @@ func FuzzFanoutMatchesQueueModel(f *testing.F) {
 						queued += uint64(len(item.Data))
 					}
 					if uint64(length) > candidate.maxBytes-queued {
-						candidate.attached, candidate.evicted, candidate.queue = false, true, nil
+						candidate.evicted, candidate.queue = true, nil // lagged: backlog dropped, still attached
 					} else {
 						candidate.queue = append(candidate.queue, event)
 					}
@@ -82,6 +82,13 @@ func FuzzFanoutMatchesQueueModel(f *testing.F) {
 					continue
 				}
 				got, ok, err := fanout.Next(id)
+				if state.evicted {
+					if err != ErrAttachmentLagged {
+						t.Fatalf("lagged next %v: %v", id, err)
+					}
+					state.evicted = false
+					continue
+				}
 				if len(state.queue) == 0 {
 					if err != nil || ok {
 						t.Fatalf("empty next %s: event=%+v ok=%v err=%v", id, got, ok, err)

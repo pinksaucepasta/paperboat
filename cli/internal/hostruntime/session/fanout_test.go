@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 )
@@ -354,5 +355,36 @@ func TestFreeRunningAttachmentLagsInsteadOfEviction(t *testing.T) {
 	}
 	if state, _, err := f.Status("viewer"); err != nil || state != Attached {
 		t.Fatalf("state=%s err=%v", state, err)
+	}
+}
+
+// Of two owner terminals, only the controller paces output: the first attached, until the other one types. A
+// stalled second window never holds the program back.
+func TestOnlyTheControllingOwnerPacesOutput(t *testing.T) {
+	f := NewFanout()
+	f.AttachBackpressured("first", 3)
+	f.AttachBackpressured("second", 3)
+	f.Publish(history.Event{StartSequence: 0, EndSequence: 3, Data: []byte("abc")})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started := time.Now()
+	f.WaitRoom(ctx, 1, 300*time.Millisecond) // "first" is full and is the controller: waits
+	if time.Since(started) < 250*time.Millisecond {
+		t.Fatal("the controller's full queue did not hold the producer")
+	}
+	f.SetController("second")
+	if _, ok, err := f.Next("second"); err != nil || !ok {
+		t.Fatalf("second drain ok=%v err=%v", ok, err)
+	}
+	started = time.Now()
+	f.WaitRoom(ctx, 1, 300*time.Millisecond) // "first" is full but no longer the controller
+	if time.Since(started) > 100*time.Millisecond {
+		t.Fatal("a stalled non-controller held the producer")
+	}
+	if evictions, err := f.Publish(history.Event{StartSequence: 3, EndSequence: 4, Data: []byte("d")}); err != nil || len(evictions) != 0 {
+		t.Fatalf("the stalled non-controller was evicted: %#v %v", evictions, err)
+	}
+	if _, _, err := f.Next("first"); !errors.Is(err, ErrAttachmentLagged) {
+		t.Fatalf("stalled non-controller: %v, want lagged", err)
 	}
 }

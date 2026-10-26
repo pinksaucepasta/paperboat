@@ -13,7 +13,7 @@ func TestFanoutRapidStateMachine(t *testing.T) {
 		fanout := NewFanout()
 		type attachment struct {
 			attached bool
-			evicted  bool
+			evicted  bool // lagged: told once on the next read
 			maxBytes uint64
 			queue    []history.Event
 		}
@@ -25,7 +25,7 @@ func TestFanoutRapidStateMachine(t *testing.T) {
 			switch operation % 4 {
 			case 0:
 				limit := uint64(operation/4%16 + 1)
-				err := fanout.AttachBackpressured(id, limit)
+				err := fanout.Attach(id, limit)
 				if state != nil && state.attached {
 					if err != ErrAttachmentExists {
 						t.Fatalf("attach existing %q: %v", id, err)
@@ -67,7 +67,7 @@ func TestFanoutRapidStateMachine(t *testing.T) {
 						queued += uint64(len(item.Data))
 					}
 					if uint64(length) > candidate.maxBytes-queued {
-						candidate.attached, candidate.evicted, candidate.queue = false, true, nil
+						candidate.evicted, candidate.queue = true, nil // lagged: backlog dropped, still attached
 					} else {
 						candidate.queue = append(candidate.queue, event)
 					}
@@ -78,6 +78,13 @@ func TestFanoutRapidStateMachine(t *testing.T) {
 					continue
 				}
 				got, ok, err := fanout.Next(id)
+				if state.evicted {
+					if err != ErrAttachmentLagged {
+						t.Fatalf("lagged next %v: %v", id, err)
+					}
+					state.evicted = false
+					continue
+				}
 				if len(state.queue) == 0 {
 					if err != nil || ok {
 						t.Fatalf("empty next %q: event=%+v ok=%v err=%v", id, got, ok, err)
