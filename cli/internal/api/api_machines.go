@@ -56,6 +56,7 @@ type UserMachine struct {
 	SSHLocalCode  string       `json:"-"`
 	SSHUser       string       `json:"-"`
 	SSHPort       uint16       `json:"-"`
+	SSHHostKeys   []string     `json:"-"`
 }
 
 // MachineSSH is the managed SSH target an inventory item carries; HostKeyGeneration is 0 until
@@ -65,6 +66,8 @@ type MachineSSH struct {
 	Port              uint16 `json:"port"`
 	TargetGeneration  uint64 `json:"target_generation"`
 	HostKeyGeneration uint64 `json:"host_key_generation"`
+	// HostKeys is the active host key set (public keys), so known_hosts needs no request per connection.
+	HostKeys []string `json:"host_keys,omitempty"`
 }
 
 // CurrentSSH returns the listed SSH target when it is complete and belongs to the machine's

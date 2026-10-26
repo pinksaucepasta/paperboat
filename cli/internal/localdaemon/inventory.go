@@ -422,6 +422,7 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			SSHReadiness:      sshReadiness(machine, generation),
 			SSHUser:           machine.SSHUser,
 			SSHPort:           machine.SSHPort,
+			SSHHostKeys:       machine.SSHHostKeys,
 			NATMappingIPv4:    "unknown",
 			NATMappingIPv6:    "unknown",
 			CaptivePortal:     "unknown",

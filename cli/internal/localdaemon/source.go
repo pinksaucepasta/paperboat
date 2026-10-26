@@ -284,7 +284,7 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 		if !machine.Online || machine.State == "revoked" || machine.State == "deleted" || !ok {
 			continue
 		}
-		machine.SSHUser, machine.SSHPort = ssh.OSUser, ssh.Port
+		machine.SSHUser, machine.SSHPort, machine.SSHHostKeys = ssh.OSUser, ssh.Port, ssh.HostKeys
 		machine.SSHAuthority = api.SSHAuthority{TargetGeneration: ssh.TargetGeneration, HostKeyGeneration: ssh.HostKeyGeneration}
 	}
 	return machines

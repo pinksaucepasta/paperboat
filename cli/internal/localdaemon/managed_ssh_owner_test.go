@@ -129,8 +129,8 @@ func TestSnapshotCarriesTheSSHDomainAndTarget(t *testing.T) {
 	if snapshot, _ := store.Snapshot(t.Context()); snapshot.SSHDomain != "example.test" {
 		t.Fatalf("domain = %q", snapshot.SSHDomain)
 	}
-	machines := applyListedSSH([]api.UserMachine{{ID: "machine_1", Alias: "m", State: "ready", Online: true, InstallationGeneration: 3, SSH: &api.MachineSSH{OSUser: "pbt", Port: 2222, TargetGeneration: 3}}})
-	if status := mapMachines(machines); len(status) != 1 || status[0].SSHUser != "pbt" || status[0].SSHPort != 2222 {
+	machines := applyListedSSH([]api.UserMachine{{ID: "machine_1", Alias: "m", State: "ready", Online: true, InstallationGeneration: 3, SSH: &api.MachineSSH{OSUser: "pbt", Port: 2222, TargetGeneration: 3, HostKeyGeneration: 3, HostKeys: []string{"ssh-ed25519 AAAA"}}}})
+	if status := mapMachines(machines); len(status) != 1 || status[0].SSHUser != "pbt" || status[0].SSHPort != 2222 || len(status[0].SSHHostKeys) != 1 {
 		t.Fatalf("status = %+v", status)
 	}
 }

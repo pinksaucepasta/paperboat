@@ -235,11 +235,15 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	if _, err := managedssh.ValidateDestinationPort(portText, target.Port); err != nil {
 		return err
 	}
-	set, err := client.ManagedSSHHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
-	if err != nil {
-		return friendlyCommandError(err)
+	hostKeys := machine.SSHHostKeys // from the daemon's inventory (F5-07)
+	if len(hostKeys) == 0 {
+		set, err := client.ManagedSSHHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+		hostKeys = set.Keys
 	}
-	keys, err := managedssh.ParseHostPublicKeys(set.Keys)
+	keys, err := managedssh.ParseHostPublicKeys(hostKeys)
 	if err != nil {
 		return err
 	}

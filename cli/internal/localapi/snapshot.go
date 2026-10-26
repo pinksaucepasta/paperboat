@@ -174,6 +174,7 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 	for index := range copy.Machines {
 		copy.Machines[index].Health = cloneHealth(snapshot.Machines[index].Health)
 		copy.Machines[index].TransportConsumers = append([]TransportConsumer(nil), snapshot.Machines[index].TransportConsumers...)
+		copy.Machines[index].SSHHostKeys = append([]string(nil), snapshot.Machines[index].SSHHostKeys...)
 		if snapshot.Machines[index].LastObservedAt != nil {
 			observed := *snapshot.Machines[index].LastObservedAt
 			copy.Machines[index].LastObservedAt = &observed

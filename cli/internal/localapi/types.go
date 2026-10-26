@@ -297,6 +297,8 @@ type MachineStatus struct {
 	// SSHUser and SSHPort are the machine's managed SSH target (its setup user and sshd port) when listed.
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPort uint16 `json:"ssh_port,omitempty"`
+	// SSHHostKeys is the machine's active SSH host key set, for the CLI's known_hosts helper.
+	SSHHostKeys []string `json:"ssh_host_keys,omitempty"`
 	NATMappingIPv4     string              `json:"nat_mapping_ipv4"`
 	NATMappingIPv6     string              `json:"nat_mapping_ipv6"`
 	CaptivePortal      string              `json:"captive_portal"`

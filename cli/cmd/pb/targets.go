@@ -387,7 +387,7 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 	if err != nil || !status.Eligible || status.Generation == 0 || status.RuntimeState != "ready" {
 		return api.UserMachine{}, false
 	}
-	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation), SSHUser: status.SSHUser, SSHPort: status.SSHPort}, true
+	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: true, InstallationGeneration: int64(status.Generation), SSHUser: status.SSHUser, SSHPort: status.SSHPort, SSHHostKeys: status.SSHHostKeys}, true
 }
 
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
