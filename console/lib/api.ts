@@ -7,6 +7,8 @@ import type { components, paths } from "@/lib/api-schema"
 import { queryKeys } from "@/lib/query-keys"
 import { usageParams, type UsagePeriod } from "@/lib/usage-period"
 import { useWorkspaceId } from "@/lib/workspace"
+import { withDeadline } from "@/lib/deadline"
+import { sessionVerdict } from "@/lib/session-verdict"
 import { fetchMachineList, type MachinePages } from "@/lib/machine-pages"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
@@ -30,9 +32,10 @@ const readTimeoutMs = 30_000
  * "Failed to fetch"; people are told what happened instead. Cancelled requests stay cancelled.
  */
 export async function send(input: string, init?: RequestInit): Promise<Response> {
-  // A read the server never answers would hang its page; writes, streams and uploads set their own.
+  // A read the server never answers would hang its page, so reads always have a deadline (a
+  // caller's signal adds cancellation, it doesn't remove it); writes, streams and uploads don't.
   const reads = !init?.method || init.method === "GET"
-  const signal = init?.signal ?? (reads ? AbortSignal.timeout(readTimeoutMs) : undefined)
+  const signal = reads ? withDeadline(init?.signal, readTimeoutMs) : (init?.signal ?? undefined)
   try {
     return await fetch(input, { ...init, signal })
   } catch (error) {
@@ -43,20 +46,33 @@ export async function send(input: string, init?: RequestInit): Promise<Response>
   }
 }
 
+/**
+ * After a 401, asks `/me` what it meant (sessionVerdict): returns when the session is valid, sends
+ * an ended session to sign-in, and throws an outage as an error the page can retry.
+ */
+export async function confirmSession(): Promise<void> {
+  const session = await send("/api/v1/me", { headers: { accept: "application/json" } })
+  const verdict = sessionVerdict(session.status)
+  if (verdict === "valid") return
+  if (verdict === "ended") {
+    const here = window.location.pathname + window.location.search
+    // Sign-in is a route handler that redirects to WorkOS, so it needs a full navigation.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign(`/auth/sign-in?return_to=${encodeURIComponent(here)}`)
+    throw new ApiError(401, "unauthenticated", "Your session ended.")
+  }
+  throw new ApiError(session.status, "unavailable", "Paperboat is temporarily unavailable. Try again.")
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await send(`/api/v1/${path}`, {
     ...init,
     headers: { accept: "application/json", ...init?.headers },
   })
   if (response.status === 401) {
-    // Unknown paths also answer 401 (NOTES.md), so only an ended session goes to sign-in.
-    const session = await send("/api/v1/me", { headers: { accept: "application/json" } })
-    if (session.status !== 401) throw new ApiError(404, "not_found", "This isn't available yet.")
-    const here = window.location.pathname + window.location.search
-    // Sign-in is a route handler that redirects to WorkOS, so it needs a full navigation.
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.assign(`/auth/sign-in?return_to=${encodeURIComponent(here)}`)
-    throw new ApiError(401, "unauthenticated", "Your session ended.")
+    // Unknown paths also answer 401 (NOTES.md): with the session confirmed, this one is missing.
+    await confirmSession()
+    throw new ApiError(404, "not_found", "This isn't available yet.")
   }
   const body = (await response.json().catch(() => null)) as {
     data?: T

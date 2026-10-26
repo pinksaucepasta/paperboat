@@ -1,4 +1,5 @@
 import "server-only"
+import { withDeadline } from "@/lib/deadline"
 
 /** Session cookies are issued by the control plane; the console only relays them. */
 export const sessionCookieNames = ["__Host-pb-session", "pb-dev-session"] as const
@@ -20,13 +21,21 @@ export function controlPlaneUrl(pathAndQuery: string): URL {
   return new URL(pathAndQuery, `${serverOrigin()}/`)
 }
 
-/** Fetches a control-plane endpoint with a bounded deadline unless the caller owns cancellation. */
-export function controlPlaneFetch(pathAndQuery: string, init: RequestInit = {}): Promise<Response> {
+/**
+ * Fetches a control-plane endpoint with a bounded deadline; a caller's signal adds cancellation and
+ * keeps the deadline. Streams and file transfers pass `{ deadline: false }`: the browser's
+ * disconnect (their signal) is their only end.
+ */
+export function controlPlaneFetch(
+  pathAndQuery: string,
+  init: RequestInit = {},
+  { deadline = true }: { deadline?: boolean } = {},
+): Promise<Response> {
   return fetch(controlPlaneUrl(pathAndQuery), {
     ...init,
     cache: "no-store",
     redirect: "manual",
-    signal: init.signal ?? AbortSignal.timeout(requestTimeoutMs),
+    signal: deadline ? withDeadline(init.signal, requestTimeoutMs) : init.signal,
   })
 }
 

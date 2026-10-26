@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { ApiError, idempotencyKey, send } from "@/lib/api"
+import { ApiError, confirmSession, idempotencyKey, send } from "@/lib/api"
 
 // Workspace policy and API tokens. Contract: shared/policy/README.md ("HTTP API", "API tokens").
 // Hand-written types until the server documents these endpoints in openapi.json.
@@ -116,15 +116,8 @@ async function call<T>(step: string, path: string, init?: RequestInit & { json?:
       ...(rest.method && rest.method !== "GET" && { "idempotency-key": idempotencyKey() }),
     },
   })
-  if (response.status === 401) {
-    const session = await send("/api/v1/me", { headers: { accept: "application/json" } })
-    if (session.status === 401) {
-      const here = window.location.pathname + window.location.search
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`/auth/sign-in?return_to=${encodeURIComponent(here)}`)
-      throw new ApiError(401, "unauthenticated", "Your session ended.")
-    }
-  }
+  // A 401 with a valid session is the policy API's own refusal, read below like any error.
+  if (response.status === 401) await confirmSession()
   const body = (await response.json().catch(() => null)) as {
     data?: T
     error?: { code?: string; message?: string; details?: PolicyError["details"] }

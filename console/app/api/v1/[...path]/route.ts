@@ -69,17 +69,20 @@ async function relay(request: Request, { params }: Context): Promise<Response> {
     const route = path.join("/")
     const fileUpload = unsafe && /^(previews\/files|machines\/[^/]+\/inbox)$/.test(route)
     const fileDownload = request.method === "GET" && /^machines\/[^/]+\/inbox\/[^/]+\/content$/.test(route)
-    upstream = await controlPlaneFetch(`/v1/${path.join("/")}${search}`, {
-      method: request.method,
-      headers,
-      body: fileUpload ? request.body : unsafe ? await request.arrayBuffer() : undefined,
-      ...(fileUpload && { duplex: "half" }),
-      // Event streams and file transfers stay open; the browser's disconnect is their only deadline.
-      signal:
-        fileUpload || fileDownload || request.headers.get("accept") === "text/event-stream"
-          ? request.signal
-          : undefined,
-    })
+    // Event streams and file transfers stay open; the browser's disconnect is their only deadline.
+    // Everything else also ends when the browser goes away, and has the deadline.
+    const open = fileUpload || fileDownload || request.headers.get("accept") === "text/event-stream"
+    upstream = await controlPlaneFetch(
+      `/v1/${path.join("/")}${search}`,
+      {
+        method: request.method,
+        headers,
+        body: fileUpload ? request.body : unsafe ? await request.arrayBuffer() : undefined,
+        ...(fileUpload && { duplex: "half" }),
+        signal: request.signal,
+      },
+      { deadline: !open },
+    )
   } catch {
     return problem(503, "unavailable", "Paperboat is temporarily unavailable.")
   }
