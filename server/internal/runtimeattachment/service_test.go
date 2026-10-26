@@ -403,7 +403,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
-	exec(`UPDATE runtime_carrier_attachments SET observed_at=now()-interval '31 seconds' WHERE route_id=$1`, route)
+	exec(`UPDATE runtime_carrier_attachments SET observed_at=now()-interval '121 seconds' WHERE route_id=$1`, route)
 	ready(false)
 	if _, err = database.Queries().GetActiveHelperRouteForEnvironment(ctx, env); err == nil {
 		t.Fatal("stale browser route remained ready")

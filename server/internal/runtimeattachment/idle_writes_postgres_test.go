@@ -74,3 +74,37 @@ func TestUnchangedAttachmentWritesNoRowsOnPostgres(t *testing.T) {
 		t.Fatal("an admission past half its lifetime was not renewed")
 	}
 }
+
+// Readiness accepts a carrier observation up to 2 minutes old (edges refresh an unchanged one every minute), but
+// never on observed_at alone: a stale edge heartbeat or an observation past 2 minutes is not ready (migration 188).
+func TestCarrierReadinessNeedsAFreshHeartbeatNextToAnOldObservationOnPostgres(t *testing.T) {
+	f := newAgentFixture(t, "readiness")
+	a, err := f.service.Attach(f.ctx, f.proof, f.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.Observe(f.ctx, f.edge, []runtimewire.Observation{{RouteID: f.route, SessionID: a.Admission.Binding.SessionID, AttachmentGeneration: a.Admission.AttachmentGeneration, Ready: true}}); err != nil {
+		t.Fatal(err)
+	}
+	valid := func() bool {
+		t.Helper()
+		var ok bool
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT paperboat.runtime_carrier_valid($1,$2,$3,true)`, f.route, f.node, f.edge.ProcessEpoch).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	f.exec(t, `UPDATE runtime_carrier_attachments SET observed_at=now()-interval '90 seconds' WHERE route_id=$1 AND edge_node_id=$2`, f.route, f.node)
+	if !valid() {
+		t.Fatal("a 90 s old ready observation with a live edge heartbeat is not valid")
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now()-interval '45 seconds' WHERE id=$1`, f.node)
+	if valid() {
+		t.Fatal("an old observation with a stale edge heartbeat is still valid")
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now() WHERE id=$1`, f.node)
+	f.exec(t, `UPDATE runtime_carrier_attachments SET observed_at=now()-interval '130 seconds' WHERE route_id=$1 AND edge_node_id=$2`, f.route, f.node)
+	if valid() {
+		t.Fatal("an observation older than 2 minutes is still valid")
+	}
+}

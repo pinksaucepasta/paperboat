@@ -163,8 +163,9 @@ SELECT EXISTS(SELECT 1 FROM assignment)`,
 }
 
 // ObservationRefresh is how stale an unchanged edge observation may get before it is written again; readers
-// treat an observation as current for at least 15 s (tunnelv1 health projection).
-const ObservationRefresh = 10 * time.Second
+// accept one up to 2 minutes old next to the edge's heartbeat and epoch (preview_routes, migration 188; tunnelv1
+// health projection).
+const ObservationRefresh = time.Minute
 
 // IsRouteTx reports whether a route id names an endpoint route (as opposed to a runtime route).
 func IsRouteTx(ctx context.Context, tx *db.Tx, routeID string) (bool, error) {

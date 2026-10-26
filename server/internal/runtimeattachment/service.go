@@ -424,9 +424,10 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 	return append(out, routes...), nil
 }
 
-// observationRefresh is how often an unchanged ready observation is written
-// again; readers treat a ready carrier as fresh for 30 seconds.
-const observationRefresh = 10 * time.Second
+// observationRefresh is how stale an unchanged carrier observation may get before it is written again.
+// Readiness accepts an observation up to 2 minutes old (runtime_carrier_valid, migration 188) because a dead
+// edge is caught by its node heartbeat and a restart by its epoch; a change is always written at once.
+const observationRefresh = time.Minute
 
 // PullEndpoints returns the endpoint route admissions of the edge's snapshot (the routes of the
 // agents' runtime carriers on this edge). An edge with CapabilityEndpointDeltas gets them grouped by

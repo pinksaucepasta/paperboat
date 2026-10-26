@@ -66,7 +66,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  UNION ALL
  -- A tunnel on the endpoint engine (PLAN 3a step 4): its route on each edge where the agent's
  -- runtime carrier holds it, observed ready by that edge.
- SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '15 seconds', false
+ SELECT x.observed_ready AND x.observed_at>$3::timestamptz-interval '2 minutes', false
  FROM endpoint_edge_assignments x
  JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
  JOIN endpoint_routes er ON er.id=x.route_id AND er.tunnel_route_id=r.id

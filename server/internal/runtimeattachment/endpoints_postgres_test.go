@@ -257,6 +257,16 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if after := assignmentVersions(); after != observedVersions {
 		t.Fatalf("unchanged observations and attachments rewrote the assignments: %s -> %s", observedVersions, after)
 	}
+	// An endpoint route's readiness never rests on observed_at alone: with the edge's heartbeat stale the route
+	// is not served even though its observation is fresh (migration 188).
+	if got := served(); len(got) == 0 {
+		t.Fatal("observed route not served")
+	}
+	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now()-interval '45 seconds' WHERE id=$1`, node)
+	if got := served(); len(got) != 0 {
+		t.Fatalf("a route on an edge with a stale heartbeat is still served: %v", got)
+	}
+	exec(`UPDATE control_tunnel_nodes SET last_heartbeat_at=now() WHERE id=$1`, node)
 	// Served only where observed: DNS and browser access can never name the unobserved edge.
 	if got := served(); len(got) != 1 || got[0] != node+"/edge_ready" {
 		t.Fatalf("preview_routes = %v, want only %s/edge_ready", got, node)
@@ -333,7 +343,7 @@ SELECT $1,$2,'epoch_usage',$3,$4,x.route_generation,'egress',4096,4096,now(),now
 	if err := database.SQL().QueryRowContext(ctx, `SELECT resource_kind||'/'||resource_id||'/'||machine_id FROM resource_bandwidth_events WHERE operation_id='edge:'||$1`, usage).Scan(&attributed); err != nil || attributed != "preview/"+lease+"/"+machine {
 		t.Fatalf("endpoint-route bandwidth attributed as %q, %v; want preview/%s/%s", attributed, err, lease, machine)
 	}
-	exec(`UPDATE endpoint_edge_assignments SET observed_at=now()-interval '31 seconds' WHERE endpoint_id=$1`, lease)
+	exec(`UPDATE endpoint_edge_assignments SET observed_at=now()-interval '121 seconds' WHERE endpoint_id=$1`, lease)
 	if got := served(); len(got) != 0 {
 		t.Fatalf("a route the edge stopped observing is still served: %v", got)
 	}
