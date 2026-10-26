@@ -21,7 +21,7 @@ import (
 func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr]string) {
 	peers := make(map[key.NodePublic]netip.Addr)
 	admitted := make(map[netip.Addr]string)
-	for _, p := range a.current.Peers {
+	for _, p := range a.installedPeersLocked() {
 		pub, _ := publicKey(p.Identity.WireGuardPublicKey)
 		address := netip.MustParseAddr(p.Identity.VirtualAddress)
 		peers[pub] = address
@@ -41,7 +41,7 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 // endpoints the server delivered (PLAN 3b "Direct paths without a relay"). Peers without endpoints have none.
 func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
 	contacts := make(map[key.NodePublic]mesh.PeerContact)
-	for _, p := range a.current.Peers {
+	for _, p := range a.installedPeersLocked() {
 		if len(p.Endpoints) == 0 {
 			continue
 		}

@@ -2,7 +2,7 @@
 # ssh_live_revoke.sh HOST BINARY  (check id: ssh-live-revoke, CHECKLIST F5-10)
 # Revoking access ends open SSH sessions (F5-10). Pairs two FRESH throwaway containers on HOST (as
 # ssh_other_user.sh), the target with OpenSSH; the client opens `pb ssh <target>` running a long command, then
-# `pb logout` revokes its CLI session. The open session must end within 15 s and pb must say access was revoked.
+# `pb logout` revokes its CLI session. The open session must end within 15 s and pb must say access was revoked ("access to <m> was revoked").
 # Prints one JSON line {"check":"ssh-live-revoke",...}; machines revoked by exact id, containers removed on exit.
 set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
@@ -71,7 +71,7 @@ ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < 
 res=$(ssh "$HOST" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 600 bash /home/pbt/run.sh $ALIAS" 2>&1)
 detail=$(grep -E "^(domain=|RESULT)" <<<"$res" | tr '\n' ' ')
 secs=$(sed -n 's/^RESULT seconds=\([0-9.]*\) .*/\1/p' <<<"$res")
-if [ -n "$secs" ] && python3 -c "import sys; sys.exit(0 if float('$secs') <= 15 else 1)" && grep -q "alive=no" <<<"$res" && grep -qi "access was revoked" <<<"$res"; then
+if [ -n "$secs" ] && python3 -c "import sys; sys.exit(0 if float('$secs') <= 15 else 1)" && grep -q "alive=no" <<<"$res" && grep -qiE "access (to [^ ]+ )?was revoked" <<<"$res"; then
   finish PASS "$detail"
 fi
 finish FAIL "$detail $(tail -c 300 <<<"$res" | tr '\n' ' ')"

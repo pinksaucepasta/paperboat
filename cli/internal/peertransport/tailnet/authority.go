@@ -162,6 +162,7 @@ type Authority struct {
 	lastReport       time.Time
 	reported         *[]string // the last endpoint set the server accepted; nil before the first
 	clients          map[string]authorizedClient
+	withdrawing      map[string]withdrawnPeer // withdrawal.go
 	clientSlots      chan struct{}
 	regional         *RegionalCandidates
 	relay            relayAuthority
@@ -499,6 +500,7 @@ func (a *Authority) installLocked(cfg NetworkConfiguration, selected key.NodePri
 		a.dropLocked()
 	}
 	a.expired = false
+	a.withdrawLocked(a.current, cfg)
 	a.current = &cfg
 	a.lastVerified = verifiedAt
 	a.expiresAt.Store(cfg.ExpiresAt)
@@ -569,6 +571,7 @@ func (a *Authority) Restore(ctx context.Context) error {
 
 func (a *Authority) dropLocked() {
 	a.expired = false
+	a.withdrawing = nil
 	a.expiresAt.Store(0)
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery

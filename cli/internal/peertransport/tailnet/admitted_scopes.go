@@ -95,6 +95,9 @@ func (a *Authority) retainScopeLocked(scope NetworkScope) (func(), error) {
 			} else {
 				a.admitted[ref]--
 			}
+			if len(a.withdrawing) > 0 {
+				a.cutWithdrawnLocked() // a withdrawn peer's last session closed: cut its path now
+			}
 		})
 	}, nil
 }
