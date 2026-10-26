@@ -53,14 +53,14 @@ func TestBrowserAliasesRequireOwnedHTTPSGatewayAndCanonicalShape(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		var journal reservations
-		if err = json.Unmarshal(saved, &journal); err != nil || journal.Names[name] != "owner" {
+		if err = json.Unmarshal(saved, &journal); err != nil || journal.Names[nameKey("owner", name)] != "owner" {
 			t.Fatalf("browser alias reservation not durable: %+v %v", journal, err)
 		}
 	}
 	if err := g.replaceAliases(t.Context(), owner, "owner", nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.aliases[owner]) != 0 || g.reserved.Names[name] != "owner" {
+	if len(g.aliases[owner]) != 0 || g.reserved.Names[nameKey("owner", name)] != "owner" {
 		t.Fatal("withdrawal retained active alias or lost owner reservation")
 	}
 }
@@ -178,8 +178,10 @@ func TestMachineProxyPatternRequiresOwnedNumericRouteAndWithdraws(t *testing.T) 
 	if _, err := g.certificate(t.Context(), owner, "owner", "third."+base); err == nil {
 		t.Fatal("withdrawn cached certificate returned")
 	}
-	g.reserved.Names["foreign."+base] = "other"
-	if err := g.replaceAliases(t.Context(), owner, "owner", aliases); err == nil {
-		t.Fatal("foreign reservation crossed")
+	// Another OS user's name blocks an overlapping alias only where names are host-wide; where the gateway is
+	// routed by uid it lives in that user's own namespace (F23-01).
+	g.reserved.Names[nameKey("other", "foreign."+base)] = "other"
+	if err := g.replaceAliases(t.Context(), owner, "owner", aliases); (err == nil) != gatewayRouting {
+		t.Fatalf("foreign reservation with gateway routing %v: %v", gatewayRouting, err)
 	}
 }

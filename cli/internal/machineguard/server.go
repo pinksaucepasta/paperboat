@@ -111,6 +111,9 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	if gatewayRouting {
+		scopeNameReservations(g.reserved.Names)
+	}
 	if g.reserved.Claims == nil {
 		g.reserved.Claims = map[string]claim{}
 	}
@@ -627,33 +630,17 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, errors.New("invalid protected machine listener")
 		}
 
-		for _, aliases := range g.aliases {
-			if _, exists := aliases[in.Hostname]; exists {
+		for other, aliases := range g.aliases {
+			if _, exists := aliases[in.Hostname]; exists && g.sameNamespace(other, uid) {
 				return nil, errors.New("machine name conflicts with an active browser alias")
-			}
-		}
-		ownedNames := 0
-		for _, owner := range g.reserved.Names {
-			if owner == uid {
-				ownedNames++
-			}
-		}
-		if len(g.leases) >= 8192 || !has(g.reserved.Names, in.Hostname) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
-			return nil, listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
-		}
-
-		for _, owner := range []struct {
-			value  string
-			exists bool
-		}{{g.reserved.Names[in.Hostname], has(g.reserved.Names, in.Hostname)}} {
-			if owner.exists && owner.value != uid {
-				return nil, listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
 			}
 		}
 		if _, exists := g.leases[key]; exists {
 			return nil, listenerRefusal{reason: "protected listener is already owned by another connection"}
 		}
-		g.reserved.Names[in.Hostname] = uid
+		if err := g.reserveName(uid, in.Hostname); err != nil {
+			return nil, err
+		}
 		if err := g.persist(); err != nil {
 			return nil, err
 		}
@@ -889,4 +876,49 @@ func (g *guardServer) acquireGatewayRoute(ctx context.Context, conn controlConn,
 		return nil, errors.Join(err, shutdownListener(route))
 	}
 	return route, nil
+}
+
+// nameKey is the reservation key of a machine name or browser alias. Where the gateway is routed by uid (F23-01) a
+// name belongs to one OS user's namespace only: two users may both have hp.<domain>, each reaching their own
+// machine. Elsewhere a name is reserved for the whole host.
+func nameKey(uid, hostname string) string {
+	if gatewayRouting {
+		return uid + ":" + hostname
+	}
+	return hostname
+}
+
+// scopeNameReservations moves host-wide reservations of an earlier guard into their owner's namespace.
+func scopeNameReservations(names map[string]string) {
+	for name, owner := range names {
+		if !strings.Contains(name, ":") {
+			delete(names, name)
+			names[owner+":"+name] = owner
+		}
+	}
+}
+
+// sameNamespace reports whether names of conn's OS user can conflict with uid's names.
+func (g *guardServer) sameNamespace(conn controlConn, uid string) bool {
+	return !gatewayRouting || g.connections[conn] == uid
+}
+
+// reserveName reserves a machine name for uid, refusing a name another OS user holds in the same namespace and
+// bounding how many names one user and the host keep.
+func (g *guardServer) reserveName(uid, hostname string) error {
+	key := nameKey(uid, hostname)
+	ownedNames := 0
+	for _, owner := range g.reserved.Names {
+		if owner == uid {
+			ownedNames++
+		}
+	}
+	if len(g.leases) >= 8192 || !has(g.reserved.Names, key) && (len(g.reserved.Names) >= 4096 || ownedNames >= 512) {
+		return listenerRefusal{reason: "machine guard reservation limit reached for this OS user"}
+	}
+	if owner, exists := g.reserved.Names[key]; exists && owner != uid {
+		return listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
+	}
+	g.reserved.Names[key] = uid
+	return nil
 }

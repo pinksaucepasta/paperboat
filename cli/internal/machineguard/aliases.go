@@ -85,11 +85,11 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 			return errors.New("invalid browser alias")
 		}
 		for reserved, owner := range g.reserved.Names {
-			if owner != uid && browserNamesOverlap(name, reserved, domain) {
+			if owner != uid && !gatewayRouting && browserNamesOverlap(name, reserved, domain) {
 				return errors.New("browser namespace belongs to another OS user")
 			}
 		}
-		if owner, ok := g.reserved.Names[name]; ok {
+		if owner, ok := g.reserved.Names[nameKey(uid, name)]; ok {
 			if owner != uid {
 				return errors.New("browser alias belongs to another OS user")
 			}
@@ -98,7 +98,7 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 		}
 		found := false
 		for _, lease := range g.leases {
-			if lease.hostname == name {
+			if lease.hostname == name && (!gatewayRouting || lease.uid == uid) {
 				return errors.New("browser alias conflicts with a machine name")
 			}
 			if lease.owner == conn && lease.hostname == splitdns.BrowserGatewayHostname && lease.ip == splitdns.BrowserGatewayIP && lease.port == 443 {
@@ -109,7 +109,7 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 			return errors.New("browser alias requires an owned protected HTTPS listener")
 		}
 		for other, values := range g.aliases {
-			if other != conn {
+			if other != conn && g.sameNamespace(other, uid) {
 				for otherName := range values {
 					if browserNamesOverlap(name, otherName, domain) {
 						return errors.New("browser alias belongs to another connection")
@@ -123,7 +123,7 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 	}
 	previousReservations := maps.Clone(g.reserved.Names)
 	for name := range aliases {
-		g.reserved.Names[name] = uid
+		g.reserved.Names[nameKey(uid, name)] = uid
 	}
 	if newNames > 0 {
 		if err := g.persist(); err != nil {
