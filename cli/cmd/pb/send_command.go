@@ -224,7 +224,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(serverclock.Now()) {
 					return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
 				}
-				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: uint64(current.Policy.MaxFileBytes)})
+				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: transferLeaseBytes(current.Policy, declared)})
 				if leaseErr != nil {
 					return filetransfer.NativeGrant{}, leaseErr
 				}
@@ -279,4 +279,12 @@ func batchTotal(sources []filetransfer.Source) int64 {
 		total += source.Size
 	}
 	return total
+}
+
+// transferLeaseBytes bounds the daemon's stream lease for a send: the policy's per-file cap, or the declared
+// batch total when larger (an Automatic send up to 2,000,000,000 bytes under today's 50 MiB policy), plus room
+// for the transfer's own framing.
+func transferLeaseBytes(policy api.FileTransferPolicy, declared api.TransferDeclaration) uint64 {
+	limit, _ := policy.Bounds()
+	return uint64(max(limit, declared.Bytes)) + 1<<20
 }
