@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
@@ -220,6 +221,7 @@ func (a *CarrierAssembly) report(ctx context.Context, err error, fatal bool) {
 		a.observeError(err)
 	}
 	if !fatal {
+		slog.Warn("carrier_handler_failed", "error", err.Error())
 		observeWorkerFailure(ctx, a.reporter, "carrier_handler", err)
 		return
 	}

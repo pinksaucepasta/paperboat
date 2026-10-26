@@ -3,9 +3,11 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	yamux "github.com/libp2p/go-yamux/v5"
 	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -145,6 +147,12 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 	now := b.clock().UTC()
 	open, err := connectorprotocol.ReadPrivateAccessOpen(stream, now)
 	if err != nil || !privateAccessMetadataMatches(metadata, open.Request, identity) {
+		slog.Warn("private_access_open_refused", "read_error", err != nil, "route_id", open.Request.RouteID,
+			"host_match", identity.HostID == open.Request.MachineID, "tunnel_match", identity.TunnelID == metadata.TunnelID,
+			"connector_match", identity.ConnectorID == metadata.ConnectorID, "session_match", identity.SessionID == metadata.SessionID && metadata.SessionID == open.Request.CarrierSessionID,
+			"process_generation", fmt.Sprintf("%d/%d/%d", identity.ProcessGeneration, metadata.ProcessGeneration, open.Request.ProcessGeneration),
+			"generation", fmt.Sprintf("%d/%d/%d", identity.Generation, metadata.Generation, open.Request.ConfigGeneration),
+			"kind", string(metadata.Kind), "request_match", metadata.RouteID == open.Request.RouteID && metadata.RequestID == open.Request.RequestID && metadata.AccountID == open.Request.AccountID)
 		writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusUnauthorized})
 		return errors.Join(err, writeErr)
 	}
@@ -406,5 +414,6 @@ func (b *PrivateAccessStreamBridge) observe(ctx context.Context, phase string, e
 		}
 		current = wrapper.Unwrap()
 	}
+	slog.Warn("private_access_stream_failed", "phase", phase, "error", err.Error())
 	b.onFailure(ctx, phase, err)
 }
