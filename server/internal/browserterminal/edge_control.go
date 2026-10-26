@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 	"io"
 	"log/slog"
 	"net/http"
@@ -51,25 +52,25 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 	ticket, err := g.Tickets.ConsumeEdge(ctx, input.Ticket, input.Origin)
 	if err != nil {
 		if expectedTerminalRejection(err) {
-			return edgeAdmission{}, nil, ErrForbidden
+			return edgeAdmission{}, nil, refused(terminalend.TicketInvalid, ErrForbidden)
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
 	if !g.acquire(ticket.principalSessionID()) {
-		return edgeAdmission{}, nil, ErrForbidden
+		return edgeAdmission{}, nil, refused(terminalend.Capacity, ErrForbidden)
 	}
 	release := func() { g.release(ticket.principalSessionID()) }
 	decision, err := g.resolveTicketRole(ctx, ticket)
 	if err != nil {
 		release()
 		if expectedTerminalRejection(err) {
-			return edgeAdmission{}, nil, ErrForbidden
+			return edgeAdmission{}, nil, refused(rejectionReason(err), ErrForbidden)
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
 	if !validDecision(decision, ticket.subjectID(), ticket.TerminalSessionID) || decision.Role != ticket.Role || decision.PolicyGeneration != ticket.PolicyGeneration || decision.TeamGeneration != ticket.TeamGeneration || decision.MembershipGeneration != ticket.MembershipGeneration || decision.BindingGeneration != ticket.BindingGeneration || decision.HostWSSURL != urlValue.String() || decision.EdgeNodeID != nodeID || decision.EdgeProcessEpoch != processEpoch {
 		release()
-		return edgeAdmission{}, nil, ErrForbidden
+		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
 	if ticket.Role == RoleInspector {
 		admitted, err := g.admitInspectorEdge(ticket, decision)
@@ -85,25 +86,25 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 	if err != nil {
 		release()
 		if expectedTerminalRejection(err) {
-			return edgeAdmission{}, nil, ErrForbidden
+			return edgeAdmission{}, nil, refused(rejectionReason(err), ErrForbidden)
 		}
-		return edgeAdmission{}, nil, unavailableCause(err)
+		return edgeAdmission{}, nil, refused(terminalend.HostUnreachable, unavailableCause(err))
 	}
 	if processGeneration < 1 {
 		release()
-		return edgeAdmission{}, nil, ErrHostUnavailable
+		return edgeAdmission{}, nil, refused(terminalend.HostUnreachable, ErrHostUnavailable)
 	}
 	current, err := g.resolveTicketRole(ctx, ticket)
 	if err != nil {
 		release()
 		if expectedTerminalRejection(err) {
-			return edgeAdmission{}, nil, ErrForbidden
+			return edgeAdmission{}, nil, refused(rejectionReason(err), ErrForbidden)
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
 	if !sameDecision(decision, current) {
 		release()
-		return edgeAdmission{}, nil, ErrForbidden
+		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
 	now := time.Now().UTC()
 	attachmentID, err := secureID("attachment")
@@ -169,12 +170,8 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	admission, release, err := g.admitEdge(r.Context(), input, nodeID, processEpoch)
 	if err != nil {
 		reportEdgeAdmissionFailure(r.Context(), err)
-		reason := "admission denied"
-		if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
-			// The edge answers the browser with its typed bandwidth refusal.
-			reason = BandwidthQuotaCloseReason
-		}
-		_ = connection.Close(websocket.StatusPolicyViolation, reason)
+		// The edge closes the browser's WebSocket with the code of this reason.
+		_ = connection.Close(websocket.StatusPolicyViolation, string(admissionRefusalReason(err)))
 		return
 	}
 	defer release()
@@ -221,11 +218,11 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 					outageSince = time.Now()
 				}
 				if time.Since(outageSince) > authorityOutageGrace {
-					_ = connection.Close(websocket.StatusPolicyViolation, "authority unavailable")
+					_ = connection.Close(websocket.StatusPolicyViolation, string(terminalend.EdgeUnavailable))
 					return
 				}
 			} else if !active || checkErr != nil {
-				_ = connection.Close(websocket.StatusPolicyViolation, "access revoked")
+				_ = connection.Close(websocket.StatusPolicyViolation, string(liveCheckReason(checkErr)))
 				return
 			} else {
 				outageSince = time.Time{}
@@ -240,9 +237,56 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	}
 }
 
-// BandwidthQuotaCloseReason is the admission close reason when the paying workspace's relay and
-// edge allowance is used up; the edge answers the browser with bandwidth_quota_exhausted.
-const BandwidthQuotaCloseReason = "bandwidth_quota_exhausted"
+// refusal is an admission refusal that names why, for the edge to tell the browser. It unwraps to the sentinel the
+// admission has always returned, so the expected-rejection classification is unchanged.
+type refusal struct {
+	reason terminalend.Reason
+	cause  error
+}
+
+func (e refusal) Error() string { return e.cause.Error() }
+func (e refusal) Unwrap() error { return e.cause }
+
+func refused(reason terminalend.Reason, cause error) error {
+	return refusal{reason: reason, cause: cause}
+}
+
+// rejectionReason names an expected rejection of a ticket's terminal.
+func rejectionReason(err error) terminalend.Reason {
+	switch {
+	case errors.Is(err, usermachines.ErrBandwidthQuotaExhausted):
+		return terminalend.BandwidthQuotaExhausted
+	case errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed):
+		return terminalend.Closed
+	case errors.Is(err, ErrTicketInvalid):
+		return terminalend.TicketInvalid
+	}
+	return terminalend.NoAccess
+}
+
+// admissionRefusalReason is the reason the control channel closes with when the server refuses to admit.
+func admissionRefusalReason(err error) terminalend.Reason {
+	var named refusal
+	switch {
+	case errors.As(err, &named):
+		return named.reason
+	case errors.Is(err, usermachines.ErrBandwidthQuotaExhausted):
+		return terminalend.BandwidthQuotaExhausted
+	case errors.Is(err, ErrForbidden):
+		return terminalend.NoAccess
+	case errors.Is(err, ErrHostUnavailable):
+		return terminalend.HostUnreachable
+	}
+	return terminalend.EdgeUnavailable
+}
+
+// liveCheckReason names why an attached terminal lost its access: its terminal ended, or its access was revoked.
+func liveCheckReason(err error) terminalend.Reason {
+	if errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed) {
+		return terminalend.Ended
+	}
+	return terminalend.Revoked
+}
 
 func reportEdgeAdmissionFailure(ctx context.Context, err error) {
 	if err == nil || pureTerminalCancellation(err) {
