@@ -78,6 +78,11 @@ VALUES($1,$2,$3,'hb-'||$4,'linux','amd64','/w','offline','occupied',false)`, mac
 	if after := read(); after.xmin == online.xmin {
 		t.Fatal("a new worker generation was not written")
 	}
+	// Unchanged diagnostics are not rewritten even when the presence interval refreshes last_seen_at.
+	var diagnostics time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_diagnostics_observed_at FROM paperboat.user_machines WHERE id=$1`, machine).Scan(&diagnostics); err != nil {
+		t.Fatal(err)
+	}
 
 	// Once last_seen_at is older than the presence interval, one heartbeat refreshes it, and that refresh is not a
 	// change clients see: the version stays.
@@ -91,5 +96,9 @@ VALUES($1,$2,$3,'hb-'||$4,'linux','amd64','/w','offline','occupied',false)`, mac
 	}
 	if refreshed.version != before.version {
 		t.Fatalf("a last_seen_at-only refresh bumped the version %d -> %d", before.version, refreshed.version)
+	}
+	var diagnosticsAfter time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_diagnostics_observed_at FROM paperboat.user_machines WHERE id=$1`, machine).Scan(&diagnosticsAfter); err != nil || !diagnosticsAfter.Equal(diagnostics) {
+		t.Fatalf("unchanged diagnostics were rewritten: %v -> %v (%v)", diagnostics, diagnosticsAfter, err)
 	}
 }

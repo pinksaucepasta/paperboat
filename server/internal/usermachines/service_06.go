@@ -260,8 +260,12 @@ func validMachineArchitecture(value string) bool {
 
 func mapMachine(row dbsqlc.UserMachine) UserMachine {
 	diagnostics := RuntimeDiagnostics{WorkerGeneration: uint64(row.WorkerGeneration), OSBootID: row.OsBootID.String, WorkerServiceScope: row.WorkerServiceScope, ConnectorState: row.ConnectorState, ConnectorGeneration: uint64(row.ConnectorGeneration)}
+	// Unchanged diagnostics are not rewritten; the heartbeat that confirms them refreshes last_seen_at.
 	if row.RuntimeDiagnosticsObservedAt.Valid {
 		observed := row.RuntimeDiagnosticsObservedAt.Time
+		if row.LastSeenAt.Valid && row.LastSeenAt.Time.After(observed) {
+			observed = row.LastSeenAt.Time
+		}
 		diagnostics.ObservedAt = &observed
 	}
 	m := UserMachine{Ownership: "personal", OwnerAccount: row.UserID, Permissions: []string{}, ID: row.ID, EnvironmentID: row.EnvironmentID, Alias: row.Alias, Platform: row.Platform, Architecture: row.Architecture, WorkspaceRoot: row.WorkspaceRoot, State: row.State, SeatState: row.SeatState, Online: row.Online, RuntimeVersions: row.RuntimeVersions, Capabilities: mapCapabilities(row.ConfiguredCapabilities, row.ObservedCapabilities), MachineCapabilities: mapMachineCapabilityPolicy(row), PublicIdentityKey: row.PublicIdentityKey.String, InstallationGeneration: row.InstallationGeneration, Availability: mapAvailability(row), RuntimeDiagnostics: diagnostics}

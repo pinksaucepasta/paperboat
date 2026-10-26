@@ -5043,23 +5043,22 @@ SET worker_generation = $1,
 WHERE id = $7 AND environment_id = $8
   AND deleted_at IS NULL
   AND (runtime_diagnostics_observed_at IS NULL OR runtime_diagnostics_observed_at <= $6)
-  -- Unchanged diagnostics refresh their timestamp at most every presence_refresh_seconds.
+  -- Diagnostics are written only when they change; how recently they were observed is last_seen_at, which the
+  -- same heartbeat refreshes (mapMachine reports the later of the two).
   AND (worker_generation IS DISTINCT FROM $1 OR os_boot_id IS DISTINCT FROM $2
     OR worker_service_scope IS DISTINCT FROM $3 OR connector_state IS DISTINCT FROM $4
-    OR connector_generation IS DISTINCT FROM $5 OR runtime_diagnostics_observed_at IS NULL
-    OR runtime_diagnostics_observed_at < $6 - make_interval(secs => $9::float8))
+    OR connector_generation IS DISTINCT FROM $5 OR runtime_diagnostics_observed_at IS NULL)
 `
 
 type RecordUserMachineRuntimeDiagnosticsParams struct {
-	WorkerGeneration       int64
-	OsBootID               sql.NullString
-	WorkerServiceScope     string
-	ConnectorState         string
-	ConnectorGeneration    int64
-	ObservedAt             sql.NullTime
-	ID                     string
-	EnvironmentID          string
-	PresenceRefreshSeconds float64
+	WorkerGeneration    int64
+	OsBootID            sql.NullString
+	WorkerServiceScope  string
+	ConnectorState      string
+	ConnectorGeneration int64
+	ObservedAt          sql.NullTime
+	ID                  string
+	EnvironmentID       string
 }
 
 func (q *Queries) RecordUserMachineRuntimeDiagnostics(ctx context.Context, arg RecordUserMachineRuntimeDiagnosticsParams) (int64, error) {
@@ -5072,7 +5071,6 @@ func (q *Queries) RecordUserMachineRuntimeDiagnostics(ctx context.Context, arg R
 		arg.ObservedAt,
 		arg.ID,
 		arg.EnvironmentID,
-		arg.PresenceRefreshSeconds,
 	)
 	if err != nil {
 		return 0, err

@@ -705,11 +705,11 @@ SET worker_generation = sqlc.arg(worker_generation),
 WHERE id = sqlc.arg(id) AND environment_id = sqlc.arg(environment_id)
   AND deleted_at IS NULL
   AND (runtime_diagnostics_observed_at IS NULL OR runtime_diagnostics_observed_at <= sqlc.arg(observed_at))
-  -- Unchanged diagnostics refresh their timestamp at most every presence_refresh_seconds.
+  -- Diagnostics are written only when they change; how recently they were observed is last_seen_at, which the
+  -- same heartbeat refreshes (mapMachine reports the later of the two).
   AND (worker_generation IS DISTINCT FROM sqlc.arg(worker_generation) OR os_boot_id IS DISTINCT FROM sqlc.arg(os_boot_id)
     OR worker_service_scope IS DISTINCT FROM sqlc.arg(worker_service_scope) OR connector_state IS DISTINCT FROM sqlc.arg(connector_state)
-    OR connector_generation IS DISTINCT FROM sqlc.arg(connector_generation) OR runtime_diagnostics_observed_at IS NULL
-    OR runtime_diagnostics_observed_at < sqlc.arg(observed_at) - make_interval(secs => sqlc.arg(presence_refresh_seconds)::float8));
+    OR connector_generation IS DISTINCT FROM sqlc.arg(connector_generation) OR runtime_diagnostics_observed_at IS NULL);
 
 -- name: GetUserMachineRuntimeMetrics :one
 SELECT
