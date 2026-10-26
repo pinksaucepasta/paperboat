@@ -926,3 +926,30 @@ func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
 		t.Fatalf("stalled viewer: %v, want lagged (never evicted)", err)
 	}
 }
+
+// A browser's screen (its in-band resync) works every time under a flood, not only the first: a control-only
+// attachment queues no output, so its end used to stay at the first screen's boundary (F3-13).
+func TestBrowserScreenRepeatsUnderAFlood(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "flood", Command: shellCommand(shell, root, "yes 0123456789abcdefghijklmnopqrstuvwxyz")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	participant := Participant{AttachmentID: "att_browser", AccountID: "acc", ClientID: "cli", Role: "owner", ConnectedAt: time.Now(), Browser: true}
+	if _, err := manager.AttachLiveParticipantAtGeneration(created.ID, participant, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	var previous uint64
+	for i := 0; i < 5; i++ {
+		time.Sleep(100 * time.Millisecond)
+		_, boundary, err := manager.BrowserScreenAttachment(created.ID, "att_browser", "acc", "cli", created.Generation)
+		if err != nil {
+			t.Fatalf("screen %d under a flood: %v", i+1, err)
+		}
+		if boundary < previous {
+			t.Fatalf("screen %d boundary %d went back from %d", i+1, boundary, previous)
+		}
+		previous = boundary
+	}
+}

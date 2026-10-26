@@ -198,6 +198,13 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 	if !ok || cursor.state != Attached {
 		return ErrAttachmentUnknown
 	}
+	if !cursor.receiveOutput {
+		// A control-only attachment (a browser fed by the shared publisher) queues nothing, so its end never
+		// advances: every screen moves it to the current boundary (repeated screens under a flood, F3-13).
+		cursor.cursor, cursor.enqueuedEnd, cursor.hasCursor, cursor.queuedBytes = nextSequence, nextSequence, true, 0
+		f.compactLocked()
+		return nil
+	}
 	if cursor.hasCursor && (nextSequence < cursor.cursor || nextSequence > cursor.enqueuedEnd) {
 		return ErrOutputOrder
 	}
