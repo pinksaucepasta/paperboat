@@ -281,6 +281,14 @@ func TestBrowserViewerPolicyPostgres(t *testing.T) {
 	if err != nil || !policy.Configured || policy.Generation != 1 || policy.ServingState != "pending" {
 		t.Fatalf("public-to-restricted policy was not saved as pending: %#v, %v", policy, err)
 	}
+	// Served on the endpoint engine, the route made owner-only is fenced for the 10 s an edge's
+	// public decision may still live.
+	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, publicTunnel, owner, machine)
+	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, publicRoute, publicTunnel, publicHost)
+	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,'edge_vp','epoch_vp','session_vp',true,now())`, publicRoute, publicTunnel)
+	if fenced, err := svc.GetViewerPolicy(ctx, owner, "tunnel", publicTunnel, publicRoute); err != nil || fenced.ServingState != "fencing" {
+		t.Fatalf("engine-served route just made owner-only = %#v, %v; want fencing", fenced, err)
+	}
 	privateTunnel := "tun_vp_native_private_" + suffix
 	privateRoute := "rte_vp_native_private_" + suffix
 	privateEndpointID := "20000000-0000-4000-8000-" + suffix[len(suffix)-12:]

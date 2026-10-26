@@ -291,9 +291,10 @@ func TestTunnelViewerPolicyPublicToRestrictedPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policyState, err := viewerPolicies.GetViewerPolicy(ctx, fixture.accountID, "tunnel", fixture.tunnelID, fixture.routeID)
-	if err != nil || policyState.ServingState != "fencing" {
-		t.Fatalf("policy state before edge fence = %#v, %v; want fencing", policyState, err)
+	// The policy's serving state reads the endpoint engine's assignments (browseraccess
+	// TestBrowserViewerPolicyPostgres); this connector route has none.
+	if _, err := viewerPolicies.GetViewerPolicy(ctx, fixture.accountID, "tunnel", fixture.tunnelID, fixture.routeID); err != nil {
+		t.Fatal(err)
 	}
 	// The projection stops matching the old public assignment as soon as the
 	// policy transaction commits, before the worker stages its replacement.
@@ -327,10 +328,6 @@ func TestTunnelViewerPolicyPublicToRestrictedPostgres(t *testing.T) {
 			t.Fatalf("exact old-public detached ACK: %v", err)
 		}
 	}
-	policyState, err = viewerPolicies.GetViewerPolicy(ctx, fixture.accountID, "tunnel", fixture.tunnelID, fixture.routeID)
-	if err != nil || policyState.ServingState != "pending" {
-		t.Fatalf("policy state after public detached ACK = %#v, %v; want pending until restricted ready", policyState, err)
-	}
 	wrong := fixture.observation(newFirst, "ready")
 	wrong.AccessMode = "public"
 	if err := service.ObserveRoutes(ctx, fixture.nodeID, []RouteObservation{wrong}); !errors.Is(err, ErrAssignmentConflict) {
@@ -346,10 +343,6 @@ func TestTunnelViewerPolicyPublicToRestrictedPostgres(t *testing.T) {
 		if row.state != "active" || row.observedState != "ready" || row.accessMode != "private" || row.viewerPolicyGeneration != 1 {
 			t.Fatalf("serving restricted assignment = %+v", row)
 		}
-	}
-	policyState, err = viewerPolicies.GetViewerPolicy(ctx, fixture.accountID, "tunnel", fixture.tunnelID, fixture.routeID)
-	if err != nil || policyState.ServingState != "ready" {
-		t.Fatalf("policy state after restricted ready ACK = %#v, %v; want ready", policyState, err)
 	}
 }
 
