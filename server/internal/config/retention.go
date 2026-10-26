@@ -24,6 +24,9 @@ type Retention struct {
 	DecidedMachineRequests    time.Duration `json:"decided_machine_requests"`
 	// StripeEvents de-duplicate webhooks; Stripe retries for at most three days.
 	StripeEvents time.Duration `json:"stripe_events"`
+	// SupersededMeshEntries: a peer mesh log entry after a newer entry of the same endpoint replaced it (readers
+	// read the latest entry per endpoint at a sequence they just took, so only a moment-old sequence can need it).
+	SupersededMeshEntries time.Duration `json:"superseded_mesh_entries"`
 	// SupportReportsPerAccount keeps an account's newest reports (they also expire on their own).
 	SupportReportsPerAccount int `json:"support_reports_per_account"`
 	// Batch rows per delete statement and the time one pass may take, so a backlog drains without long locks.
@@ -35,14 +38,15 @@ func defaultRetention() Retention {
 	return Retention{
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, StripeEvents: 30 * day,
-		SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
+		SupersededMeshEntries: time.Hour, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
 
 func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
 	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day,
-		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.StripeEvents < 4*day:
+		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.StripeEvents < 4*day,
+		r.SupersededMeshEntries < time.Minute:
 		return fmt.Errorf("retention: a window is below its minimum")
 	case r.EndedSessions < accessSessionRetention:
 		return fmt.Errorf("retention.ended_sessions must be at least user_machines.expired_access_session_retention")

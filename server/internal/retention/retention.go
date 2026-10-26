@@ -55,8 +55,17 @@ var policies = []policy{
 	// A rotated refresh token stays until its own expiry: a replay of it is how a stolen token is detected.
 	{"cli_refresh_tokens", batchOf("cli_refresh_tokens", `expires_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
+	{"browser_machine_credentials", batchOf("browser_machine_credentials", `expires_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
+	// Its native admissions cascade with it.
+	{"inspector_credentials", batchOf("inspector_credentials", `expires_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	{"managed_ssh_operations", batchOf("managed_ssh_operations", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.IdempotencyRecords })},
+	// A connector enrollment once consumed or expired; before operations, which it holds.
+	{"tunnel_connector_enrollments", batchOf("tunnel_connector_enrollments",
+		`expires_at < now()-make_interval(secs=>$2) AND (consumed_at IS NULL OR consumed_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
 	// A finished operation still referenced (a live preview's carrier attachment cascades from it; tunnel connector
 	// rows restrict it) stays until its referrer goes.
 	{"operations", batchOf("operations", `completed_at < now()-make_interval(secs=>$2)
@@ -67,6 +76,46 @@ var policies = []policy{
  AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_enrollments x WHERE x.operation_id=operations.id)
  AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_connector_rotation_targets x WHERE x.operation_id=operations.id)`),
 		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	// Its recoveries cascade; reconciliation attempts keep their row without it.
+	{"control_operations", batchOf("control_operations", `completed_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	{"preview_carrier_attachment_outbox", batchOf("preview_carrier_attachment_outbox",
+		`state IN ('delivered','failed') AND updated_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	// An invitation's latest_mail_id is cleared with it.
+	{"transactional_mail_outbox", batchOf("transactional_mail_outbox", `state <> 'queued' AND created_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	// A certificate no longer served (its edge distributions cascade).
+	{"tunnel_certificate_records", batchOf("tunnel_certificate_records",
+		`state IN ('superseded','revoked','expired','failed') AND updated_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
+	{"managed_ssh_client_keys", batchOf("managed_ssh_client_keys", `state = 'revoked' AND revoked_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
+	// A peer certificate long expired: first its revocation and issuance records (their keys restrict it), then the
+	// certificate itself unless an identity still names it.
+	{"peer_endpoint_certificate_revocations", `DELETE FROM paperboat.peer_endpoint_certificate_revocations WHERE certificate_fingerprint = ANY(ARRAY(
+ SELECT c.fingerprint FROM paperboat.peer_endpoint_certificates c WHERE c.expires_at < now()-make_interval(secs=>$2)
+  AND EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=c.fingerprint) LIMIT $1))`,
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
+	{"peer_endpoint_certificate_operations", `DELETE FROM paperboat.peer_endpoint_certificate_operations WHERE certificate_fingerprint = ANY(ARRAY(
+ SELECT c.fingerprint FROM paperboat.peer_endpoint_certificates c WHERE c.expires_at < now()-make_interval(secs=>$2)
+  AND EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_operations o WHERE o.certificate_fingerprint=c.fingerprint) LIMIT $1))`,
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
+	{"peer_endpoint_certificates", batchOf("peer_endpoint_certificates", `expires_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_network_identities n WHERE n.quic_certificate_fingerprint=peer_endpoint_certificates.fingerprint)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.certificate_fingerprint=peer_endpoint_certificates.fingerprint)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_operations o WHERE o.certificate_fingerprint=peer_endpoint_certificates.fingerprint)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
+	// A mesh log entry replaced by a newer entry of its endpoint, and the latest entry of an endpoint removed long
+	// ago (an absent endpoint reads the same with or without it).
+	{"peer_mesh_log_superseded", batchOf("peer_mesh_log", `recorded_at < now()-make_interval(secs=>$2)
+ AND EXISTS(SELECT 1 FROM paperboat.peer_mesh_log n WHERE n.account_id=peer_mesh_log.account_id AND n.endpoint_id=peer_mesh_log.endpoint_id
+  AND n.mesh_seq>peer_mesh_log.mesh_seq AND n.recorded_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.SupersededMeshEntries })},
+	{"peer_mesh_log_removed", batchOf("peer_mesh_log", `op='remove' AND recorded_at < now()-make_interval(secs=>$2)
+ AND NOT EXISTS(SELECT 1 FROM paperboat.peer_mesh_log n WHERE n.account_id=peer_mesh_log.account_id AND n.endpoint_id=peer_mesh_log.endpoint_id
+  AND n.mesh_seq>peer_mesh_log.mesh_seq)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
 	{"user_machine_access_sessions", batchOf("user_machine_access_sessions", `expires_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
 	{"sessions", batchOf("sessions", `expires_at < now()-make_interval(secs=>$2)`),
