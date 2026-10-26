@@ -309,7 +309,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if runtimeLayers != nil {
 			sender.layers = runtimeLayers
 		}
-		updaterClient, updaterErr := newProductionUpdaterClient()
+		updaterClient, updaterErr := newProductionUpdaterClient(environ)
 		if updaterErr != nil {
 			return nil, updaterErr
 		}
