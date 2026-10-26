@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 type RootKeys map[string]ed25519.PublicKey

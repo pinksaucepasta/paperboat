@@ -8,7 +8,7 @@ import (
 	"errors"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 var ErrInvalid = errors.New("invalid trusted E2EE key set")

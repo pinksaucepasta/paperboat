@@ -23,7 +23,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 const (
