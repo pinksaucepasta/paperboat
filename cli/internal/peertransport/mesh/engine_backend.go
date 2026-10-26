@@ -370,6 +370,10 @@ func (lb *locoBackend) Start() error {
 	e.SetPeerByIPPacketFunc(lb.peerByIP)
 	e.SetPeerForIPFunc(lb.peerForIP)
 	e.SetStatusCallback(lb.onEngineStatus)
+	// magicsock finds its endpoints as soon as it has a key, often before the callback above existed; that
+	// status was dropped and, with no later change, the backend never learned its endpoints (nothing to
+	// advertise or report; seen as "the engine found no local endpoint" in 2 of 10 runs). Ask once now.
+	e.RequestStatus()
 
 	wgConf := &wgcfg.Config{
 		PrivateKey: lb.priv,

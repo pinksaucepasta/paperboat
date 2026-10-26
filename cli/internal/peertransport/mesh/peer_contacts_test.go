@@ -81,3 +81,24 @@ func TestPeersWithSignedEndpointsConnectDirectlyWithoutARelay(t *testing.T) {
 	}
 	t.Logf("first echo with no relay after %v", time.Since(started))
 }
+
+// An engine knows its own endpoints shortly after Start, every time: magicsock found them before the status
+// callback existed and that status was dropped, so in 2 of 10 starts the backend never learned them and had
+// nothing to advertise or report (macOS CI, then reproduced on Linux).
+func TestEveryStartedEngineLearnsItsEndpoints(t *testing.T) {
+	for start := range 10 {
+		server := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::40"), AllowedPeers: map[key.NodePublic]netip.Addr{}}
+		if err := server.Start(); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for len(server.LocalEndpoints()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		found := len(server.LocalEndpoints())
+		_ = server.Close()
+		if found == 0 {
+			t.Fatalf("start %d: no endpoint known 3 s after Start", start)
+		}
+	}
+}
