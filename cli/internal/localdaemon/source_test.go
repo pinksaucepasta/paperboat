@@ -289,3 +289,34 @@ func TestAuthenticatedMachineSourceRefreshesRejectedAccessToken(t *testing.T) {
 		t.Fatal("machine inventory did not resume with refreshed access token")
 	}
 }
+
+// With Paperboat unreachable (no answer, or a 503 from the API itself) the daemon opens exec and
+// ssh without a descriptor for the host to admit from its own signed scopes; a refusal or any
+// other answer stays final, and a client cannot ask for an offline stream itself (F21-11).
+func TestIssuePeerStreamGoesOfflineOnlyWhenPaperboatIsUnreachable(t *testing.T) {
+	status := http.StatusServiceUnavailable
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"error":{"code":"unavailable","message":"down"}}`))
+	}))
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	result, err := source.IssuePeerStream(context.Background(), request)
+	if err != nil || !result.Offline || result.Credential != "" || result.AccessSessionID != "" || result.Validate(time.Now().UTC()) != nil {
+		t.Fatalf("a 503 from Paperboat: result=%+v err=%v", result, err)
+	}
+	status = http.StatusForbidden
+	if result, err := source.IssuePeerStream(context.Background(), request); err == nil || result.Offline {
+		t.Fatalf("a refusal went offline: %+v", result)
+	}
+	server.Close()
+	result, err = source.IssuePeerStream(context.Background(), request)
+	if err != nil || !result.Offline {
+		t.Fatalf("no answer from Paperboat: result=%+v err=%v", result, err)
+	}
+	request.Offline = true
+	if _, err := source.IssuePeerStream(context.Background(), request); err == nil {
+		t.Fatal("a client-requested offline stream was accepted")
+	}
+}

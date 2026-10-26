@@ -261,6 +261,7 @@ func (l *cliNativeTransferLease) Close() error {
 
 type nativeApplicationSession interface {
 	OpenAuthorized(context.Context, streamauth.Header, string, string) (net.Conn, error)
+	OpenOffline(context.Context, streamauth.Header) (net.Conn, error)
 	Close() error
 }
 
@@ -275,6 +276,9 @@ func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, er
 	header, err := g.application.authorizationHeader(g.target, g.consumer, fallbackOperation, streamID, g.now().UTC())
 	if err != nil {
 		return nil, err
+	}
+	if header.Offline {
+		return g.session.OpenOffline(ctx, header)
 	}
 	stream, err := g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, nativeCapability(g.consumer))
 	if err != nil && g.consumer == "file_transfer" {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // ErrUnauthenticated means the server rejected the reused credential. Callers
@@ -91,4 +92,17 @@ func (e *APIError) Is(target error) bool {
 // renewals without making callers branch on human-readable error messages.
 func (e *APIError) Retryable() bool {
 	return e != nil && (e.Status == http.StatusRequestTimeout || e.Status == http.StatusTooManyRequests || e.Status >= 500)
+}
+
+// Unreachable reports that Paperboat itself could not be reached, the only condition for starting
+// a session from the host's own signed scopes (PLAN 3b "Offline-capable authority" point 3): the
+// request did not complete (connection, TLS or timeout) or the API origin answered 503. Any other
+// answer, a refusal included, is final.
+func Unreachable(err error) bool {
+	var request *url.Error
+	if errors.As(err, &request) {
+		return true
+	}
+	var response *APIError
+	return errors.As(err, &response) && response.Status == http.StatusServiceUnavailable
 }

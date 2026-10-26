@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
@@ -101,6 +102,18 @@ func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, e
 	c.mu.Unlock()
 	resolved, err := c.resolveLocal(ctx, request)
 	if err != nil {
+		// With Paperboat unreachable the verified identity stays usable until its certificate
+		// ends, so sessions between paired machines keep starting (F21-11).
+		if api.Unreachable(err) {
+			c.mu.Lock()
+			cached, ok := c.entries[key]
+			if ok && cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
+				clone := cloneAuthority(cached.authority)
+				c.mu.Unlock()
+				return clone, nil
+			}
+			c.mu.Unlock()
+		}
 		return Authority{}, err
 	}
 	c.storeLocal(key, resolved, now)

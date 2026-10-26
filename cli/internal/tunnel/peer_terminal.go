@@ -137,7 +137,7 @@ func (t *PeerTerminalTunnel) Dial(ctx context.Context, info resolver.ConnectInfo
 }
 
 func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo, consumer string, application peerApplication) (Conn, error) {
-	if t == nil || ctx == nil || info.TargetKind != "machine" || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" || consumer == "" || (application.helper == nil) == (application.raw == nil) || application.raw != nil && application.stream == "" || application.helper != nil && application.stream != "" {
+	if t == nil || ctx == nil || info.TargetKind != "machine" || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" && !info.Terminal.Auth.Offline || consumer == "" || (application.helper == nil) == (application.raw == nil) || application.raw != nil && application.stream == "" || application.helper != nil && application.stream != "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	credential, err := t.config.Auth.Credential()
@@ -186,7 +186,7 @@ type peerApplication struct {
 }
 
 func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, consumer, fallbackOperation, streamID string, now time.Time) (streamauth.Header, error) {
-	if target == nil || target.Auth.Token == "" {
+	if target == nil || (target.Auth.Token == "") != target.Auth.Offline {
 		return streamauth.Header{}, ErrPeerTerminalInvalid
 	}
 	operationID := a.operationID
@@ -201,7 +201,12 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 	if consumer == "config_compare" {
 		maximum = 220 << 20
 	}
-	header, err := streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, maximum)
+	var header streamauth.Header
+	if target.Auth.Offline {
+		header, err = streamauth.NewOffline(operationID, consumer, streamID, deadline, maximum)
+	} else {
+		header, err = streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, maximum)
+	}
 	if err == nil {
 		header.Resumable = consumer != "config_compare"
 		if consumer == "config_compare" {

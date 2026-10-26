@@ -44,7 +44,7 @@ func (s *AuthenticatedMachineSource) SetManagedSSHReadiness(ready bool, code str
 // IssuePeerStream obtains a fresh, operation-scoped authorization just before
 // transport admission. It deliberately never caches the returned credential.
 func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
-	if strings.TrimSpace(s.ServerURL) == "" || s.Auth == nil || request.Credential != "" {
+	if strings.TrimSpace(s.ServerURL) == "" || s.Auth == nil || request.Credential != "" || request.Offline {
 		return request, ErrInvalidInventoryConfig
 	}
 	if err := api.ValidateWorkspaceSelector(request.Workspace); err != nil {
@@ -85,6 +85,9 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 					return request, inventorySourceFailure("credential", errors.Join(err, refreshErr))
 				}
 			}
+		}
+		if api.Unreachable(err) {
+			return offlinePeerStream(request)
 		}
 		return request, err
 	}
@@ -284,4 +287,22 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 		machine.SSHAuthority = api.SSHAuthority{TargetGeneration: ssh.TargetGeneration, HostKeyGeneration: ssh.HostKeyGeneration}
 	}
 	return machines
+}
+
+// offlineStreamLifetime caps how long a stream admitted without Paperboat may run; a revocation
+// received from the host's signed state still ends it at once.
+const offlineStreamLifetime = 12 * time.Hour
+
+// offlinePeerStream asks the host to admit the stream from its own signed scopes (F21-11).
+func offlinePeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
+	if !localapi.OfflineConsumers[request.Consumer] {
+		return request, errors.New("this session needs Paperboat online")
+	}
+	request.Offline, request.Credential, request.AccessSessionID = true, "", ""
+	request.QUICEndpoint, request.WSSEndpoint = "", ""
+	request.Deadline = time.Now().Add(offlineStreamLifetime).UTC()
+	if err := request.Validate(time.Now().UTC()); err != nil {
+		return request, err
+	}
+	return request, nil
 }

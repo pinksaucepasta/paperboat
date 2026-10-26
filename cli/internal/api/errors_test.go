@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -185,6 +187,24 @@ func TestConfigCompareRefusalsHaveAuthoredRecoveryMessages(t *testing.T) {
 		err := &APIError{Status: http.StatusConflict, Code: code, Message: apiErrorMessage(code, http.StatusConflict)}
 		if err.PublicCode() != code || !strings.Contains(err.Message, want) || strings.Contains(err.Message, "Refresh it and try again") {
 			t.Fatalf("%s: code=%q message=%q", code, err.PublicCode(), err.Message)
+		}
+	}
+}
+
+func TestUnreachableIsOnlyNoAnswerOrA503(t *testing.T) {
+	for name, test := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"no answer":   {fmt.Errorf("descriptor: %w", &url.Error{Op: "Post", URL: "https://api.example.test", Err: errors.New("timeout")}), true},
+		"503":         {&APIError{Status: http.StatusServiceUnavailable}, true},
+		"502":         {&APIError{Status: http.StatusBadGateway}, false},
+		"429":         {&APIError{Status: http.StatusTooManyRequests}, false},
+		"403 refusal": {&APIError{Status: http.StatusForbidden}, false},
+		"local":       {errors.New("socket closed"), false},
+	} {
+		if got := Unreachable(test.err); got != test.want {
+			t.Errorf("%s: Unreachable = %v, want %v", name, got, test.want)
 		}
 	}
 }

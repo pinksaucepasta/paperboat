@@ -75,6 +75,10 @@ func (s *capturedNativeApplicationSession) OpenAuthorized(_ context.Context, hea
 	return client, nil
 }
 
+func (s *capturedNativeApplicationSession) OpenOffline(ctx context.Context, header streamauth.Header) (net.Conn, error) {
+	return s.OpenAuthorized(ctx, header, "", "")
+}
+
 func (s *capturedNativeApplicationSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,6 +120,10 @@ func TestCLINativeStreamGroupAuthorizesEveryApplicationStream(t *testing.T) {
 type failingNativeApplicationSession struct {
 	closed bool
 	err    error
+}
+
+func (s *failingNativeApplicationSession) OpenOffline(ctx context.Context, header streamauth.Header) (net.Conn, error) {
+	return s.OpenAuthorized(ctx, header, "", "")
 }
 
 func (s *failingNativeApplicationSession) OpenAuthorized(context.Context, streamauth.Header, string, string) (net.Conn, error) {
@@ -190,6 +198,10 @@ func TestCLINativeTransferLeasePreservesFinalStreamOpenFailure(t *testing.T) {
 type deadlineNativeApplicationSession struct {
 	started chan struct{}
 	closed  bool
+}
+
+func (s *deadlineNativeApplicationSession) OpenOffline(ctx context.Context, header streamauth.Header) (net.Conn, error) {
+	return s.OpenAuthorized(ctx, header, "", "")
 }
 
 func (s *deadlineNativeApplicationSession) OpenAuthorized(ctx context.Context, _ streamauth.Header, _, _ string) (net.Conn, error) {
@@ -294,5 +306,29 @@ func TestCLINativeStreamGroupOperationBinding(t *testing.T) {
 				t.Fatal("stream did not retain exact operation and resource bindings")
 			}
 		})
+	}
+}
+
+// With Paperboat unreachable the daemon marks the target offline: the stream goes out with an
+// offline header (no credential, no access session) through OpenOffline, never OpenAuthorized
+// with an empty credential (F21-11).
+func TestCLINativeStreamGroupOpensOfflineStreamsWithoutACredential(t *testing.T) {
+	now := time.Now().UTC()
+	session := &capturedNativeApplicationSession{}
+	target := &resolver.TerminalTarget{Auth: resolver.AuthTarget{ExpiresAt: now.Add(time.Hour).Format(time.RFC3339), Offline: true}}
+	group := &cliNativeStreamGroup{session: session, target: target, application: peerApplication{operationID: "operation_1"}, consumer: "exec", now: func() time.Time { return now }}
+	stream, err := group.OpenStream(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if len(session.headers) != 1 || !session.headers[0].Offline || session.headers[0].Credential != "" || session.headers[0].OperationID != "operation_1" || session.resources[0] != "" {
+		t.Fatalf("offline stream opened with %+v resource %q", session.headers, session.resources)
+	}
+	target.Auth.Token = "smuggled"
+	if _, err := group.OpenStream(t.Context()); err == nil {
+		t.Fatal("an offline target carrying a credential opened a stream")
 	}
 }

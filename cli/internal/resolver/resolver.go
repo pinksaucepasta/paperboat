@@ -189,6 +189,9 @@ type AuthTarget struct {
 	// operation credential and signed native network scope.
 	ResourceID     string
 	UsageSessionID string
+	// Offline opens the stream without a credential for the host to admit from its own signed
+	// scopes, because Paperboat could not be reached (F21-11).
+	Offline bool
 }
 
 // TerminalTarget is the client-safe environment WebSocket endpoint returned

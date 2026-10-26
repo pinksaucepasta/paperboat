@@ -70,7 +70,13 @@ type PeerStreamRequest struct {
 	QUICEndpoint      string          `json:"quic_endpoint,omitempty"`
 	WSSEndpoint       string          `json:"wss_endpoint,omitempty"`
 	Payload           json.RawMessage `json:"payload,omitempty"`
+	// Offline is set by the daemon when Paperboat could not be reached for a descriptor: the
+	// stream carries no credential and the host admits it from its own signed scopes (F21-11).
+	Offline bool `json:"offline,omitempty"`
 }
+
+// OfflineConsumers are the streams the daemon may open without Paperboat.
+var OfflineConsumers = map[string]bool{"exec": true, "ssh": true}
 
 type PeerTerminalPayload struct {
 	Scopes              []string          `json:"scopes,omitempty"`
@@ -180,7 +186,7 @@ func (r PeerStreamRequest) Validate(now time.Time) error {
 	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
 		return ErrInvalidConfig
 	}
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != r.Offline || r.Offline && !OfflineConsumers[r.Consumer] || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	return nil
