@@ -1,9 +1,12 @@
 package usermachines
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 // F21-11: a host's offline session events land once each in the audit log of the workspace that decides that access,
@@ -101,6 +104,31 @@ func TestSSHSessionEventsLandInTheAuditLogOfTheDecidingWorkspacePostgres(t *test
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+	// What the workspace audit log (GET /v1/activity and its CSV export) returns for these events: who, outcome, bytes,
+	// origin, and the start's id that the end names.
+	details := map[string]map[string]any{}
+	metaRows, err := f.store.SQL().QueryContext(f.ctx, `SELECT event_type,metadata FROM paperboat.audit_events WHERE resource_type='machine_access' AND resource_id=$1 AND metadata->>'capability'='managed_ssh'`, f.machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for metaRows.Next() {
+		var typ string
+		var raw []byte
+		if err := metaRows.Scan(&typ, &raw); err != nil {
+			t.Fatal(err)
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(raw, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		details[typ] = teams.ProjectActivityMetadata(metadata)
+	}
+	metaRows.Close()
+	ended, started := details[accessEndedEvent], details[accessStartedEvent]
+	if ended["outcome"] != "revoked" || ended["bytes_in"] != float64(10) || ended["bytes_out"] != float64(20) || ended["origin"] != "online" || ended["session_id"] != start.EventID ||
+		started["session_id"] != start.EventID || started["origin"] != "online" || started["peer_account_id"] != f.account || started["scope_generation"] != float64(3) {
+		t.Fatalf("activity details: ended %v started %v", ended, started)
 	}
 	want := []string{accessDeniedEvent + "/denied/offline//", accessEndedEvent + "/success/online/revoked/20", accessStartedEvent + "/success/online//"}
 	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {

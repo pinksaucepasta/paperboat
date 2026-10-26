@@ -179,6 +179,9 @@ func auditEventFor(e OfflineAuditEvent, installationGeneration int64) (string, s
 	if e.Generation > 0 {
 		metadata["scope_generation"] = e.Generation
 	}
+	if e.Kind == "ssh_session_started" || e.Kind == "offline_session_started" {
+		metadata["session_id"] = e.EventID // an end names it, so the log pairs them
+	}
 	switch e.Kind {
 	case "ssh_session_ended":
 		metadata["session_id"], metadata["outcome"], metadata["bytes_in"], metadata["bytes_out"] = e.SessionID, e.Outcome, e.BytesIn, e.BytesOut
