@@ -120,37 +120,51 @@ func (s *Server) LocalEndpoints() []netip.AddrPort {
 	return slices.Clone(s.lb.eps)
 }
 
-// directPingWait bounds the disco ping that opens a direct path before the first WireGuard handshake.
-const directPingWait = 3 * time.Second
+// awaitRelayOrDirect readies a peer whose endpoints the signed configuration gives: it returns as soon as the
+// relay handshake is acknowledged (the relay carries traffic while no direct path is proven, as in Tailscale) or
+// a disco ping to the endpoints is answered (a direct path is proven), whichever comes first. Returning after an
+// unanswered ping left two machines behind one NAT, whose signed endpoints could not reach each other, without
+// the relay: every attempt idled out (Lane H, support_25a0e3be). With no usable relay the ping alone decides.
+func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) error {
+	relay := make(chan error, 1)
+	meowCtx, stopMeow := context.WithTimeout(context.WithoutCancel(ctx), backgroundMeow)
+	go func() {
+		defer stopMeow()
+		relay <- s.awaitMeow(meowCtx, peer) // keeps running, bounded, after a direct answer: the peer learns we may connect
+	}()
+	direct := s.pingDirect(ctx, peer)
+	for {
+		select {
+		case err := <-relay:
+			if err == nil {
+				return nil
+			}
+			relay = nil // the relay handshake ended without an answer; only a direct answer is left
+		case <-direct:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if relay == nil && direct == nil {
+			return errors.New("mesh: peer is reachable neither directly nor through a relay")
+		}
+	}
+}
 
-// pingDirect disco-pings peer at its signed endpoints and waits for the answer, bounded by directPingWait.
-// magicsock only starts pinging when a send finds no path, so without it the first handshakes find none
-// and each side waits out a 5 s WireGuard retry (about 10 s for a first contact with no relay).
-func (s *Server) pingDirect(ctx context.Context, peer key.NodePublic) {
+// pingDirect disco-pings peer at its signed endpoints and returns a channel closed when one answers.
+func (s *Server) pingDirect(ctx context.Context, peer key.NodePublic) <-chan struct{} {
+	answered := make(chan struct{})
 	s.lb.mu.Lock()
 	addr, ok := s.lb.allowedPeers[peer]
 	s.lb.mu.Unlock()
 	if !ok {
-		return
+		return nil
 	}
-	answered := make(chan struct{})
 	var once sync.Once
-	s.lb.sys.Engine.Get().Ping(addr, tailcfg.PingDisco, 0, func(*ipnstate.PingResult) { once.Do(func() { close(answered) }) })
-	wait := time.NewTimer(directPingWait)
-	defer wait.Stop()
-	select {
-	case <-answered:
-	case <-wait.C:
-	case <-ctx.Done():
-	}
-}
-
-// meowInBackground runs the relay handshake for a peer that is already reachable directly, bounded by
-// backgroundMeow; a missing relay only ends it early.
-func (s *Server) meowInBackground(peer key.NodePublic) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), backgroundMeow)
-		defer cancel()
-		_ = s.awaitMeow(ctx, peer)
-	}()
+	s.lb.sys.Engine.Get().Ping(addr, tailcfg.PingDisco, 0, func(r *ipnstate.PingResult) {
+		if r != nil && r.Err == "" {
+			once.Do(func() { close(answered) })
+		}
+	})
+	return answered
 }

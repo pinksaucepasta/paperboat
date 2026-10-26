@@ -297,13 +297,8 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 	if !s.lb.onMeow(peer, disco) {
 		return errors.New("mesh: peer is not admitted")
 	}
-	// A peer whose endpoints the signed configuration gives is reached directly: the WireGuard handshake
-	// goes to those addresses at once, relay or not. The relay handshake still runs, bounded, for a peer
-	// that does not know our endpoints yet.
 	if s.lb.directContact(peer) {
-		s.meowInBackground(peer)
-		s.pingDirect(ctx, peer)
-		return nil
+		return s.awaitRelayOrDirect(ctx, peer)
 	}
 	return s.awaitMeow(ctx, peer)
 }
