@@ -127,13 +127,13 @@ func TestSupervisorFetchesFreshAdmissionWithCappedBackoffAndReconnects(t *testin
 		}
 	}
 	first := manager.Status().Generation
+	// The next dial must already be set to fail when the connection is lost: the supervisor redials the
+	// moment it sees the loss, and a dial that succeeds first records no recovery metric.
 	dialer.mu.Lock()
 	active := dialer.connections[len(dialer.connections)-1]
-	dialer.mu.Unlock()
-	active.done <- errors.New("connection lost")
-	dialer.mu.Lock()
 	dialer.failDials = dialer.calls + 1
 	dialer.mu.Unlock()
+	active.done <- errors.New("connection lost")
 	deadline = time.After(time.Second)
 	for manager.Status().Generation == first {
 		select {
