@@ -83,7 +83,7 @@ def render(sections):
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
     for title, ids in (("Reliability, scale and efficiency", groups["reliability"]),
-                       ("SDK and agent tools (after Linux)", groups["sdk"])):
+                       ("SDK and agent tools", groups["sdk"])):
         rows = rows_of(ids)
         if rows:
             d, b, t = count(rows, 0)
