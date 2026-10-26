@@ -14,17 +14,28 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 )
 
 // BrowserTerminalAdmission is a live control-plane grant. Closing it releases
 // the control plane's attachment reservation; Closed also fires on revocation,
 // a failed policy check, or a missing heartbeat.
-// ErrBrowserTerminalQuotaExhausted: the server refused the admission because the paying
-// workspace's relay and edge allowance is used up (close reason bandwidth_quota_exhausted,
-// server browserterminal.BandwidthQuotaCloseReason).
-var ErrBrowserTerminalQuotaExhausted = errors.New("browser terminal refused: bandwidth allowance exhausted")
+// BrowserTerminalRefused: the control plane refused the admission and said why (the reason the server closed the
+// control channel with). The edge closes the browser's WebSocket with that reason.
+type BrowserTerminalRefused struct{ Reason terminalend.Reason }
 
-const browserTerminalQuotaCloseReason = "bandwidth_quota_exhausted"
+func (e *BrowserTerminalRefused) Error() string {
+	return "browser terminal refused: " + string(e.Reason)
+}
+
+// controlReason is the reason a control channel close names. A server that names none the edge knows (an older
+// build) is "edge_unavailable": the browser retries shortly.
+func controlReason(closed websocket.CloseError) terminalend.Reason {
+	if reason := terminalend.Parse(closed.Reason); reason != terminalend.Protocol || closed.Reason == string(terminalend.Protocol) {
+		return reason
+	}
+	return terminalend.EdgeUnavailable
+}
 
 type BrowserTerminalAdmission struct {
 	Credential        string
@@ -32,6 +43,9 @@ type BrowserTerminalAdmission struct {
 	AttachmentID      string
 	Closed            <-chan struct{}
 	Close             func()
+	// EndReason is why the control plane ended the admission once Closed has fired: the reason it closed the control
+	// channel with, or "" when the edge closed it or the connection failed.
+	EndReason func() terminalend.Reason
 }
 
 type BrowserTerminalClient struct {
@@ -95,9 +109,9 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 	}
 	stopFirst()
 	var closed websocket.CloseError
-	if errors.As(err, &closed) && closed.Code == websocket.StatusPolicyViolation && closed.Reason == browserTerminalQuotaCloseReason {
+	if errors.As(err, &closed) && closed.Code == websocket.StatusPolicyViolation {
 		connection.CloseNow()
-		return BrowserTerminalAdmission{}, ErrBrowserTerminalQuotaExhausted
+		return BrowserTerminalAdmission{}, &BrowserTerminalRefused{Reason: controlReason(closed)}
 	}
 	if err != nil || kind != websocket.MessageText {
 		connection.CloseNow()
@@ -126,6 +140,7 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 	done := make(chan struct{})
 	var once sync.Once
 	var closing atomic.Bool
+	var endReason atomic.Value // terminalend.Reason
 	closeConnection := func() {
 		closing.Store(true)
 		once.Do(func() { connection.CloseNow() })
@@ -140,6 +155,10 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 			ok := err == nil && kind == websocket.MessageText && bytes.Equal(message, []byte("ok"))
 			clearControlBytes(message)
 			if !ok {
+				var ended websocket.CloseError
+				if errors.As(err, &ended) && ended.Code == websocket.StatusPolicyViolation {
+					endReason.Store(controlReason(ended))
+				}
 				if !closing.Load() && ctx.Err() == nil && websocket.CloseStatus(err) != websocket.StatusNormalClosure && c.HTTP.controlFailure != nil {
 					status := 0
 					if websocket.CloseStatus(err) == websocket.StatusPolicyViolation {
@@ -155,5 +174,8 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 			}
 		}
 	}()
-	return BrowserTerminalAdmission{Credential: reply.Credential, TerminalSessionID: reply.TerminalSessionID, AttachmentID: reply.AttachmentID, Closed: done, Close: closeConnection}, nil
+	return BrowserTerminalAdmission{Credential: reply.Credential, TerminalSessionID: reply.TerminalSessionID, AttachmentID: reply.AttachmentID, Closed: done, Close: closeConnection, EndReason: func() terminalend.Reason {
+		reason, _ := endReason.Load().(terminalend.Reason)
+		return reason
+	}}, nil
 }

@@ -571,17 +571,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid browser terminal ticket", http.StatusForbidden)
 			return
 		}
-		admission, err := p.config.BrowserTerminal.Admit(r.Context(), ticket, r.Header.Get("Origin"), host)
-		if errors.Is(err, control.ErrBrowserTerminalQuotaExhausted) {
-			w.Header().Set("X-Paperboat-Error", "bandwidth_quota_exhausted")
-			http.Error(w, "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade, or wait for the next allowance period.", http.StatusTooManyRequests)
-			return
-		}
-		if err != nil {
-			http.Error(w, "Browser terminal admission unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		p.serveBrowserTerminal(w, r, host, matched, admission)
+		p.serveBrowserTerminal(w, r, host, matched, ticket)
 		return
 	}
 	if expectedKind == "runtime_https_wss" && helperAccessPath(r.URL.Path) {

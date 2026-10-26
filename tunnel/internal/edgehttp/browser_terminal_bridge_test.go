@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pinksaucepasta/paperboat/shared/terminalend"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 )
 
 func TestBrowserTerminalBridgeFailureAndRecovery(t *testing.T) {
@@ -61,7 +63,7 @@ func TestBrowserTerminalBridgeFailureAndRecovery(t *testing.T) {
 			completed <- err
 			return
 		}
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
 	}))
 	defer edge.Close()
 	dial := func(id string) *websocket.Conn {
@@ -114,12 +116,25 @@ func TestBrowserTerminalExpectedRequiresEveryLeaf(t *testing.T) {
 	}
 }
 
-func TestBrowserTerminalQuotaCutNamesThePlanLimit(t *testing.T) {
+// The workspace's allowance cut names the plan limit to the browser, and the control plane's own end reason reaches it
+// too, with the close code of its reason; any other end is a plain drop (the console reconnects).
+func TestBrowserTerminalEndsWithTheTypedReason(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	for name, cause := range map[string]error{
-		"quota":   fmt.Errorf("failed to read frame header: %w", ErrIngressQuotaExhausted),
-		"failure": syscall.EIO,
+	ended := func(reason terminalend.Reason) control.BrowserTerminalAdmission {
+		return control.BrowserTerminalAdmission{EndReason: func() terminalend.Reason { return reason }}
+	}
+	for name, tc := range map[string]struct {
+		cause     error
+		admission control.BrowserTerminalAdmission
+		code      int
+		reason    string
+	}{
+		"quota":              {fmt.Errorf("failed to read frame header: %w", ErrIngressQuotaExhausted), ended(""), 4403, "bandwidth_quota_exhausted"},
+		"revoked":            {context.Canceled, ended(terminalend.Revoked), 4401, "revoked"},
+		"terminal ended":     {context.Canceled, ended(terminalend.Ended), 4409, "ended"},
+		"control plane down": {context.Canceled, ended(terminalend.EdgeUnavailable), 4504, "edge_unavailable"},
+		"plain failure":      {syscall.EIO, ended(""), 1006, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +142,10 @@ func TestBrowserTerminalQuotaCutNamesThePlanLimit(t *testing.T) {
 				if err != nil {
 					return
 				}
-				closeBrowserTerminal(browser, cause)
+				defer browser.CloseNow()
+				if reason, typed := browserTerminalEnd(tc.cause, tc.admission); typed {
+					closeBrowserTerminal(browser, reason)
+				}
 			}))
 			defer edge.Close()
 			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
@@ -137,13 +155,21 @@ func TestBrowserTerminalQuotaCutNamesThePlanLimit(t *testing.T) {
 			defer conn.CloseNow()
 			_, _, err = conn.Read(ctx)
 			var closed websocket.CloseError
-			named := errors.As(err, &closed) && closed.Code == websocket.StatusPolicyViolation && closed.Reason == "bandwidth_quota_exhausted"
-			if named != (name == "quota") {
-				t.Fatalf("browser saw %v", err)
+			if tc.reason == "" {
+				if errors.As(err, &closed) && closed.Reason != "" {
+					t.Fatalf("a plain failure was named: %v", err)
+				}
+				return
+			}
+			if !errors.As(err, &closed) || int(closed.Code) != tc.code || closed.Reason != tc.reason {
+				t.Fatalf("browser saw %v, want %d %q", err, tc.code, tc.reason)
 			}
 		})
 	}
 	if !browserTerminalExpected(fmt.Errorf("read: %w", ErrIngressQuotaExhausted)) {
 		t.Fatal("allowance cut filed as an edge failure")
+	}
+	if !browserTerminalExpected(&control.BrowserTerminalRefused{Reason: terminalend.NoAccess}) || browserTerminalExpected(&control.BrowserTerminalRefused{Reason: terminalend.MachineUnavailable}) {
+		t.Fatal("a user-level refusal is expected; an unavailable machine is an edge failure")
 	}
 }

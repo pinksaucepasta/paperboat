@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
@@ -16,12 +17,44 @@ import (
 
 const browserTerminalBridgeQueue = 8
 
-func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Request, host string, match route.RouteMatch, admission control.BrowserTerminalAdmission) {
+// serveBrowserTerminal accepts the browser's WebSocket first, then admits the one-use ticket with the control plane.
+// Everything that can fail afterwards ends in a close the browser can read (a 4xxx code and a typed reason), where a
+// failed upgrade is an HTTP status JavaScript cannot see and the console could only retry blindly. Nothing is
+// forwarded before the control plane admits the ticket.
+func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Request, host string, match route.RouteMatch, ticket string) {
+	browser, err := websocket.Accept(w, request, &websocket.AcceptOptions{
+		Subprotocols: []string{browserTerminalSubprotocol},
+		// The one-use control admission binds the browser Origin to the ticket; the edge terminates this WebSocket
+		// only to add its outer message discriminator, and all inner TLS and shared-output bytes stay opaque.
+		InsecureSkipVerify: true,
+		CompressionMode:    websocket.CompressionDisabled,
+	})
+	if err != nil {
+		p.observeBrowserTerminal(request.Context(), err)
+		return
+	}
+	browser.SetReadLimit(browserTerminalMaxRecordBytes + 1)
+	defer browser.CloseNow()
+	refuse := func(reason terminalend.Reason, cause error) {
+		p.observeBrowserTerminal(request.Context(), browserTerminalRefusal{reason: reason, cause: cause})
+		_ = browser.Close(websocket.StatusCode(reason.CloseCode()), string(reason))
+	}
+
+	admission, err := p.config.BrowserTerminal.Admit(request.Context(), ticket, request.Header.Get("Origin"), host)
+	if err != nil {
+		var refused *control.BrowserTerminalRefused
+		if errors.As(err, &refused) {
+			refuse(refused.Reason, err)
+		} else {
+			refuse(terminalend.EdgeUnavailable, err)
+		}
+		return
+	}
 	if admission.Close == nil || admission.Closed == nil || admission.Credential == "" {
 		if admission.Close != nil {
 			admission.Close()
 		}
-		http.Error(w, "Browser terminal admission unavailable", http.StatusServiceUnavailable)
+		refuse(terminalend.EdgeUnavailable, errBrowserTerminalAdmissionIncomplete)
 		return
 	}
 	defer admission.Close()
@@ -33,11 +66,13 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 	fence := browserTerminalFenceForMatch(match)
 	subscription, err := p.config.BrowserTerminalHub.Subscribe(key, fence, admission.AttachmentID)
 	if err != nil {
-		status := http.StatusServiceUnavailable
-		if err == ErrBrowserTerminalHubFull {
-			status = http.StatusTooManyRequests
+		// A stale fence or a closed hub is a carrier that was replaced under the ticket: the machine is
+		// reconnecting. Full is this edge's participant cap.
+		if errors.Is(err, ErrBrowserTerminalHubFull) {
+			refuse(terminalend.TooManyPending, err)
+		} else {
+			refuse(terminalend.MachineUnavailable, err)
 		}
-		http.Error(w, "Browser terminal is at capacity", status)
 		return
 	}
 	defer subscription.Close()
@@ -77,37 +112,23 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
-		p.observeBrowserTerminal(ctx, err)
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
-		http.Error(w, "Browser terminal host is unavailable", http.StatusBadGateway)
+		refuse(terminalend.MachineUnavailable, err)
 		return
 	}
 	if upstream.Subprotocol() != browserTerminalSubprotocol {
-		p.observeBrowserTerminal(ctx, ErrBrowserTerminalMessage)
 		upstream.CloseNow()
-		http.Error(w, "Browser terminal host rejected the protocol", http.StatusBadGateway)
+		refuse(terminalend.Protocol, ErrBrowserTerminalMessage)
 		return
 	}
 	upstream.SetReadLimit(browserTerminalMaxRecordBytes)
 	defer upstream.CloseNow()
 
-	// The one-use control admission has already bound the browser Origin to the
-	// ticket. The edge terminates this WebSocket only to add its outer message
-	// discriminator; all inner TLS and shared-output bytes remain opaque.
-	browser, err := websocket.Accept(w, request, &websocket.AcceptOptions{
-		Subprotocols:       []string{browserTerminalSubprotocol},
-		InsecureSkipVerify: true,
-		CompressionMode:    websocket.CompressionDisabled,
-	})
-	if err != nil {
-		p.observeBrowserTerminal(ctx, err)
-		return
-	}
-	browser.SetReadLimit(browserTerminalMaxRecordBytes + 1)
-	defer browser.CloseNow()
-	p.observeBrowserTerminal(ctx, bridgeBrowserTerminal(ctx, browser, upstream, subscription))
+	p.observeBrowserTerminal(ctx, bridgeBrowserTerminal(ctx, browser, upstream, subscription, func(cause error) (terminalend.Reason, bool) {
+		return browserTerminalEnd(cause, admission)
+	}))
 }
 
 func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFence {
@@ -127,13 +148,22 @@ func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFe
 	}
 }
 
-func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription) (result error) {
+// bridgeBrowserTerminal runs the browser <-> host bridge until one side ends it. endReason names the typed close
+// the browser should get for the cause, if any; every other end drops the connection (the browser reconnects).
+func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, endReason func(error) (terminalend.Reason, bool)) (result error) {
 	ctx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	failures := make(chan error, 3)
 	defer func() {
+		// Close the browser first: cancelling the context under a blocked read hard-closes the connection and
+		// the typed reason would never reach it.
+		if endReason != nil {
+			if reason, typed := endReason(result); typed {
+				closeBrowserTerminal(browser, reason)
+			}
+		}
 		cancel()
-		closeBrowserTerminal(browser, result)
+		_ = browser.CloseNow()
 		_ = upstream.CloseNow()
 		workers.Wait()
 		close(failures)
@@ -253,19 +283,38 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	}
 }
 
-// browserTerminalQuotaCloseReason is the close reason the console's terminal worker matches
-// to show the plan limit instead of reconnecting.
-const browserTerminalQuotaCloseReason = "bandwidth_quota_exhausted"
-
-// closeBrowserTerminal tells the browser why its terminal ended when the workspace's
-// allowance cut it; any other end drops the connection as before.
-func closeBrowserTerminal(browser *websocket.Conn, cause error) {
-	if errors.Is(cause, ErrIngressQuotaExhausted) {
-		_ = browser.Close(websocket.StatusPolicyViolation, browserTerminalQuotaCloseReason)
-		return
-	}
-	_ = browser.CloseNow()
+// closeBrowserTerminal tells the browser why its terminal ended: the close carries the code and the typed reason.
+func closeBrowserTerminal(browser *websocket.Conn, reason terminalend.Reason) {
+	_ = browser.Close(websocket.StatusCode(reason.CloseCode()), string(reason))
 }
+
+// browserTerminalEnd names the typed close for how an attached terminal ended: the workspace's allowance cut it, or
+// the control plane ended the admission and said why. Any other end (a dropped connection, the host going away) is a
+// plain drop: the console reconnects and learns the reason from the next ticket.
+func browserTerminalEnd(cause error, admission control.BrowserTerminalAdmission) (terminalend.Reason, bool) {
+	if errors.Is(cause, ErrIngressQuotaExhausted) {
+		return terminalend.BandwidthQuotaExhausted, true
+	}
+	if admission.EndReason != nil {
+		if reason := admission.EndReason(); reason != "" {
+			return reason, true
+		}
+	}
+	return "", false
+}
+
+var errBrowserTerminalAdmissionIncomplete = errors.New("browser terminal admission is incomplete")
+
+// browserTerminalRefusal is a refusal the edge sent the browser, reported with its reason.
+type browserTerminalRefusal struct {
+	reason terminalend.Reason
+	cause  error
+}
+
+func (e browserTerminalRefusal) Error() string {
+	return "browser terminal refused (" + string(e.reason) + "): " + e.cause.Error()
+}
+func (e browserTerminalRefusal) Unwrap() error { return e.cause }
 
 // Expected shutdown must account for every leaf so a simultaneous operational
 // failure is never hidden by a normal participant departure.
@@ -274,6 +323,13 @@ func browserTerminalExpected(err error) bool {
 		// The allowance cut is a plan limit the server already reported, not an edge failure.
 		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded || leaf == ErrIngressQuotaExhausted {
 			return true
+		}
+		// The control plane's own answers about the user's access are not edge failures; it reported them.
+		if refused, ok := leaf.(*control.BrowserTerminalRefused); ok {
+			switch refused.Reason {
+			case terminalend.NoAccess, terminalend.Ended, terminalend.Revoked, terminalend.Expired, terminalend.Limit, terminalend.BandwidthQuotaExhausted, terminalend.TooManyPending:
+				return true
+			}
 		}
 		switch closed := leaf.(type) {
 		case websocket.CloseError:
