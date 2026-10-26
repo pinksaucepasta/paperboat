@@ -1322,6 +1322,22 @@ func TestTerminalSessionRetentionExpiresOnlyConfirmedClosedRows(t *testing.T) {
 	if purgeState != "pending" {
 		t.Fatalf("early host purge state = %q, want pending", purgeState)
 	}
+	// A machine revoked with operations still pending never answers again: the worker ends them as
+	// failed instead of retrying them forever.
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now(),online=false WHERE id=$1`, machineID); err != nil {
+		t.Fatal(err)
+	}
+	_ = service.processDueTerminalSessionOperations(ctx)
+	var pendingAfterRevoke int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_terminal_session_operations WHERE user_machine_id=$1 AND state='pending'`, machineID).Scan(&pendingAfterRevoke); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machine_terminal_session_operations WHERE terminal_session_id=$1 AND operation='delete_history'`, ids["recent"]).Scan(&purgeState); err != nil {
+		t.Fatal(err)
+	}
+	if pendingAfterRevoke != 0 || purgeState != "failed" {
+		t.Fatalf("revoked machine operations: %d still pending, purge state %q; want none pending and failed", pendingAfterRevoke, purgeState)
+	}
 }
 
 func TestCreateTerminalSessionAllocatesNameWhenOmitted(t *testing.T) {

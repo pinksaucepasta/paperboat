@@ -621,6 +621,14 @@ func (s *Service) applyTerminalSessionOperations(ctx context.Context, userMachin
 }
 
 func (s *Service) processDueTerminalSessionOperations(ctx context.Context) error {
+	// A revoked or removed machine never answers again: its pending operations end as failed instead
+	// of being retried forever (prod held 133 such operations, some at 2,600 attempts).
+	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_terminal_session_operations o
+ SET state='failed',completed_at=now(),updated_at=now(),last_error='machine_removed'
+ FROM paperboat.user_machines m
+ WHERE m.id=o.user_machine_id AND o.state='pending' AND (m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL)`); err != nil {
+		return err
+	}
 	items, err := s.db.Queries().ListDueUserMachineTerminalSessionOperations(ctx, 32)
 	if err != nil {
 		return err
