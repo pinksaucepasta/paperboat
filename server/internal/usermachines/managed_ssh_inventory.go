@@ -3,6 +3,7 @@ package usermachines
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 )
 
@@ -16,6 +17,9 @@ type MachineSSH struct {
 	Port              int32  `json:"port"`
 	TargetGeneration  int64  `json:"target_generation"`
 	HostKeyGeneration int64  `json:"host_key_generation"`
+	// HostKeys are the active host key set's public keys, the strings GET /ssh-host-keys?state=active returns in
+	// `keys`, so a daemon serves known_hosts without a control call per ssh. A promotion publishes the inventory topic.
+	HostKeys []string `json:"host_keys,omitempty"`
 	// HostKeyConflict is present while this machine's latest host-key observation was refused
 	// because another live machine has the same keys (a cloned image).
 	HostKeyConflict *HostKeyConflict `json:"host_key_conflict,omitempty"`
@@ -41,6 +45,7 @@ func (s *Service) describeManagedSSH(ctx context.Context, account string, machin
 		byID[machine.ID] = machine
 	}
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT m.id,t.os_user,t.target_port,t.machine_generation,coalesce(h.machine_generation,0),c.user_machine_id IS NOT NULL,
+ coalesce((SELECT json_agg(k.public_key ORDER BY member.ordinal) FROM machine_ssh_host_keys member JOIN machine_ssh_host_key_owners k ON k.fingerprint=member.fingerprint AND k.user_machine_id=member.user_machine_id WHERE member.set_id=h.id),'[]'::json),
  CASE WHEN o.user_id=$1 OR machine_management_allowed($1,o.id) THEN coalesce(nullif(o.alias,''),o.id) END
  FROM user_machines m
  JOIN machine_ssh_targets t ON t.user_machine_id=m.id AND t.machine_generation=m.installation_generation
@@ -58,7 +63,11 @@ func (s *Service) describeManagedSSH(ctx context.Context, account string, machin
 		var ssh MachineSSH
 		var conflict bool
 		var otherName sql.NullString
-		if err := rows.Scan(&id, &ssh.OSUser, &ssh.Port, &ssh.TargetGeneration, &ssh.HostKeyGeneration, &conflict, &otherName); err != nil {
+		var keys []byte
+		if err := rows.Scan(&id, &ssh.OSUser, &ssh.Port, &ssh.TargetGeneration, &ssh.HostKeyGeneration, &conflict, &keys, &otherName); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		if err := json.Unmarshal(keys, &ssh.HostKeys); err != nil {
 			return errors.Join(err, rows.Close())
 		}
 		if conflict {

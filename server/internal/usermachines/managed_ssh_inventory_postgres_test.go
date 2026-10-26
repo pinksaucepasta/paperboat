@@ -2,8 +2,12 @@ package usermachines
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The inventory carries each machine's managed SSH target, so daemons no longer fetch
@@ -33,8 +37,26 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
   CASE WHEN g=2 THEN 2 ELSE 1 END FROM generate_series(1,4) g`, suffix, owner)
 	exec(`INSERT INTO paperboat.machine_ssh_targets(user_machine_id,machine_generation,os_user,target_port,created_at,updated_at)
  SELECT 'inv_ssh_'||g||'_'||$1,1,'pbt',2200+g,now(),now() FROM generate_series(1,4) g`, suffix)
-	exec(`INSERT INTO paperboat.machine_ssh_host_key_sets(id,user_machine_id,machine_generation,observation_generation,set_fingerprint,state,reconciliation_version,observed_at,promoted_at)
- VALUES('keyset_'||gen_random_uuid()::text,'inv_ssh_1_'||$1,1,1,decode(repeat('ab',32),'hex'),'active',1,now(),now())`, suffix)
+	keyA := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI" + strings.Repeat("A", 43)
+	keyB := "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABB" + strings.Repeat("B", 60)
+	exec(`INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,algorithm,public_key,first_observed_at) VALUES
+ (decode(repeat('01',32),'hex'),'inv_ssh_1_'||$1,'ssh-ed25519',$2,now()),(decode(repeat('02',32),'hex'),'inv_ssh_1_'||$1,'ecdsa-sha2-nistp256',$3,now())`, suffix, keyA, keyB)
+	setID := "keyset_" + uuid.NewString()
+	topic := func() int64 {
+		var generation int64
+		_ = store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='inventory'),0)`, owner).Scan(&generation)
+		return generation
+	}
+	exec(`INSERT INTO paperboat.machine_ssh_host_key_sets(id,user_machine_id,machine_generation,observation_generation,set_fingerprint,state,reconciliation_version,observed_at)
+ VALUES($2,'inv_ssh_1_'||$1,1,1,decode(repeat('ab',32),'hex'),'pending',1,now())`, suffix, setID)
+	exec(`INSERT INTO paperboat.machine_ssh_host_keys(set_id,user_machine_id,fingerprint,ordinal) VALUES
+ ($2,'inv_ssh_1_'||$1,decode(repeat('02',32),'hex'),1),($2,'inv_ssh_1_'||$1,decode(repeat('01',32),'hex'),0)`, suffix, setID)
+	before := topic()
+	// A promotion (what pb ssh trust-host does) publishes the inventory topic, so daemons refetch the keys.
+	exec(`UPDATE paperboat.machine_ssh_host_key_sets SET state='active',promoted_at=now() WHERE id=$1`, setID)
+	if after := topic(); after <= before {
+		t.Fatalf("inventory topic generation %d -> %d: a host key promotion did not publish it", before, after)
+	}
 	service := New(store, nil, Policy{}, nil)
 	items, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
 	if err != nil || len(items) != 3 {
@@ -50,8 +72,9 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	for _, item := range items {
 		byAlias[item.Alias] = item.SSH
 	}
-	if got := byAlias["ssh-1"]; got == nil || *got != (MachineSSH{OSUser: "pbt", Port: 2201, TargetGeneration: 1, HostKeyGeneration: 1}) {
-		t.Fatalf("current target with active host keys: %+v", got)
+	if got := byAlias["ssh-1"]; got == nil || got.OSUser != "pbt" || got.Port != 2201 || got.TargetGeneration != 1 || got.HostKeyGeneration != 1 ||
+		!slices.Equal(got.HostKeys, []string{keyA, keyB}) {
+		t.Fatalf("current target with active host keys: %+v, want the active set's keys in order", got)
 	}
 	if got := byAlias["ssh-2"]; got != nil {
 		t.Fatalf("a target from an older installation was listed: %+v", got)
@@ -59,7 +82,7 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	if got := byAlias["ssh-3"]; got != nil {
 		t.Fatalf("a revoked machine's target was listed: %+v", got)
 	}
-	if got := byAlias["ssh-4"]; got == nil || got.HostKeyGeneration != 0 || got.Port != 2204 {
+	if got := byAlias["ssh-4"]; got == nil || got.HostKeyGeneration != 0 || got.Port != 2204 || len(got.HostKeys) != 0 {
 		t.Fatalf("target without host keys: %+v", got)
 	}
 }
