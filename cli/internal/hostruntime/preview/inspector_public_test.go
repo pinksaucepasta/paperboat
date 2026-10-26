@@ -168,7 +168,15 @@ func TestInspectorPublicCaptureAndReplay(t *testing.T) {
 		t.Fatalf("origin saw %q %q %q %q hits=%d", methods[0], uris[0], auths[0], bodies[0], hits.Load())
 	}
 
-	status, payload := call(http.MethodGet, "/v1/inspector/records?kind=preview&resource="+lease.ID+"&route="+lease.ID+"&limit=10", nil, "grant_owner_inspect")
+	// The capture is stored when the stream ends, which can be after the client has its response.
+	var status int
+	var payload []byte
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		status, payload = call(http.MethodGet, "/v1/inspector/records?kind=preview&resource="+lease.ID+"&route="+lease.ID+"&limit=10", nil, "grant_owner_inspect")
+		if status != http.StatusOK || !strings.Contains(string(payload), `"records":[]`) || time.Now().After(deadline) {
+			break
+		}
+	}
 	if status != http.StatusOK {
 		t.Fatalf("list = %d: %s", status, payload)
 	}
