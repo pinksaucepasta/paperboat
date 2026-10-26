@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 type DataPlaneSpec struct {
@@ -72,12 +73,16 @@ func (d *DataPlane) Start(ctx context.Context) error {
 	components = append(components, d.spec.Usage)
 	for _, component := range components {
 		if err := component.Start(ctx); err != nil {
+			// One bounded budget for the whole rollback: a child that ignores SIGTERM is killed
+			// when it runs out instead of hanging the failed start.
+			rollback, cancel := context.WithTimeout(context.Background(), startupRollbackTimeout)
 			var cleanup []error
 			for i := len(d.started) - 1; i >= 0; i-- {
-				if stopErr := d.started[i].Shutdown(context.Background()); stopErr != nil {
+				if stopErr := d.started[i].Shutdown(rollback); stopErr != nil {
 					cleanup = append(cleanup, stopErr)
 				}
 			}
+			cancel()
 			d.started = nil
 			d.closed = true
 			return errors.Join(componentStartError(component, err), errors.Join(cleanup...))
@@ -86,6 +91,9 @@ func (d *DataPlane) Start(ctx context.Context) error {
 	}
 	return nil
 }
+
+// startupRollbackTimeout bounds stopping the already started components after a failed start.
+var startupRollbackTimeout = 10 * time.Second
 
 func (d *DataPlane) Shutdown(ctx context.Context) error {
 	d.mu.Lock()

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type orderedComponent struct {
@@ -110,4 +112,39 @@ func indexOf(values []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// stuckComponent's Shutdown returns only when its context ends, like a child ignoring SIGTERM.
+type stuckComponent struct{}
+
+func (stuckComponent) Start(context.Context) error { return nil }
+func (stuckComponent) Shutdown(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Code review (dataplane.go:77): a failed start's rollback is bounded, and the start error stays
+// the primary error.
+func TestDataPlaneRollbackIsBoundedAndKeepsTheStartError(t *testing.T) {
+	defer func(previous time.Duration) { startupRollbackTimeout = previous }(startupRollbackTimeout)
+	startupRollbackTimeout = 200 * time.Millisecond
+	var mu sync.Mutex
+	var events []string
+	component := func(name string, fail bool) Component {
+		return orderedComponent{name: name, events: &events, mu: &mu, fail: fail}
+	}
+	dataPlane, _ := NewDataPlane(DataPlaneSpec{Persistence: component("store", false), Control: component("control", false), Node: component("node", false), Routes: component("routes", false), Gateway: stuckComponent{}, HTTP3Ingress: component("http3", true), PrivateIngress: component("private", false), RedirectIngress: component("redirect", false), Usage: component("usage", false)})
+	done := make(chan error, 1)
+	go func() { done <- dataPlane.Start(context.Background()) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "failed") || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("start error = %v, want the start failure joined with the bounded cleanup", err)
+		}
+		if first := strings.SplitN(err.Error(), "\n", 2)[0]; strings.Contains(first, "deadline") {
+			t.Fatalf("cleanup error hides the start error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed start hung in its rollback")
+	}
 }
