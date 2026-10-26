@@ -1,9 +1,11 @@
 #!/bin/bash
-# final_pair_extras.sh MODE HOST BINARY: two of the final re-check's extra checks, on fresh throwaway containers on HOST
+# final_pair_extras.sh MODE HOST BINARY: final re-check checks that need fresh throwaway pairs, on fresh throwaway containers on HOST
 # (a Docker host with the laneh-ubuntu24-systemd image; HOST's own pb mints the enrollment tokens, as in fresh_pair_lib.sh).
 #
 #   exec     two fresh pairs with BINARY, then `pb exec` from one to the other as the very first thing after the pair
 #            (no wait, no retry): the old intermittent first-exec failure. Passes only if the marker comes back.
+#   revoke   C036: two fresh pairs; one revokes the other by exact id (`pb machine revoke`, revoked_machine.py revoke),
+#            then the revoked machine checks it lost access at once and does not hammer the server (verify).
 #   history  two machines installed with the PUBLISHED one-liner (the official Latest), real history on the target
 #            (background preview, tunnel, a held terminal, a transfer in flight), then `pb update --from BINARY` while
 #            all of it runs: transfer byte-identical, preview and tunnel on the same URLs, the same shell answers
@@ -16,7 +18,7 @@
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and the
 # containers removed on every exit path; enrollment tokens stay in files.
 set -uo pipefail
-MODE=${1:?exec|history|scheduled} HOST=${2:?host} BIN=${3:?binary}
+MODE=${1:?exec|revoke|history|scheduled} HOST=${2:?host} BIN=${3:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
 T=final-$MODE-t-$STAMP P=final-$MODE-p-$STAMP ALIAS=lanea-fx-$STAMP
@@ -69,6 +71,23 @@ EOF
 )
   MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
   grep -qx SCHEDULED_OK <<<"$out" && finish PASS "official install: settings disable/enable persisted; at the configured time it reached the newest release by itself"
+  finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 3 | cut -c1-300 | tr "\n" " ")"
+fi
+
+if [ "$MODE" = revoke ]; then
+  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+set -euo pipefail
+fresh $T $ALIAS
+fresh $P $ALIAS-p
+X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+for ct in $T $P; do sudo -n docker cp /tmp/$T-ds.tgz $ct:/home/pbt/ds.tgz; $X $ct bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'; done
+target=$($X $T python3 -c 'import json;print(json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])')
+for i in $(seq 1 24); do $X $P timeout 40 /home/pbt/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
+if $X $P bash -c "cd ~/ds && python3 revoked_machine.py revoke $target" && $X $T bash -c "cd ~/ds && python3 revoked_machine.py verify $ALIAS-p --window 60"; then echo REVOKE_OK; else echo REVOKE_FAILED; fi
+EOF
+)
+  MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
+  grep -qx REVOKE_OK <<<"$out" && finish PASS "pb machine revoke by exact id: the revoked machine lost access at once and stayed quiet"
   finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 3 | cut -c1-300 | tr "\n" " ")"
 fi
 

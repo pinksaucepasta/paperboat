@@ -82,3 +82,5 @@ config-command-c179	device	C179	python3 config_commands.py --rows C179
 config-command-c180	device	C180	python3 config_commands.py --rows C180
 config-command-c181	device	C181	python3 config_commands.py --rows C181
 extra-update-scheduled	cmd	F14-06	tools/device-smoke/final_pair_extras.sh scheduled {host} {binary}
+machine-revoke	cmd	C036	tools/device-smoke/final_pair_extras.sh revoke {host} {binary}
+approve-refusals	device	C001	python3 approve_refusals.py
