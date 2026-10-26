@@ -354,6 +354,24 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
 		}
 	}
+	// An operator edge's usage report for an engine route is bound to the route the edge serves, at the
+	// tunnel route generation and agent environment its ingress decision carried: the usage endpoint read
+	// only connector, preview and carrier paths and refused every engine report (staging, 4/s).
+	var environment string
+	var generation int64
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT m.environment_id,r.generation FROM user_machines m, tunnel_routes r WHERE m.id=$1 AND r.id=$2`, f.machine, route).Scan(&environment, &generation); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		route    string
+		revision int64
+		want     bool
+	}{{route, generation, true}, {route, generation - 1, false}, {"route_not_held_" + f.prefix, generation, false}} {
+		held, err := f.database.EdgeHoldsUsageRoute(f.ctx, f.edge.NodeID, c.route, c.revision, environment)
+		if err != nil || held != c.want {
+			t.Fatalf("usage route %s@%d held = %v, %v; want %v", c.route, c.revision, held, err, c.want)
+		}
+	}
 	// The certificate ledger treats the engine's edges like connector edges: a domain whose active
 	// certificate is not yet acknowledged by every engine edge is due, and once each edge acknowledges
 	// the certificate at its engine assignment generation the domain is complete (not due again).

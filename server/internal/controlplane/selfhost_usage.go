@@ -21,24 +21,7 @@ func (s *EdgeService) authorizeSelfhostUsage(ctx context.Context, r edgeUsageReq
 	if err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, r.Node).Scan(&customerOwned); err != nil || !customerOwned {
 		return false, err
 	}
-	var authorized bool
-	err = s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS (
- SELECT 1 FROM paperboat.tunnel_edge_route_assignments a
- JOIN paperboat.user_machines m ON m.id=a.host_id AND m.user_id=a.account_id
- WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
- AND paperboat.node_route_eligible(a.edge_node_id,a.account_id,a.route_id)
- UNION ALL
- SELECT 1 FROM paperboat.preview_routes a
- JOIN paperboat.user_machines m ON m.id=a.owner_machine_id
- WHERE a.edge_node_id=$1 AND a.route_id=$2 AND a.route_generation=$3 AND m.environment_id=$4
- AND paperboat.node_preview_eligible(a.edge_node_id,a.account_id,a.preview_id)
- UNION ALL
- SELECT 1 FROM paperboat.runtime_carrier_attachments attachment
- JOIN paperboat.control_routes r ON r.id=attachment.route_id
- JOIN paperboat.control_environments e ON e.id=r.environment_id
- WHERE attachment.edge_node_id=$1 AND r.id=$2 AND attachment.route_revision=$3 AND e.id=$4
- AND paperboat.runtime_carrier_valid(r.id,attachment.edge_node_id,attachment.edge_process_epoch,false)
- )`, r.Node, r.Route, r.Revision, r.Environment).Scan(&authorized)
+	authorized, err := s.store.EdgeHoldsUsageRoute(ctx, r.Node, r.Route, r.Revision, r.Environment)
 	if err != nil {
 		return true, err
 	}
