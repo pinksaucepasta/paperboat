@@ -9,7 +9,7 @@ import { usageParams, type UsagePeriod } from "@/lib/usage-period"
 import { useWorkspaceId } from "@/lib/workspace"
 import { withDeadline } from "@/lib/deadline"
 import { sessionVerdict } from "@/lib/session-verdict"
-import { fetchMachineList, type MachinePages } from "@/lib/machine-pages"
+import { fetchAllPages, type MachinePages } from "@/lib/machine-pages"
 
 /** Error envelope returned by the control plane: `{ error: { code, message } }`. */
 export class ApiError extends Error {
@@ -272,11 +272,15 @@ async function fetchMachines(params: Record<string, string>): Promise<MachinePag
   return { items: page.items, total: page.pagination.total, complete: page.items.length >= page.pagination.total }
 }
 
-/** Every machine of the workspace, revoked ones included (bounded, see lib/machine-pages.ts). */
+/**
+ * The workspace's machines in use (the server leaves revoked ones out), for pickers and name
+ * lookups; bounded, and `complete` says whether that was all of them (lib/machine-pages.ts). The
+ * Machines table pages on the server instead (lib/machine-list.ts).
+ */
 export const machinesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.machines(workspace),
-    queryFn: async () => (await fetchMachineList(machinePage, workspace))!,
+    queryFn: async () => (await fetchAllPages(machinePage, workspace))!,
     refetchInterval: 15_000,
   })
 
@@ -435,13 +439,13 @@ export function useWorkspace(): Workspace | undefined {
   return data?.find((workspace) => workspace.id === id) ?? data?.find((workspace) => workspace.kind === "personal")
 }
 
-/** The workspace's machines you can use: every page, revoked ones left out. */
+/** The workspace's machines in use (machinesQuery). */
 export function useMachines() {
   const workspace = useWorkspace()
   return useApiQuery({
     ...machinesQuery(workspace?.id ?? ""),
     enabled: Boolean(workspace),
-    select: (page: MachinePage) => page.items.filter((machine) => machine.state !== "revoked"),
+    select: (page: MachinePage) => page.items,
   })
 }
 

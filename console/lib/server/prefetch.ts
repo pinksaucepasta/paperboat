@@ -6,7 +6,6 @@ import { connection } from "next/server"
 import { defaultUsagePeriod, usageParams } from "@/lib/usage-period"
 import { queryKeys } from "@/lib/query-keys"
 import { controlPlaneFetch } from "@/lib/server/control-plane"
-import { fetchMachineList } from "@/lib/machine-pages"
 
 const workspacePattern = /^[a-z0-9-]{1,63}$/
 
@@ -41,14 +40,20 @@ export async function prefetchMachinesPage(): Promise<{ state: DehydratedState; 
   const [me, workspaces, machines, usage] = await Promise.all([
     get("me"),
     get<{ items: unknown[] }>("workspaces"),
-    fetchMachineList((params) => get<{ items: unknown[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`), workspace),
+    // The Machines table's first page (lib/machine-list.ts), not every machine.
+    get<{ items: unknown[]; total: number }>(`machines?${new URLSearchParams({ workspace, limit: "50" })}`),
     get(`usage?${usageParams(workspace, defaultUsagePeriod)}`),
   ])
 
   // Shapes match the browser query functions in lib/api.ts.
   if (me) queryClient.setQueryData(queryKeys.me, me)
   if (workspaces) queryClient.setQueryData(queryKeys.workspaces, workspaces.items)
-  if (machines) queryClient.setQueryData(queryKeys.machines(workspace), machines)
+  if (machines)
+    queryClient.setQueryData(queryKeys.machineList(workspace, "", {}, 1), {
+      items: machines.items,
+      total: machines.total,
+      page: 1,
+    })
   if (usage) queryClient.setQueryData(queryKeys.usage(workspace, defaultUsagePeriod), usage)
   return { state: dehydrate(queryClient), workspace }
 }

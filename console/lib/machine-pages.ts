@@ -25,19 +25,3 @@ export async function fetchAllPages<T>(
   }
   return { items, total, complete: items.length >= total }
 }
-
-/**
- * The machines list both the browser and the server prefetch load: those in use from the default
- * list (its total is what `complete` measures), then the revoked and disconnected ones, which the
- * server lists only with ?state=revoked (for the Revoked filter).
- */
-export async function fetchMachineList<T>(
-  fetchPage: (params: Record<string, string>) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
-  workspace: string,
-): Promise<MachinePages<T> | null> {
-  const [live, revoked] = await Promise.all([
-    fetchAllPages(fetchPage, workspace),
-    fetchAllPages((params) => fetchPage({ ...params, state: "revoked" }), workspace),
-  ])
-  return live && { ...live, items: [...live.items, ...(revoked?.items ?? [])] }
-}
