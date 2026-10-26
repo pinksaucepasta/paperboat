@@ -36,7 +36,7 @@ pb tunnel route add <tunnel> [flags]
       --path string                          HTTP path prefix, optionally ending in *
       --preserve-host                        preserve the incoming Host header (default true)
       --priority int32                       route priority
-      --protocol string                      route protocol (http, tcp, or tcp_private) (default "http")
+      --protocol string                      route protocol (http, tcp, tls passthrough, or tcp_private) (default "http")
       --timeout duration                     maximum time to wait for operation completion (default 2m0s)
       --tls-server-name string               explicit origin TLS server name
       --tls-verification string              origin TLS verification (system, custom_ca, or insecure_development)
