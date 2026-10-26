@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -443,6 +445,12 @@ func soleCommandOwner(err error) error {
 			return failure
 		}
 		if _, ok := err.(interface{ Unwrap() []error }); ok {
+			// errors.Join(err, cleanupErr) with a cleanup that succeeded has one real cause: the join adds no
+			// sibling, so that cause owns the result. Typed wrappers with their own meaning are never peeled.
+			if only := loneJoinedCause(err); only != nil {
+				err = only
+				continue
+			}
 			return nil
 		}
 		if signedActivationPending(err) {
@@ -474,6 +482,27 @@ func soleCommandOwner(err error) error {
 		err = wrapper.Unwrap()
 	}
 	return nil
+}
+
+var joinErrorType = reflect.TypeOf(errors.Join(io.EOF))
+
+// loneJoinedCause is the one non-nil error of an errors.Join result, or nil when err is not such a join or has
+// several (a typed nil still counts as a cause).
+func loneJoinedCause(err error) error {
+	if reflect.TypeOf(err) != joinErrorType {
+		return nil
+	}
+	var only error
+	for _, child := range err.(interface{ Unwrap() []error }).Unwrap() {
+		if child == nil {
+			continue
+		}
+		if only != nil {
+			return nil
+		}
+		only = child
+	}
+	return only
 }
 
 func apiErrorFallback(err *api.APIError) string {

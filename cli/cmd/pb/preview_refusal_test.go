@@ -26,3 +26,24 @@ func TestPreviewFailureReportsALoneServerRefusal(t *testing.T) {
 		t.Fatalf("unknown server code echoed: %#v", got)
 	}
 }
+
+// An errors.Join whose cleanup succeeded (the shape pb access tunnel, pb access machine, pb inbox and pb exec
+// return) has one real cause, so a lone server refusal is reported; a second cause or a typed wrapper with its own
+// meaning is not peeled.
+func TestLoneServerRefusalInAJoinIsReported(t *testing.T) {
+	full := &api.APIError{Status: http.StatusConflict, Code: "team_limit", Message: api.PublicMessage("team_limit")}
+	var cleanup error // a cleanup that succeeded
+	if got := classifyCLIJSONError(errors.Join(full, cleanup)); got.Code != "team_limit" {
+		t.Fatalf("lone cause in a join: %#v", got)
+	}
+	for name, err := range map[string]error{
+		"two causes":                errors.Join(full, errors.New("close failed")),
+		"typed nil beside it":       errors.Join(full, (*commandPrivateError)(nil)),
+		"delivered receipt wrapper": deliveredReceiptFailure{causes: []error{full}},
+		"terminal sharing wrapper":  terminalSharingFailure{causes: []error{full}},
+	} {
+		if got := classifyCLIJSONError(err); got.Code == "team_limit" {
+			t.Errorf("%s: the refusal was presented as the whole story: %#v", name, got)
+		}
+	}
+}
