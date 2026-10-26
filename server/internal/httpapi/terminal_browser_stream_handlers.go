@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
@@ -38,11 +39,21 @@ func writeTerminalBrowserTicket(w http.ResponseWriter, r *http.Request, signer b
 	if writePlanLimitReached(w, r, err) || writeBrowserTerminalQuotaExhausted(w, r, err) {
 		return
 	}
+	var pending browserterminal.TooManyPendingTicketsError
 	switch {
 	case expectedHTTPErrorOnly(err, browserterminal.ErrBrowserKeyInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_browser_key", "Create a new browser terminal key and retry.")
+	case expectedHTTPErrorOnly(err, browserterminal.ErrSessionInactive):
+		writeError(w, r, http.StatusUnauthorized, "unauthenticated", "A browser sign-in is required.")
+	case errors.As(err, &pending) && expectedHTTPErrorOnly(err, pending):
+		w.Header().Set("Retry-After", strconv.Itoa(int(pending.RetryAfter/time.Second)))
+		writeError(w, r, http.StatusTooManyRequests, "too_many_pending_tickets", "This browser has too many terminal connections starting at once. It will retry shortly.")
+	case expectedHTTPErrorOnly(err, browserterminal.ErrSessionClosed):
+		writeError(w, r, http.StatusConflict, "terminal_session_closed", "This terminal has closed or is unavailable.")
+	case expectedHTTPErrorOnly(err, browserterminal.ErrMachineEdgeUnavailable):
+		writeError(w, r, http.StatusConflict, "machine_edge_unavailable", "This machine's edge connection is down. It reconnects on its own; check that Paperboat is running on the machine.")
 	case expectedHTTPErrorOnly(err, browserterminal.ErrForbidden, browserterminal.ErrTicketInvalid):
-		writeError(w, r, http.StatusNotFound, "terminal_session_not_found", "Terminal session is unavailable.")
+		writeError(w, r, http.StatusNotFound, "terminal_session_not_found", "This terminal doesn't exist or isn't shared with you.")
 	case err != nil:
 		writeError(w, r, http.StatusServiceUnavailable, "terminal_unavailable", "Browser terminal is temporarily unavailable. Retry shortly.", err)
 	default:

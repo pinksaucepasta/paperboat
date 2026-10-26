@@ -121,7 +121,7 @@ func TestGuestTicketsPostgres(t *testing.T) {
 		err := <-concurrent
 		if err == nil {
 			accepted++
-		} else if !errors.Is(err, ErrTicketInvalid) {
+		} else if !errors.As(err, new(TooManyPendingTicketsError)) {
 			unexpected = err
 		}
 	}

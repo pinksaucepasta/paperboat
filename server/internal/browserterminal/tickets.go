@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -14,7 +15,21 @@ import (
 
 var ErrTicketInvalid = errors.New("browser terminal ticket is invalid or expired")
 
+// ErrSessionInactive: the browser sign-in that asked for a ticket has ended or been revoked.
+var ErrSessionInactive = errors.New("browser terminal sign-in is no longer active")
+
+// TooManyPendingTicketsError: the browser session already holds the most unredeemed tickets it may. A ticket
+// that is not redeemed lapses after TicketLifetime, so the caller can retry after RetryAfter.
+type TooManyPendingTicketsError struct{ RetryAfter time.Duration }
+
+func (e TooManyPendingTicketsError) Error() string {
+	return "too many unredeemed browser terminal tickets; retry in " + e.RetryAfter.String()
+}
+
 const TicketLifetime = 30 * time.Second
+
+// maxPendingTickets bounds the unredeemed tickets one browser session may hold.
+const maxPendingTickets = 8
 
 type Ticket struct {
 	Value                  string
@@ -85,21 +100,22 @@ func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resul
 		FROM sessions auth_session JOIN users account ON account.id=auth_session.user_id
 		WHERE auth_session.id=$1 AND auth_session.user_id=$2 FOR UPDATE OF auth_session`, in.BrowserSessionID, in.UserID).Scan(&active)
 		if err == sql.ErrNoRows {
-			return Ticket{}, ErrTicketInvalid
+			return Ticket{}, ErrSessionInactive
 		}
 		if err != nil {
 			return Ticket{}, err
 		}
 		if !active {
-			return Ticket{}, ErrTicketInvalid
+			return Ticket{}, ErrSessionInactive
 		}
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM browser_terminal_tickets WHERE (browser_session_id=$1 OR guest_session_id=$1) AND consumed_at IS NULL AND expires_at>now()`, in.principalSessionID()).Scan(&pending); err != nil {
+	var retryAfterSeconds float64
+	if err := tx.QueryRowContext(ctx, `SELECT count(*), coalesce(extract(epoch FROM min(expires_at) - now()), 0)::float8 FROM browser_terminal_tickets WHERE (browser_session_id=$1 OR guest_session_id=$1) AND consumed_at IS NULL AND expires_at>now()`, in.principalSessionID()).Scan(&pending, &retryAfterSeconds); err != nil {
 		return Ticket{}, err
 	}
-	if pending >= 8 {
-		return Ticket{}, ErrTicketInvalid
+	if pending >= maxPendingTickets {
+		return Ticket{}, TooManyPendingTicketsError{RetryAfter: max(time.Second, time.Duration(math.Ceil(retryAfterSeconds))*time.Second)}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,terminal_session_id,origin,role,policy_generation,team_generation,membership_generation,binding_generation,browser_public_key_sha256,expires_at,guest_session_id,inspector_credential_id)
 		VALUES ($1,nullif($2,''),nullif($3,''),nullif($4,''),$5,$6,$7,$8,$9,$10,$11,$12,nullif($13,''),nullif($14,''))`, hash[:], in.UserID, in.BrowserSessionID, in.TerminalSessionID, in.Origin, in.Role, in.PolicyGeneration, in.TeamGeneration, in.MembershipGeneration, in.BindingGeneration, in.BrowserPublicKeySHA256, in.ExpiresAt, in.GuestSessionID, in.InspectorCredentialID); err != nil {

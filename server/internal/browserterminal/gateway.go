@@ -18,6 +18,13 @@ import (
 var ErrForbidden = errors.New("browser terminal access is unavailable")
 var ErrHostUnavailable = errors.New("browser terminal host is unavailable")
 
+// ErrMachineEdgeUnavailable: the terminal's machine has no connected route to an edge right now (offline, or its
+// runtime carrier is not attached). The console tells the owner so instead of retrying silently.
+var ErrMachineEdgeUnavailable = errors.New("the machine's edge connection is down")
+
+// ErrSessionClosed: the owner's terminal has ended or been closed, so no ticket can open it.
+var ErrSessionClosed = errors.New("terminal session is closed")
+
 // BandwidthChecker refuses a terminal ticket while the paying workspace's hosted allowance is
 // used up, so the browser learns the plan limit from the ticket API before it connects.
 type BandwidthChecker interface {
@@ -96,7 +103,12 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 	}
 	decision, err := g.resolveTicketRole(ctx, in)
 	if err != nil {
-		if expectedTerminalRejection(err) {
+		switch {
+		case errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed):
+			return Ticket{}, "", Decision{}, ErrSessionClosed
+		case errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) && in.Role != RoleInspector:
+			return Ticket{}, "", Decision{}, ErrMachineEdgeUnavailable
+		case expectedTerminalRejection(err):
 			return Ticket{}, "", Decision{}, ErrForbidden
 		}
 		return Ticket{}, "", Decision{}, unavailableCause(err)
@@ -105,7 +117,10 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 		return Ticket{}, "", Decision{}, ErrForbidden
 	}
 	if decision.HostWSSURL == "" {
-		return Ticket{}, "", Decision{}, ErrHostUnavailable
+		if in.Role == RoleInspector {
+			return Ticket{}, "", Decision{}, ErrHostUnavailable
+		}
+		return Ticket{}, "", Decision{}, ErrMachineEdgeUnavailable
 	}
 	if checker, ok := g.Authorizer.(BandwidthChecker); ok && in.Role != RoleInspector {
 		if err := checker.CheckBandwidth(ctx, decision); err != nil {

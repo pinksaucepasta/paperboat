@@ -238,7 +238,10 @@ Documented public codes currently emitted by the handlers include:
 - `idempotency_key_required`
 - `idempotency_key_conflict`
 - `machine_not_ready`
-- `terminal_session_not_found`
+- `terminal_session_not_found` (404; only "not yours or doesn't exist")
+- `terminal_session_closed` (409; the owner's terminal has ended)
+- `machine_edge_unavailable` (409; the machine has no connected edge route; it reconnects on its own)
+- `too_many_pending_tickets` (429 with `Retry-After`; the browser holds the most unredeemed terminal tickets it may)
 - `terminal_session_name_conflict`
 - `terminal_session_reserved`
 - `terminal_session_not_closed`

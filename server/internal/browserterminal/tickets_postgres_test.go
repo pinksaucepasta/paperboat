@@ -89,7 +89,7 @@ func TestBrowserTerminalTicketIsSingleUseAndSessionBoundPostgres(t *testing.T) {
 		issueErr := <-concurrent
 		if issueErr == nil {
 			accepted++
-		} else if !errors.Is(issueErr, ErrTicketInvalid) {
+		} else if !errors.As(issueErr, new(TooManyPendingTicketsError)) {
 			t.Fatalf("concurrent ticket issue: %v", issueErr)
 		}
 	}
@@ -103,8 +103,11 @@ func TestBrowserTerminalTicketIsSingleUseAndSessionBoundPostgres(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		issue()
 	}
-	if _, err := tickets.Issue(ctx, Ticket{UserID: userID, BrowserSessionID: browserSessionID, TerminalSessionID: terminalID, Origin: "https://dashboard.example.test", Role: "viewer", PolicyGeneration: 2, BrowserPublicKeySHA256: testBrowserKeyDigest}); !errors.Is(err, ErrTicketInvalid) {
+	var pendingErr TooManyPendingTicketsError
+	if _, err := tickets.Issue(ctx, Ticket{UserID: userID, BrowserSessionID: browserSessionID, TerminalSessionID: terminalID, Origin: "https://dashboard.example.test", Role: "viewer", PolicyGeneration: 2, BrowserPublicKeySHA256: testBrowserKeyDigest}); !errors.As(err, &pendingErr) {
 		t.Fatalf("unconsumed ticket capacity: %v", err)
+	} else if pendingErr.RetryAfter < time.Second || pendingErr.RetryAfter > TicketLifetime {
+		t.Fatalf("retry after = %v, want between 1s and the ticket lifetime", pendingErr.RetryAfter)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE sessions SET expires_at=now()-interval '1 second' WHERE id=$1`, browserSessionID); err != nil {
 		t.Fatal(err)

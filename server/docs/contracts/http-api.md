@@ -636,6 +636,13 @@ reauthorizes active connections every two seconds and fails closed on failed/exp
 checks; edge watchdog/check latency also bounds withdrawal. Existing account ticket
 authentication and CSRF are unchanged. Native shared-terminal joins remain account-only.
 
+Both browser-ticket routes refuse with a code the console branches on (never the status alone):
+`terminal_session_not_found` (404, only "not yours or doesn't exist"), `terminal_session_closed` (409, the
+owner's terminal has ended), `machine_edge_unavailable` (409, the machine has no connected edge route; it
+reconnects on its own), `too_many_pending_tickets` (429 with `Retry-After`, the browser holds the most
+unredeemed tickets it may; they lapse after 30 seconds) and `unauthenticated` (401, the browser sign-in has
+ended). A caller never retries a 404 or 409 in a loop.
+
 Code admission is bounded to 120 attempts/minute and the shared-terminal viewer cap of
 unexpired guest identities per terminal (`billing.limits.viewers_per_shared_terminal`,
 default 50), serialized in PostgreSQL across server processes. Rate limits return

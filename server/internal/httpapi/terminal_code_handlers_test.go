@@ -221,6 +221,13 @@ func TestTerminalBrowserTicketKeepsPureRejectionsAndReportsMixedFailures(t *test
 		{"invalid key with IO", errors.Join(browserterminal.ErrBrowserKeyInvalid, syscall.EIO), http.StatusServiceUnavailable},
 		{"denied with IO", errors.Join(browserterminal.ErrForbidden, syscall.EIO), http.StatusServiceUnavailable},
 		{"invalid ticket with IO", errors.Join(browserterminal.ErrTicketInvalid, syscall.EIO), http.StatusServiceUnavailable},
+		{"closed", browserterminal.ErrSessionClosed, http.StatusConflict},
+		{"edge down", browserterminal.ErrMachineEdgeUnavailable, http.StatusConflict},
+		{"sign-in ended", browserterminal.ErrSessionInactive, http.StatusUnauthorized},
+		{"too many tickets", browserterminal.TooManyPendingTicketsError{RetryAfter: 7 * time.Second}, http.StatusTooManyRequests},
+		{"closed with IO", errors.Join(browserterminal.ErrSessionClosed, syscall.EIO), http.StatusServiceUnavailable},
+		{"edge down with IO", errors.Join(browserterminal.ErrMachineEdgeUnavailable, syscall.EIO), http.StatusServiceUnavailable},
+		{"too many tickets with IO", errors.Join(browserterminal.TooManyPendingTicketsError{RetryAfter: time.Second}, syscall.EIO), http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request, logs, reference := diagnosticRequest("/v1/terminal-sessions/private-session/browser-ticket")
@@ -251,6 +258,37 @@ func TestTerminalBrowserTicketKeepsPureRejectionsAndReportsMixedFailures(t *test
 			}
 			if strings.Contains(response.Body.String()+logs.String(), "private-session") {
 				t.Fatal("private terminal identity leaked")
+			}
+		})
+	}
+}
+
+// Slice 7 (Lane K terminal plan): each ticket refusal has its own code, so the console can say what is wrong
+// instead of showing "No access" for a lost edge connection or a ticket cap.
+func TestTerminalBrowserTicketRefusalsCarryTheirOwnCode(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		cause      error
+		status     int
+		code       string
+		retryAfter string
+	}{
+		{"closed owner terminal", browserterminal.ErrSessionClosed, http.StatusConflict, "terminal_session_closed", ""},
+		{"machine edge down", browserterminal.ErrMachineEdgeUnavailable, http.StatusConflict, "machine_edge_unavailable", ""},
+		{"ticket cap", browserterminal.TooManyPendingTicketsError{RetryAfter: 7 * time.Second}, http.StatusTooManyRequests, "too_many_pending_tickets", "7"},
+		{"sign-in ended", browserterminal.ErrSessionInactive, http.StatusUnauthorized, "unauthenticated", ""},
+		{"not yours", browserterminal.ErrForbidden, http.StatusNotFound, "terminal_session_not_found", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request, _, _ := diagnosticRequest("/v1/terminal-sessions/session/browser-ticket")
+			response := httptest.NewRecorder()
+			writeTerminalBrowserTicket(response, request, nil, browserterminal.Ticket{}, "", browserterminal.Decision{}, tc.cause)
+			var body ErrorResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != tc.status || body.Error.Code != tc.code || response.Header().Get("Retry-After") != tc.retryAfter {
+				t.Fatalf("status %d code %q Retry-After %q; want %d %q %q", response.Code, body.Error.Code, response.Header().Get("Retry-After"), tc.status, tc.code, tc.retryAfter)
 			}
 		})
 	}

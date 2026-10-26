@@ -84,3 +84,50 @@ func TestGatewayRefusesTicketAtTheBandwidthCap(t *testing.T) {
 		t.Fatalf("ticket under the cap: %v", err)
 	}
 }
+
+type resolveErrAuthorizer struct {
+	testBrowserAuthorizer
+	err error
+}
+
+func (a *resolveErrAuthorizer) ResolveRole(ctx context.Context, user, terminal string) (Decision, error) {
+	if a.err != nil {
+		return Decision{}, a.err
+	}
+	return a.testBrowserAuthorizer.ResolveRole(ctx, user, terminal)
+}
+
+// Slice 7 (Lane K terminal plan): the refusal says what is wrong, so the console does not show "No access" for a
+// machine whose edge connection is down or an owner's closed terminal.
+func TestGatewayIssueNamesWhyATerminalCannotBeOpened(t *testing.T) {
+	routed := Decision{WorkspaceID: "personal", UserID: "usr_1", OwnerAccountID: "usr_1", TerminalSessionID: "term_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge-one.example.test", Role: "owner", PolicyGeneration: 1}
+	unrouted := routed
+	unrouted.HostWSSURL = ""
+	for _, tc := range []struct {
+		name     string
+		decision Decision
+		err      error
+		want     error
+		not      []error
+	}{
+		{"no route", unrouted, nil, ErrMachineEdgeUnavailable, []error{ErrHostUnavailable, ErrForbidden}},
+		{"edge node not ready", routed, usermachines.ErrMachineCapabilityUnavailable, ErrMachineEdgeUnavailable, []error{ErrForbidden}},
+		{"owner's terminal closed", routed, usermachines.ErrTerminalBrowserSessionClosed, ErrSessionClosed, []error{ErrForbidden}},
+		{"not found", routed, usermachines.ErrTerminalSessionNotFound, ErrForbidden, []error{ErrMachineEdgeUnavailable, ErrSessionClosed}},
+		{"store down", routed, errors.New("store down"), ErrHostUnavailable, []error{ErrMachineEdgeUnavailable, ErrSessionClosed, ErrForbidden}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authorizer := &resolveErrAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: tc.decision}, err: tc.err}
+			gateway := &Gateway{Tickets: issueTestTickets{}, Authorizer: authorizer, AllowedOrigins: []string{"https://dashboard.example.test"}}
+			_, _, _, err := gateway.Issue(context.Background(), "usr_1", "browser_1", "term_1", "https://dashboard.example.test", testBrowserKeyDigest)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			for _, other := range tc.not {
+				if errors.Is(err, other) {
+					t.Fatalf("err = %v also matches %v", err, other)
+				}
+			}
+		})
+	}
+}
