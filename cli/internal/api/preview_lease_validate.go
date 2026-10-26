@@ -337,6 +337,10 @@ func validatePreviewLease(lease PreviewLease) error {
 		if !validPreviewHTTPSURL(lease.Endpoint) {
 			return fmt.Errorf("%w: ready endpoint must be an HTTPS URL", ErrPreviewLeaseInvalid)
 		}
+	case "ended":
+		if lease.Endpoint != "" || lease.State != "owner_disconnected" && lease.State != "expired" && lease.State != "stopped" {
+			return fmt.Errorf("%w: an ended lease must have no endpoint and a terminal state", ErrPreviewLeaseInvalid)
+		}
 	case "custom_domain_not_ready":
 		if lease.Endpoint != "" || lease.State == "ready" {
 			return fmt.Errorf("%w: unavailable custom domain must have no endpoint and cannot be ready", ErrPreviewLeaseInvalid)

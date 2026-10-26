@@ -406,6 +406,10 @@ func validateSessionLease(lease Lease, config SessionConfig, now time.Time) erro
 		if !validPreviewHTTPSURL(lease.Endpoint) {
 			return fmt.Errorf("%w: server returned an invalid HTTPS endpoint", ErrSessionInvalid)
 		}
+	case "ended":
+		if lease.Endpoint != "" || lease.State != "owner_disconnected" && lease.State != "expired" && lease.State != "stopped" {
+			return fmt.Errorf("%w: an ended lease must have no endpoint and a terminal state", ErrSessionInvalid)
+		}
 	case "custom_domain_not_ready":
 		if lease.Endpoint != "" || lease.State == "ready" {
 			return fmt.Errorf("%w: unavailable custom domain must have no endpoint and cannot be ready", ErrSessionInvalid)

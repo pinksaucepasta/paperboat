@@ -256,3 +256,29 @@ func TestPreviewResponseValidationDoesNotExposePayload(t *testing.T) {
 		})
 	}
 }
+
+// A terminal lease says endpoint_state "ended" with no endpoint; any other state or an endpoint is refused.
+func TestPreviewLeaseAcceptsEndedOnlyForTerminalLeases(t *testing.T) {
+	now := time.Now().UTC()
+	lease := PreviewLease{
+		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1",
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		AccessMode: "public", EndpointState: "ended",
+		LeaseDeadline: now.Add(time.Hour), AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
+		CreatedAt: now, LastRenewedAt: now,
+	}
+	for _, state := range []string{"owner_disconnected", "expired", "stopped"} {
+		lease.State = state
+		if err := validatePreviewLease(lease); err != nil {
+			t.Fatalf("ended %s lease refused: %v", state, err)
+		}
+	}
+	lease.State = "ready"
+	if err := validatePreviewLease(lease); !errors.Is(err, ErrPreviewLeaseInvalid) {
+		t.Fatalf("ended ready lease accepted: %v", err)
+	}
+	lease.State, lease.Endpoint = "stopped", "https://p.example.test"
+	if err := validatePreviewLease(lease); !errors.Is(err, ErrPreviewLeaseInvalid) {
+		t.Fatalf("ended lease with an endpoint accepted: %v", err)
+	}
+}

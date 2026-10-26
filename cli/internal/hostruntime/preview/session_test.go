@@ -690,3 +690,26 @@ func TestObservedSessionDelegatesRenewAndStopToStableRuntime(t *testing.T) {
 		t.Fatalf("observer mutated server lease: renew=%d stop=%d", len(client.renewed), len(client.stopLeases))
 	}
 }
+
+// A terminal lease says endpoint_state "ended" with no endpoint: the daemon accepts it as a valid lease and a
+// renewal that returns it ends the session (ErrLeaseLost); "ended" with a live state is refused.
+func TestSessionAcceptsEndedLeaseAsTerminal(t *testing.T) {
+	session, _, _ := newSessionTest(t, nil)
+	session.mu.Lock()
+	current := session.lease
+	session.mu.Unlock()
+	ended := current
+	ended.Endpoint, ended.EndpointState, ended.State = "", "ended", "stopped"
+	if err := validateSessionLease(ended, session.config, time.Now()); err != nil {
+		t.Fatalf("ended stopped lease refused: %v", err)
+	}
+	ended.Generation = current.Generation + 1
+	ended.ETag = formatLeaseETag(ended.ID, ended.Generation)
+	if err := session.acceptRenewal(ended, current); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("renewal to an ended lease: %v, want ErrLeaseLost", err)
+	}
+	ended.State = "ready"
+	if err := validateSessionLease(ended, session.config, time.Now()); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("ended ready lease accepted: %v", err)
+	}
+}
