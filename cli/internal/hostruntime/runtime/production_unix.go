@@ -317,7 +317,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, updaterErr
 		}
 		sender.updater = updaterClient
-		runtimeObservation = &runtimeObservationService{sender: sender, interval: 10 * time.Second, timeout: 10 * time.Second}
+		runtimeObservation = &runtimeObservationService{sender: sender, interval: runtimeObservationInterval, timeout: 10 * time.Second}
 	}
 	workspaceRoot := environ("PAPERBOAT_WORKSPACE_ROOT")
 	if strings.TrimSpace(workspaceRoot) == "" {

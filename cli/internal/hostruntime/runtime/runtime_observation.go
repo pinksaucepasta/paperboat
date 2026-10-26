@@ -44,6 +44,12 @@ type runtimeObservationService struct {
 	done          chan struct{}
 }
 
+// runtimeObservationInterval is the backstop between observations when nothing local changed. The server rewrites a
+// machine's presence at most every OfflineAfter/2 (1 min) and marks it offline after OfflineAfter (2 min), so 30 s keeps
+// one lost report from taking a machine offline while an idle machine costs 20 requests per 10 min instead of 60
+// (PR-03, F21-19). A new listening port is still announced within machineServicesWatchInterval.
+const runtimeObservationInterval = 30 * time.Second
+
 // machineServicesWatchInterval bounds how long a newly listening port waits before it is announced:
 // the periodic observation alone would make other computers wait for the next one.
 const machineServicesWatchInterval = 2 * time.Second
