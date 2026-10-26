@@ -155,6 +155,8 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	authorizer.mu.Unlock()
 	if _, _, err := connection.Read(ctx); err == nil {
 		t.Fatal("revoked attachment remained connected")
+	} else if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || !strings.HasPrefix(err.Error(), "failed to get reader: received close frame: status = StatusPolicyViolation and reason = \"revoked\"") {
+		t.Fatalf("revocation close = %v, want reason revoked", err)
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -306,5 +308,55 @@ func TestBandwidthRefusalIsAnExpectedAdmissionRejection(t *testing.T) {
 	err := fmt.Errorf("record usage admission: %w", &usermachines.BandwidthQuotaError{BillingURL: "https://console.example.test/billing"})
 	if !expectedTerminalRejection(err) || edgeAdmissionReason(err) != "bandwidth_quota_exhausted" {
 		t.Fatalf("expected=%v reason=%q", expectedTerminalRejection(err), edgeAdmissionReason(err))
+	}
+}
+
+// Slice 7 (Lane K terminal plan): a refused admission closes the control channel with the typed reason the edge
+// sends to the browser, so a lost machine, a closed terminal and a lapsed ticket are told apart.
+func TestEdgeControlRefusalsCarryATypedReason(t *testing.T) {
+	signer, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := Ticket{UserID: "usr_1", BrowserSessionID: "ses_1", TerminalSessionID: "term_1", Origin: "https://dashboard.example.test", Role: "interactive", PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
+	decision := Decision{WorkspaceID: "personal", UserID: ticket.UserID, OwnerAccountID: ticket.UserID, TerminalSessionID: ticket.TerminalSessionID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: ticket.Role, PolicyGeneration: 1}
+	for _, tc := range []struct {
+		name       string
+		resolveErr error
+		snapshot   error
+		spent      bool
+		want       string
+	}{
+		{"terminal not shared", usermachines.ErrTerminalSessionNotFound, nil, false, "no_access"},
+		{"owner's terminal closed", usermachines.ErrTerminalBrowserSessionClosed, nil, false, "ended"},
+		{"host says it ended", nil, usermachines.ErrTerminalBrowserSessionClosed, false, "ended"},
+		{"host cannot be asked", nil, errors.New("host unreachable"), false, "machine_unavailable"},
+		{"ticket already used", nil, nil, true, "expired"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tickets := &edgeTestTickets{active: true, ticket: ticket, value: "one-use", used: tc.spent}
+			authorizer := &resolveErrAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: decision, snapshotErr: tc.snapshot}, err: tc.resolveErr}
+			gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gateway.ServeEdgeControl(w, r, "edge_1", "epoch_1")
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+			defer cancel()
+			connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.CloseNow()
+			request, _ := json.Marshal(EdgeControlRequest{Ticket: "one-use", Origin: ticket.Origin, Host: "machine.runtime.example.test"})
+			if err := connection.Write(ctx, websocket.MessageText, request); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = connection.Read(ctx)
+			var closed websocket.CloseError
+			if !errors.As(err, &closed) || closed.Code != websocket.StatusPolicyViolation || closed.Reason != tc.want {
+				t.Fatalf("admission refusal = %v, want close reason %q", err, tc.want)
+			}
+		})
 	}
 }

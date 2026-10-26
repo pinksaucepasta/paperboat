@@ -2,33 +2,37 @@ package terminalend
 
 import "testing"
 
-func TestEveryReasonHasOneCloseCodeAndParsesBack(t *testing.T) {
+func TestEveryReasonHasItsOwnCloseCodeAndParsesBack(t *testing.T) {
 	want := map[Reason]int{
-		NoAccess: CodeNoAccess, Closed: CodeEnded, Revoked: CodeEnded, Ended: CodeEnded,
-		HostUnreachable: CodeUnavailable, EdgeUnavailable: CodeUnavailable,
-		BandwidthQuotaExhausted: CodeQuota, TicketInvalid: CodeRetry, Capacity: CodeRetry,
+		NoAccess: 4404, Ended: 4409, Revoked: 4401, Expired: 4408, Limit: 4402, BandwidthQuotaExhausted: 4403,
+		TooManyPending: 4429, MachineUnavailable: 4503, EdgeUnavailable: 4504, Protocol: 4500,
 	}
+	seen := map[int]Reason{}
 	for reason, code := range want {
 		if got := reason.CloseCode(); got != code {
 			t.Errorf("%s closes with %d, want %d", reason, got, code)
 		}
-		if Parse(string(reason)) != reason {
-			t.Errorf("%s does not parse back", reason)
+		if other, dup := seen[code]; dup {
+			t.Errorf("%s and %s share close code %d", reason, other, code)
+		}
+		seen[code] = reason
+		if Parse(string(reason)) != reason || Parse(string(reason)+": any human text") != reason {
+			t.Errorf("%s does not parse back, with or without text", reason)
 		}
 	}
 }
 
-func TestAnUnknownReasonIsARetry(t *testing.T) {
-	for _, value := range []string{"", "admission denied", "access revoked", "surprise"} {
-		if got := Parse(value); got != TicketInvalid || got.CloseCode() != CodeRetry {
-			t.Errorf("Parse(%q) = %s/%d, want ticket_invalid retry", value, got, got.CloseCode())
+func TestAnUnknownReasonIsAProtocolError(t *testing.T) {
+	for _, value := range []string{"", "admission denied", "access revoked", "ws_4503", "no_access:missing-space"} {
+		if got := Parse(value); got != Protocol || got.CloseCode() != CodeProtocol {
+			t.Errorf("Parse(%q) = %s/%d, want protocol", value, got, got.CloseCode())
 		}
 	}
 }
 
 // The browser worker and the console match these strings; changing one is a contract change.
 func TestWireValuesAreStable(t *testing.T) {
-	if BandwidthQuotaExhausted != "bandwidth_quota_exhausted" || CodeNoAccess != 4404 || CodeEnded != 4409 || CodeUnavailable != 4503 || CodeQuota != 4429 {
-		t.Fatal("a browser terminal close value changed")
+	if BandwidthQuotaExhausted != "bandwidth_quota_exhausted" || NoAccess != "no_access" || MachineUnavailable != "machine_unavailable" {
+		t.Fatal("a browser terminal close reason changed")
 	}
 }

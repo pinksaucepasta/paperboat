@@ -52,12 +52,12 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 	ticket, err := g.Tickets.ConsumeEdge(ctx, input.Ticket, input.Origin)
 	if err != nil {
 		if expectedTerminalRejection(err) {
-			return edgeAdmission{}, nil, refused(terminalend.TicketInvalid, ErrForbidden)
+			return edgeAdmission{}, nil, refused(terminalend.Expired, ErrForbidden)
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
 	if !g.acquire(ticket.principalSessionID()) {
-		return edgeAdmission{}, nil, refused(terminalend.Capacity, ErrForbidden)
+		return edgeAdmission{}, nil, refused(terminalend.TooManyPending, ErrForbidden)
 	}
 	release := func() { g.release(ticket.principalSessionID()) }
 	decision, err := g.resolveTicketRole(ctx, ticket)
@@ -88,11 +88,11 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		if expectedTerminalRejection(err) {
 			return edgeAdmission{}, nil, refused(rejectionReason(err), ErrForbidden)
 		}
-		return edgeAdmission{}, nil, refused(terminalend.HostUnreachable, unavailableCause(err))
+		return edgeAdmission{}, nil, refused(terminalend.MachineUnavailable, unavailableCause(err))
 	}
 	if processGeneration < 1 {
 		release()
-		return edgeAdmission{}, nil, refused(terminalend.HostUnreachable, ErrHostUnavailable)
+		return edgeAdmission{}, nil, refused(terminalend.MachineUnavailable, ErrHostUnavailable)
 	}
 	current, err := g.resolveTicketRole(ctx, ticket)
 	if err != nil {
@@ -257,9 +257,9 @@ func rejectionReason(err error) terminalend.Reason {
 	case errors.Is(err, usermachines.ErrBandwidthQuotaExhausted):
 		return terminalend.BandwidthQuotaExhausted
 	case errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed):
-		return terminalend.Closed
+		return terminalend.Ended
 	case errors.Is(err, ErrTicketInvalid):
-		return terminalend.TicketInvalid
+		return terminalend.Expired
 	}
 	return terminalend.NoAccess
 }
@@ -275,7 +275,7 @@ func admissionRefusalReason(err error) terminalend.Reason {
 	case errors.Is(err, ErrForbidden):
 		return terminalend.NoAccess
 	case errors.Is(err, ErrHostUnavailable):
-		return terminalend.HostUnreachable
+		return terminalend.MachineUnavailable
 	}
 	return terminalend.EdgeUnavailable
 }
