@@ -147,6 +147,7 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'pl-pub','linux','amd64','/w','online','occupied')`, machine, user)
+	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
 	personal := Scope{Account: user}
 	preview := func(id, state string) {
 		t.Helper()
@@ -159,6 +160,13 @@ func TestPublicationAndBrowserTerminalLimitsPostgres(t *testing.T) {
 		t.Fatalf("one active preview of 2: %v", err)
 	}
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,desired_state) VALUES($1,$2,'t',$5,$4,$3,$2,'active')`, "pl_tn_"+x, user, machine, "https://pltn-"+x+".tunnel.example.test", "endpoint_"+uuid.NewString())
+	refused(t, check(t, store, personal, Publications), Free, 2)
+	// Only live counts (user rule): with the machine offline its preview and tunnel serve nothing.
+	exec(`UPDATE paperboat.user_machines SET online=false,state='offline' WHERE id=$1`, machine)
+	if err := check(t, store, personal, Publications); err != nil {
+		t.Fatalf("publications of an offline machine counted: %v", err)
+	}
+	exec(`UPDATE paperboat.user_machines SET online=true,state='online' WHERE id=$1`, machine)
 	refused(t, check(t, store, personal, Publications), Free, 2)
 	exec(`UPDATE paperboat.tunnels SET desired_state='deleted',deleted_at=now() WHERE id=$1`, "pl_tn_"+x)
 	if err := check(t, store, personal, Publications); err != nil {

@@ -217,10 +217,16 @@ func countSQL(kind Kind) (string, error) {
 		return `(SELECT count(*) FROM user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL AND
  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' END)`, nil
 	case Publications:
-		return `((SELECT count(*) FROM preview_leases WHERE terminal_state='active' AND stopped_at IS NULL AND lease_deadline>now() AND
-  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE account_id=$1 AND owner_team_id IS NULL END) +
- (SELECT count(*) FROM tunnels WHERE desired_state='active' AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now()) AND
-  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE account_id=$1 AND owner_team_id IS NULL END))`, nil
+		// Live only (user rule): a preview or tunnel counts while it serves from a live machine. A
+		// stopped, expired or deleted one never counts, nor one whose machine is offline or revoked.
+		return `((SELECT count(*) FROM preview_leases p JOIN user_machines m ON m.id=p.owner_machine_id
+  WHERE p.terminal_state='active' AND p.stopped_at IS NULL AND p.lease_deadline>now()
+  AND m.online AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND
+  CASE WHEN $2<>'' THEN p.owner_team_id=$2 ELSE p.account_id=$1 AND p.owner_team_id IS NULL END) +
+ (SELECT count(*) FROM tunnels t JOIN user_machines m ON m.id=t.created_by_host_id
+  WHERE t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())
+  AND m.online AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND
+  CASE WHEN $2<>'' THEN t.owner_team_id=$2 ELSE t.account_id=$1 AND t.owner_team_id IS NULL END))`, nil
 	case BrowserTerminals:
 		// Open console terminals: distinct terminal sessions with a live edge admission, so a
 		// reconnect or a shared terminal's viewers never count twice.
