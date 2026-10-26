@@ -4945,3 +4945,6 @@ CLI CI 40315925420: all except tailnet authority/future PASS; that unchanged che
 2026-10-26 | SDK F24 Linux | F24-00–03 PASS on dev-c9ab1c14/server .102: argv/stdin/bounds/deadline, cancel/EOF/frame limits, inventory total, actual Inbox hash and symlink refusal; result tools/device-smoke/results/f24-mcp-20261026-fixed.json.
 Exact-ID cleanup: machine_03bd8102-1813-4638-9f4a-3028ca454a9b, machine_738851b3-76d5-4bea-bee7-514f41a56b8c revoked; both containers removed. One initial setup-copy timeout created no machines; verified remote build reused.
 M/W remain unticked; Go SDK waits for Lane B session-bound source and owner-scheduled core extraction (PLAN 3b).
+
+2026-10-26 | Lane MERGER S5 server+edge | 3a step 5 server/edge deletion: connector HTTP/tables/previewattachment gone, migration 201, edge preview worker gone; origin health now POST /v1/runtime/endpoint-tunnels/origin-health. CI 40345779983 (pre-rebase).
+Waits for Server lane: ONE joint deploy of edge + server (migration 201) + CLI dev build of that main; then Lane M/F20 checks (F7/F8/F17).
