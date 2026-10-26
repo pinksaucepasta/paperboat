@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/spf13/cobra"
@@ -17,6 +18,10 @@ func statusCommand() *cobra.Command {
 			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
 			if err != nil {
 				return fmt.Errorf("read local Paperboat status: %w", err)
+			}
+			// Signed out (revoked, or never added): say so like every other command, with the sign-in step.
+			if snapshot.DaemonState == "awaiting_enrollment" {
+				return api.ErrUnauthenticated
 			}
 			selected, local := workspaceSnapshotMachines(command.Context(), snapshot.Machines)
 			if !local {
