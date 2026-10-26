@@ -71,12 +71,9 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, sourceMachineID, team); err != nil {
 		t.Fatal(err)
 	}
-	// End to end: exec and managed SSH descriptors from the team-owned source machine.
+	// End to end: the exec descriptor from the team-owned source machine.
 	if _, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_exec_"+suffix, false); err != nil {
 		t.Fatalf("exec descriptor from a team-owned source: %v", err)
-	}
-	if _, err := service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_ts_1", "operation_ts_ssh_"+suffix, false); err != nil && !errors.Is(err, ErrMachineCapabilityUnavailable) {
-		t.Fatalf("ssh descriptor from a team-owned source: %v", err)
 	}
 	stranger := "usr_ts_other_" + suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, stranger, "workos_ts_other_"+suffix, "ts-other-"+suffix+"@example.test"); err != nil {

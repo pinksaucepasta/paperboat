@@ -771,51 +771,6 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 	}
 }
 
-func userMachineSSHDescriptor(service *usermachines.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		if !ok || p.Client == nil {
-			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "CLI authentication is required.")
-			return
-		}
-		var body struct {
-			SourceMachineID string `json:"source_machine_id"`
-			OperationID     string `json:"operation_id"`
-			// NativeOnlyAccepted: the client runs the operation over its native connection when the
-			// machine has no edge route, so it accepts a descriptor with empty endpoints.
-			NativeOnlyAccepted bool `json:"native_only_accepted"`
-		}
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&body) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must contain a valid source machine and operation ID.")
-			return
-		}
-		response, err := service.SSHDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
-		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
-			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
-			return
-		}
-		if errors.Is(err, usermachines.ErrSSHOperationInvalid) {
-			writeError(w, r, http.StatusBadRequest, "invalid_operation_id", "Operation ID is invalid.")
-			return
-		}
-		if errors.Is(err, usermachines.ErrNotFound) {
-			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
-			return
-		}
-		if errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) {
-			writeError(w, r, http.StatusConflict, "machine_not_ready", "Machine is not ready for SSH.")
-			return
-		}
-		if err != nil {
-			writeError(w, r, http.StatusServiceUnavailable, "credential_unavailable", "SSH credentials are unavailable.", err)
-			return
-		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: response})
-	}
-}
-
 func userMachineFileTransferDescriptor(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())

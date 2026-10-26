@@ -79,9 +79,6 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, accessSessionID).Scan(&cliAuthorities); err != nil || cliAuthorities != 0 {
 		t.Fatalf("CLI descriptor recorded an edge authority: %d err=%v", cliAuthorities, err)
 	}
-	if _, err = service.SSHDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_ssh_"+suffix, false); errors.Is(err, ErrBandwidthQuotaExhausted) {
-		t.Fatalf("ssh descriptor refused for bandwidth: %v", err)
-	}
 	if len(quota.checked) != 0 {
 		t.Fatalf("CLI descriptors checked the allowance: %v", quota.checked)
 	}

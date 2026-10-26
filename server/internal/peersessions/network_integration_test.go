@@ -14,7 +14,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
@@ -44,7 +43,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"golang.org/x/crypto/curve25519"
-	"golang.org/x/crypto/ssh"
 )
 
 func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
@@ -708,45 +706,6 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sshHostPublicRaw, sshHostPrivateRaw, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sshClientPublicRaw, sshClientPrivateRaw, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sshHostPublicKey, _ := ssh.NewPublicKey(sshHostPublicRaw)
-	sshClientPublicKey, _ := ssh.NewPublicKey(sshClientPublicRaw)
-	sshHostPrivateBlock, _ := ssh.MarshalPrivateKey(sshHostPrivateRaw, "")
-	sshClientPrivateBlock, _ := ssh.MarshalPrivateKey(sshClientPrivateRaw, "")
-	sshHostPublic := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshHostPublicKey)))
-	sshClientPublic := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshClientPublicKey)))
-	sshHostPrivate := pem.EncodeToMemory(sshHostPrivateBlock)
-	sshClientPrivate := pem.EncodeToMemory(sshClientPrivateBlock)
-	sshFingerprint := sha256.Sum256(sshHostPublicKey.Marshal())
-	sshClientFingerprint := sha256.Sum256(sshClientPublicKey.Marshal())
-	sshSetFingerprint := sha256.Sum256([]byte("network-shared-ssh-set-" + suffix))
-	sshSetID := "keyset_" + uuid.NewString()
-	for _, statement := range []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO paperboat.machine_ssh_targets(user_machine_id,machine_generation,os_user,target_port,reconciliation_version,created_at,updated_at) VALUES($1,1,'paperboat',22,1,$2,$2)`, []any{machineID, now}},
-		{`INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,algorithm,public_key,first_observed_at) VALUES($1,$2,'ssh-ed25519',$3,$4)`, []any{sshFingerprint[:], machineID, sshHostPublic, now}},
-		{`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key) VALUES($1,$2,$3,'ssh-ed25519',$4)`, []any{sshClientFingerprint[:], sharedUser, sharedCLI, sshClientPublic}},
-		{`INSERT INTO paperboat.machine_ssh_host_key_sets(id,user_machine_id,machine_generation,observation_generation,set_fingerprint,state,reconciliation_version,observed_at,promoted_at) VALUES($1,$2,1,1,$3,'active',1,$4,$4)`, []any{sshSetID, machineID, sshSetFingerprint[:], now}},
-		{`INSERT INTO paperboat.machine_ssh_host_keys(set_id,user_machine_id,fingerprint,ordinal) VALUES($1,$2,$3,0)`, []any{sshSetID, machineID, sshFingerprint[:]}},
-	} {
-		if _, err = store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	refreshRuntimeCarrier()
-	sshDescriptor, err := machineService.SSHDescriptor(sharedScope, sharedUser, "network_shared_source_"+suffix, machineID, sharedCLI, "operation_shared_ssh_"+suffix, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 	sharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
 	if err != nil {
 		t.Fatal(err)
@@ -754,7 +713,6 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", sharedAccess, "exec")
 	terminalAccess := terminalDescriptor.Terminal["auth"].(map[string]any)["access_session_id"].(string)
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", terminalAccess, "terminal")
-	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", sshDescriptor.Auth["access_session_id"].(string), "managed_ssh")
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", fileDescriptor.Auth["access_session_id"].(string), "file_transfer")
 	assertNetworkPeerAccount(t, sharedConfig.Configuration, machineID, userID)
 	assertNoNetworkCapability(t, sharedConfig.Configuration, "private_access")
@@ -891,11 +849,6 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		fixture["terminal_revoked_configuration"] = terminalRevokedConfig.Configuration
 		fixture["file_descriptor"] = fileDescriptor
 		fixture["file_batch_id"] = fileBatchID
-		fixture["ssh_descriptor"] = sshDescriptor
-		fixture["ssh_host_public_key"] = sshHostPublic
-		fixture["ssh_host_private_key"] = base64.RawURLEncoding.EncodeToString(sshHostPrivate)
-		fixture["ssh_client_public_key"] = sshClientPublic
-		fixture["ssh_client_private_key"] = base64.RawURLEncoding.EncodeToString(sshClientPrivate)
 		fixture["owner_exec_descriptor"] = ownerExecDescriptor
 		fixture["owner_shared_configuration"] = ownerSharedConfig.Configuration
 		fixture["final_shared_exec_descriptor"] = finalSharedExec

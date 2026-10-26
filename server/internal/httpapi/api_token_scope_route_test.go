@@ -14,7 +14,6 @@ func TestScopedTokenRoute(t *testing.T) {
 		{"GET", "/v1/favorites", true},
 		{"GET", "/v1/machines", true},
 		{"POST", "/v1/machines/m1/exec-descriptor", true},
-		{"POST", "/v1/machines/m1/ssh-descriptor", true},
 		{"POST", "/v1/machines/m1/file-transfer-descriptor", true},
 		{"POST", "/v1/machines/m1/terminal-sessions", true},
 		{"POST", "/v1/terminal-sessions/s1/connection-descriptor", true},

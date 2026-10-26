@@ -73,7 +73,6 @@ var (
 	ErrInvalidTransferIntent                = errors.New("file transfer mode or declared size is invalid")
 	ErrTransferIntentRequired               = errors.New("file transfer mode and declared size are required")
 	ErrExecOperationInvalid                 = errors.New("exec operation id is invalid")
-	ErrSSHOperationInvalid                  = errors.New("ssh operation id is invalid")
 )
 
 func exactNoRows(err error) bool {

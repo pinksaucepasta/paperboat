@@ -240,7 +240,7 @@ func scopedTokenRoute(r *http.Request) bool {
 	}
 	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
 	switch {
-	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "ssh-descriptor" || parts[2] == "file-transfer-descriptor" ||
+	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "file-transfer-descriptor" ||
 		parts[2] == "connection-descriptor" || parts[2] == "terminal-sessions" || parts[2] == "events"):
 		return true
 	case len(parts) == 4 && parts[0] == "machines" && parts[2] == "events" && parts[3] == "wait":

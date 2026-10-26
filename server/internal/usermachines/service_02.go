@@ -766,8 +766,6 @@ type ExecDescriptor struct {
 	ExpiresAt   time.Time      `json:"expires_at"`
 }
 
-type SSHDescriptor = ExecDescriptor
-
 // ExecDescriptor issues an exec operation credential. nativeOnly is the client's statement that it can run
 // the operation over its native peer connection alone: when the machine has no current edge route (its edge
 // carrier is re-attaching after an outage), such a client still gets the descriptor, with no edge endpoints,
@@ -775,16 +773,8 @@ type SSHDescriptor = ExecDescriptor
 // Prior art: Tailscale SSH authorizes per connection from the netmap, independent of DERP reachability
 // (ssh/tailssh/tailssh.go).
 func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (ExecDescriptor, error) {
-	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "exec_operation", "exec:operate", ErrExecOperationInvalid, nativeOnly)
-}
-
-func (s *Service) SSHDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (SSHDescriptor, error) {
-	return s.operationDescriptor(ctx, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, "ssh_operation", "ssh:operate", ErrSSHOperationInvalid, nativeOnly)
-}
-
-func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID, credentialClass, scope string, invalidOperationErr error, nativeOnly bool) (ExecDescriptor, error) {
 	if !execOperationIDPattern.MatchString(operationID) {
-		return ExecDescriptor{}, invalidOperationErr
+		return ExecDescriptor{}, ErrExecOperationInvalid
 	}
 	if sourceMachineID == "" || cliClientSessionID == "" {
 		return ExecDescriptor{}, ErrNotFound
@@ -794,39 +784,16 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	} else if !allowed {
 		return ExecDescriptor{}, ErrNotFound
 	}
-	capability := "exec"
-	if credentialClass == "ssh_operation" {
-		capability = "managed_ssh"
-	}
-	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: capability})
+	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "exec"})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExecDescriptor{}, ErrNotFound
 	}
 	if err != nil {
 		return ExecDescriptor{}, err
 	}
-	incoming := "terminal_host"
-	if capability == "managed_ssh" {
-		incoming = "ssh_host"
-	}
+	const incoming = "terminal_host"
 	if row.State != "online" || row.SeatState != "occupied" || !row.Online || !slices.Contains(row.ObservedCapabilities, incoming) || !slices.Contains(row.ConfiguredCapabilities, incoming) {
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable
-	}
-	if credentialClass == "ssh_operation" {
-		target, targetErr := s.db.Queries().GetMachineSSHTarget(ctx, row.ID)
-		if targetErr != nil || target.MachineGeneration != row.InstallationGeneration {
-			if targetErr != nil && !errors.Is(targetErr, sql.ErrNoRows) {
-				return ExecDescriptor{}, targetErr
-			}
-			return ExecDescriptor{}, ErrMachineCapabilityUnavailable
-		}
-		keys, keysErr := s.db.Queries().GetActiveMachineSSHHostKeySet(ctx, row.ID)
-		if keysErr != nil || keys.MachineGeneration != row.InstallationGeneration {
-			if keysErr != nil && !errors.Is(keysErr, sql.ErrNoRows) {
-				return ExecDescriptor{}, keysErr
-			}
-			return ExecDescriptor{}, ErrMachineCapabilityUnavailable
-		}
 	}
 	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, row.EnvironmentID)
 	edge := err == nil
@@ -845,7 +812,7 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	accessSessionID := newID("session")
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{
 		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: operationJTI,
-		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: credentialClass, Scopes: []string{scope},
+		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: "exec_operation", Scopes: []string{"exec:operate"},
 		EnvironmentID: row.EnvironmentID, MachineID: row.ID, SourceMachineID: sourceMachineID, UserID: userID, CLIClientSessionID: cliClientSessionID, OperationID: operationID, AssignmentID: accessSessionID,
 	})
 	if err != nil {
@@ -864,7 +831,7 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 	if err := s.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
 		ID: accessSessionID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpIngressURL,
-		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{capability}, OperationID: operationID,
+		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{"exec"}, OperationID: operationID,
 	}, machineCredentialSigned); err != nil {
 		return ExecDescriptor{}, err
 	}
@@ -872,7 +839,7 @@ func (s *Service) operationDescriptor(ctx context.Context, userID, sourceMachine
 		OperationID: operationID,
 		Environment: map[string]any{"id": row.EnvironmentID, "kind": accessdescriptor.EnvironmentMachine, "resource_id": row.ID, "alias": row.Alias, "state": "ready", "root": row.WorkspaceRoot},
 		Endpoints:   endpoints,
-		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{scope}, "access_session_id": accessSessionID},
+		Auth:        map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{"exec:operate"}, "access_session_id": accessSessionID},
 		ExpiresAt:   expiresAt,
 	}, nil
 }
