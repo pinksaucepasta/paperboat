@@ -7,7 +7,7 @@
 import { chromium } from "playwright-core"
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, MACHINE: machine, ROW: row, CHROME_ARG } = process.env
-const hiddenMs = Number(process.env.HIDDEN_MS ?? 125000)
+const hiddenMs = Number(process.env.HIDDEN_MS ?? 125000) 
 const browser = await chromium.launch({ executablePath: CHROME, args: CHROME_ARG ? [CHROME_ARG] : [] })
 const ctx = await browser.newContext({ storageState: STATE, ignoreHTTPSErrors: true, viewport: { width: 1200, height: 760 } })
 let failed = 0
@@ -53,36 +53,48 @@ async function live(p, name) {
   return echoed
 }
 
+const flood = (m) => `yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${m}`
+const stamp = () => new Date().toISOString().slice(11, 19) + "Z"
+
+// 200 tab and window switches cost no reconnect and no replay; only a real freeze (Page Lifecycle) may
+// restore from a checkpoint. A really hidden tab is check-terminal-hidden.mjs (Playwright cannot hide one).
 async function f313() {
   const { p, id } = await open()
   if (!(await live(p, "before"))) return id
-  const before = await counts(p)
-  // Printed while the tab is hidden and frozen; it must be on screen on return without a replay.
-  const hiddenMarker = marker("hidden")
-  await type(p, `sleep 30; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${hiddenMarker}`)
   const other = await ctx.newPage()
   await other.goto("about:blank")
-  await other.bringToFront()
-  await p.waitForTimeout(1500)
-  const cdp = await ctx.newCDPSession(p)
-  await cdp.send("Page.setWebLifecycleState", { state: "frozen" })
-  await p.waitForTimeout(hiddenMs)
-  await cdp.send("Page.setWebLifecycleState", { state: "active" })
+  let before = await counts(p)
+  let after
+
+  // 200 tab and window switches.
   for (let i = 0; i < 200; i++) {
-    const [front, back] = i % 2 ? [p, other] : [other, p]
+    const [front, rest] = i % 2 ? [p, other] : [other, p]
     await front.bringToFront()
-    await back.evaluate(() => window.dispatchEvent(new Event("blur")))
-    await front.evaluate(() => {
-      document.dispatchEvent(new Event("visibilitychange"))
-      window.dispatchEvent(new Event("focus"))
-    })
+    await rest.evaluate(() => window.dispatchEvent(new Event("blur")))
+    await front.evaluate(() => window.dispatchEvent(new Event("focus")))
   }
   await p.bringToFront()
   await p.waitForTimeout(6000)
-  const after = await counts(p)
-  log(after[0] === before[0] && after[1] === before[1], "reconnects and replays unchanged", `${before} -> ${after}`)
-  log(await shows(p, hiddenMarker, 5000), "output printed while hidden is on screen")
-  await live(p, "after")
+  after = await counts(p)
+  log(after[0] === before[0] && after[1] === before[1], "200 switches: reconnects and replays unchanged", `${before} -> ${after}`)
+  await live(p, "after-switches")
+
+  // Frozen: the page and its worker stop; on resume the screen is restored (a checkpoint, one paint).
+  before = await counts(p)
+  const frozenMarker = marker("frozen")
+  await type(p, `sleep 5; ${flood(frozenMarker)}`)
+  const cdp = await ctx.newCDPSession(p)
+  console.log("frozen at", stamp())
+  await cdp.send("Page.setWebLifecycleState", { state: "frozen" })
+  await p.waitForTimeout(hiddenMs)
+  await cdp.send("Page.setWebLifecycleState", { state: "active" })
+  console.log("resumed at", stamp())
+  log(await phaseIs(p, "attached", 30000), "frozen: attached again on its own")
+  log(await shows(p, frozenMarker, 15000), "frozen: output made meanwhile is on screen")
+  after = await counts(p)
+  log(after[1] === before[1], "frozen: no replayed output", `${before} -> ${after}`)
+  console.log(`INFO frozen: reconnects ${before[0]} -> ${after[0]}, close=${await attr(p, "data-terminal-close")}`)
+  await live(p, "after-freeze")
   await other.close()
   return id
 }
