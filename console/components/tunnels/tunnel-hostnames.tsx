@@ -42,6 +42,7 @@ import { Section } from "@/components/section"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -440,7 +441,12 @@ function HostnameDialog({
               <p className="text-xs text-muted-foreground">On the tunnel’s machine. A port works too.</p>
             )}
           </Field>
-          {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
+          {save.isError &&
+            (isLimitReached(save.error) ? (
+              <LimitReached error={save.error} />
+            ) : (
+              <p className="text-sm text-destructive">{save.error.message}</p>
+            ))}
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={save.isPending}>
               Cancel

@@ -2,7 +2,7 @@ import Link from "next/link"
 import { ApiError } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 
-const limitCodes = new Set(["machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached"])
+const limitCodes = new Set(["machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached"])
 
 export const isLimitReached = (error: unknown): error is ApiError =>
   error instanceof ApiError && limitCodes.has(error.code)
@@ -22,6 +22,12 @@ export function LimitReached({ error, removeMachines }: { error: ApiError; remov
         {removeMachines && (
           <Button variant="secondary" size="sm" nativeButton={false} render={<Link href="/" />}>
             Remove machines
+          </Button>
+        )}
+        {error.code === "public_tcp_limit_reached" && (
+          // Workspaces on their own edge have no public TCP limit.
+          <Button variant="secondary" size="sm" nativeButton={false} render={<Link href="/network" />}>
+            Use your own edge
           </Button>
         )}
         <Button size="sm" nativeButton={false} render={<a href={upgradeHref(error)} />}>
