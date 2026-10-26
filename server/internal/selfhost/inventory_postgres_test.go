@@ -97,6 +97,17 @@ func TestScopedInstallationInventoryPaginationOnPostgres(t *testing.T) {
 			previous = order
 		}
 	}
+	// sort=newest (the console's Network page): the most recently created installation first, same total.
+	exec(`UPDATE paperboat.selfhost_installations SET created_at=now()-make_interval(mins=>substr(id,length(id)-3)::int) WHERE id LIKE $1||'_installation_%'`, prefix)
+	newest, err := service.ListScopedInventory(ctx, owner, Scope{}, false, InventoryOptions{Limit: 3, Q: "Registry", Newest: true})
+	if err != nil || newest.Pagination.Total != 300 || len(newest.Installations) != 3 {
+		t.Fatalf("newest first: %+v, %v", newest.Pagination, err)
+	}
+	for i, installation := range newest.Installations {
+		if want := fmt.Sprintf("%s_installation_%04d", prefix, i+1); installation.InstallationID != want {
+			t.Fatalf("newest first item %d is %s, want %s", i, installation.InstallationID, want)
+		}
+	}
 	ready := true
 	filtered, err := service.ListScopedInventory(ctx, owner, Scope{}, false, InventoryOptions{Limit: 1, Q: "Registry", Capability: "relay", EnrollmentState: "enrolled", Ready: &ready})
 	if err != nil || filtered.Pagination.Total != 100 || filtered.Counts.Ready != 100 || len(filtered.Installations) != 1 {

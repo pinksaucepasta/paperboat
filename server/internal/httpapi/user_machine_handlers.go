@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -351,7 +349,7 @@ func machinesList(service *usermachines.Service) http.HandlerFunc {
 		data := map[string]any{"items": items, "total": total, "pagination": inventoryPagination(opts.Limit, opts.Offset, total, len(items))}
 		if more && len(items) > 0 {
 			last := items[len(items)-1]
-			data["next_cursor"] = encodeMachineCursor(usermachines.InventoryPosition{Key: strings.ToLower(last.Alias), ID: last.ID})
+			data["next_cursor"] = encodeKeyCursor(strings.ToLower(last.Alias), last.ID)
 		}
 		writeJSON(w, 200, SuccessResponse{Data: data})
 	}
@@ -365,26 +363,16 @@ func readMachineListQuery(w http.ResponseWriter, r *http.Request) (usermachines.
 		writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), an offset or a cursor, and supported inventory filters.")
 		return usermachines.InventoryOptions{}, false
 	}
-	cursor := values.Get("cursor")
-	if len(values["cursor"]) > 1 || (cursor != "" && values.Has("offset")) || len(values["platform"]) > 1 || len(values["tag"]) > 1 {
+	if len(values["platform"]) > 1 || len(values["tag"]) > 1 {
 		return bad()
 	}
-	cloned := r.Clone(r.Context())
-	urlCopy := *r.URL
-	cloned.URL = &urlCopy
-	values.Del("cursor")
-	cloned.URL.RawQuery = values.Encode()
-	query, ok := readInventoryQuery(w, cloned, []string{"online", "offline", "disconnected", "revoked", "pending"}, false, "platform", "tag")
+	query, after, ok := readKeysetInventoryQuery(w, r, []string{"online", "offline", "disconnected", "revoked", "pending"}, "platform", "tag")
 	if !ok {
 		return usermachines.InventoryOptions{}, false
 	}
 	opts := usermachines.InventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner}
-	if cursor != "" {
-		position, err := decodeMachineCursor(cursor)
-		if err != nil {
-			return bad()
-		}
-		opts.After = &position
+	if after != nil {
+		opts.After = &usermachines.InventoryPosition{Key: after[0], ID: after[1]}
 	}
 	switch platform := values.Get("platform"); platform {
 	case "":
@@ -404,26 +392,6 @@ func readMachineListQuery(w http.ResponseWriter, r *http.Request) (usermachines.
 }
 
 // A machine list cursor is the last row's sort key and id; every row it selects is still authorized by the query.
-func encodeMachineCursor(position usermachines.InventoryPosition) string {
-	raw, _ := json.Marshal([2]string{position.Key, position.ID})
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-func decodeMachineCursor(cursor string) (usermachines.InventoryPosition, error) {
-	if len(cursor) > 512 {
-		return usermachines.InventoryPosition{}, errors.New("cursor too long")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(cursor)
-	if err != nil {
-		return usermachines.InventoryPosition{}, err
-	}
-	var pair [2]string
-	if err := json.Unmarshal(raw, &pair); err != nil || pair[1] == "" || !utf8.ValidString(pair[0]) {
-		return usermachines.InventoryPosition{}, errors.New("cursor is invalid")
-	}
-	return usermachines.InventoryPosition{Key: pair[0], ID: pair[1]}, nil
-}
-
 // machinesSummary counts the selected workspace's machines (GET /v1/machines/summary): the dashboard's totals,
 // authorized exactly as GET /v1/machines.
 func machinesSummary(service *usermachines.Service) http.HandlerFunc {

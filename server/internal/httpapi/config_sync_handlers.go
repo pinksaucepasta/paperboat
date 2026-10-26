@@ -15,11 +15,15 @@ func configSyncStatus(service *controlplane.ConfigStatusService) http.Handler {
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		query, ok := readInventoryQuery(w, r, []string{"disabled", "revoked", "consent_required", "pending", "offline", "conflict", "error", "syncing", "healthy", "watching", "restoring", "warning", "sync_uncertain"}, false)
+		query, after, ok := readKeysetInventoryQuery(w, r, []string{"disabled", "revoked", "consent_required", "pending", "offline", "conflict", "error", "syncing", "healthy", "watching", "restoring", "warning", "sync_uncertain"})
 		if !ok {
 			return
 		}
-		status, err := service.AccountInventory(personalWorkspaceContext(r.Context()), principal.User.ID, controlplane.ConfigStatusInventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner})
+		opts := controlplane.ConfigStatusInventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner}
+		if after != nil {
+			opts.After = &controlplane.ConfigStatusPosition{Alias: after[0], EnvironmentID: after[1]}
+		}
+		status, err := service.AccountInventory(personalWorkspaceContext(r.Context()), principal.User.ID, opts)
 		if err != nil {
 			if errors.Is(err, workspace.ErrInvalid) {
 				writeWorkspaceError(w, r, err)
@@ -31,6 +35,9 @@ func configSyncStatus(service *controlplane.ConfigStatusService) http.Handler {
 			}
 			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
 			return
+		}
+		if status.Next != nil {
+			status.Pagination["next_cursor"] = encodeKeyCursor(status.Next.Alias, status.Next.EnvironmentID)
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: status})
 	})

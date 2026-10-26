@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -120,4 +123,52 @@ func readMachineIDFilter(w http.ResponseWriter, r *http.Request) (string, bool) 
 		return "", false
 	}
 	return machineID, true
+}
+
+// encodeKeyCursor is a keyset list's next_cursor: the last row's sort key and id.
+func encodeKeyCursor(key, id string) string {
+	raw, _ := json.Marshal([2]string{key, id})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeKeyCursor(cursor string) (string, string, error) {
+	if len(cursor) > 512 {
+		return "", "", errors.New("cursor too long")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", "", err
+	}
+	var pair [2]string
+	if err := json.Unmarshal(raw, &pair); err != nil || pair[1] == "" || !utf8.ValidString(pair[0]) {
+		return "", "", errors.New("cursor is invalid")
+	}
+	return pair[0], pair[1], nil
+}
+
+// readKeysetInventoryQuery is readInventoryQuery for a list that also pages by cursor (next_cursor from the
+// previous page, never with offset): the cursor's sort key and id, or nil without one.
+func readKeysetInventoryQuery(w http.ResponseWriter, r *http.Request, states []string, extraKeys ...string) (inventoryQuery, *[2]string, bool) {
+	values := r.URL.Query()
+	cursor := values.Get("cursor")
+	if len(values["cursor"]) > 1 || (cursor != "" && values.Has("offset")) {
+		writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), an offset or a cursor, and supported inventory filters.")
+		return inventoryQuery{}, nil, false
+	}
+	var after *[2]string
+	if cursor != "" {
+		key, id, err := decodeKeyCursor(cursor)
+		if err != nil {
+			writeError(w, r, 400, "invalid_inventory_query", "Use one valid limit (1–200), an offset or a cursor, and supported inventory filters.")
+			return inventoryQuery{}, nil, false
+		}
+		after = &[2]string{key, id}
+	}
+	cloned := r.Clone(r.Context())
+	urlCopy := *r.URL
+	cloned.URL = &urlCopy
+	values.Del("cursor")
+	cloned.URL.RawQuery = values.Encode()
+	query, ok := readInventoryQuery(w, cloned, states, false, extraKeys...)
+	return query, after, ok
 }

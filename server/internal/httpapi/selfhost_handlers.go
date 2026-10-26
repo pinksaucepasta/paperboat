@@ -90,7 +90,7 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 	}
 	isInventory := r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/installations")
 	for key, values := range q {
-		inventoryKey := key == "limit" || key == "offset" || key == "q" || key == "capability" || key == "enrollment_state" || key == "ready"
+		inventoryKey := key == "limit" || key == "offset" || key == "q" || key == "capability" || key == "enrollment_state" || key == "ready" || key == "sort"
 		if (key != "scope_kind" && key != "scope_id" && !(isInventory && inventoryKey)) || len(values) != 1 {
 			selfhostError(w, r, selfhost.ErrInvalid)
 			return
@@ -174,13 +174,20 @@ func selfhostInventoryOptions(r *http.Request) (selfhost.InventoryOptions, error
 	options := selfhost.InventoryOptions{Limit: 50, Q: q.Get("q"), Capability: q.Get("capability"), EnrollmentState: q.Get("enrollment_state")}
 	for key, values := range q {
 		switch key {
-		case "scope_kind", "scope_id", "limit", "offset", "q", "capability", "enrollment_state", "ready":
+		case "scope_kind", "scope_id", "limit", "offset", "q", "capability", "enrollment_state", "ready", "sort":
 		default:
 			return options, selfhost.ErrInvalid
 		}
 		if len(values) != 1 {
 			return options, selfhost.ErrInvalid
 		}
+	}
+	switch q.Get("sort") {
+	case "", "name":
+	case "newest":
+		options.Newest = true
+	default:
+		return options, selfhost.ErrInvalid
 	}
 	if kind := q.Get("scope_kind"); kind != "" && kind != "account" && kind != "team" && kind != "global" {
 		return options, selfhost.ErrInvalid

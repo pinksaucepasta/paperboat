@@ -63,15 +63,24 @@ LEFT JOIN user_machines machine
 WHERE environment.owner_user_id = $1
   AND environment.desired_state <> 'revoked'`
 
-func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account string, opts ConfigStatusInventoryOptions) ([]dbsqlc.ListOwnedControlConfigSyncStatusRow, int, string, error) {
+// configStatusPage is one page of the status list: its rows (one past the limit when another follows) with each
+// row's sort key (PostgreSQL's lower(alias), the cursor's key), the filtered total and the highest state.
+type configStatusPage struct {
+	rows    []dbsqlc.ListOwnedControlConfigSyncStatusRow
+	keys    []string
+	total   int
+	summary string
+}
+
+func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account string, opts ConfigStatusInventoryOptions) (configStatusPage, error) {
 	if opts.Limit < 1 || opts.Limit > 200 || opts.Offset < 0 {
-		return nil, 0, "", ErrConfigStatusInvalid
+		return configStatusPage{}, ErrConfigStatusInvalid
 	}
 	scoped := false
 	var team any
 	if scope, ok := workspace.FromContext(ctx); ok {
 		if err := workspace.Validate(ctx, s.store, account, scope); err != nil {
-			return nil, 0, "", err
+			return configStatusPage{}, err
 		}
 		scoped = true
 		if scope.TeamID != "" {
@@ -93,7 +102,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 	args := []any{account, scoped, team, opts.Q, opts.State, opts.Owner, s.policy.Mode == "disabled", int64(s.policy.StaleHeartbeatAfter), s.clock().Add(-s.policy.StaleHeartbeatAfter), opts.EnvironmentID}
 	summaryRows, err := s.store.SQL().QueryContext(ctx, "SELECT inventory_state,count(*) FROM ("+query+") states GROUP BY inventory_state", args...)
 	if err != nil {
-		return nil, 0, "", err
+		return configStatusPage{}, err
 	}
 	total := 0
 	summary := "disabled"
@@ -102,7 +111,7 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 		var count int
 		if err = summaryRows.Scan(&state, &count); err != nil {
 			summaryRows.Close()
-			return nil, 0, "", err
+			return configStatusPage{}, err
 		}
 		total += count
 		summary = higherConfigAccountState(summary, state)
@@ -110,17 +119,26 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 	err = summaryRows.Err()
 	summaryRows.Close()
 	if err != nil {
-		return nil, 0, "", err
+		return configStatusPage{}, err
 	}
-	rows, err := s.store.SQL().QueryContext(ctx, query+" ORDER BY lower(alias),environment_id LIMIT $11 OFFSET $12", append(args, opts.Limit, opts.Offset)...)
+	// The page reads one row past the limit so it knows whether another follows; the cursor (the last row's
+	// position) narrows only the page, never the total.
+	var afterKey, afterID any
+	if opts.After != nil {
+		afterKey, afterID = opts.After.Alias, opts.After.EnvironmentID
+	}
+	rows, err := s.store.SQL().QueryContext(ctx, "SELECT page.*,lower(page.alias) FROM ("+query+`) page
+ WHERE $13::text IS NULL OR (lower(alias),environment_id)>($13::text,$14::text)
+ ORDER BY lower(alias),environment_id LIMIT $11 OFFSET $12`, append(args, opts.Limit+1, opts.Offset, afterKey, afterID)...)
 	if err != nil {
-		return nil, 0, "", err
+		return configStatusPage{}, err
 	}
 	defer rows.Close()
 	out := []dbsqlc.ListOwnedControlConfigSyncStatusRow{}
+	var keys []string
 	for rows.Next() {
 		var item dbsqlc.ListOwnedControlConfigSyncStatusRow
-		var state string
+		var state, key string
 		if err := rows.Scan(
 			&item.EnvironmentID,
 			&item.MachineID,
@@ -164,10 +182,11 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 			&item.LastSuccessfulAt,
 			&item.MachineUpdatedAt,
 			&item.ObservedAt,
-			&state); err != nil {
-			return nil, 0, "", err
+			&state, &key); err != nil {
+			return configStatusPage{}, err
 		}
 		out = append(out, item)
+		keys = append(keys, key)
 	}
-	return out, total, summary, rows.Err()
+	return configStatusPage{rows: out, keys: keys, total: total, summary: summary}, rows.Err()
 }

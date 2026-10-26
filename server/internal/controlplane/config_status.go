@@ -141,13 +141,20 @@ type ConfigAccountStatus struct {
 	Policy       ConfigAccountPolicy        `json:"policy"`
 	Environments []ConfigAccountEnvironment `json:"environments"`
 	Pagination   map[string]any             `json:"pagination,omitempty"`
+	// Next is the last row's position when another page follows (the HTTP layer's next_cursor).
+	Next *ConfigStatusPosition `json:"-"`
 }
 
 type ConfigStatusInventoryOptions struct {
 	EnvironmentID   string
 	Limit, Offset   int
 	Q, State, Owner string
+	// After continues the list after this row (next_cursor); used instead of Offset.
+	After *ConfigStatusPosition
 }
+
+// ConfigStatusPosition is a row's place in the status list's order: lower(alias), then environment id.
+type ConfigStatusPosition struct{ Alias, EnvironmentID string }
 
 func (s *ConfigStatusService) Account(ctx context.Context, userID string) (ConfigAccountStatus, error) {
 	return s.account(ctx, userID, nil)
@@ -160,18 +167,19 @@ func (s *ConfigStatusService) account(ctx context.Context, userID string, opts *
 		return ConfigAccountStatus{}, ErrConfigStatusInvalid
 	}
 	var rows []dbsqlc.ListOwnedControlConfigSyncStatusRow
-	var total int
-	var summary string
+	var page configStatusPage
 	var err error
 	if opts == nil {
 		rows, err = s.store.Queries().ListOwnedControlConfigSyncStatus(ctx, sql.NullString{String: userID, Valid: true})
 	} else {
-		rows, total, summary, err = s.inventoryStatusRows(ctx, userID, *opts)
+		page, err = s.inventoryStatusRows(ctx, userID, *opts)
+		rows = page.rows
 	}
 	if err != nil {
 		return ConfigAccountStatus{}, err
 	}
-	if scope, selected := workspace.FromContext(ctx); selected {
+	// The inventory query filters by workspace itself (inventoryStatusRows); the full read is filtered here.
+	if scope, selected := workspace.FromContext(ctx); selected && opts == nil {
 		if err := workspace.Validate(ctx, s.store, userID, scope); err != nil {
 			return ConfigAccountStatus{}, err
 		}
@@ -236,11 +244,15 @@ func (s *ConfigStatusService) account(ctx context.Context, userID string, opts *
 	}
 	if opts != nil {
 		var next any
-		if opts.Offset+len(result.Environments) < total && len(result.Environments) > 0 {
-			next = opts.Offset + len(result.Environments)
+		if len(result.Environments) > opts.Limit {
+			result.Environments = result.Environments[:opts.Limit]
+			result.Next = &ConfigStatusPosition{Alias: page.keys[opts.Limit-1], EnvironmentID: result.Environments[opts.Limit-1].EnvironmentID}
+			if opts.After == nil {
+				next = opts.Offset + opts.Limit
+			}
 		}
-		result.Pagination = map[string]any{"limit": opts.Limit, "offset": opts.Offset, "total": total, "next_offset": next}
-		result.State = summary
+		result.Pagination = map[string]any{"limit": opts.Limit, "offset": opts.Offset, "total": page.total, "next_offset": next}
+		result.State = page.summary
 	}
 	return result, nil
 }

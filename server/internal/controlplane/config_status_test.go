@@ -188,6 +188,23 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 			t.Fatal("filter applied after limit")
 		}
 	}
+	// The cursor walks the list in alias order, one row per page, and every page keeps the whole total.
+	var walked []string
+	opts := ConfigStatusInventoryOptions{Limit: 1}
+	for pages := 0; ; pages++ {
+		page, err := service.AccountInventory(ctx, user, opts)
+		if err != nil || page.Pagination["total"] != 2 || len(page.Environments) != 1 || pages > 2 {
+			t.Fatalf("cursor page %d: %v rows, pagination %v, %v", pages, len(page.Environments), page.Pagination, err)
+		}
+		walked = append(walked, page.Environments[0].EnvironmentID)
+		if page.Next == nil {
+			break
+		}
+		opts.After = page.Next
+	}
+	if len(walked) != 2 || walked[0] == walked[1] {
+		t.Fatalf("cursor walk %v, want both environments once", walked)
+	}
 	for _, environment := range []string{machineAEnvironment, machineEnvironment, "unrelated_environment"} {
 		page, err := service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 1, EnvironmentID: environment})
 		if err != nil {

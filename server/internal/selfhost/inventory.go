@@ -12,6 +12,8 @@ type InventoryOptions struct {
 	Limit, Offset                  int
 	Q, Capability, EnrollmentState string
 	Ready                          *bool
+	// Newest orders the newest installation first (sort=newest); the default order is by name.
+	Newest bool
 }
 type InventoryPagination struct {
 	Limit      int  `json:"limit"`
@@ -41,7 +43,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 }
 
 const installationInventorySQL = `WITH visible AS (
- SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
+ SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,i.created_at,
  ` + installationReadySQL + ` AS ready
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
  WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))
@@ -81,7 +83,11 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 	if err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready FROM filtered ORDER BY name,capability,id LIMIT $10 OFFSET $11`, append(args, options.Limit, options.Offset)...)
+	order := "name,capability,id"
+	if options.Newest {
+		order = "created_at DESC,id DESC"
+	}
+	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready FROM filtered ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, options.Limit, options.Offset)...)
 	if err != nil {
 		return out, err
 	}
