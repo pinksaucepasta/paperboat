@@ -2940,6 +2940,15 @@ type TunnelRouteOriginHealth struct {
 	ReportedAt  time.Time
 }
 
+type TunnelRouteReadyEdgesV1 struct {
+	AccountID            string
+	TunnelID             string
+	RouteID              string
+	EdgeNodeID           string
+	EdgeProcessEpoch     string
+	AssignmentGeneration int64
+}
+
 type UsageAccountingAuthority struct {
 	AuthorityID        string
 	EdgeNodeID         string

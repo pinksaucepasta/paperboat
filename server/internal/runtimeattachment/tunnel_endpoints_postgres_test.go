@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -352,6 +353,46 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		if target.EdgeNodeID != f.edge.NodeID && target.EdgeNodeID != f.backupEdge.NodeID {
 			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
 		}
+	}
+	// The certificate ledger treats the engine's edges like connector edges: a domain whose active
+	// certificate is not yet acknowledged by every engine edge is due, and once each edge acknowledges
+	// the certificate at its engine assignment generation the domain is complete (not due again).
+	certID := "tcert_" + f.prefix
+	f.exec(t, `INSERT INTO tunnel_certificate_records(id,domain_id,account_id,tunnel_id,route_id,hostname,domain_generation,certificate_generation,strategy,state,certificate_reference,master_key_reference,certificate_ciphertext,private_key_ciphertext,fingerprint,issuer,not_before,expires_at,renewal_at,target_kind) VALUES($1,$2,$3,$4,$5,$6,1,1,'delegated_dns01','active',$1,'fixture',decode(repeat('ab',29),'hex'),decode(repeat('ab',29),'hex'),decode(repeat('ab',32),'hex'),'fixture',now()-interval '1 hour',now()+interval '60 days',now()+interval '30 days','durable_route')`, certID, domain, f.account, tunnel, route, "custom-"+f.prefix+".example.test")
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM tunnel_certificate_records WHERE id=$1`, certID)
+	})
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='ready',certificate_reference=$2 WHERE id=$1`, domain, certID)
+	// The heartbeats the edges' eligibility checks read are fresh for this part of the test.
+	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour' WHERE id IN ($1,$2)`, f.node, f.backupNode)
+	due := func() bool {
+		t.Helper()
+		rows, err := f.database.Queries().ListDueTunnelCertificateDomainsV1(f.ctx, dbsqlc.ListDueTunnelCertificateDomainsV1Params{Now: time.Now().UTC(), RenewBefore: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond)}, RowLimit: 10000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if row.ID == domain {
+				return true
+			}
+		}
+		return false
+	}
+	if !due() {
+		t.Fatal("engine domain with an unacknowledged certificate is not due")
+	}
+	for _, target := range targets {
+		f.exec(t, `INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,$4,'active',1)`, certID, target.EdgeNodeID, target.EdgeProcessEpoch, target.AssignmentGeneration)
+	}
+	if due() {
+		t.Fatal("engine domain whose edges acknowledged its certificate is still due")
+	}
+	// A failed projection of the same certificate is restored to ready by the completion check, which
+	// accepts the engine edges' acknowledgements as the current edge coverage.
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='failed' WHERE id=$1`, domain)
+	restored, err := f.database.Queries().RecoverTunnelDomainCertificateProjectionV1(f.ctx, dbsqlc.RecoverTunnelDomainCertificateProjectionV1Params{Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}, DomainID: domain, AccountID: f.account, ExpectedGeneration: 1, CertificateID: certID, CertificateGeneration: 1, CertificateReference: certID})
+	if err != nil || restored != 1 {
+		t.Fatalf("engine domain certificate completion = %d, %v; want the projection restored", restored, err)
 	}
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {

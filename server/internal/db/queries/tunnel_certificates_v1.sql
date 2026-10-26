@@ -986,20 +986,20 @@ WHERE d.id = sqlc.arg(domain_id) AND d.account_id = sqlc.arg(account_id)
   AND cert.certificate_reference = sqlc.arg(certificate_reference)
   AND cert.expires_at > sqlc.arg(now) AND cert.renewal_at > sqlc.arg(now)
   AND EXISTS (
-    SELECT 1 FROM tunnel_edge_route_assignments AS a
-    WHERE a.account_id = d.account_id AND a.tunnel_id = d.tunnel_id
-      AND a.route_id = d.route_id AND a.state = 'active' AND a.observed_state = 'ready'
+    SELECT 1 FROM tunnel_route_ready_edges_v1 AS ready
+    WHERE ready.account_id = d.account_id AND ready.tunnel_id = d.tunnel_id
+      AND ready.route_id = d.route_id
   )
   AND NOT EXISTS (
-    SELECT 1 FROM tunnel_edge_route_assignments AS a
-    WHERE a.account_id = d.account_id AND a.tunnel_id = d.tunnel_id
-      AND a.route_id = d.route_id AND a.state = 'active' AND a.observed_state = 'ready'
+    SELECT 1 FROM tunnel_route_ready_edges_v1 AS ready
+    WHERE ready.account_id = d.account_id AND ready.tunnel_id = d.tunnel_id
+      AND ready.route_id = d.route_id
       AND NOT EXISTS (
         SELECT 1 FROM tunnel_certificate_edge_distributions AS e
         JOIN control_tunnel_nodes AS n ON n.id = e.edge_node_id AND n.process_epoch = e.edge_process_epoch
-        WHERE e.certificate_id = cert.id AND e.edge_node_id = a.edge_node_id
-          AND e.edge_process_epoch = a.edge_process_epoch
-          AND e.edge_assignment_generation = a.assignment_generation
+        WHERE e.certificate_id = cert.id AND e.edge_node_id = ready.edge_node_id
+          AND e.edge_process_epoch = ready.edge_process_epoch
+          AND e.edge_assignment_generation = ready.assignment_generation
           AND e.observed_certificate_generation = cert.certificate_generation
           AND e.state = 'active' AND e.updated_at >= cert.updated_at
           AND n.state = 'ready' AND n.ready AND n.drain_deadline IS NULL

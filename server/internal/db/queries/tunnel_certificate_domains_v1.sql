@@ -12,26 +12,27 @@ WHERE d.deleted_at IS NULL
       AND EXISTS (
         SELECT 1
         FROM tunnel_certificate_records AS cert
-        JOIN tunnel_edge_route_assignments AS a
-          ON a.route_id = d.route_id
-         AND a.tunnel_id = d.tunnel_id
-         AND a.account_id = d.account_id
         WHERE cert.domain_id = d.id
           AND cert.certificate_reference = d.certificate_reference
           AND cert.target_kind = 'durable_route'
           AND cert.leaf_hostname IS NULL
           AND cert.state = 'active'
-          AND a.state = 'active'
-          AND a.observed_state = 'ready'
-          AND NOT EXISTS (
+          AND EXISTS (
             SELECT 1
-            FROM tunnel_certificate_edge_distributions AS edge_cert
-            WHERE edge_cert.certificate_id = cert.id
-              AND edge_cert.edge_node_id = a.edge_node_id
-              AND edge_cert.edge_process_epoch = a.edge_process_epoch
-              AND edge_cert.edge_assignment_generation = a.assignment_generation
-              AND edge_cert.observed_certificate_generation = cert.certificate_generation
-              AND edge_cert.state = 'active'
+            FROM tunnel_route_ready_edges_v1 AS ready
+            WHERE ready.account_id = d.account_id
+              AND ready.tunnel_id = d.tunnel_id
+              AND ready.route_id = d.route_id
+              AND NOT EXISTS (
+                SELECT 1
+                FROM tunnel_certificate_edge_distributions AS edge_cert
+                WHERE edge_cert.certificate_id = cert.id
+                  AND edge_cert.edge_node_id = ready.edge_node_id
+                  AND edge_cert.edge_process_epoch = ready.edge_process_epoch
+                  AND edge_cert.edge_assignment_generation = ready.assignment_generation
+                  AND edge_cert.observed_certificate_generation = cert.certificate_generation
+                  AND edge_cert.state = 'active'
+              )
           )
       )
     )
@@ -40,35 +41,18 @@ ORDER BY d.certificate_expires_at NULLS FIRST, d.id
 LIMIT sqlc.arg(row_limit);
 
 -- name: ListReadyTunnelCertificateEdgesV1 :many
--- The edges serving a domain's route: connector-path assignments, and the engine's endpoint assignments
--- for a tunnel moved onto the engine (3a step 4.3), which has no connector session and no row above.
-SELECT edge_node_id, edge_process_epoch, assignment_generation FROM (
-  SELECT a.edge_node_id, a.edge_process_epoch, a.assignment_generation
-  FROM tunnel_edge_route_assignments AS a
-  JOIN tunnel_domains AS d ON d.route_id = a.route_id AND d.tunnel_id = a.tunnel_id AND d.account_id = a.account_id
-  WHERE d.id = sqlc.arg(domain_id)
-    AND a.state = 'active'
-    AND a.observed_state = 'ready'
-  UNION
-  SELECT ea.edge_node_id, ea.edge_process_epoch, ea.generation AS assignment_generation
-  FROM endpoint_edge_assignments AS ea
-  JOIN endpoint_routes AS er ON er.id = ea.route_id
-  JOIN endpoints AS e ON e.id = er.endpoint_id
-  JOIN tunnel_domains AS d ON d.route_id = er.tunnel_route_id AND d.tunnel_id = e.tunnel_id AND d.account_id = e.account_id
-  WHERE d.id = sqlc.arg(domain_id)
-    AND e.desired_state = 'active'
-    AND ea.desired = 'active'
-    AND ea.observed_ready
-) AS edges
-ORDER BY edge_node_id, edge_process_epoch, assignment_generation;
+-- The edges serving a domain's route on either path: connector assignments and the endpoint engine's
+-- assignments (tunnel_route_ready_edges_v1). A domain on the engine has no connector session.
+SELECT ready.edge_node_id, ready.edge_process_epoch, ready.assignment_generation
+FROM tunnel_route_ready_edges_v1 AS ready
+JOIN tunnel_domains AS d
+  ON d.route_id = ready.route_id AND d.tunnel_id = ready.tunnel_id AND d.account_id = ready.account_id
+WHERE d.id = sqlc.arg(domain_id)
+ORDER BY ready.edge_node_id, ready.edge_process_epoch, ready.assignment_generation;
 
 -- name: ListOnDemandWildcardDomainsForEdgeV1 :many
 SELECT d.*
 FROM tunnel_domains AS d
-JOIN tunnel_edge_route_assignments AS a
-  ON a.route_id = d.route_id
- AND a.tunnel_id = d.tunnel_id
- AND a.account_id = d.account_id
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
   AND d.ownership_state = 'verified'
@@ -76,10 +60,13 @@ WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
   AND d.deleted_at IS NULL
-  AND a.edge_node_id = sqlc.arg(edge_node_id)
-  AND a.edge_process_epoch = sqlc.arg(edge_process_epoch)
-  AND a.state = 'active'
-  AND a.observed_state = 'ready'
+  AND EXISTS (
+    SELECT 1
+    FROM tunnel_route_ready_edges_v1 AS a
+    WHERE a.route_id = d.route_id AND a.tunnel_id = d.tunnel_id AND a.account_id = d.account_id
+      AND a.edge_node_id = sqlc.arg(edge_node_id)
+      AND a.edge_process_epoch = sqlc.arg(edge_process_epoch)
+  )
   AND EXISTS (
     SELECT 1
     FROM tunnel_certificate_records AS cert
