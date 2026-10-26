@@ -12,6 +12,10 @@ type TransactionalMail struct {
 	From                      string `json:"from"`
 	ConsoleOrigin             string `json:"console_origin"`
 	InvitationLifetimeSeconds int64  `json:"invitation_lifetime_seconds"`
+	// SuppressedInvitationTeams are test teams whose invitations never send mail: the invitation is
+	// recorded and logged, and tests read it from the API. Smoke runs otherwise mailed a real inbox
+	// on every run.
+	SuppressedInvitationTeams []string `json:"suppressed_invitation_teams"`
 }
 
 func (m TransactionalMail) Validate(key string) error {

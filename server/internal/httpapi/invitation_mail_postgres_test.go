@@ -306,6 +306,16 @@ func TestInvitationMailPostgresHTTP(t *testing.T) {
 	call("admin", "POST", adminPath, teams.AcceptRequest{OperationID: "admin-denied"}, 403, nil)
 	exec(`UPDATE paperboat.team_invitations SET mail_requested_at=now()-interval '2 minutes' WHERE invitation_id=$1`, third.InvitationID)
 	call("owner", "POST", adminPath, teams.AcceptRequest{OperationID: "owner-resend"}, 200, nil)
+	// A test team listed in mail.suppressed_invitation_teams records its invitations without mailing
+	// anyone: smoke runs mailed a real inbox on every run.
+	suppressed := policy
+	suppressed.SuppressedInvitationTeams = []string{team}
+	service.ConfigureMail(suppressed, true)
+	quiet := invite("suppressed-invite", "mail-suppressed-"+suffix+"@example.test", "member")
+	if e := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM transactional_mail_outbox WHERE invitation_id=$1`, quiet.InvitationID).Scan(&count); e != nil || count != 0 {
+		t.Fatalf("suppressed test team queued %d invitation mails, want 0 (%v)", count, e)
+	}
+	service.ConfigureMail(policy, true)
 
 	// A former owner remains an admin: the owner-only stored-role rule, rather
 	// than ordinary membership loss, must reject replay while the invite is pending.

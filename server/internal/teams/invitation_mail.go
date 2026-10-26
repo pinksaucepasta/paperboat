@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"html"
+	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,13 +36,17 @@ func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string) e
 	if !s.mailEnabled {
 		return nil
 	}
-	var address, name string
+	var address, name, team string
 	var expires time.Time
-	err := tx.QueryRow(ctx, `SELECT coalesce(i.recipient_email,CASE WHEN u.email_verified AND u.status='active' THEN u.primary_email END,''),coalesce(t.display_name,t.team_id),i.expires_at FROM team_invitations i JOIN teams t USING(team_id) LEFT JOIN users u ON u.id=i.recipient_account WHERE i.invitation_id=$1`, id).Scan(&address, &name, &expires)
+	err := tx.QueryRow(ctx, `SELECT coalesce(i.recipient_email,CASE WHEN u.email_verified AND u.status='active' THEN u.primary_email END,''),coalesce(t.display_name,t.team_id),i.expires_at,i.team_id FROM team_invitations i JOIN teams t USING(team_id) LEFT JOIN users u ON u.id=i.recipient_account WHERE i.invitation_id=$1`, id).Scan(&address, &name, &expires, &team)
 	if err != nil {
 		return err
 	}
 	if address == "" {
+		return nil
+	}
+	if slices.Contains(s.mail.SuppressedInvitationTeams, team) {
+		slog.InfoContext(ctx, "team invitation mail suppressed for a test team", "team_id", team, "invitation_id", id)
 		return nil
 	}
 	mailID := "mail_" + uuid.NewString()
