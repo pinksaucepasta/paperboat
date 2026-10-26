@@ -61,3 +61,23 @@ policy-cli	cmd	@policy_cli.sh	E=$(ssh {host} "sudo -n docker exec -u pbt -e HOME
 local-access	cmd	@local_access.py	python3 tools/device-smoke/local_access.py --controller "$F9_CONTROLLER" --target "$F9_TARGET"
 private-access-permission	cmd	@private_access_permission.py	python3 tools/device-smoke/private_access_permission.py --owner "$F9_OWNER" --owner-alias "$F9_OWNER_ALIAS" --accessor "$F9_ACCESSOR" --team "$F9_TEAM"
 old-connector-paths-gone	cmd	F20-04	! grep -rlE "tunnelenrollment|connectorrotation|(FROM|JOIN|INTO|UPDATE) (paperboat\.)?tunnel_connectors|connector_enrollments" cli server tunnel shared --include=*.go --exclude-dir=migrations
+
+# Config command checks require signed-in account cleanup authority and no active config assignment; sudo password uses runner stdin.
+config-command-c127	device	C127	python3 config_commands.py --rows C127
+config-command-c128	device	C128	python3 config_commands.py --rows C128
+config-command-c129	device	C129	python3 config_commands.py --rows C129
+config-command-c130	device	C130	python3 config_commands.py --rows C130
+config-command-c131	device	C131	python3 config_commands.py --rows C131
+config-command-c132	device	C132	python3 config_commands.py --rows C132
+config-command-c133	device	C133	python3 config_commands.py --rows C133
+config-command-c134	device	C134	python3 config_commands.py --rows C134
+config-command-c135	device	C135	python3 config_commands.py --rows C135
+config-command-c136	device	C136	python3 config_commands.py --rows C136
+config-command-c137	device	C137	python3 config_commands.py --rows C137
+config-command-c138	device	C138	python3 config_commands.py --rows C138
+config-command-c169	device	C169	python3 config_commands.py --rows C169
+config-command-c172	device	C172	python3 config_commands.py --rows C172
+config-command-c177	device	C177	python3 config_commands.py --rows C177
+config-command-c179	device	C179	python3 config_commands.py --rows C179
+config-command-c180	device	C180	python3 config_commands.py --rows C180
+config-command-c181	device	C181	python3 config_commands.py --rows C181

@@ -4989,3 +4989,6 @@ Result tools/device-smoke/results/tunnel-preview-manage-785d6f16-edge15-20261027
 
 2026-10-27 | Transfers lane first-exec | Not reproduced on dev-ad441296 (main 5724c3cc runtime), 0/20 fresh container -> install -> pair -> sleep 8 -> 3 execs on hp (4 parallel x5); exec1 ok in 20/20. 3 later execs (2nd/3rd on 2 targets) failed "could not reach" during batch 1 only, while I was revoking an earlier batch (peer-network churn); none in batches 2-5.
 Closed per user rule; the final re-check catches it if back. Throwaway records revoked by exact id, containers removed.
+
+2026-10-27 | SDK lane config command checks | config_commands.py adds main/error paths for C127–C138,C169,C172,C177,C179–C181, reusing local-access apply/restore and config-sync Git/file owners; manifest entries added.
+Device run waits for Server/builds verified renewal-fix build; hp pair remains stopped. Requires signed-in cleanup authority and unassigned config fixture; product failures will be reported, no product edits.
