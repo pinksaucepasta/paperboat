@@ -38,7 +38,7 @@ func TestRelayQuotaRefusalNamesThePlanLimitAndTheAction(t *testing.T) {
 	}
 	other := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "peer_stream_unavailable", Message: "peer stream could not open"}
 	if strings.Contains(commandFailureMessage(other, classifyCommandFailure(other)), "bandwidth") || errors.Is(other, refusal) {
-		t.Fatal("other peer failures must keep the generic guidance")
+		t.Fatal("other peer failures must not read as a plan limit")
 	}
 }
 

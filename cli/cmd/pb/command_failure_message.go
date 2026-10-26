@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"net/http"
 	"os"
+	"regexp"
 	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -244,7 +245,7 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		if owner.Code == "terminal_session_limit_reached" || localapi.Refusal(owner.Code) {
 			return owner.Message
 		}
-		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
+		return localAPIFailureMessage(owner.Code)
 	case *filetransfer.LimitError:
 		return transferLimitMessage(owner)
 	case updateOpenConnectionsRefusal:
@@ -268,6 +269,27 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 	}
 	return ""
 }
+
+// localAPIFailureMessage says which side is not ready for a local-service failure, from the
+// daemon's authored code. An unlisted code is named in the message, so the step that failed is
+// never hidden; the code is an authored constant, shown only when it has that shape.
+func localAPIFailureMessage(code string) string {
+	switch code {
+	case "peer_transport_unavailable":
+		return "Paperboat could not reach the target machine. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry."
+	case "peer_stream_unavailable":
+		return "The target machine was reached but did not open the connection. Its Paperboat service may still be starting, or it has not accepted this machine yet. Retry in a minute; run `pb doctor` if this continues."
+	case "inventory_unavailable", "snapshot_unavailable", "observation_unavailable", "relay_inventory_unavailable":
+		return "The local Paperboat service is still starting or syncing its machine list. Wait a few seconds and retry; check `pb status`."
+	}
+	step := ""
+	if localAPICodeShape.MatchString(code) {
+		step = " (step: " + code + ")"
+	}
+	return "The local Paperboat service could not complete the request" + step + ". Check `pb status` for the local service and the target, then retry; run `pb doctor` if this continues."
+}
+
+var localAPICodeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // transferLimitMessage says which transfer limit a send exceeded and by how much. Nothing was sent.
 func transferLimitMessage(limit *filetransfer.LimitError) string {
