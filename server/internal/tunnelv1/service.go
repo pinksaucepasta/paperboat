@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ func NewService(repository TunnelRepository, config Config) (*Service, error) {
 		endpointIDGenerator = randomEndpointID
 	}
 	if config.PublicTCPPortMin == 0 && config.PublicTCPPortMax == 0 {
-		config.PublicTCPPortMin, config.PublicTCPPortMax = 20000, 29999
+		config.PublicTCPPortMin, config.PublicTCPPortMax = edgeports.PublicTCPMin, edgeports.PublicTCPMax
 	}
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, errors.New("public TCP port range is invalid")

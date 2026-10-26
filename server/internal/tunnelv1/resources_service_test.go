@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
 // fakeResourceRepository keeps service policy tests independent from
@@ -280,7 +281,7 @@ func TestResourceServicePublicTCPAllocatesListenerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.createRoute.Protocol != "tcp" || repo.createRoute.MatchType != "managed" || repo.createRoute.Hostname.String != hostname || repo.createRoute.PublicTCPListenerID == "" || repo.createRoute.PublicTCPPortMin != 20000 || repo.createRoute.PublicTCPPortMax != 29999 {
+	if repo.createRoute.Protocol != "tcp" || repo.createRoute.MatchType != "managed" || repo.createRoute.Hostname.String != hostname || repo.createRoute.PublicTCPListenerID == "" || repo.createRoute.PublicTCPPortMin != edgeports.PublicTCPMin || repo.createRoute.PublicTCPPortMax != edgeports.PublicTCPMax {
 		t.Fatalf("public TCP route projection = %+v", repo.createRoute)
 	}
 	row := resourceRoute("route_tcp_1", "tcp", "managed")

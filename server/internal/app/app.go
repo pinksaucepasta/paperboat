@@ -173,11 +173,9 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure tunnel endpoint builder: %w", err)
 	}
 	tunnelService, err := tunnelv1.NewService(tunnelRepository, tunnelv1.Config{
-		EndpointBuilder:  tunnelEndpointBuilder,
-		CursorKey:        cursorKey[:],
-		PublicTCPPortMin: int32(opts.Config.Tunnel.PublicTCPPortMin),
-		PublicTCPPortMax: int32(opts.Config.Tunnel.PublicTCPPortMax),
-		BandwidthDenied:  bandwidthgate.New(store).Denied,
+		EndpointBuilder: tunnelEndpointBuilder,
+		CursorKey:       cursorKey[:],
+		BandwidthDenied: bandwidthgate.New(store).Denied,
 	})
 	if err != nil {
 		_ = store.Close()
@@ -185,7 +183,6 @@ func New(opts Options) (*App, error) {
 	}
 	tunnelResourceService, err := tunnelv1.NewResourceService(tunnelRepository, tunnelv1.ResourceConfig{
 		CursorKey: cursorKey[:], ChallengeZone: opts.Config.Certificates.ChallengeZone, AllowInsecureDevelopment: opts.Config.Environment == config.EnvironmentDevelopment,
-		PublicTCPPortMin: int32(opts.Config.Tunnel.PublicTCPPortMin), PublicTCPPortMax: int32(opts.Config.Tunnel.PublicTCPPortMax),
 	})
 	if err != nil {
 		_ = store.Close()

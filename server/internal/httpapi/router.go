@@ -327,6 +327,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.Selfhost != nil {
 			mux.HandleFunc("GET /v1/selfhost/runtime-readiness", opts.Selfhost.RuntimeReadiness)
+			mux.HandleFunc("POST /v1/selfhost/port-probe", opts.Selfhost.PortProbe)
 			account := http.HandlerFunc(opts.Selfhost.Account)
 			read := requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", account))
 			write := requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, account)))

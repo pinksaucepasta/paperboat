@@ -150,3 +150,44 @@ func (n *nodeClient) readiness(ctx context.Context) (NodeReadiness, error) {
 	}
 	return result, nil
 }
+
+// PortProbe is the control plane's view of one test port on this node's public address.
+type PortProbe struct {
+	Reachable bool   `json:"reachable"`
+	Detail    string `json:"detail"`
+}
+
+// ProbePort asks the control plane to connect to this node's public address on port and expect nonce
+// echoed back by a listener the caller has opened there.
+func ProbePort(ctx context.Context, dir string, port int, nonce string) (PortProbe, error) {
+	node, err := newNodeClient("tunnel", dir)
+	if err != nil {
+		return PortProbe{}, err
+	}
+	body, err := json.Marshal(map[string]any{"port": port, "nonce": nonce})
+	if err != nil {
+		return PortProbe{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(node.url, "/")+"/v1/selfhost/port-probe", bytes.NewReader(body))
+	if err != nil {
+		return PortProbe{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+node.credential)
+	req.Header.Set("Content-Type", "application/json")
+	node.http.Timeout = 15 * time.Second
+	response, err := node.http.Do(req)
+	if err != nil {
+		return PortProbe{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		return PortProbe{}, ResponseError{Status: response.StatusCode}
+	}
+	var wire struct {
+		Data PortProbe `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&wire); err != nil || wire.Data.Detail == "" {
+		return PortProbe{}, errors.New("port probe response is invalid")
+	}
+	return wire.Data, nil
+}

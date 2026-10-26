@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -95,7 +96,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 }
 func runObserved(ctx context.Context, args []string, out io.Writer, observe func(context.Context, string, error)) error {
 	if len(args) == 0 {
-		return commandError("use pbh install, pbh configure-tls, pbh selfhost code, pbh status, or pbh uninstall")
+		return commandError("use pbh install, pbh configure-tls, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall")
 	}
 	switch args[0] {
 	case "check-host":
@@ -162,10 +163,12 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		cmd.Stdout = out
 		cmd.Stderr = out
 		return cmd.Run()
+	case "doctor":
+		return doctor(ctx, args[1:], out)
 	case "uninstall":
 		return uninstall(ctx, args[1:], out)
 	default:
-		return commandError("unknown command; use pbh install, pbh configure-tls, pbh selfhost code, pbh status, or pbh uninstall")
+		return commandError("unknown command; use pbh install, pbh configure-tls, pbh selfhost code, pbh status, pbh doctor, or pbh uninstall")
 	}
 }
 func elevated(ctx context.Context, args []string, out io.Writer) error {
@@ -276,6 +279,11 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		return err
 	}
 	fresh = false
+	if !*noService && slices.Contains(selected, "tunnel") {
+		if err := setupHostNetwork(ctx, execCommander, defaultHostPaths(*dir), out); err != nil {
+			return err
+		}
+	}
 	ready, err := selfhost.RuntimeReady(*dir)
 	if err != nil {
 		return err
@@ -294,6 +302,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 // serve runs the installation. A claim address already in use is reported by
 // name, because the service journal is the only place the operator will look.
 func serve(ctx context.Context, dir string, out io.Writer, observe func(context.Context, string, error)) error {
+	reapplyHostFirewall(ctx, execCommander, defaultHostPaths(dir), out)
 	err := containers.Serve(ctx, dir, out, observe)
 	if errors.Is(err, syscall.EADDRINUSE) {
 		if c, readErr := selfhost.ReadConfig(dir); readErr == nil {

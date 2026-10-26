@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"io"
 	"net/url"
 	"strconv"
@@ -54,7 +55,7 @@ func NewResourceService(repository ResourceRepository, config ResourceConfig) (*
 		newID = randomID
 	}
 	if config.PublicTCPPortMin == 0 && config.PublicTCPPortMax == 0 {
-		config.PublicTCPPortMin, config.PublicTCPPortMax = 20000, 29999
+		config.PublicTCPPortMin, config.PublicTCPPortMax = edgeports.PublicTCPMin, edgeports.PublicTCPMax
 	}
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, fmt.Errorf("public TCP port range is invalid")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
@@ -21,7 +23,7 @@ type publicTCPAuthorityFixture struct {
 }
 
 func TestPublicTCPListenersBindBeforeReadyObservation(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	probe, err := listenInPublicTCPRange()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func publicTCPListenerDecision(port int, listener string) connectorprotocol.Ingr
 }
 
 func TestPublicTCPListenersBindPersistAndWithdrawExactReservation(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	probe, err := listenInPublicTCPRange()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +129,7 @@ func TestPublicTCPListenersBindPersistAndWithdrawExactReservation(t *testing.T) 
 }
 
 func TestPublicTCPFatalAcceptWithdrawsOnlyItsIdentityAndRebinds(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	probe, err := listenInPublicTCPRange()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,5 +219,48 @@ func TestPublicTCPObservationKeepsMixedOperationalCause(t *testing.T) {
 	manager.observe(ctx, "public_tcp_stream", errors.Join(context.Canceled, io.EOF))
 	if observed != 2 {
 		t.Fatalf("observed=%d", observed)
+	}
+}
+
+// listenInPublicTCPRange returns a free loopback listener inside the public TCP range; an operating-system
+// chosen port could fall outside it, where the listeners refuse to bind.
+func listenInPublicTCPRange() (net.Listener, error) {
+	var err error
+	for range 200 {
+		var listener net.Listener
+		listener, err = net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(edgeports.PublicTCPMin+rand.IntN(edgeports.PublicTCPMax-edgeports.PublicTCPMin+1)))
+		if err == nil {
+			return listener, nil
+		}
+	}
+	return nil, err
+}
+
+func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
+	var failures []error
+	authority := &publicTCPAuthorityFixture{}
+	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown(context.Background())
+	for _, port := range []int{edgeports.PublicTCPMin - 1, edgeports.PublicTCPMax + 1, 22} {
+		if err = manager.PrepareTCPRoutes(t.Context(), []route.RouteRule{{Kind: route.TunnelTCP, PublicTCPListenerID: "listener_out", PublicTCPPort: uint16(port)}}); err == nil {
+			t.Errorf("PrepareTCPRoutes bound port %d outside the range", port)
+		}
+		authority.set(publicTCPListenerDecision(port, "listener_out"))
+		if err = manager.reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager.mu.Lock()
+	bound := len(manager.listeners)
+	manager.mu.Unlock()
+	if bound != 0 || len(failures) != 3 {
+		t.Fatalf("listeners=%d failures=%d, want none bound and 3 reported", bound, len(failures))
 	}
 }

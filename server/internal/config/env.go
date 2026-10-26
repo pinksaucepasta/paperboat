@@ -226,20 +226,6 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	}
 	setString("PAPERBOAT_PREVIEW_BASE_DOMAIN", &c.Preview.BaseDomain)
 	setString("PAPERBOAT_TUNNEL_BASE_DOMAIN", &c.Tunnel.BaseDomain)
-	if value, ok := lookup("PAPERBOAT_TUNNEL_PUBLIC_TCP_PORT_MIN"); ok {
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("parse PAPERBOAT_TUNNEL_PUBLIC_TCP_PORT_MIN: %w", err)
-		}
-		c.Tunnel.PublicTCPPortMin = parsed
-	}
-	if value, ok := lookup("PAPERBOAT_TUNNEL_PUBLIC_TCP_PORT_MAX"); ok {
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("parse PAPERBOAT_TUNNEL_PUBLIC_TCP_PORT_MAX: %w", err)
-		}
-		c.Tunnel.PublicTCPPortMax = parsed
-	}
 	setString("PAPERBOAT_CERTIFICATES_DIRECTORY_URL", &c.Certificates.DirectoryURL)
 	setString("PAPERBOAT_CERTIFICATES_ACCOUNT_KID", &c.Certificates.AccountKID)
 	setString("PAPERBOAT_CERTIFICATES_ACCOUNT_EMAIL", &c.Certificates.AccountEmail)

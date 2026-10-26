@@ -264,9 +264,7 @@ type Preview struct {
 }
 
 type Tunnel struct {
-	BaseDomain       string `json:"base_domain"`
-	PublicTCPPortMin int    `json:"public_tcp_port_min"`
-	PublicTCPPortMax int    `json:"public_tcp_port_max"`
+	BaseDomain string `json:"base_domain"`
 }
 
 // Certificates contains references and public endpoints only. It never
@@ -519,7 +517,7 @@ func Default() Config {
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost"},
-		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", PublicTCPPortMin: 20000, PublicTCPPortMax: 29999},
+		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost"},
 		ConfigSync: ConfigSync{
 			Mode:             "disabled",
 			ManifestContract: "paperboat-manifest-v1", ManifestMaxBytes: 256 << 10,
@@ -845,9 +843,6 @@ func (c Config) Validate() error {
 	}
 	if !validEndpointBaseDomain(c.Tunnel.BaseDomain) {
 		errs = append(errs, fmt.Errorf("tunnel.base_domain must be a DNS hostname"))
-	}
-	if c.Tunnel.PublicTCPPortMin < 1024 || c.Tunnel.PublicTCPPortMax > 65535 || c.Tunnel.PublicTCPPortMin > c.Tunnel.PublicTCPPortMax {
-		errs = append(errs, fmt.Errorf("tunnel public TCP port range must be within 1024-65535 and nonempty"))
 	}
 	if err := c.Certificates.Validate(c.Environment); err != nil {
 		errs = append(errs, err)

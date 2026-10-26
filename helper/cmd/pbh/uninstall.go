@@ -36,6 +36,9 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	if err := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-selfhost.service").Run(); err != nil {
 		return fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
 	}
+	if err := removeHostNetwork(ctx, execCommander, defaultHostPaths(defaultState), out); err != nil {
+		return err
+	}
 	if err := containers.Teardown(ctx, defaultState); err != nil {
 		return err
 	}

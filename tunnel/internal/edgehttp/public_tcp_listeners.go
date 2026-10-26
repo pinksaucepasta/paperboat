@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
@@ -100,6 +101,9 @@ func (p *PublicTCPListeners) PrepareTCPRoutes(ctx context.Context, rules []route
 		if rule.Kind != route.TunnelTCP || rule.PublicTCPListenerID == "" || rule.PublicTCPPort == 0 {
 			return errors.New("public TCP listener assignment is invalid")
 		}
+		if !edgeports.PublicTCP(int(rule.PublicTCPPort)) {
+			return fmt.Errorf("public TCP port %d is outside the allowed range %d-%d", rule.PublicTCPPort, edgeports.PublicTCPMin, edgeports.PublicTCPMax)
+		}
 		if live := p.listeners[rule.PublicTCPListenerID]; live != nil {
 			if live.decision.Binding.PublicPort != rule.PublicTCPPort || live.decision.Binding.Protocol != rule.Protocol && rule.Protocol != "" {
 				return errors.New("public TCP listener identity changed port")
@@ -174,6 +178,12 @@ func (p *PublicTCPListeners) reconcile(ctx context.Context) error {
 	ports := make(map[uint16]string)
 	for _, d := range decisions {
 		if d.Binding.Protocol != "tcp" || d.Binding.Audience != "public" || d.Validate(time.Now().UTC()) != nil {
+			continue
+		}
+		if !edgeports.PublicTCP(int(d.Binding.PublicPort)) {
+			if p.cfg.OnFailure != nil {
+				p.cfg.OnFailure(ctx, "public_tcp_port_range", fmt.Errorf("public TCP port %d is outside the allowed range", d.Binding.PublicPort))
+			}
 			continue
 		}
 		if existing, ok := ports[d.Binding.PublicPort]; ok && existing != d.Binding.ListenerID {

@@ -43794,6 +43794,87 @@
         "description": "Browser mutations require CSRF. Reuse the same operation_id for an uncertain outcome; accepted or changed invitations require refresh."
       }
     },
+    "/v1/selfhost/port-probe": {
+      "post": {
+        "operationId": "selfhost_port_probe",
+        "summary": "Check from the control plane that a node's public TCP range is reachable",
+        "description": "The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only) on the given public TCP tunnel port and reports whether the node's temporary test listener echoed the nonce. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.",
+        "security": [
+          {
+            "bearerSelfhostRuntime": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "port",
+                  "nonce"
+                ],
+                "properties": {
+                  "port": {
+                    "type": "integer",
+                    "minimum": 10000,
+                    "maximum": 59999
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The probe outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "reachable",
+                        "detail"
+                      ],
+                      "properties": {
+                        "reachable": {
+                          "type": "boolean"
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request: the port or nonce is outside what the probe accepts."
+          },
+          "401": {
+            "description": "runtime_unauthorized: missing/invalid credential or incomplete, removed or expired installation."
+          },
+          "503": {
+            "description": "port_probe_unavailable: configuration/database unavailable; retry shortly."
+          }
+        }
+      }
+    },
     "/v1/selfhost/runtime-readiness": {
       "get": {
         "operationId": "get_selfhost_runtime_readiness",
