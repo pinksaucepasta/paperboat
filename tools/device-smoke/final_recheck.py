@@ -171,7 +171,7 @@ def run_smoke(groups, args, results):
         return
     listing = Path('/tmp/final-recheck-smoke.list')
     listing.write_text('\n'.join(sorted(ids)) + '\n')
-    env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': 'pbt', 'SMOKE_CT_UID': '1000'}
+    env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': CT_USER, 'SMOKE_CT_UID': CT_UID}
     long_exec = ['--long-seconds', '1801'] if any(i.startswith('exec-long:') for i in ids) else []  # F4-02: a command of 30+ minutes
     code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.build, '--only-list', str(listing)] + long_exec, env)
     seen = {}
@@ -203,18 +203,20 @@ def run_go(tests, results):
 
 
 DOCKER = os.environ.get('SMOKE_CT_DOCKER', 'docker')
+CT_USER = os.environ.get('SMOKE_CT_USER', 'pbt')  # the containers' user and uid, as for smoke.sh
+CT_UID = os.environ.get('SMOKE_CT_UID', '1000')
 
 
 def in_container(host, ct, command, stdin=None, timeout=3600):
-    remote = '%s exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 %s bash -lc %s' % (DOCKER, ct, shlex.quote(command))
+    remote = '%s exec -i -u %s -w /home/%s -e HOME=/home/%s -e XDG_RUNTIME_DIR=/run/user/%s %s bash -lc %s' % (DOCKER, CT_USER, CT_USER, CT_USER, CT_UID, ct, shlex.quote(command))
     return run(['ssh', '-o', 'BatchMode=yes', host, remote], stdin=stdin, timeout=timeout)
 
 
 def stage_scripts(host, ct):
-    """The device scripts run inside the container from /home/pbt/ds (the same files smoke.sh uploads)."""
+    """The device scripts run inside the container from /home/<user>/ds (the same files smoke.sh uploads)."""
     tar = subprocess.run(['tar', 'czf', '-', '-C', str(HERE)] + sorted(p.name for p in HERE.iterdir() if p.suffix in ('.py', '.sh')),
                          capture_output=True, check=True).stdout
-    remote = '%s exec -i -u pbt %s bash -c %s' % (DOCKER, ct, shlex.quote('rm -rf ~/ds && mkdir -p ~/ds && tar xzf - -C ~/ds'))
+    remote = '%s exec -i -u %s -e HOME=/home/%s %s bash -c %s' % (DOCKER, CT_USER, CT_USER, ct, shlex.quote('rm -rf ~/ds && mkdir -p ~/ds && tar xzf - -C ~/ds'))
     subprocess.run(['ssh', host, remote], input=tar, check=True, capture_output=True)
 
 
@@ -235,7 +237,7 @@ def run_entry(entry, args, results):
     names = [machine_name(host, ct) for _, host, ct in devices]
     values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'binary': args.binary, 'release': args.release, 'from_official': args.from_official,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
-              'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else ''}
+              'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else '', 'ct_user': CT_USER, 'ct_uid': CT_UID}
     spec = entry['spec'].format(**values)
     env = {'ORIGIN': args.origin, 'STATE': args.state, 'HOST': args.host, 'BINARY': args.binary, 'BUILD': args.build}  # PW_CHROMIUM and PW_MODULE come from the caller
     if entry['kind'] == 'device':

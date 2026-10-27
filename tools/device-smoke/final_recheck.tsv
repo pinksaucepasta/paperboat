@@ -3,7 +3,7 @@
 #         console: <script in console/scripts> <page path> [globals JSON], on the live console (ORIGIN, STATE, PW_CHROMIUM, NODE_PATH)
 #         cmd: a shell command on the machine running this runner
 #   rows  comma list of row ids, or @script.py for every row whose Linux evidence names that script; EXTRA for the final extras
-#   spec  placeholders {build} {binary} {release} {from_official} {origin} {state} {host} {self} {peer} (machine names of containers a and b) {ct_a} {ct_b}
+#   spec  placeholders {build} {binary} {release} {from_official} {origin} {state} {host} {self} {peer} (machine names of containers a and b) {ct_a} {ct_b} {ct_user} {ct_uid} (container user and uid)
 #         local-access and private-access-permission run from this host over ssh: F9_CONTROLLER F9_TARGET (two machines of one
 #         account) and F9_OWNER F9_OWNER_ALIAS F9_ACCESSOR F9_TEAM (two accounts, a paid team) come from the environment
 # A script not listed here is not run by the final re-check: `final_recheck.py inventory` lists the [x] rows that depend on it.
@@ -85,3 +85,30 @@ extra-update-scheduled	cmd	F14-06	tools/device-smoke/final_pair_extras.sh schedu
 machine-revoke	cmd	C036	tools/device-smoke/final_pair_extras.sh revoke {host} {binary}
 approve-refusals	device	C001	python3 approve_refusals.py
 console-files	cmd	F6-06	tools/device-smoke/final_console_files.sh {host} {ct_a} {ct_b}
+# Linux scripts the final re-check does not run, and why (a row citing only these shows NO CHECK in `inventory`):
+#   account_inventory.py, machine_lifecycle.py revoke: revoke removes the peer machine; the other machine_lifecycle checks run above
+#   auth_lifecycle.py: needs a human browser approval (the link is written to a file)
+#   config_team_default.py: needs a GitHub config repository connected to the account and a team the account administers
+#   deploy.py, device_install.py: harness tools that build and install onto devices, not checks
+#   env_ssh_hook.py, env_vscode_remote.py: drive plain ssh into a machine with an unlocked ENV vault (a controller host, not a container)
+#   env_vault_lifecycle.py: re-initialises the account's ENV vault with a new password and recovery code, which other checks on the shared test account depend on
+#   local_access.py, private_access_permission.py: need a controller reachable over ssh and a second team-member account
+#   official_update.py, update_continuity.py, update_failures.py, update_survival.py: need an official install, a second build and a wrong-platform binary; run by the update step of the final re-check
+#   pairing_lifecycle.py, setup_recovery.py, reset_lifecycle.py: uninstall and re-pair the machine; run on a fresh pair, never on the container the other checks use
+#   session_idle.py: needs an 8 hour idle between its start and verify phases
+#   session_share_cross.py, team_two_account.py, team_machines.py, team_business.py: need two accounts (owner and team member), some also a server database or S3 target
+account-inventory	device	@account_inventory.py	python3 account_inventory.py
+machine-lifecycle	device	@machine_lifecycle.py	for c in rename settings availability capabilities; do python3 machine_lifecycle.py $c || exit 1; done
+install-reinstall	device	F1-05	python3 install_lifecycle.py reinstall --sudo-password-stdin
+install-service	device	F1-11,C013,C014,C015,C016,C017,C018,C019	python3 install_lifecycle.py service --sudo-password-stdin
+config-sync-lifecycle	device	@config_sync_lifecycle.py	python3 config_sync_lifecycle.py {self}
+session-lifecycle	device	@session_lifecycle.py	python3 session_lifecycle.py {peer} --check manage
+session-sharing	device	@session_sharing_lifecycle.py	python3 session_sharing_lifecycle.py {peer}
+terminal-lifecycle	device	@terminal_lifecycle.py	python3 terminal_lifecycle.py {peer} --check all
+terminal-matrix	device	@terminal_matrix.py	python3 terminal_matrix.py {peer}
+team-commands	device	C192,C196,C197,C200,C202,C203,C204,C206	python3 team_commands.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}}
+team-lifecycle	device	F12-02,C193,C198,C199,C205,C213,C214,C215	python3 team_lifecycle.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} && python3 team_lifecycle.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} --roles
+grpc-control-sync-removed	cmd	F21-07	! test -e server/internal/sync && ! test -e cli/internal/controlsync && ! grep -rIl --include=*.go -e internal/controlsync -e 'paperboat/server/internal/sync"' server cli shared tunnel relay helper
+workspace-lifecycle	device	@workspace_lifecycle.py	python3 workspace_lifecycle.py
+network-drop	device	@network_drop.py	python3 network_drop.py {peer}
+machine-tags	cmd	@machine_tags.py	cd tools/device-smoke && python3 machine_tags.py --owner-cmd 'ssh {host} docker exec -i -u {ct_user} -e HOME=/home/{ct_user} -e XDG_RUNTIME_DIR=/run/user/{ct_uid} {ct_a}' --target {peer} --pb /home/{ct_user}/.local/bin/pb
