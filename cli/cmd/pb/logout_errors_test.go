@@ -129,8 +129,10 @@ func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing
 	set := flag.NewFlagSet("logout", flag.ContinueOnError)
 	set.Bool("json", true, "")
 	action := command.NewContext(set, strings.NewReader(""))
-	// Exercise the production revocation deadline, which starts after local
-	// credential removal, rather than expiring before a request can start.
+	// Exercise the revocation deadline, which starts after local credential
+	// removal, rather than expiring before a request can start.
+	defer func(previous time.Duration) { logoutRevocationDeadline = previous }(logoutRevocationDeadline)
+	logoutRevocationDeadline = time.Second
 	action.Context = t.Context()
 	var out bytes.Buffer
 	action.Writer = &out
@@ -164,5 +166,39 @@ func TestPreferenceFailureAndInteractiveCancellationKeepMixedCauses(t *testing.T
 	}
 	if !interactiveCanceled(selector.ErrCanceled) {
 		t.Fatal("pure interactive cancellation changed")
+	}
+}
+
+// A server that takes longer than the old 2 s deadline to answer still revokes the session: the logout reports it
+// complete (the running exec and terminal of that session end through the server's revoke event).
+func TestLogoutWaitsForASlowServerToConfirmTheRevocation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2500 * time.Millisecond)
+		_, _ = io.WriteString(w, `{"data":{}}`)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	cfgPath := dir + "/config.json"
+	writeTestProfile(t, dir, cfgPath, server.URL)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.ProfileStoreFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := flag.NewFlagSet("logout", flag.ContinueOnError)
+	set.Bool("json", true, "")
+	action := command.NewContext(set, strings.NewReader(""))
+	action.Context = t.Context()
+	var out bytes.Buffer
+	action.Writer = &out
+	action.ErrWriter = io.Discard
+	if err := authLogoutSessions(action, cfg, store, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"server_revocation":"complete"`) {
+		t.Fatalf("a revocation confirmed after 2.5 s was reported as %s", out.String())
 	}
 }

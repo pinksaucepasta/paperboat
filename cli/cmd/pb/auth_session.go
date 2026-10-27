@@ -116,6 +116,11 @@ func authLogout(c *command.Context) error {
 	})
 }
 
+// logoutRevocationDeadline bounds the server revocation after local sign-out. A server that answers in a few seconds
+// (a slow link) must still revoke: with 2 s, `pb logout` left the session live on the server, and a running exec or
+// terminal kept going until the next login drained the queued revocation. Variable for tests only.
+var logoutRevocationDeadline = 10 * time.Second
+
 func authLogoutSessions(c *command.Context, cfg *config.Config, store config.ProfileStore, cancellationErr error) error {
 	credentials, err := store.TakeLogoutCredentials(cfg.ServerURL)
 	partial, locallySignedOut := err.(*config.LogoutRevocationIncompleteError)
@@ -133,7 +138,7 @@ func authLogoutSessions(c *command.Context, cfg *config.Config, store config.Pro
 		}
 	}
 	observe(err)
-	revokeCtx, cancel := context.WithTimeout(c.Context, 2*time.Second)
+	revokeCtx, cancel := context.WithTimeout(c.Context, logoutRevocationDeadline)
 	defer cancel()
 	// Sequential requests share one deadline. No worker can outlive local
 	// signout, and the number of historical sessions never grows concurrency.
