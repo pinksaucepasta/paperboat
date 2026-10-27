@@ -21,6 +21,19 @@ const mailtm = async (path, token, body) => {
   return r.json()
 }
 
+// The live console is a dev server that compiles a route on its first request: ask for each route this script uses until it answers
+// (anything below 500, redirects not followed), for at most five minutes in all.
+async function warm() {
+  const deadline = Date.now() + 300000
+  for (const path of ["/", "/auth/sign-in", "/auth/callback", "/machines", "/api/v1/me", "/account/delete"]) {
+    while (Date.now() < deadline) {
+      const status = await fetch(origin + path, { redirect: "manual", signal: AbortSignal.timeout(60000) }).then((r) => r.status, () => 0)
+      if (status > 0 && status < 500) break
+      await new Promise((r) => setTimeout(r, 5000))
+    }
+  }
+}
+
 async function signup() {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const domain = (await mailtm("/domains")) ["hydra:member"][0].domain
@@ -131,7 +144,16 @@ async function remove() {
 }
 
 try {
-  await (action === "signup" ? signup() : action === "delete" ? remove() : Promise.reject(new Error("usage: signup|delete DIR")))
+  if (action === "signup" || action === "delete") await warm()
+  if (action === "signup") {
+    // One retry on a transport error only (the dev server dropped the connection); the first attempt's mailbox is abandoned.
+    await signup().catch(async (e) => {
+      if (!/Failed to fetch|Timeout|ERR_CONNECTION|ERR_EMPTY|ECONNRESET/.test(String(e.message))) throw e
+      console.error("sign-up hit a transport error, trying once more: " + String(e.message).split("\n")[0])
+      await warm()
+      await signup()
+    })
+  } else await (action === "delete" ? remove() : Promise.reject(new Error("usage: signup|delete DIR")))
 } catch (e) {
   console.error(String(e.message ?? e))
   process.exit(1)
