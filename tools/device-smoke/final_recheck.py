@@ -172,7 +172,8 @@ def run_smoke(groups, args, results):
     listing = Path('/tmp/final-recheck-smoke.list')
     listing.write_text('\n'.join(sorted(ids)) + '\n')
     env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': 'pbt', 'SMOKE_CT_UID': '1000'}
-    code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.build, '--only-list', str(listing)], env)
+    long_exec = ['--long-seconds', '1801'] if any(i.startswith('exec-long:') for i in ids) else []  # F4-02: a command of 30+ minutes
+    code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.build, '--only-list', str(listing)] + long_exec, env)
     seen = {}
     for line in out.splitlines():
         m = re.match(r'^(\S+:\S+)\s+(PASS|FAIL|SKIP)\s+(\d+)s\s*(.*)$', line)

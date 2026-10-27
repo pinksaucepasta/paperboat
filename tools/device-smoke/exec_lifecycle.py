@@ -56,7 +56,7 @@ def large_output(binary, target):
         raise RuntimeError('exec lost or changed immediate large output (%d of %d bytes)' % (len(output), size))
     command = [str(binary), *argv]
     received = 0
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         try:
             time.sleep(3)  # a slow consumer: the host output backs up while nothing reads
             while True:
@@ -65,11 +65,13 @@ def large_output(binary, target):
                     break
                 received += len(chunk)
             process.wait(timeout=60)
+            errors = without_env_notice(process.stderr.read())
         except BaseException:
             process.kill()
             raise
     if process.returncode != 0 or received != size:
-        raise RuntimeError('exec failed for a slow reader of large output (exit %s, %d of %d bytes)' % (process.returncode, received, size))
+        raise RuntimeError('exec failed for a slow reader of large output (exit %s, %d of %d bytes): %s'
+                           % (process.returncode, received, size, errors[:300].decode(errors='replace')))
 
 
 def execute(binary, target):
