@@ -13,6 +13,7 @@ import (
 // Tests in this package exercise the triggers themselves; the shared budget is tested on its own below.
 func TestMain(m *testing.M) {
 	renewalBudget = &tokenBucket{refill: time.Nanosecond, burst: 1e9}
+	regionalWarningDelay = 0 // tests read the reasons as soon as they are set
 	os.Exit(m.Run())
 }
 

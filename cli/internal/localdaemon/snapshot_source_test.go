@@ -74,12 +74,19 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 		t.Fatalf("failover health = %+v", snapshot.Health)
 	}
 
-	// No usable relay: a warning with the reason; WebSocket relay transport is reported as wss.
-	native.Relay = tailnet.RegionalStatus{Reason: "no_mutually_reachable_node", ProbeFailures: map[string]string{"relay_b": "udp_blocked", "relay_a": "timeout"}}
+	// This engine cannot use any relay: a warning with the reason; WebSocket relay transport is reported as wss.
+	native.Relay = tailnet.RegionalStatus{Reason: "regional_admission_denied", ProbeFailures: map[string]string{"relay_b": "udp_blocked", "relay_a": "timeout"}}
 	snapshot, _ = source.Snapshot(context.Background())
 	if len(snapshot.Health) != 1 || snapshot.Health[0].Severity != "warning" || snapshot.Validate() != nil ||
-		snapshot.Health[0].Title != "No relay is usable: no relay is reachable from both machines; probe failures: relay_a timeout, relay_b udp_blocked" {
+		snapshot.Health[0].Title != "No relay is usable: the relays refused admission; probe failures: relay_a timeout, relay_b udp_blocked" {
 		t.Fatalf("unusable relay health = %+v", snapshot.Health)
+	}
+	// One pair without a common reachable relay is not a health item; a dial over it names its cause.
+	for _, reason := range []string{"no_mutually_reachable_node", "pair_authority_expired", "promotion_not_acknowledged"} {
+		native.Relay = tailnet.RegionalStatus{Reason: reason, ProbeFailures: map[string]string{"relay_a": "retry_backoff"}}
+		if snapshot, _ = source.Snapshot(context.Background()); len(snapshot.Health) != 0 {
+			t.Fatalf("pair reason %s added health %+v", reason, snapshot.Health)
+		}
 	}
 	native.Relay = tailnet.RegionalStatus{NodeID: "relay_fra_2", Region: "eu-central", LocalTransport: "derp_wss", Reason: "healthy_choice_retained"}
 	snapshot, _ = source.Snapshot(context.Background())

@@ -215,3 +215,31 @@ func TestRegionalRecoveryFollowsTheLastDialedPair(t *testing.T) {
 		t.Fatalf("unstarted recovery bound to %q", got)
 	}
 }
+
+// An unusable relay state shows only once it has lasted regionalWarningDelay (Tailscale's TimeToVisible): a
+// probe round between relays is not a warning.
+func TestUnusableRelayIsReportedAfterTheWarningDelay(t *testing.T) {
+	previous := regionalWarningDelay
+	regionalWarningDelay = 200 * time.Millisecond
+	t.Cleanup(func() { regionalWarningDelay = previous })
+	a := &Authority{}
+	r := &regionalRecovery{authority: a, peerID: "machine_test", status: RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied"}}
+	a.relay.recovery = r
+	if got := a.RegionalStatus(); got.Reason != "" {
+		t.Fatalf("unusable relay reported at once: %+v", got)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if got := a.RegionalStatus(); got.Reason != "regional_admission_denied" {
+		t.Fatalf("unusable relay not reported after the delay: %+v", got)
+	}
+	r.mu.Lock()
+	r.status = RegionalStatus{NodeID: "relay_a", Reason: "healthy_choice_retained"}
+	r.mu.Unlock()
+	_ = a.RegionalStatus()
+	r.mu.Lock()
+	r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied"}
+	r.mu.Unlock()
+	if got := a.RegionalStatus(); got.Reason != "" {
+		t.Fatalf("a new unusable period was reported without its own delay: %+v", got)
+	}
+}

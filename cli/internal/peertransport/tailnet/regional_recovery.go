@@ -75,6 +75,8 @@ type regionalRecovery struct {
 	readyOnce sync.Once
 	inbox     chan regionalInbound
 	status    RegionalStatus
+	// unusableSince is when RegionalStatus first saw no usable relay (protected by mu).
+	unusableSince time.Time
 	// Protected by authority.mu; renewal timestamps do not revoke an unchanged pair.
 	semanticGeneration uint64
 	semanticSelf       NetworkBinding
@@ -311,10 +313,24 @@ func (a *Authority) RegionalStatus() RegionalStatus {
 		// usable" on a machine whose dials all went direct (hp 2026-10-27). A listener reports its own.
 		return RegionalStatus{Redundancy: RedundancyNone}
 	}
+	// An unusable state is reported once it has lasted regionalWarningDelay (Tailscale's TimeToVisible for
+	// its relay warnings, health/warnings.go): a probe round between relays is not a warning.
+	if r.status.NodeID == "" && r.status.Reason != "" {
+		now := time.Now()
+		if r.unusableSince.IsZero() {
+			r.unusableSince = now
+		}
+		if now.Sub(r.unusableSince) < regionalWarningDelay {
+			return RegionalStatus{Redundancy: RedundancyNone}
+		}
+	} else {
+		r.unusableSince = time.Time{}
+	}
 	status := r.status
 	status.ProbeFailures = maps.Clone(status.ProbeFailures)
 	return status
 }
+
 // pair is the peer whose relay path this recovery keeps: the last machine dialed successfully.
 func (r *regionalRecovery) pair() string {
 	r.mu.Lock()
@@ -338,6 +354,9 @@ func (a *Authority) BindRegionalPeer(peerID string) {
 	}
 	r.mu.Unlock()
 }
+
+// regionalWarningDelay is how long an unusable relay state lasts before RegionalStatus reports it.
+var regionalWarningDelay = 10 * time.Second
 
 func (r *regionalRecovery) stop() {
 	r.mu.Lock()

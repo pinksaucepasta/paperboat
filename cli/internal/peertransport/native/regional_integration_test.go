@@ -203,8 +203,9 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 		t.Fatalf("restored failure-domain backup unavailable: %+v", afterRestore)
 	}
 	assertRegionalBytes(t, ctx, session, "after-restore")
-	// Stop control refresh. Cached signed health expires without widening scope.
-	expiryDeadline := time.Now().Add(20 * time.Second)
+	// Stop control refresh. Cached signed health expires without widening scope. RegionalStatus shows it once it
+	// has lasted the 10 s warning delay.
+	expiryDeadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(expiryDeadline) && clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
 		time.Sleep(100 * time.Millisecond)
 	}
