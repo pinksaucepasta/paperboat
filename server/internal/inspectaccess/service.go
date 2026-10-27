@@ -453,8 +453,8 @@ type BrowserCredential struct {
 	// ResourceExpiresAt is when the previewed resource itself ends; no credential outlives it.
 	ResourceExpiresAt time.Time
 	Action            string
-	MachineID   string
-	WorkspaceID string
+	MachineID         string
+	WorkspaceID       string
 }
 
 // ResolveBrowserCredential re-resolves an inspector credential by ID for its

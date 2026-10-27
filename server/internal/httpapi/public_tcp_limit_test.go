@@ -19,7 +19,9 @@ func TestPublicTCPLimitIsATyped409(t *testing.T) {
 	if !writePreviewTunnelLimitReached(recorder, request, err) {
 		t.Fatal("the limit was not handled")
 	}
-	var body struct{ Error struct{ Code, Message string } }
+	var body struct {
+		Error struct{ Code, Message string }
+	}
 	if recorder.Code != http.StatusConflict || json.Unmarshal(recorder.Body.Bytes(), &body) != nil {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
