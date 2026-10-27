@@ -55,7 +55,7 @@ def diagnostics_tail(count=12):
 
 
 def names(target):
-    out = subprocess.run([str(PB), 'session', 'list', target, '--json'], capture_output=True, text=True, timeout=60).stdout
+    out = subprocess.run([str(PB), 'session', 'list', target, '--all', '--json'], capture_output=True, text=True, timeout=60).stdout
     return {s['name']: s for s in json.loads(out)['sessions']}
 
 

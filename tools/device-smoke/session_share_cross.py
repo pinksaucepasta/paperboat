@@ -66,14 +66,14 @@ def main():
         old = uuid.uuid4().hex
         owner.send("printf '\\nPB_OLD_%s\\n' '" + old + "'\r")
         owner.expect('PB_OLD_' + old)
-        sessions = data(args.owner_host, 'session', 'list', args.owner_target)['sessions']
+        sessions = data(args.owner_host, 'session', 'list', args.owner_target, '--all')['sessions']
         identifier = next(s['id'] for s in sessions if s['name'] == name)
         if pb(args.peer_host, '--workspace', args.team, 'session', 'join', identifier, timeout=40)[0] == 0:
             raise RuntimeError('peer joined an unshared session')
         stage('share viewer')
         data(args.owner_host, 'session', 'share', identifier, '--team', args.team, '--member', peer_id, '--role', 'viewer')
         shared = True
-        catalog = data(args.peer_host, '--workspace', args.team, 'session', 'shared')
+        catalog = data(args.peer_host, '--workspace', args.team, 'session', 'shared', '--all')
         if not any(item['id'] == identifier for item in catalog):
             raise RuntimeError('peer shared catalog omitted the shared session')
         if not data(args.owner_host, 'session', 'participants', identifier)['can_manage']:

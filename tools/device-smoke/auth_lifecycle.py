@@ -60,7 +60,7 @@ def main():
         if login.poll() is None:
             raise RuntimeError('login was not approved in time')
         if login.returncode != 0:
-            raise RuntimeError('login exited %s: %s' % (login.returncode, login.stdout.read()[-300:]))
+            raise RuntimeError('login exited %s: %s' % (login.returncode, login.stdout.read()[-900:]))
     finally:
         if login.poll() is None:
             login.kill()

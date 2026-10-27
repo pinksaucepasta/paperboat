@@ -2,8 +2,8 @@
 """F10-02 on headless Linux: lock, unlock, password, recovery, recover, remove, resume and reset.
 
 Usage: env_vault_lifecycle.py PASSWORD_FILE RECOVERY_FILE
-The signed-in account's vault is initialised with that password and recovery
-code (owner-only files). The vault ends unlocked with the same password and a
+The signed-in account's vault uses that password (a vault is created with it when the
+account has none) and the recovery code (owner-only files). The vault ends unlocked with the same password and a
 fresh recovery code written over RECOVERY_FILE. No ENV value is touched.
 """
 import argparse
@@ -69,7 +69,11 @@ def main():
         with os.fdopen(fd, 'w') as handle:
             handle.write('pbsmoke-' + secrets.token_urlsafe(24))
         unlock = lambda path: run('unlock', '--password-file', str(path))
-        need(unlock(original), 'unlock')
+        first = unlock(original)
+        if not first[0] and first[1].get('error', {}).get('code') == 'not_found':  # an account without a vault yet
+            need(run('init', '--password-file', str(original), '--recovery-file', str(base / 'init-recovery')), 'init')
+            first = unlock(original)
+        need(first, 'unlock')
         need(run('lock'), 'lock')
         refuse(run('password', '--password-stdin', stdin='x'), 'password change while locked')
         need(unlock(original), 'unlock after lock')

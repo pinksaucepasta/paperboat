@@ -108,6 +108,7 @@ terminal-matrix	device	@terminal_matrix.py	python3 terminal_matrix.py {peer}
 team-commands	device	C192,C196,C197,C200,C202,C203,C204,C206	python3 team_commands.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}}
 team-lifecycle	device	F12-02,C193,C198,C199,C205,C213,C214,C215	python3 team_lifecycle.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} && python3 team_lifecycle.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} --roles
 grpc-control-sync-removed	cmd	F21-07	! test -e server/internal/sync && ! test -e cli/internal/controlsync && ! grep -rIl --include=*.go -e internal/controlsync -e 'paperboat/server/internal/sync"' server cli shared tunnel relay helper
+team-machines	device	@team_machines.py	python3 team_machines.py ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}}
 workspace-lifecycle	device	@workspace_lifecycle.py	PAPERBOAT_SMOKE_TEAM=${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} python3 workspace_lifecycle.py
 network-drop	device	@network_drop.py	python3 network_drop.py {self}
 machine-tags	cmd	@machine_tags.py	cd tools/device-smoke && python3 machine_tags.py --owner-cmd 'ssh {host} docker exec -i -u {ct_user} -e HOME=/home/{ct_user} -e XDG_RUNTIME_DIR=/run/user/{ct_uid} {ct_a}' --target {peer} --pb /home/{ct_user}/.local/bin/pb

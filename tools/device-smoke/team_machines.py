@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """F12-04 / F12-05: share a personal machine into a team, grant, revoke, unshare; owner activity shows it.
 
-The enrolled device account is the machine owner and a MEMBER of TEAM; the controlled second profile
-(teammate_profile.py) is the team OWNER. Usage: team_machines.py TEAM
+The enrolled device account owns the machine and shares it; the controlled second profile (teammate_profile.py)
+is the other active member who must (not) see it. --device-role says which of the two owns TEAM (default: the
+device account); the team owner reads the activity. Usage: team_machines.py TEAM [--device-role owner|member]
 """
 import argparse
 import json
@@ -18,6 +19,7 @@ PB = Path.home() / '.local/bin/pb'
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('team')
+    parser.add_argument('--device-role', choices=['owner', 'member'], default='owner')
     args = parser.parse_args()
     root = profile_root()
     config, env = root / 'config.json', environment(root)
@@ -43,8 +45,9 @@ def main():
         machines = owner('--workspace', team, 'machine', 'list', '--json')['machines']
         return next((m for m in machines if m['id'] == machine_id), None)
 
-    if not any(m['account_id'] == member_id and m['active'] for m in member('team', 'get', team, '--json')['members']):
-        raise RuntimeError('device account must be an active member of the team')
+    members = member('team', 'get', team, '--json')['members']
+    if not all(any(m['account_id'] == who and m['active'] for m in members) for who in (member_id, owner_id)):
+        raise RuntimeError('device account and teammate profile must both be active members of the team')
     if seen_by_owner() is not None:
         raise RuntimeError('machine is already shared with the team; refusing to guess its prior grants')
     shared = False
@@ -74,10 +77,10 @@ def main():
         shared = False
         if seen_by_owner() is not None:
             raise RuntimeError('unshared machine is still visible to the owner')
-        activity = owner('team', 'activity', team, '--limit', '50', '--json')
-        events = [e for e in activity['items'] if e.get('metadata', {}).get('machine_id') == machine_id]
+        activity = (member if args.device_role == 'owner' else owner)('team', 'activity', team, '--limit', '50', '--json')
+        events = [e for e in activity['items'] if e.get('details', {}).get('machine_id') == machine_id]
         kinds = sorted({e['action'] for e in events})
-        for needed in ('machine_share', 'machine_grant', 'machine_unshare'):
+        for needed in ('team.machine_share', 'team.machine_grant', 'team.machine_unshare'):
             if needed not in kinds:
                 raise RuntimeError('team activity lacks %s for this machine; saw: %s' % (needed, ', '.join(kinds)[:200]))
     finally:
