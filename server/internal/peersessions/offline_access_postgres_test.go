@@ -219,6 +219,30 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	if got := after["offline_cli_"+suspendedMember]; len(got) != 1 {
 		t.Fatalf("an unaffected member lost its scopes: %v", got)
 	}
+	// A grant or the team's private access setting also moves machine_access (migration 206): on a carrier
+	// install the engine that admits native streams wakes on machine_access only (F9-04: a new grant waited for
+	// the next renewal, a setting change published nothing).
+	accessMoves := func(what string, want bool, change func()) {
+		t.Helper()
+		access := func() (g int64) {
+			if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'),0)`, host).Scan(&g); err != nil {
+				t.Fatal(err)
+			}
+			return g
+		}
+		before := access()
+		change()
+		if moved := access() != before; moved != want {
+			t.Errorf("%s: host machine_access moved=%v, want %v", what, moved, want)
+		}
+	}
+	accessMoves("private access setting changed", true, func() {
+		exec(`UPDATE paperboat.teams SET allow_private_access=NOT allow_private_access WHERE team_id=$1`, team)
+	})
+	accessMoves("same private access setting written again", false, func() {
+		exec(`UPDATE paperboat.teams SET allow_private_access=allow_private_access WHERE team_id=$1`, team)
+	})
+	accessMoves("grant added", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember, "terminal") })
 	// A suspended team gives none (no trigger stands behind an offline right).
 	moves("team suspended", true, func() {
 		exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
