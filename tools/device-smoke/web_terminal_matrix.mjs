@@ -152,6 +152,8 @@ const rows = {
   async w2(ctx) {
     const { page, id } = await newTerminal(ctx)
     await type(page, "for i in $(seq 1 15); do echo WR$i; sleep 2; done")
+    // Closing the tab before the shell has run the line drops the keys still in flight.
+    await waitText(page, "WR1", 30_000)
     await page.close()
     await sleep(35_000)
     const back = await openExisting(ctx, id)
@@ -291,6 +293,7 @@ const rows = {
     await type(page, "yes")
     await sleep(3000)
     await page.keyboard.press("Control+C")
+    await waitText(page, "^C", 10_000) // typing again while the interrupted flood is still draining loses keys
     const s = Date.now()
     const ok = (await run(page, "true", 15_000)) !== null
     row("W9 Ctrl-C stops yes promptly", ok, `${((Date.now() - s) / 1000).toFixed(1)} s`)
