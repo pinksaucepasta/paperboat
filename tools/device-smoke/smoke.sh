@@ -724,7 +724,7 @@ test_inbox_approval() {
     for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "could not stage teammate source"; done
     return
   fi
-  if ! source_id=$(on ubuntu24 "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;print(registration()[\"machine_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}$ ]]; then
+  if ! source_id=$(on ubuntu24 "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;r=registration();print(r[\"machine_id\"],r[\"account_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}\ [A-Za-z0-9_-]{3,128}$ ]]; then
     for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "teammate source identity unavailable"; done
     return
   fi
@@ -736,7 +736,7 @@ test_inbox_approval() {
       record "$id" FAIL 0 "could not stage recipient fixture"
       continue
     fi
-    printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --source-machine-id $source_id && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
+    printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --source-machine-id ${source_id% *} --source-account-id ${source_id#* } && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
     phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state inbox_sender_required" 2>&1); status=$?
     output="$phase"
     if [ "$status" = 0 ]; then

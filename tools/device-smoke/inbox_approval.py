@@ -40,6 +40,7 @@ def decide_manifests(call, source_id, destination_id, files, inbox, refused):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-machine-id', required=True)
+    parser.add_argument('--source-account-id', required=True)
     parser.add_argument('--team', default='paperboat-smoke-paid')
     args = parser.parse_args()
     binary = Path.home() / '.local/bin/pb'
@@ -51,8 +52,9 @@ def main():
 
     current = call('team', 'get', args.team, '--json')
     members = [member for member in current['members']
-               if member['active'] and member['account_id'] != before['account_id']]
-    assert len(members) == 1, 'paid fixture must have exactly one independent teammate'
+               if member['active'] and member['account_id'] == args.source_account_id]
+    assert args.source_account_id != before['account_id'] and len(members) == 1, \
+        'the source machine must belong to an independent active teammate'
     recipient = {'id': members[0]['account_id']}
     name = 'smoke-inbox-' + uuid.uuid4().hex
     team = args.team
