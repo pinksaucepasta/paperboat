@@ -23,7 +23,7 @@ import (
 //     region, and a relay_failover health item with the reason and probe failures when the regional relay
 //     failed over or none is usable, so pb status, pb doctor and the bug report show them.
 //
-// It embeds the inventory so the local API still finds its refresh and watch methods.
+// It embeds the inventory so the local API still finds its refresh method.
 type snapshotSource struct {
 	*Inventory
 	denial    func() *api.APIError
@@ -80,6 +80,20 @@ func (s snapshotSource) Snapshot(ctx context.Context) (localapi.Snapshot, error)
 	if err != nil {
 		return snapshot, err
 	}
+	return s.decorate(snapshot), nil
+}
+
+// Watch is the local API's snapshot watch (pb connect's path label follows it): the inventory's next
+// snapshot with the same additions as Snapshot.
+func (s snapshotSource) Watch(ctx context.Context, after uint64) (localapi.Snapshot, error) {
+	snapshot, err := s.Inventory.store.Watch(ctx, after)
+	if err != nil {
+		return snapshot, err
+	}
+	return s.decorate(snapshot), nil
+}
+
+func (s snapshotSource) decorate(snapshot localapi.Snapshot) localapi.Snapshot {
 	if s.transport != nil {
 		applyNativeTransport(&snapshot, s.transport())
 	}
@@ -87,12 +101,12 @@ func (s snapshotSource) Snapshot(ctx context.Context) (localapi.Snapshot, error)
 		hideBehindNetworkDown(&snapshot)
 	}
 	if s.denial == nil {
-		return snapshot, nil
+		return snapshot
 	}
 	if denial := s.denial(); denial != nil && denial.Code == localapi.RelayQuotaCode {
 		snapshot.Health = append(snapshot.Health, localapi.HealthItem{Code: localapi.RelayQuotaCode, Severity: "warning", Title: denial.Message, Recovery: RelayQuotaRecovery, ETag: localapi.RelayQuotaCode})
 	}
-	return snapshot, nil
+	return snapshot
 }
 
 // RelayQuotaRecovery is the action for an exhausted hosted relay allowance.

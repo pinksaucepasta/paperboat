@@ -115,3 +115,26 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 		t.Fatalf("a healthy relay adds health %+v", snapshot.Health)
 	}
 }
+
+// pb connect labels the path from the local API's snapshot watch; the daemon's source must serve it (it
+// answered 501 "snapshot watch is unavailable" before) with the same native path as Snapshot.
+func TestSnapshotSourceServesTheWatch(t *testing.T) {
+	now := time.Date(2026, 10, 27, 10, 0, 0, 0, time.UTC)
+	machines := []api.UserMachine{{ID: "machine_direct", Alias: "a", State: "online", Online: true, InstallationGeneration: 1}}
+	inventory, _ := newTestInventory(t, &scriptedMachineSource{results: []machineResult{{machines: machines}}}, func() time.Time { return now })
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	native := tunnel.NativeTransport{Paths: map[string]string{"machine_direct": "direct"}}
+	var source localapi.SnapshotSource = snapshotSource{Inventory: inventory, transport: func() tunnel.NativeTransport { return native }}
+	watcher, ok := source.(localapi.SnapshotWatcher)
+	if !ok {
+		t.Fatal("the daemon snapshot source does not serve the snapshot watch")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	snapshot, err := watcher.Watch(ctx, 0)
+	if err != nil || len(snapshot.Machines) != 1 || snapshot.Machines[0].SelectedPath != "direct" {
+		t.Fatalf("watch = %+v err=%v", snapshot.Machines, err)
+	}
+}
