@@ -5012,3 +5012,6 @@ F4-02 PASS (1801 s exec, dev-35a943a9), exec-main/readiness/exec-repeat PASS, F6
 
 2026-10-27 | Native carrier restart | Same-key carrier replacement left peers on stale discovery/WireGuard state; peer_contacts now invalidates only changed/cleared peer paths before applying contacts.
 Workspace TestPeerRestartWithSameIdentityReplacesItsPath reproduces the failure before the fix and passes direct/relay, both directions, after either peer restarts; .7 device gate waits release.
+
+2026-10-27 | Native relay locality | dadape mistook hp for its own host because their Docker/private interface addresses overlap, skipping relay preparation; locality now requires the signed machine ID.
+TestPeerLocalityUsesMachineIdentityDespiteOverlappingAddresses fails before and passes after; TestOwnMachineIsLocalWithoutEndpoints preserves self-dials. Device verification waits coordinator approval.
