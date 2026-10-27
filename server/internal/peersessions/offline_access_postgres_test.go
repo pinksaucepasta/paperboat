@@ -245,8 +245,10 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	accessMoves("grant added", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember, "terminal") })
 	// The members' daemons learn of the change too (migration 207): their account inventory topic moves, or `pb access
 	// machine` did not know the shared machine for minutes after the grant (F9-04).
+	// machine_access too (migration 209): the daemon refreshes its machine list within a second on it.
 	memberInventory := func() (g int64) {
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='inventory'),0)`, suspendedMember).Scan(&g); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='inventory'),0)
+ * 1000000 + coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='machine_access'),0)`, suspendedMember).Scan(&g); err != nil {
 			t.Fatal(err)
 		}
 		return g
