@@ -377,6 +377,9 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					binary.BigEndian.PutUint32(result, uint32(int32(code)))
 					kind := localPeerResult
 					if waitErr != nil {
+						if ctx.Err() != nil {
+							return // the daemon is stopping: its closing socket tells the CLI, not a machine failure
+						}
 						kind, result = localPeerFailure, nil
 					}
 					if err := writer.write(kind, result); err != nil {
@@ -776,6 +779,7 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 	}
 	return count, nil
 }
+
 // Write sends one data frame; the daemon acts only on whole frames, so a failed write sent nothing.
 func (c *localPeerConn) Write(value []byte) (int, error) {
 	if err := c.writer.write(localPeerData, value); err != nil {

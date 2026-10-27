@@ -18,7 +18,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
+// stopping ends when the daemon stops, before it closes its transports.
+func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
 		if ctx == nil || peerTunnel == nil || request.Validate(peerTunnelNow()) != nil {
 			return nil, ErrInvalidInventoryConfig
@@ -91,6 +92,9 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 		client, server := net.Pipe()
 		go func() {
 			defer staged.Abort()
+			lifetime, stop := context.WithCancel(lifetime)
+			defer stop()
+			defer context.AfterFunc(stopping, stop)()
 			if request.Consumer == "terminal" && terminalPayload.Debug {
 				reportLocalPeerBridgeFailure(lifetime, tunnel.ServeLocalPeerDebugTerminalConn(lifetime, server, remote, cursor))
 			} else {
