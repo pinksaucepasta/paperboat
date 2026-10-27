@@ -112,3 +112,11 @@ grpc-control-sync-removed	cmd	F21-07	! test -e server/internal/sync && ! test -e
 workspace-lifecycle	device	@workspace_lifecycle.py	PAPERBOAT_SMOKE_TEAM=${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} python3 workspace_lifecycle.py
 network-drop	device	@network_drop.py	python3 network_drop.py {self}
 machine-tags	cmd	@machine_tags.py	cd tools/device-smoke && python3 machine_tags.py --owner-cmd 'ssh {host} docker exec -i -u {ct_user} -e HOME=/home/{ct_user} -e XDG_RUNTIME_DIR=/run/user/{ct_uid} {ct_a}' --target {peer} --pb /home/{ct_user}/.local/bin/pb
+
+# Managed SSH (Lane I). device checks run in container A and dial {peer}, the machine with sshd; ssh-trust-host
+# rotates {ct_b}'s ed25519 host key as root, so {ct_b} must be the container of {peer}. ssh-long holds one hour.
+ssh-main	device	F5-01,C064	python3 ssh_lifecycle.py {peer}
+ssh-alias	device	F5-04	python3 ssh_alias_lifecycle.py {peer}
+ssh-trust-host	cmd	F5-04	tools/device-smoke/ssh_trust_host.sh {host} {ct_a} {ct_b} {peer}
+ssh-long	device	F5-02	python3 ssh_long.py {peer}
+local-access-settings	device	F9-03	python3 local_access_settings.py
