@@ -791,3 +791,50 @@ func TestLocalPeerConnFailedWriteIsNotSentAndLost(t *testing.T) {
 		t.Fatalf("wait err=%v, want ErrTransportLost", err)
 	}
 }
+
+// stoppingRemote is a peer stream whose transport dies: its output ends (EOF) and Wait fails.
+type stoppingRemote struct {
+	*localPeerRemote
+	dead   <-chan struct{}
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (r *stoppingRemote) Read([]byte) (int, error) { <-r.dead; return 0, io.EOF }
+func (r *stoppingRemote) Wait() (int, error)       { <-r.dead; return 1, ErrTransportLost }
+func (r *stoppingRemote) Close() error             { r.once.Do(func() { close(r.closed) }); return nil }
+
+// A stopping daemon's peer streams fail before the CLI's socket closes: the failure says the daemon stopped, so the
+// CLI shows Paperboat on this computer restarted, not that the machine's connection was lost (N14, F3-18). A stream
+// that fails while the daemon runs is still a machine transport loss.
+func TestDaemonStopReadsAsDaemonLost(t *testing.T) {
+	for _, stop := range []bool{true, false} {
+		localClient, localServer := net.Pipe()
+		stopping, stopDaemon := context.WithCancel(context.Background())
+		dead := make(chan struct{})
+		go func() {
+			_ = ServeLocalPeerTerminalConn(context.Background(), localServer, &stoppingRemote{localPeerRemote: &localPeerRemote{}, dead: dead, closed: make(chan struct{})}, &LocalPeerCursorBridge{Stopping: stopping})
+		}()
+		connection, err := NewLocalPeerConn(localClient, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		waited := make(chan error, 1)
+		go func() { _, err := connection.Wait(); waited <- err }()
+		time.Sleep(20 * time.Millisecond)
+		if stop {
+			stopDaemon()
+		}
+		close(dead)
+		select {
+		case err := <-waited:
+			if errors.Is(err, ErrLocalDaemonLost) != stop || !errors.Is(err, ErrTransportLost) {
+				t.Fatalf("stop=%v: read as %v", stop, err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("wait did not end")
+		}
+		stopDaemon()
+		_ = connection.Close()
+	}
+}

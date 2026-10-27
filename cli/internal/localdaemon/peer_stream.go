@@ -18,7 +18,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
+// stopping ends when the daemon starts to stop, before it closes its transports.
+func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
 		if ctx == nil || peerTunnel == nil || request.Validate(peerTunnelNow()) != nil {
 			return nil, ErrInvalidInventoryConfig
@@ -29,7 +30,7 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 				return nil, err
 			}
 		}
-		cursor := &tunnel.LocalPeerCursorBridge{}
+		cursor := &tunnel.LocalPeerCursorBridge{Stopping: stopping}
 		target := &resolver.TerminalTarget{Protocol: terminalPayload.Protocol, Debug: terminalPayload.Debug, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Scopes: terminalPayload.Scopes, Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format("2006-01-02T15:04:05Z07:00"), ResourceID: request.AccessSessionID, UsageSessionID: request.UsageSessionID, Offline: request.Offline}, SessionID: terminalPayload.SessionID, CWD: terminalPayload.CWD, Env: terminalPayload.Environment, Cols: terminalPayload.Columns, Rows: terminalPayload.Rows, RestartIfNotRunning: terminalPayload.RestartIfNotRunning, ReplayHistory: terminalPayload.ReplayHistory, AfterSequence: terminalPayload.AfterSequence, InputAttachmentID: terminalPayload.InputAttachmentID, SequenceSink: cursor.RecordSequence, ReplayGapSink: cursor.RecordReplayGap, LaunchWarningSink: cursor.RecordLaunchWarnings}
 		target.QUICEndpoint, target.WSSEndpoint = request.QUICEndpoint, request.WSSEndpoint
 		if request.Consumer == "terminal" {

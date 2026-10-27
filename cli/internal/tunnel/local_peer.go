@@ -51,6 +51,12 @@ type LocalPeerCursorBridge struct {
 	read     uint64
 	gaps     []localPeerReplayGapPayload
 	warnings []string
+	// Stopping ends when this daemon starts to stop: a stream that fails after it tells the CLI the daemon restarted.
+	Stopping context.Context
+}
+
+func (b *LocalPeerCursorBridge) stopping() bool {
+	return b != nil && b.Stopping != nil && b.Stopping.Err() != nil
 }
 
 func (b *LocalPeerCursorBridge) RecordSequence(sequence int) {
@@ -378,6 +384,9 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					kind := localPeerResult
 					if waitErr != nil {
 						kind, result = localPeerFailure, nil
+						if cursor.stopping() {
+							result = []byte{1}
+						}
 					}
 					if err := writer.write(kind, result); err != nil {
 						done <- err
@@ -643,7 +652,11 @@ func (c *localPeerConn) readLoop() {
 			}
 			c.publishResult(localPeerWaitResult{code: int(int32(binary.BigEndian.Uint32(payload)))})
 		case localPeerFailure:
-			c.publishResult(localPeerWaitResult{err: ErrTransportLost})
+			if len(payload) == 1 && payload[0] == 1 {
+				c.publishResult(localPeerWaitResult{err: ErrLocalDaemonLost})
+			} else {
+				c.publishResult(localPeerWaitResult{err: ErrTransportLost})
+			}
 		case localPeerExecEvent:
 			if !c.exec {
 				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
@@ -776,6 +789,7 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 	}
 	return count, nil
 }
+
 // Write sends one data frame; the daemon acts only on whole frames, so a failed write sent nothing.
 func (c *localPeerConn) Write(value []byte) (int, error) {
 	if err := c.writer.write(localPeerData, value); err != nil {
