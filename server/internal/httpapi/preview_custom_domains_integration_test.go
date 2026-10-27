@@ -224,7 +224,8 @@ func TestPreviewCustomDomainsHTTPIntegration(t *testing.T) {
 	}
 	var stoppedPreview previewv1.Preview
 	decodePreviewCustomDomainJSON(t, response, &stoppedPreview)
-	if stoppedPreview.State != "stopped" || !strings.HasPrefix(stoppedPreview.Endpoint, "https://") || strings.HasPrefix(stoppedPreview.Endpoint, "https://preview-") || len(stoppedPreview.Domains) != 3 {
+	// A stopped preview has no endpoint (endpoint_state ended); its aliases stay listed, quarantined.
+	if stoppedPreview.State != "stopped" || stoppedPreview.Endpoint != "" || stoppedPreview.EndpointState != previewv1.EndpointEnded || len(stoppedPreview.Domains) != 3 {
 		t.Fatalf("stopped preview=%#v", stoppedPreview)
 	}
 	for _, summary := range stoppedPreview.Domains {

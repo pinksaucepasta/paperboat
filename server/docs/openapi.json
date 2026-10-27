@@ -3177,9 +3177,10 @@
             "type": "string",
             "enum": [
               "ready",
-              "custom_domain_not_ready"
+              "custom_domain_not_ready",
+              "ended"
             ],
-            "description": "The public endpoint projection state. custom_domain_not_ready is used only when self-hosted customer DNS/certificate verification has not produced a usable URL."
+            "description": "The public endpoint projection state. custom_domain_not_ready is used only when self-hosted customer DNS/certificate verification has not produced a usable URL. ended: the lease ended (stopped, expired or its owner disconnected); endpoint is empty."
           }
         },
         "allOf": [
