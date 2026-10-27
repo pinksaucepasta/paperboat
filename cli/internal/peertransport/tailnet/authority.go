@@ -333,7 +333,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 		for _, scope := range p.Scopes {
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
-			validResource := networkOnly || scope.ResourceKind == "config_compare" && scope.Capability == "config_compare" || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
+			validResource := networkOnly || peernetwork.ValidScope(scope.ResourceKind, scope.Capability)
 			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, and a host's offline session
 			// rights (machine_access accept), whose generation is the deciding policy version.
 			sessionRight := scope.ResourceKind == "machine_access" && scope.Direction == "accept" && scope.Capability != "private_access"

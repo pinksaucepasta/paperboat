@@ -475,12 +475,13 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 }
 
 // standingResource is the host's own machine id when its signed rules already let this peer start capability here (the
-// server publishes one standing rule per capability the peer's account may use, until revoked). A terminal or exec
+// server publishes one standing rule per capability the peer's account may use, until revoked; inspector only for the
+// host's own account). A terminal, exec or inspector request
 // then needs no per-operation scope, so no host refresh and no server request per stream; the credential was verified
 // above, and a withdrawn rule closes the stream through its scope lease like any other. Revoking one access session
 // therefore no longer ends a running stream by itself: the server withdraws the rule when it revokes the user's access.
 func (s *Session) standingResource(capability string) string {
-	if capability != "terminal" && capability != "exec" {
+	if capability != "terminal" && capability != "exec" && capability != "inspector" {
 		return ""
 	}
 	self, err := s.owner.authority.Self()

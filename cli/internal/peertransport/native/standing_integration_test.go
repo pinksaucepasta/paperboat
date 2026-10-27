@@ -40,7 +40,13 @@ func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
 	clientConfig := testConfiguration(now, 1, clientBinding, serverBinding, "dial")
 	// The host knows no per-operation scope for the peer, only its standing exec rule.
 	serverConfig := testConfiguration(now, 1, serverBinding, clientBinding, "accept")
-	serverConfig.Peers[0].Scopes = []tailnet.NetworkScope{{ResourceKind: "machine_access", ResourceID: "machine_host", ResourceGeneration: 1, Capability: "exec", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: 0}}
+	serverConfig.Peers[0].Scopes = []tailnet.NetworkScope{
+		{ResourceKind: "machine_access", ResourceID: "machine_host", ResourceGeneration: 1, Capability: "exec", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: 0},
+		// The owner's standing inspector rule (server: owner only): pb preview inspect asked one host refresh per
+		// request, which a budgeted host could not give in time (hp 2026-10-27, 10 of 10 end_of_stream).
+		{ResourceKind: "machine_access", ResourceID: "machine_host", ResourceGeneration: 1, Capability: "inspector", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: 0},
+	}
+	clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "inspector", Direction: "dial", Port: tailnet.NetworkPort, ExpiresAt: now + 300})
 	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
 	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
 
@@ -86,6 +92,10 @@ func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
 	}
 	open := func(consumer string) (net.Conn, error) {
 		header, err := streamauth.New("op_"+consumer, consumer, "stream_"+consumer, "credential", time.Now().Add(time.Minute), 1<<20)
+		if consumer == "inspector" { // the shape tunnel.InspectorRequest sends
+			target := []byte(`{"action":"inspect","resource_id":"preview_test","resource_kind":"preview","route_id":"route_test"}`)
+			header, err = streamauth.NewNativePrivate("credential_inspector", "inspector", "inspector_request", "grant", time.Now().Add(time.Minute), 1<<20, target)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,6 +128,19 @@ func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
 	}
 	if refreshes.Load() != 0 {
 		t.Fatalf("host refreshed %d times for 5 execs", refreshes.Load())
+	}
+	for i := 0; i < 3; i++ {
+		stream, err := open("inspector")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := echo(stream); err != nil {
+			t.Fatalf("inspector %d under the standing rule: %v", i, err)
+		}
+		stream.Close()
+	}
+	if refreshes.Load() != 0 {
+		t.Fatalf("host refreshed %d times for 3 inspector requests", refreshes.Load())
 	}
 
 	// No standing rule for terminal: the old path, one refresh, which here fails.
