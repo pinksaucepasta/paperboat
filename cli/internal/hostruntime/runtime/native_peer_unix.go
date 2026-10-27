@@ -478,6 +478,9 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			if generation.requestRefresh != nil {
 				generation.requestRefresh()
 			}
+			// A renewal, not a restart: falling through rebuilt the engine (new port, every open exec, ssh,
+			// terminal and inspect dropped) on each peer or inventory event, e.g. a preview being created.
+			continue
 		case <-identityCheck.C:
 			fingerprint, err := s.currentIdentityFingerprint()
 			if err == nil && fingerprint == generation.identityFingerprint {
