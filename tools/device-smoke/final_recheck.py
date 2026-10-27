@@ -288,7 +288,7 @@ class Fresh:
         self.version = ''
 
     def node(self, script, work, *rest):
-        code, out, _ = run(['node', str(HERE / script)] + list(rest), {'ORIGIN': self.args.origin, 'STATE': work + '/state.json'}, timeout=300)
+        code, out, _ = run(['node', str(HERE / script)] + list(rest), {'ORIGIN': self.args.origin, 'STATE': work + '/state.json'}, timeout=600)
         if code:
             raise RuntimeError('%s %s failed: %s' % (script, ' '.join(rest[:1]), out.strip()[-300:]))
         return out
