@@ -68,10 +68,14 @@ async function signup() {
 // (email, password, and the emailed code from the disposable inbox) and come back to the delete page.
 async function reauthenticate(page, { email, password, mailToken }) {
   const seen = new Set(((await mailtm("/messages", mailToken))["hydra:member"] ?? []).map((m) => m.id))
-  await page.getByRole("link", { name: "Sign in again" }).or(page.getByRole("button", { name: "Sign in again" })).first().click()
-  await page.waitForTimeout(3000)
-  if (await page.locator('input[name="email"]').count()) {
-    await page.fill('input[name="email"]', email)
+  // The delete page may already have sent the browser to the sign-in page.
+  if (page.url().startsWith(origin)) {
+    await page.getByRole("link", { name: "Sign in again" }).or(page.getByRole("button", { name: "Sign in again" })).first().click()
+    await page.waitForTimeout(3000)
+  }
+  // A re-authentication page shows the account's email read-only or hidden.
+  if (await page.locator('input[name="email"]:not([readonly]):visible').count()) {
+    await page.fill('input[name="email"]:not([readonly]):visible', email)
     await page.keyboard.press("Enter")
     await page.waitForTimeout(3000)
   }
