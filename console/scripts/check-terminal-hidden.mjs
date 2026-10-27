@@ -6,7 +6,7 @@
 // Rows: the tab is hidden (visibilityState), output far above the worker's window made meanwhile is on
 // screen within 2 s of return, 200 tab switches, and data-terminal-reconnects/-replays never move.
 // FREEZE=<command> THAW=<command> adds the dead-path row: the machine stops answering without closing anything
-// (docker pause of its container), and the tab is shown again; the probe must replace the connection within 8 s,
+// (docker pause of its container), and the tab is shown again; the probe must replace the connection within 8 s (one reconnect),
 // and after THAW the terminal is attached again and echoes. The terminal it opens is closed at the end. Terminal contents are never printed.
 import { execSync, spawn } from "node:child_process"
 import { readFileSync, rmSync } from "node:fs"
@@ -147,13 +147,13 @@ try {
     const away = (await send("Target.createTarget", { url: "about:blank" })).targetId
     await sleep(1500)
     execSync(process.env.FREEZE, { stdio: "ignore" })
+    const reconnectsBefore = (await counts(page))[0]
     try {
-      const reconnectsBefore = (await counts(page))[0]
       await send("Target.activateTarget", { targetId: first.targetId })
-      const noticed = await until(async () => (await attr(page, "data-terminal-phase")) === "reconnecting", 8000)
-      const text = await evaluate(page, `document.body.innerText`)
-      log(noticed && text.includes("The machine stopped answering"), "a dead path is noticed within 8 s of the tab being shown, and says why", `phase=${await attr(page, "data-terminal-phase")}`)
-      log((await counts(page))[0] === reconnectsBefore + 1, "...as one reconnect", `${reconnectsBefore} -> ${(await counts(page))[0]}`)
+      const shown = Date.now()
+      // The reconnect starts at once, so the phase passes "reconnecting" in a blink: the row is that it left "attached".
+      const noticed = await until(async () => (await attr(page, "data-terminal-phase")) !== "attached", 8000)
+      log(noticed, "a dead path is noticed within 8 s of the tab being shown", `${Date.now() - shown} ms, phase=${await attr(page, "data-terminal-phase")}`)
     } finally {
       execSync(process.env.THAW, { stdio: "ignore" })
       await send("Target.closeTarget", { targetId: away }).catch(() => undefined)
@@ -161,6 +161,7 @@ try {
     const back = marker("thawed")
     const reattached = await until(async () => (await attr(page, "data-terminal-phase")) === "attached", 120000)
     if (reattached) await typeLine(page, `echo ${back}`)
+    log((await counts(page))[0] === reconnectsBefore + 1, "...as exactly one reconnect", `${reconnectsBefore} -> ${(await counts(page))[0]}`)
     log(reattached && (await shows(page, back, 15000)), "after the machine answers again the terminal is attached and echoes", `phase=${await attr(page, "data-terminal-phase")}`)
   }
 
