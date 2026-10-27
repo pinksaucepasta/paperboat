@@ -81,6 +81,13 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 		snapshot.Health[0].Title != "No relay is usable: the relays refused admission; probe failures: relay_a timeout, relay_b udp_blocked" {
 		t.Fatalf("unusable relay health = %+v", snapshot.Health)
 	}
+	// The network itself is down: that one item shows, the relay warning that follows from it does not.
+	native.NetworkDown = true
+	snapshot, _ = source.Snapshot(context.Background())
+	if len(snapshot.Health) != 1 || snapshot.Health[0].Code != NetworkDownCode || snapshot.Validate() != nil {
+		t.Fatalf("network down health = %+v", snapshot.Health)
+	}
+	native.NetworkDown = false
 	// One pair without a common reachable relay is not a health item; a dial over it names its cause.
 	for _, reason := range []string{"no_mutually_reachable_node", "pair_authority_expired", "promotion_not_acknowledged"} {
 		native.Relay = tailnet.RegionalStatus{Reason: reason, ProbeFailures: map[string]string{"relay_a": "retry_backoff"}}

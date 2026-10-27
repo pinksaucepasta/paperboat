@@ -77,10 +77,20 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 			}
 		}
 	}
+	// Prior art: Tailscale's per-path warnings DependsOn NetworkStatusWarnable (health/warnings.go), so only the
+	// root cause shows while the network is down.
+	if native.NetworkDown {
+		snapshot.Health = append(snapshot.Health, localapi.HealthItem{Code: NetworkDownCode, ETag: NetworkDownCode, Severity: "warning",
+			Title: "This computer's network is down", Recovery: "Check the Wi-Fi or cable. Paperboat reconnects on its own when the network returns."})
+		return
+	}
 	if item, ok := relayFailoverHealth(native.Relay); ok {
 		snapshot.Health = append(snapshot.Health, item)
 	}
 }
+
+// NetworkDownCode is the health item for this computer's network being down.
+const NetworkDownCode = "network_down"
 
 func relayFailoverHealth(status tailnet.RegionalStatus) (localapi.HealthItem, bool) {
 	item := localapi.HealthItem{Code: RelayFailoverCode, ETag: RelayFailoverCode}

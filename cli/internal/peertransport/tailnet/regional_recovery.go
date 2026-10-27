@@ -863,3 +863,11 @@ func relayRegionsSelectedFirst(nodes []RegionalNode, selected string) []*tailcfg
 	}
 	return regions
 }
+
+// NetworkDown reports that this machine's network itself is down (no interface up), per the client engine.
+func (a *Authority) NetworkDown() bool {
+	a.mu.Lock()
+	engine := a.clientEngine
+	a.mu.Unlock()
+	return engine.NetworkDown()
+}
