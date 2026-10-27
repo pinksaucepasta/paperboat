@@ -28,6 +28,10 @@ on:
       only:
         description: 'Optional subset for a dry run: ROW,ROW|CHECK,CHECK (empty = everything)'
         default: ''
+      devbuild:
+        description: 'Also build pb from this commit and give it to the checks that install a supplied build ({binary}); dry runs of unreleased fixes'
+        type: boolean
+        default: false
       fixtures:
         description: 'Create the fixtures team (final_fixtures.py); off only for dry runs that need no team'
         type: boolean
@@ -68,6 +72,7 @@ jobs:
       ORIGIN: ${{ inputs.origin }}
       ONLY: ${{ inputs.only }}
       FIXTURES: ${{ inputs.fixtures }}
+      DEVBUILD: ${{ inputs.devbuild }}
       SHARD: ${{ matrix.shard }}/${{ inputs.shards }}
       SMOKE_CT_DOCKER: docker
       FINAL_FIXTURES_URL: ${{ vars.FINAL_FIXTURES_URL }}
@@ -83,6 +88,14 @@ jobs:
           chmod 755 "$HOME/.local/bin/pb"
           "$HOME/.local/bin/pb" --version | sed -n 's/.*Version //p' | grep -qx "$BUILD"
 
+      - name: The commit's own pb (devbuild only)
+        if: inputs.devbuild
+        run: |
+          V=dev-$(git rev-parse --short HEAD)
+          L="-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$V -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(git rev-parse HEAD) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=https://api.pprbt.dev -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=https://api.pprbt.dev"
+          (cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$L" -o "$RUNNER_TEMP/pb-linux-amd64" ./cmd/pb)
+          echo "DEV_BINARY=$RUNNER_TEMP/pb-linux-amd64" >> "$GITHUB_ENV"
+
       - name: Headless browser for the console checks
         run: |
           npm install --prefix "$RUNNER_TEMP/pw" playwright-core
@@ -94,6 +107,7 @@ jobs:
         run: |
           flags=(--build "$BUILD" --previous "$PREVIOUS" --origin "$ORIGIN" --host local --shard "$SHARD" --skip-go)
           [ -z "$ONLY" ] || flags+=(--only "$ONLY")
+          [ -z "${DEV_BINARY:-}" ] || flags+=(--binary "$DEV_BINARY")
           [ "$FIXTURES" = true ] || flags+=(--no-fixtures)
           PATH="$PWD/tools/device-smoke/localssh:$PATH" python3 tools/device-smoke/final_recheck.py run "${flags[@]}"
 
