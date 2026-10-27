@@ -92,7 +92,8 @@ jobs:
         if: inputs.devbuild
         run: |
           V=dev-$(git rev-parse --short HEAD)
-          L="-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$V -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(git rev-parse HEAD) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=https://api.pprbt.dev -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=https://api.pprbt.dev"
+          URL=$(sed -n 's/^DEFAULT_SERVER_URL ?= //p' cli/Makefile)
+          L="-X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$V -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(git rev-parse HEAD) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$URL"
           (cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$L" -o "$RUNNER_TEMP/pb-linux-amd64" ./cmd/pb)
           echo "DEV_BINARY=$RUNNER_TEMP/pb-linux-amd64" >> "$GITHUB_ENV"
 
