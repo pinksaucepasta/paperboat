@@ -94,8 +94,8 @@ func (w *windowSizes) touch(id string, at time.Time) (changed bool) {
 	return before != after
 }
 
-// controller returns the attached window that sets the size and that size; ok is false when no controller is attached
-// or the controller has reported no size.
+// controller returns the attached window that controls (it paces output whether or not its size is known) and its
+// size; ok is false when no window is attached or the controller has reported no size, so the PTY keeps its size.
 func (w *windowSizes) controller() (id string, size pty.Dimensions, ok bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -105,7 +105,7 @@ func (w *windowSizes) controller() (id string, size pty.Dimensions, ok bool) {
 func (w *windowSizes) controllerLocked() (id string, size pty.Dimensions, ok bool) {
 	var best *sizeWindow
 	for candidate, win := range w.windows {
-		if !win.attached || win.size.Columns == 0 || win.size.Rows == 0 {
+		if !win.attached {
 			continue
 		}
 		if best == nil || latest(win, candidate, best, id) {
@@ -115,7 +115,7 @@ func (w *windowSizes) controllerLocked() (id string, size pty.Dimensions, ok boo
 	if best == nil {
 		return "", pty.Dimensions{}, false
 	}
-	return id, best.size, true
+	return id, best.size, best.size.Columns != 0 && best.size.Rows != 0
 }
 
 // latest reports whether window a (id aid) ranks above window b (id bid): a later activity, else, with no activity

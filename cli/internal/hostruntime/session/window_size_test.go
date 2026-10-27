@@ -115,15 +115,16 @@ func TestEqualActivityNeverFlaps(t *testing.T) {
 	}
 }
 
+// A window that has not reported its size still controls (it paces output, N6), but the PTY keeps its size.
 func TestAnUnreportedSizeIsNeverAControllerSize(t *testing.T) {
 	w := newWindowSizes()
 	w.attach("a", dims(0, 0), sizeNow)
-	if _, _, ok := w.controller(); ok {
-		t.Fatal("a window without a size controls")
+	if id, _, ok := w.controller(); id != "a" || ok {
+		t.Fatalf("an unsized window: controller %q, size known %v", id, ok)
 	}
 	w.report("a", dims(0, 24))
-	if _, _, ok := w.controller(); ok {
-		t.Fatal("a half-reported size controls")
+	if id, _, ok := w.controller(); id != "a" || ok {
+		t.Fatalf("a half-reported size: controller %q, size known %v", id, ok)
 	}
 	w.report("a", dims(80, 24))
 	mustController(t, w, "a", dims(80, 24))

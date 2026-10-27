@@ -26,6 +26,8 @@ func (m *Manager) noteWindowActivity(session *managedSession, attachmentID strin
 	if !session.sizes.touch(attachmentID, time.Now()) {
 		return
 	}
+	// Pacing moves with the typing at once; only the resize waits for opMu.
+	session.fanout.SetController(attachmentID)
 	session.sizeDirty.Store(true)
 	if session.sizeApplying.CompareAndSwap(false, true) {
 		go m.applyPendingWindowSize(session)

@@ -957,3 +957,44 @@ func TestBrowserScreenRepeatsUnderAFlood(t *testing.T) {
 		t.Fatalf("an acknowledgement from before the screen: %v", err)
 	}
 }
+
+// N6: a window whose size the host does not know yet still paces a flood (an unsized controller cleared all pacing,
+// so a 50 MB flood ran free and Ctrl-C waited for the backlog), and typing moves pacing at once.
+func TestAWindowWithoutASizePacesAndTypingMovesPacingAtOnce(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "pacing", Command: shellCommand(shell, root, "cat")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	for _, attachment := range []string{"first", "second"} {
+		participant := Participant{AttachmentID: attachment, AccountID: "acc_owner", ClientID: "cli_" + attachment, Role: "owner", ConnectedAt: time.Now()}
+		if _, err := manager.AttachParticipantAtGeneration(created.ID, participant, 0, created.Generation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session, err := manager.get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pacer := func() string {
+		session.fanout.mu.Lock()
+		defer session.fanout.mu.Unlock()
+		for id, cursor := range session.fanout.attachments {
+			if cursor.backpressure {
+				return id
+			}
+		}
+		return ""
+	}
+	if got := pacer(); got != "first" {
+		t.Fatalf("with no sizes and no typing, %q paces; want the first window", got)
+	}
+	key := InputKey{ClientID: "cli_second", AttachmentID: "second", Generation: created.Generation, InputSequence: 1}
+	if _, err := manager.Write(created.ID, key, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if got := pacer(); got != "second" {
+		t.Fatalf("right after the second window typed, %q paces; want the second", got)
+	}
+}
