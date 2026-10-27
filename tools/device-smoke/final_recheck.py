@@ -241,14 +241,14 @@ def run_entry(entry, args, results):
     """console, device and cmd entries. Placeholders: {build} {previous} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
     devices = containers(args.ct_map)
     names = [machine_name(host, ct) for _, host, ct in devices]
-    values = {'build': args.build, 'version': getattr(args, 'version', '') or args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'previous': args.previous,
+    values = {'build': args.build, 'version': getattr(args, 'version', '') or args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'previous': args.previous, 'binary': args.binary,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
               'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else '', 'ct_user': CT_USER, 'ct_uid': CT_UID}
     spec = entry['spec'].format(**values)
     env = {'ORIGIN': args.origin, 'STATE': args.state, 'HOST': args.host, 'BUILD': args.build}  # PW_CHROMIUM and PW_MODULE come from the caller
     if entry['kind'] == 'device':
         stage_scripts(devices[0][1], devices[0][2])
-        code, out, secs = in_container(devices[0][1], devices[0][2], 'cd ~/ds && ' + spec, stdin=os.environ.get('HP_SUDO_PASS', '') + '\n')
+        code, out, secs = in_container(devices[0][1], devices[0][2], ''.join('export %s=%s; ' % (k, shlex.quote(os.environ[k])) for k in ('PAPERBOAT_SMOKE_TEAM',) if k in os.environ) + 'cd ~/ds && ' + spec, stdin=os.environ.get('HP_SUDO_PASS', '') + '\n')
     elif entry['kind'] == 'console':
         script, _, rest = spec.partition(' ')
         code, out, secs = run(['node', str(ROOT / 'console/scripts/run-console-check.mjs'), str(ROOT / 'console/scripts' / script)] + shlex.split(rest), env)
@@ -256,7 +256,7 @@ def run_entry(entry, args, results):
         code, out, secs = run(['bash', '-c', spec], env)
     lines = [l for l in out.strip().splitlines() if l.strip()]
     shown = [l for l in lines if 'FAIL' in l][:2] or lines[-1:] or ['']
-    results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'PASS' if code == 0 else 'FAIL', 'seconds': secs, 'detail': ' / '.join(shown)[:300]})
+    results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'PASS' if code == 0 else 'FAIL', 'seconds': secs, 'detail': ' / '.join(shown)[:1000]})
 
 
 def ssh(host, command, stdin=None, timeout=300):
@@ -408,8 +408,9 @@ def cmd_run(args):
         if tests:
             run_go(sorted(tests), results)
         for entry in todo:
-            if '{previous}' in entry['spec'] and not args.previous:
-                results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'FAIL', 'seconds': 0, 'detail': 'pass --previous <the previous official release>'})
+            missing = next((f for f in ('previous', 'binary') if '{%s}' % f in entry['spec'] and not getattr(args, f)), None)
+            if missing:
+                results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'FAIL', 'seconds': 0, 'detail': 'needs --%s (%s)' % (missing, 'the previous official release' if missing == 'previous' else 'a local build file of the final build, for the update checks that supply one')})
             else:
                 run_entry(entry, args, results)
     except RuntimeError as error:
@@ -462,6 +463,7 @@ def main():
     go.add_argument('--build', required=True)
     go.add_argument('--host', default='hp')
     go.add_argument('--previous', default='2026.10.27.0', help='the previous official release the update-with-history extra starts from (the update goes to the Latest)')
+    go.add_argument('--binary', default='', help='local build file for the update checks that install a supplied build ({binary} in the manifest)')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))
     go.add_argument('--keep', action='store_true')
     go.add_argument('--shard', default='', help='I/N: run every N-th check on this machine (the other shards run elsewhere; merge joins them)')
