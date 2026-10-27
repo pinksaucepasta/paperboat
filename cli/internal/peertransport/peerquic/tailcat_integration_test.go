@@ -23,6 +23,10 @@ import (
 
 var tailcatOperationTimeout = flag.Duration("tailcat-operation-timeout", 90*time.Second, "Tailcat stream workload deadline; allow race-detector and shared CI runner overhead (macOS runners need over 25s)")
 
+// The test checks concurrency, integrity, cancel and restart, not throughput: 8 MiB per stream (256 blocks) missed
+// the deadline on a loaded runner (CI run 40448778601). Measure bulk with -tailcat-blocks=256.
+var tailcatBlocks = flag.Int("tailcat-blocks", 8, "32 KiB blocks each Tailcat stream sends each way")
+
 // Tests use real WireGuard/netstack UDP and Paperboat's actual QUIC entrypoints.
 // The in-process upstream DERP/STUN fixture binds only remote-host loopback.
 func TestTailcatQUIC(t *testing.T) {
@@ -159,8 +163,8 @@ func TestTailcatQUIC(t *testing.T) {
 		}
 		var wg sync.WaitGroup
 		errs := make(chan error, 16)
-		// Both peers concurrently originate four streams, each carrying 8 MiB in
-		// each direction. Verify bytes incrementally, without retaining full payloads.
+		// Both peers concurrently originate four streams, each carrying -tailcat-blocks
+		// of 32 KiB in each direction. Verify bytes incrementally, without retaining full payloads.
 		for i := 0; i < len(sessions); i += 2 {
 			a, b := sessions[i], sessions[i+1]
 			for range 4 {
@@ -216,7 +220,7 @@ func TestTailcatQUIC(t *testing.T) {
 	if n := maximum.Load(); n < 1200 || n > tailnet.MaxPayload {
 		t.Fatalf("observed QUIC maximum packet %d", n)
 	}
-	t.Logf("maximum QUIC packet=%d bytes; two peers, 4 streams each, 8 MiB each direction, 2 rounds", maximum.Load())
+	t.Logf("maximum QUIC packet=%d bytes; two peers, 4 streams each, %d KiB each direction, 2 rounds", maximum.Load(), *tailcatBlocks*32)
 }
 
 type measuredTailcatPacket struct {
@@ -244,7 +248,7 @@ func exchangeTailcat(s tailcatStream, value byte) error {
 	if err := s.SetDeadline(time.Now().Add(*tailcatOperationTimeout - 5*time.Second)); err != nil {
 		return err
 	}
-	const blocks = 256
+	blocks := *tailcatBlocks
 	payload := bytes.Repeat([]byte{value}, 32<<10)
 	written := make(chan error, 1)
 	go func() {
