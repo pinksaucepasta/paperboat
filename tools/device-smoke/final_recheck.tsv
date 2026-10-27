@@ -85,6 +85,17 @@ config-command-c179	device	C179	python3 config_commands.py --rows C179
 config-command-c180	device	C180	python3 config_commands.py --rows C180
 config-command-c181	device	C181	python3 config_commands.py --rows C181
 extra-update-scheduled	cmd	F14-06	tools/device-smoke/final_pair_extras.sh scheduled {host}
+extra-update-continuity	cmd	F14-02,F14-04	tools/device-smoke/final_pair_extras.sh continuity {host} {binary}
+extra-update-failures	cmd	F14-03	tools/device-smoke/final_pair_extras.sh failures {host} {binary} $(dirname {binary})/pb-darwin-arm64
+# Second-account checks. They need the member account's fixtures (env on the runner): SMOKE_MEMBER_SSH (ssh alias of a container paired to the
+# member account, default laneh-s5hm), SMOKE_CT_A_SSH (ssh alias of container a, default laneh-s5ha), SMOKE_OWNER_MACHINE_ID (container a's
+# machine id) and SMOKE_MEMBER_MACHINE_ID (the member container's; the check REMOVES it, so create it for this run only).
+# The suspension section is skipped: it writes to the server database.
+team-two-account	cmd	@team_two_account.py	python3 tools/device-smoke/team_two_account.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} --owner-ssh ${{SMOKE_CT_A_SSH:-laneh-s5ha}} --machine $SMOKE_OWNER_MACHINE_ID --member-cmd "ssh ${{SMOKE_MEMBER_SSH:-laneh-s5hm}}" --member-machine $SMOKE_MEMBER_MACHINE_ID --skip suspension
+# F3-04: an idle session survives 8 hours. Run session-idle-start first thing, session-idle-verify at least 8 h later (final_recheck.py run --only
+# session-idle-verify); the start is a background job of the final run, not a blocking step.
+session-idle-start	device	EXTRA	python3 session_idle.py start {peer}
+session-idle-verify	device	F3-04	python3 session_idle.py verify {peer}
 machine-revoke	cmd	C036	tools/device-smoke/final_pair_extras.sh revoke {host}
 approve-refusals	device	C001	python3 approve_refusals.py
 console-files	cmd	F6-06	tools/device-smoke/final_console_files.sh {host} {ct_a} {ct_b}
