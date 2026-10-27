@@ -194,6 +194,7 @@ type helperTerminalConn struct {
 	compressionDecodeFailures atomic.Uint64
 	lastMessage               atomic.Int64 // unix nanoseconds of the last message from the host
 	stalled                   atomic.Bool
+	stallAfter                time.Duration // helperStallAfter when the connection was made; read only by watchSilence
 	linkState                 atomic.Pointer[func(stalled bool)]
 }
 
@@ -208,7 +209,7 @@ func newHelperTerminalConn(message helperMessageConnection, target *resolver.Ter
 	if target != nil {
 		inputQueue = target.InputQueue
 	}
-	return &helperTerminalConn{message: message, target: target, out: make(chan helperOutput, queue), done: make(chan struct{}), inputWrites: make(chan helperWrite, 64), controlWrites: make(chan helperWrite, 16), detachWrites: make(chan helperWrite, 1), ackWrites: make(chan helperWrite, 1), ackNotify: make(chan struct{}, 1), responses: make(map[string]chan helperFrame), inputQueue: inputQueue}
+	return &helperTerminalConn{message: message, target: target, out: make(chan helperOutput, queue), done: make(chan struct{}), inputWrites: make(chan helperWrite, 64), controlWrites: make(chan helperWrite, 16), detachWrites: make(chan helperWrite, 1), ackWrites: make(chan helperWrite, 1), ackNotify: make(chan struct{}, 1), responses: make(map[string]chan helperFrame), inputQueue: inputQueue, stallAfter: helperStallAfter}
 }
 
 func newInitializedHelperTerminalConn(ctx context.Context, message helperMessageConnection, target *resolver.TerminalTarget, queue int) (*helperTerminalConn, error) {
@@ -562,14 +563,14 @@ func (c *helperTerminalConn) reportLinkState(stalled bool) {
 }
 
 func (c *helperTerminalConn) watchSilence() {
-	ticker := time.NewTicker(min(time.Second, helperStallAfter/4))
+	ticker := time.NewTicker(min(time.Second, c.stallAfter/4))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-c.done:
 			return
 		case now := <-ticker.C:
-			if now.Sub(time.Unix(0, c.lastMessage.Load())) > helperStallAfter {
+			if now.Sub(time.Unix(0, c.lastMessage.Load())) > c.stallAfter {
 				c.reportLinkState(true)
 			}
 		}
