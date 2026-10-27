@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -207,8 +208,17 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			fmt.Fprintf(os.Stderr, "File transfer is unavailable. Check `pb inbox` and `pb doctor`, then reconnect. Support reference: %s.\n", reference)
 		}
 	}
+	var info resolver.ConnectInfo
 	var launchWarned sync.Once
 	recordLaunchWarning := func(codes []string) {
+		if slices.Contains(codes, resolver.TerminalInputUnconfirmed) {
+			notice := "Your last keys may not have reached " + info.Machine + "; check before retyping"
+			if useStatusBar {
+				bar.Notice(notice)
+			} else {
+				fmt.Fprint(os.Stderr, "\r\n["+notice+"]\r\n")
+			}
+		}
 		line := launchWarningLine(codes)
 		if line == "" {
 			return
@@ -283,7 +293,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return localTerminalSize()
 	}
 
-	var info resolver.ConnectInfo
 	var conn tunnel.Conn
 	var lastTerminalSequence atomic.Int64
 	inputOwner := "owner_" + uuid.NewString() // one pb connect across redials: the daemon keeps its unanswered input

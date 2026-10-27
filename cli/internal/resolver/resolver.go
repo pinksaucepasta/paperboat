@@ -73,9 +73,11 @@ func (q *TerminalInputQueue) Complete(sequence uint64) {
 // were lost: they are returned as decided and never sent again. The rest are
 // returned in order to send again, before any new input: the one at the host's
 // sequence (the host answers it from its journal) and every later one.
-func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend []TerminalInput) {
+// Unconfirmed is input a host that does not know this numbering never answered:
+// it may be a different shell, so it is not sent again and the user is told.
+func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend, unconfirmed []TerminalInput) {
 	if q == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -94,19 +96,22 @@ func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend []T
 		first = resend[0].Sequence
 	}
 	if first > hostSequence+1 {
-		// The host does not know this numbering (a new attachment): what it never
-		// answered cannot be matched, so it counts as decided, and numbering
-		// continues from the host's sequence.
+		// The host does not know this numbering (a new attachment), as EternalTerminal
+		// refuses recovery it cannot match (BackedWriter::recover); numbering continues
+		// from the host's sequence.
 		for _, item := range resend {
 			delete(q.pending, item.Sequence)
 		}
-		decided, resend = append(decided, resend...), nil
+		unconfirmed, resend = resend, nil
 		q.next = hostSequence
 	} else if hostSequence > q.next {
 		q.next = hostSequence
 	}
-	return decided, resend
+	return decided, resend, unconfirmed
 }
+
+// TerminalInputUnconfirmed is the launch notice code for input a reattach could not confirm.
+const TerminalInputUnconfirmed = "input_unconfirmed"
 
 // ConnectRequest describes what the user asked to connect to.
 type ConnectRequest struct {

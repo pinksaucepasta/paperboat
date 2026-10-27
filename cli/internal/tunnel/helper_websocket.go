@@ -379,9 +379,12 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	c.target.InputAttachmentID = response.Result.AttachmentID
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
-	decided, resend := c.inputQueue.Reconcile(response.Result.InputSequence)
+	decided, resend, unconfirmed := c.inputQueue.Reconcile(response.Result.InputSequence)
 	for _, pending := range decided {
 		diagnosticlog.TryInfo("terminal input reconciled without a result", "sequence", pending.Sequence)
+	}
+	if len(unconfirmed) > 0 && c.target.LaunchWarningSink != nil {
+		c.target.LaunchWarningSink([]string{resolver.TerminalInputUnconfirmed})
 	}
 	if response.Result.Session.Snapshot.Generation != 0 {
 		c.generation = response.Result.Session.Snapshot.Generation

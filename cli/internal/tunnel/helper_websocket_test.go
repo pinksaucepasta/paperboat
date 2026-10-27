@@ -883,7 +883,7 @@ func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
 		t.Fatalf("sent %v, want the host's last sequence, then the rest, then new input", sent)
 	}
 	// The keystroke the host had passed is settled; the rest stay queued until the host answers.
-	decided, resend := target.InputQueue.Reconcile(2)
+	decided, resend, _ := target.InputQueue.Reconcile(2)
 	var pending []uint64
 	for _, item := range resend {
 		pending = append(pending, item.Sequence)
@@ -935,5 +935,38 @@ func TestHelperTerminalSilentHostIsStalledNotLost(t *testing.T) {
 	message.heard <- struct{}{}
 	if stalled := <-states; stalled {
 		t.Fatal("hearing the host did not report it")
+	}
+}
+
+// A host that does not know our input numbering is a new session or shell: unanswered keys could
+// type into the wrong shell, so (as EternalTerminal refuses such a recovery) nothing is resent and
+// the client is told once that its last keys may not have arrived.
+func TestReattachToHostWithoutOurNumberingResendsNothingAndSaysSo(t *testing.T) {
+	var notices [][]string
+	target := &resolver.TerminalTarget{SessionID: "ses_1", InputQueue: resolver.NewTerminalInputQueue(8),
+		LaunchWarningSink: func(codes []string) { notices = append(notices, codes) }}
+	for _, key := range []string{"a", "b", "c", "d"} {
+		if _, err := target.InputQueue.Enqueue([]byte(key)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target.InputQueue.Complete(1) // the old shell answered a and b; c and d are unanswered
+	target.InputQueue.Complete(2)
+	message := &capturedHelperMessageConnection{}
+	connection := newHelperTerminalConn(message, target, 1)
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_2","input_sequence":0,"session":{"snapshot":{"generation":1}}}}`)}
+	if err := connection.finishAttachment(attached, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	connection.finish(0, nil)
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	for _, record := range message.writes {
+		if record[0] == 1 {
+			t.Fatalf("resent input %q to a host that does not know it", helperTestInputBody(t, record))
+		}
+	}
+	if fmt.Sprint(notices) != "[["+resolver.TerminalInputUnconfirmed+"]]" {
+		t.Fatalf("notices %v, want one %s", notices, resolver.TerminalInputUnconfirmed)
 	}
 }

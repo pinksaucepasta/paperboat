@@ -30,7 +30,7 @@ func TestTerminalInputQueueReconcileResendsWhatTheHostHasNotAnswered(t *testing.
 			t.Fatal(err)
 		}
 	}
-	decided, resend := queue.Reconcile(2)
+	decided, resend, _ := queue.Reconcile(2)
 	if len(decided) != 1 || decided[0].Sequence != 1 {
 		t.Fatalf("decided=%#v", decided)
 	}
@@ -44,13 +44,13 @@ func TestTerminalInputQueueReconcileResendsWhatTheHostHasNotAnswered(t *testing.
 	for _, s := range []uint64{2, 3, 4, 5} {
 		queue.Complete(s)
 	}
-	if decided, resend := queue.Reconcile(5); len(decided)+len(resend) != 0 {
+	if decided, resend, unconfirmed := queue.Reconcile(5); len(decided)+len(resend)+len(unconfirmed) != 0 {
 		t.Fatalf("answered input came back: %#v %#v", decided, resend)
 	}
 }
 
 // A host that does not know the numbering (a new attachment) cannot match unanswered input; it is
-// decided and numbering continues from the host's sequence, so the next keystroke is contiguous.
+// unconfirmed (never resent, the user is told) and numbering continues from the host's sequence, so the next keystroke is contiguous.
 func TestTerminalInputQueueReconcileFollowsANewAttachment(t *testing.T) {
 	queue := NewTerminalInputQueue(8)
 	for range 3 {
@@ -59,9 +59,9 @@ func TestTerminalInputQueueReconcileFollowsANewAttachment(t *testing.T) {
 		}
 	}
 	queue.Complete(1)
-	decided, resend := queue.Reconcile(0)
-	if len(decided) != 2 || len(resend) != 0 {
-		t.Fatalf("decided=%#v resend=%#v", decided, resend)
+	decided, resend, unconfirmed := queue.Reconcile(0)
+	if len(decided) != 0 || len(resend) != 0 || len(unconfirmed) != 2 {
+		t.Fatalf("decided=%#v resend=%#v unconfirmed=%#v", decided, resend, unconfirmed)
 	}
 	if next, err := queue.Enqueue([]byte("y")); err != nil || next != 1 {
 		t.Fatalf("next=%d err=%v", next, err)
