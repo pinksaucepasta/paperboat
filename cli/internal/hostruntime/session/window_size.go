@@ -88,34 +88,39 @@ func (w *windowSizes) touch(id string, at time.Time) (changed bool) {
 	if win == nil || !win.attached || !at.After(win.active) {
 		return false
 	}
-	before, _, _ := w.controllerLocked()
+	pacer, _ := w.rankLocked(false)
+	sizer, _ := w.rankLocked(true)
 	win.active = at
-	after, _, _ := w.controllerLocked()
-	return before != after
+	nextPacer, _ := w.rankLocked(false)
+	nextSizer, _ := w.rankLocked(true)
+	return pacer != nextPacer || sizer != nextSizer
 }
 
-// controller returns the attached window that controls (it paces output whether or not its size is known) and its
-// size; ok is false when no window is attached or the controller has reported no size, so the PTY keeps its size.
+// controller returns the attached window that paces output (whether or not its size is known) and the size of the
+// latest active window that reported one; ok is false when none did, so the PTY keeps its size.
 func (w *windowSizes) controller() (id string, size pty.Dimensions, ok bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.controllerLocked()
+	id, _ = w.rankLocked(false)
+	sizer, best := w.rankLocked(true)
+	if sizer == "" {
+		return id, pty.Dimensions{}, false
+	}
+	return id, best.size, true
 }
 
-func (w *windowSizes) controllerLocked() (id string, size pty.Dimensions, ok bool) {
-	var best *sizeWindow
+// rankLocked picks the latest active attached window; sized limits it to windows that reported a size. Pacing follows
+// every window (an unsized one still paces a flood, N6); the PTY size only follows a window that has one.
+func (w *windowSizes) rankLocked(sized bool) (id string, best *sizeWindow) {
 	for candidate, win := range w.windows {
-		if !win.attached {
+		if !win.attached || sized && (win.size.Columns == 0 || win.size.Rows == 0) {
 			continue
 		}
 		if best == nil || latest(win, candidate, best, id) {
 			best, id = win, candidate
 		}
 	}
-	if best == nil {
-		return "", pty.Dimensions{}, false
-	}
-	return id, best.size, best.size.Columns != 0 && best.size.Rows != 0
+	return id, best
 }
 
 // latest reports whether window a (id aid) ranks above window b (id bid): a later activity, else, with no activity
