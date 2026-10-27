@@ -410,7 +410,7 @@ func localDaemonCommand() *cobra.Command {
 						}
 						return coordinator.ApplyMachines(ctx, machines, services)
 					},
-					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(ctx, peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), InspectorRequest: localdaemon.TunnelInspectorRequest(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines, RelayDenial: peerTunnel.RelayDenial, NativeTransport: peerTunnel.NativeTransport,
+					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), InspectorRequest: localdaemon.TunnelInspectorRequest(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines, RelayDenial: peerTunnel.RelayDenial, NativeTransport: peerTunnel.NativeTransport,
 					RelayInventory: func(ctx context.Context) (localapi.RelayInventory, error) {
 						nodes, err := peerTunnel.NativeRelayCandidates(ctx)
 						if err != nil {
