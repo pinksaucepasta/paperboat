@@ -970,3 +970,31 @@ func TestReattachToHostWithoutOurNumberingResendsNothingAndSaysSo(t *testing.T) 
 		t.Fatalf("notices %v, want one %s", notices, resolver.TerminalInputUnconfirmed)
 	}
 }
+
+// N6: Ctrl-C read together with the tail of a paste still reaches the host alone, so it overtakes the paste.
+func TestHelperTerminalSendsCtrlCInARecordOfItsOwn(t *testing.T) {
+	message := &capturedHelperMessageConnection{}
+	connection := newHelperTerminalConn(message, &resolver.TerminalTarget{SessionID: "ses_1"}, 1)
+	connection.streamID = 7
+	go connection.writeLoop()
+	payload := append(bytes.Repeat([]byte("x"), 1000), 0x03, 'y')
+	if written, err := connection.Write(payload); err != nil || written != len(payload) {
+		t.Fatalf("written=%d err=%v", written, err)
+	}
+	connection.finish(0, nil)
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	var bodies []string
+	for _, record := range message.writes {
+		bodies = append(bodies, string(helperTestInputBody(t, record)))
+	}
+	if len(bodies) != 3 || len(bodies[0]) != 1000 || bodies[1] != "\x03" || bodies[2] != "y" {
+		t.Fatalf("records = %d: lengths %v", len(bodies), func() []int {
+			n := []int{}
+			for _, b := range bodies {
+				n = append(n, len(b))
+			}
+			return n
+		}())
+	}
+}

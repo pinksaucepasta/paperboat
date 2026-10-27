@@ -813,6 +813,13 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 	var chunks []resolver.TerminalInput
 	for rest := p; len(rest) > 0; {
 		size := min(len(rest), helperInputChunkBytes)
+		// Ctrl-C goes in a record of its own: the host delivers a lone interrupt ahead of input the program has not
+		// read (a paste into a flood), however stdin reads joined it to the bytes before it (F3-11 N6).
+		if at := bytes.IndexByte(rest[:size], 0x03); at == 0 {
+			size = 1
+		} else if at > 0 {
+			size = at
+		}
 		sequence, queueErr := c.inputQueue.Enqueue(rest[:size])
 		if queueErr != nil {
 			if len(chunks) == 0 {
