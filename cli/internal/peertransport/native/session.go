@@ -89,7 +89,7 @@ func (s *Session) AuthorizeHTTP3(ctx context.Context, header streamauth.Header, 
 		return ErrInvalid
 	}
 	var resource string
-	err := s.authorizeIncoming(ctx, header, "private_access", func(ctx context.Context, h streamauth.Header) (string, error) {
+	_, err := s.authorizeIncoming(ctx, header, "private_access", func(ctx context.Context, h streamauth.Header) (string, error) {
 		var err error
 		resource, err = authorize(ctx, h)
 		return resource, err
@@ -231,7 +231,7 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		return admitted, header, nil
 	}
 	var accessSessionID string
-	err = s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
+	scopeResource, err := s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
 		var authorizeErr error
 		accessSessionID, authorizeErr = authorize(ctx, header)
 		return accessSessionID, authorizeErr
@@ -239,7 +239,7 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
-	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "accept", time.Unix(header.DeadlineUnix, 0))
+	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), scopeResource, capability, "accept", time.Unix(header.DeadlineUnix, 0))
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
@@ -448,25 +448,46 @@ var _ net.Conn = (*streamConn)(nil)
 var _ net.Conn = (*routedConn)(nil)
 var _ interface{ CloseWrite() error } = (*streamConn)(nil)
 
-// Credential validation precedes any control-plane refresh. A new, valid
-// operation may have committed after the host's last signed network snapshot.
-func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Header, capability string, authorize func(context.Context, streamauth.Header) (string, error)) error {
+// authorizeIncoming validates the operation credential, then returns the resource whose signed scope admits the stream:
+// the credential's access session when the host already holds its scope, else the host itself when its standing rule
+// admits the peer (terminal and exec), else the access session after one on-demand refresh of the host's signed state (a new, valid operation may have
+// committed after the host's last signed network snapshot).
+func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Header, capability string, authorize func(context.Context, streamauth.Header) (string, error)) (string, error) {
 	resourceID, err := authorize(ctx, header)
 	if err != nil {
-		return errors.Join(tailnet.ErrAdmission, err)
+		return "", errors.Join(tailnet.ErrAdmission, err)
 	}
 	if s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
-		return nil
+		return resourceID, nil
+	}
+	if host := s.standingResource(capability); host != "" {
+		return host, nil
 	}
 	if s.owner.refreshAuthority != nil {
 		if err := s.owner.refreshAuthority(ctx); err != nil {
-			return errors.Join(tailnet.ErrAdmission, err)
+			return "", errors.Join(tailnet.ErrAdmission, err)
 		}
 	}
 	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
-		return tailnet.ErrAdmission
+		return "", tailnet.ErrAdmission
 	}
-	return nil
+	return resourceID, nil
+}
+
+// standingResource is the host's own machine id when its signed rules already let this peer start capability here (the
+// server publishes one standing rule per capability the peer's account may use, until revoked). A terminal or exec
+// then needs no per-operation scope, so no host refresh and no server request per stream; the credential was verified
+// above, and a withdrawn rule closes the stream through its scope lease like any other. Revoking one access session
+// therefore no longer ends a running stream by itself: the server withdraws the rule when it revokes the user's access.
+func (s *Session) standingResource(capability string) string {
+	if capability != "terminal" && capability != "exec" {
+		return ""
+	}
+	self, err := s.owner.authority.Self()
+	if err != nil || !s.owner.authority.Allows(s.peerID, self.MachineID, capability, "accept") {
+		return ""
+	}
+	return self.MachineID
 }
 
 // LimitConnection applies the same authenticated per-direction byte budget to
