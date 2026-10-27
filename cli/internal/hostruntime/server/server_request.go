@@ -20,7 +20,17 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		_ = writer.write(errorFrame(frame.RequestID, "resource_limit", "operation concurrency limit reached", true))
 		return
 	}
+	// Admission and wg.Add happen under s.mu with the stopped check, so Shutdown's wg.Wait never races an Add
+	// (tailscale ssh/tailssh/tailssh.go attachSessionToConnIfNotShutdown).
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		<-s.sem
+		_ = writer.write(errorFrame(frame.RequestID, "unavailable", "server is stopping", true))
+		return
+	}
 	s.wg.Add(1)
+	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		defer func() { <-s.sem }()
