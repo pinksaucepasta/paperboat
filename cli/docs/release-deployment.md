@@ -37,7 +37,7 @@ Build the selected canonical native assets (`pb-linux-amd64`, `pb-linux-arm64`, 
 go run ./tools/release-plan manifest \
   -version 2026.08.31.1 \
   -source-commit 0123456789abcdef0123456789abcdef01234567 \
-  -toolchain go1.27.2 \
+  -toolchain go1.27.3 \
   -artifacts /absolute/path/to/qualified-assets \
   -output /absolute/path/to/manifest.json
 

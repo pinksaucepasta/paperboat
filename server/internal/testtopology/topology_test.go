@@ -15,13 +15,13 @@ import (
 	docker "github.com/ory/dockertest/v3/docker"
 )
 
-const topologyGoImage = "golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61"
+const topologyGoImage = "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
 
 const topologyNetToolsImage = "nicolaka/netshoot@sha256:a20c2531bf35436ed3766cd6cfe89d352b050ccc4d7005ce6400adf97503da1b"
 
 func TestSplitDigestImageRequiresExactSHA256(t *testing.T) {
 	repository, tag, err := splitDigestImage(topologyGoImage)
-	if err != nil || repository != "golang:1.27.2-bookworm@sha256" || len(tag) != 64 {
+	if err != nil || repository != "golang:1.27.3-bookworm@sha256" || len(tag) != 64 {
 		t.Fatalf("split = %q %q %v", repository, tag, err)
 	}
 	repository, tag, err = splitDigestImage(topologyNetToolsImage)

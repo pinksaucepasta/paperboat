@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat/server
 
-go 1.27.2
+go 1.27.3
 
 require (
 	dario.cat/mergo v1.0.0 // indirect

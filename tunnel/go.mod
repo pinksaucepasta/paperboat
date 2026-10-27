@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat/tunnel
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/libp2p/go-buffer-pool v0.0.2 // indirect

@@ -72,7 +72,7 @@ match the plan's `policy_revision`.
 go run ./tools/release-plan manifest \
   -version YYYY.MM.DD.X \
   -source-commit <40-or-64-char-commit> \
-  -toolchain go1.27.2 \
+  -toolchain go1.27.3 \
   -artifacts /absolute/path/to/qualified-assets \
   -output /absolute/path/to/manifest.json
 

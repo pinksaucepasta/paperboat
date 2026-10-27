@@ -13,7 +13,7 @@ report=$report_dir/report.json
 postgres_samples=$report_dir/postgres-resources.tsv
 postgres_sampler_pid=
 postgres_image="postgres:17.5-bookworm@sha256:fbcea1bd13b6a882cd6caa6b58db3ae5c102efe50ec625b3e2a5cbc50db5bfe4"
-go_image="golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61"
+go_image="golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
 
 cleanup() {
 	status=$?

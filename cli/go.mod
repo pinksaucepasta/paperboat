@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat
 
-go 1.27.2
+go 1.27.3
 
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264
 

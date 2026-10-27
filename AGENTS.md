@@ -44,7 +44,7 @@ after each push batch. Each lane keeps one paired pair of test machines and inst
 | `tools/device-smoke/` | device smoke suite (see below) |
 
 Go modules are bound by the root `go.work`; build and test from the repo root or a
-component directory. Go 1.27.2.
+component directory. Go 1.27.3.
 
 ## How we work
 

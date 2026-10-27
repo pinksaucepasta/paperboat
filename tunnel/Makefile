@@ -1,4 +1,4 @@
-GO_VERSION := 1.27.2
+GO_VERSION := 1.27.3
 GO_ROOT := $(shell GOTOOLCHAIN=go$(GO_VERSION) go env GOROOT)
 export PATH := $(GO_ROOT)/bin:$(PATH)
 GO := GOTOOLCHAIN=local go
