@@ -45,6 +45,7 @@ def main():
             return None, out + err
 
     try:
+        pb('machine', 'tag', a.target, 'set', '--workspace', 'personal', '--yes')  # start empty, whatever an aborted run left
         rc, out, err = pb('machine', 'tag', a.target, 'add', 'smoke-ci', 'tag:smoke-prod', '--workspace', 'personal', '--yes')
         step('C262 add two tags (prefix optional)', rc == 0 and 'tag:smoke-ci, tag:smoke-prod' in out, out + err)
         rc, out, err = pb('machine', 'tag', a.target, 'remove', 'smoke-prod', '--workspace', 'personal', '--yes', '--json')
