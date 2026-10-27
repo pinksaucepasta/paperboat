@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -498,6 +499,13 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
 		}
+		if len(status.Health) == 0 {
+			// Every degraded readiness names why: a machine that just came online has services still starting
+			// (managed SSH before it reports, transfer or preview before they are observed).
+			if item, ok := startingServicesHealth(status); ok {
+				status.Health = []localapi.HealthItem{item}
+			}
+		}
 		result = append(result, status)
 	}
 	sort.Slice(result, func(left, right int) bool {
@@ -536,6 +544,20 @@ func updateHealth(machine api.UserMachine) string {
 	default:
 		return "unknown"
 	}
+}
+
+// startingServicesHealth is the item for readiness that is degraded while nothing else explains it.
+func startingServicesHealth(status localapi.MachineStatus) (localapi.HealthItem, bool) {
+	var starting []string
+	for _, service := range []struct{ name, readiness string }{{"SSH", status.SSHReadiness}, {"file transfer", status.TransferReadiness}, {"previews", status.PreviewReadiness}} {
+		if service.readiness == "degraded" {
+			starting = append(starting, service.name)
+		}
+	}
+	if len(starting) == 0 {
+		return localapi.HealthItem{}, false
+	}
+	return localapi.HealthItem{Code: "machine_services_starting", Severity: "info", Title: "Still starting on this machine: " + strings.Join(starting, ", "), Recovery: "No action is needed; this clears within a minute of the machine coming online. If it does not, run pb doctor.", ETag: "machine_services_starting"}, true
 }
 
 func sshReadiness(machine api.UserMachine, generation uint64) string {

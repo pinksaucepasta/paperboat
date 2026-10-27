@@ -379,7 +379,7 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}
 			value.SSHLocalReady = false
 			return value
-		}(), readiness: "degraded"},
+		}(), readiness: "degraded", health: "machine_services_starting"},
 		{name: "local integration unavailable", machine: func() api.UserMachine {
 			value := base
 			value.SSHAuthority = api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4}
@@ -1018,5 +1018,25 @@ func TestTheStartupGraceCountsFromPairing(t *testing.T) {
 	_ = inventory.Refresh(context.Background())
 	if snapshot, _ := store.Snapshot(context.Background()); snapshot.DaemonState != "degraded" {
 		t.Fatalf("setup still failing a grace after pairing: state %q, want degraded", snapshot.DaemonState)
+	}
+}
+
+// Every degraded readiness names its health item: a machine that just came online, with managed SSH not reporting yet
+// and file transfer not observed, says those are still starting (seen on hp: ssh_readiness degraded, health empty).
+func TestADegradedReadinessAlwaysNamesItsHealthItem(t *testing.T) {
+	machine := api.UserMachine{ID: "machine_1", Alias: "fresh", Online: true, InstallationGeneration: 3,
+		SSHAuthority: api.SSHAuthority{TargetGeneration: 3, HostKeyGeneration: 3},
+		Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true}}}
+	status := mapMachines([]api.UserMachine{machine})[0]
+	if status.SSHReadiness != "degraded" || status.TransferReadiness != "degraded" {
+		t.Fatalf("fixture: ssh=%s transfer=%s", status.SSHReadiness, status.TransferReadiness)
+	}
+	if len(status.Health) != 1 || status.Health[0].Code != "machine_services_starting" || status.Health[0].Title != "Still starting on this machine: SSH, file transfer" {
+		t.Fatalf("health = %+v", status.Health)
+	}
+	machine.SSHLocalReady = true
+	machine.Capabilities.FileReceive.Observed = true
+	if status := mapMachines([]api.UserMachine{machine})[0]; len(status.Health) != 0 || status.SSHReadiness != "ready" {
+		t.Fatalf("a ready machine: ssh=%s health=%+v", status.SSHReadiness, status.Health)
 	}
 }
