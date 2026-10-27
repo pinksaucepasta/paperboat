@@ -183,7 +183,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL); err != nil {
 		return rollback(err)
 	}
-	readyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// The same bound as the privileged validator: a new daemon may report starting while its first local-access
+	// setup finishes (up to localdaemon's 45 s start-up grace); 30 s here rolled back a slow but healthy start.
+	readyCtx, cancel := context.WithTimeout(ctx, suppliedUpdateReadyTimeout)
 	defer cancel()
 	var lastProbeErr error
 	for {
