@@ -66,25 +66,7 @@ func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, ro
 	return nil
 }
 
-// Refresh renews the signed configuration now. A machine engine waits for a token of the process's renewal
-// budget first (bounded by ctx): per-operation refreshes for new grants bypassed it and ran a host at 15 a
-// minute under inspect load (hp 2026-10-27).
 func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
-	if a.budgeted() {
-		if err := renewalBudget.wait(ctx); err != nil {
-			return err
-		}
-	}
-	return a.refresh(ctx, client)
-}
-
-// budgeted reports whether this engine's renewals count against the machine's renewal budget: every engine
-// on a machine credential. The CLI daemon renews on the user's credential and a user command must not wait.
-func (a *Authority) budgeted() bool { return budgetedEngine(a) }
-
-var budgetedEngine = func(a *Authority) bool { return a.options.Self.Role != "cli" }
-
-func (a *Authority) refresh(ctx context.Context, client NetworkAPI) error {
 	if client == nil || ctx == nil {
 		return ErrAuthority
 	}
@@ -203,8 +185,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			reset(wait)
 		}
 	}
-	var lastRefresh, lastUrgent time.Time
-	urgent := false // the pending renewal was announced by the server: it skips the budget's wait
+	var lastRefresh time.Time
 	failures := 0
 	unusable := 0 // consecutive successful renewals that brought no usable relay
 	for {
@@ -219,28 +200,16 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				continue
 			}
 			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
-		case <-a.refreshUrgent:
-			// A server-announced change (revocation, peer change) is never kept waiting for the budget, only
-			// spaced, so an event storm stays bounded; a failing server keeps its backoff.
-			if failures == 0 && time.Since(lastUrgent) >= urgentRefreshSpacing {
-				lastUrgent, urgent = time.Now(), true
-				reset(0)
-			} else if failures == 0 {
-				earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
-			}
 		case <-a.refreshWake:
 			// A configuration applied elsewhere may expire sooner than the current schedule.
 			earlier(a.nextRefresh(nil, 0, unusable))
 		case <-timer.C:
-			if a.budgeted() {
-				if wait := renewalBudget.take(time.Now(), urgent); wait > 0 {
-					reset(wait)
-					continue
-				}
+			if wait := renewalBudget.take(time.Now()); wait > 0 {
+				reset(wait)
+				continue
 			}
-			urgent = false
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := a.refresh(request, client)
+			err := a.Refresh(request, client)
 			lastRefresh = time.Now()
 			cancel()
 			if err != nil {
@@ -371,9 +340,6 @@ func regionalRenewalAfter(nodes []RegionalNode, now time.Time) time.Duration {
 func refreshRetryDelay(failures int) time.Duration {
 	return backoff.Retry(failures, time.Second, time.Minute)
 }
-
-// urgentRefreshSpacing bounds the renewals server-announced changes start outside the renewal budget.
-const urgentRefreshSpacing = 15 * time.Second
 
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
 const onDemandRefreshSpacing = time.Second

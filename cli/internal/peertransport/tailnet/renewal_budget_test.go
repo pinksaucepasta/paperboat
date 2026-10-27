@@ -16,12 +16,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// useBudget gives the test its own budget and applies it to the test's (CLI-role) engines.
 func useBudget(t *testing.T, b *tokenBucket) {
-	previous, previousEngine := renewalBudget, budgetedEngine
+	previous := renewalBudget
 	renewalBudget = b
-	budgetedEngine = func(*Authority) bool { return true }
-	t.Cleanup(func() { renewalBudget, budgetedEngine = previous, previousEngine })
+	t.Cleanup(func() { renewalBudget = previous })
 }
 
 // A storm of on-demand requests from two engines stays within one renewal per refill plus the burst: at the
@@ -86,7 +84,7 @@ func TestRenewalOverBudgetIsDeferredNotDropped(t *testing.T) {
 	defer func() { cancel(); <-done }()
 	waitFor(t, 5*time.Second, "first renewal", func() bool { return calls.Load() >= 1 })
 	time.Sleep(onDemandRefreshSpacing) // past the on-demand spacing; the bucket is now refilled
-	b.take(time.Now(), false)          // another engine spent the token
+	b.take(time.Now())                 // another engine spent the token
 	before := calls.Load()
 	a.RequestRefresh()
 	waitFor(t, 5*time.Second, "deferred renewal", func() bool { return calls.Load() > before })
@@ -104,58 +102,7 @@ func TestRateLimitedRenewalHoldsTheBudgetForRetryAfter(t *testing.T) {
 		return "", &api.APIError{Status: 429, Code: "rate_limited", RetryAfter: 7 * time.Second}
 	}}
 	_ = a.Refresh(t.Context(), client)
-	if wait := b.take(time.Now(), false); wait < 6*time.Second || wait > 7*time.Second {
+	if wait := b.take(time.Now()); wait < 6*time.Second || wait > 7*time.Second {
 		t.Fatalf("budget wait after a 429 with Retry-After 7s = %v", wait)
-	}
-}
-
-// A storm of direct refreshes (one per new operation grant, as the host's stream admission made) waits for the
-// budget instead of bypassing it.
-func TestDirectRefreshStormStaysWithinTheBudget(t *testing.T) {
-	useBudget(t, &tokenBucket{refill: 500 * time.Millisecond, burst: 2})
-	a, c, signer, _ := networkTestAuthority(t)
-	var calls atomic.Int32
-	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
-		calls.Add(1)
-		c.Generation++
-		return networkToken(t, signer, c), nil
-	}}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	for ctx.Err() == nil {
-		_ = a.Refresh(ctx, client)
-	}
-	// 2 burst + 2 s / 500 ms = 6.
-	if got := calls.Load(); got > 7 {
-		t.Fatalf("%d direct refreshes in 2 s, want at most 6", got)
-	}
-}
-
-// A server-announced change is renewed at once even with the budget spent, and such renewals are spaced.
-func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
-	b := &tokenBucket{refill: time.Hour, burst: 1}
-	useBudget(t, b)
-	a, c, signer, _ := networkTestAuthority(t)
-	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
-		t.Fatal(err)
-	}
-	var calls atomic.Int32
-	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
-		calls.Add(1)
-		c.Generation++
-		return networkToken(t, signer, c), nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx, client, nil) }()
-	defer func() { cancel(); <-done }()
-	waitFor(t, 5*time.Second, "first renewal", func() bool { return calls.Load() >= 1 }) // spends the only token
-	a.RequestUrgentRefresh()
-	waitFor(t, 5*time.Second, "urgent renewal with the budget spent", func() bool { return calls.Load() >= 2 })
-	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
-	a.RequestUrgentRefresh() // within urgentRefreshSpacing: waits for the budget (an hour here)
-	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("%d renewals; a second urgent request within the spacing skipped the budget", got)
 	}
 }
