@@ -73,8 +73,10 @@ Run `systemctl daemon-reload`, start `paperboat-edge-certificate.service`, then
 The script reads the enrolled IP from protected deployment configuration. It uses
 a pinned native Certbot image and the short-lived IP certificate profile, persists
 ACME state under the installation's `public-acme/`, and applies certificate paths
-through `pbh configure-tls`. It checks daily and renews only within two days of
-expiry. HTTP validation briefly stops the helper and its exact owned edge container;
+through `pbh configure-tls`. It checks every six hours and renews only within two days of
+expiry; a renewal that collides with a service restart (a `pbh install` at the same second
+cancelled the stop on 2026-10-26) fails cleanly and the next check retries, as Certbot's
+own twice-daily timer does. HTTP validation briefly stops the helper and its exact owned edge container;
 the service is restored on failure. A current certificate leaves the service running.
 The protected `public-acme/renew.log` contains the latest attempt. Verify both current
 node readiness and the server's authenticated public ingress proof after configuring

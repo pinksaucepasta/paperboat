@@ -67,5 +67,11 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
                     self.assertFalse((root / "issued").exists())
 
 
+    def test_timer_retries_a_failed_renewal_inside_the_window(self):
+        # The renewal window is two days; a collision with a service restart must leave many retries.
+        timer = (ROOT / "deploy/paperboat-edge-certificate.timer").read_text()
+        self.assertIn("OnCalendar=*-*-* 00/6:00:00", timer)
+
+
 if __name__ == "__main__":
     unittest.main()

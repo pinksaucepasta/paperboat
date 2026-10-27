@@ -1,8 +1,8 @@
 [Unit]
-Description=Check Paperboat public edge certificate daily
+Description=Check Paperboat public edge certificate every six hours
 
 [Timer]
-OnCalendar=daily
+OnCalendar=*-*-* 00/6:00:00
 RandomizedDelaySec=1h
 Persistent=true
 
