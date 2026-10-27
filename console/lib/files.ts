@@ -1,7 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey } from "@/lib/api"
+import { api, apiAction, idempotencyKey } from "@/lib/api"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 import { uploadFile } from "@/lib/upload"
 
@@ -92,8 +92,9 @@ const post = <T>(path: string, body?: unknown) =>
     body: JSON.stringify(body ?? {}),
   })
 
+/** The server answers 204 with no body, which `api` reads as a failure: the file was deleted but the list never refreshed. */
 export const deleteInboxFile = (machineId: string, fileId: string) =>
-  api(filePath(machineId, fileId), { method: "DELETE", headers: { "idempotency-key": idempotencyKey() } })
+  apiAction(filePath(machineId, fileId), { method: "DELETE" })
 
 /** Copies a file from one machine's Inbox to another's, machine to machine (what `pb send` does). */
 export const sendToMachine = (machineId: string, fileId: string, destinationId: string) =>
