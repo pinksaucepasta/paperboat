@@ -35,6 +35,7 @@ def main():
     name = sys.argv[4] if len(sys.argv) > 4 else 'laneh-destructive'
     created = subprocess.run([str(HERE / 'member_container.sh'), host, name, build], capture_output=True, text=True)
     if 'True machine_' not in created.stdout:
+        subprocess.run(['ssh', host, 'docker rm -f ' + name], capture_output=True)  # never leave a half-made container
         raise RuntimeError('could not create the throwaway container: ' + (created.stdout + created.stderr)[-300:])
     inside = ['ssh', host, 'docker', 'exec', '-i', '-u', 'tester', '-e', 'HOME=/home/tester', '-e', 'XDG_RUNTIME_DIR=/run/user/1001',
               '-w', '/home/tester/dsd', name]
