@@ -42,6 +42,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	now := time.Now().UTC().Truncate(time.Second)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner, member, outsider := "offline_owner_"+suffix, "offline_member_"+suffix, "offline_outsider_"+suffix
+	previewMember := "offline_preview_" + suffix
 	revokedMember, suspendedMember := "offline_revoked_"+suffix, "offline_suspended_"+suffix
 	host, team := "offline_host_"+suffix, "offline-team-"+suffix
 	_, signer, err := ed25519.GenerateKey(rand.Reader)
@@ -62,7 +63,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember} {
+	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember, previewMember} {
 		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
 	}
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+host, owner)
@@ -70,11 +71,13 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	exec(`SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, host)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
-	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, team, owner, member, revokedMember, suspendedMember)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true),($1,$6,1,'member',true)`, team, owner, member, revokedMember, suspendedMember, previewMember)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
 	for _, account := range []string{member, revokedMember, suspendedMember} {
 		teamstest.SetMachineAccess(t, store, team, host, account, "terminal")
 	}
+	// preview_manage is the machine capability nearest to inspecting; it must not confer the offline inspector right.
+	teamstest.SetMachineAccess(t, store, team, host, previewMember, "preview_manage")
 
 	register := func(account, endpoint string, role wire.Role) {
 		name := map[wire.Role]string{wire.RoleCLI: "cli", wire.RoleMachine: "machine"}[role]
@@ -143,6 +146,9 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	for cli, account := range clis {
 		var want []string
 		for _, c := range offlineCapabilities {
+			if slices.Contains(offlineOwnerOnly, c[1]) && account != owner {
+				continue // a team grant never confers it offline
+			}
 			var allowed bool
 			if err := store.SQL().QueryRowContext(ctx, `SELECT paperboat.machine_capability_allowed($1,$2,$3)`, account, host, c[0]).Scan(&allowed); err != nil {
 				t.Fatal(err)
@@ -158,6 +164,12 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	}
 	if len(offline["offline_cli_"+member]) != 1 || offline["offline_cli_"+member][0] != "terminal" {
 		t.Errorf("member granted terminal only has %v", offline["offline_cli_"+member])
+	}
+	if !slices.Contains(offline["offline_cli_"+owner], "inspector") {
+		t.Errorf("the host's own account lacks the inspector right: %v", offline["offline_cli_"+owner])
+	}
+	if got := offline["offline_cli_"+previewMember]; len(got) != 0 {
+		t.Errorf("a team member granted preview_manage got offline scopes %v, want none (inspect is decided per resource)", got)
 	}
 	if len(offline["offline_cli_"+outsider]) != 0 {
 		t.Errorf("an account without access has offline scopes %v", offline["offline_cli_"+outsider])

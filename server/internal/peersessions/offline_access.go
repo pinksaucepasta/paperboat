@@ -13,7 +13,13 @@ const maximumOfflinePeers = 32
 
 // offlineCapabilities maps the policy capability that decides a session (machine_capability_allowed, the same
 // function online descriptors use) to the network scope capability the daemon checks.
-var offlineCapabilities = [][2]string{{"terminal", "terminal"}, {"exec", "exec"}, {"managed_ssh", "managed_ssh"}, {"files", "file_transfer"}}
+var offlineCapabilities = [][2]string{{"terminal", "terminal"}, {"exec", "exec"}, {"managed_ssh", "managed_ssh"}, {"files", "file_transfer"}, {"preview_manage", "inspector"}}
+
+// offlineOwnerOnly lists the network capabilities a team grant never confers offline. Inspecting is decided per preview
+// or tunnel (workspace_policy_resource_allowed: its owner, or the personal machine's owner, always; others by an
+// "inspect" rule that names the resource), and no machine-level policy capability stands for it, so the nearest one
+// (preview_manage, which neither implies nor is implied by inspect) maps only for the host's own account.
+var offlineOwnerOnly = []string{"inspector"}
 
 type offlinePeer struct {
 	binding      networkBinding
@@ -59,8 +65,8 @@ SELECT e.id,e.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network))
 FROM endpoints e CROSS JOIN host h
 CROSS JOIN unnest($4::text[],$5::text[]) AS cap(policy,network)
 WHERE (e.user_id=h.user_id AND paperboat.machine_capability_allowed(e.user_id,h.id,cap.policy))
- OR EXISTS(SELECT 1 FROM host_teams ht WHERE paperboat.team_machine_capability_allowed(e.user_id,ht.team_id,h.id,cap.policy))
-GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.AccountID, maximumOfflinePeers, policyNames(), networkNames())
+ OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM host_teams ht WHERE paperboat.team_machine_capability_allowed(e.user_id,ht.team_id,h.id,cap.policy)))
+GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.AccountID, maximumOfflinePeers, policyNames(), networkNames(), offlineOwnerOnly)
 	if err != nil {
 		return nil, err
 	}
