@@ -73,4 +73,12 @@ func TestMachineMetadataOwnershipAndNamespace(t *testing.T) {
 	if _, err = service.Rename(ctx, owner, b, "office"); !errors.Is(err, ErrMachineNameConflict) {
 		t.Fatalf("team manager alias collision: %v", err)
 	}
+	// A removed (revoked) team machine frees its alias: the next machine moved into the team may take the name
+	// (C209 repeated runs hit machine_name_conflict on the revoked row of the previous run).
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='revoked',revoked_at=now() WHERE id=$1`, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authority.Machine(ctx, owner, team, teams.MachineRequest{OperationID: "transfer-c-again", ExpectedGeneration: current.Generation, Action: "transfer_to_team", MachineID: c, Confirmation: c}); err != nil {
+		t.Fatalf("transfer after the alias holder was revoked: %v", err)
+	}
 }
