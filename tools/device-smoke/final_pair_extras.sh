@@ -14,6 +14,8 @@
 #            transfer byte-identical, preview and tunnel on the same URLs, the same shell answers (update_survival.py --terminal).
 #            With a fourth argument, a local build file, the update goes to that build instead (`pb update --from FILE`, the dev-target form
 #            used while no newer official release exists).
+#   reinstall  fresh official install + pair, then BINARY (a dev build; the third argument) runs `pb install` twice over the running
+#            installation: each must finish, report that build, and leave the pair answering `pb exec` (F14-03).
 #   continuity  one machine on the official Latest, then update_continuity.py: an update to CANDIDATE (a different linux build)
 #            refuses while a `pb ssh` connection is open, keeps a held terminal and a running exec, and retires the old session owner
 #            (F14-02, F14-04).
@@ -28,7 +30,7 @@
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. The containers are removed on every exit path; their
 # machines belong to the run's throwaway account, which the caller deletes. Enrollment tokens stay in files.
 set -uo pipefail
-MODE=${1:?exec|revoke|history|continuity|failures|scheduled} HOST=${2:?host} PREVIOUS=${3:-} WRONG=${4:-}
+MODE=${1:?exec|revoke|history|reinstall|continuity|failures|scheduled} HOST=${2:?host} PREVIOUS=${3:-} WRONG=${4:-}
 : "${FRESH_MINT:?the pb of the fresh throwaway account (see final_recheck.py)}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
@@ -93,6 +95,33 @@ EOF
   MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
   grep -qx REVOKE_OK <<<"$out" && finish PASS "pb machine revoke by exact id: the revoked machine lost access at once and stayed quiet"
   finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 3 | cut -c1-300 | tr "\n" " ")"
+fi
+
+if [ "$MODE" = reinstall ]; then
+  [ -f "$PREVIOUS" ] || finish FAIL "the build $PREVIOUS is not a file"
+  scp -q "$PREVIOUS" "$HOST:/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+set -uo pipefail
+X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+fresh_official $T $ALIAS || { echo REINSTALL_0_ERROR: fresh install and pair failed; exit 0; }
+fresh_official $P $ALIAS-p || { echo REINSTALL_0_ERROR: the peer failed to install and pair; exit 0; }
+sudo -n docker cp /tmp/$T-dev $T:/home/pbt/final-pb && $X $T chmod 755 /home/pbt/final-pb
+for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
+want=$($X $T /home/pbt/final-pb --version | sed -n 's/.*Version //p' | head -1)
+ok=1
+for n in 1 2; do  # each reinstall runs over a running installation; the second over the first's result
+  if ! res=$($X $T timeout 240 /home/pbt/final-pb install 2>&1); then echo "REINSTALL_${n}_ERROR: $res"; ok=0; break; fi
+  got=$($X $T /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)
+  [ "$got" = "$want" ] || { echo "REINSTALL_${n}_ERROR: installed '$got', wanted '$want'"; ok=0; break; }
+  $X $T timeout 60 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 || { echo "REINSTALL_${n}_ERROR: pb exec to the peer fails after reinstall $n"; ok=0; break; }
+done
+[ $ok = 1 ] && echo "REINSTALL_OK $want"
+EOF
+)
+  MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
+  v=$(sed -n 's/^REINSTALL_OK //p' <<<"$out" | head -1)
+  [ -n "$v" ] && finish PASS "fresh install + pair, then pb install of $v twice over the running installation; the pair answered after each"
+  finish FAIL "$(grep -v "^MACHINE_ID=" <<<"$out" | tail -n 8 | cut -c1-600 | tr "\n" " ")"
 fi
 
 if [ "$MODE" = continuity ] || [ "$MODE" = failures ]; then

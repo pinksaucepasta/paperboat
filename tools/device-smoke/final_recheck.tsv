@@ -18,6 +18,7 @@ console-previews	console	F7-06	check-previews.js /previews '{{"__port":"8080","_
 extra-exec-after-pair	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh exec {host}
 extra-update-history	cmd	EXTRA,F14-01	tools/device-smoke/final_pair_extras.sh history {host} {previous}
 extra-update-history-dev	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh history {host} {previous} {binary}
+extra-reinstall	cmd	F14-03	tools/device-smoke/final_pair_extras.sh reinstall {host} {binary}
 status-bar	device	@status_bar_lifecycle.py	python3 status_bar_lifecycle.py {peer}
 terminal-entry	device	@terminal_entry.py	python3 terminal_entry.py {peer}
 completion	device	@completion_lifecycle.py	python3 completion_lifecycle.py {peer}
