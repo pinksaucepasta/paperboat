@@ -323,6 +323,14 @@ class Fresh:
         host = self.args.host
         mints = [self.sign_up(0), self.sign_up(1)]
         os.environ['FRESH_MINT'] = mints[0]
+        if os.environ.get('FINAL_FIXTURES_URL') and os.environ.get('FINAL_FIXTURES_TOKEN'):  # the tunnel and domain checks create their DNS records through it
+            token_file = self.accounts[0][0] + '/fixtures-token'
+            Path(token_file).write_text(os.environ['FINAL_FIXTURES_TOKEN'])
+            os.chmod(token_file, 0o600)
+            os.environ['FINAL_FIXTURES_TOKEN_FILE'] = token_file
+            request = urllib.request.Request(os.environ['FINAL_FIXTURES_URL'].rstrip('/') + '/zone', headers={'Authorization': 'Bearer ' + os.environ['FINAL_FIXTURES_TOKEN']})
+            with urllib.request.urlopen(request, timeout=30) as reply:
+                os.environ['SMOKE_DNS_ZONE'] = json.load(reply)['data']['zone']
         if not os.environ.get('SMOKE_SERVER_VERSION'):  # tunnel-command rows check against the deployed server's version (the console proxies /api/v1)
             with urllib.request.urlopen(self.args.origin + '/api/v1/server-version', timeout=30) as reply:
                 os.environ['SMOKE_SERVER_VERSION'] = json.load(reply)['data']['version']

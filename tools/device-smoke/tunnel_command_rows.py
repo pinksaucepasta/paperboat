@@ -13,7 +13,7 @@ from install_lifecycle import registration
 import pairing_lifecycle
 from pairing_lifecycle import command_result, confirmed_command
 from preview_lifecycle import QuietHandler
-from tunnel_domain import Cloudflare, BODY, ephemeral, fetch, wait
+from tunnel_domain import FixtureDns, BODY, ephemeral, fetch, wait
 
 
 class CheckFailure(RuntimeError):
@@ -46,7 +46,7 @@ class Suite:
         self.last = None
         self.tunnel = self.extra = self.policy = self.capture = None
         self.dns = []
-        self.cloudflare = None
+        self.zone_dns = None
         self.name = args.run
         self.missing = 'missing-' + args.run
         self.hostname = args.run + '.' + args.zone
@@ -232,10 +232,10 @@ class Suite:
 
     def verify_domain(self):
         require(getattr(self, 'guide', None), 'DNS instructions prerequisite failed')
-        self.cloudflare = Cloudflare(self.args.cloudflare_token_file, self.args.zone)
+        self.zone_dns = FixtureDns(self.args.fixtures_token_file, self.args.fixtures_url, self.args.zone)
         for record in self.guide['records']:
             require(record['type'] == 'CNAME', 'unexpected DNS record type')
-            self.dns.append(self.cloudflare.add_cname(record['name'], record['value']))
+            self.dns.append(self.zone_dns.add_cname(record['name'], record['value']))
             self.save_dns()
         self.command('domain', 'verify', self.resource(), self.hostname, '--wait', '--timeout', '3m', timeout=240)
         def ready():
@@ -257,7 +257,7 @@ class Suite:
         confirmed_command(self.pb, 'tunnel', 'delete', tid)
         require(not any(x['id'] == tid and x['desired_state'] != 'deleted' for x in self.command('list', '--q', self.name)['items']), 'deleted tunnel remains live')
         for record in self.dns:
-            require(self.cloudflare.call('GET', '/zones/' + self.cloudflare.zone + '/dns_records/' + record)['result']['id'] == record, 'delete changed user DNS')
+            require(self.zone_dns.exists(record), 'delete changed user DNS')
         self.tunnel = None
 
     def main(self):
@@ -288,13 +288,13 @@ class Suite:
                     self.rows['C098']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
                 for record in list(self.dns):
                     try:
-                        self.cloudflare.remove(record)
+                        self.zone_dns.remove(record)
                         self.dns.remove(record)
                         self.save_dns()
                     except Exception as error: self.rows['C105']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
                 server.shutdown(); server.server_close(); worker.join(timeout=5)
                 if not self.dns:
-                    Path(self.args.cloudflare_token_file).unlink(missing_ok=True)
+                    Path(self.args.fixtures_token_file).unlink(missing_ok=True)
                 self.save()
         passed = [r for r, x in self.rows.items() if x['main'] and x['error'] and not x['failures']]
         selected = self.args.rows or list(self.rows)
@@ -307,7 +307,7 @@ class Suite:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['run', 'build', 'version', 'server', 'zone', 'cloudflare-token-file', 'output']:
+    for name in ['run', 'build', 'version', 'server', 'zone', 'fixtures-url', 'fixtures-token-file', 'output']:
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--rows', nargs='+', default=[], help='verify only these command rows')
     args = parser.parse_args()

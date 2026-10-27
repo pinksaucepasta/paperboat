@@ -2,7 +2,7 @@
 """Tunnel domains end to end (C100-C105) and the ephemeral tunnel start/stop (C089, C123).
 
 Runs on an enrolled Linux machine. A durable tunnel gets a custom domain in the given DNS zone: add,
-list, instructions, the records from the instructions written through the Cloudflare API (token
+list, instructions, the records from the instructions written through the fixtures endpoint (token
 file, zone name from the command line), verify, serving over HTTPS, remove. Then `pb tunnel
 --ephemeral` starts a preview and `pb tunnel stop` ends it. Everything created (tunnel, domain,
 DNS records) is removed on every exit path.
@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import secrets
 import time
+import urllib.error
 import urllib.request
 import http.server
 import functools
@@ -25,30 +26,37 @@ from preview_lifecycle import QuietHandler
 BODY = 'synthetic tunnel origin'
 
 
-class Cloudflare:
-    def __init__(self, token_file, zone):
+class FixtureDns:
+    """Test-zone DNS records through the fixtures endpoint (final_fixtures.py's /dns: the server writes them with its own DNS token and only
+    deletes what it created). token_file holds the endpoint's bearer token, url its base (.../v1/test-fixtures)."""
+
+    def __init__(self, token_file, url, zone):
         self.token = Path(token_file).read_text().strip()
+        self.url = url.rstrip('/')
         self.zone_name = zone
-        self.zone = self.call('GET', '/zones?name=' + zone)['result'][0]['id']
 
     def call(self, method, path, body=None):
         request = urllib.request.Request(
-            'https://api.cloudflare.com/client/v4' + path, method=method,
-            data=None if body is None else json.dumps(body).encode(),
+            self.url + path, method=method, data=None if body is None else json.dumps(body).encode(),
             headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
-        answer = json.load(urllib.request.urlopen(request, timeout=30))
-        if not answer.get('success'):
-            raise RuntimeError('DNS provider call failed: %s %s' % (method, path.split('?')[0]))
-        return answer
+        with urllib.request.urlopen(request, timeout=30) as answer:
+            text = answer.read()
+        return json.loads(text)['data'] if text else None
 
     def add_cname(self, name, value):
-        record = self.call('POST', '/zones/%s/dns_records' % self.zone, {
-            'type': 'CNAME', 'name': name, 'content': value, 'ttl': 300, 'proxied': False,
-            'comment': 'paperboat device-smoke tunnel_domain; temporary'})
-        return record['result']['id']
+        return self.call('POST', '/dns', {'type': 'CNAME', 'name': name, 'content': value})['id']
 
     def remove(self, record_id):
-        self.call('DELETE', '/zones/%s/dns_records/%s' % (self.zone, record_id))
+        self.call('DELETE', '/dns/' + record_id)
+
+    def exists(self, record_id):
+        try:
+            self.call('GET', '/dns/' + record_id)
+            return True
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return False
+            raise
 
 
 def wait(test, what, seconds):
@@ -92,9 +100,9 @@ def ephemeral(binary, port):
             command_result(binary, 'tunnel', 'stop', identifier, '--json', timeout=60)
 
 
-def domain(binary, cloudflare, port):
+def domain(binary, dns, port):
     name = 'smoke-domain-' + secrets.token_hex(6)
-    hostname = '%s.%s' % (name, cloudflare.zone_name)
+    hostname = '%s.%s' % (name, dns.zone_name)
     records = []
     tunnel = None
 
@@ -118,7 +126,7 @@ def domain(binary, cloudflare, port):
         assert guide['records'] and guide['records'][0]['name'] == hostname
         assert all(record['type'] == 'CNAME' and record['value'] for record in guide['records'])
         for record in guide['records']:
-            records.append(cloudflare.add_cname(record['name'], record['value']))
+            records.append(dns.add_cname(record['name'], record['value']))
 
         verified = call('domain', 'verify', tunnel, hostname, '--wait', '--timeout', '3m', timeout=240)
         assert verified['domain']['id'] == domain_id
@@ -140,7 +148,7 @@ def domain(binary, cloudflare, port):
         problems = []
         for record in records:
             try:
-                cloudflare.remove(record)
+                dns.remove(record)
             except Exception as error:  # keep cleaning; report below
                 problems.append(str(error))
         if tunnel:
@@ -187,7 +195,8 @@ def help_and_errors(binary):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cloudflare-token-file')
+    parser.add_argument('--fixtures-token-file')
+    parser.add_argument('--fixtures-url')
     parser.add_argument('--zone')
     parser.add_argument('--help-rows-only', action='store_true')
     args = parser.parse_args()
@@ -196,9 +205,9 @@ def main():
     if args.help_rows_only:
         print(json.dumps({'check': 'tunnel-domain-help', 'status': 'PASS', 'rows': sorted(ROWS)}))
         return
-    assert args.cloudflare_token_file and args.zone, '--cloudflare-token-file and --zone are required'
+    assert args.fixtures_token_file and args.fixtures_url and args.zone, '--fixtures-token-file, --fixtures-url and --zone are required'
     before = registration()
-    cloudflare = Cloudflare(args.cloudflare_token_file, args.zone)
+    dns = FixtureDns(args.fixtures_token_file, args.fixtures_url, args.zone)
     with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-domain-') as directory:
         (Path(directory) / 'index.html').write_text(BODY)
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
@@ -207,7 +216,7 @@ def main():
         worker.start()
         try:
             ephemeral(binary, server.server_port)
-            domain(binary, cloudflare, server.server_port)
+            domain(binary, dns, server.server_port)
         finally:
             server.shutdown()
             server.server_close()

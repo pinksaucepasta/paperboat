@@ -800,12 +800,12 @@ test_reset_lifecycle() {
   done
 }
 
-# Tunnel domains (C089, C100-C105, C123) need a DNS zone and its Cloudflare token: runs only when
-# SMOKE_CF_TOKEN_FILE (a local file, never printed) and SMOKE_CF_ZONE are set. The token is copied to
+# Tunnel domains (C089, C100-C105, C123) need the test zone's DNS records from the fixtures endpoint: runs only when
+# FINAL_FIXTURES_URL, FINAL_FIXTURES_TOKEN_FILE (a local file, never printed) and SMOKE_DNS_ZONE are set. The token is copied to
 # the device for the run and removed with it.
 test_tunnel_domain() {
   skipped tunnel-domain && return
-  [ -n "${SMOKE_CF_TOKEN_FILE:-}" ] && [ -n "${SMOKE_CF_ZONE:-}" ] || return 0
+  [ -n "${FINAL_FIXTURES_TOKEN_FILE:-}" ] && [ -n "${FINAL_FIXTURES_URL:-}" ] && [ -n "${SMOKE_DNS_ZONE:-}" ] || return 0
   local device id out status t0
   for device in "${TLIST[@]}"; do
     id="tunnel-domain:$device"
@@ -815,9 +815,9 @@ test_tunnel_domain() {
       record "$id" FAIL 0 "could not stage the device fixture"
       continue
     fi
-    on "$device" "umask 077; cat > /tmp/$RUN_ID/cf-token" < "$SMOKE_CF_TOKEN_FILE"
-    out=$(on "$device" "python3 /tmp/$RUN_ID/tunnel_domain.py --cloudflare-token-file /tmp/$RUN_ID/cf-token --zone $SMOKE_CF_ZONE" 2>&1); status=$?
-    on "$device" "rm -f /tmp/$RUN_ID/cf-token" >/dev/null 2>&1
+    on "$device" "umask 077; cat > /tmp/$RUN_ID/fixtures-token" < "$FINAL_FIXTURES_TOKEN_FILE"
+    out=$(on "$device" "python3 /tmp/$RUN_ID/tunnel_domain.py --fixtures-url $FINAL_FIXTURES_URL --fixtures-token-file /tmp/$RUN_ID/fixtures-token --zone $SMOKE_DNS_ZONE" 2>&1); status=$?
+    on "$device" "rm -f /tmp/$RUN_ID/fixtures-token" >/dev/null 2>&1
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="tunnel-domain" and r["status"]=="PASS" and r["domain_add_list_instructions_verify_remove"] and r["ephemeral_start_stop"] and r["served_over_https"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "C089 C100-C105 C123: domain add/list/instructions/verify/serve/remove, ephemeral start/stop"
     else

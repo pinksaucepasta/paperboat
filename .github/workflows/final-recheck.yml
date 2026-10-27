@@ -6,10 +6,8 @@ name: Final Linux re-check
 # checks against the live console and tears everything down again. Shards split the checks over several VMs (one VM is limited
 # to 6 hours); `merge` joins their result files into one table (artifact final-recheck-merged).
 #
-# Secrets (Settings > Secrets and variables > Actions), never printed:
-#   FIXTURES_SSH_KEY, FIXTURES_SSH_KNOWN_HOSTS, FIXTURES_SSH_HOST  ssh access to the database host for tools/device-smoke/final_fixtures.py
-#   SMOKE_CF_TOKEN                                                  Cloudflare DNS token for the custom-domain and tunnel checks
-# Variable: SMOKE_CF_ZONE (the DNS zone those checks create their test records in).
+# One secret, never printed: FINAL_FIXTURES_TOKEN (Settings > Secrets and variables > Actions) and one variable, FINAL_FIXTURES_URL (the server's
+# /v1/test-fixtures base). The server creates the fixtures team and the test zone's DNS records for the checks; no ssh key and no DNS token are held here.
 # The Go tests are not part of this run (they test the commit, not a build): tools/ci-test.sh runs them.
 
 on:
@@ -72,7 +70,8 @@ jobs:
       FIXTURES: ${{ inputs.fixtures }}
       SHARD: ${{ matrix.shard }}/${{ inputs.shards }}
       SMOKE_CT_DOCKER: docker
-      SMOKE_CF_ZONE: ${{ vars.SMOKE_CF_ZONE }}
+      FINAL_FIXTURES_URL: ${{ vars.FINAL_FIXTURES_URL }}
+      FINAL_FIXTURES_TOKEN: ${{ secrets.FINAL_FIXTURES_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -90,22 +89,6 @@ jobs:
           node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install --with-deps chromium
           echo "PW_MODULE=$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs" >> "$GITHUB_ENV"
           echo "PW_CHROMIUM=$(node -e "import('$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs').then(m => console.log(m.chromium.executablePath()))")" >> "$GITHUB_ENV"
-
-      - name: Secrets as 0600 files
-        env:
-          FIXTURES_SSH_KEY: ${{ secrets.FIXTURES_SSH_KEY }}
-          FIXTURES_SSH_KNOWN_HOSTS: ${{ secrets.FIXTURES_SSH_KNOWN_HOSTS }}
-          FIXTURES_SSH_HOST: ${{ secrets.FIXTURES_SSH_HOST }}
-          SMOKE_CF_TOKEN: ${{ secrets.SMOKE_CF_TOKEN }}
-        run: |
-          umask 077
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$FIXTURES_SSH_KEY" > "$HOME/.ssh/fixtures_key"
-          printf '%s\n' "$FIXTURES_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          printf '%s\n' "$SMOKE_CF_TOKEN" > "$RUNNER_TEMP/cf-token"
-          echo "FINAL_FIXTURES_HOST=$FIXTURES_SSH_HOST" >> "$GITHUB_ENV"
-          echo "SMOKE_CF_TOKEN_FILE=$RUNNER_TEMP/cf-token" >> "$GITHUB_ENV"
-          printf 'Host *\n  IdentityFile %s/.ssh/fixtures_key\n' "$HOME" > "$HOME/.ssh/config"
 
       - name: Final re-check, shard ${{ matrix.shard }} of ${{ inputs.shards }}
         run: |

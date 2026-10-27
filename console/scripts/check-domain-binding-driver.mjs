@@ -1,19 +1,17 @@
-// F8-02 driver: runs check-domain-binding.js on a tunnel page and creates/deletes the DNS records it asks for in Cloudflare.
-// usage: ORIGIN=<console origin> STATE=<storage state of the owner> CF_TOKEN_FILE=<dns token file> CHECK=console/scripts/check-domain-binding.js node check-domain-binding-driver.mjs <tunnelId> <fresh hostname> <zone>
+// F8-02 driver: runs check-domain-binding.js on a tunnel page and creates/deletes the DNS records it asks for through the fixtures endpoint.
+// usage: ORIGIN=<console origin> STATE=<storage state of the owner> FINAL_FIXTURES_URL=<fixtures endpoint> FINAL_FIXTURES_TOKEN_FILE=<its token file> CHECK=console/scripts/check-domain-binding.js node check-domain-binding-driver.mjs <tunnelId> <fresh hostname> <zone>
 // (the tunnel needs its service up; removed hostnames are held for a week, so use a new hostname each run)
 // ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 import { readFileSync } from "node:fs"
 const [tunnelId, domain, zoneName] = process.argv.slice(2)
 const origin = process.env.ORIGIN
-const token = readFileSync(process.env.CF_TOKEN_FILE, "utf8").trim()
-const cf = async (method, path, body) => {
-  const r = await fetch(`https://api.cloudflare.com/client/v4${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-  const j = await r.json()
-  if (!j.success) throw new Error(`cloudflare ${method} ${path}: ${JSON.stringify(j.errors).slice(0, 200)}`)
-  return j.result
+const token = readFileSync(process.env.FINAL_FIXTURES_TOKEN_FILE, "utf8").trim()
+const dns = async (method, path, body) => {
+  const r = await fetch(`${process.env.FINAL_FIXTURES_URL.replace(/\/$/, "")}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
+  if (!r.ok) throw new Error(`fixtures ${method} ${path}: HTTP ${r.status}`)
+  return r.status === 204 ? null : (await r.json()).data
 }
-const zone = (await cf("GET", `/zones?name=${zoneName}`))[0].id
 const created = []
 const exe = process.env.PW_CHROMIUM ?? `${process.env.HOME}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell`
 const browser = await chromium.launch({ executablePath: exe })
@@ -30,7 +28,7 @@ try {
   if (records) {
     for (const r of records) {
       const name = r.name.endsWith(zoneName) ? r.name.replace(/\.$/, "") : `${r.name.replace(/\.$/, "")}.${zoneName}`
-      const res = await cf("POST", `/zones/${zone}/dns_records`, { type: r.type, name, content: r.value.replace(/\.$/, ""), ttl: 60, proxied: false })
+      const res = await dns("POST", "/dns", { type: r.type, name, content: r.value.replace(/\.$/, "") })
       created.push(res.id)
       console.log(`dns ${r.type} ${name} created`)
     }
@@ -54,7 +52,7 @@ try {
     await page.waitForTimeout(3000)
   }
 } finally {
-  for (const id of created) await cf("DELETE", `/zones/${zone}/dns_records/${id}`).catch((e) => console.log("cleanup failed", id, e.message))
+  for (const id of created) await dns("DELETE", `/dns/${id}`).catch((e) => console.log("cleanup failed", id, e.message))
   console.log(`dns records deleted: ${created.length}`)
   await browser.close()
 }
