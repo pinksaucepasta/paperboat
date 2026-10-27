@@ -3,9 +3,10 @@
 import "@wterm/dom/css"
 
 import { WTerm } from "@wterm/dom"
-import { GhosttyCore } from "@wterm/ghostty"
+import type { GhosttyCore } from "@wterm/ghostty"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, ApiError, type Data } from "@/lib/api"
+import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { guestApi } from "@/lib/terminal/queries"
 import { verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
 import {
@@ -191,6 +192,7 @@ export function useTerminalConnection({
 
   const terminalRef = useRef<WTerm | null>(null)
   const coreRef = useRef<GhosttyCore | null>(null)
+  const newCoreRef = useRef<(() => GhosttyCore) | null>(null)
   const fitRef = useRef<(() => void) | null>(null)
   const fittingRef = useRef(false)
   const apiRef = useRef<BrowserTerminalAPI | null>(null)
@@ -536,12 +538,15 @@ export function useTerminalConnection({
 
     void (async () => {
       try {
-        core = await GhosttyCore.load({
-          wasmPath: "/terminal/ghostty-vt-0.5.1.wasm",
-          scrollbackLimit: 65536,
-          foregroundColor: themeRef.current.foreground,
-          backgroundColor: themeRef.current.background,
-        })
+        const cores = await loadGhosttyCores("/terminal/ghostty-vt-0.5.1.wasm")
+        const newCore = () =>
+          cores({
+            scrollbackLimit: 65536,
+            foregroundColor: themeRef.current.foreground,
+            backgroundColor: themeRef.current.background,
+          })
+        newCoreRef.current = newCore
+        core = newCore()
         if (disposed) {
           core.dispose()
           return
@@ -644,9 +649,10 @@ export function useTerminalConnection({
       host.removeEventListener("drop", onDrop, true)
       window.clearTimeout(resizeTimerRef.current)
       terminal?.destroy()
-      core?.dispose()
+      coreRef.current?.dispose()
       terminalRef.current = null
       coreRef.current = null
+      newCoreRef.current = null
       fitRef.current = null
     }
   }, [sessionID, hostRef, uploadFiles, scheduleReconnect, setPhaseValue, showFilePasteNotice, markActive])
@@ -773,15 +779,18 @@ export function useTerminalConnection({
         }
         const screenSequence = normalizeSequence(event.screen_sequence)
         try {
-          // The host's screen is authoritative on every attach. Reset through wterm so partial
-          // escape sequences and stale scrollback cannot leak across attachments.
-          writeTerminal("\x1bc")
-          // The reset also restores Ghostty's default palette.
-          writeTerminal(paletteSequence(themeRef.current))
-          // The reset emptied the scrollback, but the renderer still holds the rows it drew for the old one and
-          // reuses them by position: a size change makes it rebuild every row (the terminal is empty here).
-          terminal.resize(event.columns, event.rows + 1)
+          // The host's screen is authoritative on every attach: it replaces the whole terminal, so partial
+          // escape sequences, scrollback and the cells of the old screen cannot leak across attachments.
+          const fresh = newCoreRef.current?.()
+          if (!fresh) throw new Error("terminal renderer is not ready")
+          fresh.init(event.columns, event.rows)
+          terminal.bridge = fresh
+          core.dispose()
+          coreRef.current = fresh
+          // The renderer still holds the rows it drew for the old screen and reuses them by position: a resize
+          // makes it rebuild every row (the terminal is empty here).
           terminal.resize(event.columns, event.rows)
+          writeTerminal(paletteSequence(themeRef.current))
           writeTerminal(event.screen)
           displaySequenceRef.current = screenSequence
           ackSequenceRef.current = screenSequence
