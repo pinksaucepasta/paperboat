@@ -8327,10 +8327,10 @@ export interface components {
             /** @description Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account. */
             owner_team_id?: string;
             /**
-             * @description The public endpoint projection state. custom_domain_not_ready is used only when self-hosted customer DNS/certificate verification has not produced a usable URL.
+             * @description The public endpoint projection state. custom_domain_not_ready is used only when self-hosted customer DNS/certificate verification has not produced a usable URL. ended: the lease ended (stopped, expired or its owner disconnected); endpoint is empty.
              * @enum {string}
              */
-            endpoint_state: "ready" | "custom_domain_not_ready";
+            endpoint_state: "ready" | "custom_domain_not_ready" | "ended";
         } & (unknown & unknown);
         PreviewLeasePage: {
             items: components["schemas"]["PreviewLease"][];

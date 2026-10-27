@@ -26,8 +26,9 @@ import { copyWithToast } from "@/lib/clipboard"
 
 type View = "live" | "ended"
 
-/** Stopped, expired, owner lost (`owner_disconnected` is terminal), or past its deadline. */
+/** Stopped, expired, owner lost (`owner_disconnected` is terminal), past its deadline, or the server says its lease ended. */
 export const ended = (preview: Preview, now: number) =>
+  preview.endpoint_state === "ended" ||
   preview.state === "expired" ||
   preview.state === "stopped" ||
   preview.state === "owner_disconnected" ||
@@ -248,8 +249,8 @@ function Row({ preview, now, machineName }: { preview: Preview; now: number; mac
               {host}
             </a>
           ) : (
-            // An ended preview's address no longer answers.
-            <span className="truncate-x font-mono text-code text-muted-foreground trim-cap">{host}</span>
+            // An ended preview's address no longer answers; the server sends none for a lease that ended.
+            <span className="truncate-x font-mono text-code text-muted-foreground trim-cap">{host || "Ended"}</span>
           )}
           {preview.access_mode === "private" && (
             <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
