@@ -450,7 +450,7 @@ func TestPrivateAccessorPreviewHTTPOutlivesGrantAndRevokes(t *testing.T) {
 			edgeResult <- errors.New("wrong access binding")
 			return
 		}
-		if writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: time.Now().Add(100 * time.Millisecond)}); writeErr != nil {
+		if writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: accessOpen.Request.ExpiresAt}); writeErr != nil {
 			edgeResult <- writeErr
 			return
 		}
