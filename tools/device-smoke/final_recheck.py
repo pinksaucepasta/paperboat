@@ -241,7 +241,7 @@ def run_entry(entry, args, results):
     """console, device and cmd entries. Placeholders: {build} {previous} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
     devices = containers(args.ct_map)
     names = [machine_name(host, ct) for _, host, ct in devices]
-    values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'previous': args.previous,
+    values = {'build': args.build, 'version': getattr(args, 'version', '') or args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'previous': args.previous,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
               'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else '', 'ct_user': CT_USER, 'ct_uid': CT_UID}
     spec = entry['spec'].format(**values)

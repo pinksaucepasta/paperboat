@@ -3,7 +3,7 @@
 #         console: <script in console/scripts> <page path> [globals JSON], on the live console (ORIGIN, STATE, PW_CHROMIUM, NODE_PATH)
 #         cmd: a shell command on the machine running this runner
 #   rows  comma list of row ids, or @script.py for every row whose Linux evidence names that script; EXTRA for the final extras
-#   spec  placeholders {build} {previous} {origin} {state} {host} {self} {peer} (machine names of containers a and b) {ct_a} {ct_b} {ct_user} {ct_uid} (container user and uid)
+#   spec  placeholders {build} {version} (the installed version) {previous} {origin} {state} {host} {self} {peer} (machine names of containers a and b) {ct_a} {ct_b} {ct_user} {ct_uid} (container user and uid)
 #         local-access and private-access-permission run from this host through tools/device-smoke/ctssh/ssh (their ssh destinations are
 #         containers): F9_CONTROLLER F9_TARGET F9_OWNER F9_OWNER_ALIAS F9_ACCESSOR F9_TEAM are set by final_recheck.py from its own
 #         containers and the fixtures' team (the teammate's machine is container D of the second throwaway account)
@@ -102,12 +102,10 @@ approve-refusals	device	C001	python3 approve_refusals.py
 console-files	cmd	F6-06	tools/device-smoke/final_console_files.sh {host} {ct_a} {ct_b}
 # Linux scripts the final re-check does not run, and why (a row citing only these shows NO CHECK in `inventory`):
 #   account_inventory.py, machine_lifecycle.py revoke: revoke removes the peer machine; the other machine_lifecycle checks run above
-#   auth_lifecycle.py: needs a human browser approval (the link is written to a file)
 #   config_team_default.py: needs a GitHub config repository connected to the account and a team the account administers
 #   deploy.py, device_install.py: harness tools that build and install onto devices, not checks
 #   private_access_permission.py: needs a second team-member account with a machine and a paid team the owner administers; it runs with F9_OWNER F9_OWNER_ALIAS F9_ACCESSOR F9_TEAM from the environment, never on the run's fresh account
 #   official_update.py, update_continuity.py, update_failures.py, update_survival.py: need an official install, a second build and a wrong-platform binary; run by the update step of the final re-check
-#   pairing_lifecycle.py, setup_recovery.py, reset_lifecycle.py: uninstall and re-pair the machine; run on a fresh pair, never on the container the other checks use
 #   session_idle.py: needs an 8 hour idle between its start and verify phases
 #   session_share_cross.py, team_two_account.py, team_machines.py, team_business.py: need two accounts (owner and team member), some also a server database or S3 target
 account-inventory	device	@account_inventory.py	python3 account_inventory.py
@@ -134,3 +132,9 @@ ssh-alias	device	F5-04	python3 ssh_alias_lifecycle.py {peer}
 ssh-trust-host	cmd	F5-04	tools/device-smoke/ssh_trust_host.sh {host} {ct_a} {ct_b} {peer}
 ssh-long	device	F5-02	python3 ssh_long.py {peer}
 local-access-settings	device	F9-03	python3 local_access_settings.py
+
+# Login approval and the destructive pairing checks. auth-lifecycle signs container A out and back in, approving the login link
+# in headless Chromium with the run's account ({state}). destructive makes its own throwaway container from the build container A
+# runs, paired to the same account, runs uninstall/re-pair/interrupted setup/reset there, then revokes and removes it.
+auth-lifecycle	cmd	@auth_lifecycle.py	python3 tools/device-smoke/auth_lifecycle_approved.py {host} {ct_a} {ct_user} {ct_uid} {self}
+destructive	cmd	@pairing_lifecycle.py,@setup_recovery.py,@reset_lifecycle.py	ssh {host} 'docker exec {ct_a} cat /home/{ct_user}/.local/bin/pb > /tmp/final-pb-{version}' && python3 tools/device-smoke/destructive_suite.py {host} /tmp/final-pb-{version} {version} final-destr-{version}; c=$?; ssh {host} 'rm -f /tmp/final-pb-{version}'; exit $c
