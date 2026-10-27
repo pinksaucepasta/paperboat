@@ -508,9 +508,11 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 	return result
 }
 
-const sshHostKeysUnpublishedRecovery = "On the machine, start an SSH server (sshd) if none runs. If sshd runs, its host keys are " +
-	"identical to another machine's (cloned image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd. " +
-	"Paperboat publishes the keys within a minute"
+// A machine shows this from pairing until its host service has installed and published the keys (about a minute
+// on a fresh container, dadape ltc-d7 2026-10-27), so the text leads with waiting, not with a cloned image.
+const sshHostKeysUnpublishedRecovery = "A newly set up machine publishes them within a minute or two. If this stays, on the " +
+	"machine start an SSH server (sshd) if none runs; if sshd runs, its host keys may be identical to another machine's " +
+	"(a cloned VM or image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd"
 
 func updateHealth(machine api.UserMachine) string {
 	if machine.Availability.Schema != "paperboat.availability-policy/v1" || machine.Availability.ObservedAt == nil {
