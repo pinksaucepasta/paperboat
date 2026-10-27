@@ -37,8 +37,34 @@ func managedSSHHealthCode(err error) string {
 	if managedSSHAuthenticationRejection(err) {
 		return "ssh_key_rejected"
 	}
+	if hasAPIErrorCode(err, "managed_ssh_client_key_capacity") {
+		return managedSSHClientKeyCapacityCode
+	}
 	return "ssh_target_not_ready"
 }
+
+// hasAPIErrorCode walks at most 16 causes (errors.As would loop on a cyclic chain, see BoundsCyclicCause).
+func hasAPIErrorCode(err error, code string) bool {
+	pending := []error{err}
+	for visited := 0; len(pending) > 0 && visited < 16; visited++ {
+		current := pending[0]
+		pending = pending[1:]
+		if response, ok := current.(*api.APIError); ok && response != nil && response.Code == code {
+			return true
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			pending = append(pending, wrapped.Unwrap()...)
+		case interface{ Unwrap() error }:
+			pending = append(pending, wrapped.Unwrap())
+		}
+	}
+	return false
+}
+
+// managedSSHClientKeyCapacityCode: the account already has the most signed-in computers using managed SSH, so this
+// computer's key was refused. Retrying cannot help until one is signed out (pb logout) or removed.
+const managedSSHClientKeyCapacityCode = "ssh_client_key_capacity"
 
 func managedSSHAuthenticationRejection(err error) bool {
 	if err == nil {

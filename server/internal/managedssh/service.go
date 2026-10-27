@@ -21,6 +21,9 @@ var (
 	ErrHostKeyInUse       = errors.New("managed SSH host keys belong to another machine")
 	ErrUnavailable        = errors.New("managed SSH authority is unavailable")
 	ErrMachineKeyCapacity = errors.New("machine exceeds the managed SSH client-key limit")
+	// ErrClientKeyCapacity: the user already has the maximum of active client keys (signed-in computers using
+	// managed SSH). It was ErrUnavailable (404), which clients retried forever as "target not ready".
+	ErrClientKeyCapacity = errors.New("user has the maximum of active managed SSH client keys")
 )
 
 type ClientKey struct {

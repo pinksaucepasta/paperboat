@@ -69,3 +69,17 @@ func TestManagedSSHHealthCodeBoundsCyclicCause(t *testing.T) {
 		t.Fatalf("cyclic health code = %q", got)
 	}
 }
+
+// The server's refusal at the account's client-key limit (managed_ssh_client_key_capacity) is its own health item
+// with the way out, not "SSH target is not ready" retried forever (hp 2026-10-27, a full test account).
+func TestManagedSSHClientKeyCapacityIsNamed(t *testing.T) {
+	refused := managedSSHAuthorityError(&api.APIError{Status: http.StatusConflict, Code: "managed_ssh_client_key_capacity"})
+	if code := managedSSHHealthCode(refused); code != "ssh_client_key_capacity" {
+		t.Fatalf("code=%q", code)
+	}
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 1, SSHLocalCode: "ssh_client_key_capacity"}
+	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
+	if item.Code != "ssh_client_key_capacity" || !strings.Contains(item.Title, "limit") || !strings.Contains(item.Recovery, "pb logout") {
+		t.Fatalf("health = %+v", item)
+	}
+}

@@ -489,6 +489,10 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			// Without a code this computer's managed SSH is still starting: nothing to report or refuse yet.
 			code := machine.SSHLocalCode
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
+			if code == managedSSHClientKeyCapacityCode {
+				status.Health[0].Title = "This computer cannot use managed SSH: the account's signed-in computer limit is reached"
+				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or remove it, then retry"
+			}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 && machine.SSHAuthority.HostKeyInUse {

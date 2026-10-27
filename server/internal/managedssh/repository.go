@@ -109,7 +109,7 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 			return err
 		}
 		if activeCount >= 64 {
-			return ErrUnavailable
+			return ErrClientKeyCapacity
 		}
 		existing, err := q.GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
 		if err == nil {

@@ -22,6 +22,7 @@ func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *t
 		{"invalid", wire.ErrInvalid, 400, "invalid_request"},
 		{"conflict", managedssh.ErrConflict, 409, "operation_conflict"},
 		{"capacity", managedssh.ErrMachineKeyCapacity, 409, "managed_ssh_key_capacity"},
+		{"client key capacity", managedssh.ErrClientKeyCapacity, 409, "managed_ssh_client_key_capacity"},
 		{"unavailable", managedssh.ErrUnavailable, 404, "not_found"},
 		{"native IO", syscall.EIO, 503, "managed_ssh_unavailable"},
 		{"mixed conflict", errors.Join(managedssh.ErrConflict, syscall.EIO), 503, "managed_ssh_unavailable"},

@@ -360,6 +360,9 @@ func managedSSHError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case expectedHTTPErrorOnly(err, managedssh.ErrMachineKeyCapacity):
 		writeError(w, r, http.StatusConflict, "managed_ssh_key_capacity", "This machine has more than 64 authorized SSH client keys. Revoke unused client keys or narrow its SSH grants, then retry.")
 		return true
+	case expectedHTTPErrorOnly(err, managedssh.ErrClientKeyCapacity):
+		writeError(w, r, http.StatusConflict, "managed_ssh_client_key_capacity", "64 signed-in computers already use managed SSH on this account. Sign out on one you no longer use (pb logout there) or remove it, then retry.")
+		return true
 	case expectedHTTPErrorOnly(err, managedssh.ErrUnavailable):
 		status, code = http.StatusNotFound, "not_found"
 	default:

@@ -399,8 +399,17 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded registration','desktop','windows',ARRAY['machines:connect'],'active',$4,$4)`, registrationSession, userID, "client_"+registrationSession, now.Add(65*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: publicLine(t, "ed25519"), Now: now.Add(65 * time.Second)}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("registration over account key capacity error=%v", err)
+	registrationKey := publicLine(t, "ed25519")
+	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add(65 * time.Second)}); !errors.Is(err, ErrClientKeyCapacity) {
+		t.Fatalf("registration over account key capacity error=%v, want the typed capacity refusal", err)
+	}
+	// A signed-out (revoked) session frees its slot at once: dead sessions cannot hold the cap (hp 2026-10-27,
+	// a full test account refused every new computer's key).
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=$2 WHERE id=$1`, "ssh_bounded_cli_01_"+suffix, now.Add(66*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_bounded_capacity_freed_" + suffix, UserID: userID, CLIClientSessionID: registrationSession, PublicKey: registrationKey, Now: now.Add(67 * time.Second)}); err != nil {
+		t.Fatalf("registration after a session was revoked: %v", err)
 	}
 }
 
