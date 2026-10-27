@@ -167,11 +167,9 @@ function Plan({
           <Row label="Machines">{formatLimit(billing.limits.machines)}</Row>
           <Row label="Previews & tunnels">{formatLimit(billing.limits.publications)}</Row>
           <Row label="Browser terminals">{formatLimit(billing.limits.browser_terminals)}</Row>
-          {billing.limits.public_tcp && (
-            <Row label="Public TCP tunnels">
-              {formatLimit(billing.limits.public_tcp).replace("Unlimited", "Not limited on your own edge")}
-            </Row>
-          )}
+          <Row label="Public TCP tunnels">
+            {formatLimit(billing.limits.public_tcp).replace("Unlimited", "Not limited on your own edge")}
+          </Row>
         </>
       )}
       <PlanActions workspace={workspace} billing={billing} />

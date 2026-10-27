@@ -1,7 +1,7 @@
 // Console check for the public TCP limit: adding a public hostname that the server refuses with 409
 // public_tcp_limit_reached shows the server's sentence with Upgrade and "Use your own edge", and the
-// billing overview shows "Public TCP tunnels" from limits.public_tcp. Both answers are stubbed in the browser
-// (the real refusal needs a Free workspace at its limit); the page and its wiring are the real console.
+// billing overview shows "Public TCP tunnels" from the server's real limits.public_tcp. The refusal is stubbed in the
+// browser (the real one needs a Free workspace at its limit); the page and its wiring are the real console.
 //   STATE=<storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> TUNNEL=<tunnel id> node check-public-tcp-limit.mjs
 import { chromium } from "playwright-core"
 
@@ -37,18 +37,13 @@ log((await alert.locator('a:has-text("Upgrade")').first().getAttribute("href").c
 log((await alert.locator('a:has-text("Use your own edge")').first().getAttribute("href").catch(() => null)) === "/network", "...and 'Use your own edge'")
 await p.screenshot({ path: "/tmp/public-tcp-limit-route.png" })
 
-// Billing overview: the line from the server's numbers (stubbed workspace billing with limits.public_tcp).
+// Billing overview: the line from the server's real limits.public_tcp (no stub; the server sends it since .128).
 const q = await ctx.newPage()
-await q.route(/\/api\/v1\/billing\/workspaces\/personal(\?.*)?$/, async (route) => {
-  const real = await route.fetch()
-  const body = await real.json()
-  body.data = { ...body.data, limits: { ...(body.data?.limits ?? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: 100 }, browser_terminals: { used: 0, limit: 10 } }), public_tcp: { used: 1, limit: 1 } } }
-  await route.fulfill({ response: real, json: body })
-})
 await q.goto(`${origin}/billing`, { waitUntil: "networkidle", timeout: 120000 })
 const row = q.getByText("Public TCP tunnels")
 log(await row.isVisible({ timeout: 15000 }).catch(() => false), "billing: 'Public TCP tunnels' is listed with the plan limits")
-log(((await row.locator("..").innerText().catch(() => "")) || "").includes("1 of 1"), "...as used of limit", "1 of 1")
+const shown = ((await row.locator("..").innerText().catch(() => "")) || "").replace(/\s+/g, " ")
+log(/\d+ (of [\d,]+|· Not limited on your own edge)$/.test(shown), "...as used of limit, or not limited on your own edge", shown)
 await q.screenshot({ path: "/tmp/public-tcp-limit-billing.png" })
 await browser.close()
 console.log(failed ? `${failed} failed` : "all passed")

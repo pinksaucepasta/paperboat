@@ -6550,6 +6550,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/selfhost/port-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check from the control plane that a node's public TCP range is reachable
+         * @description The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only) on the given public TCP tunnel port and reports whether the node's temporary test listener echoed the nonce. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.
+         */
+        post: operations["selfhost_port_probe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/test-fixtures/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the paid test team of a throwaway account
+         * @description Creates (idempotently) the team owned by the account with the paid entitlement granted as test data, plus each member as an active member. The account and the members must have signed in once. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        post: operations["test_fixture_team_create"];
+        /**
+         * Make the other members of a test team inactive
+         * @description Teardown: every non-owner member becomes inactive so the owner's account can be deleted; a team left with its owner alone is deleted by the product with the account. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        delete: operations["test_fixture_team_remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/test-fixtures/zone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the confined test DNS domain
+         * @description The only domain test DNS records may be named under. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        get: operations["test_fixture_zone"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/test-fixtures/dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a temporary test DNS record
+         * @description A CNAME, TXT or A record (ttl 60, not proxied) named strictly under the test domain, marked as a fixture. Refuses everything else. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        post: operations["test_fixture_dns_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/test-fixtures/dns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a test DNS record the fixtures created
+         * @description 404 for any record that is not one of the fixtures' own under the test domain. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        get: operations["test_fixture_dns_read"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a test DNS record the fixtures created
+         * @description Idempotent: an already removed or foreign record answers 204 and nothing else is touched. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.
+         */
+        delete: operations["test_fixture_dns_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/selfhost/runtime-readiness": {
         parameters: {
             query?: never;
@@ -9660,7 +9770,7 @@ export interface components {
             carrier: components["schemas"]["InspectorCarrierRoute"];
         };
         BillingWorkspace: {
-            /** @description Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge. */
+            /** @description Per-plan count limits with current use. machines: live machines; publications: active previews and tunnels together; browser_terminals: console terminals open through the edge. public_tcp: concurrent public raw-TCP tunnels. */
             limits: {
                 machines: {
                     used: number;
@@ -9675,6 +9785,11 @@ export interface components {
                 browser_terminals: {
                     used: number;
                     /** @description Plan limit; null for Teams (advertised unlimited). */
+                    limit: number | null;
+                };
+                public_tcp: {
+                    used: number;
+                    /** @description Plan limit on concurrent public TCP tunnels (per seat, pooled, for a team); null when the workspace's tunnel edge is self-hosted (not limited). */
                     limit: number | null;
                 };
             };
@@ -25760,6 +25875,360 @@ export interface operations {
                 };
             };
             503: components["responses"]["Error"];
+        };
+    };
+    selfhost_port_probe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    port: number;
+                    nonce: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The probe outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            reachable: boolean;
+                            detail: string;
+                        };
+                    };
+                };
+            };
+            /** @description invalid_request: the port or nonce is outside what the probe accepts. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description runtime_unauthorized: missing/invalid credential or incomplete, removed or expired installation. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description port_probe_unavailable: configuration/database unavailable; retry shortly. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_team_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    members?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description {"env":{"PAPERBOAT_SMOKE_TEAM":team}} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            /** @description validation_failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description account_not_found: the account has not signed in yet. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_team_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description {"team":...,"active_members":n} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            /** @description validation_failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_zone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {"zone":domain} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_dns_not_configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_dns_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    type: "CNAME" | "TXT" | "A";
+                    name: string;
+                    content: string;
+                };
+            };
+        };
+        responses: {
+            /** @description {"id":record id,"name":name} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            /** @description validation_failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_dns_not_configured or the provider failed */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_dns_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {"id","name","type","content"} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: Record<string, never>;
+                    };
+                };
+            };
+            /** @description validation_failed: malformed id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description record_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test_fixture_dns_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed or already gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation_failed: malformed id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description test_fixtures_unauthorized: a dedicated test fixtures credential is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description rate_limited: all test fixture calls share one limit; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_selfhost_runtime_readiness: {
