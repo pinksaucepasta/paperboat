@@ -180,3 +180,40 @@ func TestDeviceLoginShowsEnrolledMachineWorkspace(t *testing.T) {
 		t.Fatal("a machine id the account does not own was described")
 	}
 }
+
+// A login on a paired machine is that machine's login, so removing or revoking the machine ends it (C209).
+// A machine that is already revoked, or not the account's, leaves an account login as on an unpaired computer.
+func TestDeviceLoginOnPairedMachineBindsItsSession(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_bound:bound@example.com:Bound User")
+	user := userIDByEmail(t, store, "bound@example.com")
+	if _, err := store.SQL().Exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,revoked_at) VALUES
+		('machine_bound_live',$1,'env_bound_live','live','linux','amd64','/home/dev','offline','released',NULL),
+		('machine_bound_gone',$1,'env_bound_gone','gone','linux','amd64','/home/dev','revoked','released',now())`, user); err != nil {
+		t.Fatal(err)
+	}
+	f := deviceEnrollmentFixture{t: t, router: router, cookies: cookies}
+	boundTo := func(machine string) string {
+		t.Helper()
+		grant := f.authorize(map[string]any{"enrolled_machine_id": machine}, http.StatusOK)
+		f.approve(grant.UserCode, "", http.StatusOK)
+		f.poll(grant.DeviceCode)
+		var bound *string
+		if err := store.SQL().QueryRow(`SELECT user_machine_id FROM paperboat.cli_client_sessions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`, user).Scan(&bound); err != nil {
+			t.Fatal(err)
+		}
+		if bound == nil {
+			return ""
+		}
+		return *bound
+	}
+	if got := boundTo("machine_bound_live"); got != "machine_bound_live" {
+		t.Fatalf("login on a paired machine bound to %q", got)
+	}
+	if got := boundTo("machine_bound_gone"); got != "" {
+		t.Fatalf("login on a revoked machine bound to %q", got)
+	}
+	if got := boundTo("machine_someone_else"); got != "" {
+		t.Fatalf("login naming a foreign machine bound to %q", got)
+	}
+}

@@ -25,6 +25,8 @@ WHERE client_session.id = $2
     WHERE machine.id = $1
       AND machine.user_id = $3
       AND machine.deleted_at IS NULL
+      AND machine.revoked_at IS NULL
+      AND machine.state NOT IN ('revoked', 'disconnected')
   )
 `
 

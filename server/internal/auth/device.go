@@ -328,6 +328,13 @@ func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet
 		if err = CreateClientSessionTx(ctx, tx, dbsqlc.CreateClientSessionParams{ID: sessionID, UserID: grant.UserID, ClientID: grant.ClientID, ClientLabel: grant.ClientLabel, DeviceType: grant.DeviceType, Os: grant.Os, Scopes: grant.Scopes, CreatedAt: now, ApprovedAt: approvedAt.Time}, access, refresh, s.tokenPolicy()); err != nil {
 			return err
 		}
+		// A login on a paired machine is that machine's login: removing or revoking the machine ends it. A stale or
+		// foreign machine id leaves it an account login, as on an unpaired computer.
+		if grant.EnrolledMachineID.Valid {
+			if _, err := q.BindCLIClientSessionToUserMachine(ctx, dbsqlc.BindCLIClientSessionToUserMachineParams{TargetMachineID: grant.EnrolledMachineID, TargetCLISessionID: sessionID, TargetUserID: grant.UserID}); err != nil {
+				return err
+			}
+		}
 		rows, err := q.ConsumeDeviceGrant(ctx, dbsqlc.ConsumeDeviceGrantParams{ID: grant.ID, ConsumedAt: sql.NullTime{Time: now, Valid: true}})
 		if err != nil {
 			return err

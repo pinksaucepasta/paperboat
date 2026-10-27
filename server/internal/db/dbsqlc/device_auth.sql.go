@@ -472,7 +472,7 @@ func (q *Queries) GetDeviceGrantForDecision(ctx context.Context, stringToArray s
 }
 
 const getDeviceGrantForPoll = `-- name: GetDeviceGrantForPoll :one
-SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash,enroll,workspace_team_id
+SELECT id,client_id,state,coalesce(user_id,'') AS user_id,client_label,device_type,os,array_to_string(scopes,' ') AS scopes,issued_at,expires_at,next_poll_at,poll_interval_seconds,device_code_hash,enroll,workspace_team_id,enrolled_machine_id
 FROM device_grants WHERE device_code_hash = ANY(string_to_array($1,' ')) FOR UPDATE
 `
 
@@ -492,6 +492,7 @@ type GetDeviceGrantForPollRow struct {
 	DeviceCodeHash      string
 	Enroll              bool
 	WorkspaceTeamID     sql.NullString
+	EnrolledMachineID   sql.NullString
 }
 
 func (q *Queries) GetDeviceGrantForPoll(ctx context.Context, stringToArray string) (GetDeviceGrantForPollRow, error) {
@@ -513,6 +514,7 @@ func (q *Queries) GetDeviceGrantForPoll(ctx context.Context, stringToArray strin
 		&i.DeviceCodeHash,
 		&i.Enroll,
 		&i.WorkspaceTeamID,
+		&i.EnrolledMachineID,
 	)
 	return i, err
 }

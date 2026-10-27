@@ -15,6 +15,8 @@ WHERE client_session.id = sqlc.arg(target_cli_session_id)
     WHERE machine.id = sqlc.arg(target_machine_id)
       AND machine.user_id = sqlc.arg(target_user_id)
       AND machine.deleted_at IS NULL
+      AND machine.revoked_at IS NULL
+      AND machine.state NOT IN ('revoked', 'disconnected')
   );
 
 -- name: RevokeCLIClientSessionsForUserMachine :execrows
