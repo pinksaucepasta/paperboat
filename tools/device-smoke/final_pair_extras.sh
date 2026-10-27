@@ -105,7 +105,7 @@ set -uo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 fresh_official $T $ALIAS || { echo REINSTALL_0_ERROR: fresh install and pair failed; exit 0; }
 fresh_official $P $ALIAS-p || { echo REINSTALL_0_ERROR: the peer failed to install and pair; exit 0; }
-sudo -n docker cp /tmp/$T-dev $T:/home/pbt/final-pb && $X $T chmod 755 /home/pbt/final-pb
+sudo -n docker cp /tmp/$T-dev $T:/home/pbt/final-pb && sudo -n docker exec $T sh -c "chown pbt:pbt /home/pbt/final-pb && chmod 755 /home/pbt/final-pb"  # pb install refuses a binary owned by another user
 for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
 want=$($X $T /home/pbt/final-pb --version | sed -n 's/.*Version //p' | head -1)
 ok=1
