@@ -897,6 +897,7 @@ type ControlTunnelNode struct {
 	TlsSpkiSha256                    []byte
 	EndpointsEpoch                   sql.NullString
 	TunnelEndpointsEpoch             sql.NullString
+	TunnelSnapshotAt                 sql.NullTime
 }
 
 type ControlUsageCounter struct {
@@ -1467,6 +1468,7 @@ type InspectorCredential struct {
 	NativeCLISessionID      sql.NullString
 	NativeMachineID         sql.NullString
 	NativeMachineGeneration sql.NullInt64
+	RenewedAt               sql.NullTime
 }
 
 type InspectorNativeAdmission struct {
