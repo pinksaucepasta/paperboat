@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 func TestConfirmModelAcceptsConfirmationKeys(t *testing.T) {
-	for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, {Type: tea.KeyRunes, Runes: []rune{'y'}}} {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Text: string('y')}} {
 		updated, command := (confirmModel{}).Update(key)
 		result := updated.(confirmModel)
 		if command == nil || !result.done || !result.yes {
@@ -21,10 +21,10 @@ func TestConfirmModelAcceptsConfirmationKeys(t *testing.T) {
 }
 
 func TestConfirmModelAcceptsCancellationKeys(t *testing.T) {
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'n'}},
-		{Type: tea.KeyEsc},
-		{Type: tea.KeyCtrlC},
+	for _, key := range []tea.KeyPressMsg{
+		{Text: string('n')},
+		{Code: tea.KeyEscape},
+		{Code: 'c', Mod: tea.ModCtrl},
 	} {
 		updated, command := (confirmModel{}).Update(key)
 		result := updated.(confirmModel)
@@ -36,7 +36,7 @@ func TestConfirmModelAcceptsCancellationKeys(t *testing.T) {
 
 func TestConfirmViewFitsNarrowWidth(t *testing.T) {
 	model := confirmModel{options: ConfirmOptions{Title: strings.Repeat("confirm", 8), Description: strings.Repeat("description", 8)}, width: 7}
-	for _, line := range strings.Split(model.View(), "\n") {
+	for _, line := range strings.Split(model.View().Content, "\n") {
 		if width := ansi.StringWidth(line); width > 7 {
 			t.Fatalf("line width=%d: %q", width, line)
 		}
@@ -50,7 +50,7 @@ func TestConfirmationPreservesEntireConsentInCompactAndNormalViews(t *testing.T)
 			ctx := preferences.WithContext(context.Background(), preferences.Document{Version: 1, TUI: preferences.TUI{Density: density}})
 			updated, _ := (confirmModel{options: ConfirmOptions{Context: ctx, Title: "Confirm configuration change", Description: impact}}).Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 			model := updated.(confirmModel)
-			view := strings.Join(strings.Fields(ansi.Strip(model.View())), " ")
+			view := strings.Join(strings.Fields(ansi.Strip(model.View().Content)), " ")
 			if !strings.Contains(view, "ordinary plaintext in private Git") || !strings.Contains(view, "Git history may retain removed versions") {
 				t.Fatalf("required consent hidden in %s view", density)
 			}
@@ -64,25 +64,25 @@ func TestConfirmationPreservesEntireConsentInCompactAndNormalViews(t *testing.T)
 func TestConfirmationLongScopeIsScrollableAndFitsTerminal(t *testing.T) {
 	updated, _ := (confirmModel{options: ConfirmOptions{Title: "Confirm", Description: strings.Repeat("repository scope ", 40) + "retained Git history"}}).Update(tea.WindowSizeMsg{Width: 20, Height: 12})
 	model := updated.(confirmModel)
-	for _, line := range strings.Split(model.View(), "\n") {
+	for _, line := range strings.Split(model.View().Content, "\n") {
 		if ansi.StringWidth(line) > 20 {
 			t.Fatal("confirmation exceeds terminal width")
 		}
 	}
-	if len(strings.Split(model.View(), "\n")) > 12 {
+	if len(strings.Split(model.View().Content, "\n")) > 12 {
 		t.Fatal("confirmation exceeds terminal height")
 	}
 	for page := 0; page < 20 && !model.description.AtBottom(); page++ {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 		model = updated.(confirmModel)
 	}
-	if !strings.Contains(ansi.Strip(model.View()), "Git history") {
+	if !strings.Contains(ansi.Strip(model.View().Content), "Git history") {
 		t.Fatal("required scope tail unavailable by scrolling")
 	}
 	if model.done || model.yes {
 		t.Fatal("scrolling confirmed mutation")
 	}
-	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if command == nil || updated.(confirmModel).yes {
 		t.Fatal("scrolled confirmation cannot cancel")
 	}
@@ -91,16 +91,16 @@ func TestConfirmationLongScopeIsScrollableAndFitsTerminal(t *testing.T) {
 func TestConfirmationCannotApproveWhenTerminalCannotShowConsent(t *testing.T) {
 	updated, _ := (confirmModel{options: ConfirmOptions{Title: "Confirm", Description: "Required consent"}}).Update(tea.WindowSizeMsg{Width: 20, Height: 3})
 	model := updated.(confirmModel)
-	if len(strings.Split(model.View(), "\n")) > 3 {
+	if len(strings.Split(model.View().Content, "\n")) > 3 {
 		t.Fatal("small-terminal notice overflows")
 	}
-	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, command := model.Update(tea.KeyPressMsg{Text: string('y')})
 	model = updated.(confirmModel)
 	if command != nil || model.done || model.yes {
 		t.Fatal("unreadable confirmation was accepted")
 	}
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	updated, command = updated.(confirmModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, command = updated.(confirmModel).Update(tea.KeyPressMsg{Text: string('y')})
 	if command == nil || !updated.(confirmModel).yes {
 		t.Fatal("resized confirmation cannot proceed")
 	}

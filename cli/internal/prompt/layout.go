@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 )
@@ -29,9 +29,14 @@ func configureInputStyles(input *textinput.Model, ctx context.Context) {
 	if input == nil {
 		return
 	}
-	input.PromptStyle = selector.AccentStyle(ctx)
-	input.Cursor.Style = selector.AccentStyle(ctx)
-	input.PlaceholderStyle = selector.HelpStyle(ctx)
+	styles := input.Styles()
+	accent := selector.AccentStyle(ctx)
+	for _, state := range []*textinput.StyleState{&styles.Focused, &styles.Blurred} {
+		state.Prompt = accent
+		state.Placeholder = selector.HelpStyle(ctx)
+	}
+	styles.Cursor.Color = accent.GetForeground()
+	input.SetStyles(styles)
 }
 
 func promptFooter(ctx context.Context, confirm, cancel string) string {

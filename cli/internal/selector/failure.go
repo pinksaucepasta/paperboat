@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
@@ -98,6 +99,17 @@ func (w *selectorOutput) Write(p []byte) (int, error) {
 	return n, err
 }
 func (w *selectorOutput) failure() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }
+
+// selectorTerminalOutput is a selectorOutput over a terminal: Bubble Tea v2 sizes and renders only for an output
+// that is a term.File (Read, Write, Close, Fd), and draws nothing at 0x0 otherwise.
+type selectorTerminalOutput struct {
+	*selectorOutput
+	file *os.File
+}
+
+func (w selectorTerminalOutput) Read(p []byte) (int, error) { return w.file.Read(p) }
+func (w selectorTerminalOutput) Close() error               { return w.file.Close() }
+func (w selectorTerminalOutput) Fd() uintptr                { return w.file.Fd() }
 
 func writeScreen(output io.Writer, sequence string) {
 	n, err := io.WriteString(output, sequence)

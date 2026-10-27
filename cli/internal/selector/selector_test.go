@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -131,7 +132,7 @@ func TestLoadingWaitsForCanceledWorker(t *testing.T) {
 
 func TestLoadingViewUsesSimplePaperboatMark(t *testing.T) {
 	model := loadingModel{title: "Machines", detail: "Loading", width: 80, height: 24}
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "~~~") || !strings.Contains(view, "▄█▄") || !strings.Contains(view, "Loading") {
 		t.Fatalf("loading view=%q", view)
 	}
@@ -139,7 +140,7 @@ func TestLoadingViewUsesSimplePaperboatMark(t *testing.T) {
 
 func TestLoadingViewFitsNarrowTerminal(t *testing.T) {
 	model := loadingModel{title: strings.Repeat("title", 8), detail: strings.Repeat("detail", 8), width: 7, height: 4}
-	view := model.View()
+	view := model.View().Content
 	if lines := strings.Count(view, "\n") + 1; lines > 4 {
 		t.Fatalf("loading lines=%d view=%q", lines, view)
 	}
@@ -226,7 +227,7 @@ func TestChooserUpdatesRequiredFilterFromTypedRunes(t *testing.T) {
 	input := textinput.New()
 	input.Focus()
 	base := chooserModel{options: Options{RequireFilter: true}, choices: choices, input: input, width: 80, height: 24}
-	updated, command := base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("rpt")})
+	updated, command := base.Update(tea.KeyPressMsg{Text: "rpt"})
 	result := updated.(chooserModel)
 	if result.choices.Filter() != "rpt" {
 		t.Fatalf("filter=%q command=%v", result.choices.Filter(), command)
@@ -248,12 +249,12 @@ func TestModelNoMatchesCannotSelect(t *testing.T) {
 
 func TestChooserDistinguishesBackFromQuit(t *testing.T) {
 	base := chooserModel{options: Options{}, choices: NewModel(nil, 8), width: 80, height: 24}
-	updated, command := base.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, command := base.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	back := updated.(chooserModel)
 	if command == nil || !back.canceled || back.interrupted {
 		t.Fatalf("escape = canceled %t interrupted %t command %v", back.canceled, back.interrupted, command)
 	}
-	updated, command = base.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, command = base.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	quit := updated.(chooserModel)
 	if command == nil || quit.canceled || !quit.interrupted {
 		t.Fatalf("ctrl+c = canceled %t interrupted %t command %v", quit.canceled, quit.interrupted, command)
@@ -262,12 +263,12 @@ func TestChooserDistinguishesBackFromQuit(t *testing.T) {
 
 func TestChooserSupportsMouseWheelAndClick(t *testing.T) {
 	base := chooserModel{options: Options{Header: "Paperboat", Title: "Machines"}, choices: NewModel([]Item{{ID: "one"}, {ID: "two"}}, 8), width: 80, height: 24}
-	updated, _ := base.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	updated, _ := base.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	scrolled := updated.(chooserModel)
 	if selected, _ := scrolled.choices.Selected(); selected.ID != "two" {
 		t.Fatalf("wheel selected %q", selected.ID)
 	}
-	updated, command := base.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, Y: 6})
+	updated, command := base.Update(tea.MouseClickMsg{Button: tea.MouseLeft, Y: 6})
 	clicked := updated.(chooserModel)
 	if command == nil || !clicked.confirmed || clicked.selected.ID != "two" {
 		t.Fatalf("click confirmed=%t selected=%q command=%v", clicked.confirmed, clicked.selected.ID, command)
@@ -276,7 +277,7 @@ func TestChooserSupportsMouseWheelAndClick(t *testing.T) {
 
 func TestChooserMouseMotionUpdatesHoverSelection(t *testing.T) {
 	base := chooserModel{options: Options{Title: "Machines"}, choices: NewModel([]Item{{ID: "one"}, {ID: "two"}}, 8), width: 80, height: 24}
-	updated, command := base.Update(tea.MouseMsg{Action: tea.MouseActionMotion, X: 4, Y: 4})
+	updated, command := base.Update(tea.MouseMotionMsg{X: 4, Y: 4})
 	hovered := updated.(chooserModel)
 	if command != nil {
 		t.Fatalf("hover command=%v", command)
@@ -288,7 +289,7 @@ func TestChooserMouseMotionUpdatesHoverSelection(t *testing.T) {
 
 func TestChooserReturnsConfiguredKeyAction(t *testing.T) {
 	base := chooserModel{options: Options{Title: "Machines", Actions: map[string]string{"ctrl+f": "favorite"}}, choices: NewModel([]Item{{ID: "one"}}, 8), width: 80, height: 24}
-	updated, command := base.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	updated, command := base.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	result := updated.(chooserModel)
 	if command == nil || !result.confirmed || result.action != "favorite" || result.selected.ID != "one" {
 		t.Fatalf("action=%q selected=%q confirmed=%t command=%v", result.action, result.selected.ID, result.confirmed, command)
@@ -304,7 +305,7 @@ func TestChooserCanAcceptRecognizedPastedInput(t *testing.T) {
 		}},
 		choices: NewModel([]Item{{ID: "ordinary"}}, 8), input: input, width: 80, height: 24,
 	}
-	updated, command := base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/tmp/report.pdf")})
+	updated, command := base.Update(tea.KeyPressMsg{Text: "/tmp/report.pdf"})
 	result := updated.(chooserModel)
 	if !result.confirmed || result.selected.ID != "drop" || command == nil {
 		t.Fatalf("result=%#v command=%v", result, command)
@@ -315,7 +316,7 @@ func TestChooserPreservesUnrecognizedPastedInputAsFilter(t *testing.T) {
 	input := textinput.New()
 	input.Focus()
 	base := chooserModel{options: Options{InputSelection: func(string) (Item, bool) { return Item{}, false }}, choices: NewModel([]Item{{ID: "ordinary"}}, 8), input: input, width: 80, height: 24}
-	updated, _ := base.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ordinary text")})
+	updated, _ := base.Update(tea.KeyPressMsg{Text: "ordinary text"})
 	result := updated.(chooserModel)
 	if result.confirmed || result.input.Value() != "ordinary text" || result.choices.Filter() != "ordinary text" {
 		t.Fatalf("input=%q filter=%q confirmed=%v", result.input.Value(), result.choices.Filter(), result.confirmed)
@@ -324,7 +325,7 @@ func TestChooserPreservesUnrecognizedPastedInputAsFilter(t *testing.T) {
 
 func TestChooserReturnsHeaderClickAction(t *testing.T) {
 	base := chooserModel{options: Options{Header: "Paperboat\nVersion\nmasked", HeaderActions: map[int]string{2: "reveal"}}, choices: NewModel([]Item{{ID: "one"}}, 8), width: 80, height: 24}
-	updated, command := base.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 20, Y: 2})
+	updated, command := base.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 20, Y: 2})
 	result := updated.(chooserModel)
 	if command == nil || !result.confirmed || result.action != "reveal" {
 		t.Fatalf("action=%q confirmed=%t command=%v", result.action, result.confirmed, command)
@@ -333,7 +334,7 @@ func TestChooserReturnsHeaderClickAction(t *testing.T) {
 
 func TestEmptyChooserRendersUsefulState(t *testing.T) {
 	model := chooserModel{options: Options{Title: "Public previews", Empty: "No public previews yet"}, choices: NewModel(nil, 8), width: 80, height: 24}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "No public previews yet") || strings.Contains(view, "No matches") {
 		t.Fatalf("empty view = %q", view)
 	}
@@ -349,7 +350,7 @@ func TestChooserRendersActionItemsDistinctly(t *testing.T) {
 		width:   80,
 		height:  24,
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, stylesForContext(model.options.Context).action.Render("     + Add machine")) {
 		t.Fatalf("action item was not accented: %q", view)
 	}
@@ -362,7 +363,7 @@ func TestChooserViewFitsNarrowTerminal(t *testing.T) {
 		width:   7,
 		height:  4,
 	}
-	view := model.View()
+	view := model.View().Content
 	if lines := strings.Count(view, "\n") + 1; lines > 4 {
 		t.Fatalf("chooser lines=%d view=%q", lines, view)
 	}
@@ -381,7 +382,8 @@ func TestChooserSanitizesTerminalControlsInItemText(t *testing.T) {
 		width:   80,
 		height:  12,
 	}
-	view := model.View()
+	// v2 styles always emit SGR; only item text may not smuggle other controls.
+	view := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(model.View().Content, "")
 	if strings.ContainsAny(view, "\x1b\x07") {
 		t.Fatalf("item text injected terminal controls: %q", view)
 	}
@@ -397,7 +399,7 @@ func TestChooserRendersFavoriteItemsWithAccent(t *testing.T) {
 		width:   80,
 		height:  24,
 	}
-	view := model.View()
+	view := model.View().Content
 	styles := stylesForContext(model.options.Context)
 	if !strings.Contains(view, styles.favorite.Render("     Favorite")+" "+styles.favoriteMarker.Render("◆")) {
 		t.Fatalf("favorite item was not accented: %q", view)

@@ -15,9 +15,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/junegunn/fzf/src/algo"
@@ -96,12 +95,27 @@ func ProgramOptions(input *os.File, output io.Writer) []tea.ProgramOption {
 	if output == nil {
 		output = os.Stderr
 	}
-	options := []tea.ProgramOption{tea.WithInput(input), tea.WithOutput(output), tea.WithMouseAllMotion()}
-	if persistentScreen.Load() == 0 || suspendedScreen.Load() > 0 {
-		return append(options, tea.WithAltScreen())
+	programOutput := output
+	if fenced, ok := output.(*selectorOutput); ok {
+		if file, ok := fenced.Writer.(*os.File); ok && term.IsTerminal(file.Fd()) {
+			programOutput = selectorTerminalOutput{selectorOutput: fenced, file: file}
+		}
 	}
-	writeScreen(output, "\x1b[2J\x1b[H")
+	options := []tea.ProgramOption{tea.WithInput(input), tea.WithOutput(programOutput)}
+	if persistentScreen.Load() > 0 && suspendedScreen.Load() == 0 {
+		writeScreen(output, "\x1b[2J\x1b[H")
+	}
 	return options
+}
+
+// NewView wraps rendered content with the screen settings v1 passed as program
+// options: all-motion mouse, and the alternate screen unless a persistent
+// screen is already active.
+func NewView(content string) tea.View {
+	view := tea.NewView(content)
+	view.MouseMode = tea.MouseModeAllMotion
+	view.AltScreen = persistentScreen.Load() == 0 || suspendedScreen.Load() > 0
+	return view
 }
 
 func ScreenActive() bool { return persistentScreen.Load() > 0 }
@@ -402,7 +416,7 @@ type loadingModel struct {
 }
 
 func (m loadingModel) Init() tea.Cmd {
-	return tea.Batch(func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, loadingTick())
+	return tea.Batch(tea.RequestBackgroundColor, func() tea.Msg { return loadDoneMsg{err: m.work(context.Background())} }, loadingTick())
 }
 
 func loadingTick() tea.Cmd {
@@ -413,7 +427,9 @@ func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
-	case tea.KeyMsg:
+	case tea.BackgroundColorMsg:
+		ObserveBackground(message)
+	case tea.KeyPressMsg:
 		if (message.String() == "ctrl+c" || KeyMatches(m.ctx, "back", message.String())) && !m.interrupted {
 			m.interrupted = true
 			m.cancel()
@@ -430,7 +446,9 @@ func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m loadingModel) View() string {
+func (m loadingModel) View() tea.View { return NewView(m.render()) }
+
+func (m loadingModel) render() string {
 	lineWidth := viewWidth(m.width)
 	height := viewHeight(m.height)
 	styles := stylesForContext(m.ctx)
@@ -478,7 +496,7 @@ func Loading(ctx context.Context, title, detail string, input *os.File, output i
 	model := loadingModel{ctx: ctx, title: title, detail: detail, width: 80, height: 24, cancel: cancel, work: func(context.Context) error { <-workerDone; return workerErr }}
 	programOptions := ProgramOptions(input, output)
 	if ScreenActive() {
-		writeScreen(output, model.View()+"\x1b[H")
+		writeScreen(output, model.render()+"\x1b[H")
 	}
 	final, runErr := tea.NewProgram(model, programOptions...).Run()
 	cancel()
@@ -546,7 +564,7 @@ func (m chooserModel) Init() tea.Cmd {
 	if m.options.Context != nil {
 		cancellation = func() tea.Msg { <-m.options.Context.Done(); return chooserCanceled{} }
 	}
-	return tea.Batch(textinput.Blink, m.refreshTick(), cancellation)
+	return tea.Batch(tea.RequestBackgroundColor, textinput.Blink, m.refreshTick(), cancellation)
 }
 
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -600,16 +618,18 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.refreshTick()
+	case tea.BackgroundColorMsg:
+		ObserveBackground(message)
 	case tea.WindowSizeMsg:
 		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
-		m.input.Width = filterInputWidth(m.width, m.options.RequireFilter)
+		m.input.SetWidth(filterInputWidth(m.width, m.options.RequireFilter))
 		bodyLines := headerLineCount(sanitizeHeader(m.options.Header)) + 2
 		if m.options.Subtitle != "" {
 			bodyLines++
 		}
 		m.choices.rows = max(1, (m.height-2-bodyLines)/itemRowHeight(m.options.Context))
 		m.choices.ensureVisible()
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		key := message.String()
 		// Ctrl+C remains an unconditional interrupt even when a caller or a
 		// preference maps another action to the same key.
@@ -649,42 +669,14 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.choices.Move(1)
 			return m, nil
 		}
-		var command tea.Cmd
-		m.input, command = m.input.Update(message)
-		value := SanitizeText(m.input.Value())
-		if value != m.input.Value() {
-			m.input.SetValue(value)
-		}
-		m.choices.SetFilter(value)
-		if m.options.InputSelection != nil {
-			if selected, ok := m.options.InputSelection(value); ok {
-				m.selected, m.confirmed = selected, true
-				return m, tea.Quit
-			}
-		}
-		return m, command
-	case tea.MouseMsg:
-		if message.Action == tea.MouseActionPress && message.Button == tea.MouseButtonLeft {
+		return m.typed(message)
+	case tea.PasteMsg:
+		return m.typed(message)
+	case tea.MouseClickMsg:
+		if message.Button == tea.MouseLeft {
 			if action, ok := m.options.HeaderActions[message.Y]; ok {
 				m.action, m.confirmed = action, true
 				return m, tea.Quit
-			}
-		}
-		if message.Action == tea.MouseActionMotion {
-			if index, ok := m.itemAtRow(message.Y); ok {
-				m.choices.selected = index
-				m.choices.ensureVisible()
-			}
-			break
-		}
-		switch message.Button {
-		case tea.MouseButtonWheelUp:
-			m.choices.Move(-1)
-		case tea.MouseButtonWheelDown:
-			m.choices.Move(1)
-		case tea.MouseButtonLeft:
-			if message.Action != tea.MouseActionPress {
-				break
 			}
 			index, ok := m.itemAtRow(message.Y)
 			if !ok {
@@ -696,8 +688,38 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
+	case tea.MouseMotionMsg:
+		if index, ok := m.itemAtRow(message.Y); ok {
+			m.choices.selected = index
+			m.choices.ensureVisible()
+		}
+	case tea.MouseWheelMsg:
+		switch message.Button {
+		case tea.MouseWheelUp:
+			m.choices.Move(-1)
+		case tea.MouseWheelDown:
+			m.choices.Move(1)
+		}
 	}
 	return m, nil
+}
+
+// typed feeds typed or pasted text to the filter input.
+func (m chooserModel) typed(message tea.Msg) (tea.Model, tea.Cmd) {
+	var command tea.Cmd
+	m.input, command = m.input.Update(message)
+	value := SanitizeText(m.input.Value())
+	if value != m.input.Value() {
+		m.input.SetValue(value)
+	}
+	m.choices.SetFilter(value)
+	if m.options.InputSelection != nil {
+		if selected, ok := m.options.InputSelection(value); ok {
+			m.selected, m.confirmed = selected, true
+			return m, tea.Quit
+		}
+	}
+	return m, command
 }
 
 func (m chooserModel) itemAtRow(row int) (int, bool) {
@@ -714,9 +736,9 @@ func (m chooserModel) itemAtRow(row int) (int, bool) {
 	return index, index >= m.choices.offset && index < end
 }
 
-var brandColor = lipgloss.AdaptiveColor{Light: "#1447E6", Dark: "#6F8CFF"}
+func (m chooserModel) View() tea.View { return NewView(m.render()) }
 
-func (m chooserModel) View() string {
+func (m chooserModel) render() string {
 	lineWidth := viewWidth(m.width)
 	height := viewHeight(m.height)
 	styles := stylesForContext(m.options.Context)
@@ -781,7 +803,7 @@ func (m chooserModel) View() string {
 		filterLabel = "Search files"
 	}
 	input := m.input
-	input.Width = filterInputWidth(lineWidth, m.options.RequireFilter)
+	input.SetWidth(filterInputWidth(lineWidth, m.options.RequireFilter))
 	input.SetValue(SanitizeText(input.Value()))
 	filterLine := filterLabel + "  " + input.View()
 	filterLine = truncateLine(filterLine, max(1, lineWidth-2))

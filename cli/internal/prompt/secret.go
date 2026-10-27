@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 )
 
@@ -85,15 +85,18 @@ func Secret(options SecretOptions) ([]byte, error) {
 	return result.value, nil
 }
 
-func (m secretModel) Init() tea.Cmd { return textinput.Blink }
+func (m secretModel) Init() tea.Cmd { return tea.Batch(tea.RequestBackgroundColor, textinput.Blink) }
 
 func (m secretModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var command tea.Cmd
 	switch message := message.(type) {
+	case tea.BackgroundColorMsg:
+		selector.ObserveBackground(message)
+		configureInputStyles(&m.input, m.options.Context)
 	case tea.WindowSizeMsg:
 		m.width = promptWidth(message.Width)
-		m.input.Width = promptInputWidth(m.width)
-	case tea.KeyMsg:
+		m.input.SetWidth(promptInputWidth(m.width))
+	case tea.KeyPressMsg:
 		key := message.String()
 		if key == "ctrl+c" || selector.KeyMatches(m.options.Context, "back", key) {
 			m.canceled = true
@@ -120,11 +123,13 @@ func (m secretModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, command
 }
 
-func (m secretModel) View() string {
+func (m secretModel) View() tea.View { return selector.NewView(m.render()) }
+
+func (m secretModel) render() string {
 	width := promptWidth(m.width)
 	styles := promptStyles(m.options.Context)
 	input := m.input
-	input.Width = promptInputWidth(width)
+	input.SetWidth(promptInputWidth(width))
 	input.Placeholder = selector.SanitizeText(input.Placeholder)
 	title := styles.title.Render(promptLine(m.options.Title, width))
 	lines := []string{title}

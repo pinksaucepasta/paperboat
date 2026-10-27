@@ -7,16 +7,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -169,18 +168,18 @@ func TestPreviewConsoleControlsAndErrors(t *testing.T) {
 	model := previewConsoleModel{ctx: context.Background(), lease: preview.Lease{Endpoint: "https://preview.example", State: "ready"}, target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, visibility: "private", input: textinput.New(), perform: func(action, value string) tea.Cmd {
 		return func() tea.Msg { return previewConsoleResult{action: action} }
 	}}
-	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	next, _ := model.Update(tea.KeyPressMsg{Text: string('b')})
 	background := next.(previewConsoleModel)
 	if background.prompt != "background" || background.input.Value() != "30m" {
 		t.Fatal("background duration prompt missing")
 	}
-	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	next, _ = model.Update(tea.KeyPressMsg{Text: string('t')})
 	tunnel := next.(previewConsoleModel)
-	if tunnel.prompt != "tunnel" || !strings.Contains(tunnel.View(), "new URL") {
+	if tunnel.prompt != "tunnel" || !strings.Contains(tunnel.View().Content, "new URL") {
 		t.Fatal("durable transition did not disclose URL change")
 	}
 	model.domains = []string{"app.example.com"}
-	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	next, cmd := model.Update(tea.KeyPressMsg{Text: string('t')})
 	if cmd != nil || !strings.Contains(next.(previewConsoleModel).status, "cannot be moved") {
 		t.Fatal("custom domains silently migrated")
 	}
@@ -190,7 +189,7 @@ func TestPreviewConsoleControlsAndErrors(t *testing.T) {
 	privateCause := errors.New("connector unavailable private-token=do-not-display")
 	next, cmd = model.Update(previewConsoleResult{action: "tunnel", err: privateCause})
 	updated := next.(previewConsoleModel)
-	if cmd != nil || updated.stopped || !strings.Contains(updated.status, "Paperboat could not finish the command.") || strings.Contains(updated.View(), privateCause.Error()) {
+	if cmd != nil || updated.stopped || !strings.Contains(updated.status, "Paperboat could not finish the command.") || strings.Contains(updated.View().Content, privateCause.Error()) {
 		t.Fatal("failure terminated live preview")
 	}
 	if len(faults) != 1 || faults[0].Component != "paperboat-cli" || faults[0].Operation != "preview" || faults[0].Stage != "command" || faults[0].Code != "command_failed" {
@@ -200,7 +199,7 @@ func TestPreviewConsoleControlsAndErrors(t *testing.T) {
 		t.Fatalf("fault included private cause text: %+v", faults[0])
 	}
 	model.busy = true
-	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("busy action disabled cancellation")
 	}
@@ -313,7 +312,8 @@ func TestPreviewConsoleResizesSanitizesAndPreservesActionErrors(t *testing.T) {
 	if model.status != "Try the connector again" || !strings.Contains(model.content(), "waiting_dns") || !strings.Contains(model.content(), "CNAME") {
 		t.Fatal("poll lost domain instructions or action error")
 	}
-	view := model.View()
+	// v2 styles always emit SGR; the injected payload may not add other controls.
+	view := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(model.View().Content, "")
 	if strings.Contains(view, "payload") || strings.Contains(view, "\x1b") {
 		t.Fatal("terminal control sequence was rendered")
 	}
@@ -325,11 +325,12 @@ func TestPreviewConsoleResizesSanitizesAndPreservesActionErrors(t *testing.T) {
 	if len(strings.Split(view, "\n")) > 12 {
 		t.Fatal("view exceeds terminal height")
 	}
-	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	if next.(previewConsoleModel).view.YOffset == 0 {
+	next, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	scrolledView := next.(previewConsoleModel).view
+	if scrolledView.YOffset() == 0 {
 		t.Fatal("long domain content cannot be scrolled")
 	}
-	scrolled := next.(previewConsoleModel).View()
+	scrolled := next.(previewConsoleModel).View().Content
 	for _, required := range []string{"Status", "Try the connector again", "s stop", "Esc/Ctrl+C"} {
 		if !strings.Contains(scrolled, required) {
 			t.Fatalf("scroll hid mandatory content %q: %s", required, scrolled)
@@ -353,22 +354,22 @@ func TestPreviewConsolePreferencesPanelsKeysAndSafetyControls(t *testing.T) {
 			t.Fatalf("missing mandatory content %q", required)
 		}
 	}
-	next, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	next, cmd := model.Update(tea.KeyPressMsg{Text: string('x')})
 	if cmd == nil || cmd().(previewConsoleResult).action != "open" || !next.(previewConsoleModel).busy {
 		t.Fatal("configured open binding was not dispatched")
 	}
-	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	next, _ = model.Update(tea.KeyPressMsg{Text: string('y')})
 	if next.(previewConsoleModel).prompt != "background" {
 		t.Fatal("configured background binding was not dispatched")
 	}
-	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	next, _ = model.Update(tea.KeyPressMsg{Text: string('b')})
 	if next.(previewConsoleModel).prompt != "" {
 		t.Fatal("old binding remains active after override")
 	}
-	for _, key := range []tea.KeyType{tea.KeyEsc, tea.KeyCtrlC} {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEscape}, {Code: 'c', Mod: tea.ModCtrl}} {
 		busy := model
 		busy.busy = true
-		_, cmd := busy.Update(tea.KeyMsg{Type: key})
+		_, cmd := busy.Update(key)
 		if cmd == nil {
 			t.Fatal("busy action removed safety control")
 		}
@@ -389,24 +390,21 @@ func TestPreviewConsolePreferencesPanelsKeysAndSafetyControls(t *testing.T) {
 }
 
 func TestPreviewConsoleThemeAndAccentAreContextLocal(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(previous)
 	doc := preferences.Default()
 	doc.TUI.Theme = "dark"
 	doc.TUI.Accent = "#123456"
 	model := previewConsoleModel{ctx: preferences.WithContext(context.Background(), doc), lease: preview.Lease{Endpoint: "https://preview.example", State: "ready"}, width: 80, height: 24, input: textinput.New()}
-	colored := model.View()
+	colored := model.View().Content
 	if !strings.Contains(colored, "38;2;18;52;86") {
 		t.Fatalf("context accent not applied: %q", colored)
 	}
 	doc.TUI.Theme = "mono"
 	mono := model
 	mono.ctx = preferences.WithContext(context.Background(), doc)
-	if strings.Contains(mono.View(), "38;") || strings.Contains(mono.View(), "48;") {
+	if strings.Contains(mono.View().Content, "38;") || strings.Contains(mono.View().Content, "48;") {
 		t.Fatal("mono theme emitted foreground/background colors")
 	}
-	if model.View() != colored {
+	if model.View().Content != colored {
 		t.Fatal("another console theme changed the original instance")
 	}
 }

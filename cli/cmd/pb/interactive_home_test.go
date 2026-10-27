@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
@@ -116,19 +116,19 @@ func TestHomePromptCancellationIsNavigation(t *testing.T) {
 }
 
 func TestHomeTextResizeAndBack(t *testing.T) {
-	model := homeTextModel{title: "Details", content: strings.Repeat("long output ", 40), view: viewport.New(80, 20), width: 80, height: 24}
+	model := homeTextModel{title: "Details", content: strings.Repeat("long output ", 40), view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)), width: 80, height: 24}
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 24, Height: 10})
 	model = updated.(homeTextModel)
-	for _, line := range strings.Split(model.View(), "\n") {
+	for _, line := range strings.Split(model.View().Content, "\n") {
 		if ansi.StringWidth(line) > 24 {
 			t.Errorf("overflow: %q", line)
 		}
 	}
-	updated, quit := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, quit := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if quit == nil || updated.(homeTextModel).interrupted {
 		t.Fatal("Esc did not go back")
 	}
-	updated, quit = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, quit = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if quit == nil || !updated.(homeTextModel).interrupted {
 		t.Fatal("interrupt lost")
 	}
@@ -136,9 +136,9 @@ func TestHomeTextResizeAndBack(t *testing.T) {
 
 func TestHomeTextFitsTinyTerminal(t *testing.T) {
 	for _, height := range []int{1, 2, 3} {
-		model := homeTextModel{title: "Long title", content: "long result\nnext line", view: viewport.New(80, 20), width: 80, height: 24}
+		model := homeTextModel{title: "Long title", content: "long result\nnext line", view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)), width: 80, height: 24}
 		resized, _ := model.Update(tea.WindowSizeMsg{Width: 3, Height: height})
-		lines := strings.Split(resized.(homeTextModel).View(), "\n")
+		lines := strings.Split(resized.(homeTextModel).View().Content, "\n")
 		if len(lines) > height {
 			t.Fatalf("view has %d rows at height %d", len(lines), height)
 		}

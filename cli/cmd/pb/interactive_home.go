@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
@@ -579,25 +579,27 @@ type homeTextModel struct {
 	interrupted    bool
 }
 
-func (m homeTextModel) Init() tea.Cmd { return nil }
+func (m homeTextModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case tea.BackgroundColorMsg:
+		selector.ObserveBackground(msg)
 	case tea.WindowSizeMsg:
 		m.width = max(1, msg.Width)
 		m.height = max(1, msg.Height)
-		m.view.Width = m.width
-		m.view.Height = max(1, m.height-4)
+		m.view.SetWidth(m.width)
+		m.view.SetHeight(max(1, m.height-4))
 		m.view.SetContent(ansi.Hardwrap(m.content, m.width, true))
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if selector.KeyMatches(m.ctx, "back", msg.String()) || selector.KeyMatches(m.ctx, "select", msg.String()) {
 			return m, tea.Quit
 		}
 		if selector.KeyMatches(m.ctx, "up", msg.String()) {
-			m.view.LineUp(1)
+			m.view.ScrollUp(1)
 			return m, nil
 		}
 		if selector.KeyMatches(m.ctx, "down", msg.String()) {
-			m.view.LineDown(1)
+			m.view.ScrollDown(1)
 			return m, nil
 		}
 		switch msg.String() {
@@ -612,7 +614,8 @@ func (m homeTextModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	m.view, cmd = m.view.Update(message)
 	return m, cmd
 }
-func (m homeTextModel) View() string {
+func (m homeTextModel) View() tea.View { return selector.NewView(m.render()) }
+func (m homeTextModel) render() string {
 	title := selector.TitleStyle(m.ctx).Render(ansi.Truncate(m.title, m.width, "…"))
 	keys := selector.HelpKeys(m.ctx)
 	rendered := title + "\n\n" + m.view.View() + "\n" + ansi.Truncate(keys["up"]+"/"+keys["down"]+" scroll · PgUp/PgDn page · "+keys["back"]+" back", m.width, "…")
@@ -632,7 +635,7 @@ func renderHomeText(command *cobra.Command, title, content string) error {
 		}
 		return -1
 	}, content)
-	view := viewport.New(80, 20)
+	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	view.SetContent(ansi.Hardwrap(content, 80, true))
 	options := append(selector.ProgramOptions(os.Stdin, command.ErrOrStderr()), tea.WithContext(command.Context()))
 	result, err := tea.NewProgram(homeTextModel{ctx: command.Context(), title: title, content: content, view: view, width: 80, height: 24}, options...).Run()

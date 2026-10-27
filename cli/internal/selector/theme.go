@@ -2,10 +2,13 @@ package selector
 
 import (
 	"context"
+	"image/color"
 	"slices"
 	"strings"
+	"sync/atomic"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 )
 
@@ -57,7 +60,25 @@ func stylesForContext(ctx context.Context) styleSet {
 	return styles
 }
 
-func accentColor(tui preferences.TUI) lipgloss.TerminalColor {
+// lightBackground is learned from the terminal inside a running program
+// (tea.RequestBackgroundColor in Init, ObserveBackground in Update); the brand colour assumes dark until then.
+var lightBackground atomic.Bool
+
+// ObserveBackground records the terminal's background from a program message
+// and reports whether it changed, so the model can restyle.
+func ObserveBackground(message tea.Msg) bool {
+	background, ok := message.(tea.BackgroundColorMsg)
+	if !ok {
+		return false
+	}
+	return lightBackground.Swap(!background.IsDark()) != !background.IsDark()
+}
+
+func brandColor() color.Color {
+	return lipgloss.LightDark(!lightBackground.Load())(lipgloss.Color("#1447E6"), lipgloss.Color("#6F8CFF"))
+}
+
+func accentColor(tui preferences.TUI) color.Color {
 	if tui.Theme == "mono" {
 		return nil
 	}
@@ -72,7 +93,7 @@ func accentColor(tui preferences.TUI) lipgloss.TerminalColor {
 	case "terminal":
 		return nil
 	default:
-		return brandColor
+		return brandColor()
 	}
 }
 

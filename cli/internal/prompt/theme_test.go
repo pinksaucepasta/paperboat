@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 )
 
@@ -25,22 +25,22 @@ func TestPromptContextKeysKeepSafetyControlsAndCompactLayout(t *testing.T) {
 		width:   40,
 	}
 	model.input.SetValue("value")
-	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	result := updated.(textModel)
 	if command == nil || !result.confirmed || result.value != "value" {
 		t.Fatalf("custom select confirmed=%t value=%q command=%v", result.confirmed, result.value, command)
 	}
 	model = textModel{options: TextOptions{Context: ctx, Title: "Input", Description: "optional details"}, input: newPromptInput(), width: 40}
-	updated, command = model.Update(tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	updated, command = model.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt})
 	result = updated.(textModel)
 	if command == nil || !result.canceled {
 		t.Fatalf("custom back canceled=%t command=%v", result.canceled, command)
 	}
 	model = textModel{options: TextOptions{Context: ctx, Title: "Input", Description: "optional details"}, input: newPromptInput(), width: 40}
-	if updated, command = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); command == nil || !updated.(textModel).canceled {
+	if updated, command = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); command == nil || !updated.(textModel).canceled {
 		t.Fatal("Ctrl+C safety control was not preserved")
 	}
-	view := result.View()
+	view := result.View().Content
 	if strings.Contains(view, "optional details") {
 		t.Fatalf("compact prompt rendered description: %q", view)
 	}

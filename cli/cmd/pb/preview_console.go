@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -72,20 +72,24 @@ type previewConsoleModel struct {
 }
 
 func (m previewConsoleModel) Init() tea.Cmd {
-	return tea.Batch(m.poll, func() tea.Msg { return previewConsoleEnded{<-m.ended} })
+	return tea.Batch(tea.RequestBackgroundColor, m.poll, func() tea.Msg { return previewConsoleEnded{<-m.ended} })
 }
 func (m previewConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.width > 0 {
 		m.prepareViewport()
 	}
 	switch v := msg.(type) {
+	case tea.BackgroundColorMsg:
+		selector.ObserveBackground(v)
+		return m, nil
 	case tea.WindowSizeMsg:
-		if m.view.Width == 0 {
-			m.view = viewport.New(max(1, v.Width), max(1, v.Height-1))
+		if m.view.Width() == 0 {
+			m.view = viewport.New(viewport.WithWidth(max(1, v.Width)), viewport.WithHeight(max(1, v.Height-1)))
 		}
 		m.width, m.height = max(1, v.Width), max(1, v.Height)
-		m.view.Width, m.view.Height = m.width, max(1, m.height-1)
-		m.input.Width = max(1, m.width-4)
+		m.view.SetWidth(m.width)
+		m.view.SetHeight(max(1, m.height-1))
+		m.input.SetWidth(max(1, m.width-4))
 		return m, nil
 	case previewConsoleEnded:
 		m.stopped = true
@@ -137,7 +141,14 @@ func (m previewConsoleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.outcome = v
 		return m, tea.Quit
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		if m.prompt == "" || m.busy {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(v)
+		return m, cmd
+	case tea.KeyPressMsg:
 		key := v.String()
 		if key == "ctrl+c" {
 			return m, tea.Quit
@@ -319,7 +330,8 @@ func (m previewConsoleModel) frame() ([]string, []string) {
 }
 func (m *previewConsoleModel) prepareViewport() {
 	header, footer := m.frame()
-	m.view.Width, m.view.Height = m.width, max(0, m.height-len(header)-len(footer))
+	m.view.SetWidth(m.width)
+	m.view.SetHeight(max(0, m.height-len(header)-len(footer)))
 	content := m.panelsContent()
 	if m.status != "" {
 		content += "\n" + previewConsoleText(m.status) + "\n"
@@ -332,7 +344,8 @@ func (m *previewConsoleModel) prepareViewport() {
 	}
 	m.view.SetContent(ansi.Hardwrap(content, m.width, true))
 }
-func (m previewConsoleModel) View() string {
+func (m previewConsoleModel) View() tea.View { return tea.NewView(m.render()) }
+func (m previewConsoleModel) render() string {
 	if m.width == 0 {
 		return m.content()
 	}
@@ -345,7 +358,7 @@ func (m previewConsoleModel) View() string {
 		footer[i] = selector.HelpStyle(m.ctx).Render(footer[i])
 	}
 	lines := append([]string{}, header...)
-	if m.view.Height > 0 {
+	if m.view.Height() > 0 {
 		lines = append(lines, m.view.View())
 	}
 	lines = append(lines, footer...)
@@ -417,7 +430,7 @@ func runPreviewConsole(command *cobra.Command, lease preview.Lease, target previ
 	}
 	input := textinput.New()
 	input.CharLimit = 63
-	model := previewConsoleModel{ctx: ctx, lease: lease, target: target, visibility: visibility, domains: domains, input: input, view: viewport.New(80, 23), width: 80, height: 24, perform: perform, poll: poll, ended: ended}
+	model := previewConsoleModel{ctx: ctx, lease: lease, target: target, visibility: visibility, domains: domains, input: input, view: viewport.New(viewport.WithWidth(80), viewport.WithHeight(23)), width: 80, height: 24, perform: perform, poll: poll, ended: ended}
 	result, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(command.InOrStdin()), tea.WithOutput(command.OutOrStdout())).Run()
 	cancel()
 	workers.Wait()

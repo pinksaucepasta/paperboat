@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 )
@@ -66,7 +66,7 @@ func TestChooserCompactDensityUsesOneRowAndHidesDescription(t *testing.T) {
 	if _, ok := model.itemAtRow(4); ok {
 		t.Fatal("compact row below list was clickable")
 	}
-	view := model.View()
+	view := model.View().Content
 	if containsPlain(view, "hidden detail") {
 		t.Fatalf("compact view rendered optional description: %q", view)
 	}

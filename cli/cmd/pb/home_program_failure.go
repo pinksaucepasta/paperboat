@@ -5,7 +5,7 @@ import (
 	"errors"
 	"reflect"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // homeProgramFailure removes only Bubble Tea's cancellation mechanism marker

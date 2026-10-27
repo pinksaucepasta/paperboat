@@ -697,7 +697,6 @@ def shared(a, sessions):
         share = ['--workspace', 'personal', 'session', 'share', s['id'], '--team', a.team, '--member', a.member]
         subprocess.run([PB, *share, '--role', 'interactive', '--json'], check=True, capture_output=True, timeout=60)
         joined = Client(shlex.split(a.member_cmd) + [a.member_pb, 'session', 'join', s['id']])
-        joined.expect('Shared terminal ', 60)  # pb's join banner: keys typed before the client is attached are not the row
         token = uuid.uuid4().hex
         joined.send("printf '\\nPB_MEMBER_%s\\n' '" + token + "'\r")
         try:

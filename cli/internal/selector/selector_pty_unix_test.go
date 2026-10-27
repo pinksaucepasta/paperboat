@@ -58,7 +58,7 @@ func TestChooseRestoresTerminalAndSelects(t *testing.T) {
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("selector did not restore terminal state")
 	}
-	if rendered := output.String(); !strings.Contains(rendered, "\x1b[?1049h") || !strings.Contains(rendered, "\x1b[?2004l") || !strings.Contains(rendered, "\x1b[?1049l") || !strings.HasSuffix(rendered, "\x1b[?25h") {
+	if rendered := output.String(); !strings.Contains(rendered, "\x1b[?1049h") || !strings.Contains(rendered, "\x1b[?2004l") || !strings.Contains(rendered, "\x1b[?1049l") || !strings.HasSuffix(rendered[strings.LastIndex(rendered, "\x1b[?1049l"):], "\x1b[?1006l") || !strings.Contains(rendered[strings.LastIndex(rendered, "\x1b[?1049l"):], "\x1b[?25h") {
 		t.Fatalf("terminal lifecycle output = %q", rendered)
 	}
 }
