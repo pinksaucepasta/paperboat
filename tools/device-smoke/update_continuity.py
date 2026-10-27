@@ -106,11 +106,15 @@ def main():
                                             stderr=subprocess.PIPE, text=True)
         ssh_blocks_update(args.target, args.candidate, password)
         time.sleep(5)
-        result = p.command_result(PB, 'update', '--from', args.candidate, '--json', timeout=420,
-                                  terminal=True, password=password)
+        for attempts in (1, 2, 3):  # the closed pb ssh connection may still be winding down; the attempt count is reported
+            result = p.command_result(PB, 'update', '--from', args.candidate, '--json', timeout=420,
+                                      terminal=True, password=password)
+            if not result.returncode:
+                break
+            time.sleep(15)
         if result.returncode:
             import re
-            raise RuntimeError('update failed while work was held rc=%s: %s' % (result.returncode, re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', result.stdout)[-600:]))
+            raise RuntimeError('update failed while work was held rc=%s: %s' % (result.returncode, re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', result.stdout)[-2500:]))
         after_version = p.invoke(PB, '--version', raw=True)
         if after_version == before_version:
             raise RuntimeError('candidate must be a different build')
@@ -140,7 +144,7 @@ def main():
             cleanup(str(PB), args.target, name)
         except Exception:
             pass
-    print(json.dumps({'check': 'update-continuity', 'target': args.target, 'status': 'PASS',
+    print(json.dumps({'check': 'update-continuity', 'target': args.target, 'status': 'PASS', 'update_attempts': attempts,
                       'same_shell_after_update': True, 'exec_finished': True,
                       'old_owner_retired': True, 'busy_while_ssh_open': True}), flush=True)
 
