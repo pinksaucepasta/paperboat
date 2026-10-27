@@ -43,14 +43,7 @@ def rename(pb, original):
         if machine(pb, machine_id)['alias'] != temporary:
             raise RuntimeError('machine list did not publish the renamed alias')
         invoke(pb, 'exec', temporary, '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
-        for attempt in range(12):  # status reads the daemon snapshot, refreshed from the server's inventory within ~15 s
-            try:
-                status = invoke(pb, 'status', temporary, '--json')
-                break
-            except RuntimeError:
-                if attempt == 11:
-                    raise
-                time.sleep(5)
+        status = invoke(pb, 'status', temporary, '--json')
         if len(status['machines']) != 1 or status['machines'][0]['id'] != machine_id:
             raise RuntimeError('status did not resolve the renamed machine')
     finally:

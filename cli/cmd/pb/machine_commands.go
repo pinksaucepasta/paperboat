@@ -133,6 +133,7 @@ func machineRenameCommand() *cobra.Command {
 		if err != nil {
 			return friendlyCommandError(err)
 		}
+		_ = refreshLocalInventory(ctx.Context) // best effort: the rename is done; this only lets `pb status <new name>` resolve at once
 		if jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": updated, "outcome": "renamed"})
 		}

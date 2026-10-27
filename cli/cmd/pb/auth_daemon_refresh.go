@@ -34,3 +34,20 @@ func refreshSignedInDaemon(ctx context.Context, cfg *config.Config) error {
 	}
 	return client.RefreshInventory(ctx)
 }
+
+// renameInventoryRefreshTimeout bounds the refresh after a rename; the rename itself is already done.
+const renameInventoryRefreshTimeout = 20 * time.Second
+
+// refreshLocalInventory asks the running daemon to re-read the account's machines, so `pb status`
+// shows a change this command just made. Without a running daemon there is nothing to refresh.
+func refreshLocalInventory(ctx context.Context) error {
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		return err
+	}
+	client, err := localapi.NewClient(paths.SocketPath, renameInventoryRefreshTimeout)
+	if err != nil {
+		return err
+	}
+	return client.RefreshInventory(ctx)
+}
