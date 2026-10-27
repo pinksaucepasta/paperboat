@@ -30,6 +30,13 @@ type scriptedMachineSource struct {
 	index   int
 }
 
+func (*scriptedMachineSource) APIHost() string { return "api.example.test" }
+
+// apiDown is the Paperboat API not answering a request.
+func apiDown(path string) error {
+	return &url.Error{Op: "Get", URL: "https://api.example.test" + path, Err: context.DeadlineExceeded}
+}
+
 type completionMachineSource struct{ *scriptedMachineSource }
 
 func (s completionMachineSource) ListCompletionItems(context.Context, []api.UserMachine) ([]localapi.CompletionItem, error) {
@@ -437,7 +444,7 @@ func TestInventoryPublishesOnlySemanticTransitionsAndPreservesLastGoodMachines(t
 		return now.Add(time.Duration(clockCalls) * time.Minute)
 	}
 	machines := []api.UserMachine{{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 3}}
-	unavailable := errors.New("control plane unavailable")
+	unavailable := apiDown("/v1/machines")
 	source := &scriptedMachineSource{results: []machineResult{{machines: machines}, {machines: machines}, {err: unavailable}, {err: unavailable}, {machines: machines}, {machines: machines}}}
 	inventory, store := newTestInventory(t, source, clock)
 
@@ -701,6 +708,8 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 		"server unavailable":  {fmt.Errorf("coordinator: %w", &api.APIError{Status: 503, Code: "temporarily_unavailable"}), "control_plane_unavailable"},
 		"local guard failure": {errors.New("apply local machine access: machine guard refused"), "local_access_unavailable"},
 		"server refused":      {&api.APIError{Status: 403, Code: "forbidden"}, "local_access_unavailable"},
+		// A peer or local service not answering is not the control plane (hp 2026-10-27: an update rolled back on it).
+		"peer deadline": {fmt.Errorf("apply browser routes: %w", &url.Error{Op: "Get", URL: "http://100.64.0.7:38080/health", Err: context.DeadlineExceeded}), "local_access_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store, err := localapi.NewSnapshotStore(nil)
@@ -1038,5 +1047,36 @@ func TestADegradedReadinessAlwaysNamesItsHealthItem(t *testing.T) {
 	machine.Capabilities.FileReceive.Observed = true
 	if status := mapMachines([]api.UserMachine{machine})[0]; len(status.Health) != 0 || status.SSHReadiness != "ready" {
 		t.Fatalf("a ready machine: ssh=%s health=%+v", status.SSHReadiness, status.Health)
+	}
+}
+
+// A machine list that fails because the API did not answer is the control plane; one that fails in a local step
+// (configuration, credentials, alias validation) is named as such, so the update gate does not wait on the server
+// for it (hp, 2026-10-27).
+func TestInventoryListingFailureNamesTheControlPlaneOnlyForTheAPI(t *testing.T) {
+	for name, test := range map[string]struct {
+		err  error
+		want string
+	}{
+		"API deadline":      {apiDown("/v1/machines"), "control_plane_unavailable"},
+		"API unavailable":   {fmt.Errorf("list machines: %w", &api.APIError{Status: 503, Code: "temporarily_unavailable"}), "control_plane_unavailable"},
+		"local credentials": {errors.New("read the daemon credential: permission denied"), "machine_list_unavailable"},
+		"peer request":      {&url.Error{Op: "Get", URL: "https://peer.example.test/v1/x", Err: context.DeadlineExceeded}, "machine_list_unavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, err := localapi.NewSnapshotStore(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inventory, err := NewInventory(InventoryConfig{Source: &scriptedMachineSource{results: []machineResult{{err: test.err}}}, Store: store, RefreshInterval: time.Second, RequestTimeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = inventory.Refresh(context.Background())
+			snapshot, err := store.Snapshot(context.Background())
+			if err != nil || snapshot.DaemonState != "degraded" || len(snapshot.Health) != 1 || snapshot.Health[0].Code != test.want {
+				t.Fatalf("snapshot=%#v err=%v, want degraded with %s", snapshot, err, test.want)
+			}
+		})
 	}
 }

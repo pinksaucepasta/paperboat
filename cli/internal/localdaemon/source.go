@@ -17,6 +17,15 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
+// APIHost is the host of ServerURL, against which a failed request counts as the control plane being unavailable.
+func (s AuthenticatedMachineSource) APIHost() string {
+	target, err := url.Parse(s.ServerURL)
+	if err != nil {
+		return ""
+	}
+	return target.Host
+}
+
 type AuthenticatedMachineSource struct {
 	ServerURL       string
 	Auth            config.AuthSource

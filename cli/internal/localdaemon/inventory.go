@@ -318,7 +318,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				// certificates). When the server did not answer, the machine's local access is not what
 				// is broken; saying so sent people to their local settings and made updates treat a slow
 				// server as a broken installation (lanel-a, 2026-10-23).
-				if controlPlaneUnreachable(reconcileErr) {
+				if controlPlaneUnreachable(reconcileErr, i.apiHost()) {
 					desired.Health = controlPlaneUnavailableHealth(current, now)
 				} else {
 					desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
@@ -332,6 +332,15 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		} else {
 			desired.DaemonState = "degraded"
 			desired.Health = controlPlaneUnavailableHealth(current, now)
+			if !controlPlaneUnreachable(sourceErr, i.apiHost()) {
+				// A local step of the listing failed (configuration, credentials, alias validation), not the server.
+				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+					Code:     "machine_list_unavailable",
+					Severity: "error",
+					Title:    "Paperboat could not read your machine list on this computer",
+					Recovery: "Run pb doctor, then repair the installation if it reports a problem",
+				})}
+			}
 			if inventoryAuthenticationRequired(sourceErr) {
 				desired.DaemonState = "awaiting_enrollment"
 				desired.Machines = nil
@@ -369,6 +378,14 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	return refreshErr
 }
 
+// apiHost is the configured Paperboat API's host, from the machine source.
+func (i *Inventory) apiHost() string {
+	if source, ok := i.source.(interface{ APIHost() string }); ok {
+		return source.APIHost()
+	}
+	return ""
+}
+
 func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time) []localapi.HealthItem {
 	return []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
 		Code:     "control_plane_unavailable",
@@ -395,10 +412,14 @@ func healthSince(current *localapi.Snapshot, now time.Time, item localapi.Health
 // request in the chain) is not the control plane. The reconcile's only net/http requests go to the
 // server; the machine guard speaks its own protocol over a unix socket (*net.OpError). If a local
 // dependency ever moves to HTTP, this must look at the request's host instead of the error type.
-func controlPlaneUnreachable(err error) bool {
+// controlPlaneUnreachable reports whether err is the Paperboat API not answering: a request to apiHost that
+// failed in transport, or an API answer of 408, 429 or 5xx. A failed request to any other host (a peer, a local
+// service) is not the control plane: labeling it so made a healthy update roll back (hp, 2026-10-27).
+func controlPlaneUnreachable(err error, apiHost string) bool {
 	var request *url.Error
 	if errors.As(err, &request) {
-		return true
+		target, parseErr := url.Parse(request.URL)
+		return parseErr == nil && apiHost != "" && strings.EqualFold(target.Host, apiHost)
 	}
 	var response *api.APIError
 	return errors.As(err, &response) && (response.Status == 408 || response.Status == 429 || response.Status >= 500)

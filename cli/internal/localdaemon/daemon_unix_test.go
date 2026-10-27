@@ -299,7 +299,7 @@ func TestDaemonOwnsStaleSocketCleanupAfterLockAcquisition(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := &scriptedMachineSource{results: []machineResult{{err: errors.New("offline")}}}
+	source := &scriptedMachineSource{results: []machineResult{{err: apiDown("/v1/machines")}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
