@@ -186,32 +186,27 @@ func (i *Inventory) Run(ctx context.Context) error {
 	refresh()
 	timer := time.NewTimer(i.refreshInterval)
 	defer timer.Stop()
+	// soon refreshes now or within requestedRefreshSpacing, replacing a later pending refresh: an inventory event
+	// just before a local request or an access change armed the 15 s event spacing, and the request waited for it.
+	soon := func() <-chan time.Time {
+		if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
+			return time.After(wait)
+		}
+		refresh()
+		return pending
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
-			if pending != nil {
-				continue
-			}
-			if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
-				pending = time.After(wait)
-				continue
-			}
-			refresh()
+			pending = soon()
 		case <-i.accessEvents.Changed():
 			// An access change (a machine shared with this account, a grant, the team's private access setting)
 			// shows within requestedRefreshSpacing, not the event spacing: such changes are rare, and a member
 			// waited up to ~30 s to reach a machine just shared with them (F9-04, hp 2026-10-27). Prior art:
 			// Tailscale pushes netmap changes to the client at once (control/controlclient map poll).
-			if pending != nil {
-				continue
-			}
-			if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
-				pending = time.After(wait)
-				continue
-			}
-			refresh()
+			pending = soon()
 		case <-i.events.Changed():
 			// A wake while the stream is unhealthy is its refused wait (this machine revoked or signed out):
 			// refresh now, so pb status says so at once instead of after the spacing (C036).

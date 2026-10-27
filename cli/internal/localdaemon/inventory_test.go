@@ -921,4 +921,17 @@ func TestInventoryRefreshesAtOnceForAnAccessChange(t *testing.T) {
 	case <-time.After(requestedRefreshSpacing + 2*time.Second):
 		t.Fatal("an access change waited for the event spacing")
 	}
+	// A setting flip publishes inventory and machine_access together: the inventory event arms the hour-long
+	// spacing first, and the access change must still not wait for it (F9-04: 9-20 s after a setting flip).
+	// An off->on pair: each flip is inventory then machine_access, and each refreshes within the request spacing.
+	for _, flip := range []string{"setting off", "setting on"} {
+		plane.Publish(machineevents.TopicInventory)
+		time.Sleep(200 * time.Millisecond)
+		plane.Publish(machineevents.TopicMachineAccess)
+		select {
+		case <-refreshed:
+		case <-time.After(requestedRefreshSpacing + 2*time.Second):
+			t.Fatalf("%s: the access change waited for the refresh an inventory event had armed", flip)
+		}
+	}
 }
