@@ -6,9 +6,9 @@ by itself; the wipe needs the confirmation word.
 | Script | Does |
 |---|---|
 | `verify-backup.sh [dump]` | Restores a dump into a scratch Postgres container (same image as prod, tmpfs) and compares row counts of the key tables with the live database. Exit 1 on any difference. |
-| `export-config.sh <dump> <dir>` | From a scratch restore, writes the rows a wipe keeps (see below) and the fixture rows as COPY files. Prod is only read. |
-| `import-config.sh <dir> [container] [db]` | Into a freshly migrated database: config rows (triggers off), fixture rows (triggers on), the team's paid entitlement as test data (period now-1h .. now+90d), an orphan-row check over every foreign key, counts. |
-| `rehearse.sh [dump]` | The whole rebuild in a scratch container against a restored copy of prod: migrate an EMPTY database with the live server image, import, verify (`team_paid_entitled` must be true). Prod is only read. Run it before the wipe. |
+| `export-config.sh <dump> <dir>` | From a scratch restore, writes the infrastructure rows a wipe keeps (see below) as COPY files. Prod is only read. |
+| `import-config.sh <dir> [container] [db]` | Into a freshly migrated database: the config rows (triggers off), an orphan-row check over every foreign key, counts. |
+| `rehearse.sh [dump]` | The whole rebuild in a scratch container against a restored copy of prod: migrate an EMPTY database with the live server image, import, then run `final_fixtures.py` against it for two fresh accounts (create, repeat, teardown). Prod is only read. Run it before the wipe. |
 | `wipe-and-rebuild.sh WIPE-PROD-DATABASE` | stop servers, fresh backup, verify it restores, export, drop and recreate `paperboat`, migrate with the live image, import, start the server, health checks. After the drop, any failure restores the backup. |
 
 ## What survives, what is wiped
@@ -20,16 +20,17 @@ touched and keep their registration: `control_tunnel_nodes`, `selfhost_installat
 two platform wildcard certificate records with their targets (re-issuing would spend Let's Encrypt rate limit). Secrets,
 `.env`, `server.env`, WorkOS and Stripe settings and images are never touched.
 
-Fixture, inserted as a first sign-in and team creation would: the owner and active members of the paid team
-(`PAPERBOAT_SMOKE_TEAM`, default `paperboat-smoke-paid`) with their identity rows, the team, its active membership and its
-paid billing workspace.
-
 Everything else is wiped: every machine, CLI session and token (each test machine must be uninstalled and re-paired),
-ENV vaults, tunnels, previews, audit and usage history, all other teams and accounts.
+ENV vaults, tunnels, previews, audit and usage history, every team and account. The final re-check uses only fresh
+throwaway accounts; `tools/device-smoke/final_fixtures.py --email E [--member M ...]` (copy here as `final_fixtures.py`)
+gives each its paid team after its first sign-in and prints `{"env": {"PAPERBOAT_SMOKE_TEAM": "<team>"}}`;
+`--teardown` makes the other members inactive so the account can be deleted (the product deletes a team left with its
+owner alone when the account is deleted). It is idempotent; the entitlement is granted as test data (team-pro, quantity
+10, period now-1h .. now+90d), the same rows a completed team checkout leaves.
 
 ## Order
 
 1. `./final-recheck/rehearse.sh` (must print `REHEARSAL-OK`).
 2. Tell the test lanes to stop; wipe each device afterwards (the wipe makes every machine's server record disappear).
 3. `./final-recheck/wipe-and-rebuild.sh WIPE-PROD-DATABASE`.
-4. Sign in with the owner and teammate accounts; `pb pair` the devices.
+4. The runner signs up its throwaway accounts, calls `final_fixtures.py --email E` for each, and pairs the devices.

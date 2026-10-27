@@ -15,7 +15,7 @@ control_tunnel_nodes selfhost_installations control_usage_verification_keys rela
 edge_dns_provider_budgets workos_event_cursor"
 
 # Tables whose row counts must match exactly between the live database and its restored backup.
-KEY_TABLES="users user_identities teams team_members billing_workspaces $CONFIG_TABLES"
+KEY_TABLES="users teams billing_workspaces $CONFIG_TABLES"
 
 scratch_start() { # prints the container name
   name=pb-scratch-$$
@@ -27,23 +27,12 @@ scratch_start() { # prints the container name
   echo "$name"
 }
 
-SMOKE_TEAM=${PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}
-
 # Platform wildcard certificates are kept too (re-issuing them would spend Let's Encrypt rate limit).
-# <table>|<row filter> (filter is a WHERE body evaluated in the source database), config first, parents first.
+# <table>|<row filter> (filter is a WHERE body evaluated in the source database), parents first.
 config_sets() {
   for t in $CONFIG_TABLES; do echo "$t|true"; done
   echo "tunnel_certificate_records|certificate_reference IN (SELECT certificate_reference FROM paperboat.tunnel_platform_certificate_targets)"
   echo "tunnel_platform_certificate_targets|true"
-}
-# The fixture: the paid team, its owner and active members, and their first sign-in rows. Inserted with triggers on.
-fixture_sets() {
-  accounts="SELECT owner_account FROM paperboat.teams WHERE team_id='$SMOKE_TEAM' UNION SELECT account_id FROM paperboat.team_members WHERE team_id='$SMOKE_TEAM' AND active"
-  echo "users|id IN ($accounts)"
-  echo "user_identities|user_id IN ($accounts)"
-  echo "teams|team_id='$SMOKE_TEAM'"
-  echo "team_members|team_id='$SMOKE_TEAM' AND active"
-  echo "billing_workspaces|team_id='$SMOKE_TEAM'"
 }
 # insertable columns of a table in database $2 of container $1
 columns() {
