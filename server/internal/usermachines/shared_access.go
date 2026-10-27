@@ -254,9 +254,24 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	if err != nil {
 		return err
 	}
-	// The host's access list changed, and team access can come from another account, new to its signed peer
-	// network: wake both refreshes now instead of leaving the connection to wait for the periodic ones.
+	// A host admits exec and terminal from its standing machine_access rule (peersessions offlineCapabilities), and an
+	// account's own machines are always in each other's peer network: a new personal exec or terminal session needs
+	// no host wake, and waking per exec would put a register and a config refresh on the host for each one. Team access
+	// can come from an account new to the host's signed peer network, and every other capability still needs a
+	// per-session scope: those wake both refreshes now instead of leaving the connection to wait for the periodic ones.
+	if !wakePeers && onlyStandingRuleCapabilities(in.Capabilities) {
+		return nil
+	}
 	return s.publishAccessSession(ctx, []string{in.UserMachineID}, wakePeers)
+}
+
+func onlyStandingRuleCapabilities(capabilities []string) bool {
+	for _, capability := range capabilities {
+		if capability != "exec" && capability != "terminal" {
+			return false
+		}
+	}
+	return true
 }
 
 // publishAccessSession wakes the hosts of a just-committed access session. It runs after the commit, not in the

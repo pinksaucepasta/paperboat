@@ -106,8 +106,10 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 			t.Errorf("access session while the team lock is held: %v", err)
 		}
 	}
-	if after := generation(); after <= before {
-		t.Errorf("machine_access topic generation %d -> %d: new access sessions did not wake the host", before, after)
+	// The 10 team-member sessions wake the host (their account may be new to its peer network); the 10 personal
+	// exec sessions are admitted from the host's standing rule and must not.
+	if after := generation(); after != before+10 {
+		t.Errorf("machine_access topic generation %d -> %d: want exactly the 10 team sessions to wake the host, not the 10 personal exec sessions", before, after)
 	}
 	// Sessions of one machine must not conflict with each other: they used to replay ~4 times each on the machine's
 	// topic row (bumped by an insert trigger), and 20 at once ran out of retries (40001 to the caller).
@@ -117,5 +119,46 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 	close(release)
 	if err := <-holder; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A personal exec or terminal session leaves the host alone; a capability that needs a per-session scope still wakes it (team access is covered by the network lifecycle test).
+func TestPostgresAccessSessionWakesTheHostOnlyForCapabilitiesThatNeedAScope(t *testing.T) {
+	store := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	owner, machine := "aw_owner_"+suffix, "aw_machine_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active')`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host','file_receive'],ARRAY['terminal_host','file_receive'])`, machine, owner, "env_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, audit.NewWriter(store), Policy{}, nil)
+	generation := func() (n int64) {
+		_ = store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'),0)`, machine).Scan(&n)
+		return n
+	}
+	for i, test := range []struct {
+		capabilities []string
+		wakes        bool
+	}{{[]string{"exec"}, false}, {[]string{"terminal"}, false}, {[]string{"terminal", "exec"}, false}, {[]string{"files"}, true}, {[]string{"terminal", "files"}, true}} {
+		before := generation()
+		id := fmt.Sprintf("session_aw_%s_%d", suffix, i)
+		if err := service.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: owner, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + owner, HttpBaseUrl: "https://example.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: test.capabilities, OperationID: id}, machineCredentialExternal); err != nil {
+			t.Fatalf("%v: %v", test.capabilities, err)
+		}
+		if woke := generation() != before; woke != test.wakes {
+			t.Errorf("capabilities %v: host woken=%v, want %v", test.capabilities, woke, test.wakes)
+		}
+		// Ending a session always wakes the host, whatever it carried: the revoke must reach it at once.
+		before = generation()
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET state='revoked', revoked_at=now(), updated_at=now(), revocation_reason='test' WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if generation() == before {
+			t.Errorf("capabilities %v: revoking the session did not wake the host", test.capabilities)
+		}
 	}
 }
