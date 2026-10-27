@@ -13,7 +13,8 @@
 #   scheduled one machine installed with the PUBLISHED one-liner, then update_scheduled.py: `pb update settings` disables and
 #            enables the automatic update, and at the configured time the machine reaches the newest official release by
 #            itself (about 15 minutes). The official Latest must be older than the newest release: cut the candidate as a
-#            release first; otherwise this FAILS with that reason.
+#            release first; otherwise this FAILS with that reason. SCHEDULED_FROM_RELEASE=<older release> installs that
+#            release instead of the newest (to test before a newer release exists).
 #
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and the
 # containers removed on every exit path; enrollment tokens stay in files.
@@ -28,7 +29,7 @@ MACHINE_IDS=
 
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-pb /tmp/$T-ds.tgz" || true
+  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-pb /tmp/$T-rel /tmp/$T-ds.tgz" || true
   for id in $MACHINE_IDS; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -56,14 +57,30 @@ EOF
 fi
 
 if [ "$MODE" = scheduled ]; then
-  out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_BINARY=/tmp/$T-rel T=$T ALIAS=$ALIAS REL=${SCHEDULED_FROM_RELEASE:-}"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 start_ct $T
 sudo -n docker exec $T bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
 ${FRESH_MINT:-$HOME/.local/bin/pb} machine add --name $ALIAS --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["linux_macos_command"])' > /tmp/$T-cmd
-sudo -n docker cp /tmp/$T-cmd $T:/home/pbt/install-cmd; rm -f /tmp/$T-cmd
-$X $T bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
+if [ -n "$REL" ]; then
+  # An older official release: the published one-liner only installs the newest, so take the older release's
+  # asset from the same place the installer downloads it, and install and pair it like any supplied binary.
+  url=$(python3 - "$T" <<'PY'
+import re, subprocess
+import sys
+cmd = open("/tmp/" + sys.argv[1] + "-cmd").read()
+script = subprocess.run(["curl", "-fsSL", re.search(r"'(https?://[^']+)'", cmd).group(1)], capture_output=True, text=True, check=True).stdout
+print(re.search(r"product_url='([^']*linux-amd64)'", script).group(1))
+PY
+)
+  curl -fsSL -o /tmp/$T-rel "$(sed -E "s#/download/[^/]+/#/download/$REL/#" <<<"$url")"
+  rm -f /tmp/$T-cmd
+  pair_user $T pbt 1000 $ALIAS
+else
+  sudo -n docker cp /tmp/$T-cmd $T:/home/pbt/install-cmd; rm -f /tmp/$T-cmd
+  $X $T bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
+fi
 $X $T python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
 sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
 $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
