@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
@@ -183,14 +184,17 @@ func sourceIdentifier(value string, maximum int) string {
 }
 
 // processDiagnosticsDirectory is the user's state directory, except for the
-// root update service and its activation helper: they run under the service
-// manager with no HOME and own their own state root, so their diagnostics live
-// there instead of failing to save at every update step.
+// root update service and its activation helper, and the root machine guard:
+// they run under the service manager with no HOME and own their own state root,
+// so their diagnostics live there instead of failing to save at every start.
 func processDiagnosticsDirectory(command *cobra.Command) (string, error) {
 	if command != nil && command.Name() == "__runtime-updated" {
 		if root := os.Getenv("PAPERBOAT_UPDATE_STATE_ROOT"); filepath.IsAbs(root) && filepath.Clean(root) == root {
 			return filepath.Join(root, "diagnostics"), nil
 		}
+	}
+	if command != nil && command.Name() == "run" && command.Parent() != nil && command.Parent().Name() == "machine-guard" && machineguard.DefaultStateDir != "" {
+		return filepath.Join(machineguard.DefaultStateDir, "diagnostics"), nil
 	}
 	paths, err := currentLocalDaemonPaths()
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
 func TestTeardownDiagnosticsDoesNotOpenRemovedStorage(t *testing.T) {
@@ -57,5 +58,25 @@ func TestUpdateServiceDiagnosticsUseItsOwnStateRoot(t *testing.T) {
 	closeDiagnostics()
 	if stderr.Len() == 0 {
 		t.Fatal("ordinary commands must keep using the user's state directory")
+	}
+}
+
+// The root machine guard runs with no HOME too; its diagnostics belong under
+// its own state directory, not the user's.
+func TestMachineGuardDiagnosticsUseItsOwnStateDirectory(t *testing.T) {
+	if machineguard.DefaultStateDir == "" {
+		t.Skip("machine guard is not supported on this platform")
+	}
+	t.Setenv("HOME", "")
+	command, _, err := newRootCommand().Find([]string{"daemon", "machine-guard", "run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := processDiagnosticsDirectory(command)
+	if err != nil {
+		t.Fatalf("machine guard diagnostics need HOME: %v", err)
+	}
+	if want := filepath.Join(machineguard.DefaultStateDir, "diagnostics"); directory != want {
+		t.Fatalf("machine guard diagnostics directory = %q, want %q", directory, want)
 	}
 }
