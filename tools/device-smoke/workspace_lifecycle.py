@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Verify selected workspace isolation using an empty temporary team, then remove it."""
+"""Verify selected workspace isolation using an empty team: the retained PAPERBOAT_SMOKE_TEAM (team creation needs a
+paid Checkout), else a temporary one that is removed again."""
 import json
+import os
 from pathlib import Path
 import uuid
 
@@ -11,13 +13,15 @@ from pairing_lifecycle import invoke
 def main():
     pb = Path.home() / '.local/bin/pb'
     enrolled = registration()
-    team = 'smoke-f2-' + uuid.uuid4().hex[:12]
+    retained = os.environ.get('PAPERBOAT_SMOKE_TEAM', '')
+    team = retained or 'smoke-f2-' + uuid.uuid4().hex[:12]
     personal = invoke(pb, '--workspace', 'personal', 'machine', 'list', '--json')
     expected = {machine['id'] for machine in personal['machines']}
     created = False
     try:
-        invoke(pb, 'team', 'create', team, '--json')
-        created = True
+        if not retained:
+            invoke(pb, 'team', 'create', team, '--json')
+            created = True
         invoke(pb, 'switch', team, raw=True)
         for command in ('machine', 'environments'):
             args = ('machine', 'list', '--json') if command == 'machine' else ('environments', '--json')

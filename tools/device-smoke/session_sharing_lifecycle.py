@@ -61,7 +61,7 @@ def main():
                 raise RuntimeError('participants did not identify the live owned terminal')
             if not any(p['account_id'] == registration()['account_id'] for p in state['participants']):
                 raise RuntimeError('live participant owner identity was missing')
-        result = command_result(pb, *prefix, 'session', 'shared', '--json')
+        result = command_result(pb, *prefix, 'session', 'shared', '--all', '--json')
         if result.returncode:
             raise RuntimeError('shared catalog failed; private diagnostics: ' + str(
                 command_diagnostic(result.args, result.stdout, result.stderr)))
