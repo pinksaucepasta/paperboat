@@ -24,6 +24,8 @@ export type BrowserTerminalEvent = {
   screen_sequence?: string
   capability?: string
   payload?: unknown
+  /** `probe` events: the request id `probe()` returned. */
+  request_id?: string
 }
 
 export type BrowserTerminalAPI = {
@@ -52,6 +54,8 @@ export type BrowserTerminalAPI = {
   ): Promise<{ result?: unknown; error?: string; message?: string }>
   /** This window gained focus: the machine sizes the shell to the typing window that was last active. */
   activity(id: string): Promise<void | { error: string; message: string }>
+  /** Asks the machine for a heartbeat reply, delivered as a `probe` event carrying the returned request id. */
+  probe(id: string): Promise<{ request_id: string } | { error: string; message: string }>
   leave(id: string): void
   dispose(): void
 }
@@ -75,7 +79,7 @@ function nextTask(run: () => void) {
 }
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
-  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261027-flow4`, {
+  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261027-probe`, {
     type: "module",
     name: "paperboat-terminal",
   })
@@ -223,6 +227,7 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
     },
     resize: (id, columns, rows) => call("resize", [id, columns, rows]),
     activity: (id) => call("activity", [id]),
+    probe: (id) => call("probe", [id]),
     ack: (id, next) => call("ack", [id, next]),
     hashFile: (file) => call("hashFile", [file]),
     fileRequest: (id, request) => {

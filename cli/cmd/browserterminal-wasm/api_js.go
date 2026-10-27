@@ -181,6 +181,21 @@ func apiCursor(_ js.Value, args []js.Value) any {
 	return js.ValueOf(map[string]any{"request_id": requestID})
 }
 
+func apiProbe(_ js.Value, args []js.Value) any {
+	if len(args) != 1 {
+		return errorObject("invalid_request", "Terminal probe is invalid.")
+	}
+	connection := getConnection(args[0].String())
+	if connection == nil {
+		return errorObject("connection_closed", "The encrypted terminal connection is closed.")
+	}
+	requestID, err := connection.sendProbe()
+	if err != nil {
+		return errorObject("probe_failed", "The terminal connection could not be checked.")
+	}
+	return js.ValueOf(map[string]any{"request_id": requestID})
+}
+
 func apiLeave(_ js.Value, args []js.Value) any {
 	if len(args) == 0 {
 		return nil

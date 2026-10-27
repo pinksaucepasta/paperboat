@@ -28,6 +28,7 @@ import {
   type MobileKey,
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
+import { createLivenessProbe } from "@/lib/terminal/liveness-probe"
 import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 
@@ -418,6 +419,8 @@ export function useTerminalConnection({
     [setPhaseValue],
   )
 
+  const probeRef = useRef<ReturnType<typeof createLivenessProbe> | null>(null)
+
   // Renderer: one Ghostty core and wterm per session.
   useEffect(() => {
     const host = hostRef.current
@@ -496,8 +499,29 @@ export function useTerminalConnection({
       apiRef.current?.leave(id)
       scheduleReconnect(0)
     }
+    // The tab shown again or the window focused: the machine must answer within 5 s, else the connection died
+    // without a close (sleep, VPN change, black hole) and is replaced at once, like a network that came back.
+    const probe = createLivenessProbe(
+      async () => {
+        const browser = apiRef.current
+        if (!browser || !connectionIDRef.current || phaseRef.current !== "attached") return undefined
+        const sent = await browser.probe(connectionIDRef.current)
+        return "request_id" in sent ? sent.request_id : undefined
+      },
+      () => {
+        const id = connectionIDRef.current
+        if (!id || phaseRef.current !== "attached") return
+        connectionIDRef.current = ""
+        apiRef.current?.leave(id)
+        setError("The machine stopped answering.")
+        scheduleReconnect(0)
+      },
+    )
+    probeRef.current = probe
     const onActive = () => {
-      if (document.visibilityState === "visible") markActive()
+      if (document.visibilityState !== "visible") return
+      markActive()
+      void probe.start()
     }
     const onPasteCapture = (event: ClipboardEvent) => {
       const selection = classifyFilePaste(event.clipboardData)
@@ -638,6 +662,8 @@ export function useTerminalConnection({
       disposed = true
       setReady(false)
       observer?.disconnect()
+      probe.clear()
+      probeRef.current = null
       window.removeEventListener("focus", onActive)
       window.removeEventListener("offline", onOffline)
       window.removeEventListener("online", onOnline)
@@ -706,6 +732,8 @@ export function useTerminalConnection({
           setParticipants(payload.participants)
         return
       }
+      if (event.type === "probe") probeRef.current?.answered(event.request_id)
+      if (event.type === "output") probeRef.current?.answered()
       if (event.type === "identity-verified") {
         const current = sessionRef.current
         if (

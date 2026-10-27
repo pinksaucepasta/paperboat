@@ -119,6 +119,7 @@ func main() {
 	api.Set("resync", js.FuncOf(apiResync))
 	api.Set("ack", js.FuncOf(apiAck))
 	api.Set("cursor", js.FuncOf(apiCursor))
+	api.Set("probe", js.FuncOf(apiProbe))
 	api.Set("hashFile", js.FuncOf(apiHashFile))
 	api.Set("fileRequest", js.FuncOf(apiFileRequest))
 	api.Set("inspectorRequest", js.FuncOf(apiInspectorRequest))

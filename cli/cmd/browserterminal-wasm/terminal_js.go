@@ -502,6 +502,12 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			connection.emit("event", map[string]any{"type": frame.Type, "capability": frame.Capability, "payload": json.RawMessage(frame.Payload)})
 			continue
 		}
+		if frame.Type == "heartbeat" {
+			if strings.HasPrefix(frame.RequestID, "probe_") {
+				connection.emit("probe", map[string]any{"request_id": frame.RequestID})
+			}
+			continue
+		}
 		connection.emit("frame", map[string]any{"type": frame.Type, "capability": frame.Capability, "payload": json.RawMessage(frame.Payload)})
 	}
 }
@@ -770,6 +776,30 @@ func (connection *browserTerminal) writeLoop(writer io.Writer, ws *browserWSConn
 			connection.writes.sentACK(sequence)
 		}
 	}
+}
+
+// sendProbe checks the connection when the page becomes visible, focused or online: the host
+// answers a heartbeat whose request id starts with probe_ at once, ahead of queued output, and the
+// reply arrives as a "probe" event. The caller's deadline starts when it sends, so time spent hidden
+// never counts.
+func (connection *browserTerminal) sendProbe() (string, error) {
+	requestID, err := randomID("probe")
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(protocol.Frame{Type: "heartbeat", RequestID: requestID, Version: protocol.ProtocolVersion})
+	if err != nil {
+		return "", err
+	}
+	connection.mu.Lock()
+	defer connection.mu.Unlock()
+	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
+		return "", net.ErrClosed
+	}
+	if err := connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5}); err != nil {
+		return "", err
+	}
+	return requestID, nil
 }
 
 func (connection *browserTerminal) sendCursor() (string, error) {
