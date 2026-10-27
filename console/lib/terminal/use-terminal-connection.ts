@@ -778,6 +778,9 @@ export function useTerminalConnection({
           writeTerminal("\x1bc")
           // The reset also restores Ghostty's default palette.
           writeTerminal(paletteSequence(themeRef.current))
+          // The reset emptied the scrollback, but the renderer still holds the rows it drew for the old one and
+          // reuses them by position: a size change makes it rebuild every row (the terminal is empty here).
+          terminal.resize(event.columns, event.rows + 1)
           terminal.resize(event.columns, event.rows)
           writeTerminal(event.screen)
           displaySequenceRef.current = screenSequence

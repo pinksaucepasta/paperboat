@@ -130,6 +130,8 @@ try {
       return { count: numbers.size, min: Math.min(...numbers), max: Math.max(...numbers), duplicated, outOfOrder, garbled, sample }
     })()`)
     log(seen.count === ticks && seen.min === 1 && seen.max === ticks && seen.duplicated === 0, `all ${ticks} lines printed while hidden are in the scrollback, none twice in a view`, `${seen.count} distinct, ${seen.duplicated} duplicated`)
+    const tail = (await evaluate(page, `(document.querySelector(".terminal-host")?.innerText ?? "").split("\\n").filter((l) => l.trim()).slice(-8).map((l) => l.slice(0, 60)).join(" | ")`))
+    console.log(`INFO last rows: ${JSON.stringify(tail)}`)
     // Rows the renderer shows sparsely or with stale cells after a screen restore are reported, not failed here.
     console.log(`INFO scrollback: ${seen.outOfOrder} non-consecutive neighbours, ${seen.garbled} rows with stale cells ${JSON.stringify(seen.sample)}`)
     after = await counts(page)
