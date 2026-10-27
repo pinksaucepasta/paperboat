@@ -132,7 +132,8 @@ func TestDirectRefreshStormStaysWithinTheBudget(t *testing.T) {
 	}
 }
 
-// A server-announced change is renewed at once even with the budget spent, and such renewals are spaced.
+// A server-announced change is renewed at once even with the budget spent; announcements inside the spacing wait
+// for its end (still without the budget) and coalesce into one renewal.
 func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
 	b := &tokenBucket{refill: time.Hour, burst: 1}
 	useBudget(t, b)
@@ -153,10 +154,17 @@ func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
 	waitFor(t, 5*time.Second, "first renewal", func() bool { return calls.Load() >= 1 }) // spends the only token
 	a.RequestUrgentRefresh()
 	waitFor(t, 5*time.Second, "urgent renewal with the budget spent", func() bool { return calls.Load() >= 2 })
-	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
-	a.RequestUrgentRefresh() // within urgentRefreshSpacing: waits for the budget (an hour here)
-	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
+	// Three announcements right after it: one renewal, after the spacing, still without the budget (an hour here).
+	a.RequestUrgentRefresh()
+	a.RequestUrgentRefresh()
+	a.RequestUrgentRefresh()
+	time.Sleep(urgentRefreshSpacing / 2)
 	if got := calls.Load(); got != 2 {
-		t.Fatalf("%d renewals; a second urgent request within the spacing skipped the budget", got)
+		t.Fatalf("%d renewals; an announcement inside the spacing was not deferred", got)
+	}
+	waitFor(t, urgentRefreshSpacing+3*time.Second, "deferred urgent renewal", func() bool { return calls.Load() >= 3 })
+	time.Sleep(onDemandRefreshSpacing + 200*time.Millisecond)
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("%d renewals; the announcements did not coalesce", got)
 	}
 }

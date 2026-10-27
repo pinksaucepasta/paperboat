@@ -221,12 +221,13 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshUrgent:
 			// A server-announced change (revocation, peer change) is never kept waiting for the budget, only
-			// spaced, so an event storm stays bounded; a failing server keeps its backoff.
-			if failures == 0 && time.Since(lastUrgent) >= urgentRefreshSpacing {
-				lastUrgent, urgent = time.Now(), true
-				reset(0)
-			} else if failures == 0 {
-				earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
+			// spaced, so an event storm stays bounded: a request inside the spacing is deferred to its end
+			// (not handed to the budget), and requests while one is pending coalesce into it. A failing server
+			// keeps its backoff.
+			if failures == 0 && !urgent {
+				wait := max(0, urgentRefreshSpacing-time.Since(lastUrgent))
+				lastUrgent, urgent = time.Now().Add(wait), true
+				earlier(wait)
 			}
 		case <-a.refreshWake:
 			// A configuration applied elsewhere may expire sooner than the current schedule.
@@ -372,8 +373,10 @@ func refreshRetryDelay(failures int) time.Duration {
 	return backoff.Retry(failures, time.Second, time.Minute)
 }
 
-// urgentRefreshSpacing bounds the renewals server-announced changes start outside the renewal budget.
-const urgentRefreshSpacing = 15 * time.Second
+// urgentRefreshSpacing bounds the renewals server-announced changes start outside the renewal budget. A revoked
+// CLI session must end its running exec and terminal within about 2 s, so a revoke that follows another
+// announcement waits at most this long.
+const urgentRefreshSpacing = 2 * time.Second
 
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
 const onDemandRefreshSpacing = time.Second
