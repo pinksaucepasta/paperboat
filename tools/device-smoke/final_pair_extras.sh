@@ -12,6 +12,8 @@
 #            PREVIOUS is empty), the peer the official Latest; real history on the target (background preview, tunnel, a held
 #            terminal, a transfer in flight), then `pb update download` + `--approve` of the Latest while all of it runs:
 #            transfer byte-identical, preview and tunnel on the same URLs, the same shell answers (update_survival.py --terminal).
+#            With a fourth argument, a local build file, the update goes to that build instead (`pb update --from FILE`, the dev-target form
+#            used while no newer official release exists).
 #   continuity  one machine on the official Latest, then update_continuity.py: an update to CANDIDATE (a different linux build)
 #            refuses while a `pb ssh` connection is open, keeps a held terminal and a running exec, and retires the old session owner
 #            (F14-02, F14-04).
@@ -37,7 +39,7 @@ MACHINE_IDS=
 
 finish() {
   local status=$1 detail=$2
-  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-ds.tgz" || true
+  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-ds.tgz /tmp/$T-dev" || true
   python3 -c 'import json,sys;print(json.dumps({"check":"final-extras-"+sys.argv[1],"status":sys.argv[2],"machine_ids":sys.argv[3].split(),"detail":sys.argv[4]}))' "$MODE" "$status" "$MACHINE_IDS" "$detail"
   [ "$status" = PASS ]
   exit $?
@@ -122,7 +124,9 @@ EOF
 fi
 
 # history: the target starts on the previous official release, the peer on the official Latest.
-out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS PREVIOUS=$PREVIOUS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+DEV=$WRONG  # history: the optional build to update to
+[ -z "$DEV" ] || scp -q "$DEV" "$HOST:/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
+out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS PREVIOUS=$PREVIOUS DEVFILE=${DEV:+/tmp/$T-dev}"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 if [ -n "$PREVIOUS" ]; then fresh_release $T $ALIAS $PREVIOUS; else fresh_official $T $ALIAS; fi
@@ -131,7 +135,14 @@ sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
 $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
 # the update is what is judged here (first exec after a pair is the exec mode's job): wait until the pair is usable
 for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
-if $X $T bash -c "/home/pbt/.local/bin/pb update check --json >/dev/null && /home/pbt/.local/bin/pb update download --json >/dev/null" && echo x | $X $T bash -c "cd ~/ds && python3 update_survival.py $ALIAS $ALIAS-p --terminal --mib 400 --approve"; then echo HISTORY_OK; else echo HISTORY_FAILED; fi
+if [ -n "$DEVFILE" ]; then
+  sudo -n docker cp $DEVFILE $T:/home/pbt/final-pb && $X $T chmod 755 /home/pbt/final-pb
+  UPDATE="--from /home/pbt/final-pb"
+else
+  $X $T bash -c "/home/pbt/.local/bin/pb update check --json >/dev/null && /home/pbt/.local/bin/pb update download --json >/dev/null" || true
+  UPDATE="--approve"
+fi
+if echo x | $X $T bash -c "cd ~/ds && python3 update_survival.py $ALIAS $ALIAS-p --terminal --mib 400 $UPDATE"; then echo HISTORY_OK; else echo HISTORY_FAILED; fi
 echo "FINAL_$T=$($X $T /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 EOF
 )

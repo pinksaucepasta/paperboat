@@ -17,6 +17,7 @@ command-rows	device	@command_rows.py	python3 command_rows.py {self} --peer {peer
 console-previews	console	F7-06	check-previews.js /previews '{{"__port":"8080","__machine":"{self}"}}'
 extra-exec-after-pair	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh exec {host}
 extra-update-history	cmd	EXTRA,F14-01	tools/device-smoke/final_pair_extras.sh history {host} {previous}
+extra-update-history-dev	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh history {host} {previous} {binary}
 status-bar	device	@status_bar_lifecycle.py	python3 status_bar_lifecycle.py {peer}
 terminal-entry	device	@terminal_entry.py	python3 terminal_entry.py {peer}
 completion	device	@completion_lifecycle.py	python3 completion_lifecycle.py {peer}
