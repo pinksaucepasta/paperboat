@@ -102,7 +102,7 @@ type Inventory struct {
 	eventFallback     time.Duration
 	wake              chan struct{} // RequestRefresh; one pending request is enough
 	mu                sync.Mutex
-	started           time.Time // when this daemon's inventory began; bounds the start-up grace
+	setupSince        time.Time // first local-access reconcile attempt (after start or pairing); bounds the grace
 	reconciledOnce    bool      // a local-access reconcile has succeeded since start; guarded by store.Update
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
@@ -148,7 +148,6 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
 		wake:              make(chan struct{}, 1),
-		started:           config.Clock(),
 	}, nil
 }
 
@@ -298,6 +297,11 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
+			// The first reconcile runs once the machine list answers: right after start, or after `pb pair` when the
+			// daemon was waiting for enrollment. The grace counts from then, so a slow first setup is starting either way.
+			if i.setupSince.IsZero() {
+				i.setupSince = now
+			}
 			if reconcileErr == nil {
 				i.reconciledOnce = true
 			}
@@ -306,7 +310,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				// A daemon that just started has not finished its first local-access setup (the machine guard and
 				// loopback addresses can lag its start): it is starting, not broken, for a bounded grace. A
 				// supplied install's validator waits for starting and fails on degraded (F14-03).
-				if !i.reconciledOnce && now.Sub(i.started) < localAccessStartupGrace {
+				if !i.reconciledOnce && now.Sub(i.setupSince) < localAccessStartupGrace {
 					desired.DaemonState = "starting"
 				}
 				// The local reconcile asks the server too (credentials, browser services and

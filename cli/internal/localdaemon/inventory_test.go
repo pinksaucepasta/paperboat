@@ -255,7 +255,7 @@ func TestInventoryReconciliationFailurePublishesDegradedMachinesAndRecovers(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
+	inventory.setupSince = time.Unix(1, 0) // past start-up: a failure is degraded
 
 	if err := inventory.Refresh(context.Background()); !errors.Is(err, reconcileErr) {
 		t.Fatalf("degraded refresh err=%v", err)
@@ -316,7 +316,7 @@ func TestInventoryBoundsMachineReconciliationByRequestTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
+	inventory.setupSince = time.Unix(1, 0) // past start-up: a failure is degraded
 	started := time.Now()
 	err = inventory.Refresh(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
@@ -717,7 +717,7 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
+			inventory.setupSince = time.Unix(1, 0) // past start-up: a failure is degraded
 			_ = inventory.Refresh(context.Background())
 			snapshot, err := store.Snapshot(context.Background())
 			if err != nil || snapshot.DaemonState != "degraded" || len(snapshot.Health) != 1 || snapshot.Health[0].Code != test.want || len(snapshot.Machines) != 1 {
@@ -976,6 +976,37 @@ func TestAFirstLocalAccessFailureAtStartIsStarting(t *testing.T) {
 	state("setup succeeded", "ready")
 	state("a later failure", "degraded")
 
-	inventory.reconciledOnce, inventory.started, calls = false, now.Add(-localAccessStartupGrace), 0
+	inventory.reconciledOnce, inventory.setupSince, calls = false, now.Add(-localAccessStartupGrace), 0
 	state("first setup still failing after the grace", "degraded")
+}
+
+// A daemon that waited for `pb pair` longer than the grace still reads as starting while its first local-access setup
+// after pairing finishes: the grace counts from that first setup, not from daemon start.
+func TestTheStartupGraceCountsFromPairing(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notPaired := machineResult{err: errors.New("waiting for enrollment")}
+	paired := machineResult{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}
+	inventory, err := NewInventory(InventoryConfig{
+		Source: &scriptedMachineSource{results: []machineResult{notPaired, paired}},
+		Store:  store, RefreshInterval: time.Second, RequestTimeout: time.Second, Clock: func() time.Time { return now },
+		ReconcileMachines: func(context.Context, []api.UserMachine) error { return errors.New("native listener: network timeout") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = inventory.Refresh(context.Background())
+	now = now.Add(10 * localAccessStartupGrace) // the daemon waited a long time to be paired
+	_ = inventory.Refresh(context.Background())
+	if snapshot, err := store.Snapshot(context.Background()); err != nil || snapshot.DaemonState != "starting" {
+		t.Fatalf("first setup right after pairing: state %q (err %v), want starting", snapshot.DaemonState, err)
+	}
+	now = now.Add(localAccessStartupGrace)
+	_ = inventory.Refresh(context.Background())
+	if snapshot, _ := store.Snapshot(context.Background()); snapshot.DaemonState != "degraded" {
+		t.Fatalf("setup still failing a grace after pairing: state %q, want degraded", snapshot.DaemonState)
+	}
 }
