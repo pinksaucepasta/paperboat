@@ -108,19 +108,17 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
       if (error instanceof DeletionError && error.code === "reauthentication_required") window.location.href = reauthPath
     },
   })
-  const [stuck, setStuck] = useState(false)
   const reauthenticate = preview.reauthentication_required
+  // Read once, when the page opens: a sign-in that came back still too old is not tried again.
+  const [stuck] = useState(() => reauthenticate && sessionStorage.getItem(reauthTried) !== null)
   // A sign-in older than five minutes goes straight to sign-in and comes back to the typed confirmation.
   useEffect(() => {
-    if (!reauthenticate) {
-      sessionStorage.removeItem(reauthTried)
-    } else if (sessionStorage.getItem(reauthTried)) {
-      setStuck(true)
-    } else {
+    if (!reauthenticate) sessionStorage.removeItem(reauthTried)
+    else if (!stuck) {
       sessionStorage.setItem(reauthTried, "1")
       window.location.replace(reauthPath)
     }
-  }, [reauthenticate])
+  }, [reauthenticate, stuck])
   if (reauthenticate) {
     return stuck ? (
       <div className="flex flex-col items-start gap-3 text-sm">
