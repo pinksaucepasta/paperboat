@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -118,7 +119,7 @@ func TestEventLogConcurrentUse(t *testing.T) {
 	}
 }
 
-func TestEventLogCountsEvictionAndNonblockingContentionDrops(t *testing.T) {
+func TestEventLogCountsEvictionAndKeepsEventsRecordedWhileTheRingIsBusy(t *testing.T) {
 	log, err := NewEventLog(1)
 	if err != nil {
 		t.Fatal(err)
@@ -135,12 +136,21 @@ func TestEventLogCountsEvictionAndNonblockingContentionDrops(t *testing.T) {
 		t.Fatalf("eviction drops = %d, want 1", got)
 	}
 
+	if err := log.Flush(context.Background()); err != nil { // an empty queue: the busy ring must be the only obstacle
+		t.Fatal(err)
+	}
 	log.mu.Lock()
 	input.At = time.Unix(3, 0)
 	_, stored, err := log.TryRecord(input)
 	log.mu.Unlock()
-	if err != nil || stored {
-		t.Fatalf("contended TryRecord = stored %v, err %v", stored, err)
+	if err != nil || !stored {
+		t.Fatalf("TryRecord while the ring is busy = stored %v, err %v", stored, err)
+	}
+	if err := log.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if events := log.Snapshot(); len(events) != 1 || !events[0].At.Equal(time.Unix(3, 0)) {
+		t.Fatalf("retained events = %v, want the one recorded while the ring was busy", events)
 	}
 	if got := log.Dropped(); got != 2 {
 		t.Fatalf("total drops = %d, want 2", got)

@@ -299,8 +299,9 @@ func (l *EventLog) Record(input EventInput) (Event, error) {
 	return event, nil
 }
 
-// TryRecord never waits for another producer. It retains the historical
-// boolean result while using the same bounded queue as Record.
+// TryRecord never waits for the worker or another producer: a busy ring mutex
+// only delays the worker, so the event is queued; only a full queue, a closing
+// gate or a closed log drops it.
 func (l *EventLog) TryRecord(input EventInput) (Event, bool, error) {
 	event, err := NewEvent(input)
 	if err != nil {
@@ -309,13 +310,6 @@ func (l *EventLog) TryRecord(input EventInput) (Event, bool, error) {
 	if l == nil {
 		return event, false, nil
 	}
-	// Keep this quick lock probe for callers that use TryRecord as an explicit
-	// contention boundary. No producer can wait for the ring mutex.
-	if !l.mu.TryLock() {
-		l.dropped.Add(1)
-		return event, false, nil
-	}
-	l.mu.Unlock()
 	if !l.gate.TryRLock() {
 		l.dropped.Add(1)
 		return event, false, nil
