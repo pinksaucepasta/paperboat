@@ -175,6 +175,7 @@ func TestBusyStreamOffersALoneByteAsAnInterrupt(t *testing.T) {
 	for _, frame := range []protocol.TerminalInputFrame{
 		{StreamID: 7, Sequence: 5, Data: []byte{3}},
 		{StreamID: 7, Sequence: 5, Data: []byte("ls")},
+		{StreamID: 7, Sequence: 5, Data: []byte("x")}, // a printable key is never an interrupt (N11)
 		{StreamID: 7, Sequence: 4, Data: []byte{3}},
 		{StreamID: 9, Sequence: 5, Data: []byte{3}},
 	} {

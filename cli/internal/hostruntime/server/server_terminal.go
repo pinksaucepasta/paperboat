@@ -418,7 +418,9 @@ func (s *Server) interruptTerminalInput(ctx context.Context, message []byte, sta
 		return
 	}
 	frame, err := protocol.DecodeTerminalInput(message)
-	if err != nil || len(frame.Data) != 1 {
+	// Only a control byte can be the tty's interrupt key (VINTR); probing every typed key cost an owner call and an
+	// ioctl on the read loop and slowed fast typing to ~80 keys/s (N11).
+	if err != nil || len(frame.Data) != 1 || frame.Data[0] >= 0x20 && frame.Data[0] != 0x7f {
 		return
 	}
 	binding, err := state.binding(frame.StreamID)
