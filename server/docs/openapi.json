@@ -14235,6 +14235,13 @@
                 "type": "integer",
                 "minimum": 0
               },
+              "host_keys": {
+                "type": "array",
+                "description": "The active host key set's public keys (OpenSSH public key lines), in order; absent until the machine has active host keys.",
+                "items": {
+                  "type": "string"
+                }
+              },
               "host_key_conflict": {
                 "type": "object",
                 "additionalProperties": false,

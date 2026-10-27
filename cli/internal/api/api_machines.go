@@ -68,6 +68,13 @@ type MachineSSH struct {
 	HostKeyGeneration uint64 `json:"host_key_generation"`
 	// HostKeys is the active host key set (public keys), so known_hosts needs no request per connection.
 	HostKeys []string `json:"host_keys,omitempty"`
+	// HostKeyConflict is set while the server refuses the machine's host keys as another live machine's.
+	HostKeyConflict *HostKeyConflict `json:"host_key_conflict,omitempty"`
+}
+
+// HostKeyConflict names the machine that already has the keys, when the caller may see it.
+type HostKeyConflict struct {
+	MachineName string `json:"machine_name,omitempty"`
 }
 
 // CurrentSSH returns the listed SSH target when it is complete and belongs to the machine's
@@ -102,6 +109,9 @@ type MachineCapabilityPolicy struct {
 type SSHAuthority struct {
 	TargetGeneration  uint64
 	HostKeyGeneration uint64
+	// HostKeyInUse: the server refuses the machine's host keys as HostKeyInUseBy's (empty when not visible).
+	HostKeyInUse   bool
+	HostKeyInUseBy string
 }
 
 type ManagedSSHTarget struct {

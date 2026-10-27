@@ -727,16 +727,25 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 	}
 }
 
-// Cloned host keys refused by the server leave the machine without published keys while sshd runs
-// (Lane H), and so does a machine still installing (ltc-d7): the health item says to wait first, names both
-// causes and never claims no SSH server is running.
-func TestUnpublishedHostKeysDoNotClaimSSHDIsMissing(t *testing.T) {
+// A machine without published host keys is shown as publishing (a fresh container still installing, ltc-d7), with
+// no cloned-image text; only a refusal the server lists as another machine's keys gives the clone fix (Lane H).
+func TestUnpublishedHostKeysSayPublishingAndOnlyARefusalGivesTheCloneFix(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
 	machine.SSHAuthority.TargetGeneration = 4
 	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
 	text := item.Title + " " + item.Recovery
-	if strings.Contains(strings.ToLower(text), "no ssh server") || !strings.Contains(text, "within a minute") || !strings.Contains(text, "identical to another machine's") || !strings.Contains(text, "ssh-keygen -A") {
-		t.Fatalf("health = %+v", item)
+	if item.Code != "ssh_host_keys_unpublished" || !strings.HasPrefix(item.Title, "Publishing") || strings.Contains(text, "identical") || strings.Contains(text, "ssh-keygen") {
+		t.Fatalf("not yet published: %+v", item)
+	}
+	machine.SSHAuthority.HostKeyInUse, machine.SSHAuthority.HostKeyInUseBy = true, "build"
+	item = mapMachines([]api.UserMachine{machine})[0].Health[0]
+	text = item.Title + " " + item.Recovery
+	if item.Code != "ssh_host_key_in_use" || !strings.Contains(item.Title, "identical to build's") || !strings.Contains(text, "ssh-keygen -A") {
+		t.Fatalf("refused: %+v", item)
+	}
+	machine.SSHAuthority.HostKeyInUseBy = "" // the other machine is not visible to this account
+	if item = mapMachines([]api.UserMachine{machine})[0].Health[0]; !strings.HasSuffix(item.Title, "identical to another machine's") {
+		t.Fatalf("refused, other hidden: %+v", item)
 	}
 }
 

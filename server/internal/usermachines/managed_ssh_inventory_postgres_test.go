@@ -57,6 +57,8 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	if after := topic(); after <= before {
 		t.Fatalf("inventory topic generation %d -> %d: a host key promotion did not publish it", before, after)
 	}
+	// ssh-4's keys were refused as ssh-1's (a cloned image): its listing says so, naming ssh-1 to the owner.
+	exec(`INSERT INTO paperboat.machine_ssh_host_key_conflicts(user_machine_id,other_machine_id,observed_at) VALUES('inv_ssh_4_'||$1,'inv_ssh_1_'||$1,now())`, suffix)
 	service := New(store, nil, Policy{}, nil)
 	items, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10})
 	if err != nil || len(items) != 3 {
@@ -73,7 +75,7 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 		byAlias[item.Alias] = item.SSH
 	}
 	if got := byAlias["ssh-1"]; got == nil || got.OSUser != "pbt" || got.Port != 2201 || got.TargetGeneration != 1 || got.HostKeyGeneration != 1 ||
-		!slices.Equal(got.HostKeys, []string{keyA, keyB}) {
+		!slices.Equal(got.HostKeys, []string{keyA, keyB}) || got.HostKeyConflict != nil {
 		t.Fatalf("current target with active host keys: %+v, want the active set's keys in order", got)
 	}
 	if got := byAlias["ssh-2"]; got != nil {
@@ -82,7 +84,8 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	if got := byAlias["ssh-3"]; got != nil {
 		t.Fatalf("a revoked machine's target was listed: %+v", got)
 	}
-	if got := byAlias["ssh-4"]; got == nil || got.HostKeyGeneration != 0 || got.Port != 2204 || len(got.HostKeys) != 0 {
-		t.Fatalf("target without host keys: %+v", got)
+	if got := byAlias["ssh-4"]; got == nil || got.HostKeyGeneration != 0 || got.Port != 2204 || len(got.HostKeys) != 0 ||
+		got.HostKeyConflict == nil || got.HostKeyConflict.MachineName != "ssh-1" {
+		t.Fatalf("target whose host keys were refused as ssh-1's: %+v", got)
 	}
 }

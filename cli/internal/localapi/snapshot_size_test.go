@@ -20,7 +20,7 @@ func validSnapshot() Snapshot {
 func TestASnapshotOfTheMostMachinesFits(t *testing.T) {
 	snapshot := validSnapshot()
 	template := snapshot.Machines[0]
-	template.Health = []HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "warning", Title: "The machine's SSH host keys are not published", Recovery: "A newly set up machine publishes them within a minute or two. If this stays, on the machine start an SSH server (sshd) if none runs; if sshd runs, its host keys may be identical to another machine's (a cloned VM or image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd", ETag: "ssh_host_keys_unpublished"}}
+	template.Health = []HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "warning", Title: "The machine's SSH host keys are not published", Recovery: "A newly set up machine publishes them within a minute or two. If this stays, start an SSH server (sshd) on the machine", ETag: "ssh_host_keys_unpublished"}}
 	snapshot.Machines = make([]MachineStatus, maxMachines)
 	for i := range snapshot.Machines {
 		machine := template

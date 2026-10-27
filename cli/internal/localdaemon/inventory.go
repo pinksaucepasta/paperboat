@@ -490,10 +490,11 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
+		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 && machine.SSHAuthority.HostKeyInUse {
+			status.Health = []localapi.HealthItem{hostKeyInUseHealth(machine.SSHAuthority.HostKeyInUseBy)}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 {
-			// The machine never published SSH host keys. sshd may be missing, or running with host keys the
-			// server refused as another machine's (a cloned image), so name both and the fix for each.
-			status.Health = []localapi.HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "warning", Title: "The machine's SSH host keys are not published", Recovery: sshHostKeysUnpublishedRecovery, ETag: "ssh_host_keys_unpublished"}}
+			// Not refused (the server lists a refusal): the host has not published its keys yet, or sshd is missing.
+			status.Health = []localapi.HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "info", Title: "Publishing the machine's SSH host keys", Recovery: sshHostKeysUnpublishedRecovery, ETag: "ssh_host_keys_unpublished"}}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
 		}
@@ -509,10 +510,21 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 }
 
 // A machine shows this from pairing until its host service has installed and published the keys (about a minute
-// on a fresh container, dadape ltc-d7 2026-10-27), so the text leads with waiting, not with a cloned image.
-const sshHostKeysUnpublishedRecovery = "A newly set up machine publishes them within a minute or two. If this stays, on the " +
-	"machine start an SSH server (sshd) if none runs; if sshd runs, its host keys may be identical to another machine's " +
-	"(a cloned VM or image): remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd"
+// on a fresh container, dadape ltc-d7 2026-10-27).
+const sshHostKeysUnpublishedRecovery = "A newly set up machine publishes them within a minute or two. If this stays, " +
+	"start an SSH server (sshd) on the machine"
+
+// hostKeyInUseHealth is the server's refusal of the machine's host keys as another live machine's (a cloned VM or
+// image). other is empty when the caller may not see that machine.
+func hostKeyInUseHealth(other string) localapi.HealthItem {
+	title := "The machine's SSH host keys are identical to another machine's"
+	if other != "" {
+		title = "The machine's SSH host keys are identical to " + other + "'s"
+	}
+	return localapi.HealthItem{Code: "ssh_host_key_in_use", Severity: "warning", Title: title, Recovery: "This machine was " +
+		"cloned with its SSH host keys. On it, remove /etc/ssh/ssh_host_*, run ssh-keygen -A and restart sshd; " +
+		"Paperboat publishes the new keys within a minute", ETag: "ssh_host_key_in_use"}
+}
 
 func updateHealth(machine api.UserMachine) string {
 	if machine.Availability.Schema != "paperboat.availability-policy/v1" || machine.Availability.ObservedAt == nil {
