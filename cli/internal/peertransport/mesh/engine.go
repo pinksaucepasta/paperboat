@@ -342,14 +342,20 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 // the next outbound flow to repeat admission. It leaves unrelated peers and
 // the shared engine running.
 func (s *Server) InvalidateAuthorizedPeer(peer key.NodePublic) {
-	s.peerReadyMu.Lock()
-	delete(s.peerReady, peer)
-	s.peerReadyMu.Unlock()
 	if s.lb == nil {
 		return
 	}
+	s.lb.policyMu.Lock()
+	defer s.lb.policyMu.Unlock()
+	s.invalidateAuthorizedPeerLocked(peer)
+}
+
+// invalidateAuthorizedPeerLocked requires the backend policy lock.
+func (s *Server) invalidateAuthorizedPeerLocked(peer key.NodePublic) {
+	s.peerReadyMu.Lock()
+	delete(s.peerReady, peer)
+	s.peerReadyMu.Unlock()
 	b := s.lb
-	b.policyMu.Lock()
 	b.mu.Lock()
 	_, admitted := b.allowedPeers[peer]
 	_, present := b.clients[peer]
@@ -361,7 +367,6 @@ func (s *Server) InvalidateAuthorizedPeer(peer key.NodePublic) {
 	if admitted && present {
 		b.sys.Engine.Get().SyncDevicePeer(peer)
 	}
-	b.policyMu.Unlock()
 }
 
 // Close shuts down the server, closing the WireGuard engine and DERP connections.

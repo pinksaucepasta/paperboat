@@ -49,6 +49,19 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	b.policyMu.Lock()
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
+	var changedPeers []key.NodePublic
+	for k, n := range b.clients {
+		if !slices.Equal(n.Endpoints, contacts[k].Endpoints) {
+			changedPeers = append(changedPeers, k)
+		}
+	}
+	b.mu.Unlock()
+	// Reuse the peer-only reset: old disco/WireGuard state can outlive a carrier
+	// whose keys stayed the same. Other peers and application flow leases stay up.
+	for _, peer := range changedPeers {
+		s.invalidateAuthorizedPeerLocked(peer)
+	}
+	b.mu.Lock()
 	defer b.mu.Unlock()
 	next := make(map[key.NodePublic]PeerContact, len(contacts))
 	for k, c := range contacts {
@@ -62,16 +75,8 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		if !allowed || len(c.Endpoints) == 0 {
 			continue
 		}
-		n := b.clients[k]
-		if n == nil {
+		if b.clients[k] == nil {
 			b.addClientLocked(k, c.Disco, addr)
-			changed = true
-			continue
-		}
-		if !slices.Equal(n.Endpoints, c.Endpoints) {
-			updated := n.Clone()
-			updated.Endpoints = c.Endpoints
-			b.setClientLocked(k, updated)
 			changed = true
 		}
 	}
