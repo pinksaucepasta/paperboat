@@ -251,8 +251,12 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	}
 	// A peer whose own endpoints the signed configuration gives is reachable directly with no relay
 	// (PLAN 3b "Direct paths without a relay"); only a peer without them needs a usable relay first.
-	if err := o.authority.PrepareRegional(ctx, peerID); err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
-		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
+	// A peer on this host never needs one: regional recovery bound to it probed a relay pair with itself
+	// and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
+	if !o.authority.PeerIsLocal(peerID) {
+		if err := o.authority.PrepareRegional(ctx, peerID); err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
+			return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
+		}
 	}
 	socket, err := client.Dial(ctx)
 	if err != nil {

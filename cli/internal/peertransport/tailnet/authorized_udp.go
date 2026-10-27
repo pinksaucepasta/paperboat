@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net"
 	"net/netip"
 	"sort"
 	"time"
@@ -70,6 +71,49 @@ func (a *Authority) PeerHasEndpoints(endpointID string) bool {
 	for _, p := range a.current.Peers {
 		if p.Identity.EndpointID == endpointID {
 			return len(p.Endpoints) > 0
+		}
+	}
+	return false
+}
+
+// localAddresses lists this host's interface addresses; a variable so tests can supply their own.
+var localAddresses = func() []netip.Addr {
+	addrs, _ := net.InterfaceAddrs()
+	out := make([]netip.Addr, 0, len(addrs))
+	for _, a := range addrs {
+		if prefix, err := netip.ParsePrefix(a.String()); err == nil {
+			out = append(out, prefix.Addr().Unmap())
+		}
+	}
+	return out
+}
+
+// PeerIsLocal reports whether the peer runs on this host: one of its signed candidate endpoints is an address
+// of a local interface (the daemon reaching its own machine's host runtime, e.g. inspecting a local preview).
+func (a *Authority) PeerIsLocal(endpointID string) bool {
+	a.mu.Lock()
+	var endpoints []string
+	if a.current != nil {
+		for _, p := range a.current.Peers {
+			if p.Identity.EndpointID == endpointID {
+				endpoints = p.Endpoints
+			}
+		}
+	}
+	a.mu.Unlock()
+	if len(endpoints) == 0 {
+		return false
+	}
+	local := localAddresses()
+	for _, endpoint := range endpoints {
+		addrPort, err := netip.ParseAddrPort(endpoint)
+		if err != nil {
+			continue
+		}
+		for _, l := range local {
+			if l == addrPort.Addr().Unmap() {
+				return true
+			}
 		}
 	}
 	return false
