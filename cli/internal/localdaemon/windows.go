@@ -51,6 +51,8 @@ type DaemonConfig struct {
 	OnMachines              func(context.Context, []api.UserMachine)
 	// InventoryEvents wakes the machine inventory refresh when the server reports a change.
 	InventoryEvents *machineevents.Subscription
+	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).
+	AccessEvents *machineevents.Subscription
 }
 
 func Run(ctx context.Context, config DaemonConfig) error { return runWindowsDaemon(ctx, config) }

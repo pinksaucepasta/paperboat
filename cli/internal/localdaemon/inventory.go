@@ -79,6 +79,8 @@ type InventoryConfig struct {
 	// Events wakes a refresh when the server reports an inventory change; while its wait loop is
 	// healthy the periodic refresh becomes a safety net. Nil refreshes on the interval only.
 	Events *machineevents.Subscription
+	// AccessEvents wakes a refresh for an access change, spaced like a local request; nil: none.
+	AccessEvents *machineevents.Subscription
 	// EventRefreshSpacing is the least time between two refreshes woken by events (0: the default).
 	// EventFallback is the refresh period while events are healthy (0: the default).
 	EventRefreshSpacing time.Duration
@@ -95,6 +97,7 @@ type Inventory struct {
 	onMachines        func(context.Context, []api.UserMachine)
 	onRefresh         func(error)
 	events            *machineevents.Subscription
+	accessEvents      *machineevents.Subscription
 	eventSpacing      time.Duration
 	eventFallback     time.Duration
 	wake              chan struct{} // RequestRefresh; one pending request is enough
@@ -135,6 +138,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		onMachines:        config.OnMachines,
 		onRefresh:         config.OnRefresh,
 		events:            config.Events,
+		accessEvents:      config.AccessEvents,
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
 		wake:              make(chan struct{}, 1),
@@ -187,6 +191,19 @@ func (i *Inventory) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.wake:
+			if pending != nil {
+				continue
+			}
+			if wait := requestedRefreshSpacing - time.Since(started); wait > 0 {
+				pending = time.After(wait)
+				continue
+			}
+			refresh()
+		case <-i.accessEvents.Changed():
+			// An access change (a machine shared with this account, a grant, the team's private access setting)
+			// shows within requestedRefreshSpacing, not the event spacing: such changes are rare, and a member
+			// waited up to ~30 s to reach a machine just shared with them (F9-04, hp 2026-10-27). Prior art:
+			// Tailscale pushes netmap changes to the client at once (control/controlclient map poll).
 			if pending != nil {
 				continue
 			}

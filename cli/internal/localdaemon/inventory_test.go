@@ -893,3 +893,32 @@ func TestInventoryRefreshesAtOnceWhenTheEventWaitIsRefused(t *testing.T) {
 		t.Fatal("a refused event wait did not refresh the inventory within a second")
 	}
 }
+
+// An access change (a machine shared with this account, a grant, the team's private access setting) refreshes the
+// machine list within the request spacing, not the event spacing: a member waited 12-31 s to reach a machine just
+// shared with them (F9-04, hp 2026-10-27).
+func TestInventoryRefreshesAtOnceForAnAccessChange(t *testing.T) {
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
+	refreshed := make(chan struct{}, 8)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicInventory, machineevents.TopicMachineAccess)
+	inventory, err := NewInventory(InventoryConfig{Source: source, Store: store, RefreshInterval: time.Hour, RequestTimeout: time.Second,
+		Events: subscriptions[0], AccessEvents: subscriptions[1], EventRefreshSpacing: time.Hour, OnRefresh: func(error) { refreshed <- struct{}{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- inventory.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	<-refreshed // the first refresh starts the hour-long event spacing
+	plane.Publish(machineevents.TopicMachineAccess)
+	select {
+	case <-refreshed:
+	case <-time.After(requestedRefreshSpacing + 2*time.Second):
+		t.Fatal("an access change waited for the event spacing")
+	}
+}

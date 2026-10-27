@@ -352,7 +352,7 @@ func localDaemonCommand() *cobra.Command {
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
 				// The server tells the daemon when the machine list changed, so inventory refreshes at
 				// once; without a machine id (never enrolled) or while the wait fails it polls as before.
-				var inventoryEvents, servicesEvents *machineevents.Subscription
+				var inventoryEvents, accessEvents, servicesEvents *machineevents.Subscription
 				if source.SourceMachineID != "" {
 					events, eventsErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
 						credential, credentialErr := authSource.WithContext(waitCtx).Credential()
@@ -365,6 +365,7 @@ func localDaemonCommand() *cobra.Command {
 						return eventsErr
 					}
 					inventoryEvents = events.Subscribe(machineevents.TopicInventory)
+					accessEvents = events.Subscribe(machineevents.TopicMachineAccess)
 					servicesEvents = events.Subscribe(machineevents.TopicMachineServices)
 					// A newly paired machine enters the mesh when it first comes online, which moves only inventory.
 					networkEvents := events.Subscribe(machineevents.TopicPeerNetwork, machineevents.TopicInventory)
@@ -386,8 +387,8 @@ func localDaemonCommand() *cobra.Command {
 				go refreshMachineServices(ctx, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
-					InventoryEvents: inventoryEvents,
-					Paths:           paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
+					InventoryEvents: inventoryEvents, AccessEvents: accessEvents,
+					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
 						credential, err := authSource.WithContext(ctx).Credential()
