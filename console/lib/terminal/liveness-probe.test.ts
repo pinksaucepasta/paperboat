@@ -12,10 +12,10 @@ function setup(request: string | null = "probe_1") {
     },
     () => silent++,
     {
-      set: ((fn: () => void, ms: number) => timers.push({ fn, ms, live: true }) - 1) as unknown as typeof setTimeout,
-      clear: ((id: number) => {
-        timers[id].live = false
-      }) as unknown as typeof clearTimeout,
+      set: (fn, ms) => (timers.push({ fn, ms, live: true }) - 1) as unknown as ReturnType<typeof setTimeout>,
+      clear: (id) => {
+        timers[id as unknown as number].live = false
+      },
     },
   )
   const fire = () => timers.forEach((t) => t.live && ((t.live = false), t.fn()))
@@ -56,5 +56,35 @@ describe("liveness probe", () => {
     const none = setup(null)
     await none.probe.start()
     expect(none.timers.length).toBe(0)
+  })
+
+  test("a reply handled before the send returned its id does not leave a probe to time out", async () => {
+    const timers: unknown[] = []
+    let silent = 0
+    const probe = createLivenessProbe(
+      async () => {
+        probe.answered("probe_early") // the reply is handled while `send` is still resolving
+        return "probe_early"
+      },
+      () => silent++,
+      { set: () => timers.push(1) as unknown as ReturnType<typeof setTimeout>, clear: () => undefined },
+    )
+    await probe.start()
+    expect(timers.length).toBe(0)
+    expect(silent).toBe(0)
+  })
+
+  test("the default timers are real ones that fire once, detached from any object", async () => {
+    let silent = 0
+    const probe = createLivenessProbe(async () => "probe_real", () => silent++)
+    const realSet = globalThis.setTimeout
+    globalThis.setTimeout = ((run: () => void) => realSet(run, 0)) as typeof setTimeout // the 5 s deadline, shortened
+    try {
+      await probe.start()
+      await new Promise((resolve) => realSet(resolve, 20))
+    } finally {
+      globalThis.setTimeout = realSet
+    }
+    expect(silent).toBe(1)
   })
 })

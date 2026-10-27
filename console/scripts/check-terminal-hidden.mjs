@@ -5,8 +5,10 @@
 //   [HIDDEN_MS=<time hidden, default 125000>] node check-terminal-hidden.mjs
 // Rows: the tab is hidden (visibilityState), output far above the worker's window made meanwhile is on
 // screen within 2 s of return, 200 tab switches, and data-terminal-reconnects/-replays never move.
-// The terminal it opens is closed at the end. Terminal contents are never printed.
-import { spawn } from "node:child_process"
+// FREEZE=<command> THAW=<command> adds the dead-path row: the machine stops answering without closing anything
+// (docker pause of its container), and the tab is shown again; the probe must replace the connection within 8 s,
+// and after THAW the terminal is attached again and echoes. The terminal it opens is closed at the end. Terminal contents are never printed.
+import { execSync, spawn } from "node:child_process"
 import { readFileSync, rmSync } from "node:fs"
 
 const { STATE, CHROME, CONSOLE_ORIGIN: origin, MACHINE: machine } = process.env
@@ -140,6 +142,27 @@ try {
   const echoed = marker("after")
   await typeLine(page, `echo ${echoed}`)
   log((await attr(page, "data-terminal-phase")) === "attached" && (await shows(page, echoed, 15000)), "still attached and echoes its marker")
+
+  if (process.env.FREEZE) {
+    const away = (await send("Target.createTarget", { url: "about:blank" })).targetId
+    await sleep(1500)
+    execSync(process.env.FREEZE, { stdio: "ignore" })
+    try {
+      const reconnectsBefore = (await counts(page))[0]
+      await send("Target.activateTarget", { targetId: first.targetId })
+      const noticed = await until(async () => (await attr(page, "data-terminal-phase")) === "reconnecting", 8000)
+      const text = await evaluate(page, `document.body.innerText`)
+      log(noticed && text.includes("The machine stopped answering"), "a dead path is noticed within 8 s of the tab being shown, and says why", `phase=${await attr(page, "data-terminal-phase")}`)
+      log((await counts(page))[0] === reconnectsBefore + 1, "...as one reconnect", `${reconnectsBefore} -> ${(await counts(page))[0]}`)
+    } finally {
+      execSync(process.env.THAW, { stdio: "ignore" })
+      await send("Target.closeTarget", { targetId: away }).catch(() => undefined)
+    }
+    const back = marker("thawed")
+    const reattached = await until(async () => (await attr(page, "data-terminal-phase")) === "attached", 120000)
+    if (reattached) await typeLine(page, `echo ${back}`)
+    log(reattached && (await shows(page, back, 15000)), "after the machine answers again the terminal is attached and echoes", `phase=${await attr(page, "data-terminal-phase")}`)
+  }
 
   const closeButton = `[...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || b.textContent).trim() === "Close terminal")`
   console.log("closing the terminal at", stamp())
