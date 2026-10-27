@@ -56,7 +56,7 @@ async function signup() {
   if ((await boxes.count()) > 1) (await boxes.first().click(), await page.keyboard.type(code))
   else await boxes.first().fill(code)
   await page.keyboard.press("Enter").catch(() => {})
-  await page.waitForURL((u) => u.href.startsWith(origin), { timeout: 60000 })
+  await page.waitForURL((u) => u.href.startsWith(origin), { timeout: 180000 }) // the live console compiles the callback route on first use
   write(stateFile, JSON.stringify(await context.storageState()))
   const me = await page.evaluate(async () => (await fetch("/api/v1/me")).status)
   await browser.close()
@@ -97,7 +97,7 @@ async function reauthenticate(page, { email, password, mailToken }) {
     else await boxes.first().fill(code)
     await page.keyboard.press("Enter").catch(() => {})
   }
-  await page.waitForURL((u) => u.href.startsWith(origin), { timeout: 60000 })
+  await page.waitForURL((u) => u.href.startsWith(origin), { timeout: 180000 }) // the live console compiles the callback route on first use
 }
 
 async function remove() {
