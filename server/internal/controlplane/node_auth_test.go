@@ -1,9 +1,12 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"syscall"
@@ -119,5 +122,24 @@ func TestScopedNodeAuthorizationPreservesRequestReadAndCloseFailures(t *testing.
 	allowed, err := service.authorizeNodeRequest(request)
 	if allowed || !errors.Is(err, syscall.EIO) || !errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.EOF) {
 		t.Fatalf("body failure was lost or accepted: allowed=%t err=%v", allowed, err)
+	}
+}
+
+func TestRefusedNodeRequestNamesItsCaller(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(previous)
+	r := httptest.NewRequest("POST", "/v1/relay/nodes/start", strings.NewReader(`{"node_id":"node_b"}`))
+	r.RemoteAddr, r.Header = "203.0.113.9:4444", http.Header{"X-Forwarded-For": {"198.51.100.7"}}
+	s := &EdgeService{credential: "managed-secret", nodeCredentials: scopedNodeCredential{}}
+	if ok, err := s.authorizeNodeRequest(r); ok || err != nil {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	warnNodeRefusal(r)
+	for _, want := range []string{"203.0.113.9:4444", "198.51.100.7", "claimed_node_id=node_b", "/v1/relay/nodes/start"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Fatalf("log lacks %q: %s", want, logged.String())
+		}
 	}
 }

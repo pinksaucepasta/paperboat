@@ -747,6 +747,7 @@ func (s *EdgeService) Handler() http.Handler {
 			return
 		}
 		if !authorized {
+			warnNodeRefusal(r)
 			writeEdgeError(w, r, http.StatusUnauthorized, "unauthenticated", false, 0)
 			return
 		}

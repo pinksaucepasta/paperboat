@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -55,10 +56,10 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 	if err != nil || closeErr != nil {
 		return false, errors.Join(err, closeErr)
 	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
 	if len(raw) > maxEdgeDocument || canonicaljson.RejectDuplicateFields(raw) != nil {
 		return false, nil
 	}
-	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var in struct {
 		NodeID     string `json:"node_id"`
 		EdgeNodeID string `json:"edge_node_id"`
@@ -70,4 +71,24 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 		return false, nil
 	}
 	return in.NodeID == node || in.EdgeNodeID == node, nil
+}
+
+// warnNodeRefusal names who sent a refused node request: the path, the peer, the forwarded
+// chain and the node id the body claims, so an unknown caller can be found and stopped.
+func warnNodeRefusal(r *http.Request) {
+	var claimed struct {
+		NodeID     string `json:"node_id"`
+		EdgeNodeID string `json:"edge_node_id"`
+	}
+	if r.Body != nil {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, maxEdgeDocument))
+		_ = json.Unmarshal(raw, &claimed)
+	}
+	node := claimed.NodeID
+	if node == "" {
+		node = claimed.EdgeNodeID
+	}
+	slog.WarnContext(r.Context(), "node request refused", "path", r.URL.Path, "remote_addr", r.RemoteAddr,
+		"forwarded_for", r.Header.Get("X-Forwarded-For"), "claimed_node_id", node,
+		"bearer_present", nodeauth.Bearer(r) != "", "user_agent", r.UserAgent())
 }
