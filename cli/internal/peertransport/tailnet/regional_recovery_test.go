@@ -197,3 +197,21 @@ func TestRegionalStatusWithNoBoundPairReportsNothing(t *testing.T) {
 		t.Fatalf("bound recovery lost its status: %+v", got)
 	}
 }
+
+// Regional recovery follows the pair last dialed successfully: it stayed on the first peer ever prepared and
+// pb status warned about that pair while the machines in use reached their relays (hp 2026-10-27).
+func TestRegionalRecoveryFollowsTheLastDialedPair(t *testing.T) {
+	a := &Authority{}
+	r := &regionalRecovery{authority: a, engine: &failingRegionalEngine{cause: errors.New("unused")}, peerID: "machine_first"}
+	a.relay.recovery = r
+	a.BindRegionalPeer("machine_in_use")
+	if got := r.pair(); got != "machine_in_use" {
+		t.Fatalf("recovery pair = %q after a dial to machine_in_use", got)
+	}
+	idle := &regionalRecovery{authority: a}
+	a.relay.recovery = idle
+	a.BindRegionalPeer("machine_in_use") // not started yet: PrepareRegional binds it
+	if got := idle.pair(); got != "" {
+		t.Fatalf("unstarted recovery bound to %q", got)
+	}
+}

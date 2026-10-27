@@ -209,7 +209,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	if len(nodes) == 0 {
 		return fmt.Errorf("%w: no current regional relay grant", ErrRegionalAuthority)
 	}
-	peer, err := publicKeyForEndpoint(peers, r.peerID)
+	peer, err := publicKeyForEndpoint(peers, r.pair())
 	if err != nil {
 		return fmt.Errorf("%w: target peer scope is unavailable", ErrRegionalAuthority)
 	}
@@ -249,7 +249,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	if err != nil || !sameRegionalNode(freshNodes, node) {
 		return fmt.Errorf("%w: regional relay grant changed during preparation", ErrRegionalAuthority)
 	}
-	freshPeer, err := publicKeyForEndpoint(freshPeers, r.peerID)
+	freshPeer, err := publicKeyForEndpoint(freshPeers, r.pair())
 	if err != nil || freshPeer != peer {
 		return fmt.Errorf("%w: target peer scope changed during preparation", ErrRegionalAuthority)
 	}
@@ -315,6 +315,30 @@ func (a *Authority) RegionalStatus() RegionalStatus {
 	status.ProbeFailures = maps.Clone(status.ProbeFailures)
 	return status
 }
+// pair is the peer whose relay path this recovery keeps: the last machine dialed successfully.
+func (r *regionalRecovery) pair() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peerID
+}
+
+// BindRegionalPeer moves regional recovery to the pair just dialed successfully. It stayed on the first peer
+// ever prepared, so pb status on hp kept warning "No relay is usable" about a machine no longer in use while
+// the pairs that mattered were fine (2026-10-27).
+func (a *Authority) BindRegionalPeer(peerID string) {
+	a.relay.mu.Lock()
+	r := a.relay.recovery
+	a.relay.mu.Unlock()
+	if r == nil || peerID == "" {
+		return
+	}
+	r.mu.Lock()
+	if r.engine != nil {
+		r.peerID = peerID
+	}
+	r.mu.Unlock()
+}
+
 func (r *regionalRecovery) stop() {
 	r.mu.Lock()
 	if r.cancel != nil {
@@ -549,12 +573,12 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		}
 		var peer key.NodePublic
 		for k, p := range peers {
-			if p.Identity.EndpointID == r.peerID {
+			if p.Identity.EndpointID == r.pair() {
 				peer = k
 				break
 			}
 		}
-		if r.peerID != "" && peer.IsZero() {
+		if r.pair() != "" && peer.IsZero() {
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "pair_authority_expired"}
 			r.mu.Unlock()
@@ -640,7 +664,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
-		if r.peerID == "" {
+		if r.pair() == "" {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
@@ -671,7 +695,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				}
 			}
 			freshPeer, peerValid := freshPeers[peer]
-			if snapshotErr != nil || !valid || freshPeer.Identity.EndpointID != r.peerID || !peerValid {
+			if snapshotErr != nil || !valid || freshPeer.Identity.EndpointID != r.pair() || !peerValid {
 				timer.Reset(regionalProbeDelay())
 				continue
 			}

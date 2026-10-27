@@ -287,6 +287,9 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		_ = session.Close()
 		return nil, err
 	}
+	if !o.authority.PeerIsLocal(peerID) {
+		o.authority.BindRegionalPeer(peerID) // relay status describes the pair last in use
+	}
 	path, _ := o.authority.PeerPath(peerID)
 	o.emit(Event{Kind: "connected", PeerID: peerID, Path: path})
 	return session, nil
