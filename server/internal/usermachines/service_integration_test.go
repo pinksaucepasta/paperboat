@@ -1636,10 +1636,10 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 		t.Fatal(err)
 	}
 	oldMachineID := "mch_old_enrollment_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'studio','darwin','arm64','/Users/paperboat','offline','released')`, oldMachineID, userID, "env_old_enrollment_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,'studio','linux','arm64','/home/paperboat','offline','released')`, oldMachineID, userID, "env_old_enrollment_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"darwin", "linux"}}, testSeatAuthorizer{})
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
@@ -1667,21 +1667,21 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	if replayed.ID != first.ID || replayed.BootstrapToken != first.BootstrapToken || replayed.OperationID != first.OperationID {
 		t.Fatalf("idempotent replay changed result: first=%+v replay=%+v", first, replayed)
 	}
-	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-1-" + suffix, Alias: "studio", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey})
+	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-1-" + suffix, Alias: "studio", Platform: "linux", Architecture: "arm64", WorkspaceRoot: "/home/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pairing.ID != first.ID {
 		t.Fatalf("bootstrap claim changed pairing identity: %q != %q", pairing.ID, first.ID)
 	}
-	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-2-" + suffix, Alias: "replay", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentTokenUsed) {
+	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-2-" + suffix, Alias: "replay", Platform: "linux", Architecture: "arm64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentTokenUsed) {
 		t.Fatalf("consumed bootstrap claim error=%v", err)
 	}
 	status, err := service.Enrollment(ctx, userID, first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != "material_issued" || status.ID != pairing.ID || status.WorkspaceRoot != "/Users/paperboat" {
+	if status.State != "material_issued" || status.ID != pairing.ID || status.WorkspaceRoot != "/home/paperboat" {
 		t.Fatalf("claimed status=%+v", status)
 	}
 	if status.UserMachineID == oldMachineID {
@@ -1703,7 +1703,7 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: continued.BootstrapToken, Verifier: "verifier-same-machine-" + suffix, Alias: "studio", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey}); err != nil {
+	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: continued.BootstrapToken, Verifier: "verifier-same-machine-" + suffix, Alias: "studio", Platform: "linux", Architecture: "arm64", WorkspaceRoot: "/home/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey}); err != nil {
 		t.Fatal(err)
 	}
 	continuedStatus, err := service.Enrollment(ctx, userID, continued.ID)
@@ -1737,11 +1737,11 @@ func TestFreshEnrollmentTakesTheNameOnceTheRetiredRecordIsRemoved(t *testing.T) 
 	}
 	for i, state := range []string{"disconnected", "offline"} {
 		alias := []string{"studio", "desk"}[i]
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'darwin','arm64','/Users/paperboat',$5,'released')`, fmt.Sprintf("mch_retired_%d_%s", i, suffix), userID, fmt.Sprintf("env_retired_%d_%s", i, suffix), alias, state); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$3,$4,'linux','arm64','/home/paperboat',$5,'released')`, fmt.Sprintf("mch_retired_%d_%s", i, suffix), userID, fmt.Sprintf("env_retired_%d_%s", i, suffix), alias, state); err != nil {
 			t.Fatal(err)
 		}
 	}
-	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"darwin", "linux"}}, testSeatAuthorizer{})
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
 	service.ConfigureAccess(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
@@ -1759,7 +1759,7 @@ func TestFreshEnrollmentTakesTheNameOnceTheRetiredRecordIsRemoved(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-%s-%d-%s", alias, enrollments, suffix), Alias: alias, Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: key}); err != nil {
+		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-%s-%d-%s", alias, enrollments, suffix), Alias: alias, Platform: "linux", Architecture: "arm64", WorkspaceRoot: "/home/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: key}); err != nil {
 			t.Fatal(err)
 		}
 		status, err := service.Enrollment(ctx, userID, start.ID)
