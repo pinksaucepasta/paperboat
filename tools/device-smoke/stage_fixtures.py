@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import tarfile
 
-MAX_FILES = 128
+MAX_FILES = 256
 MAX_FILE_BYTES = 256 << 10
 MAX_ARCHIVE_BYTES = 8 << 20
 
