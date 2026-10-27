@@ -83,9 +83,11 @@ describe("worker output flow", () => {
   test("a consumer that cannot keep up lags: output is dropped until the next screen, which is delivered", () => {
     const sent: { events: Event[] }[] = []
     let overflowed = 0
+    let resyncs = 0
     const flow = new TerminalOutputFlow({
       send: (batch: { events: Event[] }) => sent.push(batch), // never consumed: the credit window fills
       overflow: () => overflowed++,
+      resync: () => resyncs++,
       schedule: () => 0 as unknown as ReturnType<typeof setTimeout>,
       cancel: () => undefined,
       setTimer: (() => 1) as unknown as typeof setTimeout,
@@ -94,12 +96,24 @@ describe("worker output flow", () => {
     for (let n = 0; n < 5000; n++) expect(flow.push({ ...output(n), channel: n % 2 === 0 ? 1 : 3, data: new Uint8Array(40 << 10) })).toBe(true)
     expect(overflowed).toBe(0)
     expect(flow.lagging).toBe(true)
+    expect(resyncs).toBe(1) // asked for a screen once, however much more output was dropped
     const before = sent.flatMap((batch) => batch.events).length
     expect(flow.push(output(9999))).toBe(true) // dropped while lagging
     expect(flow.push({ type: "attached", connection_id: "c", screen: new Uint8Array(100) })).toBe(true)
     expect(flow.lagging).toBe(false)
     expect(flow.pending.at(-1).event.type).toBe("attached")
     expect(sent.flatMap((batch) => batch.events).length).toBe(before)
+  })
+
+  test("the output bound is 8 screens, between one batch and the memory cap", () => {
+    const limitAfter = (columns: number, rows: number) => {
+      const flow = new TerminalOutputFlow({ send: () => undefined, overflow: () => undefined })
+      flow.push({ type: "attached", connection_id: "c", screen: new Uint8Array(10), columns, rows } as Event)
+      return flow.limit
+    }
+    expect(limitAfter(80, 24)).toBe(64 << 10)
+    expect(limitAfter(200, 60)).toBe(8 * 200 * 60)
+    expect(limitAfter(500, 200)).toBe(512 << 10)
   })
 
   test("a lag that no screen ever ends overflows once, so the connection is replaced", () => {

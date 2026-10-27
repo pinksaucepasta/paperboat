@@ -1,4 +1,7 @@
+// Upper bound of unconsumed output. The bound in use follows the screen: tmux gives up on a client once 8 screens of
+// output wait unsent (tty.c TTY_BLOCK_START), because a screen restore is cheaper than painting that much output.
 const OUTPUT_LIMIT = 512 << 10
+const SCREENS_PENDING = 8
 // A flood is thousands of small records a second; 8 batches of 32 events in flight is already 256 of them.
 // Bytes bound the memory (OUTPUT_LIMIT); the count only bounds per-record overhead.
 const RECORD_LIMIT = 8192
@@ -14,13 +17,15 @@ const MAX_INFLIGHT = OUTPUT_LIMIT / BATCH_BYTES
 // Credits cover queued and posted data until the renderer reports consumption.
 // Store sizes separately: postMessage may detach the transferred buffers.
 export class TerminalOutputFlow {
-  constructor({ send, overflow, schedule = (callback) => setTimeout(callback, 0), cancel = clearTimeout, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  constructor({ send, overflow, resync = () => {}, schedule = (callback) => setTimeout(callback, 0), cancel = clearTimeout, setTimer = setTimeout, clearTimer = clearTimeout }) {
     this.setTimer = setTimer
     this.clearTimer = clearTimer
     this.lagging = false
     this.lagTimer = null
     this.send = send
     this.overflow = overflow
+    this.resync = resync
+    this.limit = OUTPUT_LIMIT
     this.schedule = schedule
     this.cancel = cancel
     this.pending = []
@@ -51,7 +56,11 @@ export class TerminalOutputFlow {
       this.endLag()
     }
     // A screen restore replaces everything the page has not been sent yet.
-    if (screen) this.supersede()
+    if (screen) {
+      this.supersede()
+      const cells = event.columns * event.rows
+      if (cells > 0) this.limit = Math.min(OUTPUT_LIMIT, Math.max(BATCH_BYTES, SCREENS_PENDING * cells))
+    }
     const previous = this.pending.at(-1)
     // Browser channel 2 carries geometry and must remain a parse barrier.
     const merge = previous && output && event.channel === 1 &&
@@ -68,15 +77,16 @@ export class TerminalOutputFlow {
     // The old slab remains live while growth copies it. Reserve both buffers
     // before allocating, so even this transient peak stays within the bound.
     const allocation = merge && extraCapacity === 0 ? 0 : capacity
-    if (this.allocatedBytes + allocation > OUTPUT_LIMIT || (!merge && this.records + 1 > RECORD_LIMIT)) {
+    if (this.allocatedBytes + allocation > this.limit || (!merge && this.records + 1 > RECORD_LIMIT)) {
       if (!output) {
         this.fail()
         return false
       }
-      // The page cannot keep up with the flood: drop what is queued and wait for the machine's screen restore
-      // (it resyncs a lagging viewer in-band); only a restore that never comes ends the connection.
+      // The page cannot keep up with the flood: drop what is queued and ask the machine for a fresh screen (the
+      // in-band resync); only a screen that never comes ends the connection.
       this.supersede()
       this.lagging = true
+      this.resync()
       this.lagTimer = this.setTimer(() => {
         this.lagTimer = null
         if (this.lagging) this.fail()

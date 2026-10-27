@@ -62,6 +62,8 @@ self.onmessage = async ({ data }) => {
           }
           self.postMessage({ type: "events", callbackID, batch }, [...new Set(buffers)])
         },
+        // Leave outside the Go output callback: the flow drops output from inside it.
+        resync: () => setTimeout(() => connectionID && api.resync(connectionID), 0),
         overflow: () => {
           // A fresh authenticated checkpoint recovers a persistently slow
           // consumer. Never skip arbitrary VT bytes to pretend it caught up.
