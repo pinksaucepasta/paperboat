@@ -5001,3 +5001,7 @@ FIRST SCALE ITEM: relay observations signed valid 15 s force a renewal ~every 12
 2026-10-27 | SDK lane config device check | Fresh normal hp35 pair after exact revocation of old ef7fe802/b1be7342; C127–C138 main+error PASS, all18 refusal paths PASS. Installed missing fixture Git; narrowed harness status query to own machine.
 Initial C177 connect transport failure support_645573f8; C169/C172/C179–C181 main not reached, six L cells pending qualification. Result tools/device-smoke/results/config-commands-35a943a9-20261027.json; exact failure sent to Coordinator, no product edits.
 Cleanup clean/enrollment preserved, pair retained on35; Merger-requested config_sync_lifecycle.py rerun active after deploy. Original offline upgrade failure not established on a normal path; fresh install/pair PASS. M/W skipped.
+
+2026-10-27 | SDK lane config handoff | Six ID-based repository rows completed PASS at02:27Z before stop request; combined with12 local-access rows, all18 main/error checks PASS on fresh hp35. Result tools/device-smoke/results/config-commands-35a943a9-20261027-final.json.
+Preserved Merger ticks from e3bf969c; appended evidence only. Original lifecycle timeouts were my wrong-alias invocation (actual machine alias lanesdkhp-a-2), not product evidence; exact-ID unassign cleaned it, correct-alias rerun never started.
+No tests active, config files/fixture dirs absent, both machines kept running on35. Six rows handed to Merger; no further runs/product edits. M/W skipped.
