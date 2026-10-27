@@ -428,7 +428,8 @@ def restarts(a, sessions):
             return
         c1.settle(3)
         reasons = re.findall(rb'Reconnect(?:ing: [^\]\r\n]*| ?ed after [^\]\r\n]*)', bytes(c1.output))
-        row('N14 restarts: the terminal says why it reconnects and recovered', bool(reasons), b' | '.join(sorted(set(reasons)))[:200].decode(errors='replace'))
+        # the client-daemon step must name itself, not read as a lost link
+        row('N14 restarts: the terminal says why it reconnects and recovered', any(b'on this computer restarted' in r for r in reasons), b' | '.join(sorted(set(reasons)))[:200].decode(errors='replace'))
         ok, why = exactly_once(bytes(c1.output), b'RS', 1, 120)
         row('N14 restarts: output arrives exactly once', ok, why)
         counts = [bytes(c1.output).count(b'PB_GAP_' + k.encode()) for k in gap_keys]
