@@ -295,6 +295,9 @@ func sameRegionalNode(nodes []RegionalNode, wanted RegionalNode) bool {
 	return false
 }
 func (a *Authority) RegionalStatus() RegionalStatus {
+	a.mu.Lock()
+	listener := a.server != nil
+	a.mu.Unlock()
 	a.relay.mu.Lock()
 	r := a.relay.recovery
 	a.relay.mu.Unlock()
@@ -303,9 +306,9 @@ func (a *Authority) RegionalStatus() RegionalStatus {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.peerID == "" {
-		// No pair is bound: there is no relay path to report. pb status warned "No relay is usable" on a
-		// machine whose dials all went direct (hp 2026-10-27).
+	if r.peerID == "" && !listener {
+		// A dialing engine with no pair bound has no relay path to report: pb status warned "No relay is
+		// usable" on a machine whose dials all went direct (hp 2026-10-27). A listener reports its own.
 		return RegionalStatus{Redundancy: RedundancyNone}
 	}
 	status := r.status
