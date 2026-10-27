@@ -27,13 +27,17 @@ await page.waitForURL((url) => url.origin !== origin, { timeout: 30000 }).catch(
 pass("Delete account… goes straight to sign-in", new URL(page.url()).origin !== origin, new URL(page.url()).host)
 pass("no 'Sign in again' stop on the way", !stopShown)
 if (new URL(page.url()).origin === origin) await stop()
-await page.getByLabel("Email").fill(EMAIL)
-await page.getByRole("button", { name: "Continue" }).click()
+// WorkOS re-authentication ("Confirm it's you") asks for the password only, with the email filled in and locked.
+const email = page.getByLabel("Email")
+if (await email.isEditable().catch(() => false)) {
+  await email.fill(EMAIL)
+  await page.getByRole("button", { name: "Continue" }).click()
+}
 const password = page.locator("input[name=password]")
 await password.waitFor({ timeout: 20000 }).catch(() => {})
 if (await password.count()) {
   await password.fill(PASSWORD)
-  await page.getByRole("button", { name: /Continue|Sign in/ }).click()
+  await page.getByRole("button", { name: /Continue|Sign in|Confirm/ }).click()
 }
 await page.waitForTimeout(4000)
 if (/code/i.test((await page.innerText("body")).slice(0, 600))) {
