@@ -27,7 +27,6 @@ import sys
 
 version = sys.argv[2]
 assets = {
-    "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
     "pb-linux-arm64": ("linux", "arm64", "elf"),
 }
@@ -607,7 +606,7 @@ path = pathlib.Path(sys.argv[1])
 old_version, new_version = sys.argv[2:]
 body = path.read_text()
 start = body.index("  linux-arm64)\n")
-end = body.index("  darwin-arm64)\n", start)
+end = body.index("  *)", start)
 branch = body[start:end]
 old = f"product_version='{old_version}'"
 if branch.count(old) != 1:
@@ -642,10 +641,10 @@ path = pathlib.Path(sys.argv[1])
 body = path.read_text()
 amd_marker = "  linux-amd64)\n"
 arm_marker = "  linux-arm64)\n"
-darwin_marker = "  darwin-arm64)\n"
+default_marker = "  *)"
 amd_start = body.index(amd_marker)
 arm_start = body.index(arm_marker, amd_start)
-arm_end = body.index(darwin_marker, arm_start)
+arm_end = body.index(default_marker, arm_start)
 prefix, amd, arm, suffix = body[:amd_start], body[amd_start:arm_start], body[arm_start:arm_end], body[arm_end:]
 for field in ("product_version", "product_url", "product_sha", "product_length"):
     pattern = re.compile(rf"(?m)^([ \t]*{re.escape(field)}=')([^']*)('.*)$")
@@ -816,7 +815,7 @@ live_targets = live["signed"]["targets"]
 for name in ("pb-linux-arm64",):
     if active_targets[name] != live_targets[name]:
         raise SystemExit(f"omitted target metadata changed after activation: {name}")
-for name in ("pb-darwin-arm64", "pb-linux-amd64"):
+for name in ("pb-linux-amd64",):
     if active_targets[name]["custom"]["version"] != "2026.08.22.10":
         raise SystemExit(f"selected target did not advance: {name}")
 PY

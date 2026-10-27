@@ -18,7 +18,6 @@ func testManifest(t *testing.T) Manifest {
 	// The fixture declares the decided public products independently of the
 	// publisher's implementation, so an obsolete pkg/Windows set cannot pass.
 	products := []artifactSpec{
-		{Platform: "darwin", Architecture: "arm64", Format: "macho", Name: "pb-darwin-arm64"},
 		{Platform: "linux", Architecture: "amd64", Format: "elf", Name: "pb-linux-amd64"},
 		{Platform: "linux", Architecture: "arm64", Format: "elf", Name: "pb-linux-arm64"},
 	}
@@ -336,7 +335,7 @@ func containsAny(value string, needles ...string) bool {
 func TestSelectedArtifactManifestHasExactPlanCoverage(t *testing.T) {
 	full := testManifest(t)
 	selected := full
-	selected.Artifacts = []Artifact{full.Artifacts[0], full.Artifacts[1]}
+	selected.Artifacts = []Artifact{full.Artifacts[0]}
 	if err := selected.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +371,7 @@ func TestSelectedArtifactManifestHasExactPlanCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Artifacts) != 2 || VerifyManifest(got, dir) != nil {
+	if len(got.Artifacts) != 1 || VerifyManifest(got, dir) != nil {
 		t.Fatal("selected manifest did not verify")
 	}
 }

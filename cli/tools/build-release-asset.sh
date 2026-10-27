@@ -32,7 +32,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$platform/$architecture" in
-  linux/amd64|linux/arm64|darwin/arm64|windows/amd64|windows/arm64) ;;
+  linux/amd64|linux/arm64|windows/amd64|windows/arm64) ;;
   *) echo "unsupported release target: $platform/$architecture" >&2; exit 1 ;;
 esac
 

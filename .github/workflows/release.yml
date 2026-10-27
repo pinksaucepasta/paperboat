@@ -93,8 +93,7 @@ jobs:
               run.get('status') != 'completed'):
               raise SystemExit('Qualification run does not identify this exact repository/tag/source.')
           expected = {'Validate trusted source and read-only origin access',
-                      'Build Linux amd64 executable', 'Build Linux arm64 executable',
-                      'Build macOS arm64 executable'}
+                      'Build Linux amd64 executable', 'Build Linux arm64 executable'}
           jobs = [job for page in json.loads((root/'qualification-jobs.json').read_text()) for job in page['jobs']]
           qualified = {job['name'] for job in jobs if job.get('status') == 'completed' and job.get('conclusion') == 'success'}
           if not expected <= qualified:
@@ -304,62 +303,10 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  darwin-arm64:
-    if: github.event_name == 'push'
-    name: Build macOS arm64 executable
-    needs: release-authority
-    runs-on: macos-14
-    timeout-minutes: 30
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Build official macOS arm64 executable
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tools/build-release-asset.sh \
-            --platform darwin \
-            --architecture arm64 \
-            --output "$RUNNER_TEMP/pb-darwin-arm64" \
-            --version "$RELEASE_VERSION" \
-            --server-url "$DEFAULT_SERVER_URL" \
-            --release-url "$DEFAULT_RELEASE_URL"
-          mkdir -p dist
-          codesign --force --sign - "$RUNNER_TEMP/pb-darwin-arm64"
-          codesign --verify --strict "$RUNNER_TEMP/pb-darwin-arm64"
-          mv "$RUNNER_TEMP/pb-darwin-arm64" dist/pb-darwin-arm64
-      - name: Natively qualify macOS executable
-        shell: bash
-        run: |
-          set -euo pipefail
-          version_output=$(dist/pb-darwin-arm64 --version)
-          version_line=$(printf '%s\n' "$version_output" | grep -Eo 'Version[[:space:]]+[0-9A-Za-z._-]+' | tail -n 1)
-          test "$version_line" = "Version $RELEASE_VERSION"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-product-darwin-arm64
-          path: cli/dist/pb-darwin-arm64
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
   release-publication:
-    if: ${{ always() && needs.release-authority.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.linux-amd64.result == 'success' && needs.linux-arm64.result == 'success' && needs.darwin-arm64.result == 'success')) }}
-    name: Publish three qualified products and signed TUF metadata
-    needs: [release-authority, linux-amd64, linux-arm64, darwin-arm64]
+    if: ${{ always() && needs.release-authority.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.linux-amd64.result == 'success' && needs.linux-arm64.result == 'success')) }}
+    name: Publish two qualified products and signed TUF metadata
+    needs: [release-authority, linux-amd64, linux-arm64]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
     environment: paperboat-tuf-published
@@ -389,7 +336,7 @@ jobs:
           pattern: paperboat-candidate-product-*
           path: ${{ runner.temp }}/candidate-artifacts
           merge-multiple: true
-      - name: Validate the exact three-asset candidate set
+      - name: Validate the exact two-asset candidate set
         shell: bash
         run: |
           set -euo pipefail
@@ -402,7 +349,6 @@ jobs:
           if any(not item.is_file() or item.is_symlink() for item in entries):
               raise SystemExit("candidate artifact directory contains a non-regular entry")
           expected = {
-              "pb-darwin-arm64",
               "pb-linux-amd64",
               "pb-linux-arm64",
           }
@@ -628,7 +574,7 @@ jobs:
           version = os.environ['RELEASE_VERSION']
           selected = [target['custom']['version'] == version for target in targets.values()]
           if any(selected):
-              if not all(selected) or len(targets) != 3:
+              if not all(selected) or len(targets) != 2:
                   raise SystemExit('live release only partially matches the requested version')
               manifest_digest = hashlib.sha256(pathlib.Path(sys.argv[3]).read_bytes()).hexdigest()
               for name, target in targets.items():
@@ -640,7 +586,7 @@ jobs:
           else:
               print('already_published=false')
           PYCOMMITTED
-      - name: Sign the three qualified release targets
+      - name: Sign the two qualified release targets
         if: steps.committed.outputs.already_published != 'true'
         env:
           PAPERBOAT_GITHUB_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
@@ -728,4 +674,4 @@ jobs:
       - name: Summarize the completed release
         shell: bash
         run: |
-          printf 'Release **%s** published three qualified products, signed TUF metadata and product-pinned installers; Latest advanced after origin verification.\n' "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Release **%s** published two qualified products, signed TUF metadata and product-pinned installers; Latest advanced after origin verification.\n' "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"

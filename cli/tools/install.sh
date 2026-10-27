@@ -65,9 +65,8 @@ if [ "$setup" = true ] || [ "$pair" = true ]; then join=false; fi
 [ -z "$ssh_port" ] || [ "$setup" = true ] || [ "$pair" = true ] || { echo "pb installer: --ssh-port requires --setup or --pair" >&2; exit 2; }
 [ -z "$recovery_output" ] || [ "$setup" = true ] || { echo "pb installer: --recovery-output requires --setup" >&2; exit 2; }
 
-case $(uname -s) in Darwin) os=darwin ;; Linux) os=linux ;; *) echo "pb installer: only macOS and Linux are supported" >&2; exit 1 ;; esac
+case $(uname -s) in Darwin) echo "pb installer: macOS is not available yet; Linux only for now" >&2; exit 1 ;; Linux) os=linux ;; *) echo "pb installer: only Linux is supported" >&2; exit 1 ;; esac
 case $(uname -m) in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) echo "pb installer: unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac
-[ "$os" != darwin ] || [ "$arch" = arm64 ] || { echo "pb installer: macOS releases support arm64" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || { echo "pb installer: curl is required" >&2; exit 1; }
 
@@ -102,11 +101,6 @@ case "$os-$arch" in
     product_url='@PAPERBOAT_PRODUCT_LINUX_ARM64_URL@'
     product_sha='@PAPERBOAT_PRODUCT_LINUX_ARM64_SHA256@'
     product_length='@PAPERBOAT_PRODUCT_LINUX_ARM64_LENGTH@' ;;
-  darwin-arm64)
-    product_version='@PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION@'
-    product_url='@PAPERBOAT_PRODUCT_DARWIN_ARM64_URL@'
-    product_sha='@PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256@'
-    product_length='@PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH@' ;;
   *) echo "pb installer: unsupported platform: $os-$arch" >&2; exit 1 ;;
 esac
 case "$product_version:$product_url:$product_sha:$product_length" in *'@PAPERBOAT_PRODUCT_'*) echo 'pb installer: this platform has no published product record' >&2; exit 1 ;; esac

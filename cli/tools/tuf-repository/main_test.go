@@ -28,7 +28,6 @@ func TestCIKeyEnvironmentAndSupportedTargets(t *testing.T) {
 		t.Fatal("environment key seed changed while loading")
 	}
 	want := []releaseTargetPlatform{
-		{platform: "darwin", architecture: "arm64"},
 		{platform: "linux", architecture: "amd64"},
 		{platform: "linux", architecture: "arm64"},
 	}
@@ -70,13 +69,10 @@ func TestCISigningPublishesCompleteSupportedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := targets.Signed.Targets["pb-darwin-amd64.pkg"]; exists {
-		t.Fatal("unsupported macOS amd64 target was published")
+	if _, exists := targets.Signed.Targets["pb-darwin-arm64"]; exists {
+		t.Fatal("unsupported macOS arm64 target was published")
 	}
-	if _, exists := targets.Signed.Targets["pb-darwin-arm64"]; !exists {
-		t.Fatal("macOS arm64 target was not published")
-	}
-	wantNames := map[string]bool{"pb-darwin-arm64": false, "pb-linux-amd64": false, "pb-linux-arm64": false}
+	wantNames := map[string]bool{"pb-linux-amd64": false, "pb-linux-arm64": false}
 	var signedManifestDigest, signedPlanDigest string
 	if len(targets.Signed.Targets) != len(wantNames) {
 		t.Fatalf("published target count=%d, want %d", len(targets.Signed.Targets), len(wantNames))
@@ -559,7 +555,7 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	selected := []releaseTargetPlatform{{"darwin", "arm64"}, {"linux", "amd64"}}
+	selected := []releaseTargetPlatform{{"linux", "amd64"}}
 	next := "2026.09.30.1"
 	dir, evidence = makeAssets(next, selected)
 	unexpected := filepath.Join(dir, "unqualified-helper")

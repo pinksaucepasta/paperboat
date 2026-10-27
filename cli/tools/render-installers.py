@@ -16,10 +16,9 @@ def main() -> None:
     assets = {
         "pb-linux-amd64": ("linux", "amd64", "elf"),
         "pb-linux-arm64": ("linux", "arm64", "elf"),
-        "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     }
     if set(targets) != set(assets):
-        raise SystemExit("verified publication must contain exactly three product targets")
+        raise SystemExit("verified publication must contain exactly two product targets")
     values = {}
     repositories = set()
     for name, (platform, architecture, binary_format) in assets.items():

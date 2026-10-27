@@ -74,7 +74,6 @@ type artifactSpec struct {
 }
 
 var artifactSpecs = []artifactSpec{
-	{Platform: "darwin", Architecture: "arm64", Format: "macho", Name: "pb-darwin-arm64"},
 	{Platform: "linux", Architecture: "amd64", Format: "elf", Name: "pb-linux-amd64"},
 	{Platform: "linux", Architecture: "arm64", Format: "elf", Name: "pb-linux-arm64"},
 }

@@ -17,7 +17,7 @@ const testVersion = "2026.08.25.1"
 
 func testCurrent() Current {
 	current := Current{Schema: CurrentSchemaV1, Version: testVersion, Repository: testRepository, Assets: map[string]Asset{}}
-	for _, target := range []struct{ platform, architecture, format string }{{"darwin", "arm64", "macho"}, {"linux", "amd64", "elf"}, {"linux", "arm64", "elf"}} {
+	for _, target := range []struct{ platform, architecture, format string }{{"linux", "amd64", "elf"}, {"linux", "arm64", "elf"}} {
 		name := "pb-" + target.platform + "-" + target.architecture
 		body := []byte(name + " bytes")
 		digest := sha256.Sum256(body)
@@ -30,7 +30,7 @@ func TestReadCurrent(t *testing.T) {
 	directory := t.TempDir()
 	writeReadyBundle(t, directory, false)
 	current, err := ReadCurrent(directory)
-	if err != nil || current.Version != testVersion || len(current.Assets) != 3 {
+	if err != nil || current.Version != testVersion || len(current.Assets) != 2 {
 		t.Fatalf("current = %#v, %v", current, err)
 	}
 }
@@ -222,15 +222,15 @@ func TestReadyRejectsDeploymentPlanDigestMismatch(t *testing.T) {
 	}
 }
 
-func TestReadyRejectsDarwinAMD64Target(t *testing.T) {
+func TestReadyRejectsDarwinTarget(t *testing.T) {
 	directory := t.TempDir()
 	writeReadyBundle(t, directory, false)
 	if err := Ready(directory); err != nil {
 		t.Fatalf("supported release bundle was rejected: %v", err)
 	}
-	editTargets(t, directory, func(targets map[string]any) { targets["pb-darwin-amd64"] = targets["pb-darwin-arm64"] })
+	editTargets(t, directory, func(targets map[string]any) { targets["pb-darwin-arm64"] = targets["pb-linux-arm64"] })
 	if err := Ready(directory); err == nil {
-		t.Fatal("release bundle containing darwin amd64 was accepted")
+		t.Fatal("release bundle containing a darwin target was accepted")
 	}
 }
 
@@ -246,7 +246,7 @@ func TestReadyRejectsLocalTargetBlobs(t *testing.T) {
 }
 
 func TestReadyRequiresEveryLaunchAsset(t *testing.T) {
-	for _, name := range []string{"pb-linux-amd64", "pb-linux-arm64", "pb-darwin-arm64"} {
+	for _, name := range []string{"pb-linux-amd64", "pb-linux-arm64"} {
 		t.Run(name, func(t *testing.T) {
 			directory := t.TempDir()
 			writeReadyBundle(t, directory, false)
@@ -368,7 +368,7 @@ func testPublishedReleaseIndex(asset Asset, now time.Time) publishedReleaseIndex
 
 func TestSupportedPlatformArchitectureMatchesReleaseMatrix(t *testing.T) {
 	supported := map[string]bool{
-		"darwin/arm64": true, "linux/amd64": true, "linux/arm64": true,
+		"linux/amd64": true, "linux/arm64": true,
 	}
 	for _, platform := range []string{"darwin", "linux", "windows", "freebsd"} {
 		for _, architecture := range []string{"amd64", "arm64", "386"} {

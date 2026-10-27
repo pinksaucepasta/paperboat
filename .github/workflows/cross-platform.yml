@@ -1,12 +1,10 @@
 name: Cross-platform
 
-# Build and test the cli and shared modules on the platforms users run (macOS, Windows).
-# macOS must be green. Windows is post-launch (PLAN 1.1) and still has a known backlog, so its job
+# Build and test the cli and shared modules on macOS and Windows. macOS/Windows CI is paused
+# (Linux-only for now, user decision 2026-10-27): hand dispatch only. Restore the push and
+# pull_request triggers when macOS returns. Windows still has a known backlog, so its job
 # reports but does not fail the workflow; remove continue-on-error once it is green.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       packages:

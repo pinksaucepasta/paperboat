@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestMacOSInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
+func TestInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
 	for _, scenario := range []string{"valid", "no-join", "wrong-hash", "wrong-length", "wrong-url", "install-failure", "reset-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
@@ -42,19 +42,19 @@ esac
 			writeInstallerFixture(t, product, fixture)
 			digest := sha256.Sum256([]byte(fixture))
 			values := map[string]string{
-				"PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION": "2026.10.15.1",
-				"PAPERBOAT_PRODUCT_DARWIN_ARM64_URL":     "https://github.com/example/paperboat/releases/download/2026.10.15.1/pb-darwin-arm64",
-				"PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256":  hex.EncodeToString(digest[:]),
-				"PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH":  fmt.Sprint(len(fixture)),
+				"PAPERBOAT_PRODUCT_LINUX_ARM64_VERSION": "2026.10.15.1",
+				"PAPERBOAT_PRODUCT_LINUX_ARM64_URL":     "https://github.com/example/paperboat/releases/download/2026.10.15.1/pb-linux-arm64",
+				"PAPERBOAT_PRODUCT_LINUX_ARM64_SHA256":  hex.EncodeToString(digest[:]),
+				"PAPERBOAT_PRODUCT_LINUX_ARM64_LENGTH":  fmt.Sprint(len(fixture)),
 				"PAPERBOAT_PRODUCT_REPOSITORY":           "example/paperboat",
 			}
 			switch scenario {
 			case "wrong-hash":
-				values["PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256"] = strings.Repeat("f", 64)
+				values["PAPERBOAT_PRODUCT_LINUX_ARM64_SHA256"] = strings.Repeat("f", 64)
 			case "wrong-length":
-				values["PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH"] = fmt.Sprint(len(fixture) + 1)
+				values["PAPERBOAT_PRODUCT_LINUX_ARM64_LENGTH"] = fmt.Sprint(len(fixture) + 1)
 			case "wrong-url":
-				values["PAPERBOAT_PRODUCT_DARWIN_ARM64_URL"] = "https://example.test/untrusted"
+				values["PAPERBOAT_PRODUCT_LINUX_ARM64_URL"] = "https://example.test/untrusted"
 			}
 			body, err := os.ReadFile("install.sh")
 			if err != nil {
@@ -66,7 +66,7 @@ esac
 			}
 			installer := filepath.Join(root, "install.sh")
 			writeInstallerFixture(t, installer, script)
-			writeInstallerFixture(t, filepath.Join(root, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 1 ;; esac\n")
+			writeInstallerFixture(t, filepath.Join(root, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Linux ;; -m) echo aarch64 ;; *) exit 1 ;; esac\n")
 			writeInstallerFixture(t, filepath.Join(root, "curl"), "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then cp \"$PRODUCT\" \"$2\"; exit; fi; shift; done\nexit 1\n")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

@@ -22,7 +22,6 @@ func TestRenderInstallersUsesEachVerifiedProductIdentity(t *testing.T) {
 			for i, product := range []struct{ name, platform, arch, format string }{
 				{"pb-linux-amd64", "linux", "amd64", "elf"},
 				{"pb-linux-arm64", "linux", "arm64", "elf"},
-				{"pb-darwin-arm64", "darwin", "arm64", "macho"},
 			} {
 				version := "2026.10.08.21"
 				if product.platform != "darwin" && product.arch == "arm64" {

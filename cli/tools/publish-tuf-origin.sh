@@ -209,7 +209,6 @@ live_targets_path = pathlib.Path(sys.argv[2])
 version = sys.argv[3]
 fresh = sys.argv[4] == "fresh"
 expected = {
-    "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
     "pb-linux-arm64": ("linux", "arm64", "elf"),
 }
@@ -410,8 +409,8 @@ def read_installer(name):
     return body
 
 def shell_product_branches(body):
-    branch_names = ("linux-amd64", "linux-arm64", "darwin-arm64")
-    matches = list(re.finditer(r"(?m)^[ \t]*(linux-amd64|linux-arm64|darwin-arm64)\)[ \t]*$", body))
+    branch_names = ("linux-amd64", "linux-arm64")
+    matches = list(re.finditer(r"(?m)^[ \t]*(linux-amd64|linux-arm64)\)[ \t]*$", body))
     if tuple(match.group(1) for match in matches) != branch_names:
         raise SystemExit("shell installer product branches are missing, duplicated, or reordered")
     branches = {}
@@ -449,7 +448,6 @@ install_branches = shell_product_branches(install_body)
 for name, branch_name in (
     ("pb-linux-amd64", "linux-amd64"),
     ("pb-linux-arm64", "linux-arm64"),
-    ("pb-darwin-arm64", "darwin-arm64"),
 ):
     require_product_pins(install_branches[branch_name], name, candidate_product_pins[name])
 

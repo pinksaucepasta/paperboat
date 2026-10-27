@@ -13,7 +13,7 @@ import (
 // Route the real filesystem/installer contract owners through make gate.
 // Publication uses Linux renameat2; these fixtures never touch a live origin.
 func TestLaunchPublicationShellContracts(t *testing.T) {
-	for _, script := range []string{"test-publish-tuf-origin.sh", "test-macos-install-preservation.sh"} {
+	for _, script := range []string{"test-publish-tuf-origin.sh"} {
 		t.Run(script, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()

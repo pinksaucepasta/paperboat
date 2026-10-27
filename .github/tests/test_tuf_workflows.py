@@ -103,7 +103,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             self.assertEqual(creation[creation.index("--repo")+1], repository)
             self.assertIn("--verify-tag", creation)
 
-    def test_launch_candidate_accepts_three_binaries_and_rejects_incomplete_or_extra_products(self):
+    def test_launch_candidate_accepts_two_binaries_and_rejects_incomplete_or_extra_products(self):
         publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         step = next(s for s in publication["jobs"]["release-publication"]["steps"]
                     if s.get("name", "").startswith("Validate the exact"))
@@ -111,7 +111,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             directory = Path(temporary)
             artifacts = directory / "candidate-artifacts"
             artifacts.mkdir()
-            products = ["pb-linux-amd64", "pb-linux-arm64", "pb-darwin-arm64"]
+            products = ["pb-linux-amd64", "pb-linux-arm64"]
             for name in products:
                 (artifacts / name).write_bytes(b"qualified product bytes")
             environment = dict(os.environ, RUNNER_TEMP=str(directory))
