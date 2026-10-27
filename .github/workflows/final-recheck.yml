@@ -1,0 +1,141 @@
+name: Final Linux re-check
+
+# The final re-check of the Linux checklist on clean GitHub-hosted VMs. Run by hand only (workflow_dispatch; no push or pull
+# request trigger, this repository is public). Every VM builds its own disposable machines: it signs up two throwaway console
+# accounts, installs Ubuntu containers with the published one-liner (the official release under test), runs its share of the
+# checks against the live console and tears everything down again. Shards split the checks over several VMs (one VM is limited
+# to 6 hours); `merge` joins their result files into one table (artifact final-recheck-merged).
+#
+# Secrets (Settings > Secrets and variables > Actions), never printed:
+#   FIXTURES_SSH_KEY, FIXTURES_SSH_KNOWN_HOSTS, FIXTURES_SSH_HOST  ssh access to the database host for tools/device-smoke/final_fixtures.py
+#   SMOKE_CF_TOKEN                                                  Cloudflare DNS token for the custom-domain and tunnel checks
+# Variable: SMOKE_CF_ZONE (the DNS zone those checks create their test records in).
+# The Go tests are not part of this run (they test the commit, not a build): tools/ci-test.sh runs them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 'Official release under test, as published (e.g. 2026.10.27.1)'
+        required: true
+      previous:
+        description: 'Previous official release the update-with-history check starts from'
+        required: true
+      origin:
+        description: 'Live console origin the console checks run against (https://...)'
+        required: true
+      shards:
+        description: 'Number of VMs to split the checks over'
+        default: '3'
+      only:
+        description: 'Optional subset for a dry run: ROW,ROW|CHECK,CHECK (empty = everything)'
+        default: ''
+      fixtures:
+        description: 'Create the fixtures team (final_fixtures.py); off only for dry runs that need no team'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = int(os.environ["SHARDS"])
+          assert 1 <= n <= 20, "shards must be 1..20"
+          print("shards=" + json.dumps(list(range(1, n + 1))))
+          PY
+
+  recheck:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      BUILD: ${{ inputs.build }}
+      PREVIOUS: ${{ inputs.previous }}
+      ORIGIN: ${{ inputs.origin }}
+      ONLY: ${{ inputs.only }}
+      FIXTURES: ${{ inputs.fixtures }}
+      SHARD: ${{ matrix.shard }}/${{ inputs.shards }}
+      SMOKE_CT_DOCKER: docker
+      SMOKE_CF_ZONE: ${{ vars.SMOKE_CF_ZONE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The machines' image and the official pb (only used to mint enrollment commands)
+        run: |
+          docker build -q -t laneh-ubuntu24-systemd -f tools/device-smoke/ubuntu24-systemd.Dockerfile tools/device-smoke
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/pb" "https://github.com/$GITHUB_REPOSITORY/releases/download/$BUILD/pb-linux-amd64"
+          chmod 755 "$HOME/.local/bin/pb"
+          "$HOME/.local/bin/pb" --version | sed -n 's/.*Version //p' | grep -qx "$BUILD"
+
+      - name: Headless browser for the console checks
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pw" playwright-core
+          node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install --with-deps chromium
+          echo "PW_MODULE=$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs" >> "$GITHUB_ENV"
+          echo "PW_CHROMIUM=$(node -e "import('$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs').then(m => console.log(m.chromium.executablePath()))")" >> "$GITHUB_ENV"
+
+      - name: Secrets as 0600 files
+        env:
+          FIXTURES_SSH_KEY: ${{ secrets.FIXTURES_SSH_KEY }}
+          FIXTURES_SSH_KNOWN_HOSTS: ${{ secrets.FIXTURES_SSH_KNOWN_HOSTS }}
+          FIXTURES_SSH_HOST: ${{ secrets.FIXTURES_SSH_HOST }}
+          SMOKE_CF_TOKEN: ${{ secrets.SMOKE_CF_TOKEN }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$FIXTURES_SSH_KEY" > "$HOME/.ssh/fixtures_key"
+          printf '%s\n' "$FIXTURES_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SMOKE_CF_TOKEN" > "$RUNNER_TEMP/cf-token"
+          echo "FINAL_FIXTURES_HOST=$FIXTURES_SSH_HOST" >> "$GITHUB_ENV"
+          echo "SMOKE_CF_TOKEN_FILE=$RUNNER_TEMP/cf-token" >> "$GITHUB_ENV"
+          printf 'Host *\n  IdentityFile %s/.ssh/fixtures_key\n' "$HOME" > "$HOME/.ssh/config"
+
+      - name: Final re-check, shard ${{ matrix.shard }} of ${{ inputs.shards }}
+        run: |
+          flags=(--build "$BUILD" --previous "$PREVIOUS" --origin "$ORIGIN" --host local --shard "$SHARD" --skip-go)
+          [ -z "$ONLY" ] || flags+=(--only "$ONLY")
+          [ "$FIXTURES" = true ] || flags+=(--no-fixtures)
+          PATH="$PWD/tools/device-smoke/localssh:$PATH" python3 tools/device-smoke/final_recheck.py run "${flags[@]}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: final-recheck-shard-${{ matrix.shard }}
+          path: tools/device-smoke/results/final-recheck-*
+          if-no-files-found: warn
+
+  merge:
+    needs: recheck
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      BUILD: ${{ inputs.build }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: One table from the shards
+        run: |
+          gh run download "$GITHUB_RUN_ID" --pattern 'final-recheck-shard-*' --dir shards
+          python3 tools/device-smoke/final_recheck.py merge --build "$BUILD" shards/*/final-recheck-*.json
+          cat tools/device-smoke/results/final-recheck-"$BUILD"-*.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: final-recheck-merged
+          path: tools/device-smoke/results/final-recheck-*

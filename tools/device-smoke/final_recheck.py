@@ -13,8 +13,8 @@ Check kinds (nothing new: each runs through an existing tool)
 The extras of the final check (previous official -> final update with history, exec right after a fresh pair, ...) are cmd
 entries with rows EXTRA. Results: results/final-recheck-<build>-<UTC>.{md,json}.
 
-Nothing is reused: `run` makes its own throwaway console account (disposable mail.tm inbox, deleted at the end), enrolls three
-fresh containers on --host with the published one-liner (the official Latest, which must be --build; "latest" takes whatever is
+Nothing is reused: `run` makes its own throwaway console account (disposable mail.tm inbox, deleted at the end), enrolls fresh
+containers on --host with the published one-liner (the official Latest, which must be --build; "latest" takes whatever is
 published) and tears all of it down again, so the check starts from what a new user has. Needs ORIGIN (--origin) and PW_CHROMIUM
 (+ PW_MODULE) for the console.
 Options of run: --build (the official release under test), --previous (the previous official release the update-with-history
@@ -33,6 +33,7 @@ import shlex
 import subprocess
 import sys
 import time
+import urllib.request
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -266,41 +267,67 @@ def ssh(host, command, stdin=None, timeout=300):
 # fresh account only. The real pb of the host is just the binary; it is never signed in to anything here.
 PROFILE = """import json, os, sys
 s = sys.argv[1]
-c = json.load(open(os.path.expanduser('~/.config/paperboat/config.json')))
-json.dump({'server_url': c['server_url'], 'auth': {'allow_file_fallback': True, 'profile_dir': s + '/credentials'}}, open(s + '/home/config.json', 'w'))
+try:
+    server = {'server_url': json.load(open(os.path.expanduser('~/.config/paperboat/config.json')))['server_url']}
+except OSError:
+    server = {}  # no config on the host (a fresh CI VM): the official binary's own server
+json.dump({**server, 'auth': {'allow_file_fallback': True, 'profile_dir': s + '/credentials'}}, open(s + '/home/config.json', 'w'))
 open(s + '/mint.sh', 'w').write('#!/bin/bash\\nexport HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data XDG_STATE_HOME=%s/state XDG_CACHE_HOME=%s/cache\\nexec %s --config %s/home/config.json "$@"\\n' % (s, s, s, s, s, os.path.expanduser('~/.local/bin/pb'), s))
 os.chmod(s + '/mint.sh', 0o700)
 """
 
 
 class Fresh:
-    """The run's own account and machines: signup -> scratch pb on the host signed in to it (FRESH_MINT) -> three containers."""
+    """The run's own accounts and machines: two throwaway accounts (the owner and a teammate), each with a scratch pb on the host signed
+    in to it (FRESH_MINT), the fixtures (a paid team owned by the first, the second a member), and four fresh containers."""
 
     def __init__(self, args):
         self.args, self.stamp = args, str(int(time.time()))
-        self.work = '/tmp/final-fresh-' + self.stamp
-        self.scratch = '/tmp/pbfresh-' + self.stamp  # on the host: the account's API token and a pb profile signed in to it
-        self.state = self.work + '/state.json'
+        self.accounts = [('/tmp/final-fresh-%s-%s' % (self.stamp, n), '/tmp/pbfresh-%s-%s' % (self.stamp, n)) for n in ('a', 'b')]  # (work dir, scratch dir on the host)
+        self.state = self.accounts[0][0] + '/state.json'
         self.version = ''
 
-    def node(self, script, *rest):
-        env = {'ORIGIN': self.args.origin, 'STATE': self.state}
-        code, out, _ = run(['node', str(HERE / script)] + list(rest), env, timeout=300)
+    def node(self, script, work, *rest):
+        code, out, _ = run(['node', str(HERE / script)] + list(rest), {'ORIGIN': self.args.origin, 'STATE': work + '/state.json'}, timeout=300)
         if code:
             raise RuntimeError('%s %s failed: %s' % (script, ' '.join(rest[:1]), out.strip()[-300:]))
         return out
 
-    def up(self):
-        host = self.args.host
-        self.node('fresh_account.mjs', 'signup', self.work)
-        token = self.node('mint_api_token.mjs', 'final-recheck')
-        code, out, _ = ssh(host, 'umask 077; rm -rf {s}; mkdir -p {s}/home {s}/config {s}/data {s}/state {s}/cache; cat > {s}/token'.format(s=self.scratch), stdin=token)
-        code = code or ssh(host, 'python3 - ' + self.scratch, stdin=PROFILE)[0]
-        code = code or ssh(host, '{s}/mint.sh login --api-token-file - < {s}/token >/dev/null && {s}/mint.sh auth status --json | grep -q signed_in..true'.format(s=self.scratch))[0]
+    def email(self, n):
+        return json.load(open(self.accounts[n][0] + '/account.json'))['email']
+
+    def fixtures(self, *extra):
+        """final_fixtures.py (Server lane; an empty database has no paid team): a team with a paid entitlement owned by the first account, the
+        second a member. Prints one JSON line {"env": {...}} whose variables every check inherits; --teardown makes the members inactive again."""
+        if self.args.no_fixtures:
+            return {}
+        code, out, _ = run([sys.executable, str(HERE / 'final_fixtures.py'), '--email', self.email(0), '--member', self.email(1), *extra], timeout=900)
+        if code:
+            raise RuntimeError('final_fixtures.py %s failed: %s' % (' '.join(extra), out.strip()[-300:]))
+        return {} if extra else json.loads(out.strip().splitlines()[-1]).get('env', {})
+
+    def sign_up(self, n):
+        """A new account, and on the host a scratch pb profile signed in to it by API token; returns the path of its mint wrapper there."""
+        work, scratch = self.accounts[n]
+        self.node('fresh_account.mjs', work, 'signup', work)
+        token = self.node('mint_api_token.mjs', work, 'final-recheck')
+        code = ssh(self.args.host, 'umask 077; rm -rf {s}; mkdir -p {s}/home {s}/config {s}/data {s}/state {s}/cache; cat > {s}/token'.format(s=scratch), stdin=token)[0]
+        code = code or ssh(self.args.host, 'python3 - ' + scratch, stdin=PROFILE)[0]
+        login = 'for i in 1 2 3; do {s}/mint.sh login --api-token-file - < {s}/token >/dev/null && {s}/mint.sh auth status --json | grep -q signed_in..true && exit 0; sleep 10; done; exit 1'
+        code = code or ssh(self.args.host, login.format(s=scratch))[0]
         if code:
             raise RuntimeError("could not sign the host's scratch pb in to the fresh account")
-        os.environ['FRESH_MINT'] = self.scratch + '/mint.sh'
-        code, out, secs = run([str(HERE / 'final_fresh.sh'), 'up', host, self.stamp], timeout=3000)
+        return scratch + '/mint.sh'
+
+    def up(self):
+        host = self.args.host
+        mints = [self.sign_up(0), self.sign_up(1)]
+        os.environ['FRESH_MINT'] = mints[0]
+        if not os.environ.get('SMOKE_SERVER_VERSION'):  # tunnel-command rows check against the deployed server's version (the console proxies /api/v1)
+            with urllib.request.urlopen(self.args.origin + '/api/v1/server-version', timeout=30) as reply:
+                os.environ['SMOKE_SERVER_VERSION'] = json.load(reply)['data']['version']
+        os.environ.update(self.fixtures())
+        code, out, secs = run([str(HERE / 'final_fresh.sh'), 'up', host, self.stamp, mints[1]], timeout=3000)
         versions = set(re.findall(r'^OFFICIAL_\S+=(\S+)$', out, re.M))
         if code or len(versions) != 1:
             raise RuntimeError('the fresh machines did not come up (exit %d): %s' % (code, ' '.join(out.strip().splitlines()[-3:])[:300]))
@@ -309,18 +336,30 @@ class Fresh:
             raise RuntimeError('the published one-liner installed %s, not the release under test %s' % (self.version, self.args.build))
         self.args.ct_map = 'fx-a=%s:final-a-%s,fx-b=%s:final-b-%s' % (host, self.stamp, host, self.stamp)
         self.args.state, self.args.version = self.state, self.version
+        # F9 (local-access, private-access-permission): owner and controller are container A, the team the fixture's, the accessor the teammate's machine
+        os.environ.update({'F9_CONTROLLER': 'final-a-' + self.stamp, 'F9_TARGET': 'fx-b', 'F9_OWNER': 'final-a-' + self.stamp, 'F9_OWNER_ALIAS': 'fx-a',
+                           'F9_ACCESSOR': 'final-d-' + self.stamp, 'F9_TEAM': os.environ.get('PAPERBOAT_SMOKE_TEAM', ''), 'CT_SSH_HOST': host})
         return secs
 
     def down(self):
         host, notes = self.args.host, []
         run([str(HERE / 'final_fresh.sh'), 'down', host, self.stamp])
-        if os.path.exists(self.work + '/account.json'):
-            try:
-                self.node('fresh_account.mjs', 'delete', self.work)
-            except RuntimeError as error:
-                notes.append('the throwaway account was NOT deleted: ' + str(error))
-        ssh(host, 'rm -rf ' + self.scratch)
-        run(['rm', '-rf', self.work])
+        try:
+            if os.path.exists(self.accounts[0][0] + '/account.json') and os.path.exists(self.accounts[1][0] + '/account.json'):
+                self.fixtures('--teardown')
+        except (RuntimeError, OSError) as error:
+            notes.append('the fixtures were NOT torn down: ' + str(error))
+        for work, scratch in self.accounts:
+            deleted = not os.path.exists(work + '/account.json')
+            if not deleted:
+                try:
+                    self.node('fresh_account.mjs', work, 'delete', work)
+                    deleted = True
+                except RuntimeError as error:
+                    notes.append('a throwaway account was NOT deleted (its login stays in %s so it can be retried): %s' % (work, error))
+            ssh(host, 'rm -rf ' + scratch)
+            if deleted:
+                run(['rm', '-rf', work])
         return notes
 
 
@@ -334,9 +373,18 @@ def cmd_run(args):
     todo = [e for e in entries if not wanted or e['check'] in wanted or set(e['rows']) & wanted or ('EXTRA' in e['rows'] and 'EXTRA' in wanted)]
     if wanted:
         ids = {i for i in ids if i in wanted or any(i in r['smoke'] and r['row'] in wanted for r in chosen)}
+    if args.skip_go:
+        tests = set()
+    if args.shard:  # I/N: this VM takes every N-th check (smoke ids by group, so a group is never split)
+        index, count = (int(x) for x in args.shard.split('/'))
+        keys = sorted({'smoke:' + i.partition(':')[0] for i in ids} | {'go:' + t for t in tests} | {e['check'] for e in todo})
+        take = {k for pos, k in enumerate(keys) if pos % count == index - 1}
+        ids = {i for i in ids if 'smoke:' + i.partition(':')[0] in take}
+        tests = {t for t in tests if 'go:' + t in take}
+        todo = [e for e in todo if e['check'] in take]
     if args.dry:
         print('smoke ids:', sorted(ids)); print('go tests:', len(tests)); print('entries:', [e['check'] for e in todo])
-        print('machines: %s' % ('3 fresh containers on %s in a fresh throwaway account, one-liner %s' % (args.host, args.build) if ids or any(e['kind'] != 'go' for e in todo) else 'none needed'))
+        print('machines: %s' % ('fresh containers on %s in two fresh throwaway accounts, one-liner %s' % (args.host, args.build) if ids or any(e['kind'] != 'go' for e in todo) else 'none needed'))
         return 0
     results = []
     fresh = Fresh(args)
@@ -344,9 +392,9 @@ def cmd_run(args):
     try:
         if needs_machines:
             secs = fresh.up()
-            if not wanted or 'EXTRA' in wanted or 'extra-published-install' in wanted:
+            if (not wanted or 'EXTRA' in wanted or 'extra-published-install' in wanted) and (not args.shard or args.shard.startswith('1/')):
                 results.append({'check': 'extra-published-install', 'kind': 'cmd', 'status': 'PASS', 'seconds': secs,
-                                'detail': 'three fresh containers installed with the published one-liner: pb %s, enrolled, pair usable' % fresh.version})
+                                'detail': 'fresh containers installed with the published one-liner: pb %s, enrolled, pair usable' % fresh.version})
         if ids:
             run_smoke(ids, args, results)
         if tests:
@@ -360,27 +408,41 @@ def cmd_run(args):
         results.append({'check': 'fresh-machines', 'kind': 'setup', 'status': 'FAIL', 'seconds': 0, 'detail': str(error)[:300]})
     finally:
         if args.keep:
-            print('kept: account dir %s, containers final-{a,b,c}-%s on %s, scratch pb %s' % (fresh.work, fresh.stamp, args.host, fresh.scratch))
+            print('kept: account dirs %s, containers final-{a,b,c,d}-%s on %s' % (' '.join(w for w, _ in fresh.accounts), fresh.stamp, args.host))
         else:
             for note in fresh.down():
                 results.append({'check': 'fresh-teardown', 'kind': 'setup', 'status': 'FAIL', 'seconds': 0, 'detail': note[:300]})
-    by_check = {r['check']: r for r in results}
+    return report(args.build, chosen, results)
+
+
+def report(build, chosen, results):
+    """Writes results/final-recheck-<build>-<UTC>.{md,json} and prints the table; the exit status is 1 when any check failed."""
+    by_check = {}
+    for r in results:  # a check run by several shards counts as failed if any run failed
+        if r['check'] not in by_check or r['status'] == 'FAIL':
+            by_check[r['check']] = r
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     out_dir = HERE / 'results'
     out_dir.mkdir(exist_ok=True)
     per_row = []
     for r in chosen:
-        mine = ['smoke:' + i for i in r['smoke']] + ['go:%s/%s' % (go_tests()[t], t) for t in r['go']] + r['declared']
+        mine = ['smoke:' + i.partition(':')[0] for i in r['smoke']] + ['go:%s/%s' % (go_tests()[t], t) for t in r['go']] + r['declared']
         got = [by_check[c]['status'] for c in mine if c in by_check]
         status = 'FAIL' if 'FAIL' in got else 'PASS' if got else ('NO CHECK' if r['state'] == '[x]' else r['state'])
         per_row.append((r['row'], r['state'], status, len(got)))
-    md = ['# Final Linux re-check %s (%s)' % (args.build, stamp), '', '| check | kind | status | s | detail |', '|---|---|---|---|---|']
+    md = ['# Final Linux re-check %s (%s)' % (build, stamp), '', '| check | kind | status | s | detail |', '|---|---|---|---|---|']
     md += ['| %s | %s | %s | %d | %s |' % (r['check'], r['kind'], r['status'], r['seconds'], r['detail'].replace('|', '/')) for r in results]
     md += ['', '| row | Linux | result | checks run |', '|---|---|---|---|'] + ['| %s | %s | %s | %d |' % x for x in per_row]
-    (out_dir / ('final-recheck-%s-%s.md' % (args.build, stamp))).write_text('\n'.join(md) + '\n')
-    (out_dir / ('final-recheck-%s-%s.json' % (args.build, stamp))).write_text(json.dumps({'build': args.build, 'checks': results, 'rows': per_row}, indent=1))
+    (out_dir / ('final-recheck-%s-%s.md' % (build, stamp))).write_text('\n'.join(md) + '\n')
+    (out_dir / ('final-recheck-%s-%s.json' % (build, stamp))).write_text(json.dumps({'build': build, 'checks': results, 'rows': per_row}, indent=1))
     print('\n'.join(md))
     return 1 if any(r['status'] == 'FAIL' for r in results) else 0
+
+
+def cmd_merge(args):
+    """One table from the shards' result files (the JSON each shard wrote)."""
+    results = [c for path in args.files for c in json.loads(Path(path).read_text())['checks']]
+    return report(args.build, inventory(), results)
 
 
 def main():
@@ -391,14 +453,22 @@ def main():
     go = sub.add_parser('run')
     go.add_argument('--build', required=True)
     go.add_argument('--host', default='hp')
-    go.add_argument('--previous', default='', help='the previous official release the update-with-history extra starts from')
+    go.add_argument('--previous', default='2026.10.27.0', help='the previous official release the update-with-history extra starts from (the update goes to the Latest)')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))
     go.add_argument('--keep', action='store_true')
+    go.add_argument('--shard', default='', help='I/N: run every N-th check on this machine (the other shards run elsewhere; merge joins them)')
+    go.add_argument('--skip-go', action='store_true', help='leave out the Go tests (they test the commit, not a build; tools/ci-test.sh runs them)')
+    go.add_argument('--no-fixtures', action='store_true', help='dry runs only: do not create the fixtures team (checks needing a team fail)')
+    merge = sub.add_parser('merge')
+    merge.add_argument('--build', required=True)
+    merge.add_argument('files', nargs='+')
     go.add_argument('--only', default='')
     go.add_argument('--dry', action='store_true')
     args = parser.parse_args()
     if args.command == 'inventory':
         return cmd_inventory(args)
+    if args.command == 'merge':
+        return cmd_merge(args)
     return cmd_run(args)
 
 

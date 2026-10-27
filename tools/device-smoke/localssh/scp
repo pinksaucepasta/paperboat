@@ -1,0 +1,6 @@
+#!/bin/bash
+# `scp [options] SOURCE local:DESTINATION` (or the other way round) as a plain copy, see ssh next to it.
+args=("$@")
+files=()
+for a in "$@"; do case $a in -*) ;; *) files+=("${a#local:}") ;; esac; done
+case "${args[*]}" in *local:*) exec cp "${files[@]}" ;; *) exec /usr/bin/scp "${args[@]}" ;; esac

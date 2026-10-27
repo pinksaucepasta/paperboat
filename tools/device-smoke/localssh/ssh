@@ -1,0 +1,9 @@
+#!/bin/bash
+# `ssh [options] local COMMAND...` on the machine itself, for the final re-check on a GitHub Actions VM (--host local): the scripts
+# reach their Docker host with ssh, and here the Docker host is this VM. Any other destination goes to the real ssh.
+# Put this directory first in PATH.
+args=("$@")
+while [ "${1:-}" = -o ]; do shift 2; done
+[ "${1:-}" = local ] || exec /usr/bin/ssh "${args[@]}"
+shift
+if [ $# -gt 0 ]; then exec bash -c "$*"; else exec bash -s; fi

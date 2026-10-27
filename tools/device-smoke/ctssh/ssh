@@ -1,0 +1,10 @@
+#!/bin/bash
+# `ssh [-o X]... DESTINATION COMMAND...` for scripts that take ssh destinations (local_access.py, private_access_permission.py), where the
+# DESTINATION is a container of the final re-check on CT_SSH_HOST: the command runs inside it as its user (pbt) over the host's docker.
+# Put this directory first in PATH for those scripts only. CT_SSH_HOST: the Docker host; SMOKE_CT_DOCKER: its docker command.
+: "${CT_SSH_HOST:?the Docker host of the containers}"
+while [ "$1" = -o ]; do shift 2; done
+ct=$1; shift
+command="${SMOKE_CT_DOCKER:-docker} exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -c $(printf '%q' "$*")"
+[ "$CT_SSH_HOST" = local ] && exec bash -c "$command"  # on the CI VM the Docker host is the machine itself
+exec /usr/bin/ssh -o BatchMode=yes "$CT_SSH_HOST" "$command"

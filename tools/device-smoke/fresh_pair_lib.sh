@@ -24,6 +24,7 @@ pair_user() { # pair_user CONTAINER USER UID NAME: install $FRESH_BINARY as USER
   $mint machine add --name $name --json | TOKEN=/tmp/$ct-$user-token python3 -c '
 import json, os, re, subprocess, sys
 added = json.load(sys.stdin)
+added.get("data") or sys.exit("enrollment refused: " + json.dumps(added.get("error", added))[:300])
 url = re.search(r"'"'"'(https?://[^'"'"']+)'"'"'", added["data"]["linux_macos_command"]).group(1)
 script = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True, check=True).stdout
 token = re.search(r"PAPERBOAT_ENROLLMENT_TOKEN='"'"'([A-Za-z0-9]+)'"'"'", script).group(1)
@@ -46,7 +47,7 @@ fresh_official() { # fresh_official CONTAINER NAME: a fresh container, the publi
   local ct=$1 name=$2 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $1" mint=${FRESH_MINT:-$HOME/.local/bin/pb}
   start_ct $ct
   sudo -n docker exec $ct bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
-  $mint machine add --name $name --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["linux_macos_command"])' > /tmp/$ct-cmd
+  $mint machine add --name $name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);d.get("data") or sys.exit("enrollment refused: "+json.dumps(d.get("error",d))[:300]);print(d["data"]["linux_macos_command"])' > /tmp/$ct-cmd
   sudo -n docker cp /tmp/$ct-cmd $ct:/home/pbt/install-cmd; rm -f /tmp/$ct-cmd
   $X bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
   $X python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
@@ -60,7 +61,9 @@ fresh_release() { # fresh_release CONTAINER NAME VERSION: the same with an OLDER
   sudo -n docker exec $ct bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
   url=$($mint machine add --name $name --json | python3 -c '
 import json, re, subprocess, sys
-cmd = json.load(sys.stdin)["data"]["linux_macos_command"]
+added = json.load(sys.stdin)
+added.get("data") or sys.exit("enrollment refused: " + json.dumps(added.get("error", added))[:300])
+cmd = added["data"]["linux_macos_command"]
 script = subprocess.run(["curl", "-fsSL", re.search(r"'"'"'(https?://[^'"'"']+)'"'"'", cmd).group(1)], capture_output=True, text=True, check=True).stdout
 print(re.search(r"product_url='"'"'([^'"'"']*linux-amd64)'"'"'", script).group(1))')
   curl -fsSL -o /tmp/$ct-rel "$(sed -E "s#/download/[^/]+/#/download/$rel/#" <<<"$url")"
