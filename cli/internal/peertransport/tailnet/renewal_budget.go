@@ -51,10 +51,10 @@ func (b *tokenBucket) take(now time.Time, urgent bool) time.Duration {
 	return time.Duration((1 - b.tokens) * float64(b.refill))
 }
 
-// wait blocks until a token is spent or ctx ends.
-func (b *tokenBucket) wait(ctx context.Context) error {
+// wait blocks until a token is spent or ctx ends; an urgent wait blocks only for a 429's hold.
+func (b *tokenBucket) wait(ctx context.Context, urgent bool) error {
 	for {
-		wait := b.take(time.Now(), false)
+		wait := b.take(time.Now(), urgent)
 		if wait == 0 {
 			return nil
 		}

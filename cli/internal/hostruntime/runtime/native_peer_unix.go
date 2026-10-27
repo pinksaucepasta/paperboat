@@ -330,7 +330,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}, RefreshAuthority: func(refreshCtx context.Context) error {
 		request, cancel := context.WithTimeout(refreshCtx, 15*time.Second)
 		defer cancel()
-		return authority.Refresh(request, control)
+		return authority.RefreshForAdmission(request, control)
 	}})
 	if err != nil {
 		_ = authority.Close()

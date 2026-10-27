@@ -168,3 +168,27 @@ func TestUrgentRefreshSkipsTheBudgetButIsSpaced(t *testing.T) {
 		t.Fatalf("%d renewals; the announcements did not coalesce", got)
 	}
 }
+
+// A refresh before admitting a stream for a just-added grant never waits for the budget (F9-04: a private access
+// flow on a host whose tokens were spent waited for one and timed out), only for a 429's hold.
+func TestAdmissionRefreshSkipsTheBudgetButHonoursA429(t *testing.T) {
+	b := &tokenBucket{refill: time.Hour, burst: 1}
+	useBudget(t, b)
+	b.take(time.Now(), false) // spent
+	a, c, signer, _ := networkTestAuthority(t)
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := a.RefreshForAdmission(ctx, client); err != nil {
+		t.Fatalf("admission refresh with the budget spent: %v", err)
+	}
+	b.hold(time.Now(), time.Hour)
+	held, cancelHeld := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancelHeld()
+	if err := a.RefreshForAdmission(held, client); err == nil {
+		t.Fatal("admission refresh ignored a 429 hold")
+	}
+}

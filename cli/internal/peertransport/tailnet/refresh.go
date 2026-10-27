@@ -71,7 +71,19 @@ func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, ro
 // minute under inspect load (hp 2026-10-27).
 func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if a.budgeted() {
-		if err := renewalBudget.wait(ctx); err != nil {
+		if err := renewalBudget.wait(ctx, false); err != nil {
+			return err
+		}
+	}
+	return a.refresh(ctx, client)
+}
+
+// RefreshForAdmission renews before admitting a stream whose server-signed credential names a grant this host does
+// not hold yet (a grant just added). Like a server-announced change it never waits for the budget, only for a 429's
+// hold: it is one request per new grant, and waiting for a token let admission time out (F9-04, hp 2026-10-27).
+func (a *Authority) RefreshForAdmission(ctx context.Context, client NetworkAPI) error {
+	if a.budgeted() {
+		if err := renewalBudget.wait(ctx, true); err != nil {
 			return err
 		}
 	}
