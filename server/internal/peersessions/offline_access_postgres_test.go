@@ -243,6 +243,26 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		exec(`UPDATE paperboat.teams SET allow_private_access=allow_private_access WHERE team_id=$1`, team)
 	})
 	accessMoves("grant added", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember, "terminal") })
+	// The members' daemons learn of the change too (migration 207): their account inventory topic moves, or `pb access
+	// machine` did not know the shared machine for minutes after the grant (F9-04).
+	memberInventory := func() (g int64) {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='inventory'),0)`, suspendedMember).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	for what, change := range map[string]func(){
+		"grant added": func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember, "terminal", "exec") },
+		"private access setting changed": func() {
+			exec(`UPDATE paperboat.teams SET allow_private_access=NOT allow_private_access WHERE team_id=$1`, team)
+		},
+	} {
+		before := memberInventory()
+		change()
+		if memberInventory() == before {
+			t.Errorf("%s: a team member's account inventory did not move", what)
+		}
+	}
 	// A suspended team gives none (no trigger stands behind an offline right).
 	moves("team suspended", true, func() {
 		exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, team, owner)
