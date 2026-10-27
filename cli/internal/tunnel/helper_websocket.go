@@ -820,7 +820,7 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 		} else if at > 0 {
 			size = at
 		}
-		sequence, queueErr := c.inputQueue.Enqueue(rest[:size])
+		sequence, queueErr := c.inputQueue.EnqueueWait(c.done, rest[:size])
 		if queueErr != nil {
 			if len(chunks) == 0 {
 				return 0, queueErr

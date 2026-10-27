@@ -29,6 +29,7 @@ type TerminalInputQueue struct {
 	next    uint64
 	limit   int
 	pending map[uint64]TerminalInput
+	room    chan struct{} // closed when an answer frees space; nil while nobody waits
 }
 
 func NewTerminalInputQueue(limit int) *TerminalInputQueue {
@@ -55,6 +56,40 @@ func (q *TerminalInputQueue) Enqueue(data []byte) (uint64, error) {
 	return q.next, nil
 }
 
+// EnqueueWait is Enqueue that waits for the host to answer earlier input when the queue is full, so fast typing
+// backs up instead of ending the terminal (N11). It returns ErrTerminalInputQueueFull only when done closes first.
+func (q *TerminalInputQueue) EnqueueWait(done <-chan struct{}, data []byte) (uint64, error) {
+	for {
+		sequence, err := q.Enqueue(data)
+		if err == nil || q == nil || len(data) == 0 {
+			return sequence, err
+		}
+		q.mu.Lock()
+		if len(q.pending) < q.limit {
+			q.mu.Unlock()
+			continue
+		}
+		if q.room == nil {
+			q.room = make(chan struct{})
+		}
+		room := q.room
+		q.mu.Unlock()
+		select {
+		case <-room:
+		case <-done:
+			return 0, ErrTerminalInputQueueFull
+		}
+	}
+}
+
+// freedLocked wakes writers waiting for space. q.mu is held.
+func (q *TerminalInputQueue) freedLocked() {
+	if q.room != nil {
+		close(q.room)
+		q.room = nil
+	}
+}
+
 // Complete removes input the host has answered, whatever its status.
 func (q *TerminalInputQueue) Complete(sequence uint64) {
 	if q == nil {
@@ -66,6 +101,7 @@ func (q *TerminalInputQueue) Complete(sequence uint64) {
 	if sequence > q.next {
 		q.next = sequence
 	}
+	q.freedLocked()
 }
 
 // Reconcile settles pending input against the host's last input sequence after
@@ -81,6 +117,7 @@ func (q *TerminalInputQueue) Reconcile(hostSequence uint64) (decided, resend, un
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	defer q.freedLocked()
 	for sequence, item := range q.pending {
 		if sequence < hostSequence {
 			decided = append(decided, item)
