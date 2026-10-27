@@ -160,6 +160,10 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 		result := updateStatusCommandResult(buildinfo.Version, response, snapshot)
 		return writeUpdateStatusResult(command, result)
 	}
+	if errors.Is(err, updated.ErrUnavailable) {
+		// The updater socket is gone while the updater restarts to activate an approved update (dadape 2026-10-27).
+		return commandRejection{reason: commandRejectUpdaterRestarting}
+	}
 	return fmt.Errorf("read paperboat-updated status: %w", err)
 }
 

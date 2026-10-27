@@ -45,6 +45,7 @@ const (
 	commandRejectInsufficientSpace
 	commandRejectUpdateNotReady
 	commandRejectApproval
+	commandRejectUpdaterRestarting
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -56,7 +57,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectApproval
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdaterRestarting
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -127,6 +128,8 @@ func (e commandRejection) Error() string {
 		return "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (often /usr/local or the system disk), then run the command again. Nothing was changed."
 	case commandRejectActivationPending:
 		return "An approved signed update owns installation recovery. Wait for its update service to finish, then retry; run pb doctor if this continues."
+	case commandRejectUpdaterRestarting:
+		return "The Paperboat updater is not answering. It restarts while an approved update activates, which takes about a minute; run `pb update status` again then. If it still fails, run `pb doctor`."
 	case commandRejectUpdateBusy:
 		return "Paperboat is busy; the installed version is unchanged. Wait for active work or another update to finish, then retry. Use --force only if you want to interrupt active sessions."
 	case commandRejectNoninteractiveHome:

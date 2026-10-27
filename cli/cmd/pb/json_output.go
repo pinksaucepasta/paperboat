@@ -296,6 +296,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				result.Code, result.StateChanged, result.Retryable = "activation_pending", "unknown", true
 				result.Recovery = "Wait for the signed update service to finish recovery, then retry; run pb doctor if this continues."
 			}
+			if typed.reason == commandRejectUpdaterRestarting {
+				result.Code, result.Category, result.StateChanged, result.Retryable = "updater_restarting", "unavailable_retryable", false, true
+				result.Recovery = "Run `pb update status` again in a minute; run pb doctor if this continues."
+			}
 			if typed.reason == commandRejectLegacyCarrierRunning {
 				result.Code, result.Category, result.StateChanged, result.Retryable = "initial_update_requires_stop", "conflict", "unknown", true
 				result.Recovery = "Finish active sessions and SSH connections, stop the existing native Paperboat service, then retry. Run pb doctor to inspect the recovered installation."
