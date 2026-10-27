@@ -27,6 +27,7 @@ type outputWriter struct {
 	manager   *Manager
 	mu        sync.Mutex
 	dirty     map[*managedSession]struct{}
+	decisions []store.InputDecision // input outcomes, written with the next group commit
 	wake      chan struct{}
 	committed chan struct{}
 }
@@ -92,6 +93,18 @@ func (m *Manager) stopOutputPersistenceContext(ctx context.Context, session *man
 	return classifySessionFailure("lifecycle", persistErr)
 }
 
+// decided queues an input outcome for the next group commit. The input was recorded as uncertain before the PTY
+// write, so a crash before this commit can never replay it; it only reads as uncertain after a restart.
+func (w *outputWriter) decided(decision store.InputDecision) {
+	w.mu.Lock()
+	w.decisions = append(w.decisions, decision)
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
 func (w *outputWriter) mark(session *managedSession) {
 	w.mu.Lock()
 	w.dirty[session] = struct{}{}
@@ -149,7 +162,14 @@ func (w *outputWriter) commit() {
 		sessions = append(sessions, session)
 	}
 	w.dirty = map[*managedSession]struct{}{}
+	decisions := w.decisions
+	w.decisions = nil
 	w.mu.Unlock()
+	if len(decisions) > 0 {
+		if err := w.manager.config.Store.UpdateInputDecisions(context.Background(), decisions); err != nil && w.manager.config.Metrics != nil {
+			_ = w.manager.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+		}
+	}
 	var pending []pendingOutput
 	var batches []store.OutputBatch
 	budget := outputCommitBytes

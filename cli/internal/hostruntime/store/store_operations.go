@@ -49,20 +49,21 @@ func (s *Store) InputDecisions(ctx context.Context, sessionID string) (decisionR
 	return decisions, nil
 }
 
-func (s *Store) UpdateInputDecision(ctx context.Context, decision InputDecision) (resultErr error) {
+// UpdateInputDecisions records several input outcomes in one transaction (one fsync for a burst of typing). A row
+// already pruned from the journal window is skipped.
+func (s *Store) UpdateInputDecisions(ctx context.Context, decisions []InputDecision) (resultErr error) {
 	defer protectStoreError(&resultErr)
-	result, err := s.db.ExecContext(ctx, `UPDATE input_decisions SET status=?,bytes_written=?,error_code=? WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id=? AND request_hash=?`, decision.Status, decision.BytesWritten, nullableString(decision.ErrorCode), decision.SessionID, decision.ClientID, decision.AttachmentID, decision.Generation, decision.InputID, decision.Hash)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	changed, affectedErr := result.RowsAffected()
-	if affectedErr != nil {
-		return affectedErr
+	defer retainRollback(tx, &resultErr)
+	for _, decision := range decisions {
+		if _, err := tx.ExecContext(ctx, `UPDATE input_decisions SET status=?,bytes_written=?,error_code=? WHERE session_id=? AND client_id=? AND attachment_id=? AND generation=? AND input_id=? AND request_hash=?`, decision.Status, decision.BytesWritten, nullableString(decision.ErrorCode), decision.SessionID, decision.ClientID, decision.AttachmentID, decision.Generation, decision.InputID, decision.Hash); err != nil {
+			return err
+		}
 	}
-	if changed != 1 {
-		return ErrConflict
-	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) PutOperation(ctx context.Context, operation OperationResult) (resultErr error) {

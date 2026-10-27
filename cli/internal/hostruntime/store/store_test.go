@@ -886,3 +886,34 @@ func TestLiftFileTransferSizeLimitKeepsRowsAndRunsOnce(t *testing.T) {
 	}
 	_ = reopened.Close()
 }
+
+// N11: a burst of typing records its outcomes in one transaction; a row already pruned from the journal is skipped.
+func TestInputDecisionsAreUpdatedTogether(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	if err := state.CreateSession(context.Background(), testSession()); err != nil {
+		t.Fatal(err)
+	}
+	var decisions []InputDecision
+	for _, id := range []string{"inp_1", "inp_2"} {
+		decision := InputDecision{SessionID: "ses_1", ClientID: "cli", AttachmentID: "att", Generation: 1, InputID: id, Hash: []byte(id), Status: "uncertain", CreatedAt: time.Now()}
+		if _, err := state.PutInputDecision(context.Background(), decision); err != nil {
+			t.Fatal(err)
+		}
+		decision.Status, decision.BytesWritten = "accepted", 1
+		decisions = append(decisions, decision)
+	}
+	decisions = append(decisions, InputDecision{SessionID: "ses_1", ClientID: "cli", AttachmentID: "att", Generation: 1, InputID: "inp_pruned", Hash: []byte("p"), Status: "accepted"})
+	if err := state.UpdateInputDecisions(context.Background(), decisions); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := state.InputDecisions(context.Background(), "ses_1")
+	if err != nil || len(stored) != 2 {
+		t.Fatalf("decisions=%v err=%v", stored, err)
+	}
+	for _, decision := range stored {
+		if decision.Status != "accepted" || decision.BytesWritten != 1 {
+			t.Fatalf("decision %s = %s/%d", decision.InputID, decision.Status, decision.BytesWritten)
+		}
+	}
+}

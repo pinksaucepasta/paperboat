@@ -77,12 +77,9 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 		return decision, err
 	}
 	if m.config.Store != nil {
-		persisted := store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError}
-		if persistErr := m.config.Store.UpdateInputDecision(context.Background(), persisted); persistErr != nil {
-			decision.Status = InputUncertain
-			decision.WriteError = "decision_persist_failed"
-			return decision, persistErr
-		}
+		// The outcome joins the next group commit instead of a second fsync per key (N11: 2 000 keys 10 ms apart
+		// backed up 5 s on a disk that takes ~5 ms per fsync).
+		m.writer().decided(store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError})
 		// The journal keeps only the last InputDecisionWindow sequenced decisions of a client; the
 		// durable rows follow it in batches so a long session stays bounded (Lane X audit H2).
 		if key.InputSequence > InputDecisionWindow && key.InputSequence%inputPruneBatch == 0 {
