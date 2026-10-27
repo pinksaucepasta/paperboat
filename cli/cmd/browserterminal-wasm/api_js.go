@@ -135,6 +135,19 @@ func apiActivity(_ js.Value, args []js.Value) any {
 	return nil
 }
 
+// apiResync asks the machine for a fresh screen, as a lag does: the page dropped its backlog (tmux's tty.c
+// tty_block_maybe drops and redraws). A request already pending is joined, not repeated.
+func apiResync(_ js.Value, args []js.Value) any {
+	if len(args) != 1 {
+		return errorObject("invalid_request", "Terminal resync is invalid.")
+	}
+	connection := getConnection(args[0].String())
+	if connection == nil || !connection.markLagged() {
+		return errorObject("connection_closed", "The encrypted terminal connection is closed.")
+	}
+	return nil
+}
+
 func apiAck(_ js.Value, args []js.Value) any {
 	if len(args) != 2 {
 		return errorObject("invalid_request", "Terminal acknowledgement is invalid.")

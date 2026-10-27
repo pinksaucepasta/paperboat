@@ -843,6 +843,18 @@ func (connection *browserTerminal) requestScreen() error {
 	return err
 }
 
+// markLagged makes the shared-output reader resync as if the edge had dropped records; false once the feed is gone.
+func (connection *browserTerminal) markLagged() bool {
+	connection.mu.Lock()
+	ws := connection.websocket
+	connection.mu.Unlock()
+	if ws == nil {
+		return false
+	}
+	ws.broadcasts.markLagged()
+	return true
+}
+
 // finishResync paints the fresh screen and moves the shared-output cursor to its boundary.
 func (connection *browserTerminal) finishResync(checkpoint []byte, boundary uint64) {
 	connection.mu.Lock()

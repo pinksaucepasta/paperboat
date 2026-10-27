@@ -116,6 +116,7 @@ func main() {
 	api.Set("sendInput", js.FuncOf(apiSendInput))
 	api.Set("resize", js.FuncOf(apiResize))
 	api.Set("activity", js.FuncOf(apiActivity))
+	api.Set("resync", js.FuncOf(apiResync))
 	api.Set("ack", js.FuncOf(apiAck))
 	api.Set("cursor", js.FuncOf(apiCursor))
 	api.Set("hashFile", js.FuncOf(apiHashFile))

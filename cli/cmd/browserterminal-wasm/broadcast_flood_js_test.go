@@ -248,3 +248,34 @@ func TestFloodLeavesTheEventLoopRunning(t *testing.T) {
 		t.Fatalf("the JS event loop starved: %d ticks in %v", got, elapsed)
 	}
 }
+
+// The page drops its own backlog and asks for the screen (api.resync): with no lag on this side, the request still
+// goes out, and the screen it brings lets output continue (W9 Ctrl-C after a flood).
+func TestPageResyncRequestsAScreen(t *testing.T) {
+	h := newFloodHarness(t)
+	line := bytes.Repeat([]byte("1234567\n"), 90)
+	h.send(1, 0, line)
+	if !h.connection.markLagged() {
+		t.Fatal("resync refused on a live feed")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		h.connection.mu.Lock()
+		pending := h.connection.screenRequestID != ""
+		h.connection.mu.Unlock()
+		if pending {
+			end := uint64(len(line)) * 2
+			h.answerScreens(func() uint64 { return end })
+			h.send(2, end, line)
+			for time.Now().Before(deadline) && h.drawn() < end+uint64(len(line)) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if h.drawn() != end+uint64(len(line)) || h.count("attached") == 0 {
+				t.Fatalf("after the screen: drew to %d, events %v", h.drawn(), h.events)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("no screen was requested")
+}
