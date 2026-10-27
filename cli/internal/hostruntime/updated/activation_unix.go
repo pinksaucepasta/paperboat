@@ -38,12 +38,13 @@ var ErrActivationPending = errors.New("verified update activation is owned by th
 var ErrParticipantReadiness = errors.New("updated installation readiness unavailable")
 
 type UnixParticipantProbe struct {
-	Version                     string `json:"version"`
-	UpdaterVersion              string `json:"updater_version"`
-	State                       string `json:"state"`
-	Machines                    uint32 `json:"machines"`
-	Running                     bool   `json:"running"`
-	ControlPlaneUnavailableOnly bool   `json:"control_plane_unavailable_only"`
+	Version                     string   `json:"version"`
+	UpdaterVersion              string   `json:"updater_version"`
+	State                       string   `json:"state"`
+	Machines                    uint32   `json:"machines"`
+	Running                     bool     `json:"running"`
+	ControlPlaneUnavailableOnly bool     `json:"control_plane_unavailable_only"`
+	Health                      []string `json:"health,omitempty"` // the daemon's health item codes
 }
 
 type UnixParticipants interface {

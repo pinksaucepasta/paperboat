@@ -255,6 +255,7 @@ func TestInventoryReconciliationFailurePublishesDegradedMachinesAndRecovers(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
 
 	if err := inventory.Refresh(context.Background()); !errors.Is(err, reconcileErr) {
 		t.Fatalf("degraded refresh err=%v", err)
@@ -315,6 +316,7 @@ func TestInventoryBoundsMachineReconciliationByRequestTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
 	started := time.Now()
 	err = inventory.Refresh(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
@@ -715,6 +717,7 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
+			inventory.started = inventory.started.Add(-localAccessStartupGrace) // past start-up: a failure is degraded
 			_ = inventory.Refresh(context.Background())
 			snapshot, err := store.Snapshot(context.Background())
 			if err != nil || snapshot.DaemonState != "degraded" || len(snapshot.Health) != 1 || snapshot.Health[0].Code != test.want || len(snapshot.Machines) != 1 {
@@ -934,4 +937,45 @@ func TestInventoryRefreshesAtOnceForAnAccessChange(t *testing.T) {
 			t.Fatalf("%s: the access change waited for the refresh an inventory event had armed", flip)
 		}
 	}
+}
+
+// F14-03: a daemon that just started and has not finished its first local-access setup (the native listener waits for
+// the peer network) reports starting, which a supplied install waits for; past the grace, or after a setup that
+// succeeded, a failure is degraded, which fails the install at once.
+func TestAFirstLocalAccessFailureAtStartIsStarting(t *testing.T) {
+	now := time.Date(2026, 10, 27, 8, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	failures := []error{errors.New("native listener: network timeout"), nil, errors.New("local access broke")}
+	calls := 0
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{
+		Source: &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}},
+		Store:  store, RefreshInterval: time.Second, RequestTimeout: time.Second, Clock: clock,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			err := failures[min(calls, len(failures)-1)]
+			calls++
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func(why string, want string) {
+		t.Helper()
+		_ = inventory.Refresh(context.Background())
+		snapshot, err := store.Snapshot(context.Background())
+		if err != nil || snapshot.DaemonState != want {
+			t.Fatalf("%s: daemon state %q, want %q (err %v)", why, snapshot.DaemonState, want, err)
+		}
+	}
+	state("first setup failed right after start", "starting")
+	now = now.Add(time.Second)
+	state("setup succeeded", "ready")
+	state("a later failure", "degraded")
+
+	inventory.reconciledOnce, inventory.started, calls = false, now.Add(-localAccessStartupGrace), 0
+	state("first setup still failing after the grace", "degraded")
 }

@@ -102,9 +102,15 @@ type Inventory struct {
 	eventFallback     time.Duration
 	wake              chan struct{} // RequestRefresh; one pending request is enough
 	mu                sync.Mutex
+	started           time.Time // when this daemon's inventory began; bounds the start-up grace
+	reconciledOnce    bool      // a local-access reconcile has succeeded since start; guarded by store.Update
 	completionMu      sync.RWMutex
 	completion        localapi.CompletionSnapshot
 }
+
+// localAccessStartupGrace is how long after start a failed local-access reconcile reads as starting, below the 60 s a
+// supplied install waits for the new daemon.
+const localAccessStartupGrace = 45 * time.Second
 
 func NewInventory(config InventoryConfig) (*Inventory, error) {
 	if config.Source == nil || config.Store == nil || config.RefreshInterval < 0 || config.RequestTimeout < 0 || config.EventRefreshSpacing < 0 || config.EventFallback < 0 {
@@ -142,6 +148,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		eventSpacing:      config.EventRefreshSpacing,
 		eventFallback:     config.EventFallback,
 		wake:              make(chan struct{}, 1),
+		started:           config.Clock(),
 	}, nil
 }
 
@@ -291,8 +298,17 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
+			if reconcileErr == nil {
+				i.reconciledOnce = true
+			}
 			if reconcileErr != nil {
 				desired.DaemonState = "degraded"
+				// A daemon that just started has not finished its first local-access setup (the machine guard and
+				// loopback addresses can lag its start): it is starting, not broken, for a bounded grace. A
+				// supplied install's validator waits for starting and fails on degraded (F14-03).
+				if !i.reconciledOnce && now.Sub(i.started) < localAccessStartupGrace {
+					desired.DaemonState = "starting"
+				}
 				// The local reconcile asks the server too (credentials, browser services and
 				// certificates). When the server did not answer, the machine's local access is not what
 				// is broken; saying so sent people to their local settings and made updates treat a slow

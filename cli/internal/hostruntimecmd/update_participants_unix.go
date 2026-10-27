@@ -55,7 +55,7 @@ func (p *unixUpdateParticipants) Probe(ctx context.Context) (updated.UnixPartici
 	if decoder.Decode(&probe) != nil || decoder.Decode(&extra) != io.EOF || probe.Schema != localdaemon.UpdateProbeSchema {
 		return result, errors.New("invalid enrolled daemon update probe")
 	}
-	return updated.UnixParticipantProbe{Version: probe.Version, UpdaterVersion: probe.UpdaterVersion, State: probe.State, Machines: probe.Machines, Running: probe.Running, ControlPlaneUnavailableOnly: probe.ControlPlaneUnavailableOnly}, nil
+	return updated.UnixParticipantProbe{Version: probe.Version, UpdaterVersion: probe.UpdaterVersion, State: probe.State, Machines: probe.Machines, Running: probe.Running, ControlPlaneUnavailableOnly: probe.ControlPlaneUnavailableOnly, Health: probe.Health}, nil
 }
 
 func (p *unixUpdateParticipants) Restart(ctx context.Context) error {

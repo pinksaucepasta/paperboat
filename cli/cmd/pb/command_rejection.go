@@ -122,7 +122,7 @@ func (e commandRejection) Error() string {
 	case commandRejectUpdateVerification:
 		return "The official update could not be verified; the installed version is unchanged. Download a fresh official update bundle and retry. Force cannot bypass verification."
 	case commandRejectUpdateNotReady:
-		return "The new version's background service did not start, so the previous version was restored and nothing was changed. Run `pb doctor` to see why the service cannot start, then try the update again."
+		return "The new version did not become ready (the failing step is printed above, for example local machine access), so the previous version was restored and nothing was changed. Run `pb doctor` for details, then try again."
 	case commandRejectInsufficientSpace:
 		return "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (often /usr/local or the system disk), then run the command again. Nothing was changed."
 	case commandRejectActivationPending:

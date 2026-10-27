@@ -5,7 +5,9 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -62,6 +64,14 @@ func daemonValidation(participants updated.UnixParticipants, version string, bas
 	return validate, recover
 }
 
+// degradedSteps names what the daemon reported failing, e.g. local machine access, for the rollback message.
+func degradedSteps(codes []string) string {
+	if len(codes) == 0 {
+		return "no health item reported"
+	}
+	return strings.ReplaceAll(strings.Join(codes, ", "), "_", " ")
+}
+
 func restartAndAwaitDaemon(ctx context.Context, participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {
 	if err := participants.Restart(ctx); err != nil {
 		return errors.Join(errors.New("the user's Paperboat daemon could not be restarted on the new version"), err)
@@ -81,7 +91,7 @@ func restartAndAwaitDaemon(ctx context.Context, participants updated.UnixPartici
 			if wait, last = updated.ClassifyParticipant(probe, version, baseline, requireInventory); wait == updated.ParticipantReadyNow {
 				return nil
 			} else if wait == updated.ParticipantDegradedLocally {
-				return errors.Join(errors.New("the user's Paperboat daemon came up degraded on the new version"), last)
+				return errors.Join(fmt.Errorf("the user's Paperboat daemon came up degraded on the new version (%s)", degradedSteps(probe.Health)), last)
 			}
 		} else {
 			wait, last = updated.ParticipantNotReady, err

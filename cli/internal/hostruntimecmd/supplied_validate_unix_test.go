@@ -5,6 +5,7 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,10 +130,14 @@ func TestSuppliedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 		t.Fatalf("daemon still waiting for the server at the deadline: %v, want the control-plane error", err)
 	}
 
-	locallyBroken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1}}}
+	locallyBroken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1, Health: []string{"local_access_unavailable"}}}}
 	started := time.Now()
 	err := restartAndAwaitDaemon(t.Context(), locallyBroken, "2", baseline)
 	if err == nil || errors.Is(err, updated.ErrParticipantControlPlaneTimeout) || time.Since(started) > time.Second {
 		t.Fatalf("locally degraded daemon: err=%v after %v, want an immediate non-control-plane failure", err, time.Since(started))
+	}
+	// The rollback names the step that failed, not only that the service did not start.
+	if !strings.Contains(err.Error(), "local access unavailable") {
+		t.Fatalf("locally degraded daemon error does not name the failing step: %v", err)
 	}
 }
