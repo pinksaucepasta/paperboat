@@ -8,7 +8,7 @@ iptables (network loss, control plane unreachable), resize storms, 50 MB of outp
 large paste. Each row prints PASS/FAIL/SKIP with a short reason; output content is never
 printed. Only sessions named smoke-matrix-* are created, and all are closed and deleted.
 
-Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD --team TEAM --member ID]
+Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD [--member-pb PATH] --team TEAM --member ID]
        [--restart-target-cmd CMD --restart-client-cmd CMD]   (N14: commands that restart the target host runtime / this daemon)
 """
 import argparse
@@ -680,7 +680,7 @@ def many_sessions(a, sessions):
 
 def member(a, args, timeout=60):
     """Run pb as the team member on the member machine (MEMBER_CMD prefixes the remote command)."""
-    remote = ' '.join(shlex.quote(x) for x in ['timeout', str(timeout), '/home/pbt/.local/bin/pb', *args])
+    remote = ' '.join(shlex.quote(x) for x in ['timeout', str(timeout), a.member_pb, *args])
     return subprocess.run(shlex.split(a.member_cmd) + [remote], capture_output=True, text=True, timeout=timeout + 30)
 
 
@@ -696,7 +696,8 @@ def shared(a, sessions):
         _, s = selected(PB, a.target, name)
         share = ['--workspace', 'personal', 'session', 'share', s['id'], '--team', a.team, '--member', a.member]
         subprocess.run([PB, *share, '--role', 'interactive', '--json'], check=True, capture_output=True, timeout=60)
-        joined = Client(shlex.split(a.member_cmd) + ['/home/pbt/.local/bin/pb', 'session', 'join', s['id']])
+        joined = Client(shlex.split(a.member_cmd) + [a.member_pb, 'session', 'join', s['id']])
+        joined.expect('Shared terminal ', 60)  # pb's join banner: keys typed before the client is attached are not the row
         token = uuid.uuid4().hex
         joined.send("printf '\\nPB_MEMBER_%s\\n' '" + token + "'\r")
         try:
@@ -706,7 +707,7 @@ def shared(a, sessions):
             row('N10 interactive member: their typing reaches the owner', False, 'not seen by the owner in 60 s')
         joined.close()
         subprocess.run([PB, *share, '--role', 'viewer', '--json'], check=True, capture_output=True, timeout=60)
-        joined = Client(shlex.split(a.member_cmd) + ['/home/pbt/.local/bin/pb', 'session', 'join', s['id']])
+        joined = Client(shlex.split(a.member_cmd) + [a.member_pb, 'session', 'join', s['id']])
         time.sleep(5)
         token = uuid.uuid4().hex
         joined.send("printf '\\nPB_VIEWER_%s\\n' '" + token + "'\r")
@@ -745,6 +746,7 @@ def main():
     p.add_argument('--restart-target-cmd', default='', help='shell command that restarts the TARGET machine\'s host runtime (N14)')
     p.add_argument('--restart-client-cmd', default='', help="shell command that restarts this machine's daemon (N14)")
     p.add_argument('--member-cmd', default='')
+    p.add_argument('--member-pb', default='/home/pbt/.local/bin/pb', help="the member's pb path")
     p.add_argument('--team', default='')
     p.add_argument('--member', default='', help='member account ID')
     a = p.parse_args()

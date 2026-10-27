@@ -79,6 +79,8 @@ func TestTerminalSharingReturnsOutputErrorsBeforeReportingSuccessOrMutating(t *t
 	}
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/workspaces":
+			writeTestWorkspaces(t, w, "personal")
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/terminal-sessions":
 			writeAPIData(t, w, map[string]any{"sessions": []any{state}, "pagination": map[string]any{"limit": echoedLimit(r), "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/terminal-sessions/ses_1/sharing":

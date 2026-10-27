@@ -89,6 +89,10 @@ func TestOffsetListsShowOnePageAndTheServersTotal(t *testing.T) {
 		t.Run(strings.Join(l.args, " "), func(t *testing.T) {
 			requested := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/workspaces" {
+					writeTestWorkspaces(t, w, "personal")
+					return
+				}
 				if r.URL.Path != l.path {
 					http.NotFound(w, r)
 					return

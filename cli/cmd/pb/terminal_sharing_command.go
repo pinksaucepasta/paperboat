@@ -109,7 +109,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sessions, total, err := client.SharedTerminalSessionsPage(c.Context(), inventoryFilters(c), maxItems)
+			sessions, total, err := sharedSessionsEverywhere(c.Context(), client, inventoryFilters(c), maxItems)
 			if err != nil {
 				return err
 			}
@@ -119,8 +119,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 				return terminalSharingOutputFailure(json.NewEncoder(c.OutOrStdout()).Encode(sessions))
 			}
 			if len(sessions) == 0 {
-				// Sessions a team shared belong to that team's workspace, not to the personal one.
-				_, err := fmt.Fprintln(c.ErrOrStderr(), "No sessions in this workspace are shared with you. Sessions shared by a team are listed with `pb session shared --workspace <team>`.")
+				_, err := fmt.Fprintln(c.ErrOrStderr(), "No sessions are shared with you.")
 				return terminalSharingOutputFailure(err)
 			}
 			for _, s := range sessions {
@@ -199,6 +198,14 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	if err != nil {
 		return err
 	}
+	lookup, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, d.auth)
+	if err != nil {
+		return err
+	}
+	workspace, err := sharedSessionWorkspace(c.Context(), lookup, id)
+	if err != nil {
+		return err
+	}
 	var cursor atomic.Int64
 	attachment := "attachment_" + uuid.NewString()
 	inputQueue := resolver.NewTerminalInputQueue(256)
@@ -209,6 +216,9 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 		}
 		client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, d.auth)
 		if err != nil {
+			return resolver.ConnectInfo{}, err
+		}
+		if err := client.SetWorkspace(workspace); err != nil {
 			return resolver.ConnectInfo{}, err
 		}
 		client.SetSourceMachineID(source)
@@ -258,7 +268,7 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 		}
 		return next, err
 	})
-	if client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, d.auth); err == nil {
+	if client, err := lookup.ForWorkspace(workspace); err == nil {
 		go watchSharedRole(c.Context(), sharedRoleInterval, func(ctx context.Context) (bool, error) {
 			state, err := client.TerminalSharing(ctx, id)
 			return state.Role == "viewer", err
