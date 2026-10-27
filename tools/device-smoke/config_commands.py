@@ -115,7 +115,7 @@ class Suite:
             self.rows[row]['main'] = True
 
     def state(self):
-        states = self.call('status')['environments']
+        states = self.call('status', self.machine)['environments']
         return next(item for item in states if item['environment_id'] == self.machine or item['machine_id'] == self.machine)
 
     def conflicts(self):
@@ -173,6 +173,7 @@ class Suite:
     def repositories(self, root):
         repository = None
         applied = False
+        require(shutil.which('git') is not None, 'install Git before running repository config checks')
         require(not sync.MACHINE_FILE.exists(), 'fixture already has config-sync.toml; refusing to replace it')
         require(self.state()['state'] == 'disabled', 'fixture already has an active config assignment')
         # Validate cleanup authority before creating a server-owned repository.
