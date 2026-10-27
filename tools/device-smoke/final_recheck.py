@@ -10,11 +10,16 @@ Check kinds (nothing new: each runs through an existing tool)
   console  console/scripts/check-*.js on the live console, through console/scripts/run-console-check.mjs
   device   a device script run inside container A of --ct-map (needs a peer: container B)
   cmd      a device script that needs arguments, declared in final_recheck.tsv with its command line
-The extras of the final check (official Latest -> build update with history, published one-liner install, exec right
-after a fresh pair) are cmd entries with rows EXTRA. Results: results/final-recheck-<build>-<UTC>.{md,json}.
+The extras of the final check (previous official -> final update with history, exec right after a fresh pair, ...) are cmd
+entries with rows EXTRA. Results: results/final-recheck-<build>-<UTC>.{md,json}.
 
-Options of run: --binary (the final linux build file, for the extras), --release, --from-official (optional: fail unless the published Latest is this version; default none, the update starts from whatever Latest is), --ct-map 'alias1=hp:ct1,alias2=hp:ct2' (the machine alias of each container, which is its smoke device name), --origin/--state (live console and
-the signed-in storage state of its owner), --only ROW,ROW|CHECK,CHECK (a subset, for a dry run), --dry (print, run nothing).
+Nothing is reused: `run` makes its own throwaway console account (disposable mail.tm inbox, deleted at the end), enrolls three
+fresh containers on --host with the published one-liner (the official Latest, which must be --build; "latest" takes whatever is
+published) and tears all of it down again, so the check starts from what a new user has. Needs ORIGIN (--origin) and PW_CHROMIUM
+(+ PW_MODULE) for the console.
+Options of run: --build (the official release under test), --previous (the previous official release the update-with-history
+extra starts from), --host (the Docker host), --origin (live console), --only ROW,ROW|CHECK,CHECK (a subset, for a dry run),
+--dry (print, run nothing), --keep (leave the containers and the account for a look; the next run does not reuse them).
 Secrets come from the environment (HP_SUDO_PASS ...), never from arguments, and are never printed.
 """
 import argparse
@@ -173,7 +178,7 @@ def run_smoke(groups, args, results):
     listing.write_text('\n'.join(sorted(ids)) + '\n')
     env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': CT_USER, 'SMOKE_CT_UID': CT_UID}
     long_exec = ['--long-seconds', '1801'] if any(i.startswith('exec-long:') for i in ids) else []  # F4-02: a command of 30+ minutes
-    code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.build, '--only-list', str(listing)] + long_exec, env)
+    code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.version, '--only-list', str(listing)] + long_exec, env)
     seen = {}
     for line in out.splitlines():
         m = re.match(r'^(\S+:\S+)\s+(PASS|FAIL|SKIP)\s+(\d+)s\s*(.*)$', line)
@@ -232,14 +237,14 @@ def containers(ct_map):
 
 
 def run_entry(entry, args, results):
-    """console, device and cmd entries. Placeholders: {build} {binary} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
+    """console, device and cmd entries. Placeholders: {build} {previous} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
     devices = containers(args.ct_map)
     names = [machine_name(host, ct) for _, host, ct in devices]
-    values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'binary': args.binary, 'release': args.release, 'from_official': args.from_official,
+    values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'previous': args.previous,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
               'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else '', 'ct_user': CT_USER, 'ct_uid': CT_UID}
     spec = entry['spec'].format(**values)
-    env = {'ORIGIN': args.origin, 'STATE': args.state, 'HOST': args.host, 'BINARY': args.binary, 'BUILD': args.build}  # PW_CHROMIUM and PW_MODULE come from the caller
+    env = {'ORIGIN': args.origin, 'STATE': args.state, 'HOST': args.host, 'BUILD': args.build}  # PW_CHROMIUM and PW_MODULE come from the caller
     if entry['kind'] == 'device':
         stage_scripts(devices[0][1], devices[0][2])
         code, out, secs = in_container(devices[0][1], devices[0][2], 'cd ~/ds && ' + spec, stdin=os.environ.get('HP_SUDO_PASS', '') + '\n')
@@ -251,6 +256,72 @@ def run_entry(entry, args, results):
     lines = [l for l in out.strip().splitlines() if l.strip()]
     shown = [l for l in lines if 'FAIL' in l][:2] or lines[-1:] or ['']
     results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'PASS' if code == 0 else 'FAIL', 'seconds': secs, 'detail': ' / '.join(shown)[:300]})
+
+
+def ssh(host, command, stdin=None, timeout=300):
+    return run(['ssh', '-o', 'BatchMode=yes', host, command], stdin=stdin, timeout=timeout)
+
+
+# Runs on the host: the scratch profile (HOME, XDG dirs, file credentials) and a pb wrapper that mints enrollment commands for the
+# fresh account only. The real pb of the host is just the binary; it is never signed in to anything here.
+PROFILE = """import json, os, sys
+s = sys.argv[1]
+c = json.load(open(os.path.expanduser('~/.config/paperboat/config.json')))
+json.dump({'server_url': c['server_url'], 'auth': {'allow_file_fallback': True, 'profile_dir': s + '/credentials'}}, open(s + '/home/config.json', 'w'))
+open(s + '/mint.sh', 'w').write('#!/bin/bash\\nexport HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data XDG_STATE_HOME=%s/state XDG_CACHE_HOME=%s/cache\\nexec %s --config %s/home/config.json "$@"\\n' % (s, s, s, s, s, os.path.expanduser('~/.local/bin/pb'), s))
+os.chmod(s + '/mint.sh', 0o700)
+"""
+
+
+class Fresh:
+    """The run's own account and machines: signup -> scratch pb on the host signed in to it (FRESH_MINT) -> three containers."""
+
+    def __init__(self, args):
+        self.args, self.stamp = args, str(int(time.time()))
+        self.work = '/tmp/final-fresh-' + self.stamp
+        self.scratch = '/tmp/pbfresh-' + self.stamp  # on the host: the account's API token and a pb profile signed in to it
+        self.state = self.work + '/state.json'
+        self.version = ''
+
+    def node(self, script, *rest):
+        env = {'ORIGIN': self.args.origin, 'STATE': self.state}
+        code, out, _ = run(['node', str(HERE / script)] + list(rest), env, timeout=300)
+        if code:
+            raise RuntimeError('%s %s failed: %s' % (script, ' '.join(rest[:1]), out.strip()[-300:]))
+        return out
+
+    def up(self):
+        host = self.args.host
+        self.node('fresh_account.mjs', 'signup', self.work)
+        token = self.node('mint_api_token.mjs', 'final-recheck')
+        code, out, _ = ssh(host, 'umask 077; rm -rf {s}; mkdir -p {s}/home {s}/config {s}/data {s}/state {s}/cache; cat > {s}/token'.format(s=self.scratch), stdin=token)
+        code = code or ssh(host, 'python3 - ' + self.scratch, stdin=PROFILE)[0]
+        code = code or ssh(host, '{s}/mint.sh login --api-token-file - < {s}/token >/dev/null && {s}/mint.sh auth status --json | grep -q signed_in..true'.format(s=self.scratch))[0]
+        if code:
+            raise RuntimeError("could not sign the host's scratch pb in to the fresh account")
+        os.environ['FRESH_MINT'] = self.scratch + '/mint.sh'
+        code, out, secs = run([str(HERE / 'final_fresh.sh'), 'up', host, self.stamp], timeout=3000)
+        versions = set(re.findall(r'^OFFICIAL_\S+=\s*Version (\S+)', out, re.M))
+        if code or len(versions) != 1:
+            raise RuntimeError('the fresh machines did not come up (exit %d): %s' % (code, ' '.join(out.strip().splitlines()[-3:])[:300]))
+        self.version = versions.pop()
+        if self.args.build != 'latest' and self.version != self.args.build:
+            raise RuntimeError('the published one-liner installed %s, not the release under test %s' % (self.version, self.args.build))
+        self.args.ct_map = 'fx-a=%s:final-a-%s,fx-b=%s:final-b-%s' % (host, self.stamp, host, self.stamp)
+        self.args.state, self.args.version = self.state, self.version
+        return secs
+
+    def down(self):
+        host, notes = self.args.host, []
+        run([str(HERE / 'final_fresh.sh'), 'down', host, self.stamp])
+        if os.path.exists(self.work + '/account.json'):
+            try:
+                self.node('fresh_account.mjs', 'delete', self.work)
+            except RuntimeError as error:
+                notes.append('the throwaway account was NOT deleted: ' + str(error))
+        ssh(host, 'rm -rf ' + self.scratch)
+        run(['rm', '-rf', self.work])
+        return notes
 
 
 def cmd_run(args):
@@ -265,14 +336,34 @@ def cmd_run(args):
         ids = {i for i in ids if i in wanted or any(i in r['smoke'] and r['row'] in wanted for r in chosen)}
     if args.dry:
         print('smoke ids:', sorted(ids)); print('go tests:', len(tests)); print('entries:', [e['check'] for e in todo])
+        print('machines: %s' % ('3 fresh containers on %s in a fresh throwaway account, one-liner %s' % (args.host, args.build) if ids or any(e['kind'] != 'go' for e in todo) else 'none needed'))
         return 0
     results = []
-    if ids:
-        run_smoke(ids, args, results)
-    if tests:
-        run_go(sorted(tests), results)
-    for entry in todo:
-        run_entry(entry, args, results)
+    fresh = Fresh(args)
+    needs_machines = bool(ids) or any(e['kind'] != 'go' for e in todo)
+    try:
+        if needs_machines:
+            secs = fresh.up()
+            if not wanted or 'EXTRA' in wanted or 'extra-published-install' in wanted:
+                results.append({'check': 'extra-published-install', 'kind': 'cmd', 'status': 'PASS', 'seconds': secs,
+                                'detail': 'three fresh containers installed with the published one-liner: pb %s, enrolled, pair usable' % fresh.version})
+        if ids:
+            run_smoke(ids, args, results)
+        if tests:
+            run_go(sorted(tests), results)
+        for entry in todo:
+            if '{previous}' in entry['spec'] and not args.previous:
+                results.append({'check': entry['check'], 'kind': entry['kind'], 'status': 'FAIL', 'seconds': 0, 'detail': 'pass --previous <the previous official release>'})
+            else:
+                run_entry(entry, args, results)
+    except RuntimeError as error:
+        results.append({'check': 'fresh-machines', 'kind': 'setup', 'status': 'FAIL', 'seconds': 0, 'detail': str(error)[:300]})
+    finally:
+        if args.keep:
+            print('kept: account dir %s, containers final-{a,b,c}-%s on %s, scratch pb %s' % (fresh.work, fresh.stamp, args.host, fresh.scratch))
+        else:
+            for note in fresh.down():
+                results.append({'check': 'fresh-teardown', 'kind': 'setup', 'status': 'FAIL', 'seconds': 0, 'detail': note[:300]})
     by_check = {r['check']: r for r in results}
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     out_dir = HERE / 'results'
@@ -299,13 +390,10 @@ def main():
     inv.add_argument('--out')
     go = sub.add_parser('run')
     go.add_argument('--build', required=True)
-    go.add_argument('--ct-map', default='')
     go.add_argument('--host', default='hp')
-    go.add_argument('--release', default='', help='version of the final official release (for the published-install extra)')
-    go.add_argument('--from-official', default='', help='optional: the history extra fails early unless the published Latest is this version (default: take Latest as it is)')
-    go.add_argument('--binary', default='', help='path of the final linux build (for the update and fresh-pair extras)')
+    go.add_argument('--previous', default='', help='the previous official release the update-with-history extra starts from')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))
-    go.add_argument('--state', default='')
+    go.add_argument('--keep', action='store_true')
     go.add_argument('--only', default='')
     go.add_argument('--dry', action='store_true')
     args = parser.parse_args()

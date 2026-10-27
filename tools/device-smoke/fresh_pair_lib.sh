@@ -41,3 +41,30 @@ fresh() { # fresh CONTAINER NAME: a fresh container with pbt paired as NAME
   start_ct $1
   pair_user $1 pbt 1000 $2
 }
+
+fresh_official() { # fresh_official CONTAINER NAME: a fresh container, the published one-liner (the official Latest), freshly enrolled; prints MACHINE_ID= and OFFICIAL_<container>=<version>
+  local ct=$1 name=$2 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $1" mint=${FRESH_MINT:-$HOME/.local/bin/pb}
+  start_ct $ct
+  sudo -n docker exec $ct bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
+  $mint machine add --name $name --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["linux_macos_command"])' > /tmp/$ct-cmd
+  sudo -n docker cp /tmp/$ct-cmd $ct:/home/pbt/install-cmd; rm -f /tmp/$ct-cmd
+  $X bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
+  $X python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
+  echo "OFFICIAL_$ct=$($X /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+}
+
+fresh_release() { # fresh_release CONTAINER NAME VERSION: the same with an OLDER official release. The published one-liner only installs the
+  # newest, so the older release's asset comes from the place the installer downloads it, and is installed and paired like any supplied binary.
+  local ct=$1 name=$2 rel=$3 mint=${FRESH_MINT:-$HOME/.local/bin/pb} url
+  start_ct $ct
+  sudo -n docker exec $ct bash -c "loginctl enable-linger pbt; systemctl start user@1000.service"
+  url=$($mint machine add --name $name --json | python3 -c '
+import json, re, subprocess, sys
+cmd = json.load(sys.stdin)["data"]["linux_macos_command"]
+script = subprocess.run(["curl", "-fsSL", re.search(r"'"'"'(https?://[^'"'"']+)'"'"'", cmd).group(1)], capture_output=True, text=True, check=True).stdout
+print(re.search(r"product_url='"'"'([^'"'"']*linux-amd64)'"'"'", script).group(1))')
+  curl -fsSL -o /tmp/$ct-rel "$(sed -E "s#/download/[^/]+/#/download/$rel/#" <<<"$url")"
+  FRESH_BINARY=/tmp/$ct-rel pair_user $ct pbt 1000 $name
+  rm -f /tmp/$ct-rel
+  echo "OFFICIAL_$ct=$(sudo -n docker exec -u pbt -e HOME=/home/pbt $ct /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+}
