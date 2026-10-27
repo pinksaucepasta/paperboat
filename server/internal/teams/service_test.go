@@ -572,6 +572,9 @@ func TestPostgresTeamHistoryBounds(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
 	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
 	owner, recipient, team := "tb_owner_"+suffix, "tb_recipient_"+suffix, "tb-team-"+suffix
 	defer func() {
