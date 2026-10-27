@@ -169,6 +169,7 @@ type Authority struct {
 	recoveryWorkers  sync.WaitGroup
 	refreshSlot      chan struct{}
 	refreshWake      chan struct{}
+	refreshUrgent    chan struct{}
 	refreshNow       chan struct{}
 }
 
@@ -198,12 +199,22 @@ func (a *Authority) RequestRefresh() {
 	}
 }
 
+// RequestUrgentRefresh asks Run to renew now for a change the server announced (a machine event: an access
+// revocation, a peer change). Unlike RequestRefresh it does not wait for the renewal budget; such renewals
+// are spaced by urgentRefreshSpacing instead.
+func (a *Authority) RequestUrgentRefresh() {
+	select {
+	case a.refreshUrgent <- struct{}{}:
+	default:
+	}
+}
+
 func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	issuer, err := config.NormalizeIssuer(options.Issuer)
 	if err != nil || issuer != options.Issuer || options.Keys == nil || !validLocalBinding(options.Self) {
 		return nil, ErrAuthority
 	}
-	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1)}, nil
+	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1), refreshUrgent: make(chan struct{}, 1)}, nil
 }
 
 func validID(id string) bool {

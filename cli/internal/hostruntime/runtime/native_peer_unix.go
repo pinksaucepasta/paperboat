@@ -369,7 +369,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, nativePeerListenerError{cause: errors.Join(err, owner.Close())}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, requestRefresh: authority.RequestRefresh, control: control}
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
 	generation.done.Add(2)
 	go func() {
 		defer generation.done.Done()

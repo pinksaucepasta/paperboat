@@ -1,6 +1,7 @@
 package tailnet
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -25,8 +26,9 @@ type tokenBucket struct {
 	granted, deferred uint64
 }
 
-// take spends a token and returns 0, or returns how long until one is available.
-func (b *tokenBucket) take(now time.Time) time.Duration {
+// take spends a token and returns 0, or returns how long until one is available. An urgent renewal spends a
+// token if there is one but waits only for a 429's hold.
+func (b *tokenBucket) take(now time.Time, urgent bool) time.Duration {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.last.IsZero() {
@@ -40,13 +42,30 @@ func (b *tokenBucket) take(now time.Time) time.Duration {
 		b.deferred++
 		return wait
 	}
-	if b.tokens >= 1 {
-		b.tokens--
+	if b.tokens >= 1 || urgent {
+		b.tokens = max(0, b.tokens-1)
 		b.granted++
 		return 0
 	}
 	b.deferred++
 	return time.Duration((1 - b.tokens) * float64(b.refill))
+}
+
+// wait blocks until a token is spent or ctx ends.
+func (b *tokenBucket) wait(ctx context.Context) error {
+	for {
+		wait := b.take(time.Now(), false)
+		if wait == 0 {
+			return nil
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // hold blocks renewals for d (a 429's Retry-After, at least one refill).
