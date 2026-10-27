@@ -7,7 +7,7 @@
 #   console-tunnels  F8-08: CT_A serves HTTP behind a tunnel; console/scripts/check-tunnels.js runs on the live
 #                    console (ORIGIN, STATE, PW_CHROMIUM from the caller).
 #   domain-binding   F8-02: as console-tunnels, then check-domain-binding-driver.mjs adds a fresh hostname under
-#                    CF_ZONE and creates/deletes its DNS records with the token in CF_TOKEN_FILE (never printed).
+#                    SMOKE_CF_ZONE and creates/deletes its DNS records with the token in SMOKE_CF_TOKEN_FILE (never printed).
 set -uo pipefail
 MODE=${1:?private-tcp|console-tunnels|domain-binding} HOST=${2:?host} CT_A=${3:?container a} CT_B=${4:?container b}
 HERE=$(cd "$(dirname "$0")" && pwd) ROOT=$(cd "$HERE/../.." && pwd)
@@ -62,10 +62,10 @@ console-tunnels)
   (cd "$ROOT" && node console/scripts/run-console-check.mjs console/scripts/check-tunnels.js /tunnels "{\"__tunnel\":\"$name\",\"__port\":\"$HTTP_PORT\"}")
   ;;
 domain-binding)
-  : "${CF_TOKEN_FILE:?Cloudflare DNS token file}" "${CF_ZONE:?zone, e.g. pprbt.dev}"
+  : "${SMOKE_CF_TOKEN_FILE:?Cloudflare DNS token file}" "${SMOKE_CF_ZONE:?DNS zone for the test hostname}"
   start_http "$CT_A"; sleep 1
   create_tunnel "$CT_A" "final-f802-$STAMP" || { echo "FAIL tunnel create"; exit 1; }
-  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$CF_ZONE" "$CF_ZONE")
+  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$SMOKE_CF_ZONE" "$SMOKE_CF_ZONE")
   ;;
 *) echo "unknown mode $MODE"; exit 2 ;;
 esac
