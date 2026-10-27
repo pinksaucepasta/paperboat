@@ -16,6 +16,6 @@ export async function loadGhosttyCores(wasmPath: string): Promise<(options: Ghos
   const compiled = await WebAssembly.compile(await response.arrayBuffer())
   return (options) => {
     const instance = new WebAssembly.Instance(compiled, { env: { log() {} } })
-    return construct({ exports: instance.exports, instance }, { ...options, wasmPath })
+    return new construct({ exports: instance.exports, instance }, { ...options, wasmPath })
   }
 }
