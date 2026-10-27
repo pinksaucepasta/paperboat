@@ -110,6 +110,8 @@ def fresh_name():
 
 
 def lines(out, prefix):
+    # Control sequences are not text: a resize report (CSI 8 t) can start the line that follows it.
+    out = re.sub(rb'\x1b\[[0-9;?]*[A-Za-z]', b'', out)
     return re.findall(rb'(?m)^' + re.escape(prefix) + rb'(\d+)\r?$', out)
 
 
