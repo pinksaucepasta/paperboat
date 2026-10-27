@@ -4,7 +4,7 @@ import { WarningIcon } from "@phosphor-icons/react"
 import { useMutation } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useApiQuery } from "@/lib/api"
 import {
   accountDeletionLive,
@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const reauthPath = "/auth/sign-in?reauth=1&return_to=%2Faccount%2Fdelete"
+// Set while a sign-in started here has not come back yet: a sign-in that returns still "too old" must not loop.
+const reauthTried = "pb-delete-reauth-tried"
 
 /**
  * Deleting the account: exactly what goes (from the server's preview), then the account's email
@@ -106,14 +108,29 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
       if (error instanceof DeletionError && error.code === "reauthentication_required") window.location.href = reauthPath
     },
   })
-  if (preview.reauthentication_required) {
-    return (
+  const [stuck, setStuck] = useState(false)
+  const reauthenticate = preview.reauthentication_required
+  // A sign-in older than five minutes goes straight to sign-in and comes back to the typed confirmation.
+  useEffect(() => {
+    if (!reauthenticate) {
+      sessionStorage.removeItem(reauthTried)
+    } else if (sessionStorage.getItem(reauthTried)) {
+      setStuck(true)
+    } else {
+      sessionStorage.setItem(reauthTried, "1")
+      window.location.replace(reauthPath)
+    }
+  }, [reauthenticate])
+  if (reauthenticate) {
+    return stuck ? (
       <div className="flex flex-col items-start gap-3 text-sm">
-        <p>To delete your account, sign in again first. You come back here afterwards.</p>
+        <p>Paperboat still needs a fresh sign-in to delete your account. You come back here afterwards.</p>
         <Button variant="outline" nativeButton={false} render={<a href={reauthPath} />}>
           Sign in again
         </Button>
       </div>
+    ) : (
+      <p className="text-sm text-muted-foreground">Taking you to sign in again…</p>
     )
   }
   const matches = typed.trim().toLowerCase() === preview.account_email.toLowerCase()
@@ -140,6 +157,7 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
       </label>
       <Input
         id="confirm-email"
+        autoFocus
         value={typed}
         onChange={(event) => setTyped(event.target.value)}
         autoComplete="off"
