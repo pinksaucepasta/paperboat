@@ -99,7 +99,7 @@ $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
 # the update is what is judged here (first exec after a pair is the exec mode's job): wait until the pair is usable
 for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
 if $X $T bash -c "/home/pbt/.local/bin/pb update check --json >/dev/null && /home/pbt/.local/bin/pb update download --json >/dev/null" && echo x | $X $T bash -c "cd ~/ds && python3 update_survival.py $ALIAS $ALIAS-p --terminal --mib 400 --approve"; then echo HISTORY_OK; else echo HISTORY_FAILED; fi
-echo "FINAL_$T=$($X $T /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+echo "FINAL_$T=$($X $T /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 EOF
 )
 MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')

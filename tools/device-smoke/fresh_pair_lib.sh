@@ -50,7 +50,7 @@ fresh_official() { # fresh_official CONTAINER NAME: a fresh container, the publi
   sudo -n docker cp /tmp/$ct-cmd $ct:/home/pbt/install-cmd; rm -f /tmp/$ct-cmd
   $X bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
   $X python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
-  echo "OFFICIAL_$ct=$($X /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+  echo "OFFICIAL_$ct=$($X /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 }
 
 fresh_release() { # fresh_release CONTAINER NAME VERSION: the same with an OLDER official release. The published one-liner only installs the
@@ -66,5 +66,5 @@ print(re.search(r"product_url='"'"'([^'"'"']*linux-amd64)'"'"'", script).group(1
   curl -fsSL -o /tmp/$ct-rel "$(sed -E "s#/download/[^/]+/#/download/$rel/#" <<<"$url")"
   FRESH_BINARY=/tmp/$ct-rel pair_user $ct pbt 1000 $name
   rm -f /tmp/$ct-rel
-  echo "OFFICIAL_$ct=$(sudo -n docker exec -u pbt -e HOME=/home/pbt $ct /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+  echo "OFFICIAL_$ct=$(sudo -n docker exec -u pbt -e HOME=/home/pbt $ct /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 }

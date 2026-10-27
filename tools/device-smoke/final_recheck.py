@@ -301,7 +301,7 @@ class Fresh:
             raise RuntimeError("could not sign the host's scratch pb in to the fresh account")
         os.environ['FRESH_MINT'] = self.scratch + '/mint.sh'
         code, out, secs = run([str(HERE / 'final_fresh.sh'), 'up', host, self.stamp], timeout=3000)
-        versions = set(re.findall(r'^OFFICIAL_\S+=\s*Version (\S+)', out, re.M))
+        versions = set(re.findall(r'^OFFICIAL_\S+=(\S+)$', out, re.M))
         if code or len(versions) != 1:
             raise RuntimeError('the fresh machines did not come up (exit %d): %s' % (code, ' '.join(out.strip().splitlines()[-3:])[:300]))
         self.version = versions.pop()
