@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -41,5 +43,18 @@ func TestLoginFailureLookupIsBoundedOnCyclicChains(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("cyclic error chain was walked without a bound")
+	}
+}
+
+func TestExpiredBrowserLoginLinkSaysSo(t *testing.T) {
+	// The real abort path (abortBrowserLogin with no device code to cancel) wraps the expiry failure.
+	expired := browserLoginFailure{
+		message: "The sign-in link expired before it was approved. Run `pb login` again (or rerun the install command) to get a new link.",
+		cause:   errors.New("login link expired"),
+	}
+	err := abortBrowserLogin(context.Background(), "", &config.BrowserLoginState{}, func() error { return nil }, expired)
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	if !strings.Contains(message, "sign-in link expired") || strings.Contains(message, "could not finish the command") {
+		t.Fatalf("expired login link reported generically: %q", message)
 	}
 }

@@ -180,7 +180,7 @@ func browserLogin(c *command.Context) error {
 					return abortBrowserLogin(c.Context, issuer, state, save, err)
 				}
 				if !serverclock.Now().Before(state.ExpiresAt) {
-					return abortBrowserLogin(c.Context, issuer, state, save, errors.New("login link expired; run `pb login` again"))
+					return abortBrowserLogin(c.Context, issuer, state, save, browserLoginFailure{message: "The sign-in link expired before it was approved. Run `pb login` again (or rerun the install command) to get a new link.", cause: errors.New("login link expired")})
 				}
 				t, err := api.PollDeviceLogin(c.Context, issuer, state.DeviceCode, loginHTTPClient())
 				if err == nil {
