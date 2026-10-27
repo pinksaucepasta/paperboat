@@ -58,7 +58,11 @@ async function signup() {
   await page.keyboard.press("Enter").catch(() => {})
   await page.waitForURL((u) => u.href.startsWith(origin), { waitUntil: "domcontentloaded", timeout: 420000 }) // the live console compiles the callback route on first use (minutes on a busy dev server)
   write(stateFile, JSON.stringify(await context.storageState()))
-  const me = await page.evaluate(async () => (await fetch("/api/v1/me")).status)
+  let me = 0
+  for (let i = 0; i < 6 && me !== 200; i++) { // the live console's dev server drops a connection now and then
+    me = await page.evaluate(async () => (await fetch("/api/v1/me").catch(() => ({ status: 0 }))).status)
+    if (me !== 200) await page.waitForTimeout(5000)
+  }
   await browser.close()
   if (me !== 200) throw new Error(`signed up but /me answers ${me}`)
   console.log("fresh account signed up")
@@ -104,7 +108,10 @@ async function remove() {
   const account = JSON.parse(readFileSync(accountFile, "utf8"))
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
   const page = await (await browser.newContext({ storageState: stateFile })).newPage()
-  await page.goto(`${origin}/account/delete`)
+  for (let i = 0; i < 4; i++) { // same dropped connections as in signup
+    if (await page.goto(`${origin}/account/delete`).then(() => true, () => false)) break
+    await page.waitForTimeout(10000)
+  }
   await page.waitForTimeout(5000)
   if (!(await page.locator("#confirm-email").count())) {
     await reauthenticate(page, account)
