@@ -253,10 +253,11 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - Leave every device either fully working or cleanly uninstalled at the end of a step.
   Remove temporary files, processes and test binaries you created, locally and remotely.
 - The live console (dashboard) is served at https://oracle.newt-mermaid.ts.net, a Tailscale
-  Funnel to `next dev` on http://100.95.70.63:3000 (systemd user unit
+  Funnel to a production build (`next start`) on http://100.95.70.63:3000 (systemd user unit
   `paperboat-console.service`, running from `~/paperboat/console`). WorkOS redirects to
   this origin, so sign in there; do not change WorkOS settings, the Funnel, or create other
-  public tunnels. Console changes go live on save; restart the unit after dependency changes.
+  public tunnels. Changes do not go live on save: `tools/console-live.sh` fast-forwards that tree, builds,
+  and restarts the unit; a failed build leaves the previous build running.
 
 ## Security and privacy
 

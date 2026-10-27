@@ -4,6 +4,8 @@ import type { NextConfig } from "next"
 const publicHost = process.env.WORKOS_REDIRECT_URI ? new URL(process.env.WORKOS_REDIRECT_URI).hostname : undefined
 
 const nextConfig: NextConfig = {
+  // tools/console-live.sh builds into the slot the live server is not running from.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   cacheComponents: true,
   partialPrefetching: true,
   allowedDevOrigins: publicHost ? [publicHost] : [],
