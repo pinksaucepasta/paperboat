@@ -242,12 +242,14 @@ func explainTeamPrivateAccess(ctx context.Context, client teamAccessReader, mach
 	if workspace == "" || workspace == "personal" {
 		return cause
 	}
-	if !slices.Contains(machine.Permissions, "private_access") {
-		return commandRejection{reason: commandRejectPrivateAccessNoPermission}
-	}
+	// The team setting comes first: with it off the server drops private_access from every member's
+	// permissions, so checking Permissions first would blame a missing grant.
 	team, err := client.GetTeam(ctx, workspace)
 	if err == nil && !team.AllowPrivateAccess {
 		return commandRejection{reason: commandRejectPrivateAccessTeamOff}
+	}
+	if !slices.Contains(machine.Permissions, "private_access") {
+		return commandRejection{reason: commandRejectPrivateAccessNoPermission}
 	}
 	return cause
 }

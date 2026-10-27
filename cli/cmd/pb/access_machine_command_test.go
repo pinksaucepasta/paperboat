@@ -337,6 +337,8 @@ func TestTeamMemberIsToldWhyASharedMachinePortIsNotOffered(t *testing.T) {
 	}{
 		{"no permission", fakeTeamAccess{workspace: "team-a", team: api.Team{AllowPrivateAccess: true}}, api.UserMachine{Permissions: []string{"terminal"}}, commandRejectPrivateAccessNoPermission},
 		{"team setting off", fakeTeamAccess{workspace: "team-a"}, granted, commandRejectPrivateAccessTeamOff},
+		// With the setting off the server drops private_access from the permissions: the setting is the reason.
+		{"team setting off, permission dropped", fakeTeamAccess{workspace: "team-a"}, api.UserMachine{Permissions: []string{"terminal"}}, commandRejectPrivateAccessTeamOff},
 	} {
 		var rejection commandRejection
 		err := explainTeamPrivateAccess(context.Background(), test.client, test.machine, cause)
