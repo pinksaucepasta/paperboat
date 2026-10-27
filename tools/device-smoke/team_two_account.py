@@ -193,7 +193,7 @@ def main():
         granted = mine()
         if not granted or not any(g['active'] and g['permission'] == 'use' for g in granted):
             raise Failure(f'the member does not see the active tunnel grant: {granted}')
-        kinds = {e['action'] for e in owner('team', 'activity', team, '--limit', '100')['items']}
+        kinds = {e['action'].removeprefix('team.') for e in owner('team', 'activity', team, '--limit', '100')['items']}
         if not {'attach', 'grant'} <= kinds:
             raise Failure(f'owner activity lacks the attach/grant events: {sorted(kinds)}')
         owner('team', 'grant', team, member_id, 'tunnel', tunnel, 'use', '--active=false', '--generation', generation())
@@ -230,7 +230,7 @@ def main():
 
     def activity():
         feed = owner('team', 'activity', team, '--limit', '100')
-        kinds = {e['action'] for e in feed['items']}
+        kinds = {e['action'].removeprefix('team.') for e in feed['items']}
         for needed in ('machine_share', 'machine_grant', 'machine_unshare'):
             if needed not in kinds:
                 raise Failure(f'owner activity lacks {needed}: {sorted(kinds)}')
