@@ -280,7 +280,7 @@ func localDaemonCommand() *cobra.Command {
 			// about it rarely instead of once per loop iteration.
 			controlTransport := &controlbackoff.Transport{Base: peerHTTPTransport, Host: controlHost(cfg.ServerURL)}
 			source.HTTPClient = &http.Client{Transport: controlTransport}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks})
+			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, LocalMachineID: machineID})
 			if err != nil {
 				return err
 			}

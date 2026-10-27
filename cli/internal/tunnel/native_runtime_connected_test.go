@@ -331,7 +331,7 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
 	relayTrust := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: relayRoots, ServerName: "localhost", Certificates: []tls.Certificate{cliLeaf}}
-	runtime, err := newCLINativeRuntime(ctx, issuer, store, networkAPI, clientHTTP, relayTrust, accountID, cliID, identity)
+	runtime, err := newCLINativeRuntime(ctx, issuer, store, networkAPI, clientHTTP, relayTrust, accountID, cliID, identity, "")
 	if err != nil {
 		t.Fatal(err)
 	}

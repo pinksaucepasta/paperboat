@@ -96,6 +96,12 @@ func (a *Authority) PeerIsLocal(endpointID string) bool {
 	if a.current != nil {
 		for _, p := range a.current.Peers {
 			if p.Identity.EndpointID == endpointID {
+				if a.options.LocalMachineID != "" && p.Identity.MachineID == a.options.LocalMachineID {
+					// This machine's own host runtime, whether or not its endpoints are in the configuration
+					// right now: they were briefly missing and a self-dial bound regional recovery (hp 2026-10-27).
+					a.mu.Unlock()
+					return true
+				}
 				endpoints = p.Endpoints
 			}
 		}

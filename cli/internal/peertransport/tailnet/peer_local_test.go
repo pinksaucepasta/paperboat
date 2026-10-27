@@ -28,3 +28,25 @@ func TestPeerWithALocalEndpointIsLocal(t *testing.T) {
 		t.Fatal("unknown peer is local")
 	}
 }
+
+// A self-dial is local by machine ID even while the host's endpoints are missing from the configuration:
+// a self-dial in that window bound regional recovery to the machine itself (hp 2026-10-27).
+func TestOwnMachineIsLocalWithoutEndpoints(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	c.Peers[0].Endpoints = nil
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	peer := c.Peers[0].Identity
+	if a.PeerIsLocal(peer.EndpointID) {
+		t.Fatal("peer without endpoints is local while this machine is not enrolled")
+	}
+	a.options.LocalMachineID = peer.MachineID
+	if !a.PeerIsLocal(peer.EndpointID) {
+		t.Fatal("this machine's own host runtime is not local without endpoints")
+	}
+	a.options.LocalMachineID = "machine_other"
+	if a.PeerIsLocal(peer.EndpointID) {
+		t.Fatal("another machine is local")
+	}
+}

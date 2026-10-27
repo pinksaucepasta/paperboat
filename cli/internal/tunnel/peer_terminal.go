@@ -28,6 +28,8 @@ type PeerTerminalConfig struct {
 	HTTPClient        *http.Client
 	OutputQueueChunks int
 	Now               func() time.Time
+	// LocalMachineID is the machine the daemon runs on, if enrolled (see tailnet.AuthorityOptions).
+	LocalMachineID string
 }
 
 // PeerTerminalTunnel owns native client authority and sessions for the daemon.

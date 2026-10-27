@@ -126,6 +126,9 @@ type AuthorityOptions struct {
 	// Self pins locally approved application identity, not fields from the reply.
 	Self NetworkBinding
 	Keys NetworkKeys
+	// LocalMachineID is the machine this engine runs on (its enrolled registration), so a dial to that
+	// machine's own host runtime is known to be local; empty when the machine is not enrolled.
+	LocalMachineID string
 	// TestOnlyPacketListener supplies real filtered UDP sockets to network fault tests.
 	TestOnlyPacketListener nettype.PacketListener
 	// TestOnlyDERPCarrier wraps the authenticated carrier for network fault tests.

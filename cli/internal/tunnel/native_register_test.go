@@ -73,7 +73,7 @@ func TestRegistrationAtStartIsTheIdentityTheEngineLaterRegisters(t *testing.T) {
 	})}
 	relayTrust := &tls.Config{MinVersion: tls.VersionTLS13}
 	for i := range 2 { // at daemon start, then on the first native operation
-		authority, _, _, err := newCLINativeAuthority(ctx, issuer, store, networkAPI, jwks, relayTrust, accountID, cliID, identity)
+		authority, _, _, err := newCLINativeAuthority(ctx, issuer, store, networkAPI, jwks, relayTrust, accountID, cliID, identity, "")
 		if err != nil {
 			t.Fatalf("registration %d: %v (%d registered)", i+1, err, len(registrations))
 		}
