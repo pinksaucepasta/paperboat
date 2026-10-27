@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"math"
 	"reflect"
@@ -598,6 +599,11 @@ func (r *SQLRepository) PromoteHost(ctx context.Context, request PromoteHostRequ
 			return err
 		}
 		if err := createManagedOperation(ctx, q, request.OperationID, request.ActorUserID, "host_keys_promote", requestHash, result.ID, result.ReconciliationVersion, request.Now); err != nil {
+			return err
+		}
+		// The host installs authorized keys for the new set on its next reconcile; wake it now (it listens to
+		// machine_access), or pb ssh was refused for about a minute after pb ssh trust-host (hp 2026-10-27).
+		if err := machineevents.Publish(ctx, tx, []string{request.UserMachineID}, machineevents.TopicMachineAccess); err != nil {
 			return err
 		}
 		return r.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: request.ActorUserID, ActorType: audit.ActorUser, EventType: "managed_ssh.host_key_set_promoted", ResourceType: "machine_ssh_host_key_set", ResourceID: result.ID, IdempotencyKey: request.OperationID, Metadata: map[string]any{"user_machine_id": request.UserMachineID, "old_set_id": active.ID, "new_set_id": result.ID, "set_fingerprint": hex.EncodeToString(result.Fingerprint[:]), "machine_generation": request.MachineGeneration}})

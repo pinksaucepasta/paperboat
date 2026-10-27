@@ -152,9 +152,21 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 	if _, err := service.PromoteHost(ctx, PromoteHostRequest{OperationID: "operation_host_promote" + suffix, ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 2, SetID: pending.ID, ExpectedFingerprint: pending.Fingerprint, Now: now.Add(2 * time.Second)}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("stale generation promotion error=%v", err)
 	}
+	accessGeneration := func() (generation int64) {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'),0)`, machineA).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		return generation
+	}
+	beforePromotion := accessGeneration()
 	promoted, err := service.PromoteHost(ctx, PromoteHostRequest{OperationID: "operation_host_promote" + suffix, ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, SetID: pending.ID, ExpectedFingerprint: pending.Fingerprint, Now: now.Add(2 * time.Second)})
 	if err != nil || promoted.State != "active" || !promoted.PromotedAt.Equal(now.Add(2*time.Second)) || len(promoted.Keys) != 1 {
 		t.Fatalf("promoted=%+v error=%v", promoted, err)
+	}
+	// The host learns of the trusted set at once (machine_access wakes its key reconcile): pb ssh was refused for
+	// about a minute after pb ssh trust-host (hp 2026-10-27).
+	if accessGeneration() <= beforePromotion {
+		t.Fatal("promoting a host key set did not publish machine_access for the machine")
 	}
 	activeHost, err = service.GetActiveHost(ctx, GetHostKeySetRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1})
 	if err != nil || activeHost.ID != promoted.ID {

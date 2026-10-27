@@ -24,11 +24,12 @@ ssh "$host" "$pbt $a /home/pbt/.local/bin/pb ssh trust-host $peer --fingerprint 
   fail "trust-host accepted a fingerprint that is not the pending one"
 ssh "$host" "$pbt $a /home/pbt/.local/bin/pb ssh trust-host $peer --fingerprint $pending --json" | grep -q '"trusted": *true' ||
   fail "trust-host did not trust the pending fingerprint"
-# The host installs authorized keys for the newly trusted set on its next reconcile (about a minute on hp).
+# Promotion wakes the host (machine_access), which installs authorized keys for the trusted set at once: pb ssh
+# must work within a few seconds of trust-host (it was refused for about a minute before 00125fb3).
 ok=""
-for _ in $(seq 1 18); do
+for _ in 1 2 3; do
   ssh "$host" "$pbt $a /home/pbt/.local/bin/pb ssh $peer -- true" >/dev/null 2>&1 && { ok=1; break; }
-  sleep 5
+  sleep 1
 done
-[ -n "$ok" ] || fail "pb ssh failed for 90 s after trusting the new host key"
+[ -n "$ok" ] || fail "pb ssh did not work within seconds of trusting the new host key"
 echo "{\"check\": \"ssh-trust-host\", \"target\": \"$peer\", \"status\": \"PASS\", \"pending_named\": true, \"wrong_fingerprint_refused\": true, \"trusted_then_connected\": true}"
