@@ -64,13 +64,50 @@ async function signup() {
   console.log("fresh account signed up")
 }
 
+// The server asks for a sign-in from the last five minutes before it deletes an account, and a run takes longer: sign in again
+// (email, password, and the emailed code from the disposable inbox) and come back to the delete page.
+async function reauthenticate(page, { email, password, mailToken }) {
+  const seen = new Set(((await mailtm("/messages", mailToken))["hydra:member"] ?? []).map((m) => m.id))
+  await page.getByRole("link", { name: "Sign in again" }).or(page.getByRole("button", { name: "Sign in again" })).first().click()
+  await page.waitForTimeout(3000)
+  if (await page.locator('input[name="email"]').count()) {
+    await page.fill('input[name="email"]', email)
+    await page.keyboard.press("Enter")
+    await page.waitForTimeout(3000)
+  }
+  if (await page.locator('input[type="password"]').count()) {
+    await page.fill('input[type="password"]', password)
+    await page.keyboard.press("Enter")
+    await page.waitForTimeout(4000)
+  }
+  const boxes = page.locator('input[inputmode="numeric"], input[name="code"], input[autocomplete="one-time-code"]')
+  if (await boxes.count()) {
+    let code = ""
+    for (let i = 0; i < 30 && !code; i++) {
+      const fresh = ((await mailtm("/messages", mailToken))["hydra:member"] ?? []).find((m) => !seen.has(m.id))
+      if (fresh) code = ((await mailtm(`/messages/${fresh.id}`, mailToken)).text ?? "").match(/\b(\d{6})\b/)?.[1] ?? ""
+      else await new Promise((r) => setTimeout(r, 4000))
+    }
+    if (!code) throw new Error("no sign-in code arrived in the disposable inbox")
+    if ((await boxes.count()) > 1) (await boxes.first().click(), await page.keyboard.type(code))
+    else await boxes.first().fill(code)
+    await page.keyboard.press("Enter").catch(() => {})
+  }
+  await page.waitForURL((u) => u.href.startsWith(origin), { timeout: 60000 })
+}
+
 async function remove() {
-  const { email } = JSON.parse(readFileSync(accountFile, "utf8"))
+  const account = JSON.parse(readFileSync(accountFile, "utf8"))
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
   const page = await (await browser.newContext({ storageState: stateFile })).newPage()
   await page.goto(`${origin}/account/delete`)
   await page.waitForTimeout(5000)
-  await page.fill("#confirm-email", email)
+  if (!(await page.locator("#confirm-email").count())) {
+    await reauthenticate(page, account)
+    await page.goto(`${origin}/account/delete`)
+    await page.waitForTimeout(5000)
+  }
+  await page.fill("#confirm-email", account.email, { timeout: 15000 })
   let status = 0
   page.on("response", (r) => {
     if (new URL(r.url()).pathname === "/api/v1/account" && r.request().method() === "DELETE") status = r.status()
