@@ -19,6 +19,11 @@ released CLIs, no waiting for machines to update. Change producer and consumer t
 A test machine broken by old state is reinstalled. Regressions: diff the last good build against the first
 bad one on the paths the failing check touches, then fix.
 
+**Fix efficiently (user rule, 2026-10-27).** Before changing code for a bug: (1) if it ever worked, name the
+last working commit and read `git diff good..bad` on the touched paths; (2) read how the reference products
+in `~/ref` solve the same thing (tailscale, headscale, netbird, teleport, cloudflared, ngrok-go, mosh, tmux,
+EternalTerminal, ttyd) and cite the file. Copy proven designs instead of inventing new ones.
+
 **Fast loop (user rule, 2026-10-26).** Before a push, CI runs only the packages the commit touches
 (`tools/ci-test.sh <module> -run '<their tests>'`, minutes); the full all-module run is the CI health lane's job
 after each push batch. Each lane keeps one paired pair of test machines and installs every new build over it
