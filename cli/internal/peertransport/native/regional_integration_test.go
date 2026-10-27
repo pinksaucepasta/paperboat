@@ -133,15 +133,14 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 		for i := range fresh {
 			fresh[i].ObservedAt = tick.Unix()
 			fresh[i].CapacityObservedAt = tick.Unix()
-			// A 15 s lease (production signs 1 minute) so the expiry check below is reached in seconds.
-			fresh[i].ExpiresAt = tick.Add(15 * time.Second).Unix()
+			fresh[i].ExpiresAt = tick.Add(60 * time.Second).Unix()
 		}
 		applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, fresh)
 		applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, fresh)
 	}
 	descriptor := startRelayEchoServer(t, serverOwner, serverAuthority, serverRegions[0])
-	// Establish before the candidate lease expires so a failure reports the
-	// actual startup state, not later lease withdrawal.
+	// Establish before the 15-second candidate freshness window expires so
+	// a failure reports the actual startup state, not later lease withdrawal.
 	dialCtx, stopDial := context.WithTimeout(ctx, 10*time.Second)
 	session, err := clientOwner.Dial(dialCtx, descriptor, serverBinding.EndpointID, peerquic.ClassInteractive)
 	stopDial()
@@ -204,8 +203,8 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 		t.Fatalf("restored failure-domain backup unavailable: %+v", afterRestore)
 	}
 	assertRegionalBytes(t, ctx, session, "after-restore")
-	// Stop control refresh. The cached signed relay lease (15 s here) expires without widening scope; RegionalStatus
-	// shows it once it has lasted the 10 s warning delay.
+	// Stop control refresh. Cached signed health expires without widening scope. RegionalStatus shows it once it
+	// has lasted the 10 s warning delay.
 	expiryDeadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(expiryDeadline) && clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
 		time.Sleep(100 * time.Millisecond)

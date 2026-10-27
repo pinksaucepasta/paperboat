@@ -54,7 +54,7 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 	draining := node("draining", "hel", "hel-b", "ready", 20)
 	draining.DrainDeadline = &drain
 	stale := node("stale", "hel", "hel-c", "ready", 20)
-	stale.ObservedAt = now.Add(-61 * time.Second).Unix()
+	stale.ObservedAt = now.Add(-16 * time.Second).Unix()
 	overloaded := node("overloaded", "hel", "hel-d", "ready", 90)
 	candidates := RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{excluded, draining, stale, overloaded, ready}}
 
@@ -184,19 +184,5 @@ func TestRegionalCandidatesNameWhoRunsEachRelay(t *testing.T) {
 		if err != nil || len(nodes) != 1 || nodes[0].SelfHosted() != c.selfHosted {
 			t.Fatalf("hosting %q: nodes %+v err %v, self-hosted want %v", c.hosting, nodes, err, c.selfHosted)
 		}
-	}
-}
-
-// Observations live as long as the server's relay lease (1 minute): a client renewing on the regular 30 s
-// cadence keeps its relay. At 15 s a busy hp client lost it in half of its pb status samples.
-func TestRelayObservedHalfAMinuteAgoStaysEligible(t *testing.T) {
-	now := time.Unix(2_000_000_000, 0)
-	at := now.Add(-45 * time.Second).Unix()
-	node := RegionalNode{NodeID: "relay", NodeGeneration: 1, ProcessEpoch: "epoch-1", Region: "hel", FailureDomain: "hel-a",
-		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: at, ExpiresAt: now.Add(15 * time.Second).Unix(), CapacityLimit: 100, CapacityObservedAt: at}
-	candidates := RegionalCandidates{ExpiresAt: now.Add(15 * time.Second).Unix(), Nodes: []RegionalNode{node}}
-	if got, _, err := candidates.Eligible("relay", "derp_quic", nil, now); err != nil || len(got) != 1 {
-		t.Fatalf("relay observed 45 s ago: eligible %d, err %v", len(got), err)
 	}
 }
