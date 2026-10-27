@@ -15,6 +15,7 @@ import json
 import secrets
 import subprocess
 import sys
+import time
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
@@ -65,6 +66,15 @@ def server_probe(host, pid):
     return must(ssh(host, f'bash -s {pid}', stdin=READ), 'read server environment').strip()
 
 
+def wait_hook_sees_probe(host, want, seconds=90):
+    """The runtime serves a shell's ENV from a 60 s cache: wait until a new shell loads the probe just set."""
+    show = f'printf %s "${PROBE}" | sha256sum | cut -d" " -f1'
+    end = time.monotonic() + seconds
+    while must(ssh(host, show), 'read probe in a new shell').strip() != want:
+        assert time.monotonic() < end, 'new shells did not load the probe within the hook cache time'
+        time.sleep(3)
+
+
 def stop_server(host, pid):
     ssh(host, f'kill {pid} 2>/dev/null; pkill -f "{DIR}" 2>/dev/null; true')
 
@@ -78,6 +88,7 @@ def main():
         must(ssh(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
         stale = start_server(host)
         must(ssh(host, f'{PB} env hook bash --install'), 'hook install')
+        wait_hook_sees_probe(host, want)
         report['server_started_before_hook_has_probe'] = server_probe(host, stale) == want
         stop_server(host, stale)  # the documented reload step
         fresh = start_server(host)

@@ -6,6 +6,8 @@ Runs from any host that can ssh to the controller. The controller drives every c
 user reaches it. Prints one PASS/FAIL line per check id and exits non-zero on any failure.
 
   python3 local_access.py --controller pb@pbvm2 --target hp [--only ID,ID]
+
+--controller local runs the controller's commands on this machine (the final re-check runs it inside container A).
 """
 import argparse
 import base64
@@ -135,8 +137,9 @@ print('PROBE_OK')
 
 
 def ssh(controller, command, timeout=120, **kwargs):
-    return subprocess.run(['ssh', '-o', 'BatchMode=yes', controller, 'export PATH=$HOME/.local/bin:$PATH; ' + command],
-                          capture_output=True, text=True, timeout=timeout, **kwargs)
+    command = 'export PATH=$HOME/.local/bin:$PATH; ' + command
+    argv = ['bash', '-c', command] if controller == 'local' else ['ssh', '-o', 'BatchMode=yes', controller, command]
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, **kwargs)
 
 
 def pb_json(controller, *arguments):

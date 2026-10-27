@@ -7,7 +7,11 @@
 #         local-access and private-access-permission run from this host over ssh: F9_CONTROLLER F9_TARGET (two machines of one
 #         account) and F9_OWNER F9_OWNER_ALIAS F9_ACCESSOR F9_TEAM (two accounts, a paid team) come from the environment
 # A script not listed here is not run by the final re-check: `final_recheck.py inventory` lists the [x] rows that depend on it.
-# command_rows.py needs the ENV vault of the machine's account unlocked (rows C143/C144 fail on a locked vault)
+# env-vault-lifecycle initialises the fresh account's vault and leaves it unlocked: it runs before command-rows (C143/C144 fail on a locked vault)
+# env-ssh-hook and env-vscode-remote ssh from container A to its own sshd (final_self_ssh.sh); local-access runs inside A against B (installs iptables for its relay-path phase)
+env-vault-lifecycle	device	@env_vault_lifecycle.py	umask 077; head -c 24 /dev/urandom | base64 > ~/vault-password; head -c 24 /dev/urandom | base64 > ~/vault-recovery; python3 env_vault_lifecycle.py ~/vault-password ~/vault-recovery; code=$?; rm -f ~/vault-password ~/vault-recovery; exit $code
+env-ssh-hook	device	@env_ssh_hook.py	bash final_self_ssh.sh && python3 env_ssh_hook.py selfssh
+env-vscode-remote	device	@env_vscode_remote.py	bash final_self_ssh.sh && python3 env_vscode_remote.py selfssh
 command-rows	device	@command_rows.py	python3 command_rows.py {self} --peer {peer}
 console-previews	console	F7-06	check-previews.js /previews '{{"__port":"8080","__machine":"{self}"}}'
 extra-exec-after-pair	cmd	EXTRA	tools/device-smoke/final_pair_extras.sh exec {host}
@@ -57,7 +61,7 @@ console-domain-binding	cmd	@check-domain-binding.js	tools/device-smoke/final_tun
 console-domains	console	@check-domains.js	check-domains.js /domains
 console-access-policy	console	@check-access-policy.js	check-access-policy.js /access '{{"__save":true}}'
 policy-cli	cmd	@policy_cli.sh	E=$(ssh {host} "sudo -n docker exec -u pbt -e HOME=/home/pbt {ct_a} /home/pbt/.local/bin/pb auth status --json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["account"]["email"])') && ssh {host} "CT={ct_a} EMAIL=$E TARGET={peer} bash -s" < tools/device-smoke/policy_cli.sh
-local-access	cmd	@local_access.py	python3 tools/device-smoke/local_access.py --controller "$F9_CONTROLLER" --target "$F9_TARGET"
+local-access	device	@local_access.py	sudo -n apt-get install -y -qq iptables >/dev/null 2>&1; python3 local_access.py --controller local --target {peer}
 private-access-permission	cmd	@private_access_permission.py	python3 tools/device-smoke/private_access_permission.py --owner "$F9_OWNER" --owner-alias "$F9_OWNER_ALIAS" --accessor "$F9_ACCESSOR" --team "$F9_TEAM"
 old-connector-paths-gone	cmd	F20-04	! grep -rlE "tunnelenrollment|connectorrotation|(FROM|JOIN|INTO|UPDATE) (paperboat\.)?tunnel_connectors|connector_enrollments" cli server tunnel shared --include=*.go --exclude-dir=migrations
 
@@ -89,9 +93,7 @@ console-files	cmd	F6-06	tools/device-smoke/final_console_files.sh {host} {ct_a} 
 #   auth_lifecycle.py: needs a human browser approval (the link is written to a file)
 #   config_team_default.py: needs a GitHub config repository connected to the account and a team the account administers
 #   deploy.py, device_install.py: harness tools that build and install onto devices, not checks
-#   env_ssh_hook.py, env_vscode_remote.py: drive plain ssh into a machine with an unlocked ENV vault (a controller host, not a container)
-#   env_vault_lifecycle.py: re-initialises the account's ENV vault with a new password and recovery code, which other checks on the shared test account depend on
-#   local_access.py, private_access_permission.py: need a controller reachable over ssh and a second team-member account
+#   private_access_permission.py: needs a second team-member account with a machine and a paid team the owner administers; it runs with F9_OWNER F9_OWNER_ALIAS F9_ACCESSOR F9_TEAM from the environment, never on the run's fresh account
 #   official_update.py, update_continuity.py, update_failures.py, update_survival.py: need an official install, a second build and a wrong-platform binary; run by the update step of the final re-check
 #   pairing_lifecycle.py, setup_recovery.py, reset_lifecycle.py: uninstall and re-pair the machine; run on a fresh pair, never on the container the other checks use
 #   session_idle.py: needs an 8 hour idle between its start and verify phases
