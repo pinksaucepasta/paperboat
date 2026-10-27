@@ -97,6 +97,11 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	if err := setSecret("PAPERBOAT_SENTRY_API_TOKEN", &c.Secrets.SentryAPIToken); err != nil {
 		return err
 	}
+	if err := setSecret("PAPERBOAT_TEST_FIXTURES_TOKEN", &c.Secrets.TestFixturesToken); err != nil {
+		return err
+	}
+	setString("PAPERBOAT_TEST_FIXTURES_DOMAIN", &c.TestFixtures.Domain)
+	setString("PAPERBOAT_TEST_FIXTURES_ZONE_ID", &c.TestFixtures.ZoneID)
 	if err := setSecret("PAPERBOAT_BACKUP_REPORT_TOKEN", &c.Secrets.BackupReportToken); err != nil {
 		return err
 	}

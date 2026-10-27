@@ -33,6 +33,9 @@ func (c Config) validateOperatorIntegrations() error {
 	if c.Backups.DatabaseID != "" && !operatorIntegrationID.MatchString(c.Backups.DatabaseID) || c.Secrets.BackupReportToken != "" && (len(c.Secrets.BackupReportToken) < 32 || len(c.Secrets.BackupReportToken) > 512) {
 		return errors.New("backup reporting requires a valid database ID and a token of 32–512 bytes")
 	}
+	if token := c.Secrets.TestFixturesToken; token != "" && (len(token) < 32 || len(token) > 512) || (c.TestFixtures.Domain != "" || c.TestFixtures.ZoneID != "") && (c.Secrets.TestFixturesToken == "" || !validEndpointBaseDomain(c.TestFixtures.Domain) || !validConfigMetadata(c.TestFixtures.ZoneID, 128)) {
+		return errors.New("test fixtures need a token of 32–512 bytes, and test DNS a valid domain and zone id together with it")
+	}
 	if n := c.Backups.MaxAgeSeconds; n != 0 && (n < 60 || n > 30*24*3600) {
 		return errors.New("backup maximum age must be 60–2592000 seconds")
 	}

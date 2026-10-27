@@ -49,6 +49,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/testfixtures"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
@@ -65,6 +66,7 @@ type Options struct {
 	ClientUpdatePolicy       ClientUpdatePolicyAPI
 	OperatorInfrastructure   *operatorinfra.Service
 	OperatorBackups          *backupreport.Service
+	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
 	OperatorHealth           *telemetry.HealthTracker
 	OperatorActions          *operatoractions.Service

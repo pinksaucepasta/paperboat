@@ -74,6 +74,7 @@ type Config struct {
 	TerminalSessions      TerminalSessions         `json:"terminal_sessions"`
 	Preview               Preview                  `json:"preview"`
 	Tunnel                Tunnel                   `json:"tunnel"`
+	TestFixtures          TestFixtures             `json:"test_fixtures"`
 	Certificates          Certificates             `json:"certificates"`
 	ConfigSync            ConfigSync               `json:"config_sync"`
 	CLIAuth               CLIAuth                  `json:"cli_auth"`
@@ -263,6 +264,14 @@ type Preview struct {
 	BaseDomain string `json:"base_domain"`
 }
 
+// TestFixtures confines the final re-check runner's DNS records: names must sit under Domain, in the Cloudflare zone
+// ZoneID (the server's own DNS token writes them). The runner's token is Secrets.TestFixturesToken; without it nothing
+// is mounted.
+type TestFixtures struct {
+	Domain string `json:"domain"`
+	ZoneID string `json:"zone_id"`
+}
+
 type Tunnel struct {
 	BaseDomain string `json:"base_domain"`
 }
@@ -422,6 +431,7 @@ type Secrets struct {
 	ResendAPIKey          string   `json:"resend_api_key"`
 	SentryAPIToken        string   `json:"sentry_api_token"`
 	BackupReportToken     string   `json:"backup_report_token"`
+	TestFixturesToken     string   `json:"test_fixtures_token"`
 	SentryDSN             string   `json:"sentry_dsn"`
 	SessionKeys           []string `json:"session_keys"`
 	EncryptionKey         string   `json:"encryption_key"`

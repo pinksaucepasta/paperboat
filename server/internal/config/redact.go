@@ -13,6 +13,9 @@ func (c Config) RedactedJSON() string {
 	if redacted.Secrets.SentryAPIToken != "" {
 		redacted.Secrets.SentryAPIToken = "[redacted]"
 	}
+	if redacted.Secrets.TestFixturesToken != "" {
+		redacted.Secrets.TestFixturesToken = "[redacted]"
+	}
 	if redacted.Secrets.BackupReportToken != "" {
 		redacted.Secrets.BackupReportToken = "[redacted]"
 	}

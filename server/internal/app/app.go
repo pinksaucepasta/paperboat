@@ -77,6 +77,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/server/internal/testfixtures"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -676,6 +677,14 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	var fixturesService *testfixtures.Service
+	if opts.Config.Secrets.TestFixturesToken != "" {
+		fixturesService, err = newTestFixtures(opts.Config, store, auditWriter)
+		if err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+	}
 	reportingService, err := operatorreporting.New(store, auditWriter, operatorreporting.Config{BaseURL: opts.Config.Reporting.APIBaseURL, Organization: opts.Config.Reporting.Organization, Projects: opts.Config.Reporting.Projects, Token: opts.Config.Secrets.SentryAPIToken})
 	if err != nil {
 		_ = store.Close()
@@ -738,6 +747,7 @@ func New(opts Options) (*App, error) {
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
 		OperatorBackups:          backupService,
+		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
 		Operator:                 operatorService,
 		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail},

@@ -264,6 +264,7 @@ func (w *operatorResponse) Write(b []byte) (int, error) {
 
 func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerBackupReportRoute(mux, opts)
+	registerTestFixtureRoutes(mux, opts)
 	if opts.OperatorAuth == nil {
 		return
 	}

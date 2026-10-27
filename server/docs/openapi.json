@@ -69,6 +69,11 @@
         "in": "cookie",
         "name": "pb-operator-session"
       },
+      "testFixturesToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The dedicated test fixtures credential of the final re-check runner (one token, root-only on the control plane host and in one CI secret). Not an account or API token."
+      },
       "bearerSelfhostRuntime": {
         "type": "http",
         "scheme": "bearer",
@@ -43871,6 +43876,335 @@
           },
           "503": {
             "description": "port_probe_unavailable: configuration/database unavailable; retry shortly."
+          }
+        }
+      }
+    },
+    "/v1/test-fixtures/team": {
+      "post": {
+        "operationId": "test_fixture_team_create",
+        "summary": "Create the paid test team of a throwaway account",
+        "description": "Creates (idempotently) the team owned by the account with the paid entitlement granted as test data, plus each member as an active member. The account and the members must have signed in once. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "members": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 255
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{\"env\":{\"PAPERBOAT_SMOKE_TEAM\":team}}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "400": {
+            "description": "validation_failed"
+          },
+          "404": {
+            "description": "account_not_found: the account has not signed in yet."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "test_fixture_team_remove",
+        "summary": "Make the other members of a test team inactive",
+        "description": "Teardown: every non-owner member becomes inactive so the owner's account can be deleted; a team left with its owner alone is deleted by the product with the account. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 255
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{\"team\":...,\"active_members\":n}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "400": {
+            "description": "validation_failed"
+          }
+        }
+      }
+    },
+    "/v1/test-fixtures/zone": {
+      "get": {
+        "operationId": "test_fixture_zone",
+        "summary": "Read the confined test DNS domain",
+        "description": "The only domain test DNS records may be named under. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{\"zone\":domain}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "503": {
+            "description": "test_dns_not_configured"
+          }
+        }
+      }
+    },
+    "/v1/test-fixtures/dns": {
+      "post": {
+        "operationId": "test_fixture_dns_create",
+        "summary": "Create a temporary test DNS record",
+        "description": "A CNAME, TXT or A record (ttl 60, not proxied) named strictly under the test domain, marked as a fixture. Refuses everything else. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "name",
+                  "content"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "CNAME",
+                      "TXT",
+                      "A"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 253
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 255
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{\"id\":record id,\"name\":name}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "400": {
+            "description": "validation_failed"
+          },
+          "503": {
+            "description": "test_dns_not_configured or the provider failed"
+          }
+        }
+      }
+    },
+    "/v1/test-fixtures/dns/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "test_fixture_dns_read",
+        "summary": "Read a test DNS record the fixtures created",
+        "description": "404 for any record that is not one of the fixtures' own under the test domain. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{\"id\",\"name\",\"type\",\"content\"}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "400": {
+            "description": "validation_failed: malformed id"
+          },
+          "404": {
+            "description": "record_not_found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "test_fixture_dns_delete",
+        "summary": "Delete a test DNS record the fixtures created",
+        "description": "Idempotent: an already removed or foreign record answers 204 and nothing else is touched. Only mounted when a test fixtures token is configured; authenticated with that dedicated bearer token; every call is audited as a system actor.",
+        "security": [
+          {
+            "testFixturesToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed or already gone."
+          },
+          "401": {
+            "description": "test_fixtures_unauthorized: a dedicated test fixtures credential is required."
+          },
+          "429": {
+            "description": "rate_limited: all test fixture calls share one limit; retry after Retry-After."
+          },
+          "400": {
+            "description": "validation_failed: malformed id"
           }
         }
       }
