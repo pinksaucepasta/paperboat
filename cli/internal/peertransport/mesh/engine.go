@@ -391,11 +391,14 @@ func newNetstack(logf logger.Logf, sys *tsd.System) (*netstack.Impl, error) {
 	)
 }
 
+// listenPort is the engine's fixed UDP port (stable for NAT mappings); tests set 0 so parallel engines share nothing.
+var listenPort uint16 = 41642
+
 // createEngine creates the wgengine.Engine with userspace networking.
 func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 	sys := &lb.sys
 	conf := wgengine.Config{
-		ListenPort:             41642,
+		ListenPort:             listenPort,
 		NetMon:                 sys.NetMon.Get(),
 		Dialer:                 sys.Dialer.Get(),
 		SetSubsystem:           sys.Set,

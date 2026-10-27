@@ -161,10 +161,25 @@ func (s *Server) pingDirect(ctx context.Context, peer key.NodePublic) <-chan str
 		return nil
 	}
 	var once sync.Once
-	s.lb.sys.Engine.Get().Ping(addr, tailcfg.PingDisco, 0, func(r *ipnstate.PingResult) {
-		if r != nil && r.Err == "" {
-			once.Do(func() { close(answered) })
+	// A lost or early ping (the peer has not installed our contact yet) is retried with backoff until one answers or
+	// ctx ends, as magicsock re-pings unconfirmed endpoints (tailscale wgengine/magicsock/endpoint.go sendDiscoPingsLocked).
+	go func() {
+		for wait := directPingFirstRetry; ; wait = min(2*wait, directPingMaxRetry) {
+			s.lb.sys.Engine.Get().Ping(addr, tailcfg.PingDisco, 0, func(r *ipnstate.PingResult) {
+				if r != nil && r.Err == "" {
+					once.Do(func() { close(answered) })
+				}
+			})
+			select {
+			case <-answered:
+				return
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
 		}
-	})
+	}()
 	return answered
 }
+
+const directPingFirstRetry, directPingMaxRetry = 250 * time.Millisecond, 2 * time.Second

@@ -18,6 +18,7 @@ import (
 // captive-portal probes; the tests supply their own loopback DERP/STUN servers.
 func TestMain(m *testing.M) {
 	envknob.Setenv("IN_TS_TEST", "true")
+	listenPort = 0 // OS-assigned: concurrent test binaries never contend for 41642
 	netcheck.HookStartCaptivePortalDetection.SetForTest(func(ctx context.Context, c *netcheck.Client, dm *tailcfg.DERPMap, preferredDERP tailcfg.DERPRegionID, setCaptivePortal func(bool)) (done <-chan struct{}, stop func()) {
 		return syncs.ClosedChan(), func() {}
 	})
