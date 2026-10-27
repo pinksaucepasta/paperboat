@@ -763,9 +763,8 @@ func (t *PeerTerminalTunnel) RelayDenial() *api.APIError {
 // regional relay selection with the reason and probe failures of its last change. Zero when no native
 // runtime runs.
 type NativeTransport struct {
-	Paths       map[string]string
-	Relay       tailnet.RegionalStatus
-	NetworkDown bool // no network interface is up; per-path warnings are hidden behind it
+	Paths map[string]string
+	Relay tailnet.RegionalStatus
 }
 
 func (t *PeerTerminalTunnel) NativeTransport() NativeTransport {
@@ -778,5 +777,5 @@ func (t *PeerTerminalTunnel) NativeTransport() NativeTransport {
 	if runtime == nil || runtime.authority == nil {
 		return NativeTransport{}
 	}
-	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus(), NetworkDown: runtime.authority.NetworkDown()}
+	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus()}
 }

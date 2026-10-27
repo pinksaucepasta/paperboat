@@ -452,6 +452,11 @@ func (m *Monitor) AcquireMapping(ctx context.Context, generation uint64, localPo
 	return verified, related, nil
 }
 
+// AnyInterfaceUp reports whether any interface may reach the Internet (netmon State.AnyInterfaceUp).
+func (m *Monitor) AnyInterfaceUp() bool {
+	return m == nil || m.backend == nil || m.backend.InterfaceState().AnyInterfaceUp()
+}
+
 func (m *Monitor) Start() error {
 	if m == nil || m.backend == nil || m.handle == nil {
 		return ErrInvalid

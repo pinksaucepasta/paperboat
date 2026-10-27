@@ -149,7 +149,12 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 	if err != nil {
 		return err
 	}
-	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport}
+	network, stopNetwork, err := startNetworkStatus(inventory.RequestRefresh)
+	if err != nil {
+		return err
+	}
+	defer stopNetwork()
+	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport, network: network}
 	diagnosticAPI.snapshots = source
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()

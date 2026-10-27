@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
@@ -25,6 +28,51 @@ type snapshotSource struct {
 	*Inventory
 	denial    func() *api.APIError
 	transport func() tunnel.NativeTransport
+	network   *networkStatus
+}
+
+// networkDownVisible is how long no interface may be up before pb status says so (Tailscale's
+// NetworkStatusWarnable TimeToVisible, health/warnings.go).
+const networkDownVisible = 5 * time.Second
+
+// networkStatus is Tailscale's NetworkStatusWarnable for the daemon: down once no interface has been up for
+// networkDownVisible.
+type networkStatus struct {
+	up        func() bool
+	now       func() time.Time
+	mu        sync.Mutex
+	downSince time.Time
+}
+
+// startNetworkStatus watches interface state; a network change also refreshes from the control plane at once,
+// instead of waiting for the outage backoff (Tailscale re-polls control on a link change).
+func startNetworkStatus(refresh func()) (*networkStatus, func(), error) {
+	watch, err := networkmonitor.New(func(networkmonitor.Event) { refresh() })
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := watch.Start(); err != nil {
+		_ = watch.Close()
+		return nil, nil, err
+	}
+	return &networkStatus{up: watch.AnyInterfaceUp, now: time.Now}, func() { _ = watch.Close() }, nil
+}
+
+func (n *networkStatus) down() bool {
+	if n == nil || n.up == nil {
+		return false
+	}
+	now := n.now()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.up() {
+		n.downSince = time.Time{}
+		return false
+	}
+	if n.downSince.IsZero() {
+		n.downSince = now
+	}
+	return now.Sub(n.downSince) >= networkDownVisible
 }
 
 func (s snapshotSource) Snapshot(ctx context.Context) (localapi.Snapshot, error) {
@@ -34,6 +82,9 @@ func (s snapshotSource) Snapshot(ctx context.Context) (localapi.Snapshot, error)
 	}
 	if s.transport != nil {
 		applyNativeTransport(&snapshot, s.transport())
+	}
+	if s.network.down() {
+		hideBehindNetworkDown(&snapshot)
 	}
 	if s.denial == nil {
 		return snapshot, nil
@@ -77,13 +128,6 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 			}
 		}
 	}
-	// Prior art: Tailscale's per-path warnings DependsOn NetworkStatusWarnable (health/warnings.go), so only the
-	// root cause shows while the network is down.
-	if native.NetworkDown {
-		snapshot.Health = append(snapshot.Health, localapi.HealthItem{Code: NetworkDownCode, ETag: NetworkDownCode, Severity: "warning",
-			Title: "This computer's network is down", Recovery: "Check the Wi-Fi or cable. Paperboat reconnects on its own when the network returns."})
-		return
-	}
 	if item, ok := relayFailoverHealth(native.Relay); ok {
 		snapshot.Health = append(snapshot.Health, item)
 	}
@@ -91,6 +135,20 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 
 // NetworkDownCode is the health item for this computer's network being down.
 const NetworkDownCode = "network_down"
+
+// hideBehindNetworkDown shows only the root cause while the network is down: the warnings that follow from it
+// (relay, control plane) are dropped, as Tailscale's warnables DependsOn NetworkStatusWarnable
+// (health/warnings.go, health/state.go isEffectivelyHealthyLocked).
+func hideBehindNetworkDown(snapshot *localapi.Snapshot) {
+	kept := snapshot.Health[:0]
+	for _, item := range snapshot.Health {
+		if item.Code != RelayFailoverCode && item.Code != "control_plane_unavailable" {
+			kept = append(kept, item)
+		}
+	}
+	snapshot.Health = append(kept, localapi.HealthItem{Code: NetworkDownCode, ETag: NetworkDownCode, Severity: "warning",
+		Title: "This computer's network is down", Recovery: "Check the Wi-Fi or cable. Paperboat reconnects on its own when the network returns."})
+}
 
 func relayFailoverHealth(status tailnet.RegionalStatus) (localapi.HealthItem, bool) {
 	item := localapi.HealthItem{Code: RelayFailoverCode, ETag: RelayFailoverCode}
