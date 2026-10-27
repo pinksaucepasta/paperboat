@@ -1,12 +1,12 @@
 #!/bin/bash
-# final_pair_extras.sh MODE HOST BINARY: final re-check checks that need fresh throwaway pairs, on fresh throwaway containers on HOST
+# final_pair_extras.sh MODE HOST BINARY [OFFICIAL]: final re-check checks that need fresh throwaway pairs, on fresh throwaway containers on HOST
 # (a Docker host with the laneh-ubuntu24-systemd image; HOST's own pb mints the enrollment tokens, as in fresh_pair_lib.sh).
 #
 #   exec     two fresh pairs with BINARY, then `pb exec` from one to the other as the very first thing after the pair
 #            (no wait, no retry): the old intermittent first-exec failure. Passes only if the marker comes back.
 #   revoke   C036: two fresh pairs; one revokes the other by exact id (`pb machine revoke`, revoked_machine.py revoke),
 #            then the revoked machine checks it lost access at once and does not hammer the server (verify).
-#   history  two machines installed with the PUBLISHED one-liner (the official Latest), real history on the target
+#   history  two machines installed with the PUBLISHED one-liner (the official Latest, which must be OFFICIAL when given), real history on the target
 #            (background preview, tunnel, a held terminal, a transfer in flight), then `pb update --from BINARY` while
 #            all of it runs: transfer byte-identical, preview and tunnel on the same URLs, the same shell answers
 #            (update_survival.py --terminal).
@@ -18,7 +18,7 @@
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and the
 # containers removed on every exit path; enrollment tokens stay in files.
 set -uo pipefail
-MODE=${1:?exec|revoke|history|scheduled} HOST=${2:?host} BIN=${3:?binary}
+MODE=${1:?exec|revoke|history|scheduled} HOST=${2:?host} BIN=${3:?binary} OFFICIAL_WANT=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
 # A Docker host whose user needs no sudo for docker (hp): SMOKE_CT_DOCKER=docker turns the scripts' `sudo -n docker` into `docker`.
@@ -94,7 +94,7 @@ EOF
 fi
 
 # history: the official Latest comes from the server's own published enrollment command, run inside each container.
-out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$T-pb T=$T P=$P ALIAS=$ALIAS OFFICIAL_WANT=$OFFICIAL_WANT"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
 for ct in $T $P; do
@@ -105,7 +105,9 @@ for ct in $T $P; do
   sudo -n docker cp /tmp/$ct-cmd $ct:/home/pbt/install-cmd; rm -f /tmp/$ct-cmd
   $X $ct bash -c 'bash /home/pbt/install-cmd > /home/pbt/install.log 2>&1; rm -f /home/pbt/install-cmd'
   $X $ct python3 -c 'import json;print("MACHINE_ID="+json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])'
-  echo "OFFICIAL_$ct=$($X $ct /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')"
+  v=$($X $ct /home/pbt/.local/bin/pb --version | sed -n 2p | tr -s ' ')
+  echo "OFFICIAL_$ct=$v"
+  [ -z "$OFFICIAL_WANT" ] || [[ "$v" == *"$OFFICIAL_WANT"* ]] || { echo "the published Latest is '$v', not the expected official $OFFICIAL_WANT"; exit 1; }
 done
 sudo -n docker cp /tmp/$T-pb $T:/home/pbt/final-pb
 sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz

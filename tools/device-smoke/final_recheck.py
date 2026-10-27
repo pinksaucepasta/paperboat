@@ -13,7 +13,7 @@ Check kinds (nothing new: each runs through an existing tool)
 The extras of the final check (official Latest -> build update with history, published one-liner install, exec right
 after a fresh pair) are cmd entries with rows EXTRA. Results: results/final-recheck-<build>-<UTC>.{md,json}.
 
-Options of run: --binary (the final linux build file, for the extras), --release, --ct-map 'alias1=hp:ct1,alias2=hp:ct2' (the machine alias of each container, which is its smoke device name), --origin/--state (live console and
+Options of run: --binary (the final linux build file, for the extras), --release, --from-official (the official Latest the update starts from, default 2026.10.26.6), --ct-map 'alias1=hp:ct1,alias2=hp:ct2' (the machine alias of each container, which is its smoke device name), --origin/--state (live console and
 the signed-in storage state of its owner), --only ROW,ROW|CHECK,CHECK (a subset, for a dry run), --dry (print, run nothing).
 Secrets come from the environment (HP_SUDO_PASS ...), never from arguments, and are never printed.
 """
@@ -233,7 +233,7 @@ def run_entry(entry, args, results):
     """console, device and cmd entries. Placeholders: {build} {binary} {origin} {state} {host} {self} {peer} (machine names) {ct_a} {ct_b} (containers)."""
     devices = containers(args.ct_map)
     names = [machine_name(host, ct) for _, host, ct in devices]
-    values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'binary': args.binary, 'release': args.release,
+    values = {'build': args.build, 'origin': args.origin, 'state': args.state, 'host': args.host, 'binary': args.binary, 'release': args.release, 'from_official': args.from_official,
               'self': names[0] if names else '', 'peer': names[-1] if names else '',
               'ct_a': devices[0][2] if devices else '', 'ct_b': devices[-1][2] if devices else ''}
     spec = entry['spec'].format(**values)
@@ -300,6 +300,7 @@ def main():
     go.add_argument('--ct-map', default='')
     go.add_argument('--host', default='hp')
     go.add_argument('--release', default='', help='version of the final official release (for the published-install extra)')
+    go.add_argument('--from-official', default='2026.10.26.6', help='official release the in-place update starts from (history extra fails if the published Latest differs)')
     go.add_argument('--binary', default='', help='path of the final linux build (for the update and fresh-pair extras)')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))
     go.add_argument('--state', default='')
