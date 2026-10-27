@@ -3,4 +3,4 @@
 args=("$@")
 files=()
 for a in "$@"; do case $a in -*) ;; *) files+=("${a#local:}") ;; esac; done
-case "${args[*]}" in *local:*) exec cp "${files[@]}" ;; *) exec /usr/bin/scp "${args[@]}" ;; esac
+case "${args[*]}" in *local:*) [ "${files[0]}" = "${files[1]}" ] && exit 0; exec cp "${files[@]}" ;; *) exec /usr/bin/scp "${args[@]}" ;; esac

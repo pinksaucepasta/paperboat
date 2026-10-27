@@ -43,7 +43,7 @@ finish() {
   exit $?
 }
 
-tar czf /tmp/$T-ds.tgz -C "$HERE" $(cd "$HERE" && ls *.py *.sh) && scp -q /tmp/$T-ds.tgz "$HOST:/tmp/$T-ds.tgz"; rm -f /tmp/$T-ds.tgz
+tar czf /tmp/$T-ds.tgz -C "$HERE" $(cd "$HERE" && ls *.py *.sh) && scp -q /tmp/$T-ds.tgz "$HOST:/tmp/$T-ds.tgz"; [ "$HOST" = local ] || rm -f /tmp/$T-ds.tgz  # on the VM itself the copy is the file
 
 if [ "$MODE" = exec ]; then
   out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
