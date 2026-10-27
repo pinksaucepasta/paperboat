@@ -182,3 +182,18 @@ func TestRegionalStatusDoesNotExposePreparationErrorText(t *testing.T) {
 	}
 	t.Fatalf("regional status did not report failed preparation: %+v", a.RegionalStatus())
 }
+
+// A recovery with no bound pair has no relay path to report: pb status must not warn "No relay is usable"
+// for an engine whose dials all went direct.
+func TestRegionalStatusWithNoBoundPairReportsNothing(t *testing.T) {
+	a := &Authority{}
+	r := &regionalRecovery{authority: a, status: RegionalStatus{Redundancy: RedundancyNone, Reason: "no_mutually_reachable_node"}}
+	a.relay.recovery = r
+	if got := a.RegionalStatus(); got.Reason != "" || got.NodeID != "" {
+		t.Fatalf("unbound recovery reported %+v", got)
+	}
+	r.peerID = "machine_test"
+	if got := a.RegionalStatus(); got.Reason != "no_mutually_reachable_node" {
+		t.Fatalf("bound recovery lost its status: %+v", got)
+	}
+}

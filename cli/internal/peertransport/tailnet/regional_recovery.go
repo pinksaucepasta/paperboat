@@ -303,6 +303,11 @@ func (a *Authority) RegionalStatus() RegionalStatus {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.peerID == "" {
+		// No pair is bound: there is no relay path to report. pb status warned "No relay is usable" on a
+		// machine whose dials all went direct (hp 2026-10-27).
+		return RegionalStatus{Redundancy: RedundancyNone}
+	}
 	status := r.status
 	status.ProbeFailures = maps.Clone(status.ProbeFailures)
 	return status

@@ -84,7 +84,7 @@ func TestRenewalOverBudgetIsDeferredNotDropped(t *testing.T) {
 	defer func() { cancel(); <-done }()
 	waitFor(t, 5*time.Second, "first renewal", func() bool { return calls.Load() >= 1 })
 	time.Sleep(onDemandRefreshSpacing) // past the on-demand spacing; the bucket is now refilled
-	b.take(time.Now())                // another engine spent the token
+	b.take(time.Now())                 // another engine spent the token
 	before := calls.Load()
 	a.RequestRefresh()
 	waitFor(t, 5*time.Second, "deferred renewal", func() bool { return calls.Load() > before })
