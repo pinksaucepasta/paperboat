@@ -133,14 +133,20 @@ func BoundedServerMessage(message string) string {
 
 var serverCodeShape = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
-// Refusal is what the server said about a 4xx request: its own code and message, so a refusal is never hidden
-// behind a generic failure. The session refusal (401) and the update gate (426) have their own handling; the code
-// is returned only when it has the shape of a server constant; with no server message there is no refusal to show.
+// Refusal is what the server said about a request the CLI has no text for: its own code and message, so a refusal
+// is never hidden behind a generic failure. It applies to the statuses that carry a refusal (400, 403, 404, 409,
+// 422, 429), never to a code the CLI already words itself (publicAPIMessages) and never without a server message.
+// The code is returned only when it has the shape of a server constant.
 func (e *APIError) Refusal() (code, message string, ok bool) {
-	if e == nil || e.Status < 400 || e.Status > 499 || e.Status == http.StatusUnauthorized || e.Status == http.StatusUpgradeRequired {
+	if e == nil || e.ServerMessage == "" {
 		return "", "", false
 	}
-	if e.ServerMessage == "" {
+	switch e.Status {
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests:
+	default:
+		return "", "", false
+	}
+	if _, mapped := publicAPIMessages[e.Code]; mapped {
 		return "", "", false
 	}
 	if serverCodeShape.MatchString(e.Code) {

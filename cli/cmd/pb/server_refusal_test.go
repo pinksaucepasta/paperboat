@@ -37,6 +37,17 @@ func TestServerRefusalKeepsSessionAndServerErrorsAsTheyWere(t *testing.T) {
 	}
 }
 
+// A code the CLI already words itself keeps its own message; the server's words are only for codes it has no text for.
+func TestServerRefusalDoesNotReplaceTheCLIsOwnMessage(t *testing.T) {
+	err := &api.APIError{Status: http.StatusConflict, Code: "team_subscription_active", Message: api.PublicMessage("team_subscription_active"), ServerMessage: "Cancel the team subscription."}
+	if message := apiErrorFallback(err); !strings.Contains(message, "Billing") || strings.Contains(message, "(team_subscription_active)") {
+		t.Errorf("message = %q", message)
+	}
+	if encoded := classifyCLIJSONError(err); encoded.Code != "team_subscription_active" {
+		t.Errorf("json code = %q", encoded.Code)
+	}
+}
+
 func TestServerRefusalNeverEchoesACodeThatIsNotAConstant(t *testing.T) {
 	err := serverRefusal(http.StatusBadRequest, "Bad Code /home/x", "Nope")
 	message := commandFailureMessage(err, classifyCommandFailure(err))
