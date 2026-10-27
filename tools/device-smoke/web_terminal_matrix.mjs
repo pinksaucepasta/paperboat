@@ -278,9 +278,10 @@ const rows = {
     let done = false
     while (Date.now() - t0 < 300_000) {
       const s = Date.now()
-      const txt = await page.evaluate(() => document.querySelector(".terminal-host")?.innerText.slice(-200) ?? "")
+      const txt = await page.evaluate(() => document.querySelector(".terminal-host")?.innerText ?? "")
       worst = Math.max(worst, Date.now() - s)
-      if (txt.includes("PBW_FAST_END")) { done = true; break }
+      // The marker on its own row: the typed command line holds it too, and rows are padded to the full width.
+      if (/^PBW_FAST_END[ \u00a0]*$/m.test(txt)) { done = true; break }
       await sleep(1000)
     }
     row("W9 50 MB output finishes", done, `${id} ${Math.round((Date.now() - t0) / 1000)} s`)
