@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -518,8 +517,4 @@ func nullableTimePointer(value *time.Time) sql.NullTime {
 		return sql.NullTime{}
 	}
 	return sql.NullTime{Time: value.UTC(), Valid: true}
-}
-
-func formatInt(value int64) string {
-	return strconv.FormatInt(value, 10)
 }

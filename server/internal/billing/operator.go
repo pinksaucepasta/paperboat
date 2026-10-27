@@ -413,7 +413,6 @@ func scanPolicy(row rowScanner, p *OperatorPolicy) error {
 	return row.Scan(nullableInt64(&p.PersonalAllowanceBytes), nullableInt64(&p.TeamAllowanceBytes), &p.Revision)
 }
 func nullableInt64(dst **int64) sql.Scanner { return &nullableInt64Dest{dst: dst} }
-func nullableInt32(dst **int32) sql.Scanner { return &nullableInt32Dest{dst: dst} }
 
 type nullableInt64Dest struct{ dst **int64 }
 
@@ -431,19 +430,4 @@ func (n *nullableInt64Dest) Scan(src any) error {
 	return nil
 }
 
-type nullableInt32Dest struct{ dst **int32 }
-
-func (n *nullableInt32Dest) Scan(src any) error {
-	var v sql.NullInt32
-	if err := v.Scan(src); err != nil {
-		return err
-	}
-	if v.Valid {
-		x := v.Int32
-		*n.dst = &x
-	} else {
-		*n.dst = nil
-	}
-	return nil
-}
 func newBillingID() string { return "plan_" + uuid.NewString() }

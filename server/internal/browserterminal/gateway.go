@@ -18,11 +18,11 @@ import (
 var ErrForbidden = errors.New("browser terminal access is unavailable")
 var ErrHostUnavailable = errors.New("browser terminal host is unavailable")
 
-// ErrMachineEdgeUnavailable: the terminal's machine has no connected route to an edge right now (offline, or its
+// ErrMachineEdgeUnavailable means the terminal's machine has no connected route to an edge right now (offline, or its
 // runtime carrier is not attached). The console tells the owner so instead of retrying silently.
 var ErrMachineEdgeUnavailable = errors.New("the machine's edge connection is down")
 
-// ErrSessionClosed: the owner's terminal has ended or been closed, so no ticket can open it.
+// ErrSessionClosed means the owner's terminal has ended or been closed, so no ticket can open it.
 var ErrSessionClosed = errors.New("terminal session is closed")
 
 // BandwidthChecker refuses a terminal ticket while the paying workspace's hosted allowance is

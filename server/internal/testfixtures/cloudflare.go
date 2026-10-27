@@ -88,7 +88,7 @@ func (c *Cloudflare) Get(ctx context.Context, zoneID, id string) (Record, bool, 
 	if !answer.Success || json.Unmarshal(answer.Result, &found) != nil {
 		return Record{}, false, fmt.Errorf("the DNS provider could not read the record (HTTP %d)", status)
 	}
-	return Record{ID: found.ID, Type: found.Type, Name: found.Name, Content: found.Content, Comment: found.Comment}, true, nil
+	return Record(found), true, nil
 }
 
 func (c *Cloudflare) Delete(ctx context.Context, zoneID, id string) error {

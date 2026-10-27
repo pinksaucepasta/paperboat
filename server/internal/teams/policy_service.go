@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/policy"
 )
 
-// ErrPolicyExplainForbidden: a member asked about someone else's access.
+// ErrPolicyExplainForbidden means a member asked about someone else's access.
 var ErrPolicyExplainForbidden = errors.New("members can explain only their own access")
 
 type PolicyNames struct {

@@ -76,13 +76,6 @@ func (f tunnelEdgeAcceptanceFixture) insertBase(t *testing.T, database *db.DB) {
 	}
 }
 
-func (f tunnelEdgeAcceptanceFixture) machineIdentity(hostID string) (string, string) {
-	if hostID == f.hostTwo {
-		return f.publicKeyTwo, f.thumbprintTwo
-	}
-	return f.publicKeyOne, f.thumbprintOne
-}
-
 func safeTunnelEdgeAcceptanceDSN(dsn string) bool {
 	parsed, err := url.Parse(dsn)
 	if err != nil {
@@ -90,11 +83,6 @@ func safeTunnelEdgeAcceptanceDSN(dsn string) bool {
 	}
 	name := strings.TrimPrefix(parsed.Path, "/")
 	return strings.HasSuffix(name, "_test") && name != "_test"
-}
-func sameTunnelEdgeAcceptanceDatabase(left, right string) bool {
-	l, le := url.Parse(left)
-	r, re := url.Parse(right)
-	return le == nil && re == nil && strings.EqualFold(l.Hostname(), r.Hostname()) && l.Port() == r.Port() && strings.TrimPrefix(l.Path, "/") == strings.TrimPrefix(r.Path, "/")
 }
 
 // An HTTP catch-all route has no hostname of its own; the edge refuses a catch-all with an empty

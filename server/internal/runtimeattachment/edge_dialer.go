@@ -9,7 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// ErrRouteMoving: the host is a machine's runtime host, but no edge holds a carrier of it that can
+// ErrRouteMoving means the host is a machine's runtime host, but no edge holds a carrier of it that can
 // take a new request (for example while one edge restarts and the other carrier is not valid yet).
 // Nothing was sent; the caller may retry.
 var ErrRouteMoving = errors.New("machine route is moving to another edge")

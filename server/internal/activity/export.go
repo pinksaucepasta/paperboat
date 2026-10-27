@@ -17,7 +17,7 @@ import (
 // exportPageRows is how many events one export transaction reads.
 const exportPageRows = 500
 
-// ErrExportNeedsTeam: export is a Team plan feature (PLAN F19, user decision 2026-10-23).
+// ErrExportNeedsTeam means export is a Team plan feature (PLAN F19, user decision 2026-10-23).
 var ErrExportNeedsTeam = errors.New("audit log export is available in team workspaces")
 
 // CSVHeader is the export's column order; the documented event shape flattened.

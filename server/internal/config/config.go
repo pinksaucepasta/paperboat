@@ -955,8 +955,6 @@ const (
 	CertificateChallengeHTTP01 = "http-01"
 )
 
-// validateDNS01 checks the Cloudflare zones and challenge delegation that only
-// the DNS-01 challenge needs.
 // ChallengeType is the ACME challenge in use: the configured one, or dns-01 when none is set, so a configuration
 // written before the switch (or a test fixture) keeps its meaning.
 func (c Certificates) ChallengeType() string {
@@ -966,6 +964,8 @@ func (c Certificates) ChallengeType() string {
 	return c.Challenge
 }
 
+// validateDNS01 checks the Cloudflare zones and challenge delegation that only
+// the DNS-01 challenge needs.
 func (c Certificates) validateDNS01() []error {
 	var errs []error
 	if strings.TrimSpace(c.DNSProvider) != "cloudflare" {

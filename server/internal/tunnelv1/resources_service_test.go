@@ -54,11 +54,6 @@ type fakeResourceRepository struct {
 	verifyDomainResult ResourceMutationRecord
 	verifyDomainErr    error
 
-	drainResult  ResourceMutationRecord
-	drainErr     error
-	revokeResult ResourceMutationRecord
-	revokeErr    error
-
 	tunnelLogs     []dbsqlc.ListTunnelLogsV1Row
 	tunnelLogsErr  error
 	previewLogs    []dbsqlc.TunnelLogEntry

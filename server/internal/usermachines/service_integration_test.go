@@ -3761,7 +3761,7 @@ func TestEnrollmentStartIsRefusedAtThePlanMachineLimitPostgres(t *testing.T) {
 }
 
 // limitSeatAuthorizer refuses every machine seat as the plan's machine limit would.
-type limitSeatAuthorizer struct{ testSeatAuthorizer }
+type limitSeatAuthorizer struct{}
 
 func (limitSeatAuthorizer) ReserveUserMachineSeat(context.Context, *db.Tx, string) error {
 	return &planlimits.LimitError{Kind: planlimits.Machines, Plan: planlimits.Free, Limit: 1, Used: 1}

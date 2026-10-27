@@ -52,7 +52,7 @@ func seatChangeTx(ctx context.Context, tx *db.Tx, account, team string, quantity
 	return w, SeatChange{TeamID: w.TeamID, SubscriptionID: w.SubscriptionID, CustomerID: w.CustomerID, ItemID: w.ItemID, PriceID: price, Quantity: quantity, PreviousQuantity: w.Quantity, PeriodStart: *w.PeriodStart, PeriodEnd: *w.PeriodEnd, ProrationAt: time.Now().Unix(), HadScheduledReduction: w.ScheduledQuantity != nil}, nil
 }
 
-// Provider calls never run inside a transaction: the transaction would hold teams.Lock (every team write
+// PreviewSeats runs its provider calls outside any transaction: the transaction would hold teams.Lock (every team write
 // on the platform waits) for up to the provider timeout, and InTx replays its closure on a conflict.
 // Prior art: NetBird management (account manager) holds only account-scoped row locks and makes no
 // provider calls under them; Teleport lib/usagereporter submits outside any backend lock.

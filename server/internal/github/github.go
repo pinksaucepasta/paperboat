@@ -930,7 +930,7 @@ var (
 	ErrRepositoryAccessUnavailable = errors.New("repository-scoped access is unavailable")
 )
 
-// ErrConnectionInUse: the GitHub connection cannot be removed while an active config
+// ErrConnectionInUse means the GitHub connection cannot be removed while an active config
 // repository syncs through it.
 var ErrConnectionInUse = errors.New("GitHub connection is used by the config repository")
 

@@ -24,7 +24,7 @@ type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// ErrPrivateAddress: a destination may only be a public internet address, never this server's
+// ErrPrivateAddress means a destination may only be a public internet address, never this server's
 // network (no SSRF into the platform).
 var ErrPrivateAddress = errors.New("the destination must be a public internet address")
 

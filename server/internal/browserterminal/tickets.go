@@ -15,10 +15,10 @@ import (
 
 var ErrTicketInvalid = errors.New("browser terminal ticket is invalid or expired")
 
-// ErrSessionInactive: the browser sign-in that asked for a ticket has ended or been revoked.
+// ErrSessionInactive means the browser sign-in that asked for a ticket has ended or been revoked.
 var ErrSessionInactive = errors.New("browser terminal sign-in is no longer active")
 
-// TooManyPendingTicketsError: the browser session already holds the most unredeemed tickets it may. A ticket
+// TooManyPendingTicketsError means the browser session already holds the most unredeemed tickets it may. A ticket
 // that is not redeemed lapses after TicketLifetime, so the caller can retry after RetryAfter.
 type TooManyPendingTicketsError struct{ RetryAfter time.Duration }
 

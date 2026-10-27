@@ -86,26 +86,6 @@ type tunnelResourceDomainCreateDocument struct {
 	CertificateStrategy string `json:"certificate_strategy,omitempty"`
 }
 
-type tunnelResourceEnrollmentDocument struct {
-	HostID       string   `json:"host_id"`
-	Capabilities []string `json:"capabilities"`
-	TTLSeconds   int      `json:"ttl_seconds"`
-}
-
-type tunnelResourceEnrollmentExchangeDocument struct {
-	Token                       string  `json:"token"`
-	HostID                      string  `json:"host_id"`
-	ProtocolVersion             string  `json:"protocol_version"`
-	SoftwareVersion             *string `json:"software_version"`
-	CredentialReference         string  `json:"credential_reference"`
-	CredentialThumbprint        string  `json:"credential_thumbprint"`
-	CredentialVerifierAlgorithm string  `json:"credential_verifier_algorithm"`
-	CredentialVerifierPublicKey string  `json:"credential_verifier_public_key"`
-	CredentialProof             string  `json:"credential_proof"`
-	OperatingSystem             *string `json:"operating_system"`
-	Architecture                *string `json:"architecture"`
-}
-
 func tunnelResourceRouteOrigin(document tunnelResourceRouteOriginDocument) (tunnelv1.RouteOriginRequest, error) {
 	if document.PreserveHost == nil {
 		return tunnelv1.RouteOriginRequest{}, fmt.Errorf("%w: origin.preserve_host is required", tunnelv1.ErrInvalidInput)

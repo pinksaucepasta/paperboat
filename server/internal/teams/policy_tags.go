@@ -15,7 +15,7 @@ import (
 // change edits the policy file's tags map and is saved as a new version, with the same rights,
 // access-change review and audit as any policy save.
 
-// ErrPolicyMachineNotFound: the machine is not in the workspace (not shared into the team, or
+// ErrPolicyMachineNotFound means the machine is not in the workspace (not shared into the team, or
 // another account's).
 var ErrPolicyMachineNotFound = errors.New("machine is not in this workspace")
 
