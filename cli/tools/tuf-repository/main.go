@@ -294,6 +294,15 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 	if err := validateTargetsForPublication(targets, time.Now().UTC()); err != nil {
 		return err
 	}
+	// Validate every prior target before withdrawing products from the new set.
+	currentTargets := make(map[string]*metadata.TargetFiles)
+	for _, target := range supportedReleaseTargets() {
+		name := releaseAssetName(target.platform, target.architecture)
+		if prior := targets.Signed.Targets[name]; prior != nil {
+			currentTargets[name] = prior
+		}
+	}
+	targets.Signed.Targets = currentTargets
 	err = validateOnlineSigner(root)
 	if err != nil {
 		return err

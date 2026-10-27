@@ -114,22 +114,14 @@ func verifyPublishedDeploymentPolicies(targets *metadata.Metadata[metadata.Targe
 }
 
 func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.TargetsType], now time.Time) error {
-	if targets == nil || len(targets.Signed.Targets) == 0 || len(targets.Signed.Targets) > len(supportedReleaseTargets()) {
+	if targets == nil || len(targets.Signed.Targets) == 0 {
 		return errors.New("published TUF targets contain an invalid release set")
 	}
 	type binding struct{ manifest, plan string }
 	versions := make(map[string]binding)
 	for name, info := range targets.Signed.Targets {
-		known := false
-		for _, target := range supportedReleaseTargets() {
-			if name == releaseAssetName(target.platform, target.architecture) {
-				known = true
-				break
-			}
-		}
-		if !known {
-			return fmt.Errorf("unsupported published TUF target %s", name)
-		}
+		// The signed schema validates platform and asset names independently of
+		// which products the next release ships.
 		if info == nil || info.Custom == nil {
 			return fmt.Errorf("published TUF target %s has no signed custom metadata", name)
 		}

@@ -232,8 +232,10 @@ def read_targets(path, label):
     if not isinstance(signed, dict):
         raise SystemExit(f"{label} TUF targets metadata has no signed object")
     targets = signed.get("targets")
-    if not isinstance(targets, dict) or set(targets) != set(expected):
+    if not isinstance(targets, dict) or not targets or (label == "candidate" and set(targets) != set(expected)):
         raise SystemExit(f"{label} TUF targets metadata does not contain the exact release asset set")
+    if label == "live" and not set(expected).issubset(targets):
+        raise SystemExit("live TUF targets metadata is missing a current release product")
     return targets
 
 def version_parts(value, name):
@@ -255,7 +257,13 @@ def compare_versions(left, right):
     return 0
 
 def validate_target(name, target):
-    platform, architecture, format_ = expected[name]
+    product = re.fullmatch(r"pb-(linux|darwin|windows)-(amd64|arm64)(\.exe)?", name)
+    if not product:
+        raise SystemExit(f"TUF target name is invalid: {name}")
+    platform, architecture, suffix = product.groups()
+    if bool(suffix) != (platform == "windows"):
+        raise SystemExit(f"TUF target executable suffix is invalid: {name}")
+    format_ = {"linux": "elf", "darwin": "macho", "windows": "pe"}[platform]
     if not isinstance(target, dict):
         raise SystemExit(f"TUF target metadata is invalid for {name}")
     hashes = target.get("hashes")
@@ -369,7 +377,8 @@ except (OSError, ValueError) as error:
 refresh = not fresh and targets_path.read_bytes() == live_targets_path.read_bytes()
 requested_version_parts = version_parts(version, "candidate")
 candidate_repositories = set()
-live_repositories = set()
+live_metadata = {name: validate_target(name, target) for name, target in live_targets.items()}
+live_repositories = {value[2] for value in live_metadata.values()}
 selected = []
 candidate_product_pins = {}
 for name in expected:
@@ -381,8 +390,7 @@ for name in expected:
             raise SystemExit("initial publication must select every launch target at the requested version")
         selected.append(name)
         continue
-    live_version_parts, _, live_repository, _, _, _ = validate_target(name, live_targets[name])
-    live_repositories.add(live_repository)
+    live_version_parts, _, _, _, _, _ = live_metadata[name]
     if candidate_version_parts == requested_version_parts:
         if not refresh and compare_versions(candidate_version_parts, live_version_parts) <= 0:
             raise SystemExit(f"selected TUF target version does not advance the live target for {name}")

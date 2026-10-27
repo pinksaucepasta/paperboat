@@ -754,6 +754,36 @@ EOF
     test "$before" = "$(snapshot)"
   done
 
+  # Withdrawn products are checked as prior metadata, then omitted from the new origin.
+  python3 - "$release_root/current/tuf/metadata/targets.json" <<'PY_WITHDRAWN'
+import copy, hashlib, json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+document = json.loads(path.read_text())
+target = copy.deepcopy(document["signed"]["targets"]["pb-linux-arm64"])
+custom = target["custom"]
+custom.update(platform="darwin", format="macho", asset_name="pb-darwin-arm64")
+custom["url"] = custom["url"].replace("pb-linux-arm64", "pb-darwin-arm64")
+index = custom["release_index"]
+index.update(platform="darwin", binary_format="macho")
+index["targets"][0].update(platform="darwin", binary_format="macho", target_path="pb-darwin-arm64",
+                           asset_name="pb-darwin-arm64", download_url=custom["url"])
+for cohort in index["deployment_plan"]["cohorts"]:
+    cohort["platform"] = "darwin"
+plan = (json.dumps(index["deployment_plan"], separators=(",", ":"), ensure_ascii=True) + "\n").encode()
+index["deployment_plan_sha256"] = hashlib.sha256(plan).hexdigest()
+custom["schema"] = "invalid"
+document["signed"]["targets"]["pb-darwin-arm64"] = target
+path.write_text(json.dumps(document) + "\n")
+PY_WITHDRAWN
+  before=$(snapshot)
+  expect_candidate_rejection withdrawn-malformed "TUF custom metadata is invalid for pb-darwin-arm64: schema"
+  python3 - "$release_root/current/tuf/metadata/targets.json" <<'PY_WITHDRAWN'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1]); document = json.loads(path.read_text())
+document["signed"]["targets"]["pb-darwin-arm64"]["custom"]["schema"] = "paperboat.tuf-asset/v1"
+path.write_text(json.dumps(document) + "\n")
+PY_WITHDRAWN
+
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"
   mkdir -p "$selfhost/versions/2026.09.30.32"
