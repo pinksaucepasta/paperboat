@@ -18,6 +18,32 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
+// peerStreamOpenTimeout bounds one terminal stream open, like Tailscale's 10 s DERP connect
+// (~/ref/tailscale/derp/derphttp/derphttp_client.go:359); pb connect's dial budget retries it.
+// On a 30% loss link an open hung ~110 s without it (ltc-j1, peer_stream transport_failed).
+const peerStreamOpenTimeout = 10 * time.Second
+
+type peerStreamOpenTimeoutError struct{ cause error }
+
+func (e peerStreamOpenTimeoutError) Error() string {
+	return "the terminal stream to the machine did not open within 10 s"
+}
+func (e peerStreamOpenTimeoutError) Unwrap() error            { return e.cause }
+func (e peerStreamOpenTimeoutError) TransportRetryable() bool { return true }
+
+// dialWithin aborts a dial that has not returned after timeout; one that returns after the abort is closed.
+func dialWithin(timeout time.Duration, abort func(), dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
+	watchdog := time.AfterFunc(timeout, abort)
+	conn, err := dial()
+	if watchdog.Stop() {
+		return conn, err
+	}
+	if err == nil {
+		_ = conn.Close()
+	}
+	return nil, peerStreamOpenTimeoutError{cause: err}
+}
+
 // stopping ends when the daemon starts to stop, before it closes its transports.
 func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
@@ -68,7 +94,11 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 				return nil, ErrInvalidInventoryConfig
 			}
 		}
-		remote, err = dial()
+		if request.Consumer == "terminal" {
+			remote, err = dialWithin(peerStreamOpenTimeout, staged.Abort, dial)
+		} else {
+			remote, err = dial()
+		}
 		if errors.Is(err, ErrInvalidInventoryConfig) {
 			staged.Abort()
 			return nil, ErrInvalidInventoryConfig
