@@ -412,8 +412,11 @@ func TestReconnectingConnSaysWhyItReconnects(t *testing.T) {
 }
 
 // A held `pb connect` died about 2 min into a peer's update activation (lanei-8p, .7→.8): the six-attempt
-// budget was shared by every loss, and never refilled after a recovery. Each loss now gets the full budget.
+// budget was shared by every loss, and never refilled after a recovery. A loss after a healthy link gets a fresh one.
 func TestReconnectingConnRefillsBudgetAfterRecovery(t *testing.T) {
+	previous := reattachRefillAfter
+	reattachRefillAfter = 0 // each reattached link counts as having stayed up
+	defer func() { reattachRefillAfter = previous }()
 	first := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
 	second := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
 	last := &reconnectTestConn{Reader: bytes.NewReader([]byte("ok")), code: 0}
