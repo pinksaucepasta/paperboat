@@ -323,10 +323,12 @@ func TestManagerRestartWhileOldResizeStalls(t *testing.T) {
 
 type delayedOutputProcess struct {
 	*capacityProcess
-	entered  chan struct{}
-	release  chan struct{}
-	consumed chan struct{}
-	read     bool
+	entered   chan struct{}
+	release   chan struct{}
+	consumed  chan struct{}
+	closed    chan struct{}
+	closeOnce sync.Once
+	read      bool
 }
 
 func (p *delayedOutputProcess) Read(buffer []byte) (int, error) {
@@ -338,6 +340,12 @@ func (p *delayedOutputProcess) Read(buffer []byte) (int, error) {
 	}
 	close(p.consumed)
 	return 0, io.EOF
+}
+func (p *delayedOutputProcess) CloseIO() error {
+	if p.closed != nil {
+		p.closeOnce.Do(func() { close(p.closed) })
+	}
+	return p.capacityProcess.CloseIO()
 }
 func TestManagerOldCaptureCannotWriteIntoReplacement(t *testing.T) {
 	old := &delayedOutputProcess{capacityProcess: &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}, entered: make(chan struct{}), release: make(chan struct{}), consumed: make(chan struct{})}
@@ -364,4 +372,56 @@ func TestManagerOldCaptureCannotWriteIntoReplacement(t *testing.T) {
 	if err != nil || snapshot.LatestSequence != 0 {
 		t.Fatalf("old capture polluted replacement: %+v, %v", snapshot, err)
 	}
+}
+
+func TestManagerOldCaptureCannotStopReplacementPersistence(t *testing.T) {
+	state, err := store.Open(t.Context(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	makeProcess := func() *delayedOutputProcess {
+		return &delayedOutputProcess{capacityProcess: &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}, entered: make(chan struct{}), release: make(chan struct{}), consumed: make(chan struct{}), closed: make(chan struct{})}
+	}
+	old, next := makeProcess(), makeProcess()
+	var launched atomic.Bool
+	manager, _, created := responsivenessManager(t, state, func(context.Context, pty.Command) (PTYProcess, error) {
+		if !launched.Swap(true) {
+			return old, nil
+		}
+		return next, nil
+	})
+	<-old.entered
+	var oldOnce, nextOnce sync.Once
+	unblockOld := func() { oldOnce.Do(func() { close(old.release) }) }
+	unblockNext := func() { nextOnce.Do(func() { close(next.release) }) }
+	defer unblockOld()
+	defer unblockNext()
+	if _, err := manager.Close(t.Context(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Restart(created.ID); err != nil {
+		t.Fatal(err)
+	}
+	<-next.entered
+	unblockOld()
+	<-old.closed
+	unblockNext()
+	<-next.consumed
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		_, latest, err := state.OutputBounds(t.Context(), created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if latest == uint64(len("old output")) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("old capture stopped the replacement's output persistence")
 }
