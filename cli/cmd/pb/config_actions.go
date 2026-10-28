@@ -540,9 +540,9 @@ func selectConfigEnvironments(items []api.ConfigSyncEnvironmentState, requested 
 		return matches, nil
 	}
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("configuration environment %q is ambiguous; use its stable ID", requested)
+		return nil, configSyncRefusal(fmt.Sprintf("Configuration environment %q is ambiguous; use its stable ID from `pb config status`.", requested))
 	}
-	return nil, fmt.Errorf("configuration environment %q was not found", requested)
+	return nil, configSyncRefusal(fmt.Sprintf("Configuration environment %q was not found. Run `pb config status` to see the machines with configuration.", requested))
 }
 
 func findConfigConflict(item api.ConfigSyncEnvironmentState, requested string) (api.ConfigSyncPathSummary, error) {
@@ -551,7 +551,7 @@ func findConfigConflict(item api.ConfigSyncEnvironmentState, requested string) (
 			return conflict, nil
 		}
 	}
-	return api.ConfigSyncPathSummary{}, fmt.Errorf("configuration conflict %q was not found on %s", requested, item.Alias)
+	return api.ConfigSyncPathSummary{}, configSyncRefusal(fmt.Sprintf("%s has no configuration conflict at %q, so there is nothing to compare or resolve. Run `pb config status` to see current conflicts.", item.Alias, requested))
 }
 
 func resolveConfigRepository(items []api.ConfigRepository, requested string) (api.ConfigRepository, error) {
