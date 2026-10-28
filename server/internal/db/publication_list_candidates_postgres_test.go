@@ -340,3 +340,62 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$2,$8)`, fmt.Sprintf("pc_tunnel_r%d_%s", i, s), admi
 	rows.Close()
 	return publicationFixture{s: s, team: team, users: users, machines: machines}
 }
+
+func TestRemovedMachinePublicationsAreNotVisibleOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	f := newPublicationFixture(t, ctx, store)
+	actor := f.users[2]
+	machine := "pc_machine_member_own_" + f.s
+	preview := fmt.Sprintf("pc_preview_9_%s", f.s)
+	tunnel := fmt.Sprintf("pc_tunnel_9_%s", f.s)
+	check := func(want bool) {
+		t.Helper()
+		var p, pn, tunnelAllowed, tn bool
+		if err := store.SQL().QueryRowContext(ctx, `SELECT paperboat.preview_management_allowed($1,$2), paperboat.workspace_preview_management_allowed($1,NULL,$2), paperboat.tunnel_management_allowed($1,$3), paperboat.workspace_tunnel_management_allowed($1,NULL,$3)`, actor, preview, tunnel).Scan(&p, &pn, &tunnelAllowed, &tn); err != nil {
+			t.Fatal(err)
+		}
+		if p != want || pn != want || tunnelAllowed != want || tn != want {
+			t.Fatalf("management visibility = %v %v %v %v, want %v", p, pn, tunnelAllowed, tn, want)
+		}
+		previews, err := store.Queries().ListPreviewLeasesV1(ctx, dbsqlc.ListPreviewLeasesV1Params{AccountID: actor, RowLimit: 100, Q: f.s, MachineID: machine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tunnels, err := store.Queries().ListPreviewTunnelsV1(ctx, dbsqlc.ListPreviewTunnelsV1Params{AccountID: actor, RowLimit: 100, Q: f.s, MachineID: machine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		previewCount, err := store.Queries().CountPreviewLeasesV1(ctx, dbsqlc.CountPreviewLeasesV1Params{AccountID: actor, Q: f.s, MachineID: machine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tunnelCount, err := store.Queries().CountPreviewTunnelsV1(ctx, dbsqlc.CountPreviewTunnelsV1Params{AccountID: actor, Q: f.s, MachineID: machine})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (len(previews) > 0) != want || (len(tunnels) > 0) != want || int64(len(previews)) != previewCount || int64(len(tunnels)) != tunnelCount {
+			t.Fatalf("publication lists/counts = %d/%d %d/%d, want visible %v", len(previews), previewCount, len(tunnels), tunnelCount, want)
+		}
+	}
+	check(true)
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, machine); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+}
