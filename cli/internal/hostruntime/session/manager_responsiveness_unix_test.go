@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -43,7 +44,13 @@ func responsivenessManager(t *testing.T, state *store.Store, launch ContextLaunc
 	t.Helper()
 	process := &stalledSessionProcess{capacityProcess: &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}}
 	if launch == nil {
-		launch = func(context.Context, pty.Command) (PTYProcess, error) { return process, nil }
+		var launched atomic.Bool
+		launch = func(context.Context, pty.Command) (PTYProcess, error) {
+			if !launched.Swap(true) {
+				return process, nil
+			}
+			return &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}, nil
+		}
 	}
 	manager, err := NewManager(ManagerConfig{Store: state, LaunchContext: launch})
 	if err != nil {
@@ -206,5 +213,54 @@ func TestManagerListWhileStoreWriteStalls(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A resize that completes after close/restart belongs to the old process. It
+// must neither delay the replacement nor overwrite its grid or replay history.
+func TestManagerRestartWhileOldResizeStalls(t *testing.T) {
+	manager, process, created := responsivenessManager(t, nil, nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	process.resize = func() { close(entered); <-release }
+	resized := make(chan error, 1)
+	go func() { resized <- manager.Resize(created.ID, "owner", pty.Dimensions{Columns: 100, Rows: 30}) }()
+	<-entered
+	restarted := make(chan Snapshot, 1)
+	go func() {
+		if _, err := manager.Close(context.Background(), created.ID); err != nil {
+			t.Error(err)
+		}
+		snapshot, err := manager.Restart(created.ID)
+		if err != nil {
+			t.Error(err)
+		}
+		restarted <- snapshot
+	}()
+	joined := false
+	defer func() {
+		unblock()
+		if !joined {
+			<-restarted
+		}
+	}()
+	select {
+	case snapshot := <-restarted:
+		joined = true
+		if snapshot.Generation != created.Generation+1 || snapshot.Dimensions != created.Dimensions {
+			t.Fatalf("replacement = %+v", snapshot)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("restart blocked behind old resize")
+	}
+	// Join resize before checking the surviving generation's state.
+	unblock()
+	if err := <-resized; !errors.Is(err, ErrStaleGeneration) {
+		t.Errorf("old resize error = %v, want stale generation", err)
+	}
+	snapshot, err := manager.Snapshot(created.ID)
+	if err != nil || snapshot.Dimensions != created.Dimensions || snapshot.EarliestSequence != snapshot.LatestSequence {
+		t.Fatalf("stale resize changed replacement: %+v, %v", snapshot, err)
 	}
 }

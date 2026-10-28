@@ -60,3 +60,33 @@ func TestOwnerHealthAndListWhileWorkerDetachStalls(t *testing.T) {
 		t.Fatal("health/List blocked behind worker detach")
 	}
 }
+
+func TestOwnerHealthAndListWhileRetirementStalls(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	token := make([]byte, 32)
+	server := &Server{Token: token, Sessions: &stalledDetachService{}, SessionOnly: true,
+		MaximumConcurrent: 8, Retire: func(context.Context) error { close(entered); <-release; return nil },
+		Fence: func() hostdproto.Status {
+			return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "worker", Epoch: 1}
+		},
+	}
+	handler := server.handler()
+	request := func(path string) {
+		req := httptest.NewRequest("POST", path, strings.NewReader(`{}`))
+		req.Header.Set("X-Paperboat-Owner-Capability", base64.RawURLEncoding.EncodeToString(token))
+		req.Header.Set("X-Paperboat-Worker-ID", "worker")
+		req.Header.Set("X-Paperboat-Worker-Epoch", "1")
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	done := make(chan struct{})
+	go func() { request("/owner/retire"); close(done) }()
+	<-entered
+	observed := make(chan struct{})
+	defer func() { close(release); <-done; <-observed }()
+	go func() { request("/owner/health"); request("/session/List"); close(observed) }()
+	select {
+	case <-observed:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("health/List blocked behind retirement")
+	}
+}
