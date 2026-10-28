@@ -40,6 +40,11 @@ func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Pa
 		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
 	m.pruneParticipantsLocked(session)
+	// A host runtime restart (update activation) drops the connection without detaching it; the same client
+	// reattaching takes its attachment over, like EternalTerminal's recoverClient.
+	if old, ok := session.participants[participant.AttachmentID]; ok && old.AccountID == participant.AccountID && old.ClientID == participant.ClientID && session.fanout.Detach(participant.AttachmentID) == nil {
+		session.removeParticipantLocked(participant.AttachmentID)
+	}
 	if fromSequence == 0 {
 		fromSequence, _, _ = session.history.Bounds()
 	}

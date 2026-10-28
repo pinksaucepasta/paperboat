@@ -84,6 +84,27 @@ func TestManagerMirrorsReplayAndDeduplicatesInput(t *testing.T) {
 	}
 }
 
+func TestManagerSameClientTakesOverItsUndetachedAttachment(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "takeover", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	mine := Participant{AttachmentID: "att_1", AccountID: "acct_1", ClientID: "client_1", Role: "owner", ConnectedAt: time.Now()}
+	if _, err := manager.AttachParticipant(created.ID, mine, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.AttachParticipant(created.ID, mine, 0); err != nil {
+		t.Fatalf("same client reattach err=%v", err)
+	}
+	other := mine
+	other.ClientID = "client_2"
+	if _, err := manager.AttachParticipant(created.ID, other, 0); !errors.Is(err, ErrAttachmentExists) {
+		t.Fatalf("other client err=%v", err)
+	}
+}
+
 func TestManagerSharesResizeInOutputOrder(t *testing.T) {
 	manager, root, shell := realManager(t)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "size", Command: shellCommand(shell, root, "read line")})
