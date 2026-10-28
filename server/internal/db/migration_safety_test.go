@@ -16,7 +16,7 @@ import (
 // literals are opaque so function definitions are not mistaken for backfills.
 var migrationTokens = regexp.MustCompile(`(?s)--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|"(?:""|[^"])*"|\$[\w]*\$|;|[^\s;'"$/-]+|.`)
 var migrationDDL = regexp.MustCompile(`^(ALTER|CREATE|DROP|TRUNCATE|COMMENT|REINDEX|GRANT|REVOKE)\b`)
-var migrationDML = regexp.MustCompile(`\b(INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM|MERGE\s+INTO)\b`)
+var migrationDML = regexp.MustCompile(`^(INSERT|UPDATE|DELETE|MERGE)\b|^WITH\b.*\b(INSERT|UPDATE|DELETE|MERGE)\b`)
 var migrationConstraint = regexp.MustCompile(`\bADD\s+(?:CONSTRAINT\s+\S+\s+)?(?:FOREIGN\s+KEY|CHECK)\b`)
 var migrationAdd = regexp.MustCompile(`\bADD\s+`)
 
@@ -60,7 +60,7 @@ func migrationSafetyErrors(body string) []string {
 	ddl, dml := false, false
 	for _, statement := range statements {
 		ddl = ddl || migrationDDL.MatchString(statement)
-		dml = dml || migrationDML.MatchString(statement)
+		dml = dml || migrationDML.MatchString(strings.Join(strings.Fields(statement), " "))
 		for _, clause := range migrationAdd.Split(statement, -1)[1:] {
 			if migrationConstraint.MatchString("ADD "+clause) && !strings.Contains(clause, "NOT VALID") {
 				problems = append(problems, "add FOREIGN KEY/CHECK as NOT VALID; validate in a later migration")
@@ -115,6 +115,7 @@ SET lock_timeout='5s'; ALTER TABLE t ADD COLUMN x int;`, 0},
 		{"constraints", `SET lock_timeout='5s'; ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (x) REFERENCES p(id) NOT VALID, ADD CONSTRAINT ck CHECK (x>0) NOT VALID;`, 0},
 		{"validate later", `SET LOCAL lock_timeout='5s'; ALTER TABLE t VALIDATE CONSTRAINT ck;`, 0},
 		{"mixed", `SET lock_timeout='5s'; ALTER TABLE t DROP CONSTRAINT fk; DELETE FROM t;`, 1},
+		{"update alias", `SET lock_timeout='5s'; ALTER TABLE t ADD x int; UPDATE t AS target SET x=1;`, 1},
 		{"cte data", `SET lock_timeout='5s'; ALTER TABLE t ADD x int; WITH ids AS (SELECT id FROM t) UPDATE t SET x=1;`, 1},
 		{"missing timeout", `ALTER TABLE t ADD x int;`, 1},
 		{"late timeout", `ALTER TABLE t ADD x int; SET lock_timeout='5s';`, 1},
