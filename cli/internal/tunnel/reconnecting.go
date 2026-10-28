@@ -115,6 +115,8 @@ type ReconnectingConn struct {
 	current           Conn
 	available         chan struct{}
 	redial            atomic.Bool
+	probed            atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
+	probing           atomic.Bool
 	reconnect         ReconnectFunc
 	maxRetries        int
 	delay             time.Duration
@@ -194,9 +196,11 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 	}()
 	for {
 		if observed, ok := conn.(LinkStateObserver); ok {
+			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {
 				if stalled {
 					c.notify(ReconnectStalled)
+					go c.probeStalled(stalledConn)
 				} else {
 					c.notify(ReconnectResumed)
 				}
@@ -228,6 +232,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		_ = conn.Close()
 		<-readDone
 		c.recordCompression(conn)
+		if next := c.probed.Swap(nil); next != nil {
+			c.redial.Store(false)
+			c.setUnavailable(conn)
+			c.reason.Store("no reply from the machine")
+			conn = *next
+			c.setCurrent(conn)
+			c.notify(ReconnectRecovered)
+			continue
+		}
 		requested := c.redial.Swap(false) && c.reconnect != nil && c.maxRetries > 0
 		if requested {
 			err = ErrTransportLost
@@ -494,6 +507,30 @@ func (c *ReconnectingConn) Redial() {
 	}
 	c.redial.Store(true)
 	_ = conn.Close()
+}
+
+// probeStalled dials once while a link is silent, keeping the silent link: a machine whose carrier restarted
+// leaves it dead until TCP gives up (~2 min), while a network that comes back resumes it. A fresh link replaces
+// it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
+// (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210).
+func (c *ReconnectingConn) probeStalled(stalled Conn) {
+	if c.reconnect == nil || c.maxRetries <= 0 || c.probing.Swap(true) {
+		return
+	}
+	defer c.probing.Store(false)
+	next, err := c.reconnect(c.ctx)
+	if err != nil || next == nil {
+		return
+	}
+	c.mu.RLock()
+	current := c.current
+	c.mu.RUnlock()
+	if current != stalled || c.ctx.Err() != nil {
+		_ = next.Close()
+		return
+	}
+	c.probed.Store(&next)
+	_ = stalled.Close()
 }
 
 func (c *ReconnectingConn) Close() error {

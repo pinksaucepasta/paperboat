@@ -431,3 +431,27 @@ func TestReconnectingConnRefillsBudgetAfterRecovery(t *testing.T) {
 		t.Fatalf("ReattachAttempts = %d, %d", ReattachAttempts(0), ReattachAttempts(6))
 	}
 }
+
+type stalledReconnectConn struct{ *blockingReconnectConn }
+
+func (c stalledReconnectConn) ObserveLinkState(observer func(bool)) { go observer(true) }
+
+// A carrier restart on the machine left pb connect on a dead, silent link for ~2 min until TCP gave up
+// (ltc-s1→ltc-s2, 126 s). A stalled link now dials once alongside it and moves to the fresh link.
+func TestReconnectingConnStalledLinkMovesToAFreshLink(t *testing.T) {
+	first := stalledReconnectConn{&blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	second := &reconnectTestConn{Reader: bytes.NewReader([]byte("fresh")), code: 3}
+	var reconnects atomic.Int32
+	c := NewReconnectingConn(context.Background(), first, 2, 0, func(context.Context) (Conn, error) {
+		reconnects.Add(1)
+		return second, nil
+	})
+	got, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := c.Wait()
+	if err != nil || code != 3 || string(got) != "fresh" || reconnects.Load() != 1 {
+		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
+	}
+}
