@@ -322,4 +322,26 @@ WHERE k.key_id = $2`, cliSessionID, keyID).Scan(&keyRevoked, &certificateRevoked
 	if pairingState != "expired" || enrollmentState != "deleted" || terminalState != "deleted" {
 		t.Fatalf("pairing/enrollment/terminal states = %q/%q/%q, want expired/deleted/deleted", pairingState, enrollmentState, terminalState)
 	}
+	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
+	if err := service.RetryPendingRevocations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct{ table, column, id string }{
+		{"user_machines", "id", machineID},
+		{"account_e2ee_keys", "key_id", keyID},
+		{"cli_client_sessions", "id", cliSessionID},
+		{"peer_endpoint_certificates", "key_id", keyID},
+		{"user_machine_pairings", "id", pairingID},
+		{"user_machine_terminal_sessions", "id", terminalID},
+	} {
+		var count int
+		if err := store.SQL().QueryRowContext(ctx, fmt.Sprintf("SELECT count(*) FROM paperboat.%s WHERE %s=$1", check.table, check.column), check.id).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("final deletion left %s rows=%d: %v", check.table, count, err)
+		}
+	}
+	var siblingRetained bool
+	if err := store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machines WHERE id=$1) AND EXISTS(SELECT 1 FROM paperboat.account_e2ee_keys WHERE key_id=$2)`, siblingMachineID, siblingKeyID).Scan(&siblingRetained); err != nil || !siblingRetained {
+		t.Fatalf("sibling credentials removed: %v %v", siblingRetained, err)
+	}
+
 }

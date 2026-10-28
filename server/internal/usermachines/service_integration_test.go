@@ -245,6 +245,11 @@ func TestOnlineMachinePairingPreservesIdentity(t *testing.T) {
 	if upgraded.Availability.DesiredMode != "keep_awake" {
 		t.Fatalf("pairing keep-awake mode=%q, want keep_awake", upgraded.Availability.DesiredMode)
 	}
+	var auditCount int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE resource_id=$1 AND event_type IN ('machine.setup','user_machine.enrollment_approved','machine.installation_resumed')`, machine.ID).Scan(&auditCount); err != nil || auditCount < 2 {
+		t.Fatalf("pairing audit keyed by machine: %d %v", auditCount, err)
+	}
+
 }
 
 func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t *testing.T) {

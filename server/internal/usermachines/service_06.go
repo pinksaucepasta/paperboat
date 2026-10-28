@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -103,6 +104,22 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 		if _, err := s.db.Queries().MarkUserMachineAccessSessionRevoked(ctx, row.ID); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		machines, err := tx.Queries().FinalDeleteUserMachines(ctx)
+		if err != nil {
+			return fmt.Errorf("final delete removed machines: %w", err)
+		}
+		for _, machine := range machines {
+			if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: machine.UserID, ActorType: audit.ActorSystem,
+				EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
+				IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

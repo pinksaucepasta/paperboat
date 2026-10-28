@@ -330,7 +330,7 @@ UPDATE control_environments
 SET applied_state = $1, applied_version = $2, updated_at = $3
 WHERE id = $4 AND desired_version = $2
   AND applied_version < $2
-RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at
+RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at, machine_id
 `
 
 type ApplyControlEnvironmentStateParams struct {
@@ -359,6 +359,7 @@ func (q *Queries) ApplyControlEnvironmentState(ctx context.Context, arg ApplyCon
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MachineID,
 	)
 	return i, err
 }
@@ -931,7 +932,7 @@ func (q *Queries) CreateControlConfigRepository(ctx context.Context, arg CreateC
 const createControlEnvironment = `-- name: CreateControlEnvironment :one
 INSERT INTO control_environments (id, workspace_id, owner_user_id, desired_state)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at
+RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at, machine_id
 `
 
 type CreateControlEnvironmentParams struct {
@@ -960,6 +961,7 @@ func (q *Queries) CreateControlEnvironment(ctx context.Context, arg CreateContro
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MachineID,
 	)
 	return i, err
 }
@@ -2099,7 +2101,7 @@ func (q *Queries) GetControlConnectorGenerationForUpdate(ctx context.Context, ar
 }
 
 const getControlEnvironment = `-- name: GetControlEnvironment :one
-SELECT id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at FROM control_environments WHERE id = $1
+SELECT id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at, machine_id FROM control_environments WHERE id = $1
 `
 
 func (q *Queries) GetControlEnvironment(ctx context.Context, id string) (ControlEnvironment, error) {
@@ -2116,6 +2118,7 @@ func (q *Queries) GetControlEnvironment(ctx context.Context, id string) (Control
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MachineID,
 	)
 	return i, err
 }
@@ -3448,7 +3451,8 @@ LEFT JOIN control_config_sync_statuses status
  AND status.assignment_id = assignment.id AND assignment.revoked_at IS NULL
 LEFT JOIN user_machines machine
   ON machine.environment_id = environment.id
-WHERE machine.deleted_at IS NULL AND environment.owner_user_id = $1
+WHERE (environment.machine_id IS NULL OR (machine.id IS NOT NULL AND machine.deleted_at IS NULL))
+  AND environment.owner_user_id = $1
   AND environment.desired_state <> 'revoked'
 ORDER BY lower(COALESCE(machine.alias, environment.id)), environment.id
 `
@@ -5632,7 +5636,7 @@ SET desired_state = $1, desired_version = desired_version + 1,
     revoked_at = CASE WHEN $1::text = 'revoked' THEN coalesce(revoked_at, $2) ELSE revoked_at END,
     updated_at = $2
 WHERE id = $3 AND desired_version = $4
-RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at
+RETURNING id, workspace_id, owner_user_id, desired_state, desired_version, applied_state, applied_version, revoked_at, created_at, updated_at, machine_id
 `
 
 type UpdateControlEnvironmentDesiredStateParams struct {
@@ -5661,6 +5665,7 @@ func (q *Queries) UpdateControlEnvironmentDesiredState(ctx context.Context, arg 
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MachineID,
 	)
 	return i, err
 }

@@ -1695,6 +1695,45 @@ func (q *Queries) FailUserMachineTerminalSessionOperation(ctx context.Context, a
 	return err
 }
 
+const finalDeleteUserMachines = `-- name: FinalDeleteUserMachines :many
+DELETE FROM user_machines m
+WHERE m.id IN (
+  SELECT candidate.id FROM user_machines candidate
+  WHERE candidate.deleted_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
+      AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
+  )
+  ORDER BY candidate.deleted_at,candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
+)
+RETURNING m.id,m.user_id,m.alias
+`
+
+type FinalDeleteUserMachinesRow struct {
+	ID     string
+	UserID string
+	Alias  string
+}
+
+func (q *Queries) FinalDeleteUserMachines(ctx context.Context) ([]FinalDeleteUserMachinesRow, error) {
+	rows, err := q.db.Query(ctx, finalDeleteUserMachines)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FinalDeleteUserMachinesRow
+	for rows.Next() {
+		var i FinalDeleteUserMachinesRow
+		if err := rows.Scan(&i.ID, &i.UserID, &i.Alias); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getActiveUserMachineForControl = `-- name: GetActiveUserMachineForControl :one
 SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
 WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL
@@ -2369,7 +2408,7 @@ func (q *Queries) GetUserMachineAvailabilityOperation(ctx context.Context, arg G
 }
 
 const getUserMachineBandwidthPeriodForUpdate = `-- name: GetUserMachineBandwidthPeriodForUpdate :one
-SELECT user_machine_id, period_start, period_end, included_bytes, consumed_included_bytes, consumed_topup_bytes, created_at, updated_at FROM user_machine_bandwidth_periods
+SELECT user_machine_id, period_start, period_end, included_bytes, consumed_included_bytes, consumed_topup_bytes, created_at, updated_at, user_id, machine_name FROM user_machine_bandwidth_periods
 WHERE user_machine_id = $1
   AND period_start = $2 FOR UPDATE
 `
@@ -2391,6 +2430,8 @@ func (q *Queries) GetUserMachineBandwidthPeriodForUpdate(ctx context.Context, ar
 		&i.ConsumedTopupBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
+		&i.MachineName,
 	)
 	return i, err
 }
@@ -2404,9 +2445,8 @@ SELECT
     WHERE t.user_id = $1 AND t.state = 'active'
       AND t.remaining_bytes > 0 AND (t.expires_at IS NULL OR t.expires_at > now())), 0)::bigint AS paid_topup_remaining_bytes
 FROM user_machine_bandwidth_periods p
-JOIN user_machines m ON m.id = p.user_machine_id
-JOIN user_machine_entitlements e ON e.user_id = m.user_id
-WHERE m.user_id = $1
+JOIN user_machine_entitlements e ON e.user_id = p.user_id
+WHERE p.user_id = $1
   AND p.period_start = e.current_period_start
   AND p.period_end = e.current_period_end
 `
@@ -3977,7 +4017,7 @@ SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
   coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
 FROM user_machine_access_sessions
 WHERE state = 'revoked' AND helper_revoked_at IS NULL
-ORDER BY created_at, id
+ORDER BY created_at, id LIMIT 100
 `
 
 type ListPendingUserMachineAccessSessionRevocationsRow struct {
@@ -6218,7 +6258,7 @@ INSERT INTO user_machine_bandwidth_periods (
   $1, $2,
   $3, $4
 ) ON CONFLICT (user_machine_id, period_start) DO UPDATE SET updated_at = now()
-RETURNING user_machine_id, period_start, period_end, included_bytes, consumed_included_bytes, consumed_topup_bytes, created_at, updated_at
+RETURNING user_machine_id, period_start, period_end, included_bytes, consumed_included_bytes, consumed_topup_bytes, created_at, updated_at, user_id, machine_name
 `
 
 type UpsertUserMachineBandwidthPeriodParams struct {
@@ -6245,6 +6285,8 @@ func (q *Queries) UpsertUserMachineBandwidthPeriod(ctx context.Context, arg Upse
 		&i.ConsumedTopupBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
+		&i.MachineName,
 	)
 	return i, err
 }

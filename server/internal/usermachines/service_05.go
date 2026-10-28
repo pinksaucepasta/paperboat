@@ -853,8 +853,7 @@ func (s *Service) Delete(ctx context.Context, userID, userMachineID string) erro
 	if err := s.revokeUserMachineControl(ctx, userID, userMachineID, true); err != nil {
 		return err
 	}
-	auditErr := s.audit.Write(ctx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: userMachineID, IdempotencyKey: "user_machine.deleted:" + userMachineID, Metadata: map[string]any{}})
-	return errors.Join(auditErr, s.RevokeUserMachineSessions(ctx, userMachineID, "user_machine_deleted"))
+	return s.RevokeUserMachineSessions(ctx, userMachineID, "user_machine_deleted")
 }
 
 // DeleteMachineTx deletes a machine inside the caller's transaction with the same fences, credential
@@ -915,7 +914,15 @@ func (s *Service) revokeUserMachineControlTx(ctx context.Context, tx *db.Tx, use
 	if err := expireAuthenticatedMachineInstallationPairingsTx(ctx, tx, machine.ID, now); err != nil {
 		return err
 	}
-	return db.RevokeMachineEnvironmentTx(ctx, tx, machine.EnvironmentID, now)
+	if err := db.RevokeMachineEnvironmentTx(ctx, tx, machine.EnvironmentID, now); err != nil {
+		return err
+	}
+	if deleted {
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser,
+			EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: machine.ID,
+			IdempotencyKey: "user_machine.deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}})
+	}
+	return nil
 }
 
 // RevokeUserMachineSessions records revocation before attempting the downstream

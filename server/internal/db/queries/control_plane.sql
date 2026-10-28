@@ -585,7 +585,8 @@ LEFT JOIN control_config_sync_statuses status
  AND status.assignment_id = assignment.id AND assignment.revoked_at IS NULL
 LEFT JOIN user_machines machine
   ON machine.environment_id = environment.id
-WHERE machine.deleted_at IS NULL AND environment.owner_user_id = sqlc.arg(owner_user_id)
+WHERE (environment.machine_id IS NULL OR (machine.id IS NOT NULL AND machine.deleted_at IS NULL))
+  AND environment.owner_user_id = sqlc.arg(owner_user_id)
   AND environment.desired_state <> 'revoked'
 ORDER BY lower(COALESCE(machine.alias, environment.id)), environment.id;
 

@@ -233,22 +233,29 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, "machine_"+suffix); err != nil {
 		t.Fatal(err)
 	}
-	for _, inventory := range []bool{false, true} {
-		var got ConfigAccountStatus
-		if inventory {
-			got, err = service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 10})
-		} else {
-			got, err = service.Account(ctx, user)
+	for _, hardDelete := range []bool{false, true} {
+		if hardDelete {
+			if _, err := store.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, "machine_"+suffix); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids := map[string]bool{}
-		for _, env := range got.Environments {
-			ids[env.EnvironmentID] = true
-		}
-		if len(ids) != 2 || !ids[machineAEnvironment] || !ids[standalone] || ids[machineEnvironment] {
-			t.Fatalf("inventory=%v listed environments %v", inventory, ids)
+		for _, inventory := range []bool{false, true} {
+			var got ConfigAccountStatus
+			if inventory {
+				got, err = service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 10})
+			} else {
+				got, err = service.Account(ctx, user)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := map[string]bool{}
+			for _, env := range got.Environments {
+				ids[env.EnvironmentID] = true
+			}
+			if len(ids) != 2 || !ids[machineAEnvironment] || !ids[standalone] || ids[machineEnvironment] {
+				t.Fatalf("inventory=%v listed environments %v", inventory, ids)
+			}
 		}
 	}
 	states := map[string]string{}

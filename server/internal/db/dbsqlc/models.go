@@ -738,6 +738,7 @@ type ControlEnvironment struct {
 	RevokedAt      sql.NullTime
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	MachineID      sql.NullString
 }
 
 type ControlHelper struct {
@@ -2315,31 +2316,33 @@ type TeamInboxReceiptOutbox struct {
 }
 
 type TeamInboxRequest struct {
-	RequestID            string
-	OperationID          string
-	TeamID               string
-	SenderAccount        string
-	RecipientAccount     string
-	SourceMachineID      string
-	DestinationMachineID string
-	BatchID              string
-	ManifestDigest       string
-	Manifest             []byte
-	Status               string
-	DecisionKind         string
-	PolicyGeneration     int64
-	DecisionGeneration   int64
-	ExpiresAt            time.Time
-	DecidedAt            sql.NullTime
-	ConsumedAt           sql.NullTime
-	CompletedAt          sql.NullTime
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	TransferMode         sql.NullString
-	TransferState        sql.NullString
-	PauseReason          sql.NullString
-	CommittedBytes       int64
-	ProgressAt           sql.NullTime
+	RequestID              string
+	OperationID            string
+	TeamID                 string
+	SenderAccount          string
+	RecipientAccount       string
+	SourceMachineID        string
+	DestinationMachineID   string
+	BatchID                string
+	ManifestDigest         string
+	Manifest               []byte
+	Status                 string
+	DecisionKind           string
+	PolicyGeneration       int64
+	DecisionGeneration     int64
+	ExpiresAt              time.Time
+	DecidedAt              sql.NullTime
+	ConsumedAt             sql.NullTime
+	CompletedAt            sql.NullTime
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	TransferMode           sql.NullString
+	TransferState          sql.NullString
+	PauseReason            sql.NullString
+	CommittedBytes         int64
+	ProgressAt             sql.NullTime
+	SourceMachineName      string
+	DestinationMachineName string
 }
 
 type TeamInboxSenderPolicy struct {
@@ -2925,6 +2928,8 @@ type UserMachineBandwidthPeriod struct {
 	ConsumedTopupBytes    int64
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	UserID                string
+	MachineName           string
 }
 
 type UserMachineBandwidthTopup struct {

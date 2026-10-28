@@ -158,9 +158,8 @@ SELECT
     WHERE t.user_id = sqlc.arg(user_id) AND t.state = 'active'
       AND t.remaining_bytes > 0 AND (t.expires_at IS NULL OR t.expires_at > now())), 0)::bigint AS paid_topup_remaining_bytes
 FROM user_machine_bandwidth_periods p
-JOIN user_machines m ON m.id = p.user_machine_id
-JOIN user_machine_entitlements e ON e.user_id = m.user_id
-WHERE m.user_id = sqlc.arg(user_id)
+JOIN user_machine_entitlements e ON e.user_id = p.user_id
+WHERE p.user_id = sqlc.arg(user_id)
   AND p.period_start = e.current_period_start
   AND p.period_end = e.current_period_end;
 
@@ -1033,7 +1032,19 @@ SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
   coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
 FROM user_machine_access_sessions
 WHERE state = 'revoked' AND helper_revoked_at IS NULL
-ORDER BY created_at, id;
+ORDER BY created_at, id LIMIT 100;
+
+-- name: FinalDeleteUserMachines :many
+DELETE FROM user_machines m
+WHERE m.id IN (
+  SELECT candidate.id FROM user_machines candidate
+  WHERE candidate.deleted_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
+      AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
+  )
+  ORDER BY candidate.deleted_at,candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
+)
+RETURNING m.id,m.user_id,m.alias;
 
 -- name: MarkUserMachineAccessSessionRevoked :execrows
 UPDATE user_machine_access_sessions
