@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -259,6 +260,21 @@ func TestManagerRestartWhileOldResizeStalls(t *testing.T) {
 	resized := make(chan error, 1)
 	go func() { resized <- manager.Resize(created.ID, "owner", pty.Dimensions{Columns: 100, Rows: 30}) }()
 	<-entered
+	attached := make(chan error, 1)
+	go func() {
+		_, err := manager.AttachParticipant(created.ID, Participant{AttachmentID: "second", Role: "owner", ConnectedAt: time.Now(), Dimensions: pty.Dimensions{Columns: 120, Rows: 40}}, 0)
+		attached <- err
+	}()
+	select {
+	case err := <-attached:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		unblock()
+		<-attached
+		t.Fatal("attach blocked behind resize")
+	}
 	restarted := make(chan Snapshot, 1)
 	go func() {
 		if _, err := manager.Close(context.Background(), created.ID); err != nil {
@@ -291,8 +307,61 @@ func TestManagerRestartWhileOldResizeStalls(t *testing.T) {
 	if err := <-resized; !errors.Is(err, ErrStaleGeneration) {
 		t.Errorf("old resize error = %v, want stale generation", err)
 	}
+	until := time.After(100 * time.Millisecond)
+	for {
+		snapshot, err := manager.Snapshot(created.ID)
+		if err != nil || snapshot.Dimensions != created.Dimensions || snapshot.EarliestSequence != snapshot.LatestSequence {
+			t.Fatalf("stale resize changed replacement: %+v, %v", snapshot, err)
+		}
+		select {
+		case <-until:
+			return
+		default:
+		}
+	}
+}
+
+type delayedOutputProcess struct {
+	*capacityProcess
+	entered  chan struct{}
+	release  chan struct{}
+	consumed chan struct{}
+	read     bool
+}
+
+func (p *delayedOutputProcess) Read(buffer []byte) (int, error) {
+	if !p.read {
+		p.read = true
+		close(p.entered)
+		<-p.release
+		return copy(buffer, "old output"), nil
+	}
+	close(p.consumed)
+	return 0, io.EOF
+}
+func TestManagerOldCaptureCannotWriteIntoReplacement(t *testing.T) {
+	old := &delayedOutputProcess{capacityProcess: &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}, entered: make(chan struct{}), release: make(chan struct{}), consumed: make(chan struct{})}
+	var launched atomic.Bool
+	manager, _, created := responsivenessManager(t, nil, func(context.Context, pty.Command) (PTYProcess, error) {
+		if !launched.Swap(true) {
+			return old, nil
+		}
+		return &capacityProcess{done: make(chan struct{}), exited: new(atomic.Int32)}, nil
+	})
+	<-old.entered
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(old.release) }) }
+	defer unblock()
+	if _, err := manager.Close(t.Context(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Restart(created.ID); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	<-old.consumed
 	snapshot, err := manager.Snapshot(created.ID)
-	if err != nil || snapshot.Dimensions != created.Dimensions || snapshot.EarliestSequence != snapshot.LatestSequence {
-		t.Fatalf("stale resize changed replacement: %+v, %v", snapshot, err)
+	if err != nil || snapshot.LatestSequence != 0 {
+		t.Fatalf("old capture polluted replacement: %+v, %v", snapshot, err)
 	}
 }
