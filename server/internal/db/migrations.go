@@ -138,7 +138,7 @@ func migrationLockKey() int64 {
 	return int64(hash.Sum64())
 }
 
-// Only retry errors for which PostgreSQL has aborted the migration transaction.
+// Retry PostgreSQL lock contention, never ambiguous network or other SQL failures.
 func retryableMigrationError(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "40P01")
@@ -147,6 +147,8 @@ func retryableMigrationError(err error) bool {
 // A blocking pg_advisory_lock SELECT retains a snapshot while it waits, which
 // can block CREATE INDEX CONCURRENTLY in the runner that holds the lock.
 func acquireMigrationLock(ctx context.Context, conn *sql.Conn) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
