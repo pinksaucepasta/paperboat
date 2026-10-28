@@ -16,6 +16,8 @@ func Connect(ctx context.Context, d Descriptor) (*workloadbridge.Client, error) 
 	return connectOwner(ctx, d, false)
 }
 func connectOwner(ctx context.Context, d Descriptor, allowRetired bool) (*workloadbridge.Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownerInspectionTimeout)
+	defer cancel()
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}

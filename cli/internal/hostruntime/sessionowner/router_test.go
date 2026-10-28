@@ -599,3 +599,65 @@ func TestRouterAttachesToEverySessionAtTheCeiling(t *testing.T) {
 		t.Fatalf("a refused create left %d sessions, want %d", got, ceiling)
 	}
 }
+
+// A responsive active owner must serve new terminals even when another owner's
+// health check or inventory never answers (the hp terminal regression).
+func TestRouterHungOwnerDoesNotBlockFreshTerminals(t *testing.T) {
+	for _, hang := range []string{"health", "List", "ResourceCounts"} {
+		t.Run(hang, func(t *testing.T) {
+			manager, workspace, shell := newRouterTestManager(t)
+			oldGeneration, activeGeneration := generation(81), generation(82)
+			active := authenticatedRouterOwner(t, activeGeneration, manager, workspace, shell)
+			old := authenticatedRouterOwner(t, oldGeneration, manager, workspace, shell)
+			recovered := false
+			old.Call = func(ctx context.Context, op string, _ json.RawMessage) (json.RawMessage, error) {
+				if op == hang && !recovered {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				if op == "List" {
+					return json.RawMessage(`{"V0":[]}`), nil
+				}
+				return json.RawMessage(`{"V0":{}}`), nil
+			}
+			router, err := NewRouter(activeGeneration, map[string]Owner{oldGeneration: old, activeGeneration: active}, 8,
+				func(ctx context.Context, gen string) (Owner, error) {
+					if gen == activeGeneration {
+						return active, nil
+					}
+					if hang == "health" && !recovered {
+						<-ctx.Done()
+						return Owner{}, ctx.Err()
+					}
+					return old, nil
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			if _, err := router.inspect(ctx, true); err != nil {
+				t.Fatalf("hung %s hid the healthy owner: %v", hang, err)
+			}
+			remote, err := router.Service()
+			if err != nil {
+				t.Fatal(err)
+			}
+			created, err := remote.Create(ctx, session.CreateRequest{Name: "fresh", Command: routerShellCommand(shell, workspace, "exec sleep 60")})
+			if err != nil {
+				t.Fatalf("fresh terminal: %v", err)
+			}
+			if _, err := remote.AttachLive(created.ID, "fresh-attachment"); err != nil {
+				t.Fatalf("attach fresh terminal: %v", err)
+			}
+			recovered = true
+			router.mu.Lock()
+			router.unavailable[oldGeneration] = time.Now().Add(-time.Second)
+			router.mu.Unlock()
+			image, err := router.inspect(ctx, true)
+			if err != nil || image.owners[oldGeneration].Call == nil {
+				t.Fatalf("responsive owner did not return after cooldown: %v", err)
+			}
+		})
+	}
+}

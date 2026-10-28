@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
@@ -52,16 +53,17 @@ func liveSessions(sessions map[string]routedSession) int {
 // Router combines generation-scoped session services while keeping each
 // session bound to the store in which it was created.
 type Router struct {
-	admission sync.Mutex
-	mu        sync.RWMutex
-	active    string
-	owners    map[string]Owner
-	sessions  map[string]routedSession
-	revision  uint64
-	maxIDs    int
-	maxOwners int
-	ensure    Ensure
-	archive   func(context.Context, string) (workloadbridge.ArchiveMetadata, error)
+	admission   sync.Mutex
+	mu          sync.RWMutex
+	active      string
+	owners      map[string]Owner
+	sessions    map[string]routedSession
+	revision    uint64
+	maxIDs      int
+	maxOwners   int
+	unavailable map[string]time.Time
+	ensure      Ensure
+	archive     func(context.Context, string) (workloadbridge.ArchiveMetadata, error)
 }
 
 // NewRouter creates a router over a complete, bounded owner catalog. Owners
@@ -120,6 +122,7 @@ func (r *Router) setOwners(active string, owners map[string]Owner) error {
 	r.active = active
 	r.owners = copyOwners
 	r.sessions = make(map[string]routedSession)
+	r.unavailable = make(map[string]time.Time)
 	r.revision++
 	r.mu.Unlock()
 	return nil
@@ -220,30 +223,26 @@ func (r *Router) inspect(ctx context.Context, includeCounts bool) (routerImage, 
 			}
 		}
 		if !archived {
-			owner, err := r.ensureOwner(ctx, generation, owners[generation])
+			owner, snapshots, resources, err := r.inspectOwner(ctx, generation, owners[generation], includeCounts)
+			if ctx.Err() != nil {
+				return routerImage{}, ctx.Err()
+			}
 			var unreachable ownerStartFailure
-			if generation != active && errors.As(err, &unreachable) {
-				// A previous generation that cannot start keeps its sessions
-				// unavailable; it must not stop service on the active owner.
+			if generation != active && (errors.As(err, &unreachable) || errors.Is(err, context.DeadlineExceeded)) {
+				// A hung owner is temporarily removed from routing, never killed:
+				// its shells may still be running. Retry health after the cooldown.
+				r.mu.Lock()
+				if !time.Now().Before(r.unavailable[generation]) {
+					r.unavailable[generation] = time.Now().Add(ownerRetryInterval)
+				}
+				r.mu.Unlock()
 				continue
 			}
 			if err != nil {
 				return routerImage{}, err
 			}
 			image.owners[generation] = owner
-			body, err := owner.Call(ctx, "List", json.RawMessage(`{}`))
-			if err != nil {
-				return routerImage{}, err
-			}
-			if err := decodeRemote(body, &out); err != nil {
-				return routerImage{}, errors.Join(session.ErrOwnerUnavailable, err)
-			}
-			if includeCounts {
-				counts, err = remoteResourceCounts(ctx, owner.Call)
-				if err != nil {
-					return routerImage{}, err
-				}
-			}
+			out.V0, counts = snapshots, resources
 		}
 		if out.V0 == nil {
 			return routerImage{}, session.ErrOwnerUnavailable
@@ -287,6 +286,35 @@ func (r *Router) inspect(ctx context.Context, includeCounts bool) (routerImage, 
 		return image.snapshots[i].Name < image.snapshots[j].Name
 	})
 	return image, nil
+}
+
+// Bound the whole health/inventory exchange, like derphttp.Client.connect's
+// context deadline (ref/tailscale/derp/derphttp/derphttp_client.go).
+const ownerInspectionTimeout = 2 * time.Second
+const ownerRetryInterval = 30 * time.Second
+
+func (r *Router) inspectOwner(
+	ctx context.Context, generation string, expected Owner, includeCounts bool,
+) (Owner, []session.Snapshot, map[string]uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownerInspectionTimeout)
+	defer cancel()
+	owner, err := r.ensureOwner(ctx, generation, expected)
+	if err != nil {
+		return Owner{}, nil, nil, err
+	}
+	body, err := owner.Call(ctx, "List", json.RawMessage(`{}`))
+	if err != nil {
+		return Owner{}, nil, nil, err
+	}
+	var out struct{ V0 []session.Snapshot }
+	if err := decodeRemote(body, &out); err != nil {
+		return Owner{}, nil, nil, errors.Join(session.ErrOwnerUnavailable, err)
+	}
+	var counts map[string]uint64
+	if includeCounts {
+		counts, err = remoteResourceCounts(ctx, owner.Call)
+	}
+	return owner, out.V0, counts, err
 }
 
 func remoteResourceCounts(ctx context.Context, call OwnerCall) (map[string]uint64, error) {
@@ -600,6 +628,14 @@ func (e ownerStartFailure) Error() string { return e.cause.Error() }
 func (e ownerStartFailure) Unwrap() error { return e.cause }
 
 func (r *Router) ensureOwner(ctx context.Context, generation string, expected Owner) (Owner, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownerInspectionTimeout)
+	defer cancel()
+	r.mu.RLock()
+	retryAt := r.unavailable[generation]
+	r.mu.RUnlock()
+	if time.Now().Before(retryAt) {
+		return Owner{}, ownerStartFailure{cause: session.ErrOwnerUnavailable}
+	}
 	owner, err := r.ensure(ctx, generation)
 	if err != nil {
 		return Owner{}, ownerStartFailure{cause: err}
