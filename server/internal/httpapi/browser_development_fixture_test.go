@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"net"
 	"net/http"
 	"os"
@@ -61,7 +62,7 @@ func TestBrowserDevelopmentFixture(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,'host',$2,$5,$5)`, tunnel, user.ID, strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, now)
+	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'active','private',3,$3,$4,$6,$2,$5,$5)`, tunnel, user.ID, strings.TrimSuffix(host, ".tunnels.example.test"), "https://"+host, now, testutil.PublicationMachine(t, store.SQL(), user.ID))
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,'web','http','catch_all','http','127.0.0.1:3000',7,'active',$3,$3,$4,$4)`, route, tunnel, user.ID, now)
 	defer func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
