@@ -19,3 +19,11 @@ func TestConfigLookupRefusalsReachTheUser(t *testing.T) {
 		}
 	}
 }
+
+// The refusal once ended with the whole `Usage:` help, as if the arguments were wrong.
+func TestConfigRefusalsDoNotPrintCommandHelp(t *testing.T) {
+	_, err := findConfigConflict(api.ConfigSyncEnvironmentState{Alias: "dadape"}, "/x")
+	if printsUsage(err) || !printsUsage(usageError{publicMessage: "bad flag"}) {
+		t.Fatalf("printsUsage: refusal=%v, misuse=%v", printsUsage(err), printsUsage(usageError{publicMessage: "bad flag"}))
+	}
+}

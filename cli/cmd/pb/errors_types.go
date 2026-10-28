@@ -57,6 +57,8 @@ func (e preferenceLoadFailure) Unwrap() error { return e.cause }
 type usageError struct {
 	err           error
 	publicMessage string
+	// refusal marks a state the user fixes, not wrong arguments, so the command help is not printed.
+	refusal bool
 }
 
 func (e usageError) Error() string {
@@ -69,6 +71,12 @@ func (e usageError) Error() string {
 func (e usageError) Unwrap() error { return e.err }
 
 func (e usageError) Is(target error) bool { return target == errUsage }
+
+// printsUsage reports whether a usage failure is wrong arguments, so the command help helps.
+func printsUsage(err error) bool {
+	var misuse usageError
+	return !errors.As(err, &misuse) || !misuse.refusal
+}
 
 type uninstallCleanupError struct{ err error }
 

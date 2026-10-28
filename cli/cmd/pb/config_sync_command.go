@@ -229,7 +229,7 @@ func configRepositoryReadFailure(err error) error {
 // configSyncRefusal reports a configuration the user fixes. It is a usage
 // failure, so the message is shown instead of the generic "could not finish".
 func configSyncRefusal(message string) error {
-	return usageError{err: errors.New(message), publicMessage: message}
+	return usageError{err: errors.New(message), publicMessage: message, refusal: true}
 }
 
 func configAssignmentMissingOnly(err error) bool {
