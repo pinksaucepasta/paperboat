@@ -247,7 +247,7 @@ RETURNING machine.id, machine.environment_id;
 
 -- name: ListRevokedUserMachineEnvironmentsForUser :many
 SELECT id, environment_id FROM user_machines
-WHERE user_id = sqlc.arg(user_id) AND state = 'revoked' AND deleted_at IS NULL
+WHERE user_id = sqlc.arg(user_id) AND state = 'revoked'
 ORDER BY id;
 
 -- name: GetUserMachinePairingForVerifier :one
@@ -488,17 +488,17 @@ WHERE id = sqlc.arg(id) AND state = 'pending' AND expires_at > now();
 
 -- name: ListUserMachinesForUser :many
 SELECT * FROM user_machines
-WHERE (machine_management_allowed(sqlc.arg(user_id),id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed(sqlc.arg(user_id),id,cap))) AND deleted_at IS NULL
+WHERE (machine_management_allowed(sqlc.arg(user_id),id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed(sqlc.arg(user_id),id,cap))) AND deleted_at IS NULL AND state NOT IN ('revoked','deleted')
 ORDER BY lower(alias), id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CountUserMachinesForUser :one
 SELECT count(*)::integer FROM user_machines
-WHERE (machine_management_allowed(sqlc.arg(user_id),id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed(sqlc.arg(user_id),id,cap))) AND deleted_at IS NULL;
+WHERE (machine_management_allowed(sqlc.arg(user_id),id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed(sqlc.arg(user_id),id,cap))) AND deleted_at IS NULL AND state NOT IN ('revoked','deleted');
 
 -- name: ListUserMachinesInWorkspaceForUser :many
 SELECT m.* FROM user_machines m
-WHERE m.deleted_at IS NULL AND (
+WHERE m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted') AND (
   (NOT sqlc.arg(workspace_set)::boolean AND (machine_management_allowed(sqlc.arg(user_id),m.id) OR EXISTS(
     SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap
     WHERE machine_capability_allowed(sqlc.arg(user_id),m.id,cap))))
@@ -516,7 +516,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CountUserMachinesInWorkspaceForUser :one
 SELECT count(*)::integer FROM user_machines m
-WHERE m.deleted_at IS NULL AND (
+WHERE m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted') AND (
   (NOT sqlc.arg(workspace_set)::boolean AND (machine_management_allowed(sqlc.arg(user_id),m.id) OR EXISTS(
     SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap
     WHERE machine_capability_allowed(sqlc.arg(user_id),m.id,cap))))
@@ -1038,11 +1038,11 @@ ORDER BY created_at, id;
 DELETE FROM user_machines m
 WHERE m.id IN (
   SELECT candidate.id FROM user_machines candidate
-  WHERE candidate.deleted_at IS NOT NULL AND NOT EXISTS (
+  WHERE (candidate.deleted_at IS NOT NULL OR candidate.state='revoked') AND NOT EXISTS (
     SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
       AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
   )
-  ORDER BY candidate.deleted_at,candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
+  ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
 )
 RETURNING m.id,m.user_id,m.alias;
 

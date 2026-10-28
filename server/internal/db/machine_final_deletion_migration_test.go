@@ -53,6 +53,9 @@ func TestMachineFinalDeletionMigrationFrom210(t *testing.T) {
 	exec(`INSERT INTO paperboat.control_config_repository_access_operations(operation_id,request_hash,repository_id,assignment_id,environment_id,machine_id,installation_generation,warning_revision) VALUES('orphan-access',decode(repeat('11',32),'hex'),'orphan-repo','orphan-assignment','final-orphan','final-orphan',1,'warning')`)
 	exec(`INSERT INTO paperboat.control_config_repository_lease_authority(repository_id,last_fencing_token,lease_id,assignment_id,environment_id,machine_id,installation_generation,operation_id,acquired_at,expires_at) VALUES('orphan-repo',7,'orphan-lease','orphan-assignment','final-orphan','final-orphan',1,'orphan-operation',now(),now()+interval '1 hour')`)
 	exec(`UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id='final-removed'`)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES('final-revoked','final-source','final-revoked','revoked-name','linux','amd64','/workspace','revoked','released')`)
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES('final-revoked','final-revoked','final-source')`)
+
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES('final-team','final-source',1)`)
 	exec(`INSERT INTO paperboat.team_inbox_requests(request_id,operation_id,team_id,sender_account,recipient_account,source_machine_id,destination_machine_id,batch_id,manifest_digest,manifest,status,decision_kind,policy_generation,expires_at) VALUES('final-request','final-operation','final-team','final-source','final-dest','final-live','final-removed','final-batch',repeat('a',64),'[{"basename":"fixture","size":1}]','completed','manual',1,now()+interval '1 hour')`)
 	exec(`INSERT INTO paperboat.team_inbox_receipt_outbox(request_id,recipient_account) VALUES('final-request','final-dest')`)
@@ -61,8 +64,12 @@ func TestMachineFinalDeletionMigrationFrom210(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cleaned bool
-	if err := store.SQL().QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.control_environments WHERE id IN ('final-orphan','final-removed')) AND NOT EXISTS(SELECT 1 FROM paperboat.control_helpers WHERE id IN ('orphan-helper','removed-helper')) AND EXISTS(SELECT 1 FROM paperboat.control_environments WHERE id='final-live' AND machine_id='final-live')`).Scan(&cleaned); err != nil || !cleaned {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.control_environments WHERE id IN ('final-orphan','final-removed','final-revoked')) AND NOT EXISTS(SELECT 1 FROM paperboat.control_helpers WHERE id IN ('orphan-helper','removed-helper')) AND EXISTS(SELECT 1 FROM paperboat.control_environments WHERE id='final-live' )`).Scan(&cleaned); err != nil || !cleaned {
 		t.Fatalf("orphan cleanup=%v: %v", cleaned, err)
+	}
+	var revokedTombstoned bool
+	if err := store.SQL().QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL FROM paperboat.user_machines WHERE id='final-revoked'`).Scan(&revokedTombstoned); err != nil || !revokedTombstoned {
+		t.Fatalf("revoked tombstone=%v: %v", revokedTombstoned, err)
 	}
 	var operationalCleanup bool
 	if err := store.SQL().QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM paperboat.control_config_sync_statuses WHERE environment_id='final-orphan') AND NOT EXISTS(SELECT 1 FROM paperboat.control_config_repository_access_operations WHERE operation_id='orphan-access') AND EXISTS(SELECT 1 FROM paperboat.control_config_repository_lease_authority WHERE repository_id='orphan-repo' AND lease_id IS NULL AND last_fencing_token=7)`).Scan(&operationalCleanup); err != nil || !operationalCleanup {
@@ -72,10 +79,5 @@ func TestMachineFinalDeletionMigrationFrom210(t *testing.T) {
 	var retained bool
 	if err := store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.team_inbox_requests WHERE request_id='final-request' AND source_machine_id='final-live' AND destination_machine_id='final-removed' AND source_machine_name='source-name' AND destination_machine_name='dest-name') AND EXISTS(SELECT 1 FROM paperboat.team_inbox_receipt_outbox WHERE request_id='final-request' AND status='pending') AND EXISTS(SELECT 1 FROM paperboat.user_machine_bandwidth_periods WHERE user_machine_id='final-live' AND user_id='final-source' AND machine_name='source-name' AND consumed_included_bytes=123)`).Scan(&retained); err != nil || !retained {
 		t.Fatalf("backfilled history lost=%v: %v", !retained, err)
-	}
-	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES('final-standalone','final-standalone','final-source')`)
-	var standalone bool
-	if err := store.SQL().QueryRowContext(ctx, `SELECT machine_id IS NULL FROM paperboat.control_environments WHERE id='final-standalone'`).Scan(&standalone); err != nil || !standalone {
-		t.Fatalf("standalone origin=%v: %v", standalone, err)
 	}
 }

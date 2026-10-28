@@ -3363,7 +3363,7 @@ func TestEntitlementLossRevokesMachineControlPlaneWithoutActiveSessions(t *testi
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "cm-seat-"+suffix+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,revoked_at) VALUES ($1,$2,$3,'linux','amd64','/srv/workspace','revoked','released',false,now())`, userMachineID, userID, environmentID); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,revoked_at) VALUES ($1,$2,$3,'linux','amd64','/srv/workspace','online','occupied',true,NULL)`, userMachineID, userID, environmentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id,desired_state) VALUES ($1,$2,$3,'active')`, environmentID, userMachineID, userID); err != nil {
@@ -3384,6 +3384,10 @@ func TestEntitlementLossRevokesMachineControlPlaneWithoutActiveSessions(t *testi
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	if err := service.ReconcileUserMachineEntitlement(ctx, userID); err != nil {
 		t.Fatal(err)
+	}
+	var tombstoned bool
+	if err := store.SQL().QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL AND state='revoked' FROM paperboat.user_machines WHERE id=$1`, userMachineID).Scan(&tombstoned); err != nil || !tombstoned {
+		t.Fatalf("entitlement loss did not tombstone machine: %v %v", tombstoned, err)
 	}
 	var environmentState, helperState, enrollmentState, connectorState, routeState string
 	if err := store.SQL().QueryRowContext(ctx, `SELECT e.desired_state,h.state,he.state,c.state,r.desired_state

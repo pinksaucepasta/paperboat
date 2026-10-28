@@ -225,12 +225,12 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 			t.Fatalf("exact status=%#v", page)
 		}
 	}
-	// A removed machine must disappear, while an environment without a machine remains visible.
-	standalone := "status_standalone_" + suffix
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, standalone, user); err != nil {
+	// Revoked, tombstoned and missing machines never appear; an unbound environment is not standalone.
+	unbound := "status_unbound_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, unbound, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, "machine_"+suffix); err != nil {
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state='revoked' WHERE id=$1`, "machine_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	for _, hardDelete := range []bool{false, true} {
@@ -253,7 +253,7 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 			for _, env := range got.Environments {
 				ids[env.EnvironmentID] = true
 			}
-			if len(ids) != 2 || !ids[machineAEnvironment] || !ids[standalone] || ids[machineEnvironment] {
+			if len(ids) != 1 || !ids[machineAEnvironment] || ids[unbound] || ids[machineEnvironment] {
 				t.Fatalf("inventory=%v listed environments %v", inventory, ids)
 			}
 		}

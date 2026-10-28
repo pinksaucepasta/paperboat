@@ -738,7 +738,6 @@ type ControlEnvironment struct {
 	RevokedAt      sql.NullTime
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	MachineID      sql.NullString
 }
 
 type ControlHelper struct {

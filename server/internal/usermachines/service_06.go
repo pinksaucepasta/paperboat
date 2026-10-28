@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"path/filepath"
@@ -34,6 +35,9 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 	var revokedMachineIDs []string
 	active := false
 	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
+			return err
+		}
 		seatQuantity, err := tx.Queries().GetActiveUserMachineSeatQuantity(ctx, userID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -48,6 +52,13 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 			}
 			for _, machine := range machines {
 				revokedMachineIDs = append(revokedMachineIDs, machine.ID)
+				if err := db.FenceRemovedMachineVaultTx(ctx, tx, userID, machine.ID); err != nil {
+					return err
+				}
+				if err := db.CleanupMachineMachineTx(ctx, tx, userID, machine.ID, now); err != nil {
+					return err
+				}
+
 				if err := expireAuthenticatedMachineInstallationPairingsTx(ctx, tx, machine.ID, now); err != nil {
 					return err
 				}
@@ -56,6 +67,18 @@ func (s *Service) ReconcileUserMachineEntitlement(ctx context.Context, userID st
 				}
 			}
 			return nil
+		}
+		revoked, err := tx.Queries().RevokeUserMachinesForEntitlement(ctx, userID)
+		if err != nil {
+			return err
+		}
+		for _, id := range revoked {
+			if err := db.FenceRemovedMachineVaultTx(ctx, tx, userID, id); err != nil {
+				return err
+			}
+			if err := db.CleanupMachineMachineTx(ctx, tx, userID, id, now); err != nil {
+				return err
+			}
 		}
 		environments, err := tx.Queries().ListRevokedUserMachineEnvironmentsForUser(ctx, userID)
 		if err != nil {

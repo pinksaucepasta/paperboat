@@ -536,7 +536,7 @@ SELECT
   environment.id AS environment_id,
   machine.id AS machine_id,
   environment.workspace_id,
-  COALESCE(machine.alias, environment.id)::text AS alias,
+  machine.alias AS alias,
   environment.desired_state AS environment_state,
   assignment.id AS assignment_id,
   assignment.repository_id,
@@ -551,7 +551,7 @@ SELECT
   assignment.version AS assignment_version,
   repository.display_name AS repository_name,
   repository.state AS repository_state,
-  COALESCE(machine.installation_generation, 0)::bigint AS installation_generation,
+  machine.installation_generation AS installation_generation,
   status.state AS sync_state,
   status.assignment_id AS status_assignment_id,
   status.repository_id AS status_repository_id,
@@ -583,12 +583,12 @@ LEFT JOIN control_config_repositories repository
 LEFT JOIN control_config_sync_statuses status
   ON status.environment_id = environment.id
  AND status.assignment_id = assignment.id AND assignment.revoked_at IS NULL
-LEFT JOIN user_machines machine
+JOIN user_machines machine
   ON machine.environment_id = environment.id
-WHERE (environment.machine_id IS NULL OR (machine.id IS NOT NULL AND machine.deleted_at IS NULL))
+WHERE machine.deleted_at IS NULL AND machine.state NOT IN ('revoked','deleted')
   AND environment.owner_user_id = sqlc.arg(owner_user_id)
   AND environment.desired_state <> 'revoked'
-ORDER BY lower(COALESCE(machine.alias, environment.id)), environment.id;
+ORDER BY lower(machine.alias), environment.id;
 
 -- name: ClearControlConfigAssignment :one
 UPDATE control_config_assignments

@@ -1,7 +1,8 @@
 -- +goose Up
 -- The pending-work lookup and FK cascade both need every session state.
 CREATE INDEX user_machine_access_sessions_machine_cleanup ON paperboat.user_machine_access_sessions(user_machine_id);
-CREATE INDEX user_machines_final_delete ON paperboat.user_machines(deleted_at,id) WHERE deleted_at IS NOT NULL;
+CREATE INDEX user_machines_final_delete ON paperboat.user_machines
+ ((coalesce(deleted_at,revoked_at,created_at)),id) WHERE deleted_at IS NOT NULL OR state='revoked';
 -- History owns its machine identity; operational state belongs to the machine.
 ALTER TABLE paperboat.team_inbox_requests
     ADD COLUMN source_machine_name text NOT NULL DEFAULT '',
@@ -88,12 +89,6 @@ ALTER TABLE paperboat.control_config_sync_migration_reviews DROP CONSTRAINT cont
 ALTER TABLE paperboat.control_config_sync_migration_reviews ADD CONSTRAINT control_config_sync_migration_reviews_environment_id_fkey
     FOREIGN KEY (environment_id) REFERENCES paperboat.control_environments(id) ON DELETE CASCADE;
 
--- Migration 43 required every existing control scope to have an owning machine;
--- both current creation paths also create machine scopes. Preserve that origin
--- explicitly: a missing machine is never evidence of a standalone environment.
-ALTER TABLE paperboat.control_environments ADD COLUMN machine_id text;
-UPDATE paperboat.control_environments e SET machine_id=coalesce(
-    (SELECT m.id FROM paperboat.user_machines m WHERE m.environment_id=e.id),e.id);
 -- Accounting must outlive environment cleanup as well as machine cleanup.
 ALTER TABLE paperboat.control_usage_counters DROP CONSTRAINT control_usage_counters_environment_id_fkey;
 -- Repository fencing counters belong to the repository and must survive, but
@@ -118,32 +113,67 @@ END $$;
 -- +goose StatementEnd
 CREATE TRIGGER control_environments_delete_operations BEFORE DELETE ON paperboat.control_environments
     FOR EACH ROW EXECUTE FUNCTION paperboat.delete_machine_environment_operations();
-DELETE FROM paperboat.control_environments e WHERE NOT EXISTS (
-    SELECT 1 FROM paperboat.user_machines m WHERE m.id=e.machine_id AND m.deleted_at IS NULL);
-ALTER TABLE paperboat.control_environments ADD CONSTRAINT control_environments_machine_id_fkey
-    FOREIGN KEY (machine_id) REFERENCES paperboat.user_machines(id) ON DELETE CASCADE;
-CREATE UNIQUE INDEX control_environments_machine ON paperboat.control_environments(machine_id);
-
--- Bind either insertion order. Only environments never bound to a machine have
--- a NULL machine_id (standalone); hard deletion cascades instead of clearing it.
+-- Revoked is a removal state, including rows written before this migration.
+-- Normalize it once so every existing deleted_at fence also hides revoked machines.
 -- +goose StatementBegin
-CREATE FUNCTION paperboat.bind_machine_environment() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO paperboat,pg_catalog AS $$
+CREATE FUNCTION paperboat.tombstone_revoked_machine() RETURNS trigger
+LANGUAGE plpgsql AS $$
 BEGIN
- IF TG_TABLE_NAME='control_environments' THEN
-  IF NEW.machine_id IS NULL THEN
-   SELECT id INTO NEW.machine_id FROM user_machines WHERE environment_id=NEW.id;
-  END IF;
- ELSE
-  UPDATE control_environments SET machine_id=NEW.id WHERE id=NEW.environment_id;
- END IF;
+ NEW.deleted_at=coalesce(NEW.deleted_at,now());
+ NEW.revoked_at=coalesce(NEW.revoked_at,now());
+ NEW.online=false;
+ NEW.seat_state='released';
  RETURN NEW;
 END $$;
 -- +goose StatementEnd
-CREATE TRIGGER control_environments_machine BEFORE INSERT ON paperboat.control_environments
-    FOR EACH ROW EXECUTE FUNCTION paperboat.bind_machine_environment();
-CREATE TRIGGER user_machines_environment AFTER INSERT OR UPDATE OF environment_id ON paperboat.user_machines
-    FOR EACH ROW EXECUTE FUNCTION paperboat.bind_machine_environment();
+CREATE TRIGGER machine_revoked_tombstone BEFORE INSERT OR UPDATE OF state ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.tombstone_revoked_machine();
+
+-- All revoke producers share the same environment fence and durable session
+-- revocations, as the existing machine/peer and team-entry triggers do.
+-- +goose StatementBegin
+CREATE FUNCTION paperboat.revoke_machine_environment() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO paperboat,pg_catalog AS $$
+BEGIN
+ UPDATE control_environments SET desired_state='revoked',revoked_at=coalesce(revoked_at,now()),
+  desired_version=desired_version+1,updated_at=now()
+ WHERE id=NEW.environment_id AND desired_state<>'revoked';
+ UPDATE control_helpers SET state='revoked',revoked_at=now(),updated_at=now()
+ WHERE environment_id=NEW.environment_id AND state IN ('pending','active') AND revoked_at IS NULL;
+ UPDATE control_helper_enrollments SET state='revoked',revoked_at=now()
+ WHERE environment_id=NEW.environment_id AND state='pending' AND revoked_at IS NULL;
+ UPDATE control_connector_generations SET state='revoked',revoked_at=now(),version=version+1,updated_at=now()
+ WHERE environment_id=NEW.environment_id AND state IN ('pending','admitted','draining') AND revoked_at IS NULL;
+ UPDATE control_routes SET desired_state=CASE WHEN applied_node_id IS NULL THEN 'detached' ELSE 'detaching' END,
+  desired_revision=desired_revision+1,version=version+1,updated_at=now()
+ WHERE environment_id=NEW.environment_id AND desired_state NOT IN ('detaching','detached');
+ PERFORM revoke_config_sync_for_environment(NEW.environment_id);
+ UPDATE cli_client_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),
+  revocation_reason=coalesce(revocation_reason,'machine_removed'),version=version+1
+ WHERE user_machine_id=NEW.id AND state='active';
+ UPDATE cli_access_tokens SET revoked_at=coalesce(revoked_at,now())
+ WHERE cli_client_session_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=NEW.id);
+ UPDATE cli_refresh_tokens SET state='revoked',revoked_at=coalesce(revoked_at,now())
+ WHERE cli_client_session_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=NEW.id) AND state<>'revoked';
+ UPDATE user_machine_access_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),
+  revocation_reason=coalesce(revocation_reason,'user_machine_revoked'),updated_at=now()
+ WHERE user_machine_id=NEW.id AND state='active';
+ INSERT INTO audit_events(id,actor_user_id,actor_type,event_type,resource_type,resource_id,idempotency_key,metadata)
+ VALUES('event_'||gen_random_uuid()::text,NEW.user_id,'system','user_machine.revoked','user_machine',NEW.id,
+  'user_machine.revoked:'||NEW.id,jsonb_build_object('alias',NEW.alias))
+ ON CONFLICT(event_type,resource_type,resource_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING;
+ RETURN NEW;
+END $$;
+-- +goose StatementEnd
+CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.revoke_machine_environment();
+UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),online=false,seat_state='released'
+ WHERE state='revoked';
+ALTER TABLE paperboat.user_machines ADD CONSTRAINT user_machines_revoked_tombstone
+ CHECK(state<>'revoked' OR deleted_at IS NOT NULL);
+DELETE FROM paperboat.control_environments e WHERE NOT EXISTS (
+ SELECT 1 FROM paperboat.user_machines m WHERE m.environment_id=e.id
+  AND m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted'));
 
 -- Publications and polymorphic favorites previously had no machine FK.
 DELETE FROM paperboat.preview_leases p WHERE NOT EXISTS (SELECT 1 FROM paperboat.user_machines m WHERE m.id=p.owner_machine_id);
@@ -165,6 +195,7 @@ BEGIN
   OR endpoint_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=OLD.id);
  DELETE FROM peer_endpoint_certificates WHERE endpoint_id=OLD.id
   OR endpoint_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=OLD.id);
+ DELETE FROM control_environments WHERE id=OLD.environment_id;
  DELETE FROM environment_vault_personal_rotation_scopes WHERE machine_id=OLD.id;
  DELETE FROM environment_vault_scopes WHERE machine_id=OLD.id;
  DELETE FROM control_config_repository_access_operations WHERE machine_id=OLD.id;

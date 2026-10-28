@@ -203,7 +203,7 @@ func (s *ConfigStatusService) account(ctx context.Context, userID string, opts *
 	}
 	for _, row := range rows {
 		item := ConfigAccountEnvironment{
-			MachineID: row.MachineID.String, EnvironmentID: row.EnvironmentID, Alias: row.Alias,
+			MachineID: row.MachineID, EnvironmentID: row.EnvironmentID, Alias: row.Alias,
 			EnvironmentState: row.EnvironmentState, State: canonicalAccountState(row, s.clock(), s.policy.StaleHeartbeatAfter),
 			AssignmentID: row.AssignmentID.String, AssignmentVersion: row.AssignmentVersion.Int64,
 			RepositoryID: row.RepositoryID.String, RepositoryName: row.RepositoryName.String,
@@ -266,11 +266,11 @@ func canonicalAccountState(row dbsqlc.ListOwnedControlConfigSyncStatusRow, now t
 	if row.ConsentState.String != "accepted" {
 		return "consent_required"
 	}
-	if !row.MachineID.Valid || row.MachineID.String == "" || !row.SyncState.Valid ||
+	if row.MachineID == "" || !row.SyncState.Valid ||
 		row.AssignmentID.String == "" || row.PolicyRevision.String == "" ||
 		row.StatusAssignmentID.String != row.AssignmentID.String ||
 		row.StatusRepositoryID.String != row.RepositoryID.String ||
-		row.StatusMachineID.String != row.MachineID.String ||
+		row.StatusMachineID.String != row.MachineID ||
 		row.StatusInstallationGeneration.Int64 != row.InstallationGeneration {
 		return "pending"
 	}
