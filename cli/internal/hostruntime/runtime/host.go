@@ -349,11 +349,14 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.Metrics != nil {
 		protocolMetrics = dependencies.Metrics
 	}
+	// EternalTerminal's 5 s keepalive (~/ref/EternalTerminal/src/base/Headers.hpp:225); mosh acks every 3 s
+	// (~/ref/mosh/src/network/transportsender.h:51). Peer-to-peer only; the clients' stall bound follows it.
+	const terminalHeartbeatInterval = 5 * time.Second
 	protocolServer, err := server.New(server.Config{
 		Negotiator: protocol.Negotiator{Available: available, ConfigApplyProof: dependencies.ConfigApplyProof},
 		Journal:    journal, Authorizer: nil, Handler: dispatcher,
 		MaxConcurrent:     resources.MaxConcurrentOps,
-		HeartbeatInterval: config.Runtime.Limits.HeartbeatInterval,
+		HeartbeatInterval: terminalHeartbeatInterval,
 		MutationDeadline:  config.Runtime.Limits.MutationDeadline,
 		Metrics:           protocolMetrics,
 	})

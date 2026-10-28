@@ -545,9 +545,10 @@ func (c *helperTerminalConn) nextWrite() (helperWrite, bool) {
 }
 
 // helperStallAfter is how long the host may send nothing before the terminal shows it is reconnecting. The host sends
-// a heartbeat every 15 s (hostruntime config DefaultLimits). The link is kept: it resumes on its own when the network
+// a heartbeat every 5 s (hostruntime runtime terminalHeartbeatInterval); two missed ones, like ET's 11 s server bound
+// for a 5 s keepalive (~/ref/EternalTerminal/src/base/Headers.hpp:226). The link is kept: it resumes on its own when the network
 // returns, with the input it queued, so a stall only changes what the user sees.
-var helperStallAfter = 20 * time.Second
+var helperStallAfter = 10 * time.Second
 
 // ObserveLinkState reports when the host goes silent (true) and when it is heard again (false).
 func (c *helperTerminalConn) ObserveLinkState(observer func(stalled bool)) {
