@@ -53,13 +53,13 @@ type Server struct {
 	requests          atomic.Int64
 	Retire            func(context.Context) error
 	admission         sync.RWMutex
-	retired           bool
+	retired           atomic.Bool
 	Executions        *execprocess.RemoteServer
 	Fence             func() hostdproto.Status
 	AcquireActive     func(string, uint64) (func(), error)
 	Ready             chan error
 	MaximumConcurrent int
-	mu                sync.Mutex
+	workerMu          sync.Mutex
 	worker            string
 	epoch             uint64
 }
@@ -126,10 +126,8 @@ func (s *Server) handler() http.Handler {
 		}
 		epoch, err := strconv.ParseUint(r.Header.Get("X-Paperboat-Worker-Epoch"), 10, 64)
 		worker := r.Header.Get("X-Paperboat-Worker-ID")
-		s.mu.Lock()
 		fence := s.Fence()
 		if err != nil || epoch == 0 || worker == "" || fence.State != hostdproto.StateActive || fence.WorkerID != worker || fence.Epoch != epoch {
-			s.mu.Unlock()
 			if r.URL.Path == "/owner/admission" {
 				w.WriteHeader(http.StatusConflict)
 			} else {
@@ -137,24 +135,14 @@ func (s *Server) handler() http.Handler {
 			}
 			return
 		}
-		if s.worker != worker || s.epoch != epoch {
-			if owner, ok := s.Sessions.(interface{ DetachAllAttachments() error }); ok {
-				if err := owner.DetachAllAttachments(); err != nil {
-					s.mu.Unlock()
-					writeResponse(r.Context(), w, nil, err)
-					return
-				}
+		// Read-only calls do not need attachment custody. A stalled worker
+		// cleanup must not serialize health or terminal inventory behind it.
+		if mutatesRequest(r.URL.Path) {
+			if err := s.activateWorker(worker, epoch); err != nil {
+				writeResponse(r.Context(), w, nil, err)
+				return
 			}
-			if s.Executions != nil {
-				if err := s.Executions.ResetReaders(); err != nil {
-					s.mu.Unlock()
-					writeResponse(r.Context(), w, nil, err)
-					return
-				}
-			}
-			s.worker, s.epoch = worker, epoch
 		}
-		s.mu.Unlock()
 		select {
 		case semaphore <- struct{}{}:
 			s.requests.Add(1)
@@ -219,13 +207,13 @@ func (s *Server) handler() http.Handler {
 		if parts[0] == "owner" && parts[1] == "retire" {
 			s.admission.Lock()
 			defer s.admission.Unlock()
-		} else {
+		} else if mutates(parts[0], parts[1]) {
 			s.admission.RLock()
 			defer s.admission.RUnlock()
-			if s.retired && !(parts[0] == "owner" && parts[1] == "health") {
-				writeResponse(ctx, w, nil, session.ErrManagerStopped)
-				return
-			}
+		}
+		if s.retired.Load() && !(parts[0] == "owner" && (parts[1] == "health" || parts[1] == "retire")) {
+			writeResponse(ctx, w, nil, session.ErrManagerStopped)
+			return
 		}
 		if mutates(parts[0], parts[1]) {
 			if s.AcquireActive == nil {
@@ -269,10 +257,10 @@ func (s *Server) handler() http.Handler {
 					}
 				}
 			} else if parts[1] == "retire" && s.SessionOnly && s.Retire != nil {
-				if !s.retired {
+				if !s.retired.Load() {
 					err = s.Retire(ctx)
 					if err == nil {
-						s.retired = true
+						s.retired.Store(true)
 					}
 				}
 				result = json.RawMessage(`{}`)
@@ -281,7 +269,7 @@ func (s *Server) handler() http.Handler {
 			} else {
 				if s.Identity != nil {
 					identity := *s.Identity
-					identity.Retired = s.retired
+					identity.Retired = s.retired.Load()
 					identity.RetainedSessions = uint64(len(s.Sessions.List()))
 					result, err = json.Marshal(identity)
 				} else {
@@ -294,6 +282,37 @@ func (s *Server) handler() http.Handler {
 		writeResponse(ctx, w, result, err)
 	})
 }
+func mutatesRequest(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission")
+}
+
+// activateWorker serializes attachment cleanup, independently of observations.
+func (s *Server) activateWorker(worker string, epoch uint64) error {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+	// Recheck after waiting: an earlier worker must never clean up a newer one.
+	fence := s.Fence()
+	if fence.State != hostdproto.StateActive || fence.WorkerID != worker || fence.Epoch != epoch {
+		return ErrFenced
+	}
+	if s.worker == worker && s.epoch == epoch {
+		return nil
+	}
+	if owner, ok := s.Sessions.(interface{ DetachAllAttachments() error }); ok {
+		if err := owner.DetachAllAttachments(); err != nil {
+			return err
+		}
+	}
+	if s.Executions != nil {
+		if err := s.Executions.ResetReaders(); err != nil {
+			return err
+		}
+	}
+	s.worker, s.epoch = worker, epoch
+	return nil
+}
+
 func writeResponse(ctx context.Context, w http.ResponseWriter, data json.RawMessage, err error) {
 	var failure *wireError
 	if err != nil {

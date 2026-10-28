@@ -111,13 +111,18 @@ func (s *managedSession) storeRecordLocked() store.Session {
 	return record
 }
 
+// persist requires opMu and lifecycle serialization (or an unpublished session).
+// It returns with opMu held; disk never owns the state lock.
 func (m *Manager) persist(ctx context.Context, session *managedSession) error {
 	if m.config.Store == nil {
 		return nil
 	}
-	err := m.config.Store.UpdateSession(ctx, session.id, string(session.persistedState), session.storeRecordLocked())
+	record, expected := session.storeRecordLocked(), session.persistedState
+	session.opMu.Unlock()
+	err := m.config.Store.UpdateSession(ctx, session.id, string(expected), record)
+	session.opMu.Lock()
 	if err == nil {
-		session.persistedState, _ = session.lifecycle.Snapshot()
+		session.persistedState = State(record.State)
 	}
 	return classifySessionFailure("lifecycle", err)
 }
@@ -126,8 +131,11 @@ func (m *Manager) discardFailedCreate(ctx context.Context, session *managedSessi
 	if m.config.Store == nil {
 		return nil
 	}
-	updateErr := m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked())
+	record := session.storeRecordLocked()
+	session.opMu.Unlock()
+	updateErr := m.config.Store.UpdateSession(ctx, session.id, string(expected), record)
 	deleteErr := m.config.Store.DeleteSession(ctx, session.id)
+	session.opMu.Lock()
 	return classifySessionFailure("lifecycle", errors.Join(updateErr, deleteErr))
 }
 

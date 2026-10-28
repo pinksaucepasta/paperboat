@@ -77,6 +77,7 @@ type Manager struct {
 	config            ManagerConfig
 	sessions          map[string]*managedSession
 	names             map[string]string
+	creating          map[string]string // ID/name reservations while launch and persistence run
 	stopping          bool
 	retiring          bool
 	retired           bool
@@ -84,7 +85,10 @@ type Manager struct {
 }
 
 type managedSession struct {
-	opMu             sync.Mutex
+	opMu             sync.Mutex // in-memory state only; never held across PTY or store I/O
+	operationMu      sync.Mutex // lifecycle and durable metadata ordering
+	resizeMu         sync.Mutex // PTY resize ordering, independent of lifecycle
+	outputMu         sync.Mutex // capture and clear boundaries
 	inputMu          sync.Mutex
 	persistMu        sync.Mutex
 	liveProcess      atomic.Pointer[liveProcess]
@@ -225,7 +229,7 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 	if config.HistoryBytes < 1 || config.AttachmentBytes < 1 || config.TerminationTimeout <= 0 || config.TerminationGrace < 0 || config.TerminationGrace > config.TerminationTimeout || config.MaxSessions < 1 || config.MaxAttachments < 1 || config.MaxInputDecisions < 1 || config.RecoveryExitSignal != "runtime_restart" && config.RecoveryExitSignal != "machine_reboot" {
 		return nil, ErrInvalidSession
 	}
-	manager := &Manager{config: config, sessions: make(map[string]*managedSession), names: make(map[string]string)}
+	manager := &Manager{config: config, sessions: make(map[string]*managedSession), names: make(map[string]string), creating: make(map[string]string)}
 	if config.Store != nil {
 		if err := manager.recover(context.Background()); err != nil {
 			return nil, err
@@ -258,13 +262,53 @@ func (m *Manager) launch(ctx context.Context, command pty.Command) (PTYProcess, 
 // retained only for display and must not consume the live-session limit, matching the server
 // (terminal_session_limit_reached) and the session-owner router.
 func (m *Manager) liveSessionsLocked() int {
-	live := 0
+	live := len(m.creating)
 	for _, current := range m.sessions {
 		if state, _ := current.lifecycle.Snapshot(); state != Closed && state != Deleted {
 			live++
 		}
 	}
 	return live
+}
+
+// reserveCreate keeps in-flight launches in the name, ID and capacity checks
+// without publishing a partially initialized session or holding mu over I/O.
+func (m *Manager) reserveCreate(request CreateRequest) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopping {
+		return "", ErrManagerStopped
+	}
+	if m.liveSessionsLocked() >= m.config.MaxSessions {
+		return "", ErrResourceLimit
+	}
+	if _, exists := m.names[request.Name]; exists {
+		return "", ErrSessionExists
+	}
+	id := request.ID
+	if id != "" {
+		if _, exists := m.sessions[id]; exists || m.creating[id] != "" {
+			return "", ErrSessionExists
+		}
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		if id != "" {
+			break
+		}
+		candidate, err := randomID(m.config.Random)
+		if err != nil {
+			return "", err
+		}
+		if _, exists := m.sessions[candidate]; !exists && m.creating[candidate] == "" {
+			id = candidate
+			break
+		}
+	}
+	if id == "" {
+		return "", ErrSessionExists
+	}
+	m.creating[id], m.names[request.Name] = request.Name, id
+	return id, nil
 }
 
 func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
@@ -279,41 +323,23 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	if m.updateTransaction != "" {
 		return Snapshot{}, ErrUpdateInProgress
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopping {
-		return Snapshot{}, ErrManagerStopped
+	id, err := m.reserveCreate(request)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	if m.liveSessionsLocked() >= m.config.MaxSessions {
-		return Snapshot{}, ErrResourceLimit
-	}
-	if _, exists := m.names[request.Name]; exists {
-		return Snapshot{}, ErrSessionExists
-	}
-	id := request.ID
-	if id != "" {
-		if _, exists := m.sessions[id]; exists {
-			return Snapshot{}, ErrSessionExists
+	published := false
+	defer func() {
+		m.mu.Lock()
+		delete(m.creating, id)
+		if !published {
+			delete(m.names, request.Name)
 		}
-	}
-	for attempt := 0; attempt < 8; attempt++ {
-		if id != "" {
-			break
-		}
-		candidate, err := randomID(m.config.Random)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if _, exists := m.sessions[candidate]; !exists {
-			id = candidate
-			break
-		}
-	}
-	if id == "" {
-		return Snapshot{}, ErrSessionExists
-	}
+		m.mu.Unlock()
+	}()
 	retained, _ := history.New(m.config.HistoryBytes)
 	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), sizes: newWindowSizes(), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
 	setSessionSupportReference(session, supportref.FromContext(ctx))
 	if m.config.Store != nil {
 		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
@@ -347,8 +373,11 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	session.identification = identificationTracker{}
 	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
 	m.startOutputPersistence(session)
+	m.mu.Lock()
 	m.sessions[id] = session
-	m.names[request.Name] = id
+	delete(m.creating, id)
+	published = true
+	m.mu.Unlock()
 	snapshot := session.snapshotLocked()
 	go m.capture(session, process)
 	return snapshot, nil

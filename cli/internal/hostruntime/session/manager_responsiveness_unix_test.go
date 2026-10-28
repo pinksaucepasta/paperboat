@@ -82,19 +82,51 @@ func assertListResponsive(t *testing.T, manager *Manager) {
 }
 func TestManagerListWhilePTYResizeStalls(t *testing.T) {
 	manager, process, created := responsivenessManager(t, nil, nil)
-	entered, release := make(chan struct{}), make(chan struct{})
-	process.resize = func() { close(entered); <-release }
-	done := make(chan error, 1)
+	entered, secondEntered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	process.resize = func() {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		} else {
+			close(secondEntered)
+		}
+	}
+	done := make(chan error, 2)
+	started := 1
 	defer func() {
-		close(release)
-		if err := <-done; err != nil {
-			t.Error(err)
+		unblock()
+		for range started {
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
 		}
 	}()
 	go func() { done <- manager.Resize(created.ID, "owner", pty.Dimensions{Columns: 100, Rows: 30}) }()
 	<-entered
 	assertListResponsive(t, manager)
+	started++
+	go func() { done <- manager.Resize(created.ID, "owner", pty.Dimensions{Columns: 120, Rows: 40}) }()
+	select {
+	case <-secondEntered:
+		t.Fatal("PTY resizes overlapped")
+	case <-time.After(50 * time.Millisecond):
+	}
+	unblock()
+	for range started {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	started = 0
+	snapshot, err := manager.Snapshot(created.ID)
+	if err != nil || snapshot.Dimensions != (pty.Dimensions{Columns: 120, Rows: 40}) {
+		t.Fatalf("resize order lost: %+v, %v", snapshot, err)
+	}
 }
+
 func TestManagerListWhilePTYLifecycleStalls(t *testing.T) {
 	for _, operation := range []string{"signal", "terminate", "create", "restart"} {
 		t.Run(operation, func(t *testing.T) {

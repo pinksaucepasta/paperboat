@@ -31,6 +31,8 @@ func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expec
 	// progress instead of interleaving with the journal it changes.
 	session.inputMu.Lock()
 	defer session.inputMu.Unlock()
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if err := m.checkRetiring(); err != nil {
@@ -72,14 +74,19 @@ func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expec
 		session.liveProcess.Store(nil)
 		// Drain output before the lifecycle write, but a failed history write
 		// must not prevent termination of a process the caller asked to close.
+		session.opMu.Unlock()
 		persistenceErr = m.stopOutputPersistence(session)
+		session.opMu.Lock()
 		if err := session.lifecycle.Transition(Closing); err != nil {
 			return Snapshot{}, errors.Join(persistenceErr, err)
 		}
 		persistenceErr = errors.Join(persistenceErr, m.persist(ctx, session))
 	}
 	terminateCtx, cancel := context.WithTimeout(ctx, m.config.TerminationTimeout)
-	result, terminateErr := session.process.Terminate(terminateCtx, m.config.TerminationGrace)
+	process := session.process
+	session.opMu.Unlock()
+	result, terminateErr := process.Terminate(terminateCtx, m.config.TerminationGrace)
+	session.opMu.Lock()
 	cancel()
 	if onlyContextEnd(terminateErr) {
 		process := session.process
@@ -103,6 +110,8 @@ func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expec
 }
 
 func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	state, _ := session.lifecycle.Snapshot()
@@ -110,7 +119,9 @@ func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
 		return
 	}
 	terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+	session.opMu.Unlock()
 	result, err := process.Terminate(terminateCtx, m.config.TerminationGrace)
+	session.opMu.Lock()
 	cancel()
 	if err != nil {
 		observeSessionFailure(session, "lifecycle", err)
@@ -125,7 +136,9 @@ func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
 	persistErr := m.persist(context.Background(), session)
 	clearErr := m.clearOutputLocked(context.Background(), session, true)
 	if persistErr != nil || clearErr != nil {
+		session.persistMu.Lock()
 		session.persistErr = errors.Join(session.persistErr, persistErr, clearErr)
+		session.persistMu.Unlock()
 		observeSessionFailure(session, "lifecycle", errors.Join(persistErr, clearErr))
 		if m.config.Metrics != nil {
 			_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
@@ -178,6 +191,8 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	// progress instead of interleaving with the journal it changes.
 	session.inputMu.Lock()
 	defer session.inputMu.Unlock()
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if err := m.checkRetiring(); err != nil {
@@ -209,7 +224,16 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 		_ = session.lifecycle.Transition(Closed)
 		return Snapshot{}, err
 	}
-	process, err := m.launch(ctx, session.command)
+	return m.launchRestartLocked(ctx, session)
+}
+
+// launchRestartLocked runs with operationMu and opMu; only the state lock is
+// released during launch and persistence.
+func (m *Manager) launchRestartLocked(ctx context.Context, session *managedSession) (Snapshot, error) {
+	command := session.command
+	session.opMu.Unlock()
+	process, err := m.launch(ctx, command)
+	session.opMu.Lock()
 	if err != nil {
 		_ = session.lifecycle.Transition(Closed)
 		if cleanupErr := m.persist(context.Background(), session); cleanupErr != nil {
@@ -218,26 +242,34 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 		return Snapshot{}, err
 	}
 	if err := session.lifecycle.Transition(Running); err != nil {
+		session.opMu.Unlock()
 		closeErr := process.CloseIO()
+		session.opMu.Lock()
 		observeSessionFailure(session, "lifecycle", closeErr)
 		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
 	}
-	_, generation = session.lifecycle.Snapshot()
+	_, generation := session.lifecycle.Snapshot()
 	session.inputs.SetGeneration(generation)
 	if m.config.Store != nil {
+		session.opMu.Unlock()
 		if pruneErr := m.config.Store.DeleteInputDecisionsOutsideGeneration(context.Background(), session.id, generation); pruneErr != nil {
 			observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))
 		}
+		session.opMu.Lock()
 	}
 	session.screen = xterm.New(xterm.WithCols(int(session.command.Dimensions.Columns)), xterm.WithRows(int(session.command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))
 	session.continuation.reset()
 	session.process, session.exit = process, nil
 	session.identification = identificationTracker{}
 	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
+	session.opMu.Unlock()
 	m.startOutputPersistence(session)
+	session.opMu.Lock()
 	if err := m.persist(context.Background(), session); err != nil {
 		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+		session.opMu.Unlock()
 		_, terminateErr := process.Terminate(terminateCtx, 0)
+		session.opMu.Lock()
 		cancel()
 		session.liveProcess.Store(nil)
 		session.process = nil
@@ -289,6 +321,8 @@ func (m *Manager) deleteAtGeneration(sessionID string, expectedGeneration uint64
 	if err != nil {
 		return err
 	}
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if err := m.checkRetiring(); err != nil {
@@ -302,7 +336,10 @@ func (m *Manager) deleteAtGeneration(sessionID string, expectedGeneration uint64
 		return ErrSessionRunning
 	}
 	if m.config.Store != nil {
-		if err := m.config.Store.DeleteSession(context.Background(), sessionID); err != nil {
+		session.opMu.Unlock()
+		err := m.config.Store.DeleteSession(context.Background(), sessionID)
+		session.opMu.Lock()
+		if err != nil {
 			return err
 		}
 	}

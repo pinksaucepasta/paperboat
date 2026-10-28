@@ -20,6 +20,7 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 		if n > 0 {
 			// Outside opMu: input, resize and attach never wait for the owner to drain.
 			session.fanout.WaitRoom(context.Background(), uint64(n), ownerStallBound)
+			session.outputMu.Lock()
 			session.opMu.Lock()
 			state, _ := session.lifecycle.Snapshot()
 			if state == Running || state == Closing {
@@ -41,6 +42,7 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 				history.ReleaseBuffer(buffer)
 			}
 			session.opMu.Unlock()
+			session.outputMu.Unlock()
 		} else {
 			history.ReleaseBuffer(buffer)
 		}
@@ -65,14 +67,21 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	closeErr := process.CloseIO()
 	observeSessionFailure(session, "delivery", classifySessionFailure("delivery", readErr))
 	observeSessionFailure(session, "command", classifySessionFailure("command", waitErr))
-	lifecycleErr := errors.Join(persistErr, terminateErr, closeErr)
+	m.finishCapture(session, process, result, persistErr, errors.Join(persistErr, terminateErr, closeErr), deliveryErr, terminateErr)
+}
+
+func (m *Manager) finishCapture(session *managedSession, process PTYProcess, result pty.ExitResult, persistErr, lifecycleErr, deliveryErr, terminateErr error) {
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if session.process != process {
 		observeSessionFailure(session, "lifecycle", lifecycleErr)
 		return
 	}
+	session.persistMu.Lock()
 	session.persistErr = persistErr
+	session.persistMu.Unlock()
 	if persistErr != nil && m.config.Metrics != nil {
 		_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
 	}
@@ -86,7 +95,9 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 			if err := session.lifecycle.Transition(Closing); err != nil {
 				lifecycleErr = errors.Join(lifecycleErr, err)
 			} else if err := m.persist(context.Background(), session); err != nil {
+				session.persistMu.Lock()
 				session.persistErr = errors.Join(session.persistErr, err)
+				session.persistMu.Unlock()
 				lifecycleErr = errors.Join(lifecycleErr, err)
 			}
 		}
@@ -104,7 +115,9 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 		session.liveProcess.CompareAndSwap(session.liveProcess.Load(), nil)
 		session.process = nil
 		if err := m.persist(context.Background(), session); err != nil {
+			session.persistMu.Lock()
 			session.persistErr = errors.Join(session.persistErr, err)
+			session.persistMu.Unlock()
 			lifecycleErr = errors.Join(lifecycleErr, err)
 			if m.config.Metrics != nil {
 				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
@@ -112,7 +125,9 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 		}
 		if !m.config.PreserveStoppedHistory {
 			if clearErr := m.clearOutputLocked(context.Background(), session, true); clearErr != nil {
+				session.persistMu.Lock()
 				session.persistErr = errors.Join(session.persistErr, clearErr)
+				session.persistMu.Unlock()
 				lifecycleErr = errors.Join(lifecycleErr, clearErr)
 				if m.config.Metrics != nil {
 					_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)

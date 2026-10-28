@@ -91,7 +91,7 @@ func (m *Manager) Retire(ctx context.Context) error {
 	locked := 0
 	unlockSessions := func() {
 		for index := locked - 1; index >= 0; index-- {
-			sessions[index].opMu.Unlock()
+			sessions[index].operationMu.Unlock()
 		}
 		locked = 0
 	}
@@ -100,12 +100,15 @@ func (m *Manager) Retire(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		session.opMu.Lock()
+		session.operationMu.Lock()
 		locked++
 	}
 	for _, session := range sessions {
+		session.opMu.Lock()
 		state, _ := session.lifecycle.Snapshot()
-		if session.process != nil || session.liveProcess.Load() != nil || state == Creating || state == Running || state == Restarting || state == Closing {
+		live := session.process != nil || session.liveProcess.Load() != nil
+		session.opMu.Unlock()
+		if live || state == Creating || state == Running || state == Restarting || state == Closing {
 			return ErrUpdateBusy
 		}
 		if state != Exited && state != Closed {
@@ -135,7 +138,9 @@ func (m *Manager) Retire(ctx context.Context) error {
 			m.startOutputPersistence(session)
 		}
 		err := m.stopOutputPersistenceContext(ctx, session)
+		session.persistMu.Lock()
 		session.persistErr = err
+		session.persistMu.Unlock()
 		result = errors.Join(result, err)
 	}
 	if result != nil {
@@ -234,18 +239,21 @@ func (m *Manager) ShutdownForRecovery(ctx context.Context) error {
 			result = errors.Join(result, err)
 			continue
 		}
+		session.operationMu.Lock()
 		session.opMu.Lock()
 		state, _ := session.lifecycle.Snapshot()
 		if state != Closed {
 			session.opMu.Unlock()
+			session.operationMu.Unlock()
 			result = errors.Join(result, ErrInvalidTransition)
 			continue
 		}
 		record := session.storeRecordLocked()
 		record.State = string(original)
 		record.ExitCode, record.ExitSignal, record.ExitedAt = nil, "", nil
-		err = m.config.Store.UpdateSession(restoreCtx, id, string(Closed), record)
 		session.opMu.Unlock()
+		err = m.config.Store.UpdateSession(restoreCtx, id, string(Closed), record)
+		session.operationMu.Unlock()
 		result = errors.Join(result, err)
 	}
 	return result

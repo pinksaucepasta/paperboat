@@ -14,8 +14,9 @@ func (m *Manager) registerWindowLocked(session *managedSession, participant Part
 }
 
 func (m *Manager) applyWindowSizeObservedLocked(session *managedSession) {
-	if err := m.applyWindowSizeLocked(session); err != nil {
-		observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", err))
+	session.sizeDirty.Store(true)
+	if session.sizeApplying.CompareAndSwap(false, true) {
+		go m.applyPendingWindowSize(session)
 	}
 }
 
@@ -37,9 +38,14 @@ func (m *Manager) noteWindowActivity(session *managedSession, attachmentID strin
 func (m *Manager) applyPendingWindowSize(session *managedSession) {
 	for {
 		session.sizeDirty.Store(false)
+		session.resizeMu.Lock()
 		session.opMu.Lock()
-		m.applyWindowSizeObservedLocked(session)
+		err := m.applyWindowSizeLocked(session)
 		session.opMu.Unlock()
+		session.resizeMu.Unlock()
+		if err != nil {
+			observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", err))
+		}
 		session.sizeApplying.Store(false)
 		// A touch that landed after the dirty flag was cleared is applied by this loop, not lost.
 		if !session.sizeDirty.Load() || !session.sizeApplying.CompareAndSwap(false, true) {

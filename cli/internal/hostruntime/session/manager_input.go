@@ -221,6 +221,8 @@ func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, ex
 	if err != nil {
 		return err
 	}
+	session.resizeMu.Lock()
+	defer session.resizeMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if expectedGeneration != 0 {
@@ -242,26 +244,41 @@ func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, ex
 	return m.applyWindowSizeLocked(session)
 }
 
-// applyWindowSizeLocked sets the PTY to the size of the window that controls, when it differs. opMu is held.
+// applyWindowSizeLocked requires resizeMu and opMu; it returns with opMu held.
 func (m *Manager) applyWindowSizeLocked(session *managedSession) error {
 	if session.process == nil {
 		return nil
 	}
+	process := session.process
+	_, generation := session.lifecycle.Snapshot()
 	controller, dimensions, ok := session.sizes.controller()
-	// The window that sets the size also paces the output (one rule, F3-17): its consumption holds the PTY back.
 	session.fanout.SetController(controller)
 	if !ok || session.command.Dimensions == dimensions {
 		return nil
 	}
-	if err := session.process.Resize(dimensions); err != nil {
+	session.opMu.Unlock()
+	err := process.Resize(dimensions)
+	// Serialize the geometry write with lifecycle writes, without making a
+	// stalled resize prevent close/restart of this generation.
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
+	session.outputMu.Lock()
+	defer session.outputMu.Unlock()
+	session.opMu.Lock()
+	_, current := session.lifecycle.Snapshot()
+	if session.process != process || current != generation {
+		return ErrStaleGeneration
+	}
+	if err != nil {
+		return err
+	}
+	if err := m.checkRetiring(); err != nil {
 		return err
 	}
 	session.command.Dimensions = dimensions
 	if session.screen != nil {
 		session.screen.Resize(int(dimensions.Columns), int(dimensions.Rows))
 	}
-	// Include geometry in the same ordered output history as PTY bytes. Every
-	// attachment must interpret cursor-addressed output at the host's grid size.
 	resizeOutput := []byte(fmt.Sprintf("\x1b[8;%d;%dt", dimensions.Rows, dimensions.Columns))
 	event, err := session.history.Append(2, resizeOutput)
 	if err != nil {
@@ -269,10 +286,7 @@ func (m *Manager) applyWindowSizeLocked(session *managedSession) error {
 	}
 	_, _ = session.fanout.PublishOwned(event)
 	m.queueOutputPersistence(session, event)
-	if err := m.persist(context.Background(), session); err != nil {
-		return err
-	}
-	return nil
+	return m.persist(context.Background(), session)
 }
 
 func (m *Manager) Signal(sessionID string, generation uint64, signal pty.Signal) error {
@@ -286,7 +300,11 @@ func (m *Manager) Signal(sessionID string, generation uint64, signal pty.Signal)
 	if state != Running || generation != current || session.process == nil {
 		return ErrStaleGeneration
 	}
-	return session.process.Signal(signal)
+	process := session.process
+	session.opMu.Unlock()
+	err = process.Signal(signal)
+	session.opMu.Lock()
+	return err
 }
 
 func (m *Manager) Clear(sessionID string) (uint64, error) {
@@ -305,6 +323,8 @@ func (m *Manager) clearAtGeneration(sessionID string, expectedGeneration uint64)
 	if err != nil {
 		return 0, err
 	}
+	session.operationMu.Lock()
+	defer session.operationMu.Unlock()
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if err := m.checkRetiring(); err != nil {
@@ -325,14 +345,20 @@ func (m *Manager) clearAtGeneration(sessionID string, expectedGeneration uint64)
 // session identity. Callers hold opMu and have stopped output persistence for
 // terminal states; an explicit live Clear may race only with a later append.
 func (m *Manager) clearOutputLocked(ctx context.Context, session *managedSession, stopped bool) error {
+	session.opMu.Unlock()
+	session.outputMu.Lock()
+	defer session.outputMu.Unlock()
+	session.opMu.Lock()
 	_, latest, _ := session.history.Bounds()
 	var clearErr error
 	if m.config.Store != nil {
+		session.opMu.Unlock()
 		if stopped {
 			clearErr = m.config.Store.ClearStoppedOutput(ctx, session.id, latest)
 		} else {
 			clearErr = m.config.Store.ClearOutput(ctx, session.id, latest)
 		}
+		session.opMu.Lock()
 	}
 	if clearErr == nil || stopped {
 		// A stopped terminal must not offer its old output to a new attach,
