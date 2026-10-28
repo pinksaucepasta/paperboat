@@ -100,7 +100,7 @@ func (f *fixture) seedPersonal(u auth.User) (machine string) {
 	f.exec(`INSERT INTO environment_vault_scopes(owner_kind,owner_id,machine_id,key_epoch,revision,document_id,envelope,writer_public,workspace_id)
 		VALUES('personal',$1,'',1,1,$2,'\x01',$3,'personal')`, u.ID, "sha256:"+hex.EncodeToString(digest("doc_"+u.ID)), digest("writer_"+u.ID))
 	f.exec(`INSERT INTO preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,lease_deadline,allocation_state,edge_state,origin_state)
-		VALUES($1,'https://preview-'||md5($1)||'.example.test',$2,$2,'dev','sess','foreground','http','127.0.0.1:3000',now()+interval '1 hour','ready','ready','ready')`, "prev_"+u.ID, u.ID)
+		VALUES($1,'https://preview-'||md5($1)||'.example.test',$2,$2,$3,'sess','foreground','http','127.0.0.1:3000',now()+interval '1 hour','ready','ready','ready')`, "prev_"+u.ID, u.ID, machine)
 	f.exec(`INSERT INTO tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id)
 		VALUES($1,$2,'docs',$3,'https://tunnel-'||md5($1)||'.example.test',$4,$2)`, "tun_"+u.ID, u.ID, "endpoint_"+uuidFor(u.ID), machine)
 	f.exec(`INSERT INTO billing_workspaces(id,user_id,provider_subscription_id,state) VALUES($1,$2,$3,'active')`, "bw_"+u.ID, u.ID, "sub_"+u.ID)

@@ -54,7 +54,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+suffix, "trk03-"+suffix+"@e
 		OperationID: "op_" + suffix, TunnelID: "tun_" + suffix, AuditEventID: "aud_" + suffix,
 		AccountID: accountID, IdempotencyKey: "create:" + suffix, RequestHash: requestHash,
 		Name: "coolify-" + suffix, AccessMode: "public", StableEndpointID: endpointID,
-		StableEndpoint: "https://" + testutil.EndpointLabel(endpointID) + ".tunnels.example.test", HostID: "host_" + suffix,
+		StableEndpoint: "https://" + testutil.EndpointLabel(endpointID) + ".tunnels.example.test", HostID: testutil.PublicationMachine(t, database.SQL(), accountID),
 		ActorID: accountID, ActorType: "user", CorrelationID: "cor_" + suffix, RequestID: "req_" + suffix,
 		SourceMachineID: "dev_" + suffix,
 	}

@@ -30661,6 +30661,7 @@
       "get": {
         "operationId": "list_team_inbox_requests",
         "summary": "List bounded incoming and outgoing Team Inbox requests",
+        "description": "Responses include source_machine_name and destination_machine_name captured at request creation. Request history and pending receipt delivery survive machine removal.",
         "responses": {
           "200": {
             "description": "Authorized filtered page with total and next_offset continuation."
@@ -30858,6 +30859,7 @@
       "get": {
         "operationId": "get_team_inbox_request",
         "summary": "Read exact Team Inbox request status",
+        "description": "Responses include source_machine_name and destination_machine_name captured at request creation. Request history and pending receipt delivery survive machine removal.",
         "responses": {
           "200": {
             "description": "Request and receipt-notification status."

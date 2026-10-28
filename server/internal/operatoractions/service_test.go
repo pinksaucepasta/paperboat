@@ -246,7 +246,7 @@ func TestOperatorActionsTunnelAndTeamUseAuthoritativeTransitions(t *testing.T) {
 	sum := sha256.Sum256([]byte(x))
 	endpointID := testutil.EndpointID("operator-tunnel:" + x)
 	tunnel := "opa_tunnel_" + x
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$3,'active','private',1,$4,$5,'host',$2)`, tunnel, owner, "tunnel-"+x, endpointID, "https://"+testutil.EndpointLabel(x)+".test.invalid"); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$3,'active','private',1,$4,$5,$6,$2)`, tunnel, owner, "tunnel-"+x, endpointID, "https://"+testutil.EndpointLabel(x)+".test.invalid", testutil.PublicationMachine(t, store.SQL(), owner)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_config_generations(tunnel_id,generation,content_hash,snapshot,activation_state,created_by_actor_id,retained_until) VALUES($1,1,$2,'{}','pending',$3,now()+interval '1 day')`, tunnel, sum[:], owner); err != nil {

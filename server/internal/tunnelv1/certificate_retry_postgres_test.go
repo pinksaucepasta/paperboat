@@ -29,7 +29,7 @@ func TestDurableCertificateFailureBacksOffBeforeItIsDueAgainOnPostgres(t *testin
 	if _, err := f.database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.tunnels
  (id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_transitioned_at,created_at,updated_at)
-VALUES ($1,$2,$1,$3,$4,$5,$2,$6,$6,$6)`, tunnel, account, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", "mch_"+f.suffix, now); err != nil {
+VALUES ($1,$2,$1,$3,$4,$5,$2,$6,$6,$6)`, tunnel, account, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", testutil.PublicationMachine(t, f.database.SQL(), account), now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.database.SQL().ExecContext(ctx, `

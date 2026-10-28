@@ -41,6 +41,7 @@ CREATE TRIGGER team_inbox_requests_machine_snapshot BEFORE INSERT ON paperboat.t
 CREATE TRIGGER user_machine_bandwidth_periods_machine_snapshot BEFORE INSERT ON paperboat.user_machine_bandwidth_periods
     FOR EACH ROW EXECUTE FUNCTION paperboat.snapshot_machine_history();
 
+-- Public hostname reservations are history: a removed URL cannot be reassigned.
 -- Every existing machine FK is classified here, including composite FKs. Access
 -- sessions retain their FK: the worker must deliver every revocation first.
 -- +goose StatementBegin
@@ -51,7 +52,7 @@ BEGIN
   FROM pg_constraint c WHERE c.contype='f' AND c.confrelid='paperboat.user_machines'::regclass
     AND c.conrelid<>'paperboat.user_machine_access_sessions'::regclass
  LOOP
-  IF fk.tbl IN ('paperboat.team_inbox_requests'::regclass,'paperboat.user_machine_bandwidth_periods'::regclass) THEN
+  IF fk.tbl IN ('paperboat.team_inbox_requests'::regclass,'paperboat.user_machine_bandwidth_periods'::regclass,'paperboat.managed_hostnames'::regclass) THEN
    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',fk.tbl,fk.conname);
   ELSIF fk.definition NOT LIKE '%ON DELETE CASCADE%' THEN
    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I',fk.tbl,fk.conname);

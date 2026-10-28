@@ -60,7 +60,7 @@ func TestTunnelDomainDNSStateMachineOnPostgres(t *testing.T) {
 		if _, err := database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.tunnels
  (id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_transitioned_at,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$2,$7,$7,$7)`, tunnel, account, tunnel, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", "mch_"+suffix, now); err != nil {
+VALUES ($1,$2,$3,$4,$5,$6,$2,$7,$7,$7)`, tunnel, account, tunnel, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".tunnels.example.test", testutil.PublicationMachine(t, database.SQL(), account), now); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := database.SQL().ExecContext(ctx, `

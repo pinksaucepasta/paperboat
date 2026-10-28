@@ -69,6 +69,7 @@ func TestPreviewCertificateIssuanceRenewalFencesOnPostgres(t *testing.T) {
 				args  []any
 			}{
 				{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, []any{f.previewAccountID, "subject-renewal-" + f.suffix, "renewal-" + f.suffix + "@example.test"}},
+				{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'linux','amd64','/workspace','offline','released')`, []any{"machine-" + f.suffix, f.previewAccountID}},
 				{`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline,user_deadline,created_at) VALUES('foreground',$1,$2,$3,$3,$4,$5,'http','127.0.0.1:3000','public',$6,$7,$8)`, []any{f.previewLeaseID, "https://preview-" + f.suffix + ".preview.example.test", f.previewAccountID, "machine-" + f.suffix, "session-" + f.suffix, now.Add(24 * time.Hour), now.Add(12 * time.Hour), now}},
 				{`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns-preview-platform','verified','edge.example.test','managed','issuing','ready','clear')`, []any{f.previewDomainID, f.previewAccountID, f.previewLeaseID, f.previewHostname}},
 			} {

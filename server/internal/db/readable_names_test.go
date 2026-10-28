@@ -109,7 +109,7 @@ func TestReadableHostnameReservationsOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	var tombstone bool
-	if err = store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.managed_hostnames WHERE hostname=$1 AND machine_id IS NULL)`, host).Scan(&tombstone); err != nil || !tombstone {
-		t.Fatalf("machine cleanup retained name without live binding %v %v", tombstone, err)
+	if err = store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.managed_hostnames WHERE hostname=$1 AND machine_id=$2)`, host, machine).Scan(&tombstone); err != nil || !tombstone {
+		t.Fatalf("machine removal retains its hostname reservation and identity %v %v", tombstone, err)
 	}
 }

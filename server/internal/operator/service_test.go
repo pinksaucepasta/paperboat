@@ -158,6 +158,7 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 		q    string
 		args []any
 	}{
+		{`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES('host-test',$1,'host-test','linux','amd64','/workspace','offline','released'),('host-other',$1,'host-other','linux','amd64','/workspace','offline','released')`, []any{accountID}},
 		{`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES($1,$2,$3,'active','private',7,$4,$5,'host-test',$2,'degraded'),($6,$2,$7,'active','private',3,$8,$9,'host-other',$2,'ready')`, []any{tunnelID, accountID, "operator-" + suffix, endpointID, "https://operator-" + suffix + ".tunnels.test", otherTunnelID, "other-" + suffix, otherEndpointID, "https://other-" + suffix + ".tunnels.test"}},
 	} {
 		if _, err := store.Pool().Exec(ctx, statement.q, statement.args...); err != nil {

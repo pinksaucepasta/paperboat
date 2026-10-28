@@ -301,7 +301,7 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 			t.Fatal(err)
 		}
 	}
-	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,'machine','session','http','127.0.0.1:3000',now()+interval '10 minutes')`, preview, "https://"+endpoint+".preview.example.test", owner)
+	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,$4,'session','http','127.0.0.1:3000',now()+interval '10 minutes')`, preview, "https://"+endpoint+".preview.example.test", owner, testutil.PublicationMachine(t, store.SQL(), owner))
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_placements WHERE resource_kind='preview' AND resource_id=$1`, preview)

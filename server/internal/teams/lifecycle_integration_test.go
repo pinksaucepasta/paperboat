@@ -3,6 +3,7 @@ package teams
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"os"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func TestPostgresUnifiedLifecycleNoRevivedAuthority(t *testing.T) {
 
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, other, departing, remaining)
 	for _, binding := range [][2]string{{"depart_tunnel_" + team, departing}, {"remain_tunnel_" + team, remaining}, {"other_tunnel_" + team, departing}} {
-		exec(`WITH endpoint AS (SELECT gen_random_uuid()::text AS id) INSERT INTO paperboat.tunnels(id,account_id,name,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) SELECT $1,$2,$1,'team','endpoint_'||id,'https://'||id||'.invalid.test','fixture-host',$2 FROM endpoint`, binding[0], binding[1])
+		exec(`WITH endpoint AS (SELECT gen_random_uuid()::text AS id) INSERT INTO paperboat.tunnels(id,account_id,name,access_mode,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) SELECT $1,$2,$1,'team','endpoint_'||id,'https://'||id||'.invalid.test',$3,$2 FROM endpoint`, binding[0], binding[1], testutil.PublicationMachine(t, store.SQL(), binding[1]))
 	}
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'tunnel','depart_tunnel_'||$1,$2),($1,'tunnel','remain_tunnel_'||$1,$3),($4,'tunnel','other_tunnel_'||$1,$2)`, team, departing, remaining, other)
 	exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) SELECT team_id,$2,resource_kind,resource_id,'use',1,true FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_kind='tunnel'`, team, remaining)

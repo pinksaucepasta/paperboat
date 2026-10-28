@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,7 +150,7 @@ func TestMachinePreviewReadinessGetPostgres(t *testing.T) {
 		}
 	}
 	foreign := preview + "_other"
-	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,access_mode,lease_deadline) VALUES($1,$3,$2,$2,'foreign_machine','session_foreign','foreground','http','127.0.0.1:3000','public',now()+interval '1 hour')`, foreign, account, "https://foreign-"+suffix+".preview.example.test"); err != nil {
+	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,access_mode,lease_deadline) VALUES($1,$3,$2,$2,$4,'session_foreign','foreground','http','127.0.0.1:3000','public',now()+interval '1 hour')`, foreign, account, "https://foreign-"+suffix+".preview.example.test", testutil.PublicationMachine(t, database.SQL(), account)); err != nil {
 		t.Fatal(err)
 	}
 	defer database.SQL().ExecContext(ctx, `DELETE FROM paperboat.preview_leases WHERE id=$1`, foreign)

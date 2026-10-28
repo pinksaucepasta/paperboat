@@ -139,7 +139,7 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	}
 	tunnel, route := "top_t_"+suffix, "top_r_"+suffix
 	endpointID := testutil.EndpointID("topology:" + suffix)
-	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,'host','actor')`, tunnel, account, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".example.test")
+	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,$5,'actor')`, tunnel, account, endpointID, "https://"+testutil.EndpointLabel(endpointID)+".example.test", testutil.PublicationMachine(t, database.SQL(), account))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	}
 	preview := "top_p_" + suffix
 	previewEndpointID := testutil.EndpointLabel("topology-preview:" + suffix)
-	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$3,$2,'actor','machine','session','http','127.0.0.1:3000',now()+interval '10 minutes')`, preview, account, fmt.Sprintf("https://%s.preview.example.test", previewEndpointID))
+	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$3,$2,'actor',$4,'session','http','127.0.0.1:3000',now()+interval '10 minutes')`, preview, account, fmt.Sprintf("https://%s.preview.example.test", previewEndpointID), testutil.PublicationMachine(t, database.SQL(), account))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	}
 	teamTunnel, teamRoute := "top_team_t_"+suffix, "top_team_r_"+suffix
 	teamEndpointID := testutil.EndpointID("topology-team:" + suffix)
-	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,owner_team_id) VALUES($1,$2,$1,$3,$4,'host','actor',$5)`, teamTunnel, account, teamEndpointID, "https://"+testutil.EndpointLabel(teamEndpointID)+".example.test", team); err != nil {
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,owner_team_id) VALUES($1,$2,$1,$3,$4,$6,'actor',$5)`, teamTunnel, account, teamEndpointID, "https://"+testutil.EndpointLabel(teamEndpointID)+".example.test", team, testutil.PublicationMachine(t, database.SQL(), account)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,'tunnel',$2,$3,true,1)`, team, teamTunnel, account); err != nil {

@@ -90,9 +90,9 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		// resource exists and the resource is stopped before the pool moves back (ErrLiveEdgeModeChange).
 		setPool(selfHosted)
 		if kind == "preview" {
-			exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,'machine','session','http','127.0.0.1:3000',now()+interval '10 minutes')`, id, "https://"+stable, owner)
+			exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,lease_deadline) VALUES('foreground',$1,$2,$3,$3,$4,'session','http','127.0.0.1:3000',now()+interval '10 minutes')`, id, "https://"+stable, owner, testutil.PublicationMachine(t, store.SQL(), owner))
 		} else {
-			exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,'host','actor')`, id, owner, endpointID, "https://"+stable)
+			exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,$5,'actor')`, id, owner, endpointID, "https://"+stable, testutil.PublicationMachine(t, store.SQL(), owner))
 			exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, id)
 		}
 		domainID := "dns_domain_" + kind + "_" + suffix
