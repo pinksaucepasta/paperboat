@@ -49,7 +49,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
  CASE WHEN g%3=0 THEN 'darwin' ELSE 'linux' END,'amd64','/w',
  CASE WHEN g=8 THEN 'revoked' WHEN g=9 THEN 'disconnected' WHEN g%2=0 THEN 'online' ELSE 'offline' END,
  CASE WHEN g>=8 THEN 'released' ELSE 'occupied' END,g%2=0 FROM generate_series(1,9) g`, user)
-	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id=$1`, user+"_m8")
+	exec(`UPDATE paperboat.user_machines SET revoked_at=now() WHERE id IN ($1,$2)`, user+"_m8", user+"_m9")
 	exec(`INSERT INTO paperboat.workspace_policies(owner_account,version,source,digest) VALUES($1,1,'{}','sha256:test')`, user)
 	exec(`INSERT INTO paperboat.workspace_policy_tags(policy_id,tag,machine_id) SELECT id,'tag:prod',$1||'_m'||g FROM paperboat.workspace_policies,generate_series(2,3) g WHERE owner_account=$1`, user)
 	exec(`SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, user+"_m5")

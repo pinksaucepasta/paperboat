@@ -113,7 +113,7 @@ END $$;
 -- +goose StatementEnd
 CREATE TRIGGER control_environments_delete_operations BEFORE DELETE ON paperboat.control_environments
     FOR EACH ROW EXECUTE FUNCTION paperboat.delete_machine_environment_operations();
--- Revoked and disconnected (revoked_at set) are removal states, including rows written before this migration.
+-- Revoked is a removal state, including rows written before this migration.
 -- Normalize it once so every existing deleted_at fence also hides revoked machines.
 -- +goose StatementBegin
 CREATE FUNCTION paperboat.tombstone_revoked_machine() RETURNS trigger
@@ -126,8 +126,8 @@ BEGIN
  RETURN NEW;
 END $$;
 -- +goose StatementEnd
-CREATE TRIGGER machine_revoked_tombstone BEFORE INSERT OR UPDATE OF state,revoked_at ON paperboat.user_machines
- FOR EACH ROW WHEN (NEW.state IN ('revoked','disconnected') OR NEW.revoked_at IS NOT NULL) EXECUTE FUNCTION paperboat.tombstone_revoked_machine();
+CREATE TRIGGER machine_revoked_tombstone BEFORE INSERT OR UPDATE OF state ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.tombstone_revoked_machine();
 
 -- All revoke producers share the same environment fence and durable session
 -- revocations, as the existing machine/peer and team-entry triggers do.
@@ -165,12 +165,14 @@ BEGIN
  RETURN NEW;
 END $$;
 -- +goose StatementEnd
-CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state,revoked_at ON paperboat.user_machines
- FOR EACH ROW WHEN (NEW.state IN ('revoked','disconnected') OR NEW.revoked_at IS NOT NULL) EXECUTE FUNCTION paperboat.revoke_machine_environment();
-UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),revoked_at=coalesce(revoked_at,now()),online=false,seat_state='released'
- WHERE state IN ('revoked','disconnected') OR revoked_at IS NOT NULL;
+CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.revoke_machine_environment();
+UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),online=false,seat_state='released'
+ WHERE state='revoked';
+-- A disconnected machine (pb machine revoke) is retired too: revoked_at is what the live view tests.
+UPDATE paperboat.user_machines SET revoked_at=coalesce(disconnected_at,now()) WHERE state='disconnected' AND revoked_at IS NULL;
 ALTER TABLE paperboat.user_machines ADD CONSTRAINT user_machines_revoked_tombstone
- CHECK((state NOT IN ('revoked','disconnected') AND revoked_at IS NULL) OR deleted_at IS NOT NULL);
+ CHECK(state<>'revoked' OR deleted_at IS NOT NULL);
 -- The one definition of a live machine; every listing reads this view. A later migration that adds a
 -- user_machines column must CREATE OR REPLACE it (TestLiveUserMachinesViewHasEveryColumn).
 CREATE VIEW paperboat.live_user_machines AS
