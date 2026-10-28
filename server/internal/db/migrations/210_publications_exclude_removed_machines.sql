@@ -20,26 +20,31 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.workspace_tunnel_management_allowed(actor text, team text, tunnel text) RETURNS boolean
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.workspace_tunnel_management_allowed(actor text, team text, tunnel text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  SELECT EXISTS(SELECT 1 FROM tunnels t JOIN user_machines m ON m.id=t.created_by_host_id WHERE m.deleted_at IS NULL AND t.id=tunnel
   AND workspace_tunnel_management_decision(actor, team, t.id, t.account_id, t.owner_team_id, t.access_mode, m.user_id, m.owner_team_id,
-   m.configured_capabilities, CASE WHEN team IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, team, m.id, 'tunnel_manage') END,
-   CASE WHEN team IS NOT NULL THEN tunnel_connectors_blocked(actor, team, t.id) END));
-$$;
+   m.configured_capabilities, CASE WHEN team IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, team, m.id, 'tunnel_manage') END));
+$function$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.tunnel_management_allowed(actor text, tunnel text) RETURNS boolean
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.tunnel_management_allowed(actor text, tunnel text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  SELECT EXISTS(SELECT 1 FROM tunnels t JOIN user_machines m ON m.id=t.created_by_host_id WHERE m.deleted_at IS NULL AND t.id=tunnel
   AND tunnel_management_decision(actor, t.id, t.account_id, t.owner_team_id, t.access_mode, t.deleted_at IS NOT NULL, m.user_id, m.owner_team_id,
    m.configured_capabilities,
    CASE WHEN t.owner_team_id IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, t.owner_team_id, m.id, 'tunnel_manage') END,
-   CASE WHEN t.owner_team_id IS NOT NULL THEN tunnel_connectors_blocked(actor, t.owner_team_id, t.id) END,
-   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN machine_capability_allowed(actor, m.id, 'tunnel_manage') END,
-   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN tunnel_connectors_blocked(actor, NULL, t.id) END));
-$$;
+   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN machine_capability_allowed(actor, m.id, 'tunnel_manage') END));
+$function$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
@@ -106,9 +111,12 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.manageable_tunnel_ids(actor text, workspace_set boolean, workspace_team text, q text, state text, owner text,
-    machine text, after_created_at timestamptz, after_id text, row_limit integer) RETURNS SETOF text
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.manageable_tunnel_ids(actor text, workspace_set boolean, workspace_team text, q text, state text, owner text, machine text, after_created_at timestamp with time zone, after_id text, row_limit integer)
+ RETURNS SETOF text
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  WITH rules AS (
    -- The allow rules for tunnel_manage in the account's teams whose subject may be the account (any role: a superset).
    SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
@@ -138,13 +146,10 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
     AND (q='' OR position(lower(q) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
     AND ((state='' AND t.desired_state<>'deleted') OR t.desired_state=state)
     AND (owner='' OR (owner='mine' AND t.account_id=actor) OR (owner='shared' AND t.account_id<>actor) OR t.account_id=owner)
-    AND (machine='' OR t.created_by_host_id=machine OR EXISTS(SELECT 1 FROM tunnel_connectors AS c
-      WHERE c.tunnel_id=t.id AND c.host_id=machine AND c.revoked_at IS NULL))
+    AND (machine='' OR t.created_by_host_id=machine)
     AND (after_created_at IS NULL OR (t.created_at, t.id) < (after_created_at, after_id))
- ), connectors AS MATERIALIZED (
-  SELECT c.tunnel_id, c.host_id FROM tunnel_connectors AS c WHERE c.tunnel_id IN (SELECT t.id FROM candidates AS t) AND c.revoked_at IS NULL
  ), used AS MATERIALIZED (
-  SELECT m.* FROM user_machines AS m WHERE m.deleted_at IS NULL AND m.id IN (SELECT t.created_by_host_id FROM candidates AS t UNION SELECT c.host_id FROM connectors AS c)
+  SELECT m.* FROM user_machines AS m WHERE m.deleted_at IS NULL AND m.id IN (SELECT t.created_by_host_id FROM candidates AS t)
  ), host_rights AS MATERIALIZED (
   SELECT m.id, machine_capability_allowed(actor, m.id, 'tunnel_manage') AS manage FROM used AS m
  ), team_rights AS MATERIALIZED (
@@ -153,7 +158,7 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
    UNION SELECT workspace_team WHERE workspace_team IS NOT NULL) AS t
  )
  -- Newest first, decided one row at a time until the page is full (OFFSET 0 keeps the order below the filter);
- -- the connector checks run only for the rows that get that far.
+ -- the permission checks run only for the rows that get that far.
  SELECT x.id FROM (
   SELECT t.id, t.account_id, t.owner_team_id, t.access_mode, t.deleted_at IS NOT NULL AS deleted, m.id AS host_id,
    m.user_id AS host_user, m.owner_team_id AS host_team, m.configured_capabilities AS host_capabilities,
@@ -165,23 +170,11 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
   ORDER BY t.created_at DESC, t.id DESC OFFSET 0
  ) AS x
  WHERE tunnel_management_decision(actor, x.id, x.account_id, x.owner_team_id, x.access_mode, x.deleted, x.host_user,
-   x.host_team, x.host_capabilities, x.own_team_manage,
-   x.owner_team_id IS NOT NULL AND EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id
-    LEFT JOIN team_rights AS r ON r.id = c.host_id AND r.team_id = x.owner_team_id
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, x.owner_team_id, x.account_id, x.host_id, x.host_user,
-     x.host_team, other.id, other.configured_capabilities, NULL, r.manage)),
-   x.host_manage,
-   EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id LEFT JOIN host_rights AS r ON r.id = c.host_id
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, NULL, x.account_id, x.host_id, x.host_user, x.host_team, other.id,
-     other.configured_capabilities, r.manage, NULL)))
+   x.host_team, x.host_capabilities, x.own_team_manage, x.host_manage)
   AND (NOT workspace_set OR workspace_tunnel_management_decision(actor, workspace_team, x.id, x.account_id, x.owner_team_id,
-   x.access_mode, x.host_user, x.host_team, x.host_capabilities, x.ws_team_manage,
-   workspace_team IS NOT NULL AND EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id
-    LEFT JOIN team_rights AS r ON r.id = c.host_id AND r.team_id = workspace_team
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, workspace_team, x.account_id, x.host_id, x.host_user,
-     x.host_team, other.id, other.configured_capabilities, NULL, r.manage))))
+   x.access_mode, x.host_user, x.host_team, x.host_capabilities, x.ws_team_manage))
  LIMIT row_limit;
-$$;
+$function$;
 -- +goose StatementEnd
 
 -- +goose Down
@@ -205,26 +198,31 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.workspace_tunnel_management_allowed(actor text, team text, tunnel text) RETURNS boolean
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.workspace_tunnel_management_allowed(actor text, team text, tunnel text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  SELECT EXISTS(SELECT 1 FROM tunnels t JOIN user_machines m ON m.id=t.created_by_host_id WHERE t.id=tunnel
   AND workspace_tunnel_management_decision(actor, team, t.id, t.account_id, t.owner_team_id, t.access_mode, m.user_id, m.owner_team_id,
-   m.configured_capabilities, CASE WHEN team IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, team, m.id, 'tunnel_manage') END,
-   CASE WHEN team IS NOT NULL THEN tunnel_connectors_blocked(actor, team, t.id) END));
-$$;
+   m.configured_capabilities, CASE WHEN team IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, team, m.id, 'tunnel_manage') END));
+$function$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.tunnel_management_allowed(actor text, tunnel text) RETURNS boolean
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.tunnel_management_allowed(actor text, tunnel text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  SELECT EXISTS(SELECT 1 FROM tunnels t JOIN user_machines m ON m.id=t.created_by_host_id WHERE t.id=tunnel
   AND tunnel_management_decision(actor, t.id, t.account_id, t.owner_team_id, t.access_mode, t.deleted_at IS NOT NULL, m.user_id, m.owner_team_id,
    m.configured_capabilities,
    CASE WHEN t.owner_team_id IS NOT NULL THEN workspace_publisher_host_capability_allowed(actor, t.owner_team_id, m.id, 'tunnel_manage') END,
-   CASE WHEN t.owner_team_id IS NOT NULL THEN tunnel_connectors_blocked(actor, t.owner_team_id, t.id) END,
-   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN machine_capability_allowed(actor, m.id, 'tunnel_manage') END,
-   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN tunnel_connectors_blocked(actor, NULL, t.id) END));
-$$;
+   CASE WHEN t.owner_team_id IS NULL AND t.access_mode IN ('private','team') THEN machine_capability_allowed(actor, m.id, 'tunnel_manage') END));
+$function$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
@@ -291,9 +289,12 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION paperboat.manageable_tunnel_ids(actor text, workspace_set boolean, workspace_team text, q text, state text, owner text,
-    machine text, after_created_at timestamptz, after_id text, row_limit integer) RETURNS SETOF text
-LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
+CREATE OR REPLACE FUNCTION paperboat.manageable_tunnel_ids(actor text, workspace_set boolean, workspace_team text, q text, state text, owner text, machine text, after_created_at timestamp with time zone, after_id text, row_limit integer)
+ RETURNS SETOF text
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'paperboat', 'pg_catalog'
+AS $function$
  WITH rules AS (
    -- The allow rules for tunnel_manage in the account's teams whose subject may be the account (any role: a superset).
    SELECT tm.team_id, r.policy_id, r.target_kind, r.target_id FROM team_members AS tm
@@ -323,13 +324,10 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
     AND (q='' OR position(lower(q) in lower(t.id||' '||t.name||' '||t.stable_endpoint||' '||t.created_by_host_id))>0)
     AND ((state='' AND t.desired_state<>'deleted') OR t.desired_state=state)
     AND (owner='' OR (owner='mine' AND t.account_id=actor) OR (owner='shared' AND t.account_id<>actor) OR t.account_id=owner)
-    AND (machine='' OR t.created_by_host_id=machine OR EXISTS(SELECT 1 FROM tunnel_connectors AS c
-      WHERE c.tunnel_id=t.id AND c.host_id=machine AND c.revoked_at IS NULL))
+    AND (machine='' OR t.created_by_host_id=machine)
     AND (after_created_at IS NULL OR (t.created_at, t.id) < (after_created_at, after_id))
- ), connectors AS MATERIALIZED (
-  SELECT c.tunnel_id, c.host_id FROM tunnel_connectors AS c WHERE c.tunnel_id IN (SELECT t.id FROM candidates AS t) AND c.revoked_at IS NULL
  ), used AS MATERIALIZED (
-  SELECT m.* FROM user_machines AS m WHERE m.id IN (SELECT t.created_by_host_id FROM candidates AS t UNION SELECT c.host_id FROM connectors AS c)
+  SELECT m.* FROM user_machines AS m WHERE m.id IN (SELECT t.created_by_host_id FROM candidates AS t)
  ), host_rights AS MATERIALIZED (
   SELECT m.id, machine_capability_allowed(actor, m.id, 'tunnel_manage') AS manage FROM used AS m
  ), team_rights AS MATERIALIZED (
@@ -338,7 +336,7 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
    UNION SELECT workspace_team WHERE workspace_team IS NOT NULL) AS t
  )
  -- Newest first, decided one row at a time until the page is full (OFFSET 0 keeps the order below the filter);
- -- the connector checks run only for the rows that get that far.
+ -- the permission checks run only for the rows that get that far.
  SELECT x.id FROM (
   SELECT t.id, t.account_id, t.owner_team_id, t.access_mode, t.deleted_at IS NOT NULL AS deleted, m.id AS host_id,
    m.user_id AS host_user, m.owner_team_id AS host_team, m.configured_capabilities AS host_capabilities,
@@ -350,22 +348,10 @@ LANGUAGE sql STABLE SET search_path TO 'paperboat','pg_catalog' AS $$
   ORDER BY t.created_at DESC, t.id DESC OFFSET 0
  ) AS x
  WHERE tunnel_management_decision(actor, x.id, x.account_id, x.owner_team_id, x.access_mode, x.deleted, x.host_user,
-   x.host_team, x.host_capabilities, x.own_team_manage,
-   x.owner_team_id IS NOT NULL AND EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id
-    LEFT JOIN team_rights AS r ON r.id = c.host_id AND r.team_id = x.owner_team_id
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, x.owner_team_id, x.account_id, x.host_id, x.host_user,
-     x.host_team, other.id, other.configured_capabilities, NULL, r.manage)),
-   x.host_manage,
-   EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id LEFT JOIN host_rights AS r ON r.id = c.host_id
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, NULL, x.account_id, x.host_id, x.host_user, x.host_team, other.id,
-     other.configured_capabilities, r.manage, NULL)))
+   x.host_team, x.host_capabilities, x.own_team_manage, x.host_manage)
   AND (NOT workspace_set OR workspace_tunnel_management_decision(actor, workspace_team, x.id, x.account_id, x.owner_team_id,
-   x.access_mode, x.host_user, x.host_team, x.host_capabilities, x.ws_team_manage,
-   workspace_team IS NOT NULL AND EXISTS(SELECT 1 FROM connectors AS c LEFT JOIN used AS other ON other.id = c.host_id
-    LEFT JOIN team_rights AS r ON r.id = c.host_id AND r.team_id = workspace_team
-    WHERE c.tunnel_id = x.id AND tunnel_connector_blocks(actor, workspace_team, x.account_id, x.host_id, x.host_user,
-     x.host_team, other.id, other.configured_capabilities, NULL, r.manage))))
+   x.access_mode, x.host_user, x.host_team, x.host_capabilities, x.ws_team_manage))
  LIMIT row_limit;
-$$;
+$function$;
 -- +goose StatementEnd
 
