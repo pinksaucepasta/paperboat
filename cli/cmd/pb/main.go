@@ -767,20 +767,7 @@ var newTransferCommandClient = func(ctx context.Context, target *resolver.FileTr
 	if err != nil {
 		return nil, nil, err
 	}
-	deadline := parseAuthExpiry(target.Auth.ExpiresAt)
-	lease, err := local.PrepareFileTransfer(ctx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: operationID, Credential: target.Auth.Token, AccessSessionID: target.Auth.ResourceID, Deadline: deadline, MaximumBytes: uint64(target.Policy.MaxFileBytes)})
-	if err != nil {
-		return nil, nil, err
-	}
-	client, err := filetransfer.NewNativeClient(target.Endpoint, filetransfer.Auth{Token: target.Auth.Token, ExpiresAt: deadline}, filetransfer.Binding{SourceMachineID: target.SourceMachineID, DestinationMachineID: target.DestinationMachineID, InitiatingUserID: target.InitiatingUserID}, lease.OpenTransferStream)
-	if err != nil {
-		_ = lease.Close()
-		return nil, nil, err
-	}
-	if target.Policy.DeliveryTimeoutSeconds > 0 {
-		client.DeliveryTimeout = time.Duration(target.Policy.DeliveryTimeoutSeconds) * time.Second
-	}
-	return client, lease, nil
+	return openNativeFileTransfer(ctx, local, destination.ID, destination.EnvironmentID, uint64(destination.InstallationGeneration), target, operationID)
 }
 
 func localFileTransferSenderFromEnvironment() (*filetransfer.LocalSender, error) {
@@ -820,18 +807,24 @@ func nativeFileTransferClient(ctx context.Context, local *localapi.Client, targe
 		// Connecting a computer to itself: the files are already there, so there is nothing to transfer.
 		return nil, nil, nil
 	}
-	deadline := parseAuthExpiry(target.FileTransfer.Auth.ExpiresAt)
-	lease, err := local.PrepareFileTransfer(ctx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: target.MachineID, EnvironmentID: target.Terminal.EnvironmentID, MachineGeneration: target.MachineGeneration, OperationID: operationID, Credential: target.FileTransfer.Auth.Token, AccessSessionID: target.FileTransfer.Auth.ResourceID, Deadline: deadline, MaximumBytes: uint64(target.FileTransfer.Policy.MaxFileBytes)})
+	return openNativeFileTransfer(ctx, local, target.MachineID, target.Terminal.EnvironmentID, target.MachineGeneration, target.FileTransfer, operationID)
+}
+
+// openNativeFileTransfer is the one way pb connect and the transfer commands lease a daemon stream and build
+// the native client over it.
+func openNativeFileTransfer(ctx context.Context, local *localapi.Client, machineID, environmentID string, generation uint64, target *resolver.FileTransferTarget, operationID string) (*filetransfer.NativeClient, *localapi.FileTransferLease, error) {
+	deadline := parseAuthExpiry(target.Auth.ExpiresAt)
+	lease, err := local.PrepareFileTransfer(ctx, fileTransferLeaseRequest(machineID, environmentID, generation, operationID, target.Auth.Token, target.Auth.ResourceID, deadline, target.Policy, api.TransferDeclaration{}))
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := filetransfer.NewNativeClient(target.FileTransfer.Endpoint, filetransfer.Auth{Token: target.FileTransfer.Auth.Token, ExpiresAt: deadline}, filetransfer.Binding{SourceMachineID: target.FileTransfer.SourceMachineID, DestinationMachineID: target.FileTransfer.DestinationMachineID, InitiatingUserID: target.FileTransfer.InitiatingUserID}, lease.OpenTransferStream)
+	client, err := filetransfer.NewNativeClient(target.Endpoint, filetransfer.Auth{Token: target.Auth.Token, ExpiresAt: deadline}, filetransfer.Binding{SourceMachineID: target.SourceMachineID, DestinationMachineID: target.DestinationMachineID, InitiatingUserID: target.InitiatingUserID}, lease.OpenTransferStream)
 	if err != nil {
 		_ = lease.Close()
 		return nil, nil, err
 	}
-	if target.FileTransfer.Policy.DeliveryTimeoutSeconds > 0 {
-		client.DeliveryTimeout = time.Duration(target.FileTransfer.Policy.DeliveryTimeoutSeconds) * time.Second
+	if target.Policy.DeliveryTimeoutSeconds > 0 {
+		client.DeliveryTimeout = time.Duration(target.Policy.DeliveryTimeoutSeconds) * time.Second
 	}
 	return client, lease, nil
 }

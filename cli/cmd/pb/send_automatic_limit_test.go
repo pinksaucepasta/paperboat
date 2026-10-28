@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
@@ -50,10 +51,10 @@ func asLimit(err error, target **filetransfer.LimitError) bool {
 // 500 MB to 2 GB was cut by the sender's own daemon although the server and destination accepted it.
 func TestTransferLeaseCoversTheDeclaredTotal(t *testing.T) {
 	policy := api.FileTransferPolicy{MaxFileBytes: 50 << 20, MaxBatchBytes: 500 << 20}
-	if got := transferLeaseBytes(policy, api.TransferDeclaration{Mode: "automatic", Bytes: 1_500_000_000}); got < 1_500_000_000 {
+	if got := fileTransferLeaseRequest("m", "e", 1, "o", "t", "s", time.Time{}, policy, api.TransferDeclaration{Mode: "automatic", Bytes: 1_500_000_000}).MaximumBytes; got < 1_500_000_000 {
 		t.Fatalf("lease %d bytes for a 1.5 GB declared send", got)
 	}
-	if got := transferLeaseBytes(policy, api.TransferDeclaration{}); got < 50<<20 || got > 51<<20 {
+	if got := fileTransferLeaseRequest("m", "e", 1, "o", "t", "s", time.Time{}, policy, api.TransferDeclaration{}).MaximumBytes; got < 50<<20 || got > 51<<20 {
 		t.Fatalf("lease %d bytes for an undeclared send, want the policy cap", got)
 	}
 }

@@ -225,7 +225,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				if current.Endpoint != descriptor.Endpoint || current.SourceMachineID != descriptor.SourceMachineID || current.DestinationMachineID != descriptor.DestinationMachineID || current.InitiatingUserID != descriptor.InitiatingUserID || current.Policy != descriptor.Policy || current.Auth.Method != "bearer" || current.Auth.Token == "" || !current.Auth.ExpiresAt.After(serverclock.Now()) {
 					return filetransfer.NativeGrant{}, errors.New("renewed transfer authorization changed the approved resource or policy")
 				}
-				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: current.Auth.Token, AccessSessionID: current.Auth.AccessSessionID, Deadline: current.Auth.ExpiresAt, MaximumBytes: transferLeaseBytes(current.Policy, declared), TransferMode: declared.Mode})
+				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(grantCtx, fileTransferLeaseRequest(destination.ID, destination.EnvironmentID, uint64(destination.InstallationGeneration), batchID, current.Auth.Token, current.Auth.AccessSessionID, current.Auth.ExpiresAt, current.Policy, declared))
 				if leaseErr != nil {
 					return filetransfer.NativeGrant{}, leaseErr
 				}
@@ -305,12 +305,13 @@ func batchTotal(sources []filetransfer.Source) int64 {
 	return total
 }
 
-// transferLeaseBytes bounds the daemon's stream lease for a send: the policy's per-file cap, or the declared
-// batch total when larger (an Automatic send up to 2,000,000,000 bytes under today's 50 MiB policy), plus room
-// for the transfer's own framing.
-func transferLeaseBytes(policy api.FileTransferPolicy, declared api.TransferDeclaration) uint64 {
+// fileTransferLeaseRequest is the one daemon lease request for every native transfer (pb send, pb connect,
+// transfer commands). The lease covers the policy bound (the Automatic policy sends max_file_bytes 0 and
+// automatic_max_batch_bytes) or the declared total when larger, plus room for the transfer's own framing,
+// capped at the daemon's 1 TiB lease limit so an Unlimited send of that size is not refused locally.
+func fileTransferLeaseRequest(machineID, environmentID string, generation uint64, operationID, credential, accessSessionID string, deadline time.Time, policy api.FileTransferPolicy, declared api.TransferDeclaration) localapi.FileTransferRequest {
 	limit, _ := policy.Bounds()
-	return uint64(max(limit, declared.Bytes)) + 1<<20
+	return localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: generation, OperationID: operationID, Credential: credential, AccessSessionID: accessSessionID, Deadline: deadline, MaximumBytes: min(uint64(max(limit, declared.Bytes))+1<<20, 1<<40), TransferMode: declared.Mode}
 }
 
 // unlimitedTransferLimits bound an Unlimited send only by file count: no Paperboat size limit applies.
