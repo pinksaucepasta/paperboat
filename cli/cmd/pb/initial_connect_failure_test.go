@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -55,6 +56,10 @@ func TestInitialConnectFailureProof(t *testing.T) {
 		{"stream and IO", errors.Join(stream, syscall.EIO), false},
 		{"local cancellation", errors.Join(local, context.Canceled), false},
 		{"deadline wrapper", &url.Error{Op: "dial", Err: context.DeadlineExceeded}, false},
+		// 30% loss on ltc-j1: the first API call's DNS lookup timed out and pb connect quit in 5 s.
+		{"DNS timeout", &url.Error{Op: "Get", Err: &net.OpError{Op: "dial", Err: &net.DNSError{Err: "i/o timeout", IsTimeout: true}}}, true},
+		{"DNS name not found", &net.OpError{Op: "dial", Err: &net.DNSError{Err: "no such host", IsNotFound: true}}, false},
+		{"read deadline", &net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}, true},
 		{"unknown text", &connectProofError{}, false},
 		{"cycle", cycle, false},
 		{"typed nil", typedNil, false},

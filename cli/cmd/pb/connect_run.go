@@ -237,7 +237,16 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 
 	sessionName := c.String("name")
 	sessionRef := c.String("session")
+	// The first server call gets the dial loop's retry budget: on a lossy link its DNS lookup can time out once.
 	target, resolvedMachine, err := resolveEnvironmentTargetWithMachine(c.Context, backend, machineRef)
+	for attempt := 1; err != nil && attempt <= d.cfg.Connect.DialRetries && retryableInitialConnectError(err); attempt++ {
+		select {
+		case <-c.Context.Done():
+			return errors.Join(c.Context.Err(), err)
+		case <-time.After(time.Duration(d.cfg.Connect.DialRetrySeconds) * time.Second):
+		}
+		target, resolvedMachine, err = resolveEnvironmentTargetWithMachine(c.Context, backend, machineRef)
+	}
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"syscall"
 
@@ -50,13 +51,17 @@ func retryableInitialConnectFailure(err error) (retryable bool) {
 			}
 			return owner.Unwrap() == nil || visit(owner.Unwrap(), owner.Status)
 		}
+		// A lookup that timed out on a lossy link is transient; a name that does not exist is not.
+		if dns, ok := current.(*net.DNSError); ok {
+			return dns.IsTimeout || dns.IsTemporary
+		}
 		switch current {
 		case context.Canceled, context.DeadlineExceeded:
 			return false
 		case tunnel.ErrPeerStreamOpen, tunnel.ErrTransportLost, localapi.ErrTransportUnavailable,
 			syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.ETIMEDOUT,
 			syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.EPIPE,
-			io.EOF, io.ErrUnexpectedEOF, io.ErrClosedPipe, net.ErrClosed:
+			io.EOF, io.ErrUnexpectedEOF, io.ErrClosedPipe, net.ErrClosed, os.ErrDeadlineExceeded:
 			return true
 		}
 		if joined, ok := current.(interface{ Unwrap() []error }); ok {
