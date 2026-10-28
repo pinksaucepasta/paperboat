@@ -462,6 +462,31 @@ func TestServeAuthorizesBeforeHandlerAndReplaysResult(t *testing.T) {
 	}
 }
 
+func TestTransientOperationFailureIsRetryable(t *testing.T) {
+	for code, want := range map[string]bool{"unavailable": true, "terminal_create_failed": true, "update_in_progress": true, "not_found_or_forbidden": false} {
+		server := testServer(t, func(context.Context, protocol.Frame) (Authorization, error) {
+			return Authorization{JournalBinding: "user:1"}, nil
+		}, func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+			return operation.Outcome{ErrorCode: code}
+		}, 2)
+		client, peer := net.Pipe()
+		go server.Serve(peer)
+		hello(t, client)
+		if err := protocol.WriteFrame(client, request("req_1", "op_00000001", json.RawMessage(`{"action":"attach"}`))); err != nil {
+			t.Fatal(err)
+		}
+		response, err := protocol.ReadFrame(client)
+		var payload struct {
+			Code      string `json:"code"`
+			Retryable bool   `json:"retryable"`
+		}
+		if err != nil || response.Type != "error" || json.Unmarshal(response.Payload, &payload) != nil || payload.Code != code || payload.Retryable != want {
+			t.Fatalf("code=%s response=%#v err=%v", code, response, err)
+		}
+		_ = client.Close()
+	}
+}
+
 func TestServerMetricsUseOnlyBoundedOperationLabels(t *testing.T) {
 	metrics, err := hosttelemetry.NewRegistry(hosttelemetry.DefaultDescriptors())
 	if err != nil {

@@ -104,7 +104,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		}
 		if outcome.ErrorCode != "" {
 			s.recordOperation(componentForCapability(frame.Capability), metricResult(outcome.ErrorCode, false))
-			_ = writer.write(errorFrameWithDetails(frame.RequestID, outcome.ErrorCode, "operation failed", false, outcome.Result))
+			_ = writer.write(errorFrameWithDetails(frame.RequestID, outcome.ErrorCode, "operation failed", transientOutcome(outcome.ErrorCode), outcome.Result))
 			return
 		}
 		stream, hasStream, streamErr := s.openStream(connectionCtx, authorization, frame, outcome, replay)
@@ -287,4 +287,15 @@ func metricResult(code string, replay bool) string {
 	default:
 		return "rejected"
 	}
+}
+
+// transientOutcome marks failures with no authoritative cause, such as a session owner restarting during an
+// update activation, so a reconnecting client keeps retrying instead of ending the terminal (mosh and
+// EternalTerminal retry until the server answers).
+func transientOutcome(code string) bool {
+	switch code {
+	case "unavailable", "terminal_create_failed", "update_in_progress", "deadline_exceeded":
+		return true
+	}
+	return false
 }
