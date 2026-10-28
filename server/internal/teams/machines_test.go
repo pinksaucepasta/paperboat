@@ -231,6 +231,22 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.machine_management_allowed($1,$2)`, owner, machine).Scan(&canManage); err != nil || !canManage {
 		t.Fatalf("current owner lacks control: %v %v", canManage, err)
 	}
+	// A tombstoned machine must not survive in the team view, even if its binding remains.
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, machine); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.Get(ctx, owner, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, binding := range view.Machines {
+		if binding.MachineID == machine {
+			t.Fatal("removed machine appeared in team view")
+		}
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=NULL,state='offline' WHERE id=$1`, machine); err != nil {
+		t.Fatal(err)
+	}
 	// Team deletion revokes team-owned enrollment, with no personal takeover.
 	current, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "delete", ExpectedGeneration: current.Generation, Action: "delete", Confirmation: team})
 	if err != nil {

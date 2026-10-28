@@ -3447,8 +3447,8 @@ LEFT JOIN control_config_sync_statuses status
   ON status.environment_id = environment.id
  AND status.assignment_id = assignment.id AND assignment.revoked_at IS NULL
 LEFT JOIN user_machines machine
-  ON machine.environment_id = environment.id AND machine.deleted_at IS NULL
-WHERE environment.owner_user_id = $1
+  ON machine.environment_id = environment.id
+WHERE machine.deleted_at IS NULL AND environment.owner_user_id = $1
   AND environment.desired_state <> 'revoked'
 ORDER BY lower(COALESCE(machine.alias, environment.id)), environment.id
 `

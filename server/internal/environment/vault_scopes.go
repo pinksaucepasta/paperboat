@@ -161,7 +161,7 @@ func authorizeVaultScopeTx(ctx context.Context, tx *db.Tx, account, kind, owner,
 		}
 		if machine != "" {
 			var id string
-			if err := tx.QueryRow(ctx, `SELECT id FROM user_machines WHERE id=$1 AND user_id=$2`, machine, account).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+			if err := tx.QueryRow(ctx, `SELECT id FROM user_machines WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL`, machine, account).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
 				return 0, ErrMachineNotFound
 			} else if err != nil {
 				return 0, err
@@ -761,7 +761,7 @@ func (s *Service) mutatePersonalVault(ctx context.Context, account string, reque
 		if personalEpoch >= MaxBrowserInteger {
 			return ErrVersionConflict
 		}
-		rows, err := tx.Query(ctx, `SELECT workspace_id,machine_id FROM environment_vault_scopes WHERE owner_kind='personal' AND owner_id=$1 ORDER BY workspace_id,machine_id`, account)
+		rows, err := tx.Query(ctx, `SELECT workspace_id,machine_id FROM environment_vault_scopes scope WHERE owner_kind='personal' AND owner_id=$1 AND (machine_id='' OR EXISTS (SELECT 1 FROM user_machines m WHERE m.id=scope.machine_id AND m.deleted_at IS NULL)) ORDER BY workspace_id,machine_id`, account)
 		if err != nil {
 			return err
 		}
@@ -920,7 +920,7 @@ func (s *Service) GetVaultPersonalScopes(ctx context.Context, account string) (V
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT workspace_id,machine_id,key_epoch,revision,document_id,writer_public FROM environment_vault_scopes WHERE owner_kind='personal' AND owner_id=$1 ORDER BY workspace_id,machine_id LIMIT 514`, account)
+		rows, err := tx.Query(ctx, `SELECT workspace_id,machine_id,key_epoch,revision,document_id,writer_public FROM environment_vault_scopes scope WHERE owner_kind='personal' AND owner_id=$1 AND (machine_id='' OR EXISTS (SELECT 1 FROM user_machines m WHERE m.id=scope.machine_id AND m.deleted_at IS NULL)) ORDER BY workspace_id,machine_id LIMIT 514`, account)
 		if err != nil {
 			return err
 		}

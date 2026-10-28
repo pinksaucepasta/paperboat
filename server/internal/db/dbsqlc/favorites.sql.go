@@ -60,8 +60,19 @@ func (q *Queries) DeleteUserFavorite(ctx context.Context, arg DeleteUserFavorite
 }
 
 const listUserFavorites = `-- name: ListUserFavorites :many
-SELECT user_id, kind, resource_id, created_at FROM user_favorites
-WHERE user_id = $1 ORDER BY created_at, kind, resource_id
+SELECT f.user_id, f.kind, f.resource_id, f.created_at FROM user_favorites f
+WHERE f.user_id = $1
+  AND NOT EXISTS (
+    SELECT 1 FROM user_machines m
+    WHERE m.deleted_at IS NOT NULL AND (
+      (f.kind = 'machine' AND f.resource_id = m.id)
+      OR (f.kind = 'session' AND EXISTS (
+        SELECT 1 FROM user_machine_terminal_sessions s
+        WHERE s.user_machine_id = m.id AND f.resource_id = m.id || ':' || s.id
+      ))
+    )
+  )
+ORDER BY f.created_at, f.kind, f.resource_id
 `
 
 func (q *Queries) ListUserFavorites(ctx context.Context, userID string) ([]UserFavorite, error) {
@@ -103,11 +114,12 @@ func (q *Queries) LockUserForFavorites(ctx context.Context, userID string) (stri
 const userOwnsFavoriteResource = `-- name: UserOwnsFavoriteResource :one
 SELECT EXISTS (
   SELECT 1 FROM user_machines m0
-  WHERE $1::text = 'machine' AND m0.user_id = $2 AND m0.id = $3
+  WHERE $1::text = 'machine' AND m0.user_id = $2 AND m0.id = $3 AND m0.deleted_at IS NULL
   UNION ALL
   SELECT 1 FROM user_machine_terminal_sessions s
   JOIN user_machines m ON m.id = s.user_machine_id
   WHERE $1::text = 'session' AND m.user_id = $2
+    AND m.deleted_at IS NULL AND s.deleted_at IS NULL
     AND (m.id || ':' || s.id) = $3
 )
 `

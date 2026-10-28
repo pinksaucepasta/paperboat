@@ -83,6 +83,7 @@ VALUES($1,'machine',$2,$3,true,1)`, team, sharedMachine, hostOwner); err != nil 
 			{`DELETE FROM paperboat.billing_workspaces WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
 			{`DELETE FROM paperboat.team_members WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
 			{`DELETE FROM paperboat.teams WHERE team_id=ANY($1::text[])`, []any{[]string{teamOne, teamTwo}}},
+			{`DELETE FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1`, []any{personalMachine}},
 			{`DELETE FROM paperboat.user_machines WHERE id=ANY($1::text[])`, []any{[]string{sharedMachine, personalMachine}}},
 			{`DELETE FROM paperboat.users WHERE id=ANY($1::text[])`, []any{[]string{actor, hostOwner}}},
 		} {
@@ -117,6 +118,24 @@ VALUES($1,'machine',$2,$3,true,1)`, team, sharedMachine, hostOwner); err != nil 
 	personalItems, err := service.List(personal, actor)
 	if err != nil || len(personalItems) != 1 || personalItems[0].ResourceID != personalMachine {
 		t.Fatalf("Personal favorites = %#v, %v", personalItems, err)
+	}
+	// Unscoped favorites must hide removed machines and their terminal sessions.
+	session := "fav_session_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_terminal_sessions (id,user_machine_id,owner_account,name,launch_cwd) VALUES ($1,$2,$3,'test','')`, session, personalMachine, actor); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Set(ctx, actor, "session", personalMachine+":"+session, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, personalMachine); err != nil {
+		t.Fatal(err)
+	}
+	items, err := service.List(ctx, actor)
+	if err != nil || len(items) != 1 || items[0].ResourceID != sharedMachine {
+		t.Fatalf("favorites after removal = %#v, %v", items, err)
+	}
+	if err := service.Set(ctx, actor, "machine", personalMachine, true); !errors.Is(err, ErrResourceNotFound) {
+		t.Fatalf("favorited removed machine: %v", err)
 	}
 	if err := service.Set(selectedTwo, actor, "machine", sharedMachine, false); !errors.Is(err, ErrResourceNotFound) {
 		t.Fatalf("other team removed a favorite outside its scope: %v", err)

@@ -2,6 +2,7 @@ package environment
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -70,6 +71,16 @@ func TestRemovingANeverDeliveredMachineLeavesOtherDeliveriesFencedOnlyWhereItRea
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Retained per-machine scopes must not be returned after the machine is removed.
+	exec(`UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, source)
+	service := NewService(store, nil, nil)
+	inventory, err := service.GetVaultPersonalScopes(ctx, account)
+	if err != nil || len(inventory.Scopes) != 0 {
+		t.Fatalf("removed machine ENV scopes = %+v, %v", inventory.Scopes, err)
+	}
+	if _, err := service.GetVaultScope(ctx, account, "workspace", "personal", account, source); !errors.Is(err, ErrMachineNotFound) {
+		t.Fatalf("removed machine ENV scope lookup: %v", err)
 	}
 	remove(junk)
 	if got := fence(); got != 1 {
