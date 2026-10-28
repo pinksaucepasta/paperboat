@@ -14,6 +14,7 @@ func TestLocalAPIFailureNamesWhichSideIsNotReady(t *testing.T) {
 	for _, test := range []struct{ code, want string }{
 		{"peer_transport_unavailable", "could not reach the target machine"},
 		{"peer_stream_unavailable", "did not open the connection"},
+		{"terminal_service_unavailable", "terminal service isn't responding"},
 		{"inventory_unavailable", "local Paperboat service is still starting"},
 		{"snapshot_unavailable", "local Paperboat service is still starting"},
 		{"file_transfer_unavailable", "(step: file_transfer_unavailable)"},
@@ -37,7 +38,7 @@ func TestLocalAPIFailureNeverEchoesACodeThatIsNotAnAuthoredConstant(t *testing.T
 
 // Agents get the same codes: a retryable "not ready yet" in which nothing ran, with the next step.
 func TestLocalAPIFailureJSONCarriesTheDaemonsCode(t *testing.T) {
-	for _, code := range []string{"peer_transport_unavailable", "peer_stream_unavailable", "inventory_unavailable"} {
+	for _, code := range []string{"peer_transport_unavailable", "peer_stream_unavailable", "terminal_service_unavailable", "inventory_unavailable"} {
 		err := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: code}
 		encoded := classifyCLIJSONError(err)
 		if encoded.Code != code || !encoded.Retryable || encoded.StateChanged != false || encoded.Recovery == "" || encoded.Category != "unavailable_retryable" {

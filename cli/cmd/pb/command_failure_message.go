@@ -283,6 +283,8 @@ func localAPIFailureMessage(code string) string {
 	switch code {
 	case "peer_transport_unavailable":
 		return "Paperboat could not reach the target machine. It may be offline, or its network or Paperboat service is not ready yet. Check that its Runtime is ready in `pb status`, then retry."
+	case "terminal_service_unavailable":
+		return "The machine's terminal service isn't responding. Retry; run `pb doctor` if this continues."
 	case "peer_stream_unavailable":
 		return "The target machine was reached but did not open the connection. Its Paperboat service may still be starting, or it has not accepted this machine yet. Retry in a minute; run `pb doctor` if this continues."
 	case "inventory_unavailable", "snapshot_unavailable", "observation_unavailable", "relay_inventory_unavailable":
@@ -301,6 +303,8 @@ func localAPIFailureRecovery(code string) (string, bool) {
 	switch code {
 	case "peer_transport_unavailable":
 		return "Check that the target machine's Runtime is ready in `pb status`, then retry.", true
+	case "terminal_service_unavailable":
+		return "Retry; run `pb doctor` if the target machine's terminal service still isn't responding.", true
 	case "peer_stream_unavailable":
 		return "Retry in a minute; run `pb doctor` if this continues.", true
 	case "inventory_unavailable", "snapshot_unavailable", "observation_unavailable", "relay_inventory_unavailable":

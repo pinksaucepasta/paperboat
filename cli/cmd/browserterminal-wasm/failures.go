@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 )
@@ -75,4 +77,37 @@ func innermostConnectError(err *terminalConnectError) *terminalConnectError {
 		err = inner
 	}
 	return err
+}
+
+// attachFailure projects an authenticated attach refusal into the worker state event.
+// Only authored codes and cursor values may cross to the page; never remote prose.
+func attachFailure(payload json.RawMessage, fromSequence uint64) error {
+	var serverError struct {
+		Code    string `json:"code"`
+		Details struct {
+			EarliestSequence uint64 `json:"earliest_sequence"`
+			LatestSequence   uint64 `json:"latest_sequence"`
+		} `json:"details"`
+	}
+	_ = json.Unmarshal(payload, &serverError)
+	switch serverError.Code {
+	case "unavailable", "deadline_exceeded", "update_in_progress":
+		return &terminalConnectError{state: "reconnecting", code: "terminal_service_unavailable", message: "The machine's terminal service isn't responding. Retrying."}
+	}
+	if serverError.Code == "credential_expired" {
+		return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "The short-lived terminal ticket expired. Requesting a fresh ticket."}
+	}
+	if serverError.Code == "replay_gap" && serverError.Details.EarliestSequence > fromSequence {
+		return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "Some earlier terminal output is no longer available.", details: map[string]any{
+			"earliest_sequence": strconv.FormatUint(serverError.Details.EarliestSequence, 10),
+			"latest_sequence":   strconv.FormatUint(serverError.Details.LatestSequence, 10),
+		}}
+	}
+	if serverError.Code == "not_found_or_forbidden" || serverError.Code == "stale_generation" {
+		return &terminalConnectError{state: "denied", code: serverError.Code, message: "You do not have access to this terminal. Ask its owner to restore access."}
+	}
+	if serverError.Code == "terminal_closed" || serverError.Code == "closed" {
+		return &terminalConnectError{state: "closed", code: serverError.Code, message: "This terminal has closed."}
+	}
+	return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine could not attach this terminal."}
 }

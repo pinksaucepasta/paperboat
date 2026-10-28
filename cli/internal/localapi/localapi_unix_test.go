@@ -1246,12 +1246,20 @@ func TestPeerStreamPreservesSafeEnvironmentLaunchDenial(t *testing.T) {
 	<-done
 }
 
+type terminalServiceUnavailable struct{}
+
+func (terminalServiceUnavailable) Error() string            { return "private detail must never escape" }
+func (terminalServiceUnavailable) LocalAPICode() string     { return "terminal_service_unavailable" }
+func (terminalServiceUnavailable) TransportRetryable() bool { return true }
+
 func TestPeerStreamServiceShutdownPreservesAuthoritativeFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, consumer, want string
 		cause, failure       error
 	}{
 		{"terminal service stops", "terminal", "peer_transport_unavailable", errLocalServiceStopping, errors.Join(context.Canceled, errLocalServiceStopping)},
+		{"reachable terminal service unavailable", "terminal", "terminal_service_unavailable", context.Canceled, terminalServiceUnavailable{}},
+		{"exec service unavailable", "exec", "peer_transport_unavailable", context.Canceled, terminalServiceUnavailable{}},
 		{"caller cancels", "terminal", "peer_stream_unavailable", context.Canceled, context.Canceled},
 		{"inner refusal during stop", "terminal", "peer_stream_unavailable", errLocalServiceStopping, errors.Join(context.Canceled, errors.New("refused"))},
 		{"exec uncertain stop", "exec", "peer_stream_unavailable", errLocalServiceStopping, errors.Join(context.Canceled, errLocalServiceStopping)},
@@ -1280,6 +1288,9 @@ func TestPeerStreamServiceShutdownPreservesAuthoritativeFailures(t *testing.T) {
 			}
 			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
 				t.Fatal(err)
+			}
+			if tc.want == "terminal_service_unavailable" && (!strings.Contains(response.Body.String(), "terminal service isn't responding") || strings.Contains(response.Body.String(), "private detail")) {
+				t.Fatal("terminal service refusal lost its safe explanation")
 			}
 			if response.Code != 503 || envelope.Code != tc.want {
 				t.Fatalf("status=%d code=%s", response.Code, envelope.Code)
@@ -1332,9 +1343,11 @@ func TestInspectorRequestGoesThroughTheDaemon(t *testing.T) {
 func TestPeerStreamFailureOnASignedOutMachineSaysAuthenticationRequired(t *testing.T) {
 	for _, signedOut := range []bool{true, false} {
 		server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "unused.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
-			Source:      snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
-			PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) { return nil, errors.New("no descriptor") }),
-			SignedOut:   func(context.Context) bool { return signedOut }})
+			Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+			PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+				return nil, errors.New("no descriptor")
+			}),
+			SignedOut: func(context.Context) bool { return signedOut }})
 		if err != nil {
 			t.Fatal(err)
 		}

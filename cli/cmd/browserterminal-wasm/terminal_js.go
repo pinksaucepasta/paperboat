@@ -201,30 +201,7 @@ func (connection *browserTerminal) connectAndServe() error {
 			return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
 		}
 		if response.Type == "error" {
-			var serverError struct {
-				Code    string `json:"code"`
-				Details struct {
-					EarliestSequence uint64 `json:"earliest_sequence"`
-					LatestSequence   uint64 `json:"latest_sequence"`
-				} `json:"details"`
-			}
-			_ = json.Unmarshal(response.Payload, &serverError)
-			if serverError.Code == "credential_expired" {
-				return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "The short-lived terminal ticket expired. Requesting a fresh ticket."}
-			}
-			if serverError.Code == "replay_gap" && serverError.Details.EarliestSequence > connection.config.FromSequence {
-				return &terminalConnectError{state: "reconnecting", code: serverError.Code, message: "Some earlier terminal output is no longer available.", details: map[string]any{
-					"earliest_sequence": strconv.FormatUint(serverError.Details.EarliestSequence, 10),
-					"latest_sequence":   strconv.FormatUint(serverError.Details.LatestSequence, 10),
-				}}
-			}
-			if serverError.Code == "not_found_or_forbidden" || serverError.Code == "stale_generation" {
-				return &terminalConnectError{state: "denied", code: serverError.Code, message: "You do not have access to this terminal. Ask its owner to restore access."}
-			}
-			if serverError.Code == "terminal_closed" || serverError.Code == "closed" {
-				return &terminalConnectError{state: "closed", code: serverError.Code, message: "This terminal has closed."}
-			}
-			return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine could not attach this terminal."}
+			return attachFailure(response.Payload, connection.config.FromSequence)
 		}
 		if response.Type != "response" || response.RequestID != requestID {
 			return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}

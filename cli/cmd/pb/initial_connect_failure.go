@@ -37,9 +37,9 @@ func retryableInitialConnectFailure(err error) (retryable bool) {
 			}
 		}
 		if owner, ok := current.(*localapi.RemoteError); ok {
-			// The local producer emits this code only for an explicitly typed
-			// native transport failure. Other 503s remain authoritative.
-			if owner.StatusCode != http.StatusServiceUnavailable || owner.Code != "peer_transport_unavailable" {
+			// These codes name transient native transport or terminal-service failures.
+			// Other 503s remain authoritative.
+			if owner.StatusCode != http.StatusServiceUnavailable || (owner.Code != "peer_transport_unavailable" && owner.Code != "terminal_service_unavailable") {
 				return false
 			}
 			return owner.Unwrap() == nil || visit(owner.Unwrap(), owner.StatusCode)

@@ -49,10 +49,16 @@ type helperRemoteError struct {
 	Details   *helperReplayGapDetails `json:"details,omitempty"`
 }
 
-// LocalAPICode exposes only safe, established launch-denial codes.
+// LocalAPICode exposes authored terminal failures without remote prose.
 func (e *helperRemoteError) LocalAPICode() string {
-	if e != nil && (e.Code == "environment_unavailable" || e.Code == "resource_limit") {
-		return e.Code
+	if e != nil {
+		switch e.Code {
+		case "environment_unavailable", "resource_limit":
+			return e.Code
+		case "unavailable", "deadline_exceeded":
+			// An authenticated terminal response proves the machine was reached.
+			return "terminal_service_unavailable"
+		}
 	}
 	return ""
 }

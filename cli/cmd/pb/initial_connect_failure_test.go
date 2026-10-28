@@ -42,6 +42,8 @@ func TestInitialConnectFailureProof(t *testing.T) {
 		{"ready API", fmt.Errorf("wrapper: %w", apiReady), true},
 		{"tunnel API", &api.APIError{Status: 503, Code: "tunnel_unavailable"}, true},
 		{"typed native transport response", fmt.Errorf("wrapper: %w", &localapi.RemoteError{StatusCode: 503, Code: "peer_transport_unavailable"}), true},
+		{"terminal service unavailable", &localapi.RemoteError{StatusCode: 503, Code: "terminal_service_unavailable"}, true},
+		{"terminal service plus refusal", errors.Join(&localapi.RemoteError{StatusCode: 503, Code: "terminal_service_unavailable"}, &api.APIError{Status: 403, Code: "permission_denied"}), false},
 		{"generic native response", &localapi.RemoteError{StatusCode: 503, Code: "peer_stream_unavailable"}, false},
 		{"contradictory native status", &localapi.RemoteError{StatusCode: 403, Code: "peer_transport_unavailable"}, false},
 		{"native response plus authorization refusal", errors.Join(&localapi.RemoteError{StatusCode: 503, Code: "peer_transport_unavailable"}, &api.APIError{Status: 403, Code: "permission_denied"}), false},

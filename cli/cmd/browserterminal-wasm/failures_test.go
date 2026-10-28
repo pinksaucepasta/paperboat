@@ -70,3 +70,20 @@ func TestAPlanLimitDenialInsideATransportFailureWins(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+// An authenticated refusal is service unavailability, not malformed terminal output.
+func TestAttachServiceFailureReconnectsWithoutProtocolError(t *testing.T) {
+	for _, tc := range []struct{ remote, state, code string }{
+		{"unavailable", "reconnecting", "terminal_service_unavailable"},
+		{"deadline_exceeded", "reconnecting", "terminal_service_unavailable"},
+		{"update_in_progress", "reconnecting", "terminal_service_unavailable"},
+		{"not_found_or_forbidden", "denied", "not_found_or_forbidden"},
+		{"PRIVATE_REMOTE_CODE", "transport-error", "protocol_error"},
+	} {
+		err := attachFailure([]byte(`{"code":"`+tc.remote+`","message":"PRIVATE_TERMINAL_DATA"}`), 0)
+		var got *terminalConnectError
+		if !errors.As(err, &got) || got.state != tc.state || got.code != tc.code || strings.Contains(got.message, "PRIVATE_TERMINAL_DATA") {
+			t.Fatalf("%s: %#v", tc.remote, got)
+		}
+	}
+}

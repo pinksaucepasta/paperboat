@@ -608,6 +608,11 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		var coded interface{ LocalAPICode() string }
 		if errors.As(err, &coded) {
 			switch coded.LocalAPICode() {
+			case "terminal_service_unavailable":
+				if value.Consumer == "terminal" {
+					code = "terminal_service_unavailable"
+					message = "The machine's terminal service isn't responding. Retry; run pb doctor if this continues."
+				}
 			case "exec_start_uncertain":
 				code = "exec_start_uncertain"
 				message = "remote execution start outcome is uncertain; check the execution status before starting it again"
