@@ -60,19 +60,18 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 		result, terminateErr = process.Terminate(terminateCtx, m.config.TerminationGrace)
 		cancel()
 	}
-	persistErr := m.stopOutputPersistence(session)
 	if deliveryErr == nil {
 		result, waitErr = process.Wait(context.Background())
 	}
 	closeErr := process.CloseIO()
 	observeSessionFailure(session, "delivery", classifySessionFailure("delivery", readErr))
 	observeSessionFailure(session, "command", classifySessionFailure("command", waitErr))
-	m.finishCapture(session, process, result, persistErr, errors.Join(persistErr, terminateErr, closeErr), deliveryErr, terminateErr)
+	m.finishCapture(session, process, result, errors.Join(terminateErr, closeErr), deliveryErr, terminateErr)
 }
 
 func (m *Manager) finishCapture(
 	session *managedSession, process PTYProcess, result pty.ExitResult,
-	persistErr, lifecycleErr, deliveryErr, terminateErr error,
+	lifecycleErr, deliveryErr, terminateErr error,
 ) {
 	session.operationMu.Lock()
 	defer session.operationMu.Unlock()
@@ -82,6 +81,10 @@ func (m *Manager) finishCapture(
 		observeSessionFailure(session, "lifecycle", lifecycleErr)
 		return
 	}
+	session.opMu.Unlock()
+	persistErr := m.stopOutputPersistence(session)
+	session.opMu.Lock()
+	lifecycleErr = errors.Join(lifecycleErr, persistErr)
 	session.persistMu.Lock()
 	session.persistErr = persistErr
 	session.persistMu.Unlock()
