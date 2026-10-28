@@ -27,7 +27,7 @@ func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expec
 	if err != nil {
 		return Snapshot{}, err
 	}
-	// Lock order: inputMu, then opMu. Ending or restarting a generation waits for an input write in
+	// Lock order: inputMu, operationMu, then opMu. Ending or restarting a generation waits for an input write in
 	// progress instead of interleaving with the journal it changes.
 	session.inputMu.Lock()
 	defer session.inputMu.Unlock()
@@ -187,7 +187,7 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	if err != nil {
 		return Snapshot{}, err
 	}
-	// Lock order: inputMu, then opMu. Ending or restarting a generation waits for an input write in
+	// Lock order: inputMu, operationMu, then opMu. Ending or restarting a generation waits for an input write in
 	// progress instead of interleaving with the journal it changes.
 	session.inputMu.Lock()
 	defer session.inputMu.Unlock()

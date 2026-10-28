@@ -5022,4 +5022,4 @@ Lane C F3-19: worker now emits state=reconnecting/code=terminal_service_unavaila
 
 2026-10-28 | Terminal lock repair | RED 1e2105ce/3b5685a7/f3ae40a3 on audit baseline 9ea8b767: PTY resize/signal/terminate, launch, metadata/clear/delete/restart writes, retire flush and bridge detach/retire block List/health; no known last-good lock behavior (read resize history e863c1b7..9ea8b767).
 State locks now exclude I/O; lifecycle/store operations stay ordered, resize has its own queue and verifies the process/generation before committing geometry; attach/detach queue sizing. References: ~/ref/tmux/window.c:1768 queues pane resize; ~/ref/EternalTerminal/src/terminal/TerminalServer.cpp:610 forwards terminal-info per session; BackedWriter.cpp:17 holds its writer mutex through I/O and is not a health-lock model.
-Focused session/bridge checks and vet PASS; full CLI CI pending; no release or device access.
+Additional RED 8ea7342d: queued old-generation resize and delayed old PTY output reached a replacement; queue generation/process identity now fence both. Focused session/bridge checks and vet PASS; full CLI CI pending; no release or device access.

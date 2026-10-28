@@ -104,9 +104,10 @@ type managedSession struct {
 	inputs           *InputJournal
 	process          PTYProcess
 	exit             *pty.ExitResult
-	sizes            *windowSizes // which attached window sets the PTY size (F3-17)
-	sizeApplying     atomic.Bool  // an asynchronous size application is queued or running
-	sizeDirty        atomic.Bool  // typing moved control to another window since the last application
+	sizes            *windowSizes  // which attached window sets the PTY size (F3-17)
+	sizeApplying     atomic.Bool   // an asynchronous size application is queued or running
+	sizeGeneration   atomic.Uint64 // generation that requested asynchronous sizing
+	sizeDirty        atomic.Bool   // window state changed since the last application
 	// persisting and persistedLatest are owned by persistMu: whether the group-commit writer
 	// still persists this session's output, and how far the store holds it.
 	persisting      bool
@@ -338,6 +339,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	}()
 	retained, _ := history.New(m.config.HistoryBytes)
 	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), sizes: newWindowSizes(), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	// This session remains private until launch and persistence succeed.
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	setSessionSupportReference(session, supportref.FromContext(ctx))

@@ -23,7 +23,7 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 			session.outputMu.Lock()
 			session.opMu.Lock()
 			state, _ := session.lifecycle.Snapshot()
-			if state == Running || state == Closing {
+			if session.process == process && (state == Running || state == Closing) {
 				session.modes.Consume(buffer[:n])
 				session.identification.Consume(buffer[:n])
 				event, appendErr := session.history.AppendBuffer(1, buffer[:n])
@@ -70,7 +70,10 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	m.finishCapture(session, process, result, persistErr, errors.Join(persistErr, terminateErr, closeErr), deliveryErr, terminateErr)
 }
 
-func (m *Manager) finishCapture(session *managedSession, process PTYProcess, result pty.ExitResult, persistErr, lifecycleErr, deliveryErr, terminateErr error) {
+func (m *Manager) finishCapture(
+	session *managedSession, process PTYProcess, result pty.ExitResult,
+	persistErr, lifecycleErr, deliveryErr, terminateErr error,
+) {
 	session.operationMu.Lock()
 	defer session.operationMu.Unlock()
 	session.opMu.Lock()
