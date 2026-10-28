@@ -117,6 +117,7 @@ type ReconnectingConn struct {
 	redial            atomic.Bool
 	probed            atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
 	probing           atomic.Bool
+	linkStalled       atomic.Bool
 	reconnect         ReconnectFunc
 	maxRetries        int
 	delay             time.Duration
@@ -198,6 +199,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {
+				c.linkStalled.Store(stalled)
 				if stalled {
 					c.notify(ReconnectStalled)
 					go c.probeStalled(stalledConn)
@@ -234,6 +236,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		c.recordCompression(conn)
 		if next := c.probed.Swap(nil); next != nil {
 			c.redial.Store(false)
+			c.linkStalled.Store(false)
 			c.setUnavailable(conn)
 			c.reason.Store("no reply from the machine")
 			conn = *next
@@ -509,7 +512,7 @@ func (c *ReconnectingConn) Redial() {
 	_ = conn.Close()
 }
 
-// probeStalled dials once while a link is silent, keeping the silent link: a machine whose carrier restarted
+// probeStalled dials, with backoff, while a link is silent, keeping the silent link: a machine whose carrier restarted
 // leaves it dead until TCP gives up (~2 min), while a network that comes back resumes it. A fresh link replaces
 // it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
 // (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210).
@@ -518,19 +521,32 @@ func (c *ReconnectingConn) probeStalled(stalled Conn) {
 		return
 	}
 	defer c.probing.Store(false)
-	next, err := c.reconnect(c.ctx)
-	if err != nil || next == nil {
-		return
+	still := func() bool {
+		c.mu.RLock()
+		current := c.current
+		c.mu.RUnlock()
+		return c.linkStalled.Load() && current == stalled && c.ctx.Err() == nil
 	}
-	c.mu.RLock()
-	current := c.current
-	c.mu.RUnlock()
-	if current != stalled || c.ctx.Err() != nil {
-		_ = next.Close()
-		return
+	backoff := reattach.Backoff(c.delay, 30*time.Second)
+	for attempt := 1; attempt <= c.maxRetries && still(); attempt++ {
+		next, err := c.reconnect(c.ctx)
+		var stop stopReconnectError
+		if errors.As(err, &stop) {
+			return
+		}
+		if err == nil && next != nil {
+			if !still() {
+				_ = next.Close()
+				return
+			}
+			c.probed.Store(&next)
+			_ = stalled.Close()
+			return
+		}
+		if reattach.Wait(c.ctx, backoff(attempt)) != nil {
+			return
+		}
 	}
-	c.probed.Store(&next)
-	_ = stalled.Close()
 }
 
 func (c *ReconnectingConn) Close() error {
