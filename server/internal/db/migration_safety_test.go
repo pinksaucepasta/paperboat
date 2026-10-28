@@ -62,7 +62,7 @@ func migrationSafetyErrors(body string) []string {
 		ddl = ddl || migrationDDL.MatchString(statement)
 		dml = dml || migrationDML.MatchString(strings.Join(strings.Fields(statement), " "))
 		for _, clause := range migrationAdd.Split(statement, -1)[1:] {
-			if migrationConstraint.MatchString("ADD "+clause) && !strings.Contains(clause, "NOT VALID") {
+			if migrationConstraint.MatchString("ADD "+clause) && !strings.Contains(strings.Join(strings.Fields(clause), " "), "NOT VALID") {
 				problems = append(problems, "add FOREIGN KEY/CHECK as NOT VALID; validate in a later migration")
 			}
 		}
@@ -112,7 +112,8 @@ func TestMigrationSafetySamples(t *testing.T) {
 		{"data only", `UPDATE t SET x=1; DELETE FROM t;`, 0},
 		{"ddl only", `-- +goose Up
 SET lock_timeout='5s'; ALTER TABLE t ADD COLUMN x int;`, 0},
-		{"constraints", `SET lock_timeout='5s'; ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (x) REFERENCES p(id) NOT VALID, ADD CONSTRAINT ck CHECK (x>0) NOT VALID;`, 0},
+		{"constraints", `SET lock_timeout='5s'; ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (x) REFERENCES p(id) NOT VALID, ADD CONSTRAINT ck CHECK (x>0) NOT
+VALID;`, 0},
 		{"validate later", `SET LOCAL lock_timeout='5s'; ALTER TABLE t VALIDATE CONSTRAINT ck;`, 0},
 		{"mixed", `SET lock_timeout='5s'; ALTER TABLE t DROP CONSTRAINT fk; DELETE FROM t;`, 1},
 		{"update alias", `SET lock_timeout='5s'; ALTER TABLE t ADD x int; UPDATE t AS target SET x=1;`, 1},
