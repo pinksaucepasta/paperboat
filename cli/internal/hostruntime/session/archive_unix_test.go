@@ -151,7 +151,7 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 	}
 
 	blockFlush.Store(true)
-	retireCtx, cancelRetire := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	retireCtx, cancelRetire := context.WithTimeout(context.Background(), time.Second)
 	retireDone := make(chan error, 1)
 	go func() { retireDone <- manager.Retire(retireCtx) }()
 	select {
@@ -161,6 +161,8 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 		release()
 		t.Fatal("retire retry did not reach the blocked output flush")
 	}
+	defer release()
+	assertListResponsive(t, manager)
 	if err := <-retireDone; !errors.Is(err, context.DeadlineExceeded) {
 		cancelRetire()
 		release()
