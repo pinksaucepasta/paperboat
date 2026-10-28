@@ -209,6 +209,15 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
   an unknown claim could be a restriction the client does not understand.
 - No stubs, placeholders or TODOs standing in for required behaviour.
 
+## Migrations on a live database
+
+- Follow [GitLab](https://docs.gitlab.com/development/migration_style_guide/) and [strong_migrations](https://github.com/ankane/strong_migrations): keep lock holding brief.
+- Never mix data DML (INSERT/UPDATE/DELETE backfills) with ACCESS EXCLUSIVE DDL (constraint changes, column type changes, etc.).
+- Add new foreign keys and CHECK constraints NOT VALID; VALIDATE in a later migration.
+- Prefer one table's DDL per migration; run data backfills in bounded batches.
+- Start DDL migrations with `SET lock_timeout = '5s'`; retry lock timeouts/deadlocks with bounded backoff.
+- Before touching tables whose triggers lock shared 443 names, take `SELECT pg_advisory_xact_lock(1885686843)` first.
+
 ## Testing
 
 - **Unit tests** for every change, in the package that owns the behaviour. They must not

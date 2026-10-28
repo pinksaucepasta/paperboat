@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
+	"hash/fnv"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"hash/fnv"
-
 	"github.com/pressly/goose/v3"
 )
 
@@ -22,8 +26,14 @@ func Migrate(ctx context.Context, d *DB) error {
 		return fmt.Errorf("ping direct database: %w", err)
 	}
 	// Migrations run on their own pool, on the direct DSN: the migration lock below is a session lock, and the
-	// request pool's statement and lock timeouts would cut index builds.
-	migrationPool, err := pgxpool.NewWithConfig(ctx, d.migrationConfig)
+	// request statement timeout would cut index builds. Lock waits stay short.
+	migrationConfig := d.migrationConfig.Copy()
+	// Reset on every checkout: a migration's SET must not change the next one's budget.
+	migrationConfig.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+		_, err := conn.Exec(ctx, `SET lock_timeout = '5s'`)
+		return err == nil
+	}
+	migrationPool, err := pgxpool.NewWithConfig(ctx, migrationConfig)
 	if err != nil {
 		return fmt.Errorf("open migration pool: %w", err)
 	}
@@ -35,10 +45,17 @@ func Migrate(ctx context.Context, d *DB) error {
 		return fmt.Errorf("open migration connection: %w", err)
 	}
 	defer conn.Close()
+	// Startup serialization may span the whole batch; only migration lock waits use 5s.
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = 0`); err != nil {
+		return fmt.Errorf("configure migration serialization: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey()); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
 	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey())
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = '5s'`); err != nil {
+		return fmt.Errorf("configure migration lock timeout: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS paperboat`); err != nil {
 		return fmt.Errorf("ensure paperboat schema: %w", err)
 	}
@@ -51,8 +68,27 @@ func Migrate(ctx context.Context, d *DB) error {
 	if err := checkBaselineHistory(ctx, migrations); err != nil {
 		return err
 	}
-	if err := goose.UpContext(ctx, migrations, migrationsDir); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+	for failures := 0; ; {
+		err := goose.UpByOneContext(ctx, migrations, migrationsDir)
+		if errors.Is(err, goose.ErrNoNextVersion) {
+			break
+		}
+		if err == nil {
+			failures = 0
+			continue
+		}
+		if !retryableMigrationError(err) || failures == 3 {
+			return fmt.Errorf("run migrations: %w", err)
+		}
+		delay := time.Second << failures
+		failures++
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("wait to retry migration: %w", ctx.Err())
+		case <-timer.C:
+		}
 	}
 	return nil
 }
@@ -107,4 +143,10 @@ func migrationLockKey() int64 {
 	hash := fnv.New64a()
 	_, _ = hash.Write([]byte("paperboat-server:migrations"))
 	return int64(hash.Sum64())
+}
+
+// Only retry errors for which PostgreSQL has aborted the migration transaction.
+func retryableMigrationError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "40P01")
 }
