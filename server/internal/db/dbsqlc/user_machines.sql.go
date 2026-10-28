@@ -5435,7 +5435,7 @@ func (q *Queries) RetryUserMachineTerminalSessionOperation(ctx context.Context, 
 const revokeUserMachine = `-- name: RevokeUserMachine :execrows
 UPDATE user_machines
 SET state = $1, online = false, seat_state = $2,
-    revoked_at = coalesce(revoked_at, now()),
+    revoked_at = coalesce(revoked_at, now()), deleted_at = coalesce(deleted_at, now()),
     disconnected_at = CASE WHEN $1 = 'disconnected' THEN now() ELSE disconnected_at END,
     updated_at = now(), version = version + 1
 WHERE id = $3 AND machine_management_allowed($4,id) AND deleted_at IS NULL

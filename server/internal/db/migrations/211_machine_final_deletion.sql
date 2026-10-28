@@ -170,7 +170,14 @@ CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state ON pa
 UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),online=false,seat_state='released'
  WHERE state='revoked';
 -- A disconnected machine (pb machine revoke) is retired too: revoked_at is what the live view tests.
-UPDATE paperboat.user_machines SET revoked_at=coalesce(disconnected_at,now()) WHERE state='disconnected' AND revoked_at IS NULL;
+UPDATE paperboat.user_machines SET revoked_at=coalesce(revoked_at,disconnected_at,now()),
+ deleted_at=coalesce(deleted_at,disconnected_at,now()) WHERE state='disconnected';
+-- Existing removed machines must enter the same durable delivery path.
+UPDATE paperboat.user_machine_access_sessions s
+ SET state='revoked',revoked_at=coalesce(s.revoked_at,now()),
+ revocation_reason=coalesce(s.revocation_reason,'user_machine_deleted'),updated_at=now()
+ FROM paperboat.user_machines m WHERE m.id=s.user_machine_id AND s.state='active'
+ AND (m.deleted_at IS NOT NULL OR m.revoked_at IS NOT NULL);
 ALTER TABLE paperboat.user_machines ADD CONSTRAINT user_machines_revoked_tombstone
  CHECK(state<>'revoked' OR deleted_at IS NOT NULL);
 -- The one definition of a live machine; every listing reads this view. A later migration that adds a

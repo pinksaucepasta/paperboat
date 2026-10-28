@@ -3119,8 +3119,8 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	blocked, err := service.ExecDescriptor(ctx, userID, machineID, machineID, "cli_exec_1", "operation_exec_revoked_"+suffix, false)
-	if !errors.Is(err, ErrMachineCapabilityUnavailable) || blocked.Auth != nil || blocked.OperationID != "" {
-		t.Fatalf("disconnected owned machine must return capability unavailable without issuing authority: err=%v credential=%t operation=%t", err, blocked.Auth != nil, blocked.OperationID != "")
+	if !errors.Is(err, ErrNotFound) || blocked.Auth != nil || blocked.OperationID != "" {
+		t.Fatalf("removed machine must be absent without issuing authority: err=%v credential=%t operation=%t", err, blocked.Auth != nil, blocked.OperationID != "")
 	}
 }
 
@@ -3341,8 +3341,12 @@ WHERE e.id=$1`, environmentID).Scan(&environmentState, &helperState, &enrollment
 	if err := service.RetryPendingRevocations(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SQL().QueryRowContext(ctx, `SELECT helper_revoked_at IS NOT NULL FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, userMachineID).Scan(&propagated); err != nil {
-		t.Fatal(err)
+	var remaining int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT
+ (SELECT count(*) FROM paperboat.user_machines WHERE id=$1) +
+ (SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1) +
+ (SELECT count(*) FROM paperboat.control_environments WHERE id=$2)`, userMachineID, environmentID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("delivered machine, session and environment rows remaining=%d: %v", remaining, err)
 	}
 	fixtureRevocations := 0
 	for _, revocation := range issuer.revocations {
@@ -3350,8 +3354,8 @@ WHERE e.id=$1`, environmentID).Scan(&environmentState, &helperState, &enrollment
 			fixtureRevocations++
 		}
 	}
-	if !propagated || fixtureRevocations != 2 {
-		t.Fatalf("propagated=%v fixture revocations=%d, want true and 2", propagated, fixtureRevocations)
+	if fixtureRevocations != 2 {
+		t.Fatalf("fixture revocations=%d, want 2", fixtureRevocations)
 	}
 }
 

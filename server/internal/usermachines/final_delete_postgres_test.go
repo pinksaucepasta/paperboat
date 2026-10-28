@@ -10,7 +10,7 @@ import (
 )
 
 func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
-	for _, action := range []string{"delete", "revoke"} {
+	for _, action := range []string{"delete", "revoke", "disconnect"} {
 		t.Run(action, func(t *testing.T) {
 			store := testStore(t)
 			ctx := context.Background()
@@ -46,6 +46,11 @@ func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
 			if action == "revoke" {
 				exec(`UPDATE user_machines SET state='revoked' WHERE id=$1`, machine)
 				removalEvent = "user_machine.revoked"
+			} else if action == "disconnect" {
+				if err := service.Disconnect(ctx, owner, machine); err == nil {
+					t.Fatal("offline revocation unexpectedly succeeded")
+				}
+				removalEvent = "user_machine.disconnected"
 			} else if err := service.Delete(ctx, owner, machine); err == nil {
 				t.Fatal("offline revocation unexpectedly succeeded")
 			}
