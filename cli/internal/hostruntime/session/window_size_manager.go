@@ -14,6 +14,8 @@ func (m *Manager) registerWindowLocked(session *managedSession, participant Part
 }
 
 func (m *Manager) applyWindowSizeObservedLocked(session *managedSession) {
+	controller, _, _ := session.sizes.controller()
+	session.fanout.SetController(controller)
 	_, generation := session.lifecycle.Snapshot()
 	session.sizeGeneration.Store(generation)
 	session.sizeDirty.Store(true)
