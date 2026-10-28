@@ -1032,7 +1032,7 @@ SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
   coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
 FROM user_machine_access_sessions
 WHERE state = 'revoked' AND helper_revoked_at IS NULL
-ORDER BY created_at, id LIMIT 100;
+ORDER BY created_at, id;
 
 -- name: FinalDeleteUserMachines :many
 DELETE FROM user_machines m

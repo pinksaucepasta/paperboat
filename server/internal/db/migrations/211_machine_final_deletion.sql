@@ -1,4 +1,7 @@
 -- +goose Up
+-- The pending-work lookup and FK cascade both need every session state.
+CREATE INDEX user_machine_access_sessions_machine_cleanup ON paperboat.user_machine_access_sessions(user_machine_id);
+CREATE INDEX user_machines_final_delete ON paperboat.user_machines(deleted_at,id) WHERE deleted_at IS NOT NULL;
 -- History owns its machine identity; operational state belongs to the machine.
 ALTER TABLE paperboat.team_inbox_requests
     ADD COLUMN source_machine_name text NOT NULL DEFAULT '',
@@ -64,9 +67,6 @@ END $$;
 ALTER TABLE paperboat.account_e2ee_keys DROP CONSTRAINT account_e2ee_keys_cli_client_session_id_fkey;
 ALTER TABLE paperboat.account_e2ee_keys ADD CONSTRAINT account_e2ee_keys_cli_client_session_id_fkey
     FOREIGN KEY (cli_client_session_id) REFERENCES paperboat.cli_client_sessions(id) ON DELETE CASCADE;
-ALTER TABLE paperboat.peer_endpoint_certificates DROP CONSTRAINT peer_endpoint_certificates_key_id_fkey;
-ALTER TABLE paperboat.peer_endpoint_certificates ADD CONSTRAINT peer_endpoint_certificates_key_id_fkey
-    FOREIGN KEY (key_id) REFERENCES paperboat.account_e2ee_keys(key_id) ON DELETE CASCADE;
 ALTER TABLE paperboat.peer_endpoint_certificate_operations DROP CONSTRAINT peer_endpoint_certificate_operatio_certificate_fingerprint_fkey;
 ALTER TABLE paperboat.peer_endpoint_certificate_operations ADD CONSTRAINT peer_endpoint_certificate_operatio_certificate_fingerprint_fkey
     FOREIGN KEY (certificate_fingerprint) REFERENCES paperboat.peer_endpoint_certificates(fingerprint) ON DELETE CASCADE;
@@ -136,6 +136,12 @@ BEGIN
  DELETE FROM user_favorites WHERE (kind='machine' AND resource_id=OLD.id)
   OR (kind='session' AND resource_id IN (SELECT id FROM user_machine_terminal_sessions WHERE user_machine_id=OLD.id))
   OR (kind='preview' AND resource_id IN (SELECT id FROM preview_leases WHERE owner_machine_id=OLD.id));
+ -- Endpoint certificates have independent signers (migration 11), so they
+ -- belong to the enrolled endpoint, never to its ENV signing key.
+ DELETE FROM peer_endpoint_enrollment_requests WHERE endpoint_id=OLD.id
+  OR endpoint_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=OLD.id);
+ DELETE FROM peer_endpoint_certificates WHERE endpoint_id=OLD.id
+  OR endpoint_id IN (SELECT id FROM cli_client_sessions WHERE user_machine_id=OLD.id);
  DELETE FROM environment_vault_personal_rotation_scopes WHERE machine_id=OLD.id;
  DELETE FROM environment_vault_scopes WHERE machine_id=OLD.id;
  DELETE FROM control_config_repository_access_operations WHERE machine_id=OLD.id;
