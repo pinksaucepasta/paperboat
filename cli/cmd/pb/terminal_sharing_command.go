@@ -253,7 +253,7 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	}
 	var viewOnly atomic.Bool
 	viewOnly.Store(info.Terminal.ViewOnly())
-	conn := tunnel.NewReconnectingConn(c.Context(), initial, d.cfg.Connect.DialRetries, time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(ctx context.Context) (tunnel.Conn, error) {
+	conn := tunnel.NewReconnectingConn(c.Context(), initial, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(ctx context.Context) (tunnel.Conn, error) {
 		fresh, err := resolve(ctx)
 		if err != nil {
 			var apiErr *api.APIError

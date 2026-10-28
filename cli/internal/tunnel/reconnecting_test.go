@@ -410,3 +410,24 @@ func TestReconnectingConnSaysWhyItReconnects(t *testing.T) {
 		t.Fatalf("requested reason=%q", reason)
 	}
 }
+
+// A held `pb connect` died about 2 min into a peer's update activation (lanei-8p, .7→.8): the six-attempt
+// budget was shared by every loss, and never refilled after a recovery. Each loss now gets the full budget.
+func TestReconnectingConnRefillsBudgetAfterRecovery(t *testing.T) {
+	first := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
+	second := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
+	last := &reconnectTestConn{Reader: bytes.NewReader([]byte("ok")), code: 0}
+	next := []Conn{second, last}
+	c := NewReconnectingConn(context.Background(), first, 1, 0, func(context.Context) (Conn, error) {
+		conn := next[0]
+		next = next[1:]
+		return conn, nil
+	})
+	got, _ := io.ReadAll(c)
+	if code, err := c.Wait(); err != nil || code != 0 || string(got) != "ok" {
+		t.Fatalf("code=%d err=%v output=%q", code, err, got)
+	}
+	if ReattachAttempts(0) != 0 || ReattachAttempts(6) != 24 {
+		t.Fatalf("ReattachAttempts = %d, %d", ReattachAttempts(0), ReattachAttempts(6))
+	}
+}

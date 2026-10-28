@@ -34,6 +34,10 @@ type TelemetryContext struct {
 }
 
 var ErrWriteUncertain = errors.New("terminal write outcome is uncertain")
+// ReattachAttempts is the per-loss budget of a held terminal: 2+4+8+16 s, then 30 s steps, about
+// 10 minutes, so a peer's update activation does not end the terminal. 0 keeps reconnect off.
+func ReattachAttempts(dialRetries int) int { return min(dialRetries, 1) * 24 }
+
 var ErrTransportLost = errors.New("terminal transport lost")
 
 // ErrLocalDaemonLost: the link to the Paperboat daemon on this computer broke (it restarted or stopped).
@@ -182,7 +186,6 @@ func NewObservedReconnectingConn(ctx context.Context, initial Conn, maxRetries i
 }
 
 func (c *ReconnectingConn) supervise(conn Conn) {
-	recovery := reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: reattach.Backoff(c.delay, 30*time.Second), Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
 	defer close(c.out)
 	lifetimeOutcome := "failure"
 	defer func() {
@@ -239,6 +242,9 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		c.setUnavailable(conn)
 		c.reason.Store(reconnectReason(err, requested))
 		c.notify(ReconnectStarted)
+		// Each loss gets the full budget, like EternalTerminal's per-disconnect pollReconnect loop
+		// (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210): a held terminal outlives many peer restarts.
+		recovery := reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: reattach.Backoff(c.delay, 30*time.Second), Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
 		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
 			attemptStarted := c.now()
 			next, dialErr := c.reconnect(dialCtx)

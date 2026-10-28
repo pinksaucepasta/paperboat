@@ -495,7 +495,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}
 	defer stopInbox()
 	var pastePolicy *paste.Policy
-	conn = tunnel.NewObservedReconnectingConn(ctx, conn, d.cfg.Connect.DialRetries, time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
+	conn = tunnel.NewObservedReconnectingConn(ctx, conn, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
 		freshCred, credErr := d.auth.Credential()
 		if credErr != nil {
 			return nil, credErr
