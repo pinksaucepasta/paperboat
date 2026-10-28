@@ -16,6 +16,8 @@ import (
 var (
 	ErrApprovalRequired  = errors.New("exact prepared update requires approval")
 	ErrPreparedCandidate = errors.New("prepared update is unavailable or invalid")
+	// ErrStagedPayloadConsumed: the staged payload is gone, as after the native install moved it.
+	ErrStagedPayloadConsumed = errors.New("prepared update payload was already moved by its activation")
 )
 
 // PreparedCandidate identifies the signed artifact, never its private staging path
@@ -221,6 +223,9 @@ func (m *Manager) verifyPrepared(ctx context.Context, j updateflow.Journal) erro
 	}
 	if j.StagedPath != m.config.BinaryStaged || j.CandidateID == "" || j.ArtifactPlatform != m.active.Platform || j.ArtifactArchitecture != m.active.Architecture {
 		return ErrPreparedCandidate
+	}
+	if stagedConsumed(j.StagedPath) {
+		return errors.Join(ErrPreparedCandidate, ErrStagedPayloadConsumed)
 	}
 	if err := safeRuntimeFile(j.StagedPath, m.config.OwnerUID, true); err != nil {
 		return errors.Join(ErrPreparedCandidate, err)

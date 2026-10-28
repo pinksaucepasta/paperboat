@@ -281,20 +281,27 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 		}
 		response.Transaction.ActiveVersion, response.Transaction.ActiveDigest, response.Transaction.ActiveLength = source.Version, source.SHA256, source.Length
 	}
-	if state.Stage == updateflow.StageAwaitingApproval {
-		candidate, candidateErr := s.currentManager().PreparedCandidate()
-		if candidateErr != nil {
-			return candidateErr
-		}
-		response.Candidate = &candidate
-	}
 	response.ActivationFailure = string(state.Failure)
+	var handoff *unixActivationHandoff
 	if s.config.StateRoot != "" {
-		handoff, err := readUnixHandoff(s.config.StateRoot)
-		if err != nil {
+		var err error
+		if handoff, err = readUnixHandoff(s.config.StateRoot); err != nil {
 			return ErrRecoveryState
 		}
 		response.Pending = handoff != nil
+	}
+	if state.Stage == updateflow.StageAwaitingApproval {
+		candidate, candidateErr := s.currentManager().PreparedCandidate()
+		// The approved activation moved this exact candidate's staged payload into place; its readiness probe
+		// reads this status, so that must not fail it (dadape rolled back .1→.2 on 170 candidate_changed probes).
+		// Any other verification failure, or a handoff for another candidate, still fails status.
+		consumedByActivation := handoff != nil && handoff.Candidate == state.CandidateVersion && errors.Is(candidateErr, workerupdate.ErrStagedPayloadConsumed)
+		if candidateErr != nil && !consumedByActivation {
+			return candidateErr
+		}
+		if candidateErr == nil {
+			response.Candidate = &candidate
+		}
 	}
 	return nil
 }
