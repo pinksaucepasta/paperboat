@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/activity"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
@@ -100,6 +103,13 @@ func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
 				if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE resource_id=$1 AND event_type=$2`, machine, event).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("%s audit count=%d: %v", event, count, err)
 				}
+			}
+			page, err := activity.New(store, config.Business{AuditRetentionFree: 24 * time.Hour}).List(ctx, owner, workspace.Scope{ID: "personal"}, activity.Query{MachineID: machine, Action: "user_machine.final_deleted"})
+			if err != nil || len(page.Items) != 1 {
+				t.Fatalf("final deletion missing from machine activity: %+v: %v", page, err)
+			}
+			if event := page.Items[0]; event.Machine == nil || event.Machine.ID != machine || event.Machine.Name != "renamed-host" || event.Target.Name != "renamed-host" {
+				t.Fatalf("final deletion lost machine identity: %+v", event)
 			}
 			if err := service.RetryPendingRevocations(ctx); err != nil {
 				t.Fatal(err)
