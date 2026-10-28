@@ -129,7 +129,7 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 		}
 	}
 	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		machines, err := tx.Queries().FinalDeleteUserMachines(ctx)
+		machines, err := tx.Queries().LockUserMachinesForFinalDeletion(ctx)
 		if err != nil {
 			return fmt.Errorf("final delete removed machines: %w", err)
 		}
@@ -138,6 +138,9 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 				EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
 				IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
 				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM user_machines WHERE id=$1`, machine.ID); err != nil {
+				return fmt.Errorf("final delete removed machine: %w", err)
 			}
 		}
 		return nil
