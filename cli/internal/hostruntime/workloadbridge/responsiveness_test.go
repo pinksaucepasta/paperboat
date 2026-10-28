@@ -19,7 +19,7 @@ type stalledDetachService struct {
 }
 
 func (s *stalledDetachService) DetachAllAttachments() error {
-	close(s.entered)
+	if s.entered == nil { return nil }; close(s.entered)
 	<-s.release
 	return nil
 }
