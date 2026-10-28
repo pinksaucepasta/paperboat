@@ -18,21 +18,32 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-// peerStreamOpenTimeout bounds one terminal stream open, like Tailscale's 10 s DERP connect
-// (~/ref/tailscale/derp/derphttp/derphttp_client.go:359); pb connect's dial budget retries it.
+// peerStreamOpenTimeout bounds one peer stream open (terminal, exec, SSH, config compare), like Tailscale's 10 s DERP connect
+// (~/ref/tailscale/derp/derphttp/derphttp_client.go:359); each caller's dial budget retries it.
 // On a 30% loss link an open hung ~110 s without it (ltc-j1, peer_stream transport_failed).
 const peerStreamOpenTimeout = 10 * time.Second
 
-type peerStreamOpenTimeoutError struct{ cause error }
+// An exec open that timed out may have started the command, so it reads as start-uncertain: pb exec
+// retries the same operation ID, which the host runs at most once, instead of reporting "not started".
+type peerStreamOpenTimeoutError struct {
+	cause error
+	exec  bool
+}
 
 func (e peerStreamOpenTimeoutError) Error() string {
-	return "the terminal stream to the machine did not open within 10 s"
+	return "the stream to the machine did not open within 10 s"
 }
 func (e peerStreamOpenTimeoutError) Unwrap() error            { return e.cause }
 func (e peerStreamOpenTimeoutError) TransportRetryable() bool { return true }
+func (e peerStreamOpenTimeoutError) LocalAPICode() string {
+	if e.exec {
+		return "exec_start_uncertain"
+	}
+	return ""
+}
 
 // dialWithin aborts a dial that has not returned after timeout; one that returns after the abort is closed.
-func dialWithin(timeout time.Duration, abort func(), dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
+func dialWithin(timeout time.Duration, exec bool, abort func(), dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
 	watchdog := time.AfterFunc(timeout, abort)
 	conn, err := dial()
 	if watchdog.Stop() {
@@ -41,7 +52,7 @@ func dialWithin(timeout time.Duration, abort func(), dial func() (tunnel.Conn, e
 	if err == nil {
 		_ = conn.Close()
 	}
-	return nil, peerStreamOpenTimeoutError{cause: err}
+	return nil, peerStreamOpenTimeoutError{cause: err, exec: exec}
 }
 
 // stopping ends when the daemon starts to stop, before it closes its transports.
@@ -94,11 +105,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 				return nil, ErrInvalidInventoryConfig
 			}
 		}
-		if request.Consumer == "terminal" {
-			remote, err = dialWithin(peerStreamOpenTimeout, staged.Abort, dial)
-		} else {
-			remote, err = dial()
-		}
+		remote, err = dialWithin(peerStreamOpenTimeout, request.Consumer == "exec", staged.Abort, dial)
 		if errors.Is(err, ErrInvalidInventoryConfig) {
 			staged.Abort()
 			return nil, ErrInvalidInventoryConfig

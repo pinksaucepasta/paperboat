@@ -14,7 +14,7 @@ import (
 func TestTerminalStreamOpenIsBoundedAndRetryable(t *testing.T) {
 	ctx, abort := context.WithCancel(context.Background())
 	started := time.Now()
-	_, err := dialWithin(20*time.Millisecond, abort, func() (tunnel.Conn, error) {
+	_, err := dialWithin(20*time.Millisecond, false, abort, func() (tunnel.Conn, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})
@@ -22,7 +22,13 @@ func TestTerminalStreamOpenIsBoundedAndRetryable(t *testing.T) {
 	if !errors.As(err, &retryable) || !retryable.TransportRetryable() || !errors.Is(err, context.Canceled) || time.Since(started) > 5*time.Second {
 		t.Fatalf("err=%v after %s", err, time.Since(started))
 	}
-	if _, err := dialWithin(time.Minute, func() { t.Fatal("aborted a quick dial") }, func() (tunnel.Conn, error) { return nil, errors.New("refused") }); err == nil || errors.As(err, &retryable) {
+	if _, err := dialWithin(time.Minute, false, func() { t.Fatal("aborted a quick dial") }, func() (tunnel.Conn, error) { return nil, errors.New("refused") }); err == nil || errors.As(err, &retryable) {
 		t.Fatalf("quick failure changed: %v", err)
+	}
+	execCtx, execAbort := context.WithCancel(context.Background())
+	_, err = dialWithin(20*time.Millisecond, true, execAbort, func() (tunnel.Conn, error) { <-execCtx.Done(); return nil, execCtx.Err() })
+	var coded interface{ LocalAPICode() string }
+	if !errors.As(err, &coded) || coded.LocalAPICode() != "exec_start_uncertain" {
+		t.Fatalf("a timed-out exec open must be start-uncertain: %v", err)
 	}
 }
