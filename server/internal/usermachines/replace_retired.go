@@ -52,7 +52,7 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 	if retired.OwnerTeamID.Valid != replacement.OwnerTeamID.Valid {
 		return nil // a personal record never replaces a team one
 	}
-	if err := s.removeRetiredMachineTx(ctx, tx, userID, retired, replacement.ID); err != nil {
+	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
 		return err
 	}
 	if err := s.auditReplacedTx(ctx, tx, userID, retired, replacement.ID); err != nil {
@@ -104,16 +104,6 @@ func isNumberedVariant(alias, name string) bool {
 	return false
 }
 
-// removeRetiredMachineTx removes a retired record through the normal removal: ENV fence, peer
-// authority, host-key claims, sessions and control credentials are released and its audit
-// history stays (the row is soft-deleted).
-func (s *Service) removeRetiredMachineTx(ctx context.Context, tx *db.Tx, userID string, retired dbsqlc.UserMachine, replacementID string) error {
-	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
-		return err
-	}
-	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: retired.ID, IdempotencyKey: "user_machine.deleted:" + retired.ID, Metadata: map[string]any{"replaced_by": replacementID}})
-}
-
 func (s *Service) auditReplacedTx(ctx context.Context, tx *db.Tx, userID string, retired dbsqlc.UserMachine, replacementID string) error {
 	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.replaced", ResourceType: "user_machine", ResourceID: replacementID, IdempotencyKey: "user_machine.replaced:" + retired.ID + ":" + replacementID, Metadata: map[string]any{"replaced_machine_id": retired.ID, "alias": retired.Alias}})
 }
@@ -161,7 +151,7 @@ func (s *Service) retireForFreshEnrollmentTx(ctx context.Context, tx *db.Tx, use
 	if err != nil {
 		return "", err
 	}
-	if err := s.removeRetiredMachineTx(ctx, tx, userID, retired, newID); err != nil {
+	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
 		return "", err
 	}
 	return hint, nil

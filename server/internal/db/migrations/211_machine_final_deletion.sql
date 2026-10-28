@@ -95,6 +95,28 @@ UPDATE paperboat.control_environments e SET machine_id=coalesce(
     (SELECT m.id FROM paperboat.user_machines m WHERE m.environment_id=e.id),e.id);
 -- Accounting must outlive environment cleanup as well as machine cleanup.
 ALTER TABLE paperboat.control_usage_counters DROP CONSTRAINT control_usage_counters_environment_id_fkey;
+-- Repository fencing counters belong to the repository and must survive, but
+-- their current machine lease and ephemeral operation responses do not.
+-- +goose StatementBegin
+CREATE FUNCTION paperboat.delete_machine_environment_operations() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO paperboat,pg_catalog AS $$
+BEGIN
+ UPDATE control_config_repository_lease_authority SET
+  lease_id=NULL,assignment_id=NULL,environment_id=NULL,machine_id=NULL,
+  installation_generation=NULL,base_remote_revision=NULL,operation_id=NULL,
+  acquired_at=NULL,expires_at=NULL,revoked_at=NULL,version=version+1,updated_at=now()
+ WHERE environment_id=OLD.id;
+ DELETE FROM control_config_repository_lease_operations WHERE environment_id=OLD.id;
+ DELETE FROM control_config_repository_access_operations WHERE environment_id=OLD.id;
+ DELETE FROM control_config_credentials WHERE environment_id=OLD.id;
+ DELETE FROM helper_identity_renewals WHERE environment_id=OLD.id;
+ DELETE FROM lazy_access_policies WHERE environment_id=OLD.id;
+ DELETE FROM user_machine_update_observations WHERE environment_id=OLD.id;
+ RETURN OLD;
+END $$;
+-- +goose StatementEnd
+CREATE TRIGGER control_environments_delete_operations BEFORE DELETE ON paperboat.control_environments
+    FOR EACH ROW EXECUTE FUNCTION paperboat.delete_machine_environment_operations();
 DELETE FROM paperboat.control_environments e WHERE NOT EXISTS (
     SELECT 1 FROM paperboat.user_machines m WHERE m.id=e.machine_id AND m.deleted_at IS NULL);
 ALTER TABLE paperboat.control_environments ADD CONSTRAINT control_environments_machine_id_fkey
