@@ -62,6 +62,7 @@ type Server struct {
 	workerMu          sync.Mutex
 	worker            string
 	epoch             uint64
+	workerDone        chan struct{} // custody cleanup in progress; guarded by workerMu
 }
 
 func (s *Server) Run(ctx context.Context) (resultErr error) {
@@ -135,13 +136,10 @@ func (s *Server) handler() http.Handler {
 			}
 			return
 		}
-		// Read-only calls do not need attachment custody. A stalled worker
-		// cleanup must not serialize health or terminal inventory behind it.
-		if mutatesRequest(r.URL.Path) {
-			if err := s.activateWorker(worker, epoch); err != nil {
-				writeResponse(r.Context(), w, nil, err)
-				return
-			}
+		// Observations can proceed during another request's custody cleanup.
+		if err := s.activateWorker(r.Context(), worker, epoch, !mutatesRequest(r.URL.Path)); err != nil {
+			writeResponse(r.Context(), w, nil, err)
+			return
 		}
 		select {
 		case semaphore <- struct{}{}:
@@ -287,30 +285,51 @@ func mutatesRequest(path string) bool {
 	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission")
 }
 
-// activateWorker serializes attachment cleanup, independently of observations.
-func (s *Server) activateWorker(worker string, epoch uint64) error {
-	s.workerMu.Lock()
-	defer s.workerMu.Unlock()
-	// Recheck after waiting: an earlier worker must never clean up a newer one.
-	fence := s.Fence()
-	if fence.State != hostdproto.StateActive || fence.WorkerID != worker || fence.Epoch != epoch {
-		return ErrFenced
-	}
-	if s.worker == worker && s.epoch == epoch {
-		return nil
-	}
-	if owner, ok := s.Sessions.(interface{ DetachAllAttachments() error }); ok {
-		if err := owner.DetachAllAttachments(); err != nil {
-			return err
+// activateWorker serializes custody changes without holding bridge state over
+// detach/reset calls. The initiating request confirms cleanup; observations
+// arriving during it remain responsive. Mutations wait for custody with ctx.
+func (s *Server) activateWorker(ctx context.Context, worker string, epoch uint64, observe bool) error {
+	for {
+		fence := s.Fence()
+		if fence.State != hostdproto.StateActive || fence.WorkerID != worker || fence.Epoch != epoch {
+			return ErrFenced
 		}
-	}
-	if s.Executions != nil {
-		if err := s.Executions.ResetReaders(); err != nil {
-			return err
+		s.workerMu.Lock()
+		if s.worker == worker && s.epoch == epoch {
+			s.workerMu.Unlock()
+			return nil
 		}
+		if done := s.workerDone; done != nil {
+			s.workerMu.Unlock()
+			if observe {
+				return nil
+			}
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		s.workerDone = done
+		s.workerMu.Unlock()
+		var err error
+		if owner, ok := s.Sessions.(interface{ DetachAllAttachments() error }); ok {
+			err = owner.DetachAllAttachments()
+		}
+		if err == nil && s.Executions != nil {
+			err = s.Executions.ResetReaders()
+		}
+		s.workerMu.Lock()
+		if err == nil {
+			s.worker, s.epoch = worker, epoch
+		}
+		s.workerDone = nil
+		close(done)
+		s.workerMu.Unlock()
+		return err
 	}
-	s.worker, s.epoch = worker, epoch
-	return nil
 }
 
 func writeResponse(ctx context.Context, w http.ResponseWriter, data json.RawMessage, err error) {

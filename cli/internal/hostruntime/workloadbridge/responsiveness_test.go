@@ -54,9 +54,16 @@ func TestOwnerHealthAndListWhileWorkerDetachStalls(t *testing.T) {
 	done := make(chan struct{})
 	go func() { request("/session/Create"); close(done) }()
 	<-sessions.entered
-	defer func() { close(sessions.release); <-done }()
+	pending := make(chan struct{})
 	observed := make(chan struct{})
+	defer func() { close(sessions.release); <-done; <-pending; <-observed }()
+	go func() { request("/session/Create"); close(pending) }()
 	go func() { request("/owner/health"); request("/session/List"); close(observed) }()
+	select {
+	case <-pending:
+		t.Fatal("mutation escaped pending worker cleanup")
+	case <-time.After(50 * time.Millisecond):
+	}
 	select {
 	case <-observed:
 	case <-time.After(300 * time.Millisecond):
