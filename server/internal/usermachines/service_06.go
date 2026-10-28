@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 	"github.com/pinksaucepasta/paperboat/server/internal/releases"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -128,26 +129,50 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
+	skipped := 0
 	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		skipped = 0
 		machines, err := tx.Queries().LockUserMachinesForFinalDeletion(ctx)
 		if err != nil {
 			return fmt.Errorf("final delete removed machines: %w", err)
 		}
 		for _, machine := range machines {
-			if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: machine.UserID, ActorType: audit.ActorSystem,
-				EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
-				IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `DELETE FROM user_machines WHERE id=$1`, machine.ID); err != nil {
-				return fmt.Errorf("final delete removed machine: %w", err)
+			// A machine that cannot be deleted is skipped, so one bad row never stalls the rest of the batch.
+			if err := finalDeleteMachine(ctx, tx, s.audit, machine); err != nil {
+				skipped++
+				slog.WarnContext(ctx, "final delete skipped removed machine", "machine_id", machine.ID, "error", err)
 			}
 		}
 		return nil
 	}); err != nil {
 		errs = append(errs, err)
+	} else if skipped > 0 {
+		errs = append(errs, fmt.Errorf("final delete skipped %d removed machines; see the machine_id warnings", skipped))
 	}
 	return errors.Join(errs...)
+}
+
+func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) (err error) {
+	if _, err := tx.Exec(ctx, `SAVEPOINT final_delete_machine`); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			if _, rollbackErr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT final_delete_machine`); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+		}
+	}()
+	if err := writer.WriteTx(ctx, tx, audit.Event{ActorUserID: machine.UserID, ActorType: audit.ActorSystem,
+		EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
+		IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM user_machines WHERE id=$1`, machine.ID); err != nil {
+		return fmt.Errorf("final delete removed machine: %w", err)
+	}
+	_, err = tx.Exec(ctx, `RELEASE SAVEPOINT final_delete_machine`)
+	return err
 }
 
 type machineAccessSession struct {
