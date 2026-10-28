@@ -45,17 +45,10 @@ func Migrate(ctx context.Context, d *DB) error {
 		return fmt.Errorf("open migration connection: %w", err)
 	}
 	defer conn.Close()
-	// Startup serialization may span the whole batch; only migration lock waits use 5s.
-	if _, err := conn.ExecContext(ctx, `SET lock_timeout = 0`); err != nil {
-		return fmt.Errorf("configure migration serialization: %w", err)
-	}
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey()); err != nil {
+	if err := acquireMigrationLock(ctx, conn); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
 	defer conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey())
-	if _, err := conn.ExecContext(ctx, `SET lock_timeout = '5s'`); err != nil {
-		return fmt.Errorf("configure migration lock timeout: %w", err)
-	}
 	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS paperboat`); err != nil {
 		return fmt.Errorf("ensure paperboat schema: %w", err)
 	}
@@ -149,4 +142,25 @@ func migrationLockKey() int64 {
 func retryableMigrationError(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && (pgErr.Code == "55P03" || pgErr.Code == "40P01")
+}
+
+// A blocking pg_advisory_lock SELECT retains a snapshot while it waits, which
+// can block CREATE INDEX CONCURRENTLY in the runner that holds the lock.
+func acquireMigrationLock(ctx context.Context, conn *sql.Conn) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var locked bool
+		if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, migrationLockKey()).Scan(&locked); err != nil {
+			return err
+		}
+		if locked {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
