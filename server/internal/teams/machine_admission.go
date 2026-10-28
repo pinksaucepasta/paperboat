@@ -63,7 +63,7 @@ func requestMachineTx(ctx context.Context, tx *db.Tx, team, machine, account str
 }
 
 func readMachineRequestsTx(ctx context.Context, tx *db.Tx, team string, out *Team) error {
-	rows, err := tx.Query(ctx, `SELECT r.machine_id,m.alias,r.requested_by,r.state,r.requested_at,coalesce(r.decided_by,''),r.decided_at FROM team_machine_requests r JOIN user_machines m ON m.id=r.machine_id WHERE r.team_id=$1 AND m.revoked_at IS NULL AND m.deleted_at IS NULL ORDER BY r.requested_at,r.machine_id`, team)
+	rows, err := tx.Query(ctx, `SELECT r.machine_id,m.alias,r.requested_by,r.state,r.requested_at,coalesce(r.decided_by,''),r.decided_at FROM team_machine_requests r JOIN live_user_machines m ON m.id=r.machine_id WHERE r.team_id=$1 ORDER BY r.requested_at,r.machine_id`, team)
 	if err != nil {
 		return err
 	}

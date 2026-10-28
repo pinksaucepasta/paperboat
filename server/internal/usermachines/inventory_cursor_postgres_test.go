@@ -43,7 +43,7 @@ func TestMachineListCursorAndFiltersOnPostgres(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
-	// Seven machines in use whose alias order differs from their id order, one revoked, one disconnected.
+	// Seven machines in use whose alias order differs from their id order, one revoked, one disconnected (both removed).
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
 SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo','foxtrot','golf','hotel','india'])[g],
  CASE WHEN g%3=0 THEN 'darwin' ELSE 'linux' END,'amd64','/w',
@@ -110,7 +110,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
 	}{
 		{"platform", InventoryOptions{Limit: 50, Platform: "darwin"}, []string{"m3", "m6"}},
 		{"tag", InventoryOptions{Limit: 50, Tag: "prod"}, []string{"m2", "m3"}},
-		{"revoked and disconnected", InventoryOptions{Limit: 50, State: "revoked"}, []string{"m8", "m9"}},
+		{"revoked and disconnected are gone", InventoryOptions{Limit: 50, State: "revoked"}, nil},
 		{"address", InventoryOptions{Limit: 50, Q: address}, []string{"m5"}},
 		{"hostname", InventoryOptions{Limit: 50, Q: "Echo.example.test"}, []string{"m5"}},
 	} {

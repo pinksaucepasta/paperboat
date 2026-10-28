@@ -2,7 +2,7 @@
 -- The pending-work lookup and FK cascade both need every session state.
 CREATE INDEX user_machine_access_sessions_machine_cleanup ON paperboat.user_machine_access_sessions(user_machine_id);
 CREATE INDEX user_machines_final_delete ON paperboat.user_machines
- ((coalesce(deleted_at,revoked_at,created_at)),id) WHERE deleted_at IS NOT NULL OR state='revoked';
+ ((coalesce(deleted_at,revoked_at,created_at)),id) WHERE deleted_at IS NOT NULL OR revoked_at IS NOT NULL;
 -- History owns its machine identity; operational state belongs to the machine.
 ALTER TABLE paperboat.team_inbox_requests
     ADD COLUMN source_machine_name text NOT NULL DEFAULT '',
@@ -113,7 +113,7 @@ END $$;
 -- +goose StatementEnd
 CREATE TRIGGER control_environments_delete_operations BEFORE DELETE ON paperboat.control_environments
     FOR EACH ROW EXECUTE FUNCTION paperboat.delete_machine_environment_operations();
--- Revoked is a removal state, including rows written before this migration.
+-- Revoked and disconnected (revoked_at set) are removal states, including rows written before this migration.
 -- Normalize it once so every existing deleted_at fence also hides revoked machines.
 -- +goose StatementBegin
 CREATE FUNCTION paperboat.tombstone_revoked_machine() RETURNS trigger
@@ -126,8 +126,8 @@ BEGIN
  RETURN NEW;
 END $$;
 -- +goose StatementEnd
-CREATE TRIGGER machine_revoked_tombstone BEFORE INSERT OR UPDATE OF state ON paperboat.user_machines
- FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.tombstone_revoked_machine();
+CREATE TRIGGER machine_revoked_tombstone BEFORE INSERT OR UPDATE OF state,revoked_at ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state IN ('revoked','disconnected') OR NEW.revoked_at IS NOT NULL) EXECUTE FUNCTION paperboat.tombstone_revoked_machine();
 
 -- All revoke producers share the same environment fence and durable session
 -- revocations, as the existing machine/peer and team-entry triggers do.
@@ -165,15 +165,19 @@ BEGIN
  RETURN NEW;
 END $$;
 -- +goose StatementEnd
-CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state ON paperboat.user_machines
- FOR EACH ROW WHEN (NEW.state='revoked') EXECUTE FUNCTION paperboat.revoke_machine_environment();
-UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),online=false,seat_state='released'
- WHERE state='revoked';
+CREATE TRIGGER machine_revoked_environment AFTER INSERT OR UPDATE OF state,revoked_at ON paperboat.user_machines
+ FOR EACH ROW WHEN (NEW.state IN ('revoked','disconnected') OR NEW.revoked_at IS NOT NULL) EXECUTE FUNCTION paperboat.revoke_machine_environment();
+UPDATE paperboat.user_machines SET state=state,deleted_at=coalesce(deleted_at,now()),revoked_at=coalesce(revoked_at,now()),online=false,seat_state='released'
+ WHERE state IN ('revoked','disconnected') OR revoked_at IS NOT NULL;
 ALTER TABLE paperboat.user_machines ADD CONSTRAINT user_machines_revoked_tombstone
- CHECK(state<>'revoked' OR deleted_at IS NOT NULL);
+ CHECK((state NOT IN ('revoked','disconnected') AND revoked_at IS NULL) OR deleted_at IS NOT NULL);
+-- The one definition of a live machine; every listing reads this view. A later migration that adds a
+-- user_machines column must CREATE OR REPLACE it (TestLiveUserMachinesViewHasEveryColumn).
+CREATE VIEW paperboat.live_user_machines AS
+ SELECT * FROM paperboat.user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL;
 DELETE FROM paperboat.control_environments e WHERE NOT EXISTS (
  SELECT 1 FROM paperboat.user_machines m WHERE m.environment_id=e.id
-  AND m.deleted_at IS NULL AND m.state NOT IN ('revoked','deleted'));
+  AND m.deleted_at IS NULL AND m.revoked_at IS NULL);
 
 -- Publications and polymorphic favorites previously had no machine FK.
 DELETE FROM paperboat.preview_leases p WHERE NOT EXISTS (SELECT 1 FROM paperboat.user_machines m WHERE m.id=p.owner_machine_id);

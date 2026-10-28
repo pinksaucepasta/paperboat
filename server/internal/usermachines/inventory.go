@@ -54,7 +54,7 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 
 // listInventory computes one inventory page; ListInventory shares it between identical requests.
 func (s *Service) listInventory(ctx context.Context, account string, opts InventoryOptions) ([]UserMachine, int, error) {
-	with, predicate, args := inventoryFilter(ctx, account, opts, false)
+	with, predicate, args := inventoryFilter(ctx, account, opts)
 	// One pass computes the page and the total; only a page past the end (offset > 0, no rows) needs a count.
 	// The account's own personal machines short-circuit the access functions with their first branch (own,
 	// personal, not deleted), which is what they would return: the functions cost ~1 ms per machine under load.
@@ -212,8 +212,8 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 }
 
 // inventoryFilter is the machine list's authorization and filters ($1..$6) as a WITH clause and a FROM/WHERE
-// predicate over user_machines m. withRevoked keeps revoked and disconnected machines without a state filter.
-func inventoryFilter(ctx context.Context, account string, opts InventoryOptions, withRevoked bool) (with, predicate string, args []any) {
+// predicate over live_user_machines m.
+func inventoryFilter(ctx context.Context, account string, opts InventoryOptions) (with, predicate string, args []any) {
 	scoped, team := workspaceTeamArgument(ctx)
 	var teamID any
 	if team.Valid {
@@ -240,7 +240,7 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions,
   JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active AND b.resource_id=tg.machine_id WHERE r.target_kind='tag'
  UNION SELECT b.resource_id FROM rules r JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active WHERE r.target_kind='all_machines'
 ) `
-	predicate = ` FROM user_machines m WHERE m.deleted_at IS NULL AND m.id IN (SELECT id FROM candidates)
+	predicate = ` FROM live_user_machines m WHERE m.id IN (SELECT id FROM candidates)
  AND (
  (NOT $2::boolean AND ((m.owner_team_id IS NULL AND m.user_id=$1) OR machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
@@ -248,13 +248,7 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions,
  AND ((m.owner_team_id=$3 AND machine_management_allowed($1,m.id)) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE team_machine_capability_allowed($1,$3,m.id,cap)))))
  AND ($4='' OR position(lower($4) in lower(m.alias||' '||m.id||' '||coalesce((SELECT '127.100.'||(l.address_slot/256)||'.'||(l.address_slot%256)
   FROM control_sync_leases l WHERE l.account_id=$1 AND l.machine_id=m.id),'')))>0 OR lower(m.alias)=split_part(lower($4),'.',1))
- AND ($5='' OR ($5='revoked' AND (m.revoked_at IS NOT NULL OR m.state IN ('revoked','disconnected'))) OR ($5<>'revoked' AND m.state=$5))`
-	if !withRevoked {
-		// Without a state filter the list is the machines in use: revoked and disconnected ones (revoked_at set)
-		// are listed only when asked for by state.
-		predicate += ` AND ($5<>'' OR (m.revoked_at IS NULL AND m.state NOT IN ('revoked','disconnected')))`
-	}
-	predicate += `
+ AND ($5='' OR m.state=$5)
  AND ($6='' OR ($6='mine' AND m.user_id=$1 AND m.owner_team_id IS NULL) OR ($6='shared' AND (m.user_id<>$1 OR m.owner_team_id IS NOT NULL)) OR m.user_id=$6)
  AND ($7='' OR m.platform=$7)
  AND ($8='' OR EXISTS(SELECT 1 FROM workspace_policy_tags tg JOIN workspace_policies p ON p.id=tg.policy_id

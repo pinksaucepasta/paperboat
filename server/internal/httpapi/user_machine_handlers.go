@@ -366,7 +366,7 @@ func readMachineListQuery(w http.ResponseWriter, r *http.Request) (usermachines.
 	if len(values["platform"]) > 1 || len(values["tag"]) > 1 {
 		return bad()
 	}
-	query, after, ok := readKeysetInventoryQuery(w, r, []string{"online", "offline", "disconnected", "revoked", "pending"}, "platform", "tag")
+	query, after, ok := readKeysetInventoryQuery(w, r, []string{"online", "offline", "pending"}, "platform", "tag")
 	if !ok {
 		return usermachines.InventoryOptions{}, false
 	}

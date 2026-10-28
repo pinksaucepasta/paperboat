@@ -256,7 +256,7 @@ func planOf(scope Scope, product string) Plan {
 func countSQL(kind Kind) (string, error) {
 	switch kind {
 	case Machines:
-		return `(SELECT count(*) FROM user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL AND
+		return `(SELECT count(*) FROM live_user_machines WHERE
  CASE WHEN $2<>'' THEN owner_team_id=$2 ELSE user_id=$1 AND owner_team_id IS NULL AND seat_state='occupied' END)`, nil
 	case Publications:
 		// Live only (user rule): a preview or tunnel counts while it serves from a live machine. A

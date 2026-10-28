@@ -64,12 +64,11 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
 	if err != nil || len(items) != 3 {
 		t.Fatalf("inventory: %d items err=%v; want the 3 machines in use", len(items), err)
 	}
-	// The default list leaves revoked machines out; asked for by state, one still carries no target.
+	// A revoked machine is gone: not listed by default and not when asked for by state.
 	revoked, _, _, err := service.ListInventory(ctx, owner, InventoryOptions{Limit: 10, State: "revoked"})
-	if err != nil || len(revoked) != 1 {
-		t.Fatalf("revoked inventory: %d items err=%v", len(revoked), err)
+	if err != nil || len(revoked) != 0 {
+		t.Fatalf("revoked inventory: %d items err=%v; want none", len(revoked), err)
 	}
-	items = append(items, revoked...)
 	byAlias := map[string]*MachineSSH{}
 	for _, item := range items {
 		byAlias[item.Alias] = item.SSH

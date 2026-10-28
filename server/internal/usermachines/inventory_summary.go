@@ -8,8 +8,7 @@ import (
 )
 
 // MachineSummary counts the machines of the selected workspace the account may see, as the machine list
-// authorizes them. Total and ByPlatform count the machines in use; revoked and disconnected machines (revoked_at
-// set) are only in ByState["revoked"].
+// authorizes them. Removed machines are in neither count.
 type MachineSummary struct {
 	Total      int            `json:"total"`
 	ByState    map[string]int `json:"by_state"`
@@ -20,7 +19,7 @@ type MachineSummary struct {
 // whole workspace instead of the first page.
 func (s *Service) Summary(ctx context.Context, account string) (MachineSummary, error) {
 	out := MachineSummary{
-		ByState:    map[string]int{"online": 0, "offline": 0, "pending": 0, "revoked": 0},
+		ByState:    map[string]int{"online": 0, "offline": 0, "pending": 0},
 		ByPlatform: map[string]int{"linux": 0, "macos": 0, "windows": 0},
 	}
 	if scope, ok := workspace.FromContext(ctx); ok {
@@ -28,9 +27,9 @@ func (s *Service) Summary(ctx context.Context, account string) (MachineSummary, 
 			return MachineSummary{}, err
 		}
 	}
-	with, predicate, args := inventoryFilter(ctx, account, InventoryOptions{}, true)
+	with, predicate, args := inventoryFilter(ctx, account, InventoryOptions{})
 	rows, err := s.db.SQL().QueryContext(ctx, with+`SELECT
- CASE WHEN m.revoked_at IS NOT NULL OR m.state IN ('revoked','disconnected') THEN 'revoked' ELSE m.state END,
+ m.state,
  CASE WHEN m.platform='darwin' THEN 'macos' ELSE m.platform END,count(*)`+predicate+` GROUP BY 1,2`, args...)
 	if err != nil {
 		return MachineSummary{}, err
@@ -42,10 +41,8 @@ func (s *Service) Summary(ctx context.Context, account string) (MachineSummary, 
 			return MachineSummary{}, errors.Join(err, rows.Close())
 		}
 		out.ByState[state] += n
-		if state != "revoked" {
-			out.Total += n
-			out.ByPlatform[platform] += n
-		}
+		out.Total += n
+		out.ByPlatform[platform] += n
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return MachineSummary{}, err

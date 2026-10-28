@@ -24321,12 +24321,10 @@
               "enum": [
                 "online",
                 "offline",
-                "disconnected",
-                "revoked",
                 "pending"
               ]
             },
-            "description": "revoked lists revoked and disconnected machines (what the summary counts as revoked); without state the list is the machines in use."
+            "description": "Filters the machines in use by state; removed machines are never listed."
           },
           {
             "name": "owner",
@@ -24616,7 +24614,7 @@
     "/v1/machines/summary": {
       "get": {
         "summary": "Count the selected workspace's machines (dashboard totals)",
-        "description": "Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; revoked and disconnected machines are counted only in by_state.revoked.",
+        "description": "Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; removed machines are in neither.",
         "security": [
           {
             "cookieSession": []
@@ -24659,15 +24657,14 @@
                         "total": {
                           "type": "integer",
                           "minimum": 0,
-                          "description": "Machines in use (revoked and disconnected excluded)."
+                          "description": "Machines in use."
                         },
                         "by_state": {
                           "type": "object",
                           "required": [
                             "online",
                             "offline",
-                            "pending",
-                            "revoked"
+                            "pending"
                           ],
                           "properties": {
                             "online": {
@@ -24681,17 +24678,13 @@
                             "pending": {
                               "type": "integer",
                               "minimum": 0
-                            },
-                            "revoked": {
-                              "type": "integer",
-                              "minimum": 0
                             }
                           },
                           "additionalProperties": {
                             "type": "integer",
                             "minimum": 0
                           },
-                          "description": "Machines in use by state; revoked counts revoked and disconnected machines, which total leaves out."
+                          "description": "Machines in use by state."
                         },
                         "by_platform": {
                           "type": "object",

@@ -175,7 +175,7 @@ func (s *ConfigAssignmentService) AdoptTeamDefault(ctx context.Context, userID, 
  (id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,adopted_team_id,adopted_default_version)
 SELECT 'cfgteam_' || substr(md5(m.id || $2),1,24), m.id, m.environment_id, $3, 'pull_only',
  'pending', $4, $2, $5
-FROM user_machines m WHERE m.user_id=$1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL
+FROM live_user_machines m WHERE m.user_id=$1
 ON CONFLICT (machine_id) DO UPDATE SET repository_id=EXCLUDED.repository_id,
  push_repository_id=NULL, mode='pull_only', adopted_team_id=EXCLUDED.adopted_team_id,
  adopted_default_version=EXCLUDED.adopted_default_version,

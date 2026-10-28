@@ -141,9 +141,9 @@ func policyInventoryTx(ctx context.Context, tx *db.Tx, w Workspace) (policy.Inve
 		return inv, err
 	}
 	if w.TeamID != "" {
-		rows, err = tx.Query(ctx, `SELECT m.id,m.alias,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END FROM team_resource_bindings b JOIN user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND b.active AND m.deleted_at IS NULL ORDER BY m.id`, w.TeamID)
+		rows, err = tx.Query(ctx, `SELECT m.id,m.alias,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND b.active ORDER BY m.id`, w.TeamID)
 	} else {
-		rows, err = tx.Query(ctx, `SELECT id,alias,user_id FROM user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY id`, w.Owner)
+		rows, err = tx.Query(ctx, `SELECT id,alias,user_id FROM live_user_machines WHERE user_id=$1 AND owner_team_id IS NULL ORDER BY id`, w.Owner)
 	}
 	if err != nil {
 		return inv, err

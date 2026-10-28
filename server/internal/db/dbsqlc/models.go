@@ -1527,6 +1527,62 @@ type LazyRuntimeOwner struct {
 	ExpiresAt              time.Time
 }
 
+type LiveUserMachine struct {
+	ID                             string
+	UserID                         string
+	EnvironmentID                  string
+	Platform                       string
+	Architecture                   string
+	WorkspaceRoot                  string
+	State                          string
+	SeatState                      string
+	Online                         bool
+	ProviderRouteRouteID           sql.NullString
+	ProviderRouteClientID          sql.NullString
+	ProviderRouteHttpBaseUrl       sql.NullString
+	ProviderRouteWebsocketBaseUrl  sql.NullString
+	RuntimeVersions                []byte
+	EnrolledAt                     sql.NullTime
+	LastSeenAt                     sql.NullTime
+	RevokedAt                      sql.NullTime
+	DisconnectedAt                 sql.NullTime
+	DeletedAt                      sql.NullTime
+	Version                        int64
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
+	AvailabilityMode               string
+	AvailabilityDesiredVersion     int64
+	AvailabilityObservedMode       sql.NullString
+	AvailabilityObservedVersion    int64
+	AvailabilityObservedAt         sql.NullTime
+	AvailabilityStatus             string
+	AvailabilityErrorCode          sql.NullString
+	HostServiceVersion             sql.NullString
+	HostServiceScope               sql.NullString
+	WorkerGeneration               int64
+	OsBootID                       sql.NullString
+	WorkerServiceScope             string
+	ConnectorState                 string
+	ConnectorGeneration            int64
+	HostUpdateRollbacks            int64
+	RuntimeDiagnosticsObservedAt   sql.NullTime
+	PublicIdentityKey              sql.NullString
+	InstallationGeneration         int64
+	ConfiguredCapabilities         []string
+	ObservedCapabilities           []string
+	Alias                          string
+	UpdateHealth                   string
+	CapabilitiesDesiredVersion     int64
+	CapabilitiesObservedVersion    int64
+	CapabilitiesStatus             string
+	CapabilitiesErrorCode          sql.NullString
+	OwnerTeamID                    sql.NullString
+	PersonalAutoEnabled            bool
+	MachineServicePolicyGeneration int64
+	CapabilitiesApplied            []string
+	ReporterVersion                sql.NullString
+}
+
 type MachineControlRenewal struct {
 	OperationID            string
 	MachineID              string

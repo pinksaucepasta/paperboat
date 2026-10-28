@@ -3446,10 +3446,9 @@ LEFT JOIN control_config_repositories repository
 LEFT JOIN control_config_sync_statuses status
   ON status.environment_id = environment.id
  AND status.assignment_id = assignment.id AND assignment.revoked_at IS NULL
-JOIN user_machines machine
+JOIN live_user_machines machine
   ON machine.environment_id = environment.id
-WHERE machine.deleted_at IS NULL AND machine.state NOT IN ('revoked','deleted')
-  AND environment.owner_user_id = $1
+WHERE environment.owner_user_id = $1
   AND environment.desired_state <> 'revoked'
 ORDER BY lower(machine.alias), environment.id
 `

@@ -354,7 +354,7 @@ func unbindMachineTx(ctx context.Context, tx *db.Tx, team, machine string) error
 
 func readMachinesTx(ctx context.Context, tx *db.Tx, team string, out *Team) error {
 	out.Machines = []MachineBinding{}
-	rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' AND m.deleted_at IS NULL ORDER BY m.id`, team)
+	rows, err := tx.Query(ctx, `SELECT m.id,CASE WHEN m.owner_team_id IS NULL THEN m.user_id ELSE '' END,coalesce(m.owner_team_id,''),m.alias,m.state,m.online,m.configured_capabilities,b.generation,b.active FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine' ORDER BY m.id`, team)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ func removeTeamMachineTx(ctx context.Context, tx *db.Tx, team, machine string) e
 	return db.RevokeMachineEnvironmentTx(ctx, tx, environment, now)
 }
 func removeTeamMachinesTx(ctx context.Context, tx *db.Tx, team string) error {
-	rows, err := tx.Query(ctx, `SELECT id FROM user_machines WHERE owner_team_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL ORDER BY id`, team)
+	rows, err := tx.Query(ctx, `SELECT id FROM live_user_machines WHERE owner_team_id=$1 ORDER BY id`, team)
 	if err != nil {
 		return err
 	}
