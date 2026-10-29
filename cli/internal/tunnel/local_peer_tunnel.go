@@ -78,7 +78,8 @@ func (t LocalPeerTunnel) Dial(ctx context.Context, info resolver.ConnectInfo) (C
 	if err != nil {
 		var remote *localapi.RemoteError
 		if ctx.Err() == nil && (errors.Is(err, localapi.ErrTransportUnavailable) ||
-			(errors.As(err, &remote) && remote.StatusCode == http.StatusServiceUnavailable && (remote.Code == "peer_transport_unavailable" || remote.Code == "terminal_service_unavailable"))) {
+			(errors.As(err, &remote) && remote.StatusCode == http.StatusServiceUnavailable &&
+				(remote.Code == "peer_transport_unavailable" || remote.Code == "terminal_service_unavailable"))) {
 			return nil, &terminalTransportError{transport: "local", cause: err}
 		}
 		return nil, err

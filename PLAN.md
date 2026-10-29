@@ -5038,3 +5038,7 @@ Reference: ~/ref/EternalTerminal/src/base/ClientConnection.cpp:210/276 (one-seco
 
 2026-10-29 | Update reconnect regression | Faster retries exposed36a418e8 (last-good parent): terminal_service_unavailable lost retryability at local IPC; read producer/consumer diff, preserve typed service503 recovery. Existing IPC recovery test new restart/deadline cases RED/GREEN; temporary refusals still name the terminal service.
 Real f008a605 test failed at second redial08:53:51.509Z; no release or main push with this regression. Native owner attach now records a safe local timestamp for the requested phase trace; next clean two-build retest pending.
+
+2026-10-29 | Held-update qualification blocked | User confirms hp offline, likely electricity: corrected9ae09d76 build transfer failed before install, no valid post-fix gap; release, hp/dadape update and console-live deferred until the corrected real update passes.
+Both lanegap throwaways revoked by exact id (cleanup --id twice --stale0 --apply:2); remote containers/temp files await hp power. Phase evidence results/held-update-latency-9ae09d76-20261029.json; baseline83.934s, f008a605 exposed/fixed IPC regression, never claim its two-marker run passed.
+Owner timing distinguishes Attach from AttachmentStatus (existing private-wire test RED/GREEN); full CLI gate9ae09d76 run40845751183 and focused final owner trace gate pending.

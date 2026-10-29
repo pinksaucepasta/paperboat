@@ -232,9 +232,12 @@ func (s *Server) handler() http.Handler {
 		switch parts[0] {
 		case "session":
 			result, err = session.ServeRemoteCall(ctx, s.Sessions, parts[1], body)
-			if s.SessionOnly && err == nil && strings.HasPrefix(parts[1], "Attach") {
-				if recorder := diagnostics.FromContext(ctx); recorder != nil {
-					_ = recorder.Record("terminal", "owner_attachment_ready", "info", map[string]string{"generation": worker})
+			if s.SessionOnly && err == nil {
+				switch parts[1] {
+				case "Attach", "AttachParticipant", "AttachParticipantAtGeneration", "AttachLive", "AttachLiveParticipant", "AttachLiveParticipantAtGeneration":
+					if recorder := diagnostics.FromContext(ctx); recorder != nil {
+						_ = recorder.Record("terminal", "owner_attachment_ready", "info", map[string]string{"generation": worker})
+					}
 				}
 			}
 		case "exec":

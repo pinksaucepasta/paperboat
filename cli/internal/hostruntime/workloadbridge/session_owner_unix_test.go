@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,8 @@ func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
 	defer manager.Shutdown(context.Background())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	recorder := diagnostics.NewMemoryRecorder()
+	ctx = diagnostics.WithRecorder(ctx, recorder)
 	identity := OwnerIdentity{Schema: "paperboat.session-owner/v1", Generation: strings.Repeat("a", 32), ExecutableSHA256: strings.Repeat("b", 64)}
 	token := make([]byte, 32)
 	token[0] = 17
@@ -72,6 +75,21 @@ func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
 	created, err := remote.Create(ctx, session.CreateRequest{ID: "retirement-shell", Name: "retirement", Command: pty.Command{Path: "/bin/sh", Args: []string{"-c", "while read line; do printf 'reply:%s\\n' \"$line\"; done"}, Env: []string{"PATH=/bin:/usr/bin", "TERM=xterm"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := remote.Attach(created.ID, "attachment", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := remote.AttachmentStatus(created.ID, "attachment"); err != nil {
+		t.Fatal(err)
+	}
+	var attached []diagnostics.Event
+	for _, event := range recorder.Recent() {
+		if event.Code == "owner_attachment_ready" {
+			attached = append(attached, event)
+		}
+	}
+	if len(attached) != 1 || attached[0].Fields["generation"] != identity.Generation {
+		t.Fatalf("owner attachment phase records=%+v", attached)
 	}
 	if err := client.Retire(ctx); !errors.Is(err, session.ErrUpdateBusy) {
 		t.Fatalf("live retirement: %v", err)
