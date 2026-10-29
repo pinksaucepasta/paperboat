@@ -223,6 +223,15 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	return errors.Join(removeInstallFile(s.paths.workerNext), removeJournal(s.paths.journal), updated.RollbackUnixNativeInstall(s.paths.updateState))
 }
 
+// Stage the verified replacement while the current runtime can still serve.
+// Only promotion and service activation belong in the stopped interval.
+func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer) error {
+	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
+		return err
+	}
+	return stopUnixRuntimeRoles(ctx, host, hostd, updater)
+}
+
 func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer) error {
 	for _, installer := range []*service.Installer{updater, hostd, host} {
 		if installer == nil {

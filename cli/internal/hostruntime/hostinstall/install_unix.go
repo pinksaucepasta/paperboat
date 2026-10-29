@@ -129,9 +129,6 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := publishUnixControlLifetime(ctx, paths, hostd, coldCarrier); err != nil {
 			return err
 		}
-		if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater); err != nil {
-			return err
-		}
 		// Disable declarations that could reboot into an embedded native peer
 		// before a separately owned carrier is admitted.
 		if coldCarrier {
@@ -180,7 +177,10 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return errors.Join(err, removeJournal(paths.journal))
 			}
 		}
-		if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
+		if err := prepareSessionOwner(ctx, request, paths); err != nil {
+			return err
+		}
+		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater); err != nil {
 			if intent == unixPreparedUpdate {
 				return err
 			}
@@ -228,9 +228,6 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			if err := obsoleteDarwinHost.Uninstall(ctx); err != nil {
 				return err
 			}
-		}
-		if err := prepareSessionOwner(ctx, request, paths); err != nil {
-			return err
 		}
 		if coldCarrier {
 			if err := prepareColdUnixCarrier(ctx, request, paths); err != nil {

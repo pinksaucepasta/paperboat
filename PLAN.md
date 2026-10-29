@@ -5042,3 +5042,6 @@ Real f008a605 test failed at second redial08:53:51.509Z; no release or main push
 2026-10-29 | Held-update qualification blocked | User confirms hp offline, likely electricity: corrected9ae09d76 build transfer failed before install, no valid post-fix gap; release, hp/dadape update and console-live deferred until the corrected real update passes.
 Both lanegap throwaways revoked by exact id (cleanup --id twice --stale0 --apply:2); remote containers/temp files await hp power. Phase evidence results/held-update-latency-9ae09d76-20261029.json; baseline83.934s, f008a605 exposed/fixed IPC regression, never claim its two-marker run passed.
 Owner timing distinguishes Attach from AttachmentStatus (existing private-wire test RED/GREEN); full CLI vet/race9ae09d76 PASS40845751183 (10m26s); focused final owner trace/IPCrecovery gate42b783fe PASS40846913094 (4m29s).
+
+2026-10-29 | Dadape held-update | HEAD41c57f67 same-shell20 markers PASS, gap94.424s FAIL: hostd stopped62.3s during guard replacement and verified binary staging; release held.
+Stage guard/session owner/runtime before stopping; TestInvalidReplacementLeavesServingRuntimeRunning RED/GREEN. Reference ~/ref/tailscale/clientupdate/clientupdate.go:1069–1115 stages .new before promotion; no known few-second baseline.
