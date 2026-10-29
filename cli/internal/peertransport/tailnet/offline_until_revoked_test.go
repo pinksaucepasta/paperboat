@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"math/big"
+	"strconv"
 	"testing"
 	"time"
 
@@ -128,12 +129,6 @@ func TestRestartWithoutPaperboatRestoresTheLastVerifiedPeers(t *testing.T) {
 		t.Cleanup(func() { _ = next.Close() })
 		return next
 	}
-	refused := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
-		return api.PeerNetworkRegistrationResult{}, &api.APIError{Status: 403, Code: "machine_revoked"}
-	}}
-	if err := restart().RegisterOrRestore(t.Context(), refused, false); err == nil {
-		t.Fatal("a machine Paperboat refused restored its old peers")
-	}
 	unreachable := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 		return api.PeerNetworkRegistrationResult{}, errors.New("dial tcp: connection refused")
 	}}
@@ -160,6 +155,13 @@ func TestRestartWithoutPaperboatRestoresTheLastVerifiedPeers(t *testing.T) {
 	if err := restart().Restore(t.Context()); !errors.Is(err, ErrAuthority) {
 		t.Fatalf("an altered persisted configuration = %v, want refused", err)
 	}
+	refused := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+		return api.PeerNetworkRegistrationResult{}, &api.APIError{Status: 403, Code: "machine_revoked"}
+	}}
+	if err := restart().RegisterOrRestore(t.Context(), refused, false); err == nil {
+		t.Fatal("a machine Paperboat refused restored its old peers")
+	}
+
 }
 
 // The daemon asks for until-revoked authority on every configuration request (server 2026.10.23.94+).
@@ -266,5 +268,43 @@ func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
 	}
 	if _, err := other.Peer("machine_test"); err == nil {
 		t.Fatal("changed identity admitted the cached peer")
+	}
+}
+
+func TestExplicitRefusalCannotBeUndoneByAnOfflineRestart(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			a, cfg, signer, _ := networkTestAuthority(t)
+			if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+				t.Fatal(err)
+			}
+			refused := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+				return "", &api.APIError{Status: status, Code: "peer_network_denied"}
+			}}
+			if err := a.Refresh(t.Context(), refused); err == nil {
+				t.Fatal("server refusal was hidden")
+			}
+			if _, err := a.Peer("machine_test"); err == nil {
+				t.Fatal("refused live authority retained")
+			}
+			next, err := NewAuthority(a.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer next.Close()
+			offline := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+				return api.PeerNetworkRegistrationResult{}, context.DeadlineExceeded
+			}}
+			if err := next.RestoreOrRegister(t.Context(), offline); err == nil {
+				t.Fatal("offline restart restored explicitly refused authority")
+			}
+			if _, err := next.Peer("machine_test"); err == nil {
+				t.Fatal("offline restart revived a revoked peer")
+			}
+			cfg.Generation++
+			if err := next.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+				t.Fatal("new signed authority could not recover", err)
+			}
+		})
 	}
 }

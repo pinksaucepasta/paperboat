@@ -44,9 +44,24 @@ func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool
 	hash := sha256.Sum256([]byte(a.options.Issuer + "\x00" + a.options.Self.AccountID + "\x00" + a.options.Self.EndpointID + "\x00" + a.options.Self.QUICCertificateFingerprint + "\x00" + strconv.FormatUint(generation, 10) + "\x00" + public))
 	_, err = client.RegisterPeerNetwork(ctx, api.PeerNetworkRegistration{OperationID: "network_" + hex.EncodeToString(hash[:]), WireGuardPublicKey: public, DiscoPublicKey: discovery, ExpectedKeyGeneration: generation, QUICCertificateFingerprint: a.options.Self.QUICCertificateFingerprint})
 	if err != nil {
-		return err
+		return a.rejectRefusedAuthority(err)
 	}
 	return a.Refresh(ctx, client)
+}
+
+// An explicit denial revokes the restart cache too; an outage never does.
+func (a *Authority) rejectRefusedAuthority(err error) error {
+	var response *api.APIError
+	if !errors.Is(err, api.ErrUnauthenticated) && !(errors.As(err, &response) && (response.Status == 401 || response.Status == 403)) {
+		return err
+	}
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	cacheErr := a.options.Store.SavePeerNetworkConfiguration(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, "")
+	a.mu.Lock()
+	a.dropLocked()
+	a.mu.Unlock()
+	return errors.Join(err, cacheErr)
 }
 
 // RestoreOrRegister resumes exact verified authority before doing control-plane work.
@@ -145,12 +160,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI) error {
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
 			renewalBudget.hold(time.Now(), apiErr.RetryAfter)
 		}
-		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {
-			a.mu.Lock()
-			a.dropLocked()
-			a.mu.Unlock()
-		}
-		return err
+		return a.rejectRefusedAuthority(err)
 	}
 	if err := a.knowSigningKeys(ctx, append([]string{result.Configuration, result.CandidateSet}, result.RelayGrants...)); err != nil {
 		return err
