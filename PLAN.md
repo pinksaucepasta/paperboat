@@ -5045,3 +5045,6 @@ Owner timing distinguishes Attach from AttachmentStatus (existing private-wire t
 
 2026-10-29 | Dadape held-update | HEAD41c57f67 same-shell20 markers PASS, gap94.424s FAIL: hostd stopped62.3s during guard replacement and verified binary staging; release held.
 Stage guard/session owner/runtime before stopping; TestInvalidReplacementLeavesServingRuntimeRunning RED/GREEN. Reference ~/ref/tailscale/clientupdate/clientupdate.go:1069–1115 stages .new before promotion; no known few-second baseline.
+
+2026-10-29 | Dadape admission interval | d2798fc3 CI40851380010 PASS; preparation no longer stops hostd, but gap102.029s remains: maintenance starts09:44:50 before guard stop09:45:01 and blocks terminal acknowledgements through staging.
+Move hostd/feature-worker drain immediately before native stop, after verified staging; invalid-candidate admission regression RED/GREEN. Final same-shell check passed; fixture exit/cleanup exceeded30s, retest pending.

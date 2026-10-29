@@ -225,8 +225,11 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 
 // Stage the verified replacement while the current runtime can still serve.
 // Only promotion and service activation belong in the stopped interval.
-func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer) error {
+func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
 	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
+		return err
+	}
+	if err := prepare(ctx); err != nil {
 		return err
 	}
 	return stopUnixRuntimeRoles(ctx, host, hostd, updater)

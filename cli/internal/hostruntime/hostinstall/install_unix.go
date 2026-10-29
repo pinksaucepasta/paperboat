@@ -89,35 +89,20 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	if err != nil {
 		return err
 	}
-	// Cold admission proves every legacy peer-owning native role stopped.
-	// Only that native proof permits installing without a live hostd socket.
-	// Existing independent carriers always require workload admission and drain.
-	if suppliedForce != nil && !coldCarrier {
-		timeout := 35 * time.Second
-		if intent == unixPreparedUpdate {
-			timeout = hooks.DrainTimeout + 5*time.Second
-		}
-		abort, err := prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, *suppliedForce, timeout)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			cleanupErr := abort()
+	var abortMaintenance func() error
+	defer func() {
+		if abortMaintenance != nil {
+			cleanupErr := abortMaintenance()
 			if intent == unixPreparedUpdate {
 				resultErr = withCleanup("prepared update maintenance cleanup failed", resultErr, cleanupErr)
 			}
-		}()
-	}
+		}
+	}()
 	// A pre-lifecycle binary transaction may still describe the fixed slot.
 	// Recover its exact protected baseline before capturing the new native
 	// transaction, after cold admission has proved legacy roles stopped.
 	if intent != unixPreparedUpdate {
 		if _, err := recoverInterrupted(paths); err != nil {
-			return err
-		}
-	}
-	if intent == unixPreparedUpdate {
-		if err := hooks.Prepare(ctx); err != nil {
 			return err
 		}
 	}
@@ -180,7 +165,26 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := prepareSessionOwner(ctx, request, paths); err != nil {
 			return err
 		}
-		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater); err != nil {
+		prepareCutover := func(ctx context.Context) error {
+			// Admission pauses existing terminal acknowledgements too. Keep it open
+			// through staging, then drain immediately before the native cutover.
+			if suppliedForce != nil && !coldCarrier {
+				timeout := 35 * time.Second
+				if intent == unixPreparedUpdate {
+					timeout = hooks.DrainTimeout + 5*time.Second
+				}
+				var err error
+				abortMaintenance, err = prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, *suppliedForce, timeout)
+				if err != nil {
+					return err
+				}
+			}
+			if intent == unixPreparedUpdate {
+				return hooks.Prepare(ctx)
+			}
+			return nil
+		}
+		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, prepareCutover); err != nil {
 			if intent == unixPreparedUpdate {
 				return err
 			}

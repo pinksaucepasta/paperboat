@@ -34,7 +34,11 @@ func TestInvalidReplacementLeavesServingRuntimeRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	hostd, err := service.NewPending(service.Config{Platform: "linux", Kind: service.HostdKind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: controller})
+	hostd, err := service.NewPending(service.Config{
+		Platform: "linux", Kind: service.HostdKind, Instance: "u1001", ConfigRoot: root,
+		Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester",
+		Arguments: []string{"daemon", "__runtime-hostd"}, Controller: controller,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,9 +50,13 @@ func TestInvalidReplacementLeavesServingRuntimeRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = stageAndStopUnixRuntimeRoles(t.Context(), Request{Executable: filepath.Join(root, "missing"), Source: source}, installPaths{workerNext: filepath.Join(root, "next")}, nil, hostd, nil)
-	if err == nil || runner.stopped {
-		t.Fatalf("invalid candidate interrupted serving runtime: stopped=%v err=%v", runner.stopped, err)
+	admissionClosed := false
+	err = stageAndStopUnixRuntimeRoles(t.Context(),
+		Request{Executable: filepath.Join(root, "missing"), Source: source},
+		installPaths{workerNext: filepath.Join(root, "next")}, nil, hostd, nil,
+		func(context.Context) error { admissionClosed = true; return nil })
+	if err == nil || runner.stopped || admissionClosed {
+		t.Fatalf("invalid candidate interrupted serving runtime: stopped=%v admissionClosed=%v err=%v", runner.stopped, admissionClosed, err)
 	}
 	if _, err = os.Stat(filepath.Join(root, "next")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("invalid candidate was published", err)
