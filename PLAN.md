@@ -5048,3 +5048,7 @@ Stage guard/session owner/runtime before stopping; TestInvalidReplacementLeavesS
 
 2026-10-29 | Dadape admission interval | d2798fc3 CI40851380010 PASS; preparation no longer stops hostd, but gap102.029s remains: maintenance starts09:44:50 before guard stop09:45:01 and blocks terminal acknowledgements through staging.
 Move hostd/feature-worker drain immediately before native stop, after verified staging; invalid-candidate admission regression RED/GREEN. Final same-shell check passed; fixture exit/cleanup exceeded30s, retest pending.
+
+2026-10-29 | Single timeline | Data-only83db17c1 gap63.378s: marker10:09:35.271Z, hostd stop54.950Z, ready10:10:08.905Z, carrier ready23.470Z, owner attach37.636Z, output38.649Z; retries wait1s, each fails503.
+Catalog publication discards live bindings; new store missing10:09:38.386Z aborts held I/O. Preserve bindings only for identical protected descriptors and reattach by session; regression RED/GREEN; one device verification pending.
+Reference: EternalTerminal/src/base/ServerConnection.cpp:124 reuses authenticated client ID; tailscale/wgengine/magicsock/magicsock.go:3171–3186 retains unchanged peer keys. Native-health sampler exited on timeout; no invented peer-link timestamp.

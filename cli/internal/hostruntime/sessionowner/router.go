@@ -119,9 +119,19 @@ func (r *Router) setOwners(active string, owners map[string]Owner) error {
 		}
 	}
 	r.mu.Lock()
+	// A newly published owner may not have opened its store yet. Existing
+	// sessions keep their authenticated owner while its descriptor is unchanged.
+	retained := make(map[string]routedSession)
+	for id, routed := range r.sessions {
+		previous, existed := r.owners[routed.generation]
+		next, remains := copyOwners[routed.generation]
+		if existed && remains && previous.Descriptor == next.Descriptor {
+			retained[id] = routed
+		}
+	}
 	r.active = active
 	r.owners = copyOwners
-	r.sessions = make(map[string]routedSession)
+	r.sessions = retained
 	r.unavailable = make(map[string]time.Time)
 	r.revision++
 	r.mu.Unlock()
@@ -464,7 +474,7 @@ func (r *Router) mutateExisting(ctx context.Context, op string, body json.RawMes
 }
 
 func (r *Router) attach(ctx context.Context, op string, body json.RawMessage) (json.RawMessage, error) {
-	image, err := r.inspect(ctx, false)
+	image, err := r.sessionImageFor(ctx, body)
 	if err != nil {
 		return nil, err
 	}
