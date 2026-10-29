@@ -359,7 +359,9 @@ type notSentConn struct {
 	once atomic.Bool
 }
 
-func (c *notSentConn) Write([]byte) (int, error) { return 0, errors.Join(ErrInputNotSent, io.ErrClosedPipe) }
+func (c *notSentConn) Write([]byte) (int, error) {
+	return 0, errors.Join(ErrInputNotSent, io.ErrClosedPipe)
+}
 func (c *notSentConn) MarkTransportLost(error) {
 	if c.once.CompareAndSwap(false, true) {
 		close(c.lost)
@@ -430,7 +432,7 @@ func TestReconnectingConnRefillsBudgetAfterRecovery(t *testing.T) {
 	if code, err := c.Wait(); err != nil || code != 0 || string(got) != "ok" {
 		t.Fatalf("code=%d err=%v output=%q", code, err, got)
 	}
-	if ReattachAttempts(0) != 0 || ReattachAttempts(6) != 24 {
+	if ReattachAttempts(0) != 0 || ReattachAttempts(6) != 600 {
 		t.Fatalf("ReattachAttempts = %d, %d", ReattachAttempts(0), ReattachAttempts(6))
 	}
 }
@@ -458,5 +460,28 @@ func TestReconnectingConnStalledLinkMovesToAFreshLink(t *testing.T) {
 	code, err := c.Wait()
 	if err != nil || code != 3 || string(got) != "fresh" || reconnects.Load() != 2 {
 		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
+	}
+}
+
+// A target ready after several refusals must be retried promptly instead of
+// sitting in a 30 s exponential-backoff sleep after its update has finished.
+func TestReconnectingConnRetriesReadyTargetPromptly(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	first := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
+	second := &reconnectTestConn{Reader: bytes.NewReader([]byte("recovered"))}
+	attempts := 0
+	c := NewReconnectingConn(ctx, first, 5, 10*time.Millisecond, func(context.Context) (Conn, error) {
+		attempts++
+		if attempts < 4 {
+			return nil, ErrTransportLost
+		}
+		return second, nil
+	})
+	defer c.Close()
+	got, err := io.ReadAll(c)
+	_, waitErr := c.Wait()
+	if err != nil || waitErr != nil || string(got) != "recovered" {
+		t.Fatalf("ready target was left waiting: attempts=%d output=%q read=%v wait=%v", attempts, got, err, waitErr)
 	}
 }

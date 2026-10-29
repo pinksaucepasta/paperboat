@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+type releaseHTTPMutationKey struct{}
+
 func ServeHTTPConnection(ctx context.Context, connection net.Conn, handler http.Handler) error {
 	if ctx == nil || connection == nil || handler == nil {
 		return ErrInvalidConfiguration
@@ -78,9 +80,10 @@ func ServeHTTPConnection(ctx context.Context, connection net.Conn, handler http.
 			}()
 			var once sync.Once
 			mu.Lock()
-			finish = func() { once.Do(func() { close(stop); <-done; release(); cancelAdmission(); cancel() }) }
+			releaseMutation := func() { once.Do(func() { close(stop); <-done; release(); cancelAdmission() }) }
+			finish = func() { releaseMutation(); cancel() }
 			mu.Unlock()
-			actual.ServeHTTP(w, r.WithContext(requestCtx))
+			actual.ServeHTTP(w, r.WithContext(context.WithValue(requestCtx, releaseHTTPMutationKey{}, releaseMutation)))
 		})
 	}
 	return serveHTTPConnection(ctx, connection, handler, server)

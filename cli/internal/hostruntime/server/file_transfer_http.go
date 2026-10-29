@@ -534,6 +534,12 @@ func (h *FileTransferHandler) servePending(writer http.ResponseWriter, request *
 		writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
 		return
 	}
+	// Pending only observes authorized metadata. An idle poll must not hold
+	// native mutation admission while an update drains writes. Worker shutdown
+	// and authorization revocation still cancel this request.
+	if release, ok := request.Context().Value(releaseHTTPMutationKey{}).(func()); ok {
+		release()
+	}
 	deadline := time.NewTimer(time.Duration(waitSeconds) * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
