@@ -35,7 +35,7 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 	if err != nil {
 		return err
 	}
-	restore, err := localdaemon.ReplaceCurrentUserService(ctx, systemWorkerExecutable(), cfg.Path(), serverURL)
+	restore, err := localdaemon.ReplaceCurrentUserService(ctx, systemWorkerExecutable(), cfg.Path(), serverURL, "")
 	if err != nil {
 		var cleanupErr error
 		if restore != nil {

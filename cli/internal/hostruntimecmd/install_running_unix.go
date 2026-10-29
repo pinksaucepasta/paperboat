@@ -180,7 +180,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		// install-supplied has unpacked it); commit-supplied must verify the installed one.
 		request = suppliedCommitRequest(request, source)
 	}
-	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL); err != nil {
+	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL, source.Version); err != nil {
 		return rollback(err)
 	}
 	// The same bound as the privileged validator: a new daemon may report starting while its first local-access

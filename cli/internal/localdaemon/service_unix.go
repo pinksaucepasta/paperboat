@@ -46,7 +46,7 @@ func InstallCurrentUserService(ctx context.Context, executable, configPath, serv
 
 // ReplaceCurrentUserService retains the previous declaration until the supplied
 // binary installation passes readiness. Rollback also removes a new service.
-func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serverURL string) (func(context.Context) error, error) {
+func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serverURL, version string) (func(context.Context) error, error) {
 	resolved, err := endpointbinary.Daemon(executable)
 	if err != nil {
 		return nil, err
@@ -59,6 +59,14 @@ func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serv
 	installer, err := newServiceInstaller(config)
 	if err != nil {
 		return nil, err
+	}
+	// Supplied-install validation already activated this version. Preserve that
+	// process while still activating any changed service declaration.
+	if version != "" {
+		probe, probeErr := ProbeCurrentUserForUpdate(ctx)
+		if probeErr == nil && probe.Running && probe.Version == version && probe.State != "starting" && probe.State != "stopping" {
+			return installer.Reconcile(ctx)
+		}
 	}
 	return installer.Replace(ctx)
 }

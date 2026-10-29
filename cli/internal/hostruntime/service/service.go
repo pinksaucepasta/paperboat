@@ -242,6 +242,26 @@ func safeExecutableForInstall(path string, allowMissing bool) error {
 	return nil
 }
 
+// Reconcile retains an already activated executable when only its declaration needs repair.
+func (i *Installer) Reconcile(ctx context.Context) (func(context.Context) error, error) {
+	previous, upgrading, err := i.writeDefinition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	restore := func(recovery context.Context) error { return i.rollback(recovery, previous, upgrading) }
+	definition, err := i.render()
+	if err != nil {
+		return restore, err
+	}
+	if upgrading && bytes.Equal(previous, definition) {
+		return restore, nil
+	}
+	if err := i.config.Controller.Apply(ctx, i.definitionPath, upgrading); err != nil {
+		return restore, fmt.Errorf("activate service declaration: %w", err)
+	}
+	return restore, nil
+}
+
 // Replace activates replaced executable bytes even when the declaration is
 // unchanged. The caller restores its binary before invoking the returned rollback.
 func (i *Installer) Replace(ctx context.Context) (func(context.Context) error, error) {
