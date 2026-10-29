@@ -560,7 +560,7 @@ func (a *Authority) Restore(ctx context.Context) error {
 		return ErrNothingToRestore
 	}
 	cfg, got, err := a.verify(ctx, token, time.Now(), true)
-	if err != nil || got != hash || cfg.Generation != generation || cfg.Self.VirtualAddress != address || cfg.Self.KeyGeneration != keyGeneration || cfg.Self != a.options.Self {
+	if err != nil || got != hash || cfg.Generation != generation || cfg.Self.VirtualAddress != address || cfg.Self.KeyGeneration != keyGeneration {
 		return errors.Join(ErrAuthority, err)
 	}
 	selected, err := privateKey(raw)

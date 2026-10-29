@@ -200,7 +200,13 @@ func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
 	if err := a.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewAuthority(a.options)
+	options := a.options
+	// Production knows endpoint identity, not the network fields assigned by the server.
+	options.Self.VirtualAddress = ""
+	options.Self.WireGuardPublicKey = ""
+	options.Self.DiscoPublicKey = ""
+	options.Self.KeyGeneration = 0
+	restarted, err := NewAuthority(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +226,7 @@ func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
 		t.Fatal("listener startup waited for control-plane registration before restoring verified authority")
 	}
 	// A new endpoint binding must never inherit authority for the old certificate.
-	changed := a.options
+	changed := options
 	changed.Self.EndpointGeneration++
 	other, err := NewAuthority(changed)
 	if err != nil {
