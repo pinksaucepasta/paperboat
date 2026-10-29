@@ -188,3 +188,49 @@ func TestRefusalsBeforeTheFirstConfigurationBackOff(t *testing.T) {
 		t.Fatalf("%d refresh requests in 10 minutes of refusals before a first configuration, want at most %d", requests, limit)
 	}
 }
+
+func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewAuthority(a.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	requests := 0
+	control := networkAPIFunc{register: func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+		requests++
+		return api.PeerNetworkRegistrationResult{}, context.DeadlineExceeded
+	}}
+	if err := restarted.RestoreOrRegister(t.Context(), control); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Peer("machine_test"); err != nil {
+		t.Fatal("verified peer was not restored", err)
+	}
+	if requests != 0 {
+		t.Fatal("listener startup waited for control-plane registration before restoring verified authority")
+	}
+	// A new endpoint binding must never inherit authority for the old certificate.
+	changed := a.options
+	changed.Self.EndpointGeneration++
+	other, err := NewAuthority(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if err := other.RestoreOrRegister(t.Context(), control); err == nil {
+		t.Fatal("changed identity restored another endpoint's authority")
+	}
+	if _, err := other.Peer("machine_test"); err == nil {
+		t.Fatal("changed identity admitted the cached peer")
+	}
+}

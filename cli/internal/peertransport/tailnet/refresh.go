@@ -49,6 +49,21 @@ func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool
 	return a.Refresh(ctx, client)
 }
 
+// RestoreOrRegister resumes exact verified authority before doing control-plane work.
+// Run renews it immediately; a new identity must register before it can listen.
+func (a *Authority) RestoreOrRegister(ctx context.Context, client NetworkAPI) error {
+	if ctx == nil || client == nil {
+		return ErrAuthority
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := a.Restore(ctx); err == nil {
+		return nil
+	}
+	return a.Register(ctx, client, false)
+}
+
 // RegisterOrRestore registers and refreshes; when Paperboat cannot be reached (no answer, or a 5xx), it
 // restores the configuration last verified on this machine instead, so a restart during an outage keeps the
 // peers (F21-01). An answer refusing the machine (4xx) is returned: refused authority is never restored.

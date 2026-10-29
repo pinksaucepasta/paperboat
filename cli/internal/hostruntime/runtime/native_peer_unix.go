@@ -288,7 +288,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	control := clientapi.New(s.config.controlURL, clientconfig.Credential{}, &http.Client{Transport: s.config.transport, Timeout: 15 * time.Second})
 	control.SetMachineAuth(s.config.identity)
 	request, cancelRequest := context.WithTimeout(ctx, 15*time.Second)
-	err = authority.RegisterOrRestore(request, control, false)
+	err = authority.RestoreOrRegister(request, control)
 	cancelRequest()
 	if err != nil {
 		_ = authority.Close()
