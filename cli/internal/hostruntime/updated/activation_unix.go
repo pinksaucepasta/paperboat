@@ -626,7 +626,7 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	// control plane being unreachable (a broken local access setup, say), can only be repaired by
 	// updating it. The updater must work when the app is broken: the daemon has to come back
 	// running the right version, not ready, or the fix could never reach the machine.
-	if baseline.State != "ready" && !baseline.ControlPlaneUnavailableOnly {
+	if baseline.State == "degraded" && !baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" {
 		return nil
 	}
 	// A control plane that cannot be reached, or that refuses this version (the very case an update

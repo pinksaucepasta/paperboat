@@ -46,6 +46,17 @@ func TestSuppliedUpdateIsValidatedAgainstTheUserDaemonBeforeItCommits(t *testing
 		t.Fatalf("a daemon that starts on the new version failed validation: %v restarts=%d", err, healthy.restarts)
 	}
 
+	// An update begun during replacement must not accept a new daemon that has
+	// not finished its first reconciliation, even if the old daemon was degraded.
+	for _, state := range []string{"starting", "degraded"} {
+		before := baseline
+		before.State = state
+		starting := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "starting"}, ready}}
+		if err := restartAndAwaitDaemon(t.Context(), starting, "2", before); err != nil || starting.probeCalls != 2 {
+			t.Fatalf("baseline %s completed before reconciliation: probes=%d err=%v", state, starting.probeCalls, err)
+		}
+	}
+
 	cannotRestart := &scriptedParticipants{probes: []updated.UnixParticipantProbe{ready}, restartErr: errors.New("systemctl --user restart failed")}
 	if err := restartAndAwaitDaemon(t.Context(), cannotRestart, "2", baseline); err == nil {
 		t.Fatal("a daemon that cannot be restarted passed validation")
