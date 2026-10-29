@@ -242,7 +242,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return hostInstallFailure("the installed carrier was not serving and its replacement did not become ready; restoring the previous version", err)
 			}
 		}
-		if err := applyUnixNativeRoles(ctx, legacyHost, hostd, updater, request.HelperListenAddress, false); err != nil {
+		if err := applyUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, false); err != nil {
 			return err
 		}
 

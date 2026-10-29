@@ -229,10 +229,25 @@ func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths in
 	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
 		return err
 	}
+	if host != nil {
+		if err := request.Source.Verify(host.ExecutablePath()); err != nil {
+			return err
+		}
+	}
+	return prepareUnixRuntimeCutover(ctx, host, hostd, updater, prepare)
+}
+
+// prepareUnixRuntimeCutover owns native service work at the admission boundary.
+func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
+	if host != nil {
+		if err := host.Install(ctx); err != nil {
+			return err
+		}
+	}
 	if err := prepare(ctx); err != nil {
 		return err
 	}
-	return stopUnixRuntimeRoles(ctx, host, hostd, updater)
+	return stopUnixRuntimeRoles(ctx, nil, hostd, updater)
 }
 
 func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer) error {

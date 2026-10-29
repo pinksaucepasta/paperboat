@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -106,5 +107,98 @@ func TestRuntimeStartsBeforeIndependentPowerPolicy(t *testing.T) {
 	}
 	if !runner.hostdStarted {
 		t.Fatal("independent power policy prevented terminal runtime from starting")
+	}
+}
+
+type preparedPowerRunner struct {
+	paused, powerReady, powerStopped, hostdStopped bool
+	powerErr                                       error
+}
+
+func (r *preparedPowerRunner) Run(_ context.Context, _ string, args ...string) error {
+	if len(args) < 2 {
+		return nil
+	}
+	unit := args[len(args)-1]
+	if unit == "power.service" && (args[0] == "restart" || args[0] == "enable" && args[1] == "--now") {
+		if r.paused {
+			return errors.New("power startup entered terminal cutover")
+		}
+		if r.powerErr != nil {
+			return r.powerErr
+		}
+		r.powerReady = true
+	}
+	if args[0] == "stop" {
+		if unit == "power.service" {
+			r.powerStopped = true
+		}
+		if unit == "hostd.service" {
+			r.hostdStopped = true
+		}
+	}
+	return nil
+}
+func (r *preparedPowerRunner) Output(ctx context.Context, name string, args ...string) (string, error) {
+	return "", r.Run(ctx, name, args...)
+}
+
+func TestPowerReplacementCompletesBeforeTerminalAdmissionPauses(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		name := "healthy"
+		if fail {
+			name = "failed"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			pin := filepath.Join(root, "pinned-pb")
+			if err := os.WriteFile(pin, []byte("fixture executable"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			runner := &preparedPowerRunner{}
+			if fail {
+				runner.powerErr = errors.New("power startup failed")
+			}
+			makeRole := func(kind, unit, image string) *service.Installer {
+				t.Helper()
+				i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: image, User: "tester", Group: "tester", Arguments: []string{"daemon"}, Controller: service.SystemdController{Runner: runner, Unit: unit}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return i
+			}
+			power := makeRole(service.HostKind, "power.service", pin)
+			hostd := makeRole(service.HostdKind, "hostd.service", filepath.Join(root, "pb"))
+			err := prepareUnixRuntimeCutover(t.Context(), power, hostd, nil, func(context.Context) error {
+				if !runner.powerReady {
+					return errors.New("power service was not prepared before admission")
+				}
+				runner.paused = true
+				return nil
+			})
+			if fail {
+				if !errors.Is(err, runner.powerErr) || runner.paused || runner.hostdStopped {
+					t.Fatalf("power failure interrupted serving terminal: err=%v paused=%v stopped=%v", err, runner.paused, runner.hostdStopped)
+				}
+				return
+			}
+			if err != nil || !runner.paused || !runner.hostdStopped || runner.powerStopped {
+				t.Fatalf("independent power replacement crossed terminal cutover: err=%v paused=%v hostdStopped=%v powerStopped=%v", err, runner.paused, runner.hostdStopped, runner.powerStopped)
+			}
+		})
+	}
+}
+
+func TestPowerServiceUsesTheImmutableCandidatePin(t *testing.T) {
+	root := t.TempDir()
+	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "releases", "pb.rollback")}
+	request := Request{Platform: runtime.GOOS, UID: 1001, GID: 1001, HelperListenAddress: "127.0.0.1:1234", Source: installsource.Source{SHA256: strings.Repeat("a", 64)}}
+	installer, err := hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "releases", "pins", request.Source.SHA256, "pb")
+	if installer.ExecutablePath() != want {
+		t.Fatalf("power service depends on mutable worker slot: %s", installer.ExecutablePath())
 	}
 }

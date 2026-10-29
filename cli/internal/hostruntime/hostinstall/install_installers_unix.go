@@ -198,8 +198,11 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 		rootGroup = "wheel"
 		hostController = service.LaunchdController{Runner: service.ExecRunner{}, UID: request.UID, Label: service.HostLabel + "." + instance}
 	}
+	// Use the verified owner/carrier pin so power replacement precedes terminal cutover.
+	pin := filepath.Join(filepath.Dir(paths.workerRollback), "pins", request.Source.SHA256, "pb")
 	config := service.Config{
-		Platform: request.Platform, Kind: service.HostKind, Instance: instance, ConfigRoot: string(os.PathSeparator), Executable: paths.worker,
+		Platform: request.Platform, Kind: service.HostKind, Instance: instance,
+		ConfigRoot: string(os.PathSeparator), Executable: pin,
 		User: "root", Group: rootGroup, Arguments: []string{
 			"daemon", "__runtime-host-service", "--uid", strconv.Itoa(request.UID), "--gid", strconv.Itoa(request.GID),
 			"--listen-address", request.HelperListenAddress,

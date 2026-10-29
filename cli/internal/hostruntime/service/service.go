@@ -401,6 +401,9 @@ func (i *Installer) Uninstall(ctx context.Context) error {
 }
 func (i *Installer) DefinitionPath() string { return i.definitionPath }
 
+// ExecutablePath is the image this declaration will activate.
+func (i *Installer) ExecutablePath() string { return i.config.Executable }
+
 // VerifyPublishedDefinition checks that the fixed native declaration still
 // names this exact source and configuration without publishing or restarting it.
 func (i *Installer) VerifyPublishedDefinition() error {
