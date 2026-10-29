@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -231,6 +232,11 @@ func (s *Server) handler() http.Handler {
 		switch parts[0] {
 		case "session":
 			result, err = session.ServeRemoteCall(ctx, s.Sessions, parts[1], body)
+			if s.SessionOnly && err == nil && strings.HasPrefix(parts[1], "Attach") {
+				if recorder := diagnostics.FromContext(ctx); recorder != nil {
+					_ = recorder.Record("terminal", "owner_attachment_ready", "info", map[string]string{"generation": worker})
+				}
+			}
 		case "exec":
 			if s.Executions == nil {
 				err = session.ErrOwnerUnavailable

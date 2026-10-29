@@ -81,6 +81,8 @@ func TestLocalPeerNativeTransportRecoveryPreservesRetryabilityWithoutInputReplay
 		{"owned native transport cancellation", &terminalTransportError{transport: "native application", cause: nativeOperationalStop{context.Canceled}}, true},
 		{"owned native stop with inner refusal", &terminalTransportError{transport: "native application", cause: errors.Join(nativeOperationalStop{context.Canceled}, &helperRemoteError{Code: "permission_denied", Retryable: false})}, false},
 		{"native connection closing", &terminalTransportError{transport: "QUIC", cause: net.ErrClosed}, true},
+		{"terminal service restarting", &terminalTransportError{transport: "native application", cause: &helperRemoteError{Code: "unavailable", Retryable: true}}, true},
+		{"terminal service setup deadline", &terminalTransportError{transport: "native application", cause: &helperRemoteError{Code: "deadline_exceeded", Retryable: true}}, true},
 		{"authorization refused", &terminalTransportError{transport: "native application", cause: &helperRemoteError{Code: "permission_denied", Retryable: false}}, false},
 		{"arbitrary broker failure", errors.New("broker failed"), false},
 		{"control credential rejected", &terminalTransportError{transport: "native runtime", cause: &api.APIError{Status: 401}}, false},
