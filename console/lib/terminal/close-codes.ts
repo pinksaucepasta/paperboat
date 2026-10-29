@@ -19,6 +19,7 @@ export type CloseCode =
   | "too_many_pending"
   | "machine_unavailable"
   | "edge_unavailable"
+  | "terminal_service_unavailable"
   | "protocol"
 
 export type CloseOutcome = { phase: TerminalPhase | "reconnect"; message: string; silent?: boolean }
@@ -41,6 +42,10 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
     message: "The machine is unavailable right now. This resumes when it is back.",
   },
   edge_unavailable: { phase: "reconnect", message: "The connection was interrupted." },
+  terminal_service_unavailable: {
+    phase: "reconnect",
+    message: "The machine's terminal service is not responding. This resumes when it answers.",
+  },
   protocol: { phase: "transport-error", message: "The machine sent something this page could not use. You can retry." },
 }
 

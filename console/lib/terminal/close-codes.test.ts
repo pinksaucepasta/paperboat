@@ -7,6 +7,7 @@ const refusal = (status: number, code: string) => new ApiError(status, code, "st
 describe("terminal close codes", () => {
   test("a socket close names its own outcome", () => {
     expect(workerCloseCode({ state: "transport-error", code: "machine_unavailable" })).toBe("machine_unavailable")
+    expect(workerCloseCode({ state: "transport-error", code: "terminal_service_unavailable" })).toBe("terminal_service_unavailable")
     expect(terminalCloseCodes.machine_unavailable.phase).toBe("reconnect")
     expect(terminalCloseCodes.machine_unavailable.message).toMatch(/machine is unavailable/)
   })
