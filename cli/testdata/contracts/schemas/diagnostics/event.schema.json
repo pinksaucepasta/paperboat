@@ -15,6 +15,7 @@
       "type": "object",
       "maxProperties": 12,
       "propertyNames": { "enum": ["capability", "generation", "operation", "outcome", "path_category", "phase", "reason", "relay_region", "retry_class", "state", "transport"] },
+      "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000\\r\\n]+$" } },
       "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" }
     }
   }

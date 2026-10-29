@@ -135,6 +135,7 @@ func doctorCommandV1() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordDoctorResult(command.Context(), report)
 			jsonOutput, _ := command.Flags().GetBool("json")
 			if jsonOutput {
 				encoder := json.NewEncoder(command.OutOrStdout())

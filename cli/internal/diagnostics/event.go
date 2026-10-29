@@ -78,6 +78,13 @@ func (e Event) Validate() error {
 		if key == "error_chain" {
 			limit = 1024
 		}
+		// Doctor reasons are locally produced check summaries, never raw probe errors.
+		if e.Category == "doctor" && key == "reason" {
+			if value == "" || len(value) > 512 || strings.ContainsAny(value, "\x00\r\n") {
+				return ErrInvalid
+			}
+			continue
+		}
 		if !allowedFields[key] || !safeIdentifier(value, limit) {
 			return ErrInvalid
 		}

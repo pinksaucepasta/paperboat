@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -54,5 +57,48 @@ func TestLocalDoctorFilesystemFailureIsUnavailableAndObservedThenRecovers(t *tes
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("doctor created an unconfigured installation")
+	}
+}
+
+func TestDoctorDegradationPersistsEachCheckAndReason(t *testing.T) {
+	recorder, err := diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	ctx := diagnostics.WithRecorder(t.Context(), recorder)
+	report := doctorpkg.Report{Schema: doctorpkg.SchemaV1, CorrelationID: supportref.New(), CheckedAt: time.Now().UTC(), Overall: "degraded", Checks: []doctorpkg.Check{
+		{Category: "local", Code: "daemon", Status: "warning", Summary: "The local daemon is degraded.", Recovery: "Run pb doctor again."},
+		{Category: "local", Code: "local_state", Status: "pass", Summary: "Local state is healthy."},
+		{Category: "network", Code: "udp_ipv6", Status: "unavailable", Summary: "IPv6 UDP sockets are unavailable."},
+	}}
+	if err := report.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	recordDoctorResult(ctx, report)
+	report.Overall = "healthy"
+	report.Checks = nil
+	recordDoctorResult(ctx, report)
+	if err := recorder.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	body, err := recorder.ReadDisk(t.Context(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("persisted %d checks, want 2", len(lines))
+	}
+	for i, line := range lines {
+		var event diagnostics.Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		expected := []string{"The local daemon is degraded.", "IPv6 UDP sockets are unavailable."}
+		codes := []string{"daemon", "udp_ipv6"}
+		if event.Category != "doctor" || event.Code != codes[i] || event.Fields["reason"] != expected[i] || event.SupportReference != report.CorrelationID {
+			t.Fatalf("missing degraded evidence: %#v", event)
+		}
 	}
 }
