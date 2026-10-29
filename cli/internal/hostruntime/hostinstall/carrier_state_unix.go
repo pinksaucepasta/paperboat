@@ -269,7 +269,8 @@ func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Ins
 		}
 		return nil
 	}
-	for _, installer := range []*service.Installer{host, hostd, updater} {
+	// Terminal recovery must not wait for the independent power-policy service.
+	for _, installer := range []*service.Installer{hostd, host, updater} {
 		if installer == nil {
 			continue
 		}
@@ -481,7 +482,8 @@ func RestorePriorNativeRuntime(ctx context.Context, previous Request) error {
 			return err
 		}
 	}
-	for _, installer := range []*service.Installer{host, hostd, updater} {
+	// Terminal recovery must not wait for the independent power-policy service.
+	for _, installer := range []*service.Installer{hostd, host, updater} {
 		if installer == nil {
 			continue
 		}
