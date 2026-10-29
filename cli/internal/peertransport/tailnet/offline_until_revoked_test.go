@@ -3,7 +3,11 @@ package tailnet
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"math/big"
 	"testing"
 	"time"
 
@@ -224,6 +228,30 @@ func TestRestartRestoresVerifiedNetworkBeforeContactingControl(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Fatal("listener startup waited for control-plane registration before restoring verified authority")
+	}
+	// Exercise the carrier's next startup steps too: regional discovery is not
+	// persisted authority, so no relay may be admitted until fresh signed grants arrive.
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
+	raw, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{{Certificate: [][]byte{raw}, PrivateKey: private}}}
+	regions, err := restarted.ConfigureRegionalRelays(tlsConfig)
+	if err != nil || len(regions) != 0 {
+		t.Fatalf("cached network could not start before regional discovery: %v", err)
+	}
+	listener, err := restarted.Listen(nil)
+	if err != nil {
+		t.Fatal("verified peer listener could not open", err)
+	}
+	defer listener.Close()
+	if restarted.relay.recovery == nil {
+		t.Fatal("startup omitted later authenticated relay recovery")
 	}
 	// A new endpoint binding must never inherit authority for the old certificate.
 	changed := options

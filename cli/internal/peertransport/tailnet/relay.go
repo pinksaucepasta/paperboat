@@ -299,12 +299,19 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.usableLocked() || a.server != nil || a.clientEngine != nil || a.regional == nil {
+	if !a.usableLocked() || a.server != nil || a.clientEngine != nil {
 		return nil, ErrAuthority
 	}
-	nodes, _, err := a.regional.Eligible("relay", "derp_quic", nil, time.Now())
-	if err != nil {
-		return nil, err
+	// A restored network can serve direct peers before fresh relay discovery.
+	// No regional node is usable until signed candidates and grants arrive.
+	var nodes []RegionalNode
+	if a.regional != nil {
+		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, time.Now())
+		if err != nil {
+			return nil, err
+		}
+	} else if only != "" {
+		return nil, ErrRegionalAuthority
 	}
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
