@@ -183,7 +183,9 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	ready := r.ready
 	r.mu.Unlock()
 	a.mu.Unlock()
-	if peerID == "" {
+	// Direct UDP discovery belongs to magicsock; relay rendezvous must not
+	// serialize it. The recovery worker above still prepares fallback routes.
+	if peerID == "" || a.PeerHasEndpoints(peerID) {
 		return nil
 	}
 	select {

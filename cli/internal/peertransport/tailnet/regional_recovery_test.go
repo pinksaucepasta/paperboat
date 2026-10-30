@@ -243,3 +243,28 @@ func TestUnusableRelayIsReportedAfterTheWarningDelay(t *testing.T) {
 		t.Fatalf("a new unusable period was reported without its own delay: %+v", got)
 	}
 }
+
+// A direct contact is already authorized by the signed network. Regional
+// rendezvous continues independently, including while its relay is unavailable.
+func TestDirectPeerDoesNotWaitForRegionalRendezvous(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].Endpoints = []string{"192.0.2.10:41642"}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	engine := &mesh.Server{}
+	a.mu.Lock()
+	a.clientEngine = engine
+	a.mu.Unlock()
+	a.relay.mu.Lock()
+	a.relay.regionalRecoveryConfigured = true
+	recovery := a.newRegionalRecoveryLocked()
+	recovery.engine = engine
+	a.relay.recovery = recovery
+	a.relay.mu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	if err := a.PrepareRegional(ctx, cfg.Peers[0].Identity.EndpointID); err != nil {
+		t.Fatal("authorized direct peer waited for regional rendezvous", err)
+	}
+}
