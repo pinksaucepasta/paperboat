@@ -429,10 +429,17 @@ func (o *Owner) Close() error {
 		sessions = append(sessions, session)
 	}
 	o.mu.Unlock()
-	var result error
-	for _, session := range sessions {
-		result = errors.Join(result, session.Close())
+	// Every QUIC association has a bounded close-frame flush. Initiate all
+	// independent closes before joining, so shutdown pays one flush window,
+	// rather than one window per peer.
+	failures := make([]error, len(sessions))
+	var closing sync.WaitGroup
+	for i, session := range sessions {
+		closing.Add(1)
+		go func() { defer closing.Done(); failures[i] = session.Close() }()
 	}
+	closing.Wait()
+	result := errors.Join(failures...)
 	result = errors.Join(result, o.authority.Close())
 	o.workers.Wait()
 	return result
