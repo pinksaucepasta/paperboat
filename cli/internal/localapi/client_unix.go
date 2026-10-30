@@ -192,6 +192,7 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	if reference := supportref.FromContext(ctx); reference != "" {
 		request.Header.Set(supportref.Header, reference)
 	}
+	diagnostics.ReconnectHeaders(ctx, request.Header)
 	request.Header.Set("Connection", "close")
 	if err := request.Write(connection); err != nil {
 		_ = connection.Close()

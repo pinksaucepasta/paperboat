@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
@@ -38,11 +39,13 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 	remoteServer, remotePeer := net.Pipe()
 	defer remotePeer.Close()
 	releaseWait := make(chan struct{})
+	recorder := diagnostics.NewMemoryRecorder()
 	requestSeen := make(chan localapi.PeerStreamRequest, 1)
-	broker := localPeerTunnelBroker(func(_ context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
+	broker := localPeerTunnelBroker(func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
 		if request.Consumer != "terminal" || request.OperationID != "session_1" {
 			return nil, errors.New("unexpected terminal peer request")
 		}
+		diagnostics.ReconnectEvent(ctx, "redial", "started", nil)
 		requestSeen <- request
 		client, bridge := net.Pipe()
 		remote := &blockingWaitRemote{
@@ -62,7 +65,7 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverCtx, cancelServer := context.WithCancel(context.Background())
+	serverCtx, cancelServer := context.WithCancel(diagnostics.WithRecorder(context.Background(), recorder))
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- server.Run(serverCtx) }()
 	t.Cleanup(func() {
@@ -86,7 +89,7 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	tunnel := LocalPeerTunnel{Client: client}
-	connection, err := tunnel.Dial(context.Background(), resolver.ConnectInfo{
+	connection, err := tunnel.Dial(diagnostics.WithReconnect(context.Background(), "attempt-1", "probeStalled", "old-1"), resolver.ConnectInfo{
 		MachineID:         "machine_1",
 		MachineGeneration: 1,
 		Terminal: &resolver.TerminalTarget{
@@ -104,6 +107,11 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.Close()
+	events := recorder.Recent()
+	if len(events) != 1 || events[0].Fields["attempt_id"] != "attempt-1" || events[0].Fields["caller"] != "probeStalled" || events[0].Fields["connection_id"] != "old-1" {
+		t.Fatal("peer-stream upgrade lost reconnect correlation")
+	}
+
 	if got := TerminalRuntimeVersion(connection); got != "2026.08.27.65" {
 		t.Fatalf("runtime version=%q", got)
 	}
