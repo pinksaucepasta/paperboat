@@ -9,6 +9,8 @@ import (
 
 // A terminal attachment owns one inbox poller. Replacement and terminal exit
 // cancel and join that poller before releasing its transfer connection.
+// Replacement joins happen in the new worker so terminal readiness never waits
+// for an old auxiliary HTTP request; stop still joins the complete chain.
 type terminalInboxWorker struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -18,7 +20,10 @@ type terminalInboxWorker struct {
 func (w *terminalInboxWorker) start(parent context.Context, run func(context.Context) error, failed func(error)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.stopLocked()
+	previous := w.done
+	if w.cancel != nil {
+		w.cancel()
+	}
 	if run == nil || parent.Err() != nil {
 		return
 	}
@@ -27,6 +32,12 @@ func (w *terminalInboxWorker) start(parent context.Context, run func(context.Con
 	done := w.done
 	go func() {
 		defer close(done)
+		if previous != nil {
+			<-previous
+		}
+		if ctx.Err() != nil {
+			return
+		}
 		if err := run(ctx); err != nil {
 			failed(err)
 		}

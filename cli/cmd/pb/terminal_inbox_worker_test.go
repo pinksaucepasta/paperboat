@@ -58,3 +58,45 @@ func TestTerminalInboxReplacementJoinsPreviousPollerAndKeepsFailure(t *testing.T
 		t.Fatal("inbox shutdown lost mixed I/O evidence or recorded pure cancellation")
 	}
 }
+
+func TestTerminalAuxiliaryReplacementDoesNotDelayReadyTerminal(t *testing.T) {
+	var worker terminalInboxWorker
+	started, release := make(chan struct{}), make(chan struct{})
+	worker.start(t.Context(), func(ctx context.Context) error { close(started); <-ctx.Done(); <-release; return ctx.Err() }, func(error) {})
+	<-started
+	replaced, freshStarted, freshDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		worker.start(t.Context(), func(ctx context.Context) error {
+			defer close(freshDone)
+			close(freshStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		}, func(error) {})
+		close(replaced)
+	}()
+	select {
+	case <-replaced:
+	case <-time.After(time.Second):
+		close(release)
+		worker.stop()
+		t.Fatal("ready terminal waited for the previous auxiliary request to finish")
+	}
+	select {
+	case <-freshStarted:
+		t.Fatal("replacement setup overlapped the previous resource owner")
+	default:
+	}
+	close(release)
+	select {
+	case <-freshStarted:
+	case <-time.After(time.Second):
+		worker.stop()
+		t.Fatal("replacement setup did not start after previous cleanup")
+	}
+	worker.stop()
+	select {
+	case <-freshDone:
+	default:
+		t.Fatal("terminal exit did not join auxiliary setup")
+	}
+}

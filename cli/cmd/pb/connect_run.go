@@ -503,7 +503,16 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		})
 	}
 	defer stopInbox()
-	var pastePolicy *paste.Policy
+	var transferRefresh terminalInboxWorker
+	defer func() { cancelConnection(); transferRefresh.stop() }()
+	var pasteUploader paste.BatchUploader
+	if transferClient != nil {
+		pasteUploader = transferClient
+	}
+	pastePolicy := paste.NewPolicy(pasteUploader, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
+	if transferClient != nil {
+		startInbox(transferClient.Client, info.Terminal.SessionID)
+	}
 	conn = tunnel.NewObservedReconnectingConn(ctx, conn, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
 		freshCred, credErr := d.auth.Credential()
 		if credErr != nil {
@@ -546,35 +555,43 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if c.Bool("debug") {
 			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
 		}
-		if pastePolicy != nil {
-			var freshTransfer *filetransfer.NativeClient
-			var freshLease *localapi.FileTransferLease
-			if freshInfo.FileTransfer != nil && d.peerLocal != nil {
-				var transferErr error
-				freshTransfer, freshLease, transferErr = nativeFileTransferClient(reconnectCtx, d.peerLocal, freshInfo, newIdempotencyKey())
-				observeTransferFailure(transferErr)
-				if freshTransfer != nil {
-					if policyErr := freshTransfer.VerifyPolicy(reconnectCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)); policyErr != nil {
-						observeTransferFailure(policyErr)
-						observeTransferFailure(freshLease.Close())
-						freshTransfer, freshLease = nil, nil
-					}
-				}
-			}
+		// Terminal output is ready now. Transfer authorization and inbox setup
+		// have their own cancellable owner and cannot hold this attachment back.
+		pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+		transferRefresh.start(ctx, func(refreshCtx context.Context) error {
 			stopInbox()
-			oldLease := transferLease
-			transferClient, transferLease = freshTransfer, freshLease
-			var freshUploader paste.BatchUploader = freshTransfer
-			pastePolicy.Update(freshUploader, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-			if oldLease != nil {
-				observeTransferFailure(oldLease.Close())
+			pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+			if transferLease != nil {
+				observeTransferFailure(transferLease.Close())
+				transferLease = nil
 			}
-			if freshTransfer != nil {
-				startInbox(freshTransfer.Client, freshInfo.Terminal.SessionID)
-			} else {
-				startInbox(nil, freshInfo.Terminal.SessionID)
+			if freshInfo.FileTransfer == nil || d.peerLocal == nil {
+				return nil
 			}
-		}
+			freshTransfer, freshLease, err := nativeFileTransferClient(refreshCtx, d.peerLocal, freshInfo, newIdempotencyKey())
+			defer func() {
+				if freshLease != nil {
+					observeTransferFailure(freshLease.Close())
+				}
+			}()
+			if err != nil {
+				return err
+			}
+			if freshTransfer == nil {
+				return nil
+			}
+			if err := freshTransfer.VerifyPolicy(refreshCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)); err != nil {
+				return err
+			}
+			if err := refreshCtx.Err(); err != nil {
+				return err
+			}
+			transferLease, freshLease = freshLease, nil
+			pastePolicy.Update(freshTransfer, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+			startInbox(freshTransfer.Client, freshInfo.Terminal.SessionID)
+			return nil
+		}, observeTransferFailure)
+
 		return freshConn, nil
 	}, d.telemetry, nil, tunnel.TelemetryContext{MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID}, tunnel.WithReconnectingOutput(
 		d.cfg.Connect.TerminalOutputQueueChunks,
@@ -624,8 +641,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	}))
 
 	// Wrap remote input with the file-paste interceptor.
-	var pasteUploader paste.BatchUploader = transferClient
-	pastePolicy = paste.NewPolicy(pasteUploader, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
 	interceptor := paste.NewWithPolicy(conn, pastePolicy,
 		paste.WithDirectInput(),
 		paste.WithNotifier(statusNotifier(useStatusBar)),
@@ -657,9 +672,6 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		paste.WithMaxQueuedBytes(d.cfg.FilePaste.MaxQueuedInputBytes),
 		paste.WithPartialFlushDelay(time.Duration(d.cfg.Connect.InputPartialFlushMilliseconds)*time.Millisecond),
 	)
-	if transferClient != nil {
-		startInbox(transferClient.Client, info.Terminal.SessionID)
-	}
 
 	runOptions := []session.RunOption{
 		session.WithOutputBufferBytes(d.cfg.Connect.TerminalOutputBufferBytes),
