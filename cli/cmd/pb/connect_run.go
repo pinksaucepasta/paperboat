@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 
 	"context"
 	"errors"
@@ -526,7 +527,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if target.kind == environmentUserMachine && info.MachineGeneration > 0 {
 			reconnectRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: info.MachineID, Name: info.Machine, State: info.MachineState, Generation: info.MachineGeneration}
 		}
+		resolveEnd := diagnostics.ReconnectStep(reconnectCtx, "resolve")
 		freshInfo, resolveErr := freshResolver.Resolve(reconnectCtx, reconnectRequest)
+		resolveEnd(resolveErr)
 		if resolveErr != nil {
 			var apiErr *api.APIError
 			if errors.As(resolveErr, &apiErr) && apiErr.Code == "machine_revoked" {
@@ -545,7 +548,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			freshInfo.Terminal.Cols, freshInfo.Terminal.Rows = remoteSize()
 			freshInfo.Terminal.InputOwner = inputOwner
 		}
+		dialEnd := diagnostics.ReconnectStep(reconnectCtx, "local_peer_open")
 		freshConn, dialErr := d.tunnel.Dial(reconnectCtx, freshInfo)
+		dialEnd(dialErr)
 		if dialErr != nil {
 			if !tunnel.FallbackEligible(dialErr) {
 				return nil, tunnel.StopReconnect(dialErr)

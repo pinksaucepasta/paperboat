@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net"
 	"net/http"
@@ -152,14 +153,18 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
+	authorityEnd := diagnostics.ReconnectStep(ctx, "local_authority")
 	authority, err := t.authorities.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
+	authorityEnd(err)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, contextOperationError(ctx)
 		}
 		return nil, err
 	}
+	runtimeEnd := diagnostics.ReconnectStep(ctx, "runtime_acquire")
 	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal))
+	runtimeEnd(err)
 	if !consumed {
 		authority.Clear()
 	}

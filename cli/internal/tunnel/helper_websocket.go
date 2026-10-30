@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -332,7 +332,10 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 	}
 	attach := func(sequence uint64, liveBoundary bool) (helperFrame, error) {
 		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary})
-		return c.requestSync(ctx, "terminal.v1", payload)
+		attachEnd := diagnostics.ReconnectStep(ctx, "attach")
+		frame, err := c.requestSync(ctx, "terminal.v1", payload)
+		attachEnd(err)
+		return frame, err
 	}
 	frame, err = attach(fromSequence, existingSession && c.target.AfterSequence <= 0)
 	for attempt := 0; err != nil; attempt++ {
@@ -420,71 +423,6 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	go c.readLoop()
 	go c.ackLoop()
 	return nil
-}
-
-func helperResponseSessionExisting(frame helperFrame) bool {
-	var response struct {
-		Result struct {
-			Existing bool `json:"existing"`
-		} `json:"result"`
-	}
-	_ = json.Unmarshal(frame.Payload, &response)
-	return response.Result.Existing
-}
-
-func (c *helperTerminalConn) requestSync(ctx context.Context, capability string, payload json.RawMessage) (helperFrame, error) {
-	operationCtx, cancel := context.WithTimeout(ctx, helperRequestTimeout)
-	defer cancel()
-	requestID := helperID("request")
-	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: helperID("operation"), Capability: capability, DeadlineMS: uint32(min(helperRequestTimeout, deadlineRemaining(operationCtx)) / time.Millisecond), Payload: payload}
-	if frame.DeadlineMS == 0 {
-		frame.DeadlineMS = 1
-	}
-	if err := writeHelperFrame(operationCtx, c.message, frame); err != nil {
-		return helperFrame{}, err
-	}
-	response, err := awaitHelperResponse(operationCtx, c.message, requestID, &c.initialOutput)
-	if err != nil {
-		return helperFrame{}, err
-	}
-	if response.Type == "error" {
-		return helperFrame{}, decodeHelperError(response)
-	}
-	return response, nil
-}
-
-func helperResponseSessionState(frame helperFrame) (string, uint64, uint64) {
-	var response struct {
-		Result struct {
-			State          string `json:"state"`
-			Generation     uint64 `json:"generation"`
-			LatestSequence uint64 `json:"latest_sequence"`
-		} `json:"result"`
-	}
-	_ = json.Unmarshal(frame.Payload, &response)
-	return response.Result.State, response.Result.Generation, response.Result.LatestSequence
-}
-
-func helperResponseGeneration(frame helperFrame) uint64 {
-	var response struct {
-		Result struct {
-			Generation uint64 `json:"generation"`
-		} `json:"result"`
-	}
-	_ = json.Unmarshal(frame.Payload, &response)
-	return response.Result.Generation
-}
-
-func helperResponseRuntimeVersion(frame helperFrame) string {
-	var response struct {
-		Result struct {
-			Version string `json:"version"`
-		} `json:"result"`
-	}
-	if frame.Type != "response" || json.Unmarshal(frame.Payload, &response) != nil {
-		return ""
-	}
-	return strings.TrimSpace(response.Result.Version)
 }
 
 func (c *helperTerminalConn) writeFrame(frame helperFrame) error {

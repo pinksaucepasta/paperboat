@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 	"io"
 	"net/http"
@@ -208,7 +209,9 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any, 
 // the client, with response headers exposed to callers that need optimistic
 // concurrency metadata. Keeping this as a narrow extension avoids making
 // ETags or other transport headers part of every existing API method.
-func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) error {
+func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) (resultErr error) {
+	end := diagnostics.ReconnectStep(ctx, "server_call")
+	defer func() { end(resultErr) }()
 	req, encodedBody, requestSupportReference, path, err := c.newRequest(ctx, method, path, body, headers)
 	if err != nil {
 		return err

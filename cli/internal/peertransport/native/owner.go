@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net"
 	"net/netip"
@@ -241,11 +242,15 @@ func (o *Owner) dialFailure(ctx context.Context, peerID, stage, code string, err
 }
 
 func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
+	peerEnd := diagnostics.ReconnectStep(ctx, "peer_authority_lookup")
 	peer, err := o.authority.Peer(peerID)
+	peerEnd(err)
 	if err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
+	clientEnd := diagnostics.ReconnectStep(ctx, "carrier_client")
 	client, err := o.authority.Client(descriptor, peerID)
+	clientEnd(err)
 	if err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
@@ -254,11 +259,16 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	// A peer on this host never needs one: regional recovery bound to it probed a relay pair with itself
 	// and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
 	if !o.authority.PeerIsLocal(peerID) {
-		if err := o.authority.PrepareRegional(ctx, peerID); err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
+		regionalEnd := diagnostics.ReconnectStep(ctx, "regional_prepare")
+		err := o.authority.PrepareRegional(ctx, peerID)
+		regionalEnd(err)
+		if err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
 			return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 		}
 	}
+	carrierEnd := diagnostics.ReconnectStep(ctx, "carrier_dial")
 	socket, err := client.Dial(ctx)
+	carrierEnd(err)
 	if err != nil {
 		return nil, o.failedPeerDial(ctx, peerID, client, err)
 	}
@@ -266,7 +276,9 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	if class == peerquic.ClassPreview {
 		tlsConfig.NextProtos = []string{PrivateHTTP3ALPN}
 	}
+	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
+	handshakeEnd(err)
 	if err != nil {
 		// DialPacket releases its failed socket before the shared cache decision.
 		return nil, o.failedPeerDial(ctx, peerID, client, err)

@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptrace"
@@ -43,7 +45,7 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 			}
 			var written atomic.Bool
 			trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { written.Store(true) }}
-			resp, err = c.http.Do(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
+			resp, err = c.sendReconnectRequest(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
 			if err == nil || req.Context().Err() != nil || !written.Load() {
 				return resp, err
 			}
@@ -52,7 +54,7 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 	}
 	var written atomic.Bool
 	trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { written.Store(true) }}
-	resp, err := c.http.Do(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
+	resp, err := c.sendReconnectRequest(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
 	if err != nil && written.Load() && req.Context().Err() == nil {
 		return nil, &ResponseLostError{Method: req.Method, Path: req.URL.Path, Err: err}
 	}
@@ -73,4 +75,15 @@ func sleepContext(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+func (c *Client) sendReconnectRequest(req *http.Request) (*http.Response, error) {
+	end := diagnostics.ReconnectStep(req.Context(), "server_request."+req.Method)
+	response, err := c.http.Do(req)
+	diagnosticErr := err
+	if diagnosticErr == nil && response != nil && response.StatusCode >= 400 {
+		diagnosticErr = errorreport.HTTPStatusFailure(response)
+	}
+	end(diagnosticErr)
+	return response, err
 }

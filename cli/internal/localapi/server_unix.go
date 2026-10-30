@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"io"
 	"log"
@@ -213,6 +214,7 @@ func (localListenerFailure) DiagnosticCode() string  { return "local_gateway_fai
 
 func (s *Server) handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		request = request.WithContext(diagnostics.ReconnectRequest(request.Context(), request.Header))
 		if reference := request.Header.Get(supportref.Header); supportref.Valid(reference) {
 			request = request.WithContext(supportref.WithContext(request.Context(), reference))
 		}

@@ -2,8 +2,10 @@ package tunnel
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"math"
 	"sync"
@@ -202,13 +204,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		c.record("terminal.lifetime", lifetimeOutcome, c.started)
 	}()
 	for {
+		connection := rand.Text()
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {
 				c.linkStalled.Store(stalled)
 				if stalled {
+					c.recordOldLink(connection, "supervise", "stalled", nil)
 					c.notify(ReconnectStalled)
-					go c.probeStalled(stalledConn)
+					go c.probeStalled(stalledConn, connection)
 				} else {
 					c.notify(ReconnectResumed)
 				}
@@ -232,15 +236,23 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 					}
 				}
 				if err != nil {
+					c.recordOldLink(connection, "supervise", "read_failed", err)
 					return
 				}
 			}
 		}()
 		code, err := conn.Wait()
-		_ = conn.Close()
+		c.recordOldLink(connection, "supervise", "wait_returned", err)
+		cleanupCtx := diagnostics.WithReconnect(c.ctx, "old-link", "supervise", connection)
+		closeEnd := diagnostics.ReconnectStep(cleanupCtx, "old_close")
+		closeErr := conn.Close()
+		closeEnd(closeErr)
+		joinEnd := diagnostics.ReconnectStep(cleanupCtx, "old_read_join")
 		<-readDone
+		joinEnd(nil)
 		c.recordCompression(conn)
 		if next := c.probed.Swap(nil); next != nil {
+			c.recordOldLink(connection, "supervise", "probe_adopted", nil)
 			c.redial.Store(false)
 			c.linkStalled.Store(false)
 			c.setUnavailable(conn)
@@ -274,7 +286,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		}
 		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
 			attemptStarted := c.now()
-			next, dialErr := c.dialReconnect(dialCtx)
+			next, dialErr := c.dialReconnect(dialCtx, "supervise", connection)
 			if dialErr != nil {
 				c.record("terminal.reconnect", "failure", attemptStarted)
 				err = errors.Join(err, dialErr)
@@ -528,7 +540,7 @@ func (c *ReconnectingConn) Redial() {
 // leaves it dead until TCP gives up (~2 min), while a network that comes back resumes it. A fresh link replaces
 // it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
 // (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210).
-func (c *ReconnectingConn) probeStalled(stalled Conn) {
+func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 	if c.reconnect == nil || c.maxRetries <= 0 || c.probing.Swap(true) {
 		return
 	}
@@ -541,16 +553,18 @@ func (c *ReconnectingConn) probeStalled(stalled Conn) {
 	}
 	backoff := reattach.Backoff(c.delay, c.delay)
 	for attempt := 1; attempt <= c.maxRetries && still(); attempt++ {
-		next, err := c.dialReconnect(c.ctx)
+		next, err := c.dialReconnect(c.ctx, "probeStalled", connection)
 		var stop stopReconnectError
 		if errors.As(err, &stop) {
 			return
 		}
 		if err == nil && next != nil {
 			if !still() {
+				c.recordOldLink(connection, "probeStalled", "probe_discarded", nil)
 				_ = next.Close()
 				return
 			}
+			c.recordOldLink(connection, "probeStalled", "probe_selected", nil)
 			c.probed.Store(&next)
 			_ = stalled.Close()
 			return

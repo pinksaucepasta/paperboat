@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"net/http"
 	"net/url"
 	"slices"
@@ -84,19 +85,24 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	if err := r.validatePolicy(); err != nil {
 		return ConnectInfo{}, err
 	}
+	lookupEnd := diagnostics.ReconnectStep(ctx, "peer_lookup")
 	var resolved target
 	if req.ResolvedMachine != nil {
 		if strings.TrimSpace(req.ResolvedMachine.ID) == "" || req.ResolvedMachine.Generation == 0 {
-			return ConnectInfo{}, errors.New("resolved machine is incomplete")
+			lookupErr := errors.New("resolved machine is incomplete")
+			lookupEnd(lookupErr)
+			return ConnectInfo{}, lookupErr
 		}
 		resolved = target{kind: targetUserMachine, id: req.ResolvedMachine.ID, name: req.ResolvedMachine.Name, state: req.ResolvedMachine.State, generation: req.ResolvedMachine.Generation}
 	} else {
 		found, resolveErr := r.findTarget(ctx, req.Machine)
 		if resolveErr != nil {
+			lookupEnd(resolveErr)
 			return ConnectInfo{}, resolveErr
 		}
 		resolved = found
 	}
+	lookupEnd(nil)
 	target := resolved
 	machineID = target.id
 
@@ -160,7 +166,9 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	return info, nil
 }
 
-func (r *APIResolver) connect(ctx context.Context, target target, terminalSessionID string) (api.ConnectionDescriptor, error) {
+func (r *APIResolver) connect(ctx context.Context, target target, terminalSessionID string) (descriptor api.ConnectionDescriptor, err error) {
+	end := diagnostics.ReconnectStep(ctx, "grant_fetch")
+	defer func() { end(err) }()
 	if terminalSessionID != "" {
 		sessionClient, ok := r.client.(userMachineSessionClient)
 		if !ok {

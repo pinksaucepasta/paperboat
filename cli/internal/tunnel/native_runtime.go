@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"net"
 	"net/http"
 	"net/url"
@@ -281,7 +282,9 @@ func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, er
 	if header.Offline {
 		return g.session.OpenOffline(ctx, header)
 	}
+	streamEnd := diagnostics.ReconnectStep(ctx, "stream_authorize")
 	stream, err := g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, nativeCapability(g.consumer))
+	streamEnd(err)
 	if err != nil && g.consumer == "file_transfer" {
 		if ctx != nil && ctx.Err() != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
@@ -354,7 +357,9 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 	}
 	group := &cliNativeStreamGroup{session: session, target: target, application: application, consumer: consumer, now: now}
 	if application.helper != nil {
+		authEnd := diagnostics.ReconnectStep(ctx, "application_authenticate")
 		message, err := authenticateNativeStreamGroup(ctx, group, target, "native")
+		authEnd(err)
 		if err != nil {
 			_ = session.Close()
 			return nil, err
@@ -446,7 +451,9 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		// signed admission before reusing the engine; the periodic refresh alone
 		// cannot establish that this new operation is ready to open a stream.
 		refresh, cancel := context.WithTimeout(ctx, 10*time.Second)
+		refreshEnd := diagnostics.ReconnectStep(ctx, "network_refresh")
 		err := current.authority.Refresh(refresh, networkAPI)
+		refreshEnd(err)
 		cancel()
 		if err != nil {
 			return nil, false, err
@@ -720,7 +727,9 @@ func (r *cliNativeRuntime) Dial(ctx context.Context, machineID string, class pee
 	if r == nil || r.owner == nil || machineID == "" {
 		return nil, ErrPeerTerminalInvalid
 	}
+	lookupEnd := diagnostics.ReconnectStep(ctx, "peer_descriptor")
 	descriptor, err := r.authority.Descriptor(machineID)
+	lookupEnd(err)
 	if err != nil {
 		if ctx != nil && ctx.Err() != nil {
 			return nil, contextOperationError(ctx)

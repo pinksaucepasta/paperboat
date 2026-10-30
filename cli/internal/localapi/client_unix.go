@@ -82,6 +82,7 @@ type supportReferenceTransport struct{ base http.RoundTripper }
 
 func (t supportReferenceTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	request = request.Clone(request.Context())
+	diagnostics.ReconnectHeaders(request.Context(), request.Header)
 	if reference := supportref.FromContext(request.Context()); reference != "" {
 		request.Header.Set(supportref.Header, reference)
 	}
