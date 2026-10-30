@@ -5060,3 +5060,7 @@ Regression RED/GREEN commits8c0a12b2/8071835c/5918cfaa/8c7d2e93/402ec7cb/7ea4ad3
 2026-10-30 | Single held verification | dfc5dcf3 full CLI PASS41005321715; gap22.005s FAIL, same shell/40 markers/exit/cleanup and attach/exec/send/preview/tunnel/doctor/Activation complete PASS.
 Carrier stop0.262s, hostd stop→ready1.859s; remaining wait is old-association detection and post-attach delivery setup. QUIC reset5116685a and auxiliary refresh87879577 have RED/GREEN regressions.
 F14-02 Linux unticked for the latency gate; follow-up full CLI CI pending, no second held run per user limit; release/official update/console-live held. Evidence: results/held-update-final-dfc5dcf3-20261030.json.
+
+2026-10-30 | Held update gate | Follow-up5116685a/87879577 full CLI vet/race PASS41009848392 (10m19s), arm64 build PASS; no further held run per user limit, latest fixes not device-qualified.
+Measured dfc5dcf3 gap22.005s FAIL; all functional checks PASS; dadape healthy dev-dfc5dcf3-next/Activation complete. Lane account/container, historical fixture, remote/local temp cleanup PASS.
+F14-02 remains open; no release tag/version, official dadape update or console-live because the measured latency gate failed. Evidence: results/held-update-final-dfc5dcf3-20261030.json.
