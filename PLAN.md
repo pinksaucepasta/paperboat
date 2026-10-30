@@ -5056,3 +5056,7 @@ Reference: EternalTerminal/src/base/ServerConnection.cpp:124 reuses authenticate
 2026-10-30 | Held update continuation | a6fd0715 gap41.504s FAIL; same shell, attach/replay, exec, send, preview, tunnel, doctor and Activation complete PASS; hp remains offline.
 Remaining critical path: marker→hostd stop4.289s, stop→ready8.227s, carrier15.406s, probe8.732s, attach3.779s, replay1.071s; next cutover joins participants and removes synchronous discovery/close waits.
 Regression RED/GREEN commits8c0a12b2/8071835c/5918cfaa/8c7d2e93/402ec7cb/7ea4ad3c/bcea0b2a; full CLI CI and one held-terminal qualification pending; release held.
+
+2026-10-30 | Single held verification | dfc5dcf3 full CLI PASS41005321715; gap22.005s FAIL, same shell/40 markers/exit/cleanup and attach/exec/send/preview/tunnel/doctor/Activation complete PASS.
+Carrier stop0.262s, hostd stop→ready1.859s; remaining wait is old-association detection and post-attach delivery setup. QUIC reset5116685a and auxiliary refresh87879577 have RED/GREEN regressions.
+F14-02 Linux unticked for the latency gate; follow-up full CLI CI pending, no second held run per user limit; release/official update/console-live held. Evidence: results/held-update-final-dfc5dcf3-20261030.json.
