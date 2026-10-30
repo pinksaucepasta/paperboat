@@ -163,6 +163,7 @@ type Authority struct {
 	reportMu         sync.Mutex
 	reportTimer      *time.Timer
 	lastReport       time.Time
+	startupReported  bool
 	reported         *[]string // the last endpoint set the server accepted; nil before the first
 	clients          map[string]authorizedClient
 	withdrawing      map[string]withdrawnPeer // withdrawal.go

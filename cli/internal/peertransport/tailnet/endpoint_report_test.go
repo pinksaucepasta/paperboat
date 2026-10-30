@@ -79,6 +79,7 @@ func TestEndpointChangesScheduleOneReport(t *testing.T) {
 		t.Fatal("a report was scheduled although the server does not take reports")
 	}
 	a.endpointReports.Store(true)
+	a.endpointsReported([]string{"192.0.2.1:1234"})
 	a.endpointsChanged()
 	first := a.reportTimer
 	a.endpointsChanged()
@@ -171,4 +172,22 @@ func TestTheFirstEndpointReportFollowsTheOfferAtOnce(t *testing.T) {
 	case <-time.After(2500 * time.Millisecond):
 		t.Fatal("no report within 2.5 s of the offer")
 	}
+}
+
+func TestStartupEndpointChangesDoNotWaitForSteadyStateBudget(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	a.endpointReports.Store(true)
+	a.endpointsReported(nil)
+	a.endpointsChanged()
+	select {
+	case <-a.refreshUrgent:
+	default:
+		t.Fatal("startup endpoint change waited for steady-state debounce and renewal budget")
+	}
+	a.endpointsReported([]string{"192.0.2.1:1234"})
+	a.endpointsChanged()
+	if a.reportTimer == nil {
+		t.Fatal("steady-state endpoint changes lost bounded debounce")
+	}
+	a.reportTimer.Stop()
 }

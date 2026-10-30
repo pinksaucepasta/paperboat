@@ -68,6 +68,7 @@ func (a *Authority) endpointsReported(endpoints []string) {
 	defer a.reportMu.Unlock()
 	a.reported = &endpoints
 	a.lastReport = time.Now()
+	a.startupReported = a.startupReported || len(endpoints) > 0
 }
 
 // endpointsChanged schedules one renewal that carries the new endpoints: endpointReportDebounce after the
@@ -79,6 +80,12 @@ func (a *Authority) endpointsChanged() {
 	}
 	a.reportMu.Lock()
 	defer a.reportMu.Unlock()
+	// Initial reachability is not a steady-state address change. The urgent lane
+	// still enforces server Retry-After and coalesces concurrent discoveries.
+	if !a.startupReported {
+		a.RequestUrgentRefresh()
+		return
+	}
 	if a.reportTimer != nil {
 		return
 	}
