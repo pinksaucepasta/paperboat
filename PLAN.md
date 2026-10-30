@@ -5052,3 +5052,7 @@ Move hostd/feature-worker drain immediately before native stop, after verified s
 2026-10-29 | Single timeline | Data-only83db17c1 gap63.378s: marker10:09:35.271Z, hostd stop54.950Z, ready10:10:08.905Z, carrier ready23.470Z, owner attach37.636Z, output38.649Z; retries wait1s, each fails503.
 Catalog publication discards live bindings; new store missing10:09:38.386Z aborts held I/O. Preserve bindings only for identical protected descriptors and reattach by session; regression RED/GREEN; one device verification pending.
 Reference: EternalTerminal/src/base/ServerConnection.cpp:124 reuses authenticated client ID; tailscale/wgengine/magicsock/magicsock.go:3171–3186 retains unchanged peer keys. Native-health sampler exited on timeout; no invented peer-link timestamp.
+
+2026-10-30 | Held update continuation | a6fd0715 gap41.504s FAIL; same shell, attach/replay, exec, send, preview, tunnel, doctor and Activation complete PASS; hp remains offline.
+Remaining critical path: marker→hostd stop4.289s, stop→ready8.227s, carrier15.406s, probe8.732s, attach3.779s, replay1.071s; next cutover joins participants and removes synchronous discovery/close waits.
+Regression RED/GREEN commits8c0a12b2/8071835c/5918cfaa/8c7d2e93/402ec7cb/7ea4ad3c/bcea0b2a; full CLI CI and one held-terminal qualification pending; release held.
