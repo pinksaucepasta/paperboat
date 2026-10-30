@@ -3,7 +3,10 @@ package peerquic
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -175,7 +178,19 @@ func listen(iceConn net.Conn, tlsConfig *tls.Config, quicConfig *quic.Config) (*
 }
 
 func listenPacket(packetConn net.PacketConn, tlsConfig *tls.Config, quicConfig *quic.Config) (*Listener, error) {
-	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true}
+	// Reuse the endpoint's private identity across carrier processes. A new
+	// transport can then authenticate a reset for a connection ID it no longer
+	// owns, instead of leaving the peer waiting for PTO or the idle timeout.
+	encoded, err := x509.MarshalPKCS8PrivateKey(tlsConfig.Certificates[0].PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("derive peer QUIC reset identity: %w", err)
+	}
+	defer clear(encoded)
+	resetKey := new(quic.StatelessResetKey)
+	mac := hmac.New(sha256.New, encoded)
+	_, _ = mac.Write([]byte("paperboat/peer-quic/stateless-reset/v1"))
+	copy(resetKey[:], mac.Sum(nil))
+	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true, StatelessResetKey: resetKey}
 	pto := newPTOTrace()
 	configured := quicConfig.Clone()
 	configured.Tracer = func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace { return pto }
