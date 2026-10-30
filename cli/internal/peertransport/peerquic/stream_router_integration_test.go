@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -429,5 +430,35 @@ func routerSessionPairForClass(t *testing.T, class peerquic.Class) (*peerquic.Se
 		_ = client.Close()
 		_ = server.Close()
 		_ = listener.Close()
+	}
+}
+
+func TestStreamRouterShutdownDistinguishesGracefulPeerCloseFromRejection(t *testing.T) {
+	for _, code := range []quic.ApplicationErrorCode{0, 7} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			client, server, cleanup := routerSessionPair(t)
+			defer cleanup()
+			router, err := peerquic.NewStreamRouter(server, peerquic.DevelopmentStreamRouterConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped := make(chan error, 1)
+			go func() { _, err := router.Accept(t.Context()); stopped <- err }()
+			if err := client.Connection.CloseWithError(code, ""); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-stopped:
+			case <-time.After(time.Second):
+				t.Fatal("peer close did not stop router")
+			}
+			err = router.Close()
+			if code == 0 && err != nil {
+				t.Fatal("graceful peer close became an owner shutdown failure", err)
+			}
+			if code != 0 && err == nil {
+				t.Fatal("peer application rejection was hidden")
+			}
+		})
 	}
 }

@@ -370,6 +370,13 @@ func (r *StreamRouter) Close() error {
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
+	// QUIC application code zero is an authenticated graceful peer close.
+	// Reads retain that terminal cause; owner cleanup must not export it as a
+	// service failure. A nonzero rejection or protocol failure stays visible.
+	if application, ok := err.(*quic.ApplicationError); ok && application.ErrorCode == 0 {
+		return nil
+	}
+
 	return err
 }
 
