@@ -613,6 +613,13 @@ func (a *Authority) dropLocked() {
 	a.current = nil
 	a.notifyScopeChangesLocked()
 	a.private = key.NodePrivate{}
+	a.reportMu.Lock()
+	if a.reportTimer != nil {
+		a.reportTimer.Stop()
+		a.reportTimer = nil
+	}
+	a.reported, a.lastReport, a.startupReported = nil, time.Time{}, false
+	a.reportMu.Unlock()
 }
 func (a *Authority) Close() error {
 	a.mu.Lock()

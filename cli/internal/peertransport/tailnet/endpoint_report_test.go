@@ -191,3 +191,23 @@ func TestStartupEndpointChangesDoNotWaitForSteadyStateBudget(t *testing.T) {
 	}
 	a.reportTimer.Stop()
 }
+
+func TestAuthorityDropClearsThePreviousEngineEndpointBudget(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	a.endpointsReported([]string{"192.0.2.1:1234"})
+	a.mu.Lock()
+	a.dropLocked()
+	a.mu.Unlock()
+	a.endpointReports.Store(true)
+	a.endpointsChanged()
+	defer func() {
+		if a.reportTimer != nil {
+			a.reportTimer.Stop()
+		}
+	}()
+	select {
+	case <-a.refreshUrgent:
+	default:
+		t.Fatal("replacement engine inherited the previous engine's endpoint budget")
+	}
+}
