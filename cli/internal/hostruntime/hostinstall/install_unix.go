@@ -110,6 +110,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	// The guard is a separate system component: the update keeps the replaced one restorable and puts
 	// it back if any later step fails, so a failed update leaves no component on the new version.
 	var guardRestore guardUndo
+	var carrierUpgrade *unixCarrierUpgrade
 	resultErr = lifecycle.Replace(ctx, func(ctx context.Context) error {
 		if err := publishUnixControlLifetime(ctx, paths, hostd, coldCarrier); err != nil {
 			return err
@@ -165,7 +166,35 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := prepareSessionOwner(ctx, request, paths); err != nil {
 			return err
 		}
+		if !coldCarrier && !replaceCarrier {
+			carrierUpgrade, err = stageUnixCarrierUpgrade(ctx, request, paths)
+			if err != nil {
+				return err
+			}
+		}
 		prepareCutover := func(ctx context.Context) error {
+			if intent == unixPreparedUpdate {
+				// The native lifecycle has captured and verified the prior source pin;
+				// it owns restoration, so no competing binary rollback journal is made.
+				request, err = activatePreparedCandidate(request, paths)
+				if err != nil {
+					return err
+				}
+			} else if err := activateBinary(paths.worker, paths.workerNext, paths.workerRollback); err != nil {
+				return err
+			}
+			if intent != unixPreparedUpdate {
+				journal.Stage, journal.UpdatedAt = "binaries_activated", time.Now().UTC()
+				if err := writeJournal(paths.journal, journal); err != nil {
+					return err
+				}
+			}
+			if hooks.Stage != nil {
+				if err := hooks.Stage(ctx); err != nil {
+					return err
+				}
+			}
+
 			// Admission pauses existing terminal acknowledgements too. Keep it open
 			// through staging, then drain immediately before the native cutover.
 			if suppliedForce != nil && !coldCarrier {
@@ -180,58 +209,17 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				}
 			}
 			if intent == unixPreparedUpdate {
-				return hooks.Prepare(ctx)
+				if err := hooks.Prepare(ctx); err != nil {
+					return err
+				}
 			}
-			return nil
+			return carrierUpgrade.stop(ctx)
 		}
 		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, prepareCutover); err != nil {
 			if intent == unixPreparedUpdate {
 				return err
 			}
 			return errors.Join(err, updated.RollbackUnixNativeInstall(paths.updateState), removeJournal(paths.journal))
-		}
-		if intent == unixPreparedUpdate {
-			// The native lifecycle has captured and verified the prior source pin;
-			// it owns restoration, so no competing binary rollback journal is made.
-			request, err = activatePreparedCandidate(request, paths)
-			if err != nil {
-				return err
-			}
-		} else if err := activateBinary(paths.worker, paths.workerNext, paths.workerRollback); err != nil {
-			return err
-		}
-		if intent != unixPreparedUpdate {
-			journal.Stage, journal.UpdatedAt = "binaries_activated", time.Now().UTC()
-			if err := writeJournal(paths.journal, journal); err != nil {
-				return err
-			}
-		}
-		// Migrate away from the pre-hostd monolithic worker service. Leaving it
-		// active would start a second runtime against the same control endpoint.
-		legacyWorker, legacyErr := legacyWorkerInstaller(request, paths)
-		if legacyErr != nil {
-			return legacyErr
-		}
-		_, legacyWorkerWasInstalledErr := os.Lstat(legacyWorker.DefinitionPath())
-		if legacyWorkerWasInstalledErr != nil && !installNotExistOnly(legacyWorkerWasInstalledErr) {
-			return legacyWorkerWasInstalledErr
-		}
-		if err := legacyWorker.Uninstall(ctx); err != nil {
-			return err
-		}
-		// Early macOS host builds used the privileged host-service label for the
-		// monolithic runtime. The split hostd binds the runtime health/control port,
-		// while the privileged role owns only power policy. Remove the obsolete
-		// declaration before starting hostd so both cannot contend for the port.
-		var obsoleteDarwinHost *service.Installer
-		if runtime.GOOS == "darwin" {
-			obsoleteDarwinHost, err = hostInstallerWithMissing(request, paths, true)
-			if err != nil {
-				return err
-			}
-			if err := obsoleteDarwinHost.Uninstall(ctx); err != nil {
-				return err
-			}
 		}
 		if coldCarrier {
 			if err := prepareColdUnixCarrier(ctx, request, paths); err != nil {
@@ -242,7 +230,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return hostInstallFailure("the installed carrier was not serving and its replacement did not become ready; restoring the previous version", err)
 			}
 		}
-		if err := applyUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, false); err != nil {
+		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux", carrierUpgrade.component()); err != nil {
 			return err
 		}
 
@@ -261,6 +249,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	})
+	resultErr = errors.Join(resultErr, carrierUpgrade.finish(ctx, resultErr != nil))
 	if resultErr != nil {
 		return errors.Join(resultErr, finishMachineGuard(ctx, guardRestore, resultErr))
 	}

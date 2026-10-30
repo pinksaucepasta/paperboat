@@ -421,25 +421,42 @@ func TestPreparedNativeActivationUpdatesAndRestoresRoutingDaemon(t *testing.T) {
 			if err = writeUnixHandoff(root, handoff); err != nil {
 				t.Fatal(err)
 			}
-			routing := &preparedRoutingFixture{binary: binary, old: previous, next: next, process: previous.Version}
+			routing := &preparedRoutingFixture{binary: binary, old: previous, next: next, process: previous.Version, updater: previous.Version}
 			installed := previous
 			failure := errors.New("signed health rejected")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			service := &Service{config: Config{StateRoot: root, Binary: binary, Active: oldRelease, Participants: routing, LoadInstalledSource: func() (installsource.Source, error) { return installed, nil }}}
 			service.config.ApplyPrepared = func(nativeCtx context.Context, candidate workerupdate.PreparedActivation) (installsource.Source, error) {
-				if err := candidate.Prepare(nativeCtx); err != nil {
-					return installsource.Source{}, err
-				}
-				if mode == "before native validation" {
-					return installsource.Source{}, failure
-				}
 				if err := os.WriteFile(binary, newImage, 0700); err != nil {
 					t.Fatal(err)
 				}
+				if candidate.Stage == nil {
+					t.Fatal("routing daemon startup was deferred until after native cutover")
+				}
+				if err := candidate.Stage(nativeCtx); err != nil {
+					return installsource.Source{}, err
+				}
+				if routing.process != next.Version {
+					t.Fatal("routing daemon startup was deferred until after native cutover")
+				}
+
+				if mode == "before native validation" {
+					if err := os.WriteFile(binary, oldImage, 0700); err != nil {
+						t.Fatal(err)
+					}
+					return installsource.Source{}, failure
+				}
+				if err := candidate.Prepare(nativeCtx); err != nil {
+					return installsource.Source{}, err
+				}
+
+				routing.updater = next.Version
+
 				err := candidate.Validate(nativeCtx)
 				if err != nil {
 					if mode != "native recovery pending" {
+						routing.updater = previous.Version
 						if err := os.WriteFile(binary, oldImage, 0700); err != nil {
 							t.Fatal(err)
 						}
@@ -511,6 +528,7 @@ type preparedRoutingFixture struct {
 	binary    string
 	old, next installsource.Source
 	process   string
+	updater   string
 }
 
 func (p *preparedRoutingFixture) executableVersion() (string, error) {
@@ -537,11 +555,7 @@ func (p *preparedRoutingFixture) Probe(ctx context.Context) (UnixParticipantProb
 	if err := ctx.Err(); err != nil {
 		return UnixParticipantProbe{}, err
 	}
-	version, err := p.executableVersion()
-	if err != nil {
-		return UnixParticipantProbe{}, err
-	}
-	return UnixParticipantProbe{Running: true, Version: p.process, UpdaterVersion: version, State: "ready", Machines: 1}, nil
+	return UnixParticipantProbe{Running: true, Version: p.process, UpdaterVersion: p.updater, State: "ready", Machines: 1}, nil
 }
 
 func TestUnixNativeRecoveryKeepsApprovalWhileQueuedWorkRechecksLatest(t *testing.T) {
@@ -643,6 +657,9 @@ func TestPreparedNativeActivationStrengthensBaselineBeforeDrain(t *testing.T) {
 			service.config.ApplyPrepared = func(ctx context.Context, c workerupdate.PreparedActivation) (installsource.Source, error) {
 				if mode == "committed retry skips prepare" {
 					return next, nil
+				}
+				if err := c.Stage(ctx); err != nil {
+					return installsource.Source{}, err
 				}
 				if err := c.Prepare(ctx); err != nil {
 					return installsource.Source{}, err

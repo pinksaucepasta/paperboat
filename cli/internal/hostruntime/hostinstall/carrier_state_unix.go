@@ -244,6 +244,23 @@ func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *servic
 			return err
 		}
 	}
+	// systemd publication does not start a process. Prepare declarations while
+	// the old hostd still serves; launchd bootstrap starts absent jobs, so its
+	// declarations remain in the activation phase.
+	if runtime.GOOS == "linux" {
+		for _, installer := range []*service.Installer{hostd, updater} {
+			if installer == nil {
+				continue
+			}
+			component, err := installer.NativeComponent(nil)
+			if err != nil {
+				return err
+			}
+			if err := component.Install(ctx); err != nil {
+				return err
+			}
+		}
+	}
 	if err := prepare(ctx); err != nil {
 		return err
 	}
@@ -265,25 +282,24 @@ func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Ins
 	}
 	return nil
 }
-func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string, remove bool) error {
-	if remove {
-		for _, installer := range []*service.Installer{updater, hostd, host} {
-			if installer == nil {
-				continue
+func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string) error {
+	return activateUnixNativeRoles(ctx, host, hostd, updater, address, true, nil)
+}
+
+func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string, publish bool, carrier *service.NativeTransactionalComponent) (resultErr error) {
+	if carrier != nil {
+		done := make(chan error, 1)
+		go func() {
+			if err := carrier.Start(ctx); err != nil {
+				done <- err
+				return
 			}
-			component, err := installer.NativeComponent(nil)
-			if err != nil {
-				return err
-			}
-			if err := component.Stop(ctx); err != nil {
-				return err
-			}
-			if err := component.Uninstall(ctx); err != nil {
-				return err
-			}
-		}
-		return nil
+			done <- carrier.CheckReadiness(ctx)
+		}()
+		// Join before rollback can touch declarations or custody.
+		defer func() { resultErr = errors.Join(resultErr, <-done) }()
 	}
+
 	// Terminal recovery must not wait for the independent power-policy service.
 	for _, installer := range []*service.Installer{hostd, host, updater} {
 		if installer == nil {
@@ -301,8 +317,10 @@ func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Ins
 		if err != nil {
 			return err
 		}
-		if err := component.Install(ctx); err != nil {
-			return err
+		if publish {
+			if err := component.Install(ctx); err != nil {
+				return err
+			}
 		}
 		if err := component.Start(ctx); err != nil {
 			return err

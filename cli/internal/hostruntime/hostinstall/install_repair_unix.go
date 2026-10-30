@@ -221,7 +221,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 				return err
 			}
 		}
-		if err := applyUnixNativeRoles(ctx, legacyHost, hostd, updater, request.HelperListenAddress, false); err != nil {
+		if err := applyUnixNativeRoles(ctx, legacyHost, hostd, updater, request.HelperListenAddress); err != nil {
 			return err
 		}
 		request.SessionOwnerGeneration = request.Source.SHA256[:32]

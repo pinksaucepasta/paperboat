@@ -18,6 +18,8 @@ type PreparedActivation struct {
 	Executable string
 	Source     installsource.Source
 	Force      bool
+	// Stage runs after verified binary promotion, before workload admission pauses.
+	Stage func(context.Context) error
 	// Prepare fences feature-worker mutations after hostd has fenced and
 	// drained its own admitted operations, before native services stop.
 	Prepare func(context.Context) error

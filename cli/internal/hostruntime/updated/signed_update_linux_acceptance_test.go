@@ -244,10 +244,15 @@ func newSignedAcceptanceFixture(t *testing.T, source workerupdate.TUFSource, act
 				return installsource.Source{}, err
 			}
 			edge.prepareCandidate()
-			if err := activation.Prepare(applyCtx); err != nil {
+			if err := os.WriteFile(current, candidateBytes, 0700); err != nil {
 				return previous, err
 			}
-			if err := os.WriteFile(current, candidateBytes, 0700); err != nil {
+			if activation.Stage != nil {
+				if err := activation.Stage(applyCtx); err != nil {
+					return previous, err
+				}
+			}
+			if err := activation.Prepare(applyCtx); err != nil {
 				return previous, err
 			}
 			status, err := hostd.Active(applyCtx)

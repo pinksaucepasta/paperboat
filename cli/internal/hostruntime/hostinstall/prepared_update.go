@@ -11,6 +11,8 @@ import (
 // native replacement. Prepare follows workload admission and precedes service
 // stops; Validate runs after native readiness and before source metadata commit.
 type PreparedUpdateHooks struct {
+	// Stage runs after verified binary promotion, before workload admission pauses.
+	Stage            func(context.Context) error
 	DrainTimeout     time.Duration
 	Prepare          func(context.Context) error
 	Validate         func(context.Context) error

@@ -178,7 +178,7 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return source.AuthorizeRecovery(restoreCtx, previous.Version, previous.Platform, previous.Architecture)
 	}
 	applyPrepared := func(applyCtx context.Context, candidate workerupdate.PreparedActivation) (installsource.Source, error) {
-		hooks := hostinstall.PreparedUpdateHooks{DrainTimeout: candidate.Signed.DrainTimeout, Prepare: candidate.Prepare, Validate: candidate.Validate, AuthorizeRestore: authorizeRestore}
+		hooks := hostinstall.PreparedUpdateHooks{Stage: candidate.Stage, DrainTimeout: candidate.Signed.DrainTimeout, Prepare: candidate.Prepare, Validate: candidate.Validate, AuthorizeRestore: authorizeRestore}
 		if err := hostinstall.ActivatePreparedUpdate(applyCtx, uid, candidate.Executable, candidate.Source, candidate.Force, hooks); err != nil {
 			return installsource.Source{}, err
 		}

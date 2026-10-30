@@ -100,9 +100,12 @@ func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T
 	t.Cleanup(func() { suppliedUpdateReadyTimeout = previous })
 	baseline := updated.UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}
 	notReady := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", ControlPlaneUnavailableOnly: true, Machines: 1}}}
-	validate, recover := daemonValidation(notReady, "2", baseline)
+	stage, validate, recover := daemonValidation(notReady, "2", baseline)
 	if err := recover(t.Context()); err != nil || notReady.restarts != 0 {
 		t.Fatalf("install failed before validation: recover err=%v restarts=%d, want no restart", err, notReady.restarts)
+	}
+	if err := stage(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	if err := validate(t.Context()); err == nil {
 		t.Fatal("fixture: validation passed")
@@ -111,7 +114,10 @@ func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T
 		t.Fatalf("after failed validation: recover err=%v restarts=%d, want the daemon restarted again on the restored version", err, notReady.restarts)
 	}
 	broken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}}}
-	validate, recover = daemonValidation(broken, "2", baseline)
+	stage, validate, recover = daemonValidation(broken, "2", baseline)
+	if err := stage(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	_ = validate(t.Context())
 	broken.restartErr = errors.New("systemctl --user restart failed")
 	if err := recover(t.Context()); err == nil {
@@ -150,5 +156,31 @@ func TestSuppliedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 	// The rollback names the step that failed, not only that the service did not start.
 	if !strings.Contains(err.Error(), "local access unavailable") {
 		t.Fatalf("locally degraded daemon error does not name the failing step: %v", err)
+	}
+}
+
+// Exercise the complete readiness policy while keeping the restart explicit at
+// the staging boundary in the supplied-update orchestration tests.
+func restartAndAwaitDaemon(ctx context.Context, p updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {
+	if err := p.Restart(ctx); err != nil {
+		return err
+	}
+	return awaitDaemon(ctx, p, version, baseline)
+}
+
+func TestSuppliedDaemonStartsBeforeCutoverAndValidationDoesNotRestartIt(t *testing.T) {
+	p := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}}}
+	stage, validate, _ := daemonValidation(p, "2", updated.UnixParticipantProbe{Running: true, Version: "1", State: "ready", Machines: 1})
+	if err := stage(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if p.restarts != 1 {
+		t.Fatal("routing daemon was deferred until after the runtime cutover")
+	}
+	if err := validate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if p.restarts != 1 {
+		t.Fatal("validation restarted the already staged daemon")
 	}
 }

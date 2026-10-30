@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -101,7 +102,7 @@ func TestRuntimeStartsBeforeIndependentPowerPolicy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"live":true}`))
 	}))
 	defer health.Close()
-	err := applyUnixNativeRoles(t.Context(), host, hostd, nil, strings.TrimPrefix(health.URL, "http://"), false)
+	err := applyUnixNativeRoles(t.Context(), host, hostd, nil, strings.TrimPrefix(health.URL, "http://"))
 	if err == nil || !strings.Contains(err.Error(), "power policy unavailable") {
 		t.Fatal("power policy failure was hidden or replaced", err)
 	}
@@ -200,5 +201,93 @@ func TestPowerServiceUsesTheImmutableCandidatePin(t *testing.T) {
 	want := filepath.Join(root, "releases", "pins", request.Source.SHA256, "pb")
 	if installer.ExecutablePath() != want {
 		t.Fatalf("power service depends on mutable worker slot: %s", installer.ExecutablePath())
+	}
+}
+
+func TestRuntimeDeclarationsArePublishedBeforeAdmissionPauses(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("systemd declaration staging")
+	}
+	root := t.TempDir()
+	runner := &cutoverRunner{}
+	makeRole := func(kind string) *service.Installer {
+		i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: []string{"daemon"}, Controller: service.SystemdController{Runner: runner, Unit: kind + ".service"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i
+	}
+	hostd, updater := makeRole(service.HostdKind), makeRole(service.UpdaterKind)
+	err := prepareUnixRuntimeCutover(t.Context(), nil, hostd, updater, func(context.Context) error {
+		for _, role := range []*service.Installer{hostd, updater} {
+			if _, err := os.Stat(role.DefinitionPath()); err != nil {
+				return errors.New("runtime declaration missing at admission boundary")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runner.stopped {
+		t.Fatal("runtime did not stop after staging")
+	}
+}
+
+type overlappingCarrierRunner struct{ carrierStarted chan struct{} }
+
+func (r *overlappingCarrierRunner) Run(ctx context.Context, _ string, args ...string) error {
+	if len(args) < 2 || args[0] != "start" {
+		return nil
+	}
+	if args[1] == "carrier.service" {
+		close(r.carrierStarted)
+	}
+	if args[1] == "hostd.service" {
+		select {
+		case <-r.carrierStarted:
+		case <-ctx.Done():
+			return errors.New("hostd waited while carrier startup was queued behind it")
+		}
+	}
+	return nil
+}
+func (r *overlappingCarrierRunner) Output(context.Context, string, ...string) (string, error) {
+	return "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nSubState=running\n", nil
+}
+
+func TestCarrierStartsAlongsideHostdInTheSameCutover(t *testing.T) {
+	runner := &overlappingCarrierRunner{carrierStarted: make(chan struct{})}
+	root := t.TempDir()
+	makeRole := func(kind, unit string) *service.Installer {
+		i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: func() []string {
+			if kind == service.CarrierKind {
+				return []string{"daemon", "__runtime-carrier"}
+			}
+			return []string{"daemon"}
+		}(), ExecutableSHA256: strings.Repeat("a", 64), ExecutableLength: 1, Controller: service.SystemdController{Runner: runner, Unit: unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i
+	}
+	hostd := makeRole(service.HostdKind, "hostd.service")
+	carrierInstaller := makeRole(service.CarrierKind, "carrier.service")
+	carrier, err := carrierInstaller.NativeComponent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := carrier.Install(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"live":true}`))
+	}))
+	defer health.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	if err := activateUnixNativeRoles(ctx, nil, hostd, nil, strings.TrimPrefix(health.URL, "http://"), true, carrier); err != nil {
+		t.Fatal(err)
 	}
 }

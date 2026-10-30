@@ -22,33 +22,36 @@ var suppliedUpdateReadyTimeout = 60 * time.Second
 // must report that version (and be ready, unless it was already unhealthy before for a local reason). A
 // machine without a running user daemon has nothing to prove. Its baseline is taken now, before anything
 // changes.
-func suppliedUpdateValidator(ctx context.Context, request hostinstall.Request) (validate, recover func(context.Context) error) {
+func suppliedUpdateValidator(ctx context.Context, request hostinstall.Request) (stage, validate, recover func(context.Context) error) {
 	layout, err := service.UserLayout(runtime.GOOS, request.UID)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	participants, err := newUnixUpdateParticipants(layout.Binary, request.UID, request.GID)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	baseline, baselineErr := participants.Probe(ctx)
 	if baselineErr != nil || !baseline.Running {
-		return nil, nil
+		return nil, nil, nil
 	}
 	return daemonValidation(participants, request.Source.Version, baseline)
 }
 
-// daemonValidation returns the validation hook and the step that follows a failed install. Validation
-// restarts the user's daemon on the new executable; when the install then fails, the previous files are
-// restored but that daemon kept running the replaced binary against the restored runtime (lanel-b,
-// 2026-10-22: daemon on the new version, runtime on the old, "Local machine access is unavailable").
-// recover restarts it once more on the restored executable, and does nothing if validation never
-// restarted it.
-func daemonValidation(participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) (validate, recover func(context.Context) error) {
+// The routing daemon starts on the promoted binary while hostd still serves.
+// Validation only waits for complete candidate readiness. If any later step
+// fails, native rollback restores the binary before recover restarts the daemon.
+func daemonValidation(participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) (stage, validate, recover func(context.Context) error) {
 	restarted := false
-	validate = func(ctx context.Context) error {
+	stage = func(ctx context.Context) error {
 		restarted = true
-		return restartAndAwaitDaemon(ctx, participants, version, baseline)
+		if err := participants.Restart(ctx); err != nil {
+			return errors.Join(errors.New("the user's Paperboat daemon could not be restarted on the new version"), err)
+		}
+		return nil
+	}
+	validate = func(ctx context.Context) error {
+		return awaitDaemon(ctx, participants, version, baseline)
 	}
 	recover = func(ctx context.Context) error {
 		if !restarted {
@@ -61,7 +64,7 @@ func daemonValidation(participants updated.UnixParticipants, version string, bas
 		}
 		return nil
 	}
-	return validate, recover
+	return stage, validate, recover
 }
 
 // degradedSteps names what the daemon reported failing, e.g. local machine access, for the rollback message.
@@ -72,10 +75,7 @@ func degradedSteps(codes []string) string {
 	return strings.ReplaceAll(strings.Join(codes, ", "), "_", " ")
 }
 
-func restartAndAwaitDaemon(ctx context.Context, participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {
-	if err := participants.Restart(ctx); err != nil {
-		return errors.Join(errors.New("the user's Paperboat daemon could not be restarted on the new version"), err)
-	}
+func awaitDaemon(ctx context.Context, participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {
 	readyCtx, cancel := context.WithTimeout(ctx, suppliedUpdateReadyTimeout)
 	defer cancel()
 	requireInventory := baseline.Machines > 0 || baseline.State == "ready"

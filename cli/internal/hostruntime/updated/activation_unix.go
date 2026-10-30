@@ -881,7 +881,8 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 	if prepare == nil {
 		return installsource.Source{}, ErrInvalidConfig
 	}
-	candidate.Prepare = func(prepareCtx context.Context) error {
+	routingTouched := false
+	candidate.Stage = func(prepareCtx context.Context) error {
 		probe, err := s.config.Participants.Probe(prepareCtx)
 		if err != nil {
 			return participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
@@ -898,21 +899,27 @@ func (s *Service) applyPrepared(ctx context.Context, candidate workerupdate.Prep
 		if err := writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
 			return err
 		}
-		return prepare(prepareCtx)
+		if handoff.Baseline.Running {
+			routingTouched = true
+			if err := s.config.Participants.Restart(prepareCtx); err != nil {
+				return participantFailure("restart_daemon", errors.Join(ErrParticipantReadiness, err))
+			}
+		}
+		return nil
 	}
+	candidate.Prepare = prepare
 	validate := candidate.Validate
 	readiness := &unixParticipantReadiness{participants: s.config.Participants, handoff: handoff}
 	timeout := handoff.RecoveryTimeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
 	}
-	routingTouched := false
 	candidate.Validate = func(validateCtx context.Context) error {
 		if handoff.Baseline.Running {
 			routingTouched = true
 			// A retry after Source commit can already have the exact routing daemon.
 			probe, probeErr := s.config.Participants.Probe(validateCtx)
-			if probeErr != nil || unixParticipantReady(probe, candidate.Source.Version, handoff.Baseline, handoff.RequireInventory) != nil {
+			if probeErr != nil || !probe.Running || probe.Version != candidate.Source.Version {
 				if err := s.config.Participants.Restart(validateCtx); err != nil {
 					return participantFailure("restart_daemon", errors.Join(ErrParticipantReadiness, err))
 				}

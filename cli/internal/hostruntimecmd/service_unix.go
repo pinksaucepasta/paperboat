@@ -79,11 +79,11 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return err
 	}
 	if args[0] == "install-supplied" || args[0] == "commit-supplied" || args[0] == "rollback-supplied" {
-		var validate, recover func(context.Context) error
+		var stage, validate, recover func(context.Context) error
 		if args[0] == "install-supplied" {
-			validate, recover = suppliedUpdateValidator(ctx, request)
+			stage, validate, recover = suppliedUpdateValidator(ctx, request)
 		}
-		err := hostinstall.SuppliedBinary(ctx, request, args[0], validate)
+		err := hostinstall.SuppliedBinary(ctx, request, args[0], hostinstall.PreparedUpdateHooks{Stage: stage, Validate: validate})
 		if err != nil && recover != nil {
 			err = errors.Join(err, recover(context.WithoutCancel(ctx)))
 		}
