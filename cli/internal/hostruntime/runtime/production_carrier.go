@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
@@ -96,19 +94,11 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err := allowPendingPeerEnrollment(ctx, peerEnrollment); err != nil {
 		return nil, err
 	}
-	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
+	// Each process owns its persisted key cache.
+	keys, err := productionJWKSCache(controlURL, transport, filepath.Join(config.StateRoot, "authorization", "carrier-jwks.json"))
 	if err != nil {
 		return nil, err
 	}
-	// The carrier has a separate persisted JWKS cache from the replaceable
-	// worker; two processes must never concurrently replace the same cache.
-	keys, err := auth.NewJWKSCache(auth.JWKSConfig{Fetcher: fetcher, Clock: productionClock{}, TTL: 5 * time.Minute, RetainMissing: auth.DefaultRetainMissing, PersistencePath: filepath.Join(config.StateRoot, "authorization", "carrier-jwks.json")})
-	if err != nil {
-		return nil, err
-	}
-	refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	_ = keys.Refresh(refreshCtx)
-	cancel()
 	usageControl := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
 	usageControl.SetMachineAuth(machineIdentity)
 	usage, err := bandwidth.Open(filepath.Join(config.StateRoot, "carrier-bandwidth-usage.json"), usageControl, newBandwidthObservation(ctx))

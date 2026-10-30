@@ -48,10 +48,10 @@ import (
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
@@ -198,17 +198,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		runtimeLayers = newLayerEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity, machineControlIdentity)
 		managedEnvironment, environmentBootstrap = runtimeLayers, runtimeLayers
 	}
-	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
+	cache, err := productionJWKSCache(controlURL, transport, filepath.Join(runtimeConfig.StateRoot, "authorization", "jwks.json"))
 	if err != nil {
 		return nil, err
 	}
-	cache, err := auth.NewJWKSCache(auth.JWKSConfig{Fetcher: fetcher, Clock: productionClock{}, TTL: 5 * time.Minute, RetainMissing: auth.DefaultRetainMissing, PersistencePath: filepath.Join(runtimeConfig.StateRoot, "authorization", "jwks.json")})
-	if err != nil {
-		return nil, err
-	}
-	refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	_ = cache.Refresh(refreshCtx)
-	cancel()
 	revocations := auth.NewRevocationCache()
 	revocationRefresh, err := newRevocationRefreshService(controlURL.ResolveReference(&url.URL{Path: "/v1/helper-trust/revocations"}).String(), renewingTokens, enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID, revocations, transport, 15*time.Second)
 	if err != nil {
