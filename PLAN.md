@@ -5068,3 +5068,7 @@ F14-02 remains open; no release tag/version, official dadape update or console-l
 2026-10-30 | Reconnect data-only round | Extend existing local diagnostics with attempt/caller/old-link correlation, typed failures and step boundaries across CLI/daemon IPC; no recovery behavior fixes.
 Tests: TestReconnectDiagnosticsCorrelateOverlappingRecovery and TestReconnectIPCTracePreservesCorrelationWithoutPrivateErrors; full CLI CI before push, then exactly one 1 s-marker dadape run.
 Raw captures retained privately outside the repo at /home/ubuntu/paperboat-private/reconnect-data-r5 until user authorizes deletion; F14-02 remains open, release held.
+
+2026-11-01 | Reconnect data-only capture | dd567041/8e62adb7 instrumentation pushed after full CLI vet/race PASS41033946916; one 1 s-marker dadape run gap16.767510925s, same shell/exit/cleanup/doctor/Activation complete PASS.
+One probeStalled redial6.141s; supervise adopts without a competing redial/cancellation. Recorded waits: silence10.626s, network refresh2.614s, create-or-get ack2.338s; QUIC11ms, actual attach25ms.
+F14-02 remains open; raw logs and table retained privately outside repo at /home/ubuntu/paperboat-private/reconnect-data-r5. Refresh inner2.342s wait and one missing local-authority start remain unclassified; no behavior fixes/release/console-live.
