@@ -457,10 +457,16 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 			requests.Add(1)
 			return nil, errors.New("control plane unavailable")
 		})}}}
-		cached, consumed, err := peer.acquireNativeRuntime(ctx, accountID, cliID, identity, hostRulesAdmission(target, machineID))
+		cached, consumed, err := peer.acquireNativeRuntime(ctx, accountID, cliID, identity, hostRulesAdmission(target, machineID, "managed_ssh"))
 		if err != nil || consumed || cached != runtime || requests.Load() != 0 {
 			t.Fatalf("valid signed peer waited for control: requests=%d err=%v", requests.Load(), err)
 		}
+		uncovered := *target
+		uncovered.Auth.ResourceID = "new-uncached-grant"
+		if _, _, err := peer.acquireNativeRuntime(ctx, accountID, cliID, identity, hostRulesAdmission(&uncovered, machineID, "managed_ssh")); err == nil || requests.Load() != 1 {
+			t.Fatal("cached peer without the requested scope skipped refresh")
+		}
+
 	}
 	application := peerApplication{operationID: "operation_connected", stream: "ssh", raw: func(_ context.Context, stream io.ReadWriteCloser) (Conn, error) {
 		return &connectedRawConn{Conn: stream.(net.Conn)}, nil

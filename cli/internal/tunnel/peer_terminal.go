@@ -163,7 +163,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, err
 	}
 	runtimeEnd := diagnostics.ReconnectStep(ctx, "runtime_acquire")
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal, info.MachineID))
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal, info.MachineID, nativeCapability(consumer)))
 	runtimeEnd(err)
 	if !consumed {
 		authority.Clear()
@@ -180,7 +180,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 
 // Reuse signed, live peer authority like Tailscale's cached netmap. The new
 // stream still checks its credential, scope, peer identity and revocation fence.
-func hostRulesAdmission(target *resolver.TerminalTarget, machineID string) func(*tailnet.Authority) bool {
+func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability string) func(*tailnet.Authority) bool {
 	if target == nil {
 		return nil
 	}
@@ -189,7 +189,7 @@ func hostRulesAdmission(target *resolver.TerminalTarget, machineID string) func(
 	}
 	return func(network *tailnet.Authority) bool {
 		_, err := network.Descriptor(machineID)
-		return err == nil
+		return err == nil && network.Allows(machineID, target.Auth.ResourceID, capability, "dial")
 	}
 }
 
