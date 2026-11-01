@@ -120,7 +120,10 @@ func dialPacket(ctx context.Context, packetConn net.PacketConn, remote net.Addr,
 	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true}
 	pto := newPTOTrace()
 	diagnostics.ReconnectEvent(ctx, "quic_trace", pto.id, nil)
+	// ET ClientConnection.cpp:pollReconnect retries fresh sockets each second.
+	// quic-go connection.go:695 bounds silence only before handshake completion.
 	configured := quicConfig.Clone()
+	configured.HandshakeIdleTimeout = time.Second
 	configured.Tracer = func(_ context.Context, _ bool, id quic.ConnectionID) qlogwriter.Trace {
 		return &wireTrace{pto: pto, id: id.String()}
 	}
