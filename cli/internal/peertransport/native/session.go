@@ -327,6 +327,7 @@ func readHeader(reader io.Reader) ([]byte, error) {
 func (s *Session) Close() error {
 	s.closing.Store(true)
 	s.once.Do(func() {
+		s.err = errors.Join(s.err, s.quic.Close())
 		if s.carrier != nil {
 			s.carrier.Close()
 		}
@@ -335,7 +336,6 @@ func (s *Session) Close() error {
 			s.err = errors.Join(s.err, s.router.Close())
 		}
 		s.routerMu.Unlock()
-		s.err = errors.Join(s.err, s.quic.Close())
 		s.owner.remove(s)
 		s.owner.emit(Event{Kind: "closed", PeerID: s.peerID, Err: s.err})
 	})

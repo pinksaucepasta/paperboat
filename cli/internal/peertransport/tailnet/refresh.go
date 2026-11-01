@@ -206,7 +206,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	if ctx == nil || client == nil {
 		return ErrAuthority
 	}
-	defer a.Close()
+	// The native owner closes QUIC sessions before closing this packet authority.
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	watchDone := make(chan struct{})
