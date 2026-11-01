@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 )
@@ -455,6 +456,7 @@ var _ interface{ CloseWrite() error } = (*streamConn)(nil)
 func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Header, capability string, authorize func(context.Context, streamauth.Header) (string, error)) (string, error) {
 	resourceID, err := authorize(ctx, header)
 	if err != nil {
+		diagnosticlog.TryWarn("native stream admission refused", "reason", "application_authorize")
 		return "", errors.Join(tailnet.ErrAdmission, err)
 	}
 	if s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
@@ -465,10 +467,12 @@ func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Heade
 	}
 	if s.owner.refreshAuthority != nil {
 		if err := s.owner.refreshAuthority(ctx); err != nil {
+			diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_refresh")
 			return "", errors.Join(tailnet.ErrAdmission, err)
 		}
 	}
 	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
+		diagnosticlog.TryWarn("native stream admission refused", "reason", "authority_scope")
 		return "", tailnet.ErrAdmission
 	}
 	return resourceID, nil

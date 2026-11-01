@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"net/http"
@@ -166,6 +167,24 @@ func (c *NativeDispatchClient) Authorize(ctx context.Context, header streamauth.
 	_, response, err := c.call(ctx, "authorize", &header, nil, false)
 	if err == nil && response.AccessSessionID == "" {
 		err = ErrStreamAuthorization
+	}
+	if err != nil {
+		reason := "dispatch_failed"
+		switch {
+		case errors.Is(err, hostdproto.ErrFenced):
+			reason = "worker_fenced"
+		case errors.Is(err, ErrStreamAuthorization):
+			reason = "resource_denied"
+		case errors.Is(err, ErrNativeDispatchUnavailable):
+			reason = "worker_unavailable"
+		case errors.Is(err, ErrNativeDispatchBusy):
+			reason = "worker_busy"
+		case errors.Is(err, context.Canceled):
+			reason = "cancelled"
+		case errors.Is(err, context.DeadlineExceeded):
+			reason = "deadline"
+		}
+		diagnosticlog.TryWarn("native dispatch admission refused", "reason", reason)
 	}
 	return response.AccessSessionID, err
 }
