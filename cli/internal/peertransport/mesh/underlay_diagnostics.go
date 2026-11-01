@@ -13,6 +13,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"tailscale.com/disco"
+	"tailscale.com/net/batching"
+	"tailscale.com/net/packet"
 	"tailscale.com/types/nettype"
 )
 
@@ -28,7 +30,14 @@ func (l underlayListener) ListenPacket(ctx context.Context, network, address str
 	if e != nil {
 		return nil, e
 	}
-	return &underlayPacketConn{PacketConn: c, engineLabel: l.engineLabel}, nil
+	trace := &underlayPacketConn{PacketConn: c, engineLabel: l.engineLabel}
+	// Keep magicsock's recvmmsg/sendmmsg and UDP GSO/GRO fast path underneath
+	// the metadata observer. A plain PacketConn wrapper hides *net.UDPConn.
+	upgraded := batching.TryUpgradeToConn(c.(nettype.PacketConn), network, "magicsock_udp_rxq_overflows", nil)
+	if batch, ok := upgraded.(batching.Conn); ok {
+		return &underlayBatchedConn{underlayPacketConn: trace, batch: batch}, nil
+	}
+	return trace, nil
 }
 
 type underlayPacketConn struct {
@@ -94,4 +103,28 @@ func (c *underlayPacketConn) WriteToUDPAddrPort(b []byte, a netip.AddrPort) (int
 func underlayLabel(value string) string {
 	h := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(h[:8])
+}
+
+type underlayBatchedConn struct {
+	*underlayPacketConn
+	batch batching.Conn
+}
+
+func (c *underlayBatchedConn) Close() error { return c.batch.Close() }
+func (c *underlayBatchedConn) ReadFromUDPAddrPort(b []byte) (int, netip.AddrPort, error) {
+	return c.batch.ReadFromUDPAddrPort(b)
+}
+func (c *underlayBatchedConn) ReadBatch(slab []byte, packets []batching.ReceivedPacket) (int, error) {
+	n, err := c.batch.ReadBatch(slab, packets)
+	for _, p := range packets[:n] {
+		c.trace("ingress", slab[p.Offset:p.Offset+p.Size], net.UDPAddrFromAddrPort(p.Source), err)
+	}
+	return n, err
+}
+func (c *underlayBatchedConn) WriteBatchTo(buffers [][]byte, address netip.AddrPort, geneve packet.GeneveHeader, offset int) error {
+	err := c.batch.WriteBatchTo(buffers, address, geneve, offset)
+	for _, b := range buffers {
+		c.trace("egress", b[offset:], net.UDPAddrFromAddrPort(address), err)
+	}
+	return err
 }
