@@ -3,10 +3,14 @@
 package workloadbridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +21,11 @@ import (
 )
 
 func TestAcceptedFeatureAdmissionHoldsNativeMaintenanceUntilReleased(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer func() { _ = diagnosticlog.Flush(context.Background()); slog.SetDefault(previous) }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	root := shorttemp.Dir(t)
@@ -87,6 +96,18 @@ func TestAcceptedFeatureAdmissionHoldsNativeMaintenanceUntilReleased(t *testing.
 	}
 	if _, err := controller.PrepareMaintenance(ctx, false, nil); err != nil {
 		t.Fatal(err)
+	}
+	if release, _, err := client.AcquireAdmission(ctx); !errors.Is(err, ErrFenced) {
+		if release != nil {
+			release()
+		}
+		t.Fatal("maintenance gate admitted a new feature stream")
+	}
+	if err := diagnosticlog.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"reason":"maintenance_busy"`) {
+		t.Fatal("native owner lost maintenance refusal reason")
 	}
 	controller.AbortMaintenance()
 	stale, err := NewClient(server.Endpoint, token, "worker", welcome.Epoch+1)

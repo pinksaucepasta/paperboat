@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"net/http"
@@ -166,6 +167,14 @@ func (s *Server) handler() http.Handler {
 			}
 			release, leaseErr := s.AcquireActive(worker, epoch)
 			if leaseErr != nil || release == nil {
+				reason := "admission_failed"
+				if errors.Is(leaseErr, hostdproto.ErrMaintenanceBusy) {
+					reason = "maintenance_busy"
+				}
+				if errors.Is(leaseErr, hostdproto.ErrFenced) {
+					reason = "worker_fenced"
+				}
+				diagnosticlog.TryWarn("native owner admission refused", "reason", reason)
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
