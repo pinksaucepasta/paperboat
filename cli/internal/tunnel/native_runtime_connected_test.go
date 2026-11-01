@@ -450,6 +450,18 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	if hostRules {
 		target.Auth = resolver.AuthTarget{Offline: true, ExpiresAt: expires.Format(time.RFC3339)}
 	}
+	if mode == "quic" {
+		runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
+		var requests atomic.Int32
+		peer := &PeerTerminalTunnel{nativeRuntime: runtime, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(*http.Request) (*http.Response, error) {
+			requests.Add(1)
+			return nil, errors.New("control plane unavailable")
+		})}}}
+		cached, consumed, err := peer.acquireNativeRuntime(ctx, accountID, cliID, identity, hostRulesAdmission(target, machineID))
+		if err != nil || consumed || cached != runtime || requests.Load() != 0 {
+			t.Fatalf("valid signed peer waited for control: requests=%d err=%v", requests.Load(), err)
+		}
+	}
 	application := peerApplication{operationID: "operation_connected", stream: "ssh", raw: func(_ context.Context, stream io.ReadWriteCloser) (Conn, error) {
 		return &connectedRawConn{Conn: stream.(net.Conn)}, nil
 	}}
