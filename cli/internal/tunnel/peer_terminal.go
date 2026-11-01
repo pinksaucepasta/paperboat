@@ -183,6 +183,8 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 
 // Reuse signed, live peer authority like Tailscale's cached netmap. The new
 // stream still checks its credential, scope, peer identity and revocation fence.
+// Each reconnect grant has a new access-session resource ID (server
+// usermachines/service_03.go); a cached peer cannot authorize that future ID.
 func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability string) func(*tailnet.Authority) bool {
 	if target == nil {
 		return nil

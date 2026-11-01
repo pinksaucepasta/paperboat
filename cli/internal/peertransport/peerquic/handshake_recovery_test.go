@@ -43,12 +43,14 @@ func TestSilentHandshakeReturnsBeforePTOBackoffStrandsRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	established, err := peerquic.DialPacket(t.Context(), &restartPacketSocket{freshUDP, serverUDP.LocalAddr()}, clientTLS, config)
+	freshCtx, stopFresh := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopFresh()
+	established, err := peerquic.DialPacket(freshCtx, &restartPacketSocket{freshUDP, serverUDP.LocalAddr()}, clientTLS, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer established.Close()
-	accepted, err := listener.Accept(t.Context())
+	accepted, err := listener.Accept(freshCtx)
 	if err != nil {
 		t.Fatal(err)
 	}

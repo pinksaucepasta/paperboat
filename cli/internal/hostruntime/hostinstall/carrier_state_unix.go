@@ -285,6 +285,16 @@ func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Ins
 		}
 		components = append(components, component)
 	}
+	// Repair/uninstall and an update retaining a busy SSH carrier keep their
+	// original ordered shutdown. Only coordinated carrier replacement overlaps.
+	if carrier == nil {
+		for _, component := range components {
+			if err := component.Stop(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	failures := make([]error, len(components))
 	var stopped sync.WaitGroup
 	for i, component := range components {

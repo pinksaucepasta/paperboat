@@ -309,21 +309,29 @@ func (r *concurrentStopRunner) Output(ctx context.Context, name string, args ...
 }
 func TestIndependentRuntimeStopsShareOneCutoverWindow(t *testing.T) {
 	root := t.TempDir()
-	runner := &concurrentStopRunner{started: make(chan string, 3), release: make(chan struct{})}
+	runner := &concurrentStopRunner{started: make(chan string, 4), release: make(chan struct{})}
 	makeRole := func(kind, unit string) *service.Installer {
-		i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: []string{"daemon"}, Controller: service.SystemdController{Runner: runner, Unit: unit}})
+		args := []string{"daemon"}
+		if kind == service.CarrierKind {
+			args = append(args, "__runtime-carrier")
+		}
+		i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: args, Controller: service.SystemdController{Runner: runner, Unit: unit}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return i
 	}
 	host, hostd, updater := makeRole(service.HostKind, "host.service"), makeRole(service.HostdKind, "hostd.service"), makeRole(service.UpdaterKind, "updater.service")
+	carrier, err := makeRole(service.CarrierKind, "carrier.service").NativeComponent(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
-	go func() { done <- stopUnixRuntimeRoles(t.Context(), host, hostd, updater, nil) }()
+	go func() { done <- stopUnixRuntimeRoles(t.Context(), host, hostd, updater, carrier) }()
 	deadline := time.NewTimer(500 * time.Millisecond)
 	defer deadline.Stop()
 	count := 0
-	for count < 3 {
+	for count < 4 {
 		select {
 		case <-runner.started:
 			count++
