@@ -485,3 +485,28 @@ func TestReconnectingConnRetriesReadyTargetPromptly(t *testing.T) {
 		t.Fatalf("ready target was left waiting: attempts=%d output=%q read=%v wait=%v", attempts, got, err, waitErr)
 	}
 }
+
+func TestReconnectingConnRedialsImmediatelyThenBacksOffFailures(t *testing.T) {
+	first := &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost}
+	attempts := make(chan time.Time, 2)
+	c := NewReconnectingConn(t.Context(), first, 2, time.Second, func(context.Context) (Conn, error) {
+		attempts <- time.Now()
+		return nil, errors.New("offline")
+	})
+	defer c.Close()
+	select {
+	case <-attempts:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("first redial waited for backoff")
+	}
+	select {
+	case <-attempts:
+		t.Fatal("repeated failure did not back off")
+	case <-time.After(700 * time.Millisecond):
+	}
+	select {
+	case <-attempts:
+	case <-time.After(time.Second):
+		t.Fatal("retry did not run")
+	}
+}

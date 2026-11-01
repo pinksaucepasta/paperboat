@@ -280,9 +280,14 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		// A link that stayed up reattachRefillAfter gets a fresh budget, like EternalTerminal's per-disconnect
 		// pollReconnect loop (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210), so a held terminal outlives
 		// many peer restarts; a link that dies right after each reattach keeps spending one budget (51db8129).
-		// ET polls once a second; a ready target must not wait out a 30 s backoff.
+		// ET dials immediately on loss, then sleeps only after a failed attempt.
 		if recovery == nil || time.Since(attachedAt) >= reattachRefillAfter {
-			recovery = reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: reattach.Backoff(c.delay, c.delay), Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
+			recovery = reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: func(attempt int) time.Duration {
+				if attempt == 1 {
+					return 0
+				}
+				return c.delay
+			}, Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
 		}
 		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
 			attemptStarted := c.now()
