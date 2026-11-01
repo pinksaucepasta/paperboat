@@ -284,3 +284,42 @@ func TestSaturatedDiskFlushDoesNotBlockProducersOrShutdown(t *testing.T) {
 		t.Fatal("canceled writer leaked")
 	}
 }
+
+// Native roles shut down together and retain their final diagnostics. A queued
+// burst must fit the shutdown durability budget, even with thousands of events.
+func TestQueuedDiagnosticBurstDrainsWithinShutdownBudget(t *testing.T) {
+	ring, err := NewDiskRing(DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid(), QueueCapacity: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ring.Close()
+	unlock, err := acquireDiskLock(t.Context(), filepath.Join(ring.config.Directory, "writer.lock"), ring.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2048; i++ {
+		if err := ring.Record(concurrencyEvent(t, "burst")); err != nil {
+			unlock()
+			t.Fatal(err)
+		}
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := ring.CloseContext(ctx); err != nil {
+		t.Fatalf("queued shutdown diagnostics did not become durable within 1s: %v", err)
+	}
+	stats := ring.Stats()
+	if stats.DroppedRecords != 0 || stats.FailedRecords != 0 {
+		t.Fatalf("lost shutdown diagnostics: %+v", stats)
+	}
+	data, err := ring.ReadAll(t.Context(), DefaultMaximumBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(data, []byte{'\n'}); got != 2048 {
+		t.Fatalf("persisted %d events; want 2048", got)
+	}
+}

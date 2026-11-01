@@ -223,24 +223,67 @@ func (r *DiskRing) Stats() DiskStats {
 
 func (r *DiskRing) run() {
 	defer close(r.done)
-	for record := range r.queue {
+	var pending *diskRecord
+	for {
+		var record diskRecord
+		if pending != nil {
+			record = *pending
+			pending = nil
+		} else {
+			var ok bool
+			record, ok = <-r.queue
+			if !ok {
+				return
+			}
+		}
 		if record.barrier != nil {
 			close(record.barrier)
 			continue
 		}
-		if err := r.persist(record.encoded); err != nil {
-			r.persistenceAvailable.Store(false)
-			r.mu.Lock()
-			// Retain the latest cause and count every loss. Joining every failed
-			// write would retain an unbounded error tree during a disk outage.
-			r.err = err
-			r.mu.Unlock()
-			r.failedRecords.Add(1)
-			r.droppedRecords.Add(1)
-			r.droppedBytes.Add(uint64(len(record.encoded)))
-		} else {
-			r.persistenceAvailable.Store(true)
+		encoded := record.encoded
+		count := uint64(1)
+		var barrier chan struct{}
+		// Drain the already queued burst into one bounded, atomic append+fsync.
+		// A flush barrier is acknowledged only after every preceding record is durable.
+	drain:
+		for len(encoded) < MaximumRecordBytes {
+			select {
+			case next, ok := <-r.queue:
+				if !ok {
+					break drain
+				}
+				if next.barrier != nil {
+					barrier = next.barrier
+					break drain
+				}
+				if len(encoded)+len(next.encoded) > MaximumRecordBytes {
+					pending = &next
+					break drain
+				}
+				encoded = append(encoded, next.encoded...)
+				count++
+			default:
+				break drain
+			}
 		}
+		r.persistRecords(encoded, count)
+		if barrier != nil {
+			close(barrier)
+		}
+	}
+}
+
+func (r *DiskRing) persistRecords(encoded []byte, count uint64) {
+	if err := r.persist(encoded); err != nil {
+		r.persistenceAvailable.Store(false)
+		r.mu.Lock()
+		r.err = err
+		r.mu.Unlock()
+		r.failedRecords.Add(count)
+		r.droppedRecords.Add(count)
+		r.droppedBytes.Add(uint64(len(encoded)))
+	} else {
+		r.persistenceAvailable.Store(true)
 	}
 }
 

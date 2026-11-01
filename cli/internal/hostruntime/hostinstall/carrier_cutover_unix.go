@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // A source upgrade retains account custody and accepted SSH bridges. When SSH
@@ -97,7 +98,10 @@ func (u *unixCarrierUpgrade) activate() error {
 	if u == nil {
 		return nil
 	}
-	return promoteCarrierConfig(u.stagedConfig)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "descriptor_promote_start")
+	err := promoteCarrierConfig(u.stagedConfig)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "descriptor_promote_end", "failed", err != nil)
+	return err
 }
 func promoteCarrierConfig(staged string) error {
 	if !strings.HasSuffix(staged, ".next") {
