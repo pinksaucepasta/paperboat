@@ -214,6 +214,7 @@ type Owner struct {
 	mu               sync.Mutex
 	closed           bool
 	sessions         map[*Session]struct{}
+	handshakes       map[string]*peerHandshake
 	workers          sync.WaitGroup
 }
 

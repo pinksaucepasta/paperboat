@@ -49,7 +49,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
 	defer cancel()
 	for {
-		session, err := o.dialOnce(dialCtx, descriptor, peerID, class)
+		session, err := o.dialAttempt(dialCtx, descriptor, peerID, class)
 		if err == nil {
 			return session, nil
 		}

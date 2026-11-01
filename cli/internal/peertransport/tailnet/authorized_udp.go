@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
@@ -437,6 +438,7 @@ func (a *Authority) RetireIdleClient(client *UDPClient) bool {
 		}
 		client.mu.Lock()
 		if client.closed || client.count != 0 {
+			diagnosticlog.TryInfo("native packet lifecycle", "stage", "retire_idle", "reason", "live_or_closed", "sessions", client.count)
 			client.mu.Unlock()
 			return false
 		}
@@ -447,6 +449,7 @@ func (a *Authority) RetireIdleClient(client *UDPClient) bool {
 			a.clientEngine.InvalidateAuthorizedPeer(lease.node)
 		}
 		delete(a.clients, id)
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "retire_idle", "reason", "retired")
 		return true
 	}
 	return false

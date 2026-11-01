@@ -419,7 +419,6 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 	}
 	b.addClientLocked(src, discoPub, b.allowedPeers[src])
 	b.updateServerMapLocked()
-	b.primePeer(b.allowedPeers[src])
 
 	// No engine reconfig needed: the WireGuard machine learns about the
 	// new peer lazily via the config source installed with

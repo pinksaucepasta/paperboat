@@ -30,11 +30,15 @@ func TestNativeNewHandshakeRecoversPacketLossWithoutClosingAdmittedPeer(t *testi
 		if live {
 			name = "LiveClientReused"
 		}
-		t.Run(name, func(t *testing.T) { testNativeLostHandshake(t, live) })
+		t.Run(name, func(t *testing.T) { testNativeLostHandshake(t, live, false) })
 	}
 }
 
-func testNativeLostHandshake(t *testing.T, live bool) {
+func TestConcurrentNativeDialsRecoverRestartedPeer(t *testing.T) {
+	testNativeLostHandshake(t, false, true)
+}
+
+func testNativeLostHandshake(t *testing.T, live, restart bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	public, signer, err := ed25519.GenerateKey(rand.Reader)
@@ -69,6 +73,9 @@ func testNativeLostHandshake(t *testing.T, live bool) {
 	if live {
 		lost = 2
 	}
+	if restart {
+		lost = 0
+	}
 	address, flows, failures, stop := listenWithLostHandshake(t, ctx, receiver, regions.Regions[1], serverTLS, lost)
 	defer stop()
 	owner, err := native.NewOwner(native.Config{Authority: sender, TLS: clientTLS})
@@ -76,6 +83,10 @@ func testNativeLostHandshake(t *testing.T, live bool) {
 		t.Fatal(err)
 	}
 	defer owner.Close()
+	if restart {
+		testConcurrentRestart(t, ctx, owner, receiver, regions.Regions[1], serverTLS, address, stop)
+		return
+	}
 	var stream net.Conn
 	if live {
 		first, err := owner.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)

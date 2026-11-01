@@ -70,7 +70,6 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	}
 	b.contacts = next // addClientLocked reads the new endpoints from here
 	changed := false
-	var added []netip.Addr
 	for k, c := range next {
 		addr, allowed := b.allowedPeers[k]
 		if !allowed || len(c.Endpoints) == 0 {
@@ -78,28 +77,13 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		}
 		if b.clients[k] == nil {
 			b.addClientLocked(k, c.Disco, addr)
-			added = append(added, addr)
 			changed = true
 		}
 	}
 	if changed {
 		b.updateServerMapLocked()
-		// A restarted responder has no keypair while callers may retain an old one.
-		// Start WireGuard from the fresh side instead of waiting for caller rekey.
-		// Tailscale wgengine/userspace.go:sendTSMPPing injects an authenticated probe.
-		for _, address := range added {
-			b.primePeer(address)
-		}
 	}
 	return nil
-}
-
-// primePeer starts an encrypted probe from this engine's current key state.
-// Disco alone proves reachability without replacing a stale remote keypair.
-func (b *locoBackend) primePeer(address netip.Addr) {
-	if engine, ok := b.sys.Engine.GetOK(); ok {
-		go engine.Ping(address, tailcfg.PingTSMP, 0, func(*ipnstate.PingResult) {})
-	}
 }
 
 // addClientLocked adds the netmap node of an allowed peer with the endpoints its contact names; b.mu held.
