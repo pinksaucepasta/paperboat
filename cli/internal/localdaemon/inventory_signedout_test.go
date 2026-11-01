@@ -23,6 +23,9 @@ func TestSignedOutCanceledRequestStillChecksCurrentAuthentication(t *testing.T) 
 		{err: api.ErrUnauthenticated},
 	}}}
 	inventory, store := newTestInventory(t, source, time.Now)
+	if err := inventory.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if inventory.SignedOut(ctx) {
@@ -31,6 +34,10 @@ func TestSignedOutCanceledRequestStillChecksCurrentAuthentication(t *testing.T) 
 	snapshot, err := store.Snapshot(t.Context())
 	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Health) != 0 || len(snapshot.Machines) != 1 {
 		t.Fatalf("canceled stream poisoned inventory health: snapshot=%+v err=%v", snapshot, err)
+	}
+	// The inventory owner observes revocation; failed requests read that state.
+	if err := inventory.Refresh(t.Context()); err == nil {
+		t.Fatal("authentication rejection was hidden")
 	}
 	if !inventory.SignedOut(ctx) {
 		t.Fatal("canceled caller hid a current authentication rejection")

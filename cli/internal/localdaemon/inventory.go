@@ -161,13 +161,11 @@ func (i *Inventory) RequestRefresh() {
 	}
 }
 
-// SignedOut refreshes from the control plane now and reports whether it found this machine signed out.
-// A machine revoked a moment ago learns it here, before its periodic refresh.
+// SignedOut classifies a failed local operation from current authentication state.
+// Refresh belongs to the inventory loop, never to the failure response path.
 func (i *Inventory) SignedOut(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	_ = i.Refresh(ctx)
-	snapshot, err := i.store.Snapshot(ctx)
+	i.RequestRefresh()
+	snapshot, err := i.store.Snapshot(context.WithoutCancel(ctx))
 	return err == nil && snapshot.DaemonState == "awaiting_enrollment"
 }
 
