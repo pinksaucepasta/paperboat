@@ -305,6 +305,7 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 	deadline := time.Now().Add(r.readyTimeout)
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	startupInterval := 100 * time.Millisecond
 	for {
 		if time.Now().After(deadline) {
 			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
@@ -313,6 +314,11 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 		if resp.RetryAfterSeconds > 0 {
 			interval = time.Duration(resp.RetryAfterSeconds) * time.Second
 		}
+		// Readiness has no machine-event topic; check promptly during activation,
+		// then settle at the configured/server polling interval.
+		maximumInterval := interval
+		interval = min(interval, startupInterval)
+		startupInterval = min(startupInterval*2, maximumInterval)
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)

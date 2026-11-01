@@ -742,3 +742,24 @@ func TestLocalTerminalRejectionsHaveExpectedDiagnosticStatus(t *testing.T) {
 		t.Fatal("revocation classified unexpected")
 	}
 }
+
+func TestResolveStartingMachineChecksReadinessPromptly(t *testing.T) {
+	fc := &fakeClient{machines: []api.UserMachine{terminalHost("um_1", "app", "online")},
+		connectSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", Status: "starting", RetryAfterSeconds: 2}},
+		statusSeq:  []api.ConnectionDescriptor{{UserMachineID: "um_1", Status: "starting", RetryAfterSeconds: 2}}}
+	r := newTestResolver(fc)
+	var waits []time.Duration
+	r.sleep = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		if len(waits) == 3 {
+			return context.Canceled
+		}
+		return nil
+	}
+	_, _ = r.Resolve(t.Context(), ConnectRequest{Machine: "app"})
+	for i, want := range []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond} {
+		if len(waits) <= i || waits[i] != want {
+			t.Fatalf("waits=%v, want 100/200/400 ms start", waits)
+		}
+	}
+}
