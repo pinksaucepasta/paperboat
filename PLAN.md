@@ -5072,3 +5072,7 @@ Raw captures retained privately outside the repo at /home/ubuntu/paperboat-priva
 2026-11-01 | Reconnect data-only capture | dd567041/8e62adb7 instrumentation pushed after full CLI vet/race PASS41033946916; one 1 s-marker dadape run gap16.767510925s, same shell/exit/cleanup/doctor/Activation complete PASS.
 One probeStalled redial6.141s; supervise adopts without a competing redial/cancellation. Recorded waits: silence10.626s, network refresh2.614s, create-or-get ack2.338s; QUIC11ms, actual attach25ms.
 F14-02 remains open; raw logs and table retained privately outside repo at /home/ubuntu/paperboat-private/reconnect-data-r5. Refresh inner2.342s wait and one missing local-authority start remain unclassified; no behavior fixes/release/console-live.
+
+2026-11-01 | r6 failed qualification | e607a827..c76844b8 includes target timing and three RED/GREEN regressions; full CLI vet/race PASS41275535882; one held run gap15.816516640s FAIL, same shell/exit PASS.
+Silence10.791s persists; refresh still ran365ms, QUIC4055ms, create-or-get147ms (existing-owner28ms, no launch ENV fetch). Session cleanup FAIL: temporary catalog row remains closing; controller removed/revoked, doctor/Activation complete PASS.
+F14-02 remains open; gate stopped further product changes, functional reruns/release/official update/console-live. Raw logs and table retained outside repo in /home/ubuntu/paperboat-private/reconnect-fix-r6; hp untouched.
