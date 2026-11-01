@@ -289,6 +289,8 @@ github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4
 github.com/pingcap/errors v0.11.4/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264 h1:rh/ONJr7GuYCfV8+9nwJIeqiXpR7P6QEhhhrxNnwGH4=
 github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261019044951-ac1095ce5264/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261101154814-2d32e5f0efa6 h1:9rjfIhxFq2z+1WIgZUtt7CCfJICBl8X5OLW//o09wMA=
+github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261101154814-2d32e5f0efa6/go.mod h1:Kftbp62QK8BuBWLTN7Cf32c0RMiiO0UMh5asiPiDDFM=
 github.com/pires/go-proxyproto v0.15.0 h1:dTshmNbFm/D+0+sbrxUuddPOZ5Y0B7c5NhtsBkm6LqI=
 github.com/pires/go-proxyproto v0.15.0/go.mod h1:OXsCrKwrK2tXS9YrI5tkHx5xaQlO8FH3lFW76orFh24=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=

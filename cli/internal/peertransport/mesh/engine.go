@@ -87,6 +87,9 @@ func (s *Server) Start() error {
 	if logf == nil {
 		logf = logger.Discard
 	}
+	observe := &underlayDiagnostics{engineLabel: underlayLabel(s.Key.Public().String())}
+	baseLogf := logf
+	logf = func(format string, args ...any) { observe.record(format, args...); baseLogf(format, args...) }
 	priv := s.Key
 	reg := s.Region
 	if reg != nil && reg.RegionID == 0 {
@@ -416,11 +419,7 @@ func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 		DERPCarrierFactory:     lb.derpCarrierFactory,
 		TestOnlyPacketListener: lb.testOnlyPacketListener,
 	}
-	listener := lb.testOnlyPacketListener
-	if listener == nil {
-		listener = &net.ListenConfig{}
-	}
-	conf.TestOnlyPacketListener = underlayListener{PacketListener: listener, engineLabel: underlayLabel(lb.pub.String())}
+
 	// Both sides deterministically derive a separate disco key from their
 	// node private key. The public disco key, unlike the node key, is safe to
 	// expose in direct-path disco frames. Knowing our own disco private key
