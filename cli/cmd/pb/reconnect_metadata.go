@@ -15,6 +15,9 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 	}
 	frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
 	owners := map[string]string{
+		"native underlay packet":  "/internal/peertransport/mesh.",
+		"native underlay session": "/internal/peertransport/mesh.",
+		"carrier cutover":         "/internal/hostruntime/hostinstall.",
 		"peer QUIC wire":          "/internal/peertransport/peerquic.",
 		"peer QUIC close":         "/internal/peertransport/peerquic.",
 		"native owner close":      "/internal/peertransport/native.",
@@ -30,6 +33,8 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		return false
 	}
 	keys := map[string]bool{
+		"engine_label": true, "peer_label": true,
+		"direction": true, "bytes": true, "endpoint_label": true, "state": true,
 		"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 		"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
 		"trigger": true, "application_close": true, "stage": true, "failed": true,

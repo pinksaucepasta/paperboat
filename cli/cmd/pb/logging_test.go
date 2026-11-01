@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"log/slog"
 	"reflect"
@@ -116,11 +117,20 @@ func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
 			t.Fatal("private attribute retained")
 		}
 	}
+	record = slog.NewRecord(time.Now(), slog.LevelInfo, "native underlay packet", reflect.ValueOf((*mesh.Server).Start).Pointer())
+	record.Add("packet_type", 1, "direction", "egress", "engine_label", "opaque", "credential", "PRIVATE")
+	if err := handler.Handle(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	events = recorder.Recent()
+	if len(events) != 2 || events[1].Code != "reconnect_transport" || events[1].Fields["direction"] != "egress" || events[1].Fields["packet_type"] != "1" || events[1].Fields["credential"] != "" {
+		t.Fatal("underlay metadata missing or private attribute retained")
+	}
 	record.PC = reflect.ValueOf(TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata).Pointer()
 	if err := handler.Handle(t.Context(), record); err != nil {
 		t.Fatal(err)
 	}
-	if events := recorder.Recent(); len(events) != 2 || events[1].Code != "unclassified_log" {
+	if events := recorder.Recent(); len(events) != 3 || events[2].Code != "unclassified_log" {
 		t.Fatal("untrusted producer retained metadata")
 	}
 }

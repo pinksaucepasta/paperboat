@@ -29,6 +29,7 @@ func invalidDiagnostic(cause error) error {
 }
 
 var allowedFields = map[string]bool{
+	"direction": true, "bytes": true, "engine_label": true, "peer_label": true, "endpoint_label": true,
 	"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 	"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
 	"trigger": true, "application_close": true, "stage": true, "failed": true,

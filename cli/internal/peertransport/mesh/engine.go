@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"go4.org/netipx"
 	"tailscale.com/health"
 	"tailscale.com/ipn"
@@ -415,6 +416,11 @@ func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 		DERPCarrierFactory:     lb.derpCarrierFactory,
 		TestOnlyPacketListener: lb.testOnlyPacketListener,
 	}
+	listener := lb.testOnlyPacketListener
+	if listener == nil {
+		listener = &net.ListenConfig{}
+	}
+	conf.TestOnlyPacketListener = underlayListener{PacketListener: listener, engineLabel: underlayLabel(lb.pub.String())}
 	// Both sides deterministically derive a separate disco key from their
 	// node private key. The public disco key, unlike the node key, is safe to
 	// expose in direct-path disco frames. Knowing our own disco private key
@@ -428,6 +434,9 @@ func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 		logf("wgengine.NewUserspaceEngine(tun %q) error: %v", "userspace-networking", err)
 		return err
 	}
+	e.SetPeerSessionStateFunc(func(peer key.NodePublic, state wgengine.PeerWireGuardState) {
+		diagnosticlog.TryInfo("native underlay session", "engine_label", underlayLabel(lb.pub.String()), "peer_label", underlayLabel(peer.String()), "state", int(state), "observed_unix_us", time.Now().UnixMicro())
+	})
 	sys.Set(e)
 	sys.NetstackRouter.Set(true)
 	return nil
