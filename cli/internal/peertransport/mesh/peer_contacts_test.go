@@ -14,11 +14,12 @@ import (
 // over it. With each other's endpoints from the signed configuration, two engines that have no relay at
 // all connect directly; without them, the dial cannot even start.
 func TestPeersWithSignedEndpointsConnectDirectlyWithoutARelay(t *testing.T) {
-	t.Run("both contacts first", func(t *testing.T) { connectDirectlyWithoutARelay(t, false) })
-	t.Run("first ping unanswered", func(t *testing.T) { connectDirectlyWithoutARelay(t, true) })
+	t.Run("both contacts first", func(t *testing.T) { connectDirectlyWithoutARelay(t, false, false) })
+	t.Run("first ping unanswered", func(t *testing.T) { connectDirectlyWithoutARelay(t, true, false) })
+	t.Run("inbound peer without advertised endpoints", func(t *testing.T) { connectDirectlyWithoutARelay(t, false, true) })
 }
 
-func connectDirectlyWithoutARelay(t *testing.T, lateHost bool) {
+func connectDirectlyWithoutARelay(t *testing.T, lateHost, noInboundEndpoints bool) {
 	dialerKey, hostKey := key.NewNode(), key.NewNode()
 	dialerAddr, hostAddr := netip.MustParseAddr("fd7a:115c:a1e0::20"), netip.MustParseAddr("fd7a:115c:a1e0::21")
 	host := &Server{Key: hostKey, LocalAddr: hostAddr, AllowedPeers: map[key.NodePublic]netip.Addr{dialerKey.Public(): dialerAddr}, ServedUDPPorts: []filter.PortRange{{First: 443, Last: 443}}, OnUDP: func(uint16) func(ConnPacketConn) {
@@ -58,7 +59,11 @@ func connectDirectlyWithoutARelay(t *testing.T, lateHost bool) {
 		return nil
 	}
 	hostContact := func() {
-		if err := host.SetPeerContacts(map[key.NodePublic]PeerContact{dialerKey.Public(): {Disco: dialer.lb.discoPublic(), Endpoints: endpoints(dialer)}}); err != nil {
+		eps := endpoints(dialer)
+		if noInboundEndpoints {
+			eps = nil
+		}
+		if err := host.SetPeerContacts(map[key.NodePublic]PeerContact{dialerKey.Public(): {Disco: dialer.lb.discoPublic(), Endpoints: eps}}); err != nil {
 			t.Error(err)
 		}
 	}

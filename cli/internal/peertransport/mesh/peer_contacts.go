@@ -32,9 +32,8 @@ const maxPeerContactEndpoints = 8
 // not know our endpoints yet still learns that we may connect.
 const backgroundMeow = 30 * time.Second
 
-// SetPeerContacts replaces the direct contacts of the allowed peers. An allowed peer with endpoints gets its
-// netmap node at once, so the engine disco-pings those addresses directly, and the peer's own handshakes are
-// accepted with no relay in between; before, a node appeared only after a meow over a relay.
+// SetPeerContacts installs every signed peer before accepting traffic, including
+// peers without advertised endpoints. Discovery supplies paths, not admission.
 func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error {
 	for k, c := range contacts {
 		if k.IsZero() || c.Disco.IsZero() || len(c.Endpoints) > maxPeerContactEndpoints {
@@ -72,7 +71,7 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	changed := false
 	for k, c := range next {
 		addr, allowed := b.allowedPeers[k]
-		if !allowed || len(c.Endpoints) == 0 {
+		if !allowed {
 			continue
 		}
 		if b.clients[k] == nil {
