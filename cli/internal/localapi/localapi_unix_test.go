@@ -1341,10 +1341,14 @@ func TestInspectorRequestGoesThroughTheDaemon(t *testing.T) {
 // A peer stream that fails on a machine the control plane has just revoked says the machine is signed
 // out (pb: "session is no longer valid"), not that the target is unreachable (C036).
 func TestPeerStreamFailureOnASignedOutMachineSaysAuthenticationRequired(t *testing.T) {
-	for _, signedOut := range []bool{true, false} {
+	for _, scenario := range []struct{ signedOut, rejectedCredential bool }{{true, false}, {false, false}, {false, true}} {
+		signedOut := scenario.signedOut
 		server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "unused.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 			Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
 			PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+				if scenario.rejectedCredential {
+					return nil, api.ErrUnauthenticated
+				}
 				return nil, errors.New("no descriptor")
 			}),
 			SignedOut: func(context.Context) bool { return signedOut }})
@@ -1367,7 +1371,7 @@ func TestPeerStreamFailureOnASignedOutMachineSaysAuthenticationRequired(t *testi
 			t.Fatal(err)
 		}
 		want, status := "peer_stream_unavailable", 503
-		if signedOut {
+		if signedOut || scenario.rejectedCredential {
 			want, status = AuthenticationRequiredCode, 401
 		}
 		if response.Code != status || envelope.Code != want {

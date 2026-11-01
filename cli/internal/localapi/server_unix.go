@@ -87,8 +87,8 @@ type ServerConfig struct {
 	Completions  CompletionSource
 	Observations ObservationSink
 	PeerStreams  PeerStreamBroker
-	// SignedOut asks the control plane again and reports whether this machine is signed out (revoked or
-	// never added): a peer stream that failed then says so, not that the target is unreachable.
+	// SignedOut reads current local authentication state without waiting for the
+	// control plane. Typed credential refusals are returned directly.
 	SignedOut            func(context.Context) bool
 	PeerProbes           PeerProbeBroker
 	InspectorRequests    InspectorBroker

@@ -48,6 +48,9 @@ func writeServerRefusal(writer http.ResponseWriter, requestID string, err error)
 	}
 	var refused *api.APIError
 	switch {
+	case errors.Is(err, api.ErrUnauthenticated):
+		writeError(writer, http.StatusUnauthorized, requestID, AuthenticationRequiredCode, "this machine is signed out of Paperboat")
+		return true
 	case errors.As(err, &coded) && coded.LocalAPICode() == RelayQuotaCode:
 		message = coded.LocalAPIMessage()
 	case errors.As(err, &refused) && refused.Code == TokenScopeCode:
