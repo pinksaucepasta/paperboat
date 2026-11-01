@@ -444,7 +444,7 @@ func (a *Authority) RetireIdleClient(client *UDPClient) bool {
 		client.mu.Unlock()
 		_ = client.Close()
 		if a.clientEngine != nil {
-			a.clientEngine.RekeyAuthorizedPeer(lease.node)
+			a.clientEngine.InvalidateAuthorizedPeer(lease.node)
 		}
 		delete(a.clients, id)
 		return true
