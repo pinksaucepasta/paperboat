@@ -411,10 +411,13 @@ func (g *productionNativePeerGeneration) stop() error {
 		if g.owner != nil {
 			diagnosticlog.TryInfo("carrier shutdown", "stage", "owner_close")
 			result = g.owner.Close()
+			diagnosticlog.TryInfo("carrier shutdown", "stage", "owner_complete", "failed", result != nil)
 		}
 		g.done.Wait()
+		diagnosticlog.TryInfo("carrier shutdown", "stage", "workers_complete")
 		if g.apps != nil {
 			g.apps.Wait()
+			diagnosticlog.TryInfo("carrier shutdown", "stage", "applications_complete")
 		}
 
 	})

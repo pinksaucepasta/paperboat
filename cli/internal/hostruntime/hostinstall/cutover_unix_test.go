@@ -58,7 +58,7 @@ func TestInvalidReplacementLeavesServingRuntimeRunning(t *testing.T) {
 	admissionClosed := false
 	err = stageAndStopUnixRuntimeRoles(t.Context(),
 		Request{Executable: filepath.Join(root, "missing"), Source: source},
-		installPaths{workerNext: filepath.Join(root, "next")}, nil, hostd, nil,
+		installPaths{workerNext: filepath.Join(root, "next")}, nil, hostd, nil, nil,
 		func(context.Context) error { admissionClosed = true; return nil })
 	if err == nil || runner.stopped || admissionClosed {
 		t.Fatalf("invalid candidate interrupted serving runtime: stopped=%v admissionClosed=%v err=%v", runner.stopped, admissionClosed, err)
@@ -170,7 +170,7 @@ func TestPowerReplacementCompletesBeforeTerminalAdmissionPauses(t *testing.T) {
 			}
 			power := makeRole(service.HostKind, "power.service", pin)
 			hostd := makeRole(service.HostdKind, "hostd.service", filepath.Join(root, "pb"))
-			err := prepareUnixRuntimeCutover(t.Context(), power, hostd, nil, func(context.Context) error {
+			err := prepareUnixRuntimeCutover(t.Context(), power, hostd, nil, nil, func(context.Context) error {
 				if !runner.powerReady {
 					return errors.New("power service was not prepared before admission")
 				}
@@ -218,7 +218,7 @@ func TestRuntimeDeclarationsArePublishedBeforeAdmissionPauses(t *testing.T) {
 		return i
 	}
 	hostd, updater := makeRole(service.HostdKind), makeRole(service.UpdaterKind)
-	err := prepareUnixRuntimeCutover(t.Context(), nil, hostd, updater, func(context.Context) error {
+	err := prepareUnixRuntimeCutover(t.Context(), nil, hostd, updater, nil, func(context.Context) error {
 		for _, role := range []*service.Installer{hostd, updater} {
 			if _, err := os.Stat(role.DefinitionPath()); err != nil {
 				return errors.New("runtime declaration missing at admission boundary")
@@ -288,6 +288,53 @@ func TestCarrierStartsAlongsideHostdInTheSameCutover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	if err := activateUnixNativeRoles(ctx, nil, hostd, nil, strings.TrimPrefix(health.URL, "http://"), true, carrier); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type concurrentStopRunner struct {
+	started chan string
+	release chan struct{}
+}
+
+func (r *concurrentStopRunner) Run(_ context.Context, _ string, args ...string) error {
+	if len(args) > 1 && args[0] == "stop" {
+		r.started <- args[1]
+		<-r.release
+	}
+	return nil
+}
+func (r *concurrentStopRunner) Output(ctx context.Context, name string, args ...string) (string, error) {
+	return "", r.Run(ctx, name, args...)
+}
+func TestIndependentRuntimeStopsShareOneCutoverWindow(t *testing.T) {
+	root := t.TempDir()
+	runner := &concurrentStopRunner{started: make(chan string, 3), release: make(chan struct{})}
+	makeRole := func(kind, unit string) *service.Installer {
+		i, err := service.NewPending(service.Config{Platform: "linux", Kind: kind, Instance: "u1001", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: "tester", Group: "tester", Arguments: []string{"daemon"}, Controller: service.SystemdController{Runner: runner, Unit: unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return i
+	}
+	host, hostd, updater := makeRole(service.HostKind, "host.service"), makeRole(service.HostdKind, "hostd.service"), makeRole(service.UpdaterKind, "updater.service")
+	done := make(chan error, 1)
+	go func() { done <- stopUnixRuntimeRoles(t.Context(), host, hostd, updater, nil) }()
+	deadline := time.NewTimer(500 * time.Millisecond)
+	defer deadline.Stop()
+	count := 0
+	for count < 3 {
+		select {
+		case <-runner.started:
+			count++
+		case <-deadline.C:
+			close(runner.release)
+			<-done
+			t.Fatal("one stopping runtime delayed stopping the other independent roles")
+		}
+	}
+	close(runner.release)
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 }

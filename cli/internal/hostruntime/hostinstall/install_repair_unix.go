@@ -200,7 +200,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 				}
 				defer abort()
 			}
-			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater); err != nil {
+			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil); err != nil {
 				return err
 			}
 		}
@@ -208,7 +208,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 			// A running systemd service cannot gain a newly declared credential
 			// without a process restart. Repair is the explicit user-authorized
 			// maintenance path for this one-time cutover.
-			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater); err != nil {
+			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil); err != nil {
 				return err
 			}
 		}

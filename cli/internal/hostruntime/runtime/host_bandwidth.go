@@ -26,7 +26,7 @@ func (s *hostBandwidthService) Shutdown(ctx context.Context) error {
 		}
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		s.err = s.recorder.Close(closeCtx)
+		s.err = s.recorder.CheckpointAndClose(closeCtx)
 	})
 	return s.err
 }

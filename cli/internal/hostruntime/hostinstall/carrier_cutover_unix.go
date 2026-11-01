@@ -17,7 +17,6 @@ import (
 // can retire, its carrier joins the same native cutover as hostd, rather than
 // causing a second maintenance window after the installation commits.
 type unixCarrierUpgrade struct {
-	candidate  CarrierConfig
 	capability []byte
 	previous   *carriercontrol.Client
 	native     *service.NativeTransactionalComponent
@@ -75,21 +74,16 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 	if err != nil {
 		return nil, err
 	}
+	// Like Tailscale clientupdate.go:updateLinuxBinary, finish durable publication
+	// while the old process keeps its already loaded configuration.
 	// Both native managers leave an already running job on its current image.
 	if err := native.Install(ctx); err != nil {
 		return nil, err
 	}
-	return &unixCarrierUpgrade{candidate: candidate, capability: capability, previous: client, native: native}, nil
-}
-
-func (u *unixCarrierUpgrade) stop(ctx context.Context) error {
-	if u == nil {
-		return nil
+	if err := publishCarrierFiles(candidate, carrierConfigPath(candidate.Instance), capability); err != nil {
+		return nil, err
 	}
-	if err := u.native.Stop(ctx); err != nil {
-		return err
-	}
-	return publishCarrierFiles(u.candidate, carrierConfigPath(u.candidate.Instance), u.capability)
+	return &unixCarrierUpgrade{capability: capability, previous: client, native: native}, nil
 }
 
 func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {

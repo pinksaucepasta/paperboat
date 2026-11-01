@@ -174,7 +174,13 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	}
 	// Close listeners and bridges before their identity refresh and usage owner.
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
-	result := errors.Join(c.peer.Shutdown(ctx), c.authorization.Shutdown(ctx), c.usage.Shutdown(ctx))
+	peerErr := c.peer.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
+	authErr := c.authorization.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
+	usageErr := c.usage.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
+	result := errors.Join(peerErr, authErr, usageErr)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
 	return result
 }

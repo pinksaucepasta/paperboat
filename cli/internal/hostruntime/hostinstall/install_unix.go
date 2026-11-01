@@ -213,9 +213,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 					return err
 				}
 			}
-			return carrierUpgrade.stop(ctx)
+			return nil
 		}
-		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, prepareCutover); err != nil {
+		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, carrierUpgrade.component(), prepareCutover); err != nil {
 			if intent == unixPreparedUpdate {
 				return err
 			}

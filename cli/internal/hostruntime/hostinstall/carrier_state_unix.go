@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -225,7 +226,7 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 
 // Stage the verified replacement while the current runtime can still serve.
 // Only promotion and service activation belong in the stopped interval.
-func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
+func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent, prepare func(context.Context) error) error {
 	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
 		return err
 	}
@@ -234,11 +235,11 @@ func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths in
 			return err
 		}
 	}
-	return prepareUnixRuntimeCutover(ctx, host, hostd, updater, prepare)
+	return prepareUnixRuntimeCutover(ctx, host, hostd, updater, carrier, prepare)
 }
 
 // prepareUnixRuntimeCutover owns native service work at the admission boundary.
-func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
+func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent, prepare func(context.Context) error) error {
 	if host != nil {
 		if err := host.Install(ctx); err != nil {
 			return err
@@ -264,10 +265,16 @@ func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *servic
 	if err := prepare(ctx); err != nil {
 		return err
 	}
-	return stopUnixRuntimeRoles(ctx, nil, hostd, updater)
+	return stopUnixRuntimeRoles(ctx, nil, hostd, updater, carrier)
 }
 
-func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer) error {
+// Stop independent native roles together, so replacement pays one shutdown
+// window. Resolve every component before stopping any serving process.
+func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent) error {
+	components := make([]*service.NativeTransactionalComponent, 0, 4)
+	if carrier != nil {
+		components = append(components, carrier)
+	}
 	for _, installer := range []*service.Installer{updater, hostd, host} {
 		if installer == nil {
 			continue
@@ -276,11 +283,16 @@ func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Ins
 		if err != nil {
 			return err
 		}
-		if err := component.Stop(ctx); err != nil {
-			return err
-		}
+		components = append(components, component)
 	}
-	return nil
+	failures := make([]error, len(components))
+	var stopped sync.WaitGroup
+	for i, component := range components {
+		stopped.Add(1)
+		go func() { defer stopped.Done(); failures[i] = component.Stop(ctx) }()
+	}
+	stopped.Wait()
+	return errors.Join(failures...)
 }
 func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string) error {
 	return activateUnixNativeRoles(ctx, host, hostd, updater, address, true, nil)

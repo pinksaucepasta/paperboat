@@ -130,7 +130,7 @@ func Stop(ctx context.Context, request Request) (resultErr error) {
 	if err := lifecycle.Recover(ctx); err != nil {
 		return err
 	}
-	return lifecycle.Replace(ctx, func(ctx context.Context) error { return stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater) })
+	return lifecycle.Replace(ctx, func(ctx context.Context) error { return stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil) })
 }
 
 func uninstallValidated(ctx context.Context, request Request, paths installPaths) (resultErr error) {

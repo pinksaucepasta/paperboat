@@ -293,6 +293,31 @@ func (r *Recorder) markReported(revision uint64) {
 	r.reported = time.Now()
 }
 
+// CheckpointAndClose stops uploads and durably retains final absolute counters.
+// Native service replacement must not wait for the control plane: the next
+// process resumes delivery from this file without losing billing evidence.
+func (r *Recorder) CheckpointAndClose(ctx context.Context) error {
+	r.cancel()
+	select {
+	case <-r.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case r.flushPermit <- struct{}{}:
+		defer func() { <-r.flushPermit }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state.CleanShutdown = true
+	if err := r.persistLocked(); err != nil {
+		return recorderFailure{"diagnostic_storage", err}
+	}
+	return nil
+}
+
 func (r *Recorder) Close(ctx context.Context) error {
 	r.cancel()
 	select {
