@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const MaxPayload = mesh.MaxUDPPayload
@@ -36,7 +37,21 @@ func newPacket(c mesh.ConnPacketConn, release func()) *Packet {
 func (p *Packet) LocalAddr() net.Addr  { return p.local }
 func (p *Packet) RemoteAddr() net.Addr { return p.remote }
 func (*Packet) MaxPayload() uint16     { return MaxPayload }
-func (p *Packet) Write(b []byte) (int, error) {
+func (p *Packet) Write(b []byte) (n int, err error) {
+	defer func() {
+		if err != nil {
+			reason := "socket_write_failed"
+			switch {
+			case errors.Is(err, net.ErrClosed):
+				reason = "socket_closed"
+			case errors.Is(err, ErrAdmission):
+				reason = "admission_rejected"
+			case errors.Is(err, ErrPayloadTooLarge):
+				reason = "payload_too_large"
+			}
+			diagnosticlog.TryInfo("native packet lifecycle", "stage", "write_failed", "reason", reason)
+		}
+	}()
 	if p.closed.Load() {
 		return 0, net.ErrClosed
 	}
@@ -57,6 +72,7 @@ func (p *Packet) WriteTo(b []byte, addr net.Addr) (int, error) {
 }
 func (p *Packet) Close() error {
 	p.once.Do(func() {
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "socket_close")
 		p.closed.Store(true)
 		p.closeErr = p.conn.Close()
 		if p.release != nil {

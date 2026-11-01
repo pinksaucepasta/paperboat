@@ -15,14 +15,15 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 	}
 	frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
 	owners := map[string]string{
-		"peer QUIC wire":         "/internal/peertransport/peerquic.",
-		"peer QUIC close":        "/internal/peertransport/peerquic.",
-		"native owner close":     "/internal/peertransport/native.",
-		"native handshake path":  "/internal/peertransport/native.",
-		"native cache admission": "/internal/tunnel.",
-		"native cache reuse":     "/internal/tunnel.",
-		"native scope admission": "/internal/peertransport/tailnet.",
-		"carrier shutdown":       "/internal/hostruntime/runtime.",
+		"peer QUIC wire":          "/internal/peertransport/peerquic.",
+		"peer QUIC close":         "/internal/peertransport/peerquic.",
+		"native owner close":      "/internal/peertransport/native.",
+		"native handshake path":   "/internal/peertransport/native.",
+		"native cache admission":  "/internal/tunnel.",
+		"native cache reuse":      "/internal/tunnel.",
+		"native packet lifecycle": "/internal/peertransport/tailnet.",
+		"native scope admission":  "/internal/peertransport/tailnet.",
+		"carrier shutdown":        "/internal/hostruntime/runtime.",
 	}
 	owner := owners[record.Message]
 	if owner == "" || !strings.Contains(frame.Function, owner) {
