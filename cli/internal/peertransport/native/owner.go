@@ -278,12 +278,12 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		tlsConfig.NextProtos = []string{PrivateHTTP3ALPN}
 	}
 	pathBefore, _ := o.authority.PeerPath(peerID)
-	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path", pathBefore)
+	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path_category", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
 	handshakeEnd(err)
 	pathAfter, _ := o.authority.PeerPath(peerID)
-	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path", pathAfter, "failed", err != nil)
+	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path_category", pathAfter, "failed", err != nil)
 	if err != nil {
 		// DialPacket releases its failed socket before the shared cache decision.
 		return nil, o.failedPeerDial(ctx, peerID, client, err)

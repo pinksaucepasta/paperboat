@@ -33,7 +33,7 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 		"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
 		"trigger": true, "application_close": true, "stage": true, "failed": true,
-		"sessions": true, "path": true, "predicate_present": true, "allowed": true,
+		"sessions": true, "path_category": true, "predicate_present": true, "allowed": true,
 		"resource_present": true, "reason": true, "error_type": true, "capability": true,
 		"peer_found": true, "resource_found": true, "capability_found": true, "direction_found": true,
 	}
