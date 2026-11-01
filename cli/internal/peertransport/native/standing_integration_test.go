@@ -145,13 +145,13 @@ func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
 
 	// No standing rule for terminal: the old path, one refresh, which here fails.
 	terminal, err := open("terminal")
-	if err != nil {
-		t.Fatal(err)
+	if terminal != nil {
+		terminal.Close()
 	}
-	if err := echo(terminal); err == nil {
-		t.Fatal("terminal admitted without a scope")
+	var refusal *native.AdmissionRefusal
+	if !errors.As(err, &refusal) || refusal.Code != native.AdmissionDenied {
+		t.Fatal("terminal without a scope did not receive a typed denial")
 	}
-	terminal.Close()
 	if refreshes.Load() != 1 {
 		t.Fatalf("terminal refreshes=%d, want 1", refreshes.Load())
 	}

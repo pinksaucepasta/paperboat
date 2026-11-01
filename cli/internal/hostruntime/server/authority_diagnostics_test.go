@@ -12,7 +12,7 @@ func TestExpectedCredentialRejectionDoesNotHideMixedFailure(t *testing.T) {
 	if !expectedCredentialRejection(invalidCredential) {
 		t.Fatal("invalid credential was not recognized as an expected rejection")
 	}
-	if !expectedCredentialRejection(errors.Join(invalidCredential, ErrCredentialPolicy)) {
+	if !expectedCredentialRejection(errors.Join(invalidCredential, ErrCredentialPolicy, ErrStreamAuthorization)) {
 		t.Fatal("joined expected credential rejections were not recognized")
 	}
 	if expectedCredentialRejection(errors.Join(invalidCredential, errors.New("authorization store unavailable"))) {

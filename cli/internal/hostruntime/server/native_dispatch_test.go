@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 )
 
@@ -128,14 +129,22 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	if opened.Load() != 1 {
 		t.Fatalf("handler calls=%d", opened.Load())
 	}
+	// Isolate the stale epoch from the expired-credential check above.
+	allowed.DeadlineUnix = time.Now().Add(2 * time.Second).Unix()
 	stale, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) {
 		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "old", Epoch: 6}, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stale.Open(ctx, allowed); !errors.Is(err, hostdproto.ErrFenced) {
-		t.Fatalf("stale=%v", err)
+	staleCtx, stopStale := context.WithTimeout(ctx, 300*time.Millisecond)
+	staleConnection, staleErr := stale.Open(staleCtx, allowed)
+	stopStale()
+	if staleConnection != nil {
+		staleConnection.Close()
+	}
+	if !errors.Is(staleErr, hostdproto.ErrFenced) {
+		t.Fatalf("stale=%v", staleErr)
 	}
 	wrong, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("b", 43), DialTimeout: time.Second, Active: client.config.Active})
 	if err != nil {
@@ -182,5 +191,106 @@ func TestNativeDispatchClosesStreamWhenNativeAdmissionIsLost(t *testing.T) {
 	}
 	if _, err := conn.Read(make([]byte, 1)); err == nil {
 		t.Fatal("fenced stream still readable")
+	}
+}
+
+func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	controller, err := hostdproto.NewController(hostdproto.ControllerConfig{APIMin: 1, APIMax: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	welcome, err := controller.Negotiate(hostdproto.Hello{WorkerID: "worker", Version: "test", APIMin: 1, APIMax: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = controller.MarkReady(hostdproto.Ready{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = controller.Activate(hostdproto.Activate{WorkerID: welcome.WorkerID, APIVersion: welcome.APIVersion, Epoch: welcome.Epoch, Lease: welcome.Lease}); err != nil {
+		t.Fatal(err)
+	}
+	var opened atomic.Int32
+	lost := make(chan struct{})
+	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
+		Fence: func(_ context.Context, worker string, epoch uint64) (func(), <-chan struct{}, error) {
+			release, err := controller.AcquireActive(worker, epoch)
+			return release, lost, err
+		},
+		Authorize: func(_ context.Context, h streamauth.Header) (string, error) {
+			if h.Credential != "allowed" {
+				return "", &auth.Error{Code: auth.ScopeInvalid}
+			}
+			return "access-session", nil
+		},
+		ServeStream: func(_ context.Context, _ streamauth.Header, c net.Conn) error {
+			opened.Add(1)
+			_, err := io.Copy(c, c)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close(ctx)
+	worker := httptest.NewServer(handler)
+	defer worker.Close()
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) { return controller.Status(), nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := streamauth.New("operation", "terminal", "stream", "allowed", time.Now().Add(5*time.Second), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = controller.PrepareMaintenance(ctx, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Authorize(ctx, h)
+	var refusal *native.AdmissionRefusal
+	if !errors.As(err, &refusal) || refusal.Code != native.AdmissionUnavailable {
+		t.Error("maintenance refusal lost its retryable type")
+	}
+	controller.AbortMaintenance()
+	if _, err = client.Authorize(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	// The owner can enter maintenance after authorization but before the stream opens.
+	if _, err = controller.PrepareMaintenance(ctx, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() { c, e := client.Open(ctx, h); done <- result{c, e} }()
+	select {
+	case r := <-done:
+		if r.conn != nil {
+			r.conn.Close()
+		}
+		t.Fatal("worker maintenance escaped an in-flight stream admission")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if opened.Load() != 0 {
+		t.Fatal("application ran before native commit")
+	}
+	controller.AbortMaintenance()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		r.conn.Close()
+	case <-ctx.Done():
+		t.Fatal("stream admission did not resume after native commit")
+	}
+	denied := h
+	denied.Credential = "denied"
+	_, err = client.Authorize(ctx, denied)
+	if !errors.Is(err, ErrStreamAuthorization) || !errors.As(err, &refusal) || refusal.Code != native.AdmissionDenied {
+		t.Fatal("permanent authorization rejection became retryable")
 	}
 }

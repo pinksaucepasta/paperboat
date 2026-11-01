@@ -192,7 +192,11 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 			response.AccessSessionID, err = config.Authorize(r.Context(), header)
 			if err != nil || response.AccessSessionID == "" {
 				recordNativeAdmissionFailure("resource_authorize", err)
-				http.Error(w, "dispatch resource denied", http.StatusForbidden)
+				if reportAuthorizationFailure(r.Context(), err) {
+					http.Error(w, "dispatch authority unavailable", http.StatusServiceUnavailable)
+				} else {
+					http.Error(w, "dispatch resource denied", http.StatusForbidden)
+				}
 				return
 			}
 			if operation == "stream" {
@@ -353,7 +357,7 @@ func nativeDispatchSSHTargetValid(target managedssh.HostTarget) bool {
 }
 func nativeDispatchError(status int) error {
 	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
 		return ErrStreamAuthorization
 	case http.StatusConflict:
 		return hostdproto.ErrFenced

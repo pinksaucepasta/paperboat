@@ -194,15 +194,7 @@ func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, 
 	if err != nil {
 		return nil, err
 	}
-	connection, err := s.Open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := writeHeader(connection, encoded); err != nil {
-		_ = connection.Close()
-		return nil, err
-	}
-	return s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "dial", time.Unix(header.DeadlineUnix, 0))
+	return s.openAdmitted(ctx, header, encoded, accessSessionID, capability)
 }
 
 // AcceptAuthorized validates the operation credential first, then requires
@@ -227,6 +219,10 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if header.Offline {
 		admitted, err := s.acceptOffline(ctx, connection, header, capability)
 		if err != nil {
+			// Offline SSH already sent its typed refusal in place of a banner.
+			if header.Consumer == "ssh" {
+				return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, connection.Close())
+			}
 			return rejectAuthorizedStream(connection, err)
 		}
 		return admitted, header, nil
@@ -244,6 +240,9 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
+	if err := acknowledgeAdmission(connection); err != nil {
+		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, scoped.Close())
+	}
 	return s.MeterIncoming(scoped, header, accessSessionID, false), header, nil
 }
 
@@ -260,6 +259,18 @@ func readAuthorizationHeader(connection net.Conn) ([]byte, error) {
 }
 
 func rejectAuthorizedStream(connection net.Conn, err error) (net.Conn, streamauth.Header, error) {
+	code := AdmissionDenied
+	var refusal *AdmissionRefusal
+	if errors.As(err, &refusal) && refusal.Code == AdmissionUnavailable {
+		code = AdmissionUnavailable
+	}
+	if stream, ok := connection.(interface {
+		CancelRead(quic.StreamErrorCode)
+		CancelWrite(quic.StreamErrorCode)
+	}); ok {
+		stream.CancelWrite(code)
+		stream.CancelRead(code)
+	}
 	return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, connection.Close())
 }
 

@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"io"
 	"net"
 	"net/http"
@@ -79,12 +81,58 @@ func nativeDispatchHijack(ctx context.Context, writer http.ResponseWriter) (net.
 	}
 	return &nativeDispatchConn{Conn: connection, reader: buffer.Reader}, nil
 }
-func (c *NativeDispatchClient) call(ctx context.Context, operation string, header *streamauth.Header, binding *nativeprivate.Binding, stream bool) (net.Conn, nativeDispatchResponse, error) {
+func (c *NativeDispatchClient) call(
+	ctx context.Context, operation string, header *streamauth.Header,
+	binding *nativeprivate.Binding, stream bool,
+) (net.Conn, nativeDispatchResponse, error) {
 	var result nativeDispatchResponse
 	if c == nil || ctx == nil {
 		return nil, result, ErrStreamAuthorization
 	}
-	active, err := c.config.Active(ctx)
+	deadline := time.Now().Add(c.config.DialTimeout)
+	if operation == "stream" && header != nil {
+		deadline = time.Unix(header.DeadlineUnix, 0)
+	}
+	var lastErr error
+	for {
+		if lastErr != nil && !time.Now().Before(deadline) {
+			return nil, result, errors.Join(lastErr, context.DeadlineExceeded)
+		}
+		connection, answer, err := c.callOnce(ctx, operation, header, binding, stream, deadline)
+		result = answer
+		if err == nil || operation != "stream" || !nativeDispatchTemporary(err) {
+			return connection, result, err
+		}
+		if ctx.Err() != nil {
+			return nil, result, errors.Join(err, ctx.Err())
+		}
+		lastErr = err
+		if err := reattach.Wait(ctx, min(native.AdmissionRetryInterval, time.Until(deadline))); err != nil {
+			return nil, result, errors.Join(lastErr, err)
+		}
+	}
+}
+
+func nativeDispatchTemporary(err error) bool {
+	var network net.Error
+	return errors.Is(err, hostdproto.ErrFenced) ||
+		errors.Is(err, hostdproto.ErrMaintenanceBusy) ||
+		errors.Is(err, ErrNativeDispatchUnavailable) ||
+		errors.Is(err, ErrNativeDispatchBusy) || errors.As(err, &network)
+}
+
+func (c *NativeDispatchClient) callOnce(
+	ctx context.Context, operation string, header *streamauth.Header,
+	binding *nativeprivate.Binding, stream bool, deadline time.Time,
+) (net.Conn, nativeDispatchResponse, error) {
+	var result nativeDispatchResponse
+	attemptDeadline := time.Now().Add(c.config.DialTimeout)
+	if deadline.Before(attemptDeadline) {
+		attemptDeadline = deadline
+	}
+	setupCtx, cancel := context.WithDeadline(ctx, attemptDeadline)
+	defer cancel()
+	active, err := c.config.Active(setupCtx)
 	if err != nil {
 		return nil, result, err
 	}
@@ -102,7 +150,7 @@ func (c *NativeDispatchClient) call(ctx context.Context, operation string, heade
 	if err != nil || len(body) > nativeDispatchMaximum {
 		return nil, result, ErrStreamAuthorization
 	}
-	connection, err := (&net.Dialer{Timeout: c.config.DialTimeout}).DialContext(ctx, "tcp", c.config.Address)
+	connection, err := (&net.Dialer{Timeout: c.config.DialTimeout}).DialContext(setupCtx, "tcp", c.config.Address)
 	if err != nil {
 		return nil, result, errors.Join(ErrNativeDispatchUnavailable, err)
 	}
@@ -114,10 +162,7 @@ func (c *NativeDispatchClient) call(ctx context.Context, operation string, heade
 			connection.Close()
 		}
 	}()
-	deadline := time.Now().Add(c.config.DialTimeout)
-	if bound, ok := ctx.Deadline(); ok && bound.Before(deadline) {
-		deadline = bound
-	}
+	deadline, _ = setupCtx.Deadline()
 	_ = connection.SetDeadline(deadline)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+c.config.Address+NativeDispatchPath+operation, bytes.NewReader(body))
 	if err != nil {
@@ -185,6 +230,11 @@ func (c *NativeDispatchClient) Authorize(ctx context.Context, header streamauth.
 			reason = "deadline"
 		}
 		diagnosticlog.TryWarn("native dispatch admission refused", "reason", reason)
+		code := native.AdmissionDenied
+		if nativeDispatchTemporary(err) {
+			code = native.AdmissionUnavailable
+		}
+		err = &native.AdmissionRefusal{Code: code, Err: err}
 	}
 	return response.AccessSessionID, err
 }

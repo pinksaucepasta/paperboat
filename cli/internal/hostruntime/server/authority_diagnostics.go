@@ -45,7 +45,7 @@ func expectedCredentialRejection(err error) bool {
 			next[current.err] = struct{}{}
 			path = next
 		}
-		if current.err == ErrCredentialPolicy {
+		if current.err == ErrCredentialPolicy || current.err == ErrStreamAuthorization {
 			continue
 		}
 		if credentialError, ok := current.err.(*auth.Error); ok {

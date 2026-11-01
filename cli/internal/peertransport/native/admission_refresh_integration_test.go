@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,7 +78,28 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer serverOwner.Close()
-	apps, err := nativesession.New(nativesession.Config{Authorize: func(_ context.Context, h streamauth.Header) (string, error) {
+	blockedStarted := make(chan struct{})
+	blockedRelease := make(chan struct{})
+	releaseBlocked := sync.OnceFunc(func() { close(blockedRelease) })
+	defer releaseBlocked()
+	var temporaryCalls atomic.Int32
+	var acceptedSessions atomic.Int32
+	apps, err := nativesession.New(nativesession.Config{Authorize: func(admitCtx context.Context, h streamauth.Header) (string, error) {
+		if h.Credential == "blocked" {
+			close(blockedStarted)
+			select {
+			case <-blockedRelease:
+				return "grant_test", nil
+			case <-admitCtx.Done():
+				return "", admitCtx.Err()
+			}
+		}
+		if h.Credential == "starting" {
+			if temporaryCalls.Add(1) == 1 {
+				return "", &native.AdmissionRefusal{Code: native.AdmissionUnavailable, Err: errors.New("worker starting")}
+			}
+			return "grant_test", nil
+		}
 		if h.Credential == "invalid" {
 			return "", errors.New("denied")
 		}
@@ -93,19 +115,39 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	done := make(chan struct{})
-	go func() { defer close(done); _ = serverOwner.Listen(ctx, dm.Regions[1], apps.Serve) }()
+	go func() {
+		defer close(done)
+		_ = serverOwner.Listen(ctx, dm.Regions[1], func(ctx context.Context, session *native.Session) error {
+			acceptedSessions.Add(1)
+			return apps.Serve(ctx, session)
+		})
+	}()
 	defer func() { cancel(); serverOwner.Close(); <-done; apps.Wait() }()
 	session, err := clientOwner.Dial(ctx, server.Address(), "machine_test", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	open := func(id, credential, resource string) net.Conn {
-		t.Helper()
+	rawOpen := func(id, credential, resource string) (net.Conn, error) {
 		h, e := streamauth.New(id, "terminal", id, credential, time.Now().Add(time.Minute), 1<<20)
 		if e != nil {
 			t.Fatal(e)
 		}
-		c, e := session.OpenAuthorized(ctx, h, resource, "terminal")
+		return session.OpenAuthorized(ctx, h, resource, "terminal")
+	}
+	deny := func(id, credential, resource string) {
+		t.Helper()
+		c, e := rawOpen(id, credential, resource)
+		if c != nil {
+			c.Close()
+		}
+		var refusal *native.AdmissionRefusal
+		if !errors.As(e, &refusal) || refusal.Code != native.AdmissionDenied {
+			t.Error("admission did not return a typed permanent refusal")
+		}
+	}
+	open := func(id, credential, resource string) net.Conn {
+		t.Helper()
+		c, e := rawOpen(id, credential, resource)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -128,13 +170,53 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	existing := open("existing", "grant_test", "grant_test")
 	defer existing.Close()
 	echo(existing)
-	bad := open("bad", "invalid", "grant_test")
+	deny("bad", "invalid", "grant_test")
 	var b [1]byte
-	_, err = bad.Read(b[:])
-	bad.Close()
-	if err == nil {
-		t.Fatal("invalid credential accepted")
+	starting := open("starting", "starting", "grant_test")
+	echo(starting)
+	starting.Close()
+	if temporaryCalls.Load() < 2 || acceptedSessions.Load() != 1 {
+		t.Fatal("temporary admission refusal did not recover on the same QUIC connection")
 	}
+	blockedHeader, e := streamauth.New("blocked", "terminal", "blocked", "blocked", time.Now().Add(time.Minute), 1<<20)
+	if e != nil {
+		t.Fatal(e)
+	}
+	blockedCtx, cancelBlocked := context.WithCancel(ctx)
+	defer cancelBlocked()
+	type openResult struct {
+		conn net.Conn
+		err  error
+	}
+	blockedDone := make(chan openResult, 1)
+	go func() {
+		c, e := session.OpenAuthorized(blockedCtx, blockedHeader, "grant_test", "terminal")
+		blockedDone <- openResult{c, e}
+	}()
+	select {
+	case <-blockedStarted:
+	case <-ctx.Done():
+		t.Fatal("blocked authorization never reached target")
+	}
+	cancelBlocked()
+	select {
+	case result := <-blockedDone:
+		if result.conn != nil {
+			result.conn.Close()
+		}
+		releaseBlocked()
+		if !errors.Is(result.err, context.Canceled) {
+			t.Fatal("pending admission did not preserve caller cancellation")
+		}
+	case <-time.After(time.Second):
+		releaseBlocked()
+		t.Fatal("pending admission did not cancel promptly")
+	}
+	echo(existing)
+	if acceptedSessions.Load() != 1 {
+		t.Fatal("cancelling admission replaced the QUIC connection")
+	}
+
 	if refreshes.Load() != 0 {
 		t.Fatal("invalid credential triggered refresh")
 	}
@@ -147,12 +229,7 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	}
 	for _, mode := range []int32{0, 1, 2} {
 		refreshMode.Store(mode)
-		denied := open("denied", "not_in_current_scope", "grant_test")
-		_, readErr := denied.Read(b[:])
-		denied.Close()
-		if readErr == nil {
-			t.Fatal("resource absent from current authority accepted")
-		}
+		deny("denied", "not_in_current_scope", "grant_test")
 		echo(existing)
 	}
 	if refreshes.Load() != 4 {
