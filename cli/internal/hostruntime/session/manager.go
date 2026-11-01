@@ -313,7 +313,7 @@ func (m *Manager) reserveCreate(request CreateRequest) (string, error) {
 }
 
 func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
-	if !validSessionName(request.Name) {
+	if !ValidSessionName(request.Name) {
 		return Snapshot{}, ErrInvalidSession
 	}
 	if err := ctx.Err(); err != nil {

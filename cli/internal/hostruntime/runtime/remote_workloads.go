@@ -31,6 +31,20 @@ type launchSessions struct {
 }
 
 func (s launchSessions) Create(ctx context.Context, r session.CreateRequest) (session.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return session.Snapshot{}, err
+	}
+	// The shell launcher already validated its arguments. Resolving an existing
+	// owner must not fetch launch-only secrets or perform a new creation.
+	if r.ID != "" && session.ValidSessionName(r.Name) {
+		existingEnd := diagnostics.ReconnectStep(ctx, "create_existing_owner")
+		_, err := s.Service.Snapshot(r.ID)
+		existingEnd(err)
+		if err == nil {
+			return session.Snapshot{}, session.ErrSessionExists
+		}
+	}
+
 	envEnd := diagnostics.ReconnectStep(ctx, "create_managed_environment")
 	values, err := managedEnvironmentForLaunch(s.source)(ctx)
 	envEnd(err)

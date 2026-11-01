@@ -147,7 +147,8 @@ func randomID(random io.Reader) (string, error) {
 	return "terminal_" + id.String(), nil
 }
 
-func validSessionName(name string) bool {
+// ValidSessionName is shared by creation and duplicate-launch preflight.
+func ValidSessionName(name string) bool {
 	if len(name) < 1 || len(name) > 64 {
 		return false
 	}

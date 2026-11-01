@@ -77,3 +77,33 @@ func TestLaunchStillStopsForCancellationNotForMissingEnvironment(t *testing.T) {
 		t.Fatalf("canceled launch started: err=%v", err)
 	}
 }
+
+type existingLaunchSessions struct{ session.Service }
+
+func (existingLaunchSessions) Snapshot(string) (session.Snapshot, error) {
+	return session.Snapshot{ID: "session-existing", Name: "existing"}, nil
+}
+func (existingLaunchSessions) Create(context.Context, session.CreateRequest) (session.Snapshot, error) {
+	return session.Snapshot{}, session.ErrSessionExists
+}
+
+type countLaunchEnvironment struct{ calls int }
+
+func (s *countLaunchEnvironment) Environment() ([]string, error) {
+	s.calls++
+	return nil, errors.New("fresh launch ENV is unavailable")
+}
+
+func TestExistingSessionDoesNotResolveFreshLaunchEnvironment(t *testing.T) {
+	source := &countLaunchEnvironment{}
+	launcher := launchSessions{Service: existingLaunchSessions{}, source: source}
+	_, err := launcher.Create(t.Context(), session.CreateRequest{ID: "session-existing", Name: "existing"})
+	if !errors.Is(err, session.ErrSessionExists) || source.calls != 0 {
+		t.Fatalf("reattach performed fresh launch work: calls=%d error=%v", source.calls, err)
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := launcher.Create(canceled, session.CreateRequest{ID: "session-existing", Name: "existing"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled create lost cancellation: %v", err)
+	}
+}
