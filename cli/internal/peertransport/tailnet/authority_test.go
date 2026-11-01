@@ -1258,7 +1258,7 @@ func TestPeerEntriesMayCarryCandidateEndpoints(t *testing.T) {
 }
 
 // The signed endpoints reach the engine as the peer's direct contact, keyed by its WireGuard key with its
-// disco key; a peer without endpoints has no contact and still needs a relay.
+// disco key; withdrawing endpoints preserves that signed identity for inbound admission.
 func TestSignedEndpointsBecomeDirectContacts(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	cfg.Peers[0].Endpoints = []string{"192.168.1.20:41641"}
@@ -1283,5 +1283,11 @@ func TestSignedEndpointsBecomeDirectContacts(t *testing.T) {
 	}
 	if a.PeerHasEndpoints(cfg.Peers[0].Identity.EndpointID) {
 		t.Fatal("a peer whose endpoints were withdrawn still counts as directly reachable")
+	}
+	a.mu.Lock()
+	contacts = a.peerContactsLocked()
+	a.mu.Unlock()
+	if contact, ok := contacts[peer]; !ok || contact.Disco.IsZero() || len(contact.Endpoints) != 0 {
+		t.Fatal("withdrawing endpoints also withdrew the signed inbound peer")
 	}
 }

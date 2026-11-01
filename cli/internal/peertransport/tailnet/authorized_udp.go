@@ -39,13 +39,10 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 }
 
 // peerContactsLocked is each peer's direct contact from the signed configuration: its disco key and the
-// endpoints the server delivered (PLAN 3b "Direct paths without a relay"). Peers without endpoints have none.
+// endpoints the server delivered. A missing candidate address must not hide an authorized inbound peer.
 func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
 	contacts := make(map[key.NodePublic]mesh.PeerContact)
 	for _, p := range a.installedPeersLocked() {
-		if len(p.Endpoints) == 0 {
-			continue
-		}
 		pub, err := publicKey(p.Identity.WireGuardPublicKey)
 		disco, discoErr := derpquic.ParseDiscoKey(p.Identity.DiscoPublicKey)
 		if err != nil || discoErr != nil || disco.IsZero() {
