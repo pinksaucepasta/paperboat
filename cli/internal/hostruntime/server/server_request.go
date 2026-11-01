@@ -91,7 +91,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		var outcome operation.Outcome
 		var replay bool
 		// Inspector results carry captured traffic: they are never journaled.
-		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" {
+		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || terminalCleanupRequest(frame) {
 			outcome = execute(opCtx)
 		} else {
 			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)
@@ -146,6 +146,19 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			go s.stream(connectionCtx, writer, conn, stream, terminalState, streamID, frame.Capability)
 		}
 	}()
+}
+
+// Close/delete establish an idempotent state on an exact session ID. Caching a
+// transient refusal permanently strands server retries in "closing". Keep the
+// journal for operations whose effects cannot safely be repeated.
+func terminalCleanupRequest(frame protocol.Frame) bool {
+	if frame.Capability != "terminal.v1" {
+		return false
+	}
+	var request struct {
+		Action string `json:"action"`
+	}
+	return json.Unmarshal(frame.Payload, &request) == nil && (request.Action == "close" || request.Action == "delete")
 }
 
 func requestJournalOperationID(frame protocol.Frame) string {
