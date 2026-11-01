@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -30,11 +31,16 @@ type launchSessions struct {
 }
 
 func (s launchSessions) Create(ctx context.Context, r session.CreateRequest) (session.Snapshot, error) {
+	envEnd := diagnostics.ReconnectStep(ctx, "create_managed_environment")
 	values, err := managedEnvironmentForLaunch(s.source)(ctx)
+	envEnd(err)
 	if err != nil {
 		return session.Snapshot{}, err
 	}
-	return s.Service.Create(session.WithLaunchEnvironment(ctx, values), r)
+	createEnd := diagnostics.ReconnectStep(ctx, "create_owner")
+	value, err := s.Service.Create(session.WithLaunchEnvironment(ctx, values), r)
+	createEnd(err)
+	return value, err
 }
 
 type launchExecutions struct {

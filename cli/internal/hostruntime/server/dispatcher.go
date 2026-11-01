@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
@@ -684,20 +686,25 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			EligibleTransferDestinationMachineIDs []string `json:"eligible_transfer_destination_machine_ids"`
 		}{Snapshot: value, EligibleTransferDestinationMachineIDs: eligible})
 	case "create":
+		ctx = diagnostics.WithReconnect(ctx, rand.Text(), "target", "create-or-get")
 		if authorization.BrowserTerminal {
 			return failure("not_found_or_forbidden")
 		}
 		if request.SessionID == "" {
 			request.SessionID = authorization.SessionID
 		}
+		cwdEnd := diagnostics.ReconnectStep(ctx, "create_cwd")
 		cwd, ok := d.cwd(request.CWD)
+		cwdEnd(nil)
 		if !ok {
 			return failure("invalid_terminal_workspace")
 		}
 		if request.Columns == 0 || request.Rows == 0 {
 			return failure("invalid_terminal_dimensions")
 		}
+		launchEnd := diagnostics.ReconnectStep(ctx, "create_launch")
 		value, err := d.config.SessionLauncher.Launch(ctx, process.LaunchRequest{ID: request.SessionID, Name: request.Name, CWD: cwd, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, Environment: request.Environment})
+		launchEnd(err)
 		if err != nil && !allErrorLeavesMatch(err, func(leaf error) bool { return leaf == session.ErrSessionExists }) {
 			outcome := domainResult(nil, err)
 			if outcome.ErrorCode == "unavailable" {
@@ -716,7 +723,10 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			// matching session ID keeps the original failure so clients
 			// cannot claim another session's name.
 			if errors.Is(err, session.ErrSessionExists) {
-				if snapshot, snapshotErr := d.config.Sessions.Snapshot(request.SessionID); snapshotErr == nil {
+				snapshotEnd := diagnostics.ReconnectStep(ctx, "create_existing_snapshot")
+				snapshot, snapshotErr := d.config.Sessions.Snapshot(request.SessionID)
+				snapshotEnd(snapshotErr)
+				if snapshotErr == nil {
 					return result(struct {
 						session.Snapshot
 						Existing bool `json:"existing"`

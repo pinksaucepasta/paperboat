@@ -21,7 +21,7 @@ type reconnectTrace struct{ attempt, caller, connection string }
 
 // WithReconnect correlates only locally generated identifiers, never resource IDs or content.
 func WithReconnect(ctx context.Context, attempt, caller, connection string) context.Context {
-	if !safeIdentifier(attempt, 64) || !safeIdentifier(connection, 64) || strings.ContainsAny(attempt+connection, ":") || (caller != "supervise" && caller != "probeStalled") {
+	if !safeIdentifier(attempt, 64) || !safeIdentifier(connection, 64) || strings.ContainsAny(attempt+connection, ":") || (caller != "supervise" && caller != "probeStalled" && caller != "target") {
 		return ctx
 	}
 	return context.WithValue(ctx, reconnectKey{}, reconnectTrace{attempt, caller, connection})
