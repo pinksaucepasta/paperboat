@@ -43,7 +43,10 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	// before the caller's deadline to answer with the plan-limit refusal instead of a timeout.
 	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
 	defer cancel()
-	recovery := reattach.New(reattach.Policy{Attempts: 2, Retryable: retryablePeerDial})
+	// Retain the former two ten-second silent-handshake setup budget, but
+	// spend it on fresh one-second handshakes while cold path discovery runs.
+	// Caller cancellation still ends the operation immediately, before any app bytes.
+	recovery := reattach.New(reattach.Policy{Attempts: 20, Retryable: retryablePeerDial})
 	err := recovery.Run(dialCtx, func(ctx context.Context) error {
 		if attempts > 0 {
 			fresh, err := o.authority.Descriptor(peerID)

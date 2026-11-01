@@ -350,6 +350,25 @@ func (s *Server) InvalidateAuthorizedPeer(peer key.NodePublic) {
 	s.invalidateAuthorizedPeerLocked(peer)
 }
 
+// RekeyAuthorizedPeer refreshes WireGuard after a silent remote restart without
+// discarding discovered endpoints or relay selection. Tailscale's
+// wgengine/userspace.go:MarkDevicePeerForHandshake owns this operation.
+func (s *Server) RekeyAuthorizedPeer(peer key.NodePublic) {
+	if s.lb == nil {
+		return
+	}
+	b := s.lb
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+	b.mu.Lock()
+	_, admitted := b.allowedPeers[peer]
+	_, present := b.clients[peer]
+	b.mu.Unlock()
+	if admitted && present {
+		b.sys.Engine.Get().MarkDevicePeerForHandshake(peer)
+	}
+}
+
 // invalidateAuthorizedPeerLocked requires the backend policy lock.
 func (s *Server) invalidateAuthorizedPeerLocked(peer key.NodePublic) {
 	s.peerReadyMu.Lock()
