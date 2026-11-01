@@ -7,6 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"golang.org/x/sys/unix"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
@@ -17,9 +21,10 @@ import (
 // can retire, its carrier joins the same native cutover as hostd, rather than
 // causing a second maintenance window after the installation commits.
 type unixCarrierUpgrade struct {
-	capability []byte
-	previous   *carriercontrol.Client
-	native     *service.NativeTransactionalComponent
+	stagedConfig string
+	capability   []byte
+	previous     *carriercontrol.Client
+	native       *service.NativeTransactionalComponent
 }
 
 func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths installPaths) (_ *unixCarrierUpgrade, resultErr error) {
@@ -75,15 +80,46 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 		return nil, err
 	}
 	// Like Tailscale clientupdate.go:updateLinuxBinary, finish durable publication
-	// while the old process keeps its already loaded configuration.
+	// to a separate file; current source-bound control requests still see the old descriptor.
 	// Both native managers leave an already running job on its current image.
 	if err := native.Install(ctx); err != nil {
 		return nil, err
 	}
-	if err := publishCarrierFiles(candidate, carrierConfigPath(candidate.Instance), capability); err != nil {
+	if err := publishCarrierFiles(candidate, carrierConfigPath(candidate.Instance)+".next", capability); err != nil {
 		return nil, err
 	}
-	return &unixCarrierUpgrade{capability: capability, previous: client, native: native}, nil
+	return &unixCarrierUpgrade{stagedConfig: carrierConfigPath(candidate.Instance) + ".next", capability: capability, previous: client, native: native}, nil
+}
+
+// Promote only the already durable descriptor after the old carrier stopped.
+// The protected install lock and root-owned directory exclude other writers.
+func (u *unixCarrierUpgrade) activate() error {
+	if u == nil {
+		return nil
+	}
+	return promoteCarrierConfig(u.stagedConfig)
+}
+func promoteCarrierConfig(staged string) error {
+	if !strings.HasSuffix(staged, ".next") {
+		return ErrInvalidRequest
+	}
+	parent, err := openProtectedPinDirectory(filepath.Dir(staged))
+	if err != nil {
+		return err
+	}
+	defer unix.Close(parent)
+	info, err := os.Lstat(staged)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || ownerUID(info) != 0 || info.Mode().Perm() != 0640 {
+		return ErrInvalidRequest
+	}
+	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=staged-carrier-descriptor-activation
+	if err := os.Rename(staged, strings.TrimSuffix(staged, ".next")); err != nil {
+		return err
+	}
+	return unix.Fsync(parent)
 }
 
 func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
@@ -91,12 +127,16 @@ func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
 		return nil
 	}
 	defer clear(u.capability)
+	cleanupErr := os.Remove(u.stagedConfig)
+	if installNotExistOnly(cleanupErr) {
+		cleanupErr = nil
+	}
 	if !failed {
-		return nil
+		return cleanupErr
 	}
 	recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	return u.previous.ResumeSSH(recovery)
+	return errors.Join(cleanupErr, u.previous.ResumeSSH(recovery))
 }
 
 func (u *unixCarrierUpgrade) component() *service.NativeTransactionalComponent {

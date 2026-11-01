@@ -230,6 +230,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return hostInstallFailure("the installed carrier was not serving and its replacement did not become ready; restoring the previous version", err)
 			}
 		}
+		if err := carrierUpgrade.activate(); err != nil {
+			return err
+		}
 		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux", carrierUpgrade.component()); err != nil {
 			return err
 		}
