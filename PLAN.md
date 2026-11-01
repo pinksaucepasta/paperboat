@@ -5079,3 +5079,7 @@ F14-02 remains open; gate stopped further product changes, functional reruns/rel
 
 2026-11-01 | r7 evidence-only capture authorized | Adds carrier/QUIC close stages, per-connection handshake packet/loss/PTO metadata and cache-admission rejection fields to the existing private logger; no behavior changes.
 Shared transport callers: terminal/replay, exec/send, SSH/transfer, preview/tunnel; full CLI vet/race required before push, then one dadape data-only held update. Keep all raw logs outside repo; report table before fixes.
+
+2026-11-01 | r7 evidence-only result | a6afe863/9d9f517a/d09f9ff6; full CLI vet/race PASS41294346805; one held update gap22.853294217s FAIL, same shell/exit/session cleanup/doctor/Activation complete PASS.
+Carrier close reaches controller10:07:50.619; supervise A1 fails503 then A2 succeeds, no probeStalled. Exact requested resource scope absent; Initial/PTO records show overlapping unlabelled native dials and no target Initial until10:08:11.983.
+Raw/table/manifests retained privately at /home/ubuntu/paperboat-private/reconnect-data-r7; inner refresh, post-cancel propagation and underlay/listener-readiness attribution missing; no recovery fixes/release/console-live, hp untouched. Controller discovery setup failed once, valid endpoint probe then single retry passed; fixture removed.
