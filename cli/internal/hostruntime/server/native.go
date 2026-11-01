@@ -71,7 +71,7 @@ func (m *NativeAssociationManager) serveControl(conn net.Conn, p nativeproto.Pre
 	authorizer, err := m.controlAuthorizer(conn, p)
 	if err != nil || authorizer == nil {
 		_ = conn.Close()
-		return ErrNativeAssociation
+		return errors.Join(ErrNativeAssociation, err)
 	}
 	native := newNativeConnection(conn, p.ConnectionID, m.config.Expiry)
 	native.unified = p.Role == nativeproto.RoleUnified

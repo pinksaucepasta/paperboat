@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
+	"log/slog"
 	"net"
 	"net/http/httptest"
 	"strings"
@@ -16,9 +20,22 @@ import (
 )
 
 func TestNativeDispatchAuthorizesBeforeForwardingAndPreservesHalfClose(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer func() { _ = diagnosticlog.Flush(t.Context()); slog.SetDefault(previous) }()
 	// Accepted long-running work must outlive the setup credential deadline.
 	for _, consumer := range []string{"terminal", "exec", "file_transfer"} {
 		t.Run(consumer, func(t *testing.T) { testNativeDispatchAcceptedStream(t, consumer) })
+	}
+	if err := diagnosticlog.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"reason":"credential_binding_invalid"`) {
+		t.Fatal("missing typed target refusal reason")
+	}
+	if strings.Contains(logs.String(), "private-refusal-detail") {
+		t.Fatal("refusal diagnostics retained private error text")
 	}
 }
 
@@ -37,7 +54,7 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 		},
 		Authorize: func(_ context.Context, h streamauth.Header) (string, error) {
 			if h.Credential != "allowed" {
-				return "", ErrStreamAuthorization
+				return "", &auth.Error{Code: auth.BindingInvalid, Cause: errors.New("private-refusal-detail")}
 			}
 			return "access-session", nil
 		},

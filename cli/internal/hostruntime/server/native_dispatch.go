@@ -5,8 +5,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"net/http"
@@ -142,6 +144,7 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 		release, lost, err := config.Fence(r.Context(), envelope.WorkerID, envelope.Epoch)
 		if err != nil || release == nil {
+			recordNativeAdmissionFailure("worker_fence", err)
 			http.Error(w, "dispatch worker fenced", http.StatusConflict)
 			return
 		}
@@ -188,6 +191,7 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		case "authorize", "stream":
 			response.AccessSessionID, err = config.Authorize(r.Context(), header)
 			if err != nil || response.AccessSessionID == "" {
+				recordNativeAdmissionFailure("resource_authorize", err)
 				http.Error(w, "dispatch resource denied", http.StatusForbidden)
 				return
 			}
@@ -226,7 +230,9 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				}
 				stop := context.AfterFunc(lifetime, func() { _ = connection.Close() })
 				defer stop()
-				_ = config.ServeStream(lifetime, header, native.LimitConnection(connection, header.MaximumBytes))
+				if err := config.ServeStream(lifetime, header, native.LimitConnection(connection, header.MaximumBytes)); err != nil {
+					recordNativeAdmissionFailure("application", err)
+				}
 				return
 			}
 		case "current", "private":
@@ -361,3 +367,24 @@ func nativeDispatchError(status int) error {
 // BridgeNativeDispatch preserves byte ordering, backpressure and half-close
 // through the private IPC hop without retaining payloads or replaying writes.
 func BridgeNativeDispatch(left, right net.Conn) error { return bridgeNativePrivateTCP(left, right) }
+
+// Retain only the verifier's finite code, never its credential or error text.
+func recordNativeAdmissionFailure(stage string, err error) {
+	reason := "application_failed"
+	if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
+		reason = "maintenance_busy"
+	}
+	if errors.Is(err, hostdproto.ErrFenced) {
+		reason = "worker_fenced"
+	}
+	var credential *auth.Error
+	if errors.As(err, &credential) {
+		switch credential.Code {
+		case auth.Malformed, auth.AlgorithmInvalid, auth.KeyUnknown, auth.SignatureInvalid,
+			auth.AudienceInvalid, auth.ScopeInvalid, auth.BindingInvalid, auth.Expired,
+			auth.NotYetValid, auth.Revoked, auth.Replayed:
+			reason = string(credential.Code)
+		}
+	}
+	diagnosticlog.TryWarn("native worker admission refused", "stage", stage, "reason", reason)
+}
