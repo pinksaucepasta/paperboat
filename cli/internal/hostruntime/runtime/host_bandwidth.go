@@ -26,6 +26,20 @@ func (s *hostBandwidthService) Shutdown(ctx context.Context) error {
 		}
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
+		s.err = s.recorder.Close(closeCtx)
+	})
+	return s.err
+}
+
+// The independent carrier hands pending usage to its replacement. Ordinary
+// hosts retain their eager final-report contract in Shutdown.
+func (s *hostBandwidthService) checkpoint(ctx context.Context) error {
+	s.once.Do(func() {
+		if s.recorder == nil {
+			return
+		}
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
 		s.err = s.recorder.CheckpointAndClose(closeCtx)
 	})
 	return s.err

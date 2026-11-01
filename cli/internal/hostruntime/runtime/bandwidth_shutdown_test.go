@@ -32,7 +32,7 @@ func (s *shutdownUsageSink) ReportNativeUsage(ctx context.Context, reports []api
 	s.reports = append(s.reports, reports...)
 	return nil
 }
-func TestRuntimeShutdownCheckpointsUsageWithoutWaitingForControlPlane(t *testing.T) {
+func TestCarrierShutdownCheckpointsUsageWithoutWaitingForControlPlane(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "usage.json")
 	sink := &shutdownUsageSink{release: make(chan struct{})}
 	recorder, err := bandwidth.Open(path, sink, nil)
@@ -51,9 +51,9 @@ func TestRuntimeShutdownCheckpointsUsageWithoutWaitingForControlPlane(t *testing
 	}
 	metered.Close()
 	right.Close()
-	service := &hostBandwidthService{recorder: recorder}
+	carrier := &ProductionCarrier{peer: &productionNativePeerService{}, authorization: serviceGroup{}, usage: &hostBandwidthService{recorder: recorder}}
 	done := make(chan error, 1)
-	go func() { done <- service.Shutdown(t.Context()) }()
+	go func() { done <- carrier.Shutdown(t.Context()) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -63,7 +63,7 @@ func TestRuntimeShutdownCheckpointsUsageWithoutWaitingForControlPlane(t *testing
 	case <-time.After(500 * time.Millisecond):
 		close(sink.release)
 		<-done
-		t.Fatal("runtime shutdown waited for control-plane usage upload")
+		t.Fatal("carrier shutdown waited for control-plane usage upload")
 	}
 	// The next carrier must deliver the exact final bytes without marking a clean
 	// restart incomplete, even though the old carrier did not wait for the server.

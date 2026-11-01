@@ -178,7 +178,7 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
 	authErr := c.authorization.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
-	usageErr := c.usage.Shutdown(ctx)
+	usageErr := c.usage.checkpoint(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
 	result := errors.Join(peerErr, authErr, usageErr)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
