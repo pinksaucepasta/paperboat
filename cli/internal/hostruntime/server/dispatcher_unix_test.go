@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
@@ -732,6 +733,8 @@ func TestDispatcherRejectsEscapedCWDAndRemovedPreviewCapability(t *testing.T) {
 
 func TestDispatcherCreateOrGetReturnsExistingSnapshot(t *testing.T) {
 	server := verticalServer(t)
+	recorder := diagnostics.NewMemoryRecorder()
+	server.config.Handler.(*Dispatcher).config.Diagnostics = recorder
 	client, peer := net.Pipe()
 	go server.Serve(peer)
 	hello := json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1"]}`)
@@ -767,6 +770,10 @@ func TestDispatcherCreateOrGetReturnsExistingSnapshot(t *testing.T) {
 	}
 	if err := json.Unmarshal(response.Payload, &existing); err != nil || existing.Result.ID != "ses_cog_1" || !existing.Result.Existing || existing.Result.State != "running" {
 		t.Fatalf("second create payload=%s err=%v", response.Payload, err)
+	}
+
+	if len(recorder.Recent()) == 0 {
+		t.Fatal("connection context lost target create diagnostics")
 	}
 
 	createPlain, _ := json.Marshal(map[string]any{"action": "create", "session_id": "ses_cog_1", "name": "ses-cog-1", "cwd": ".", "columns": 80, "rows": 24})

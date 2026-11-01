@@ -46,6 +46,7 @@ type TerminalJoin struct {
 type TerminalJoinRecorder func(context.Context, TerminalJoin) error
 
 type DispatcherConfig struct {
+	Diagnostics        *diagnostics.Recorder
 	RecordTerminalJoin TerminalJoinRecorder
 	BrowserOutput      *browserbroadcastserver.Registry
 	Sessions           session.Service
@@ -108,6 +109,9 @@ func (d *Dispatcher) Capabilities() []string {
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage) operation.Outcome {
+	if diagnostics.FromContext(ctx) == nil && d.config.Diagnostics != nil {
+		ctx = diagnostics.WithRecorder(ctx, d.config.Diagnostics)
+	}
 	ctx, notices := envinject.WithLaunchNotices(ctx)
 	return withLaunchWarnings(d.handle(ctx, authorization, capability, payload), notices)
 }

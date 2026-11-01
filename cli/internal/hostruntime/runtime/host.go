@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net"
 	"net/http"
@@ -98,14 +99,14 @@ type HostDependencies struct {
 	// Inspector is the daemon-local inspector HTTP service (bounded
 	// sanitized retrieval and deliberate audited replay). It is mounted at
 	// /v1/inspector/ only with a control token, on the loopback service.
-	Inspector                 *inspectorapi.Service
-	ManagedSSH                *managedssh.Host
-	ManagedSSHService         Service
-	NativePeerFactory         func(func(net.Conn) error, http.Handler) (Service, error)
-	NativeDispatch            *server.NativeDispatchConfig
-	NativeWorkerEpoch         uint64
-	ReconcileCarrierSSH       func(context.Context, bool) error
-	Capabilities              server.CapabilityGate
+	Inspector           *inspectorapi.Service
+	ManagedSSH          *managedssh.Host
+	ManagedSSHService   Service
+	NativePeerFactory   func(func(net.Conn) error, http.Handler) (Service, error)
+	NativeDispatch      *server.NativeDispatchConfig
+	NativeWorkerEpoch   uint64
+	ReconcileCarrierSSH func(context.Context, bool) error
+	Capabilities        server.CapabilityGate
 }
 
 func previewPrivateTCPAccessHandler(value any) http.Handler {
@@ -308,6 +309,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		return nil, err
 	}
 	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{
+		Diagnostics:        diagnostics.FromContext(ctx),
 		RecordTerminalJoin: dependencies.RecordTerminalJoin,
 		BrowserOutput:      browserOutput,
 		Sessions:           sessions, Health: healthSource, SessionLauncher: sessionLauncher,
