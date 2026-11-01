@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-// peerStreamOpenTimeout bounds one peer stream open (terminal, exec, SSH, config compare), like Tailscale's 10 s DERP connect
+// peerStreamOpenTimeout bounds non-terminal stream setup (exec, SSH, config compare), like Tailscale's 10 s DERP connect
 // (~/ref/tailscale/derp/derphttp/derphttp_client.go:359); each caller's dial budget retries it.
 // On a 30% loss link an open hung ~110 s without it (ltc-j1, peer_stream transport_failed).
 const peerStreamOpenTimeout = 10 * time.Second
@@ -43,7 +43,12 @@ func (e peerStreamOpenTimeoutError) LocalAPICode() string {
 }
 
 // dialWithin aborts a dial that has not returned after timeout; one that returns after the abort is closed.
-func dialWithin(timeout time.Duration, exec bool, abort func(), dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
+func dialWithin(timeout time.Duration, consumer string, abort func(), dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
+	// Terminal setup is bounded by its staged credential/caller context. Native
+	// handshake recovery must survive the generic stream watchdog.
+	if consumer == "terminal" {
+		return dial()
+	}
 	watchdog := time.AfterFunc(timeout, abort)
 	conn, err := dial()
 	if watchdog.Stop() {
@@ -52,7 +57,7 @@ func dialWithin(timeout time.Duration, exec bool, abort func(), dial func() (tun
 	if err == nil {
 		_ = conn.Close()
 	}
-	return nil, peerStreamOpenTimeoutError{cause: err, exec: exec}
+	return nil, peerStreamOpenTimeoutError{cause: err, exec: consumer == "exec"}
 }
 
 // stopping ends when the daemon starts to stop, before it closes its transports.
@@ -105,7 +110,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 				return nil, ErrInvalidInventoryConfig
 			}
 		}
-		remote, err = dialWithin(peerStreamOpenTimeout, request.Consumer == "exec", staged.Abort, dial)
+		remote, err = dialWithin(peerStreamOpenTimeout, request.Consumer, staged.Abort, dial)
 		if errors.Is(err, ErrInvalidInventoryConfig) {
 			staged.Abort()
 			return nil, ErrInvalidInventoryConfig

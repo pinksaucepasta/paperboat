@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/quic-go/quic-go"
 )
 
@@ -37,31 +37,31 @@ func (o *Owner) failedPeerDial(ctx context.Context, peerID string, client *tailn
 // Dial obtains a new QUIC association before any application request is sent.
 // Recovering a lost handshake cannot replay exec, terminal input or transfer bytes.
 func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
-	var session *Session
-	attempts := 0
-	// Without a relay a peer that is not reachable directly cannot be dialed at all. Leave time
-	// before the caller's deadline to answer with the plan-limit refusal instead of a timeout.
+	// Non-admitted callers also need a finite setup budget. Admitted terminal
+	// setup supplies its own credential deadline through the local API.
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+	}
+	// The admission/caller context bounds setup; silent handshakes each expire
+	// after one second. Do not return an intermediate 503 while recovery runs.
 	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
 	defer cancel()
-	// Retain the former two ten-second silent-handshake setup budget, but
-	// spend it on fresh one-second handshakes while cold path discovery runs.
-	// Caller cancellation still ends the operation immediately, before any app bytes.
-	recovery := reattach.New(reattach.Policy{Attempts: 20, Retryable: retryablePeerDial})
-	err := recovery.Run(dialCtx, func(ctx context.Context) error {
-		if attempts > 0 {
-			fresh, err := o.authority.Descriptor(peerID)
-			if err != nil {
-				return err
-			}
-			descriptor = fresh
+	for {
+		session, err := o.dialOnce(dialCtx, descriptor, peerID, class)
+		if err == nil {
+			return session, nil
 		}
-		attempts++
-		var err error
-		session, err = o.dialOnce(ctx, descriptor, peerID, class)
-		return err
-	})
-	if err != nil && ctx.Err() == nil {
-		err = relayQuotaFailure(o.authority, err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if dialCtx.Err() != nil || !retryablePeerDial(err) {
+			return nil, relayQuotaFailure(o.authority, err)
+		}
+		descriptor, err = o.authority.Descriptor(peerID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return session, err
 }
