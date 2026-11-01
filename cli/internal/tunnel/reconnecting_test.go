@@ -510,3 +510,28 @@ func TestReconnectingConnRedialsImmediatelyThenBacksOffFailures(t *testing.T) {
 		t.Fatal("retry did not run")
 	}
 }
+
+func TestReconnectingConnDoesNotBackOffANewLossAfterShortRecovery(t *testing.T) {
+	lost := func() Conn { return &reconnectTestConn{Reader: bytes.NewReader(nil), err: ErrTransportLost} }
+	attempts := make(chan struct{}, 2)
+	n := 0
+	c := NewReconnectingConn(t.Context(), lost(), 2, time.Second, func(context.Context) (Conn, error) {
+		n++
+		attempts <- struct{}{}
+		if n == 1 {
+			return lost(), nil
+		}
+		return &reconnectTestConn{Reader: bytes.NewReader(nil)}, nil
+	})
+	defer c.Close()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-attempts:
+		case <-time.After(300 * time.Millisecond):
+			t.Fatal("a successful dial made the next loss wait for failure backoff")
+		}
+	}
+	if _, err := c.Wait(); err != nil {
+		t.Fatal(err)
+	}
+}

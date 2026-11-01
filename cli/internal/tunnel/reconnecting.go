@@ -197,6 +197,7 @@ func NewObservedReconnectingConn(ctx context.Context, initial Conn, maxRetries i
 func (c *ReconnectingConn) supervise(conn Conn) {
 	defer close(c.out)
 	var recovery *reattach.Recovery
+	var firstAttempt bool
 	attachedAt := time.Now()
 	lifetimeOutcome := "failure"
 	defer func() {
@@ -282,13 +283,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		// many peer restarts; a link that dies right after each reattach keeps spending one budget (51db8129).
 		// ET dials immediately on loss, then sleeps only after a failed attempt.
 		if recovery == nil || time.Since(attachedAt) >= reattachRefillAfter {
-			recovery = reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: func(attempt int) time.Duration {
-				if attempt == 1 {
+			recovery = reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: func(int) time.Duration {
+				if firstAttempt {
+					firstAttempt = false
 					return 0
 				}
 				return c.delay
 			}, Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
 		}
+		firstAttempt = true
 		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
 			attemptStarted := c.now()
 			next, dialErr := c.dialReconnect(dialCtx, "supervise", connection)
