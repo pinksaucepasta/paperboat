@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 var ErrPeerTerminalInvalid = errors.New("invalid peer terminal tunnel configuration")
@@ -189,7 +192,13 @@ func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability s
 	}
 	return func(network *tailnet.Authority) bool {
 		_, err := network.Descriptor(machineID)
-		return err == nil && network.Allows(machineID, target.Auth.ResourceID, capability, "dial")
+		if err != nil {
+			diagnosticlog.TryInfo("native cache admission", "reason", "descriptor_rejected", "error_type", strings.TrimPrefix(fmt.Sprintf("%T", err), "*"))
+			return false
+		}
+		allowed := network.Allows(machineID, target.Auth.ResourceID, capability, "dial")
+		diagnosticlog.TryInfo("native cache admission", "reason", "exact_scope_check", "allowed", allowed, "capability", capability, "resource_present", target.Auth.ResourceID != "")
+		return allowed
 	}
 }
 

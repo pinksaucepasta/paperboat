@@ -5076,3 +5076,6 @@ F14-02 remains open; raw logs and table retained privately outside repo at /home
 2026-11-01 | r6 failed qualification | e607a827..c76844b8 includes target timing and three RED/GREEN regressions; full CLI vet/race PASS41275535882; one held run gap15.816516640s FAIL, same shell/exit PASS.
 Silence10.791s persists; refresh still ran365ms, QUIC4055ms, create-or-get147ms (existing-owner28ms, no launch ENV fetch). Session cleanup FAIL: temporary catalog row remains closing; controller removed/revoked, doctor/Activation complete PASS.
 F14-02 remains open; gate stopped further product changes, functional reruns/release/official update/console-live. Raw logs and table retained outside repo in /home/ubuntu/paperboat-private/reconnect-fix-r6; hp untouched.
+
+2026-11-01 | r7 evidence-only capture authorized | Adds carrier/QUIC close stages, per-connection handshake packet/loss/PTO metadata and cache-admission rejection fields to the existing private logger; no behavior changes.
+Shared transport callers: terminal/replay, exec/send, SSH/transfer, preview/tunnel; full CLI vet/race required before push, then one dadape data-only held update. Keep all raw logs outside repo; report table before fixes.

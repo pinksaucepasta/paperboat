@@ -159,6 +159,9 @@ func (h processDiagnosticHandler) Handle(ctx context.Context, record slog.Record
 	if reference == "" {
 		reference = h.reference
 	}
+	if retainReconnectMetadata(record, fields) {
+		return h.recorder.RecordWithSupportReference("terminal", "reconnect_transport", severity, reference, fields)
+	}
 	// Record.Message and Attrs may contain upstream URLs, credentials, payloads,
 	// or arbitrary LogValuers. Never resolve, format, retain or export them.
 	return h.recorder.RecordWithSupportReference("logging", "unclassified_log", severity, reference, fields)

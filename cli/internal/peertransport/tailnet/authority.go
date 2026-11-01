@@ -666,17 +666,30 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.usableLocked() {
+		diagnosticlog.TryInfo("native scope admission", "reason", "authority_unusable")
 		return false
 	}
+	peerFound, resourceFound, capabilityFound, directionFound := false, false, false, false
 	for _, p := range a.current.Peers {
 		if p.Identity.EndpointID == peerID {
+			peerFound = true
 			for _, s := range p.Scopes {
+				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID {
+					resourceFound = true
+					if s.Capability == capability {
+						capabilityFound = true
+						if s.Direction == direction {
+							directionFound = true
+						}
+					}
+				}
 				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction && scopeLive(s, time.Now().Unix()) {
 					return true
 				}
 			}
 		}
 	}
+	diagnosticlog.TryInfo("native scope admission", "reason", "scope_rejected", "peer_found", peerFound, "resource_found", resourceFound, "capability_found", capabilityFound, "direction_found", directionFound)
 	return false
 }
 

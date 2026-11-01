@@ -9,6 +9,7 @@ import (
 	"errors"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -403,10 +404,12 @@ func nativePeerApplicationContext(serveCtx, daemonCtx context.Context) context.C
 func (g *productionNativePeerGeneration) stop() error {
 	var result error
 	g.once.Do(func() {
+		diagnosticlog.TryInfo("carrier shutdown", "stage", "generation_cancel")
 		if g.cancel != nil {
 			g.cancel()
 		}
 		if g.owner != nil {
+			diagnosticlog.TryInfo("carrier shutdown", "stage", "owner_close")
 			result = g.owner.Close()
 		}
 		g.done.Wait()

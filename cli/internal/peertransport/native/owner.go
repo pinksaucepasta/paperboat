@@ -29,6 +29,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=native-regional-carrier
 	"tailscale.com/tailcfg"
 )
@@ -276,9 +277,13 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	if class == peerquic.ClassPreview {
 		tlsConfig.NextProtos = []string{PrivateHTTP3ALPN}
 	}
+	pathBefore, _ := o.authority.PeerPath(peerID)
+	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
 	handshakeEnd(err)
+	pathAfter, _ := o.authority.PeerPath(peerID)
+	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path", pathAfter, "failed", err != nil)
 	if err != nil {
 		// DialPacket releases its failed socket before the shared cache decision.
 		return nil, o.failedPeerDial(ctx, peerID, client, err)
@@ -435,12 +440,14 @@ func (o *Owner) Close() error {
 		return nil
 	}
 	o.closed = true
+	diagnosticlog.TryInfo("native owner close", "stage", "cancel_start", "sessions", len(o.sessions))
 	o.cancel()
 	sessions := make([]*Session, 0, len(o.sessions))
 	for session := range o.sessions {
 		sessions = append(sessions, session)
 	}
 	o.mu.Unlock()
+	diagnosticlog.TryInfo("native owner close", "stage", "sessions_snapshot", "sessions", len(sessions))
 	// Every QUIC association has a bounded close-frame flush. Initiate all
 	// independent closes before joining, so shutdown pays one flush window,
 	// rather than one window per peer.

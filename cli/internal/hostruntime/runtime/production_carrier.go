@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -172,5 +173,8 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 		return ErrProductionInvalid
 	}
 	// Close listeners and bridges before their identity refresh and usage owner.
-	return errors.Join(c.peer.Shutdown(ctx), c.authorization.Shutdown(ctx), c.usage.Shutdown(ctx))
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
+	result := errors.Join(c.peer.Shutdown(ctx), c.authorization.Shutdown(ctx), c.usage.Shutdown(ctx))
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
+	return result
 }

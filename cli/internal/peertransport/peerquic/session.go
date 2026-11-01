@@ -4,6 +4,7 @@ package peerquic
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/fixedpacket"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/quic-go/quic-go"
@@ -117,8 +119,11 @@ func dial(ctx context.Context, iceConn net.Conn, tlsConfig *tls.Config, quicConf
 func dialPacket(ctx context.Context, packetConn net.PacketConn, remote net.Addr, tlsConfig *tls.Config, quicConfig *quic.Config) (*Session, error) {
 	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true}
 	pto := newPTOTrace()
+	diagnostics.ReconnectEvent(ctx, "quic_trace", pto.id, nil)
 	configured := quicConfig.Clone()
-	configured.Tracer = func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace { return pto }
+	configured.Tracer = func(_ context.Context, _ bool, id quic.ConnectionID) qlogwriter.Trace {
+		return &wireTrace{pto: pto, id: id.String()}
+	}
 	connection, err := transport.Dial(ctx, remote, tlsConfig.Clone(), configured)
 	if err != nil {
 		_ = transport.Close()
@@ -193,7 +198,9 @@ func listenPacket(packetConn net.PacketConn, tlsConfig *tls.Config, quicConfig *
 	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true, StatelessResetKey: resetKey}
 	pto := newPTOTrace()
 	configured := quicConfig.Clone()
-	configured.Tracer = func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace { return pto }
+	configured.Tracer = func(_ context.Context, _ bool, id quic.ConnectionID) qlogwriter.Trace {
+		return &wireTrace{pto: pto, id: id.String()}
+	}
 	listener, err := transport.Listen(tlsConfig.Clone(), configured)
 	if err != nil {
 		_ = transport.Close()
@@ -224,6 +231,7 @@ func (l *Listener) Close() error {
 		return nil
 	}
 	l.closeOnce.Do(func() {
+		diagnosticlog.TryInfo("peer QUIC close", "trace_id", l.pto.id, "stage", "listener_packet_close")
 		l.closeErr = errors.Join(l.transport.Conn.Close(), l.listener.Close(), l.transport.Close())
 	})
 	return l.closeErr
@@ -234,6 +242,7 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.closeOnce.Do(func() {
+		diagnosticlog.TryInfo("peer QUIC close", "trace_id", s.pto.id, "stage", "application_close_start")
 		var packetErr, transportErr error
 		// Send QUIC's authenticated close while the packet transport is still
 		// writable. Closing the ICE/UDP socket first strands the peer until its
@@ -246,13 +255,16 @@ func (s *Session) Close() error {
 		var connectionErr error
 		select {
 		case connectionErr = <-connectionDone:
+			diagnosticlog.TryInfo("peer QUIC close", "trace_id", s.pto.id, "stage", "application_close_return", "failed", connectionErr != nil)
 		case <-time.After(250 * time.Millisecond):
+			diagnosticlog.TryInfo("peer QUIC close", "trace_id", s.pto.id, "stage", "application_close_timeout")
 			// Transport.Close below forcefully completes the QUIC connection;
 			// timeout here is an expected bounded-cleanup outcome, not an
 			// application failure.
 			connectionErr = nil
 		}
 		if s.transport != nil {
+			diagnosticlog.TryInfo("peer QUIC close", "trace_id", s.pto.id, "stage", "packet_transport_close")
 			transportErr = s.transport.Close()
 			packetErr = s.transport.Conn.Close()
 		}
@@ -278,19 +290,24 @@ func (s *Session) PTOChanged() <-chan struct{} {
 }
 
 type ptoTrace struct {
+	id      string
 	current atomic.Uint32
 	total   atomic.Uint32
 	changed chan struct{}
 }
 
-func newPTOTrace() *ptoTrace { return &ptoTrace{changed: make(chan struct{}, 1)} }
+func newPTOTrace() *ptoTrace { return &ptoTrace{id: rand.Text(), changed: make(chan struct{}, 1)} }
 
 func (*ptoTrace) SupportsSchemas(schema string) bool { return schema == qlog.EventSchema }
-func (t *ptoTrace) AddProducer() qlogwriter.Recorder { return (*ptoRecorder)(t) }
+func (t *ptoTrace) AddProducer() qlogwriter.Recorder { return &ptoRecorder{ptoTrace: t} }
 
-type ptoRecorder ptoTrace
+type ptoRecorder struct {
+	*ptoTrace
+	connection string
+}
 
 func (r *ptoRecorder) RecordEvent(event qlogwriter.Event) {
+	r.recordWireEvent(event)
 	updated, ok := event.(qlog.PTOCountUpdated)
 	if !ok {
 		if pointer, pointerOK := event.(*qlog.PTOCountUpdated); pointerOK {

@@ -29,6 +29,12 @@ func invalidDiagnostic(cause error) error {
 }
 
 var allowedFields = map[string]bool{
+	"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
+	"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
+	"trigger": true, "application_close": true, "stage": true, "failed": true,
+	"sessions": true, "path": true, "predicate_present": true, "allowed": true,
+	"resource_present": true, "peer_found": true, "resource_found": true, "capability_found": true,
+	"direction_found": true, "observed_unix_us": true,
 	"attempt_id": true, "caller": true, "connection_id": true, "step": true, "step_id": true, "duration_ms": true,
 	"session_id": true, "process_generation": true, "config_generation": true, "config_content_hash": true,
 	"capability": true, "generation": true, "operation": true, "outcome": true,

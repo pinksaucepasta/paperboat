@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -92,5 +95,32 @@ func TestDisabledReporterStoresFaultInProcessRecorder(t *testing.T) {
 	events := recorder.Recent()
 	if len(events) != 1 || events[0].SupportReference != reference || events[0].Fields["cause"] != "deadline_exceeded" || events[0].Code != fault.Code {
 		t.Fatalf("disabled reporter discarded local failure: %#v", events)
+	}
+}
+
+func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
+	recorder := diagnostics.NewMemoryRecorder()
+	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "peer QUIC close", reflect.ValueOf((*peerquic.Session).Close).Pointer())
+	called := false
+	record.Add("stage", "application_close_start", "trace_id", "test_trace", "credential", "PRIVATE", "failed", forbiddenDiagnosticValue{called: &called})
+	if err := handler.Handle(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	events := recorder.Recent()
+	if called || len(events) != 1 || events[0].Code != "reconnect_transport" || events[0].Fields["stage"] != "application_close_start" || events[0].Fields["observed_unix_us"] == "" {
+		t.Fatal("recovery metadata was discarded or private value evaluated")
+	}
+	for key, value := range events[0].Fields {
+		if strings.Contains(key+value, "PRIVATE") || key == "credential" {
+			t.Fatal("private attribute retained")
+		}
+	}
+	record.PC = reflect.ValueOf(TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata).Pointer()
+	if err := handler.Handle(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	if events := recorder.Recent(); len(events) != 2 || events[1].Code != "unclassified_log" {
+		t.Fatal("untrusted producer retained metadata")
 	}
 }
