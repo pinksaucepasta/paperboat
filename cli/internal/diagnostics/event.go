@@ -29,6 +29,7 @@ func invalidDiagnostic(cause error) error {
 }
 
 var allowedFields = map[string]bool{
+	"process_id":      true,
 	"hop_source_file": true, "hop_source_line": true, "hop_label": true,
 	"range_start": true, "range_end": true, "stream_id": true,
 	"stream_offset": true, "stream_length": true, "datagram_checksum": true, "timer_type": true, "timer_unix_us": true, "stream_local_limit": true, "stream_remote_limit": true,

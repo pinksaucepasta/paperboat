@@ -50,7 +50,11 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	}
 	ctx = diagnostics.WithRecorder(ctx, recorder)
 	restoreLogger := configureProcessLogging(args, recorder, supportref.FromContext(ctx))
-	stopRuntimeCapture := diagnostics.StartTerminalRuntimeCapture()
+	role := "pb"
+	if command != nil {
+		role = command.Name()
+	}
+	stopRuntimeCapture := diagnostics.StartTerminalRuntimeCapture(role)
 	restoreFaultObserver := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
 		_ = recorder.RecordFault(fault)
 	})
@@ -162,6 +166,9 @@ func (h processDiagnosticHandler) Handle(ctx context.Context, record slog.Record
 		reference = h.reference
 	}
 	if retainReconnectMetadata(record, fields) {
+		if diagnostics.TerminalHopsEnabled() {
+			fields["process_id"] = strconv.Itoa(os.Getpid())
+		}
 		return h.recorder.RecordWithSupportReference("terminal", "reconnect_transport", severity, reference, fields)
 	}
 	// Record.Message and Attrs may contain upstream URLs, credentials, payloads,

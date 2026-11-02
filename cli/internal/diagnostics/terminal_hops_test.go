@@ -33,12 +33,12 @@ func TestTerminalHopCaptureKeepsRangesAndObservationTimeWithoutIdentity(t *testi
 	}
 	t.Setenv("PAPERBOAT_TERMINAL_HOPS", "1")
 	TerminalHop("pty_read", "PRIVATE_RESOURCE", 12, 23, time.UnixMicro(123456))
-	stop := StartTerminalRuntimeCapture()
+	stop := StartTerminalRuntimeCapture("test_capture")
 	stop()
 	if err := diagnosticlog.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{`"range_start":12`, `"range_end":23`, `"observed_unix_us":123456`, `"gc_count":`, `"hop_source_file":"terminal_hops_test.go"`} {
+	for _, wanted := range []string{`"range_start":12`, `"range_end":23`, `"observed_unix_us":123456`, `"gc_count":`, `"reason":"test_capture"`, `"hop_source_file":"terminal_hops_test.go"`} {
 		if !strings.Contains(output.String(), wanted) {
 			t.Fatalf("missing capture contract %s", wanted)
 		}

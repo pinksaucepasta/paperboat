@@ -10,9 +10,12 @@ import (
 
 // StartTerminalRuntimeCapture samples pause deltas only on explicitly instrumented processes.
 // Histogram upper bounds retain scheduler/GC evidence without stacks or application values.
-func StartTerminalRuntimeCapture() func() {
+func StartTerminalRuntimeCapture(role string) func() {
 	if !TerminalHopsEnabled() {
 		return func() {}
+	}
+	if !safeIdentifier(role, 64) {
+		role = "unknown"
 	}
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
@@ -38,7 +41,7 @@ func StartTerminalRuntimeCapture() func() {
 			if samples[2].Value.Kind() == metrics.KindUint64 {
 				cycles = samples[2].Value.Uint64()
 			}
-			diagnosticlog.TryInfo("terminal runtime sample", "gc_pause_us", bounds[0], "sched_pause_us", bounds[1], "gc_count", cycles, "dropped", diagnosticlog.Dropped())
+			diagnosticlog.TryInfo("terminal runtime sample", "reason", role, "gc_pause_us", bounds[0], "sched_pause_us", bounds[1], "gc_count", cycles, "dropped", diagnosticlog.Dropped())
 			select {
 			case <-stop:
 				return

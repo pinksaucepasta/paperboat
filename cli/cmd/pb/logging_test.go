@@ -136,6 +136,7 @@ func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
 }
 
 func TestHopLoggerRetainsObservedTimeAndRejectsPrivateAttributes(t *testing.T) {
+	t.Setenv("PAPERBOAT_TERMINAL_HOPS", "1")
 	recorder := diagnostics.NewMemoryRecorder()
 	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}
 	record := slog.NewRecord(time.Now(), slog.LevelInfo, "terminal output hop", reflect.ValueOf(diagnostics.TerminalHop).Pointer())
@@ -144,7 +145,22 @@ func TestHopLoggerRetainsObservedTimeAndRejectsPrivateAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := recorder.Recent()
-	if len(events) != 1 || events[0].Fields["observed_unix_us"] != "123456" || events[0].Fields["range_end"] != "23" || events[0].Fields["credential"] != "" {
+	if len(events) != 1 || events[0].Fields["observed_unix_us"] != "123456" || events[0].Fields["range_end"] != "23" || events[0].Fields["credential"] != "" || events[0].Fields["process_id"] == "" {
 		t.Fatal("hop timestamp or privacy contract lost")
+	}
+}
+
+func TestPacketHopMetadataFitsTheExistingRecordBound(t *testing.T) {
+	t.Setenv("PAPERBOAT_TERMINAL_HOPS", "1")
+	recorder := diagnostics.NewMemoryRecorder()
+	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "peer QUIC wire", reflect.ValueOf((*peerquic.Session).Close).Pointer())
+	record.Add("trace_id", "trace", "quic_id", "wire", "event", "sent", "packet_number", 1, "datagram_checksum", 123, "stage", "stream_frame", "stream_id", 4, "stream_offset", 23, "stream_length", 17)
+	if err := handler.Handle(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	events := recorder.Recent()
+	if len(events) != 1 || events[0].Fields["process_id"] == "" || events[0].Fields["stream_length"] != "17" {
+		t.Fatal("packet hop cannot be correlated to its process")
 	}
 }
