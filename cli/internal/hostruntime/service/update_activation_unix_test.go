@@ -15,7 +15,7 @@ func TestUnixUpdateActivatorUsesFixedPersistentRecoveryEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"` + binary + `" "daemon" "__runtime-updated" "--activation-helper"`, "Restart=on-failure", "WantedBy=multi-user.target"} {
+	for _, expected := range []string{`"` + binary + `" "daemon" "__runtime-updated" "--activation-helper"`, "Restart=on-failure", "WantedBy=multi-user.target", "Nice=10\n", "IOSchedulingClass=idle\n"} {
 		if !strings.Contains(string(body), expected) {
 			t.Fatalf("missing %q in %s", expected, body)
 		}

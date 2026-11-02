@@ -184,6 +184,7 @@ func unixUpdateActivatorDefinition(platform string, uid int, binary string, envi
 	for _, key := range keys {
 		body.WriteString("Environment=" + systemdEscape(key+"="+values[key]) + "\n")
 	}
+	body.WriteString("Nice=" + UpdateNice + "\nIOSchedulingClass=" + UpdateIOClass + "\n")
 	body.WriteString("Restart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n")
 	return []byte(body.String()), nil
 }

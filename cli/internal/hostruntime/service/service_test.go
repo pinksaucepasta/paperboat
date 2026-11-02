@@ -593,3 +593,17 @@ func TestRemoveRejectsSymlinkDefinitionWithMissingExecutable(t *testing.T) {
 		t.Fatalf("changed unrelated declaration: %v", err)
 	}
 }
+
+func TestSystemdUpdaterYieldsToInteractiveRuntime(t *testing.T) {
+	for _, kind := range []string{UpdaterKind, HostdKind, CarrierKind, SessionOwnerKind, DaemonKind} {
+		body, err := renderSystemd(Config{Kind: kind, User: "paperboat", Group: "paperboat", Executable: "/opt/pb"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, setting := range []string{"Nice=10\n", "IOSchedulingClass=idle\n"} {
+			if strings.Contains(string(body), setting) != (kind == UpdaterKind) {
+				t.Fatalf("%s scheduling contract %q incorrect", kind, setting)
+			}
+		}
+	}
+}

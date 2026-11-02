@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -21,6 +22,9 @@ func TestPrivilegedInstallCommandsSelectRootHomeAndKeepEnrolledUID(t *testing.T)
 				want := []string{"/usr/bin/sudo", "-H", "--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=501", "/protected/pb"}
 				if uid == 0 {
 					want = []string{"/usr/bin/env", "HOME=/var/root", "USER=root", "LOGNAME=root", "PAPERBOAT_INVOKING_UID=501", "/protected/pb"}
+				}
+				if runtime.GOOS == "linux" {
+					want = append(want[:len(want)-1], "/usr/bin/ionice", "-c", "idle", "/usr/bin/nice", "-n", "10", "/protected/pb")
 				}
 				want = append(want, arguments...)
 				if !reflect.DeepEqual(command.Args, want) {

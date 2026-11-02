@@ -483,6 +483,10 @@ func renderLaunchd(config Config) ([]byte, error) {
 	return plist.MarshalIndent(definition, plist.XMLFormat, "  ")
 }
 
+// Update scheduling leaves interactive runtime work ahead of bulk install I/O.
+const UpdateNice = "10"
+const UpdateIOClass = "idle"
+
 func renderSystemd(config Config) ([]byte, error) {
 	description := "Paperboat host runtime"
 	if config.Kind == HostKind {
@@ -508,7 +512,11 @@ func renderSystemd(config Config) ([]byte, error) {
 		unit.NewUnitOption("Unit", "StartLimitIntervalSec", "0"),
 	}
 	if config.Kind == UpdaterKind {
-		options = append(options, unit.NewUnitOption("Unit", "Wants", "network-online.target"))
+		options = append(options,
+			unit.NewUnitOption("Unit", "Wants", "network-online.target"),
+			unit.NewUnitOption("Service", "Nice", UpdateNice),
+			unit.NewUnitOption("Service", "IOSchedulingClass", UpdateIOClass),
+		)
 	}
 	systemService := config.Kind == WorkerKind || config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind
 	notify := systemService

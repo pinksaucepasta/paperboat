@@ -239,7 +239,12 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 // Diagnostic storage belongs to the child's effective identity. Keep the
 // enrolled identity in the supplied request and invoking UID, never in HOME.
 func privilegedInstallCommand(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
-	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID, executable}
+	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID}
+	if runtime.GOOS == "linux" {
+		// Set priorities before Go starts so every installer thread and child inherits them.
+		args = append(args, "/usr/bin/ionice", "-c", service.UpdateIOClass, "/usr/bin/nice", "-n", service.UpdateNice)
+	}
+	args = append(args, executable)
 	args = append(args, arguments...)
 	if effectiveUID == 0 {
 		args = append([]string{"HOME=" + rootHome, "USER=root", "LOGNAME=root"}, args...)
