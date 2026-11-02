@@ -214,6 +214,10 @@ func startRelayEchoServer(t *testing.T, owner *native.Owner, authority *tailnet.
 					}
 					return "grant_test", nil
 				})
+				// A cancelled admission rejects its stream, not the established session.
+				if errors.Is(acceptErr, native.ErrStreamRejected) {
+					continue
+				}
 				if acceptErr != nil {
 					return acceptErr
 				}

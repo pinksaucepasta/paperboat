@@ -5137,3 +5137,6 @@ Retain all raw logs privately at /home/ubuntu/paperboat-private/reconnect-data-r
 
 2026-11-02 | r12 process correlation | Full CLI f7ce6ca2 PASS41421553904; initial41404898166 and isolated41421551686 failed regional recovery, last-green e4586fce comparison41423677613 pending, assertions unchanged. Add opt-in PID and command-role metadata because daemon roles share one diagnostics ring; widest packet event still fits16 fields.
 Focused privacy/runtime/logger checks pass; final CI and data-only held capture pending. No behavior fix, device capture or release yet; retain queued <=1.5s work after the preparation-hop repair.
+
+2026-11-02 | r12 fixture gate | fe58e843 full CLI PASS41424612763; e4586fce isolated comparison PASS41423677613. Focused workspace reproduction proves cancelled expired-authority admission returns ErrStreamRejected to the relay echo fixture, which incorrectly closed the whole session (red59.96s).
+Echo fixture now continues after per-stream rejection, matching production nativesession/service.go:70; expired-forwarding denial and same-session recovery assertions unchanged, focused GREEN. Final full CLI gate/push and held diagnostic capture pending; no product recovery fix before table.
