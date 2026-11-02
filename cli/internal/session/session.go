@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
 	"os/signal"
@@ -134,14 +135,19 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	go func() {
 		defer close(outputDone)
 		buf := make([]byte, options.outputBufferBytes)
+		var outputOffset uint64
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
+				diagnostics.TerminalHop("client_terminal_read", "local", outputOffset, outputOffset+uint64(n), time.Now())
+				diagnostics.TerminalHop("client_terminal_write_start", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				started := time.Now()
 				if _, writeErr := options.output.Write(buf[:n]); writeErr != nil {
 					streamErr <- fmt.Errorf("write terminal output: %w", writeErr)
 					return
 				}
+				diagnostics.TerminalHop("client_terminal_write_end", "local", outputOffset, outputOffset+uint64(n), time.Now())
+				outputOffset += uint64(n)
 				if observer, ok := conn.(interface{ ObserveLocalWrite(int, time.Duration) }); ok {
 					observer.ObserveLocalWrite(n, time.Since(started))
 				}

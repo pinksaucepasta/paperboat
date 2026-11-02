@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +23,7 @@ import (
 )
 
 type Session struct {
+	traceLabel string
 	owner      *Owner
 	peerID     string
 	binding    tailnet.NetworkBinding
@@ -123,6 +126,9 @@ func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, ses
 	}
 	lease.Bind(session)
 	s.carrier = lease
+	if diagnostics.TerminalHopsEnabled() {
+		s.traceLabel = diagnostics.ConnectionHopLabel(session.Connection.LocalAddr().String(), session.Connection.RemoteAddr().String())
+	}
 	return s, nil
 }
 func (s *Session) PeerID() string { return s.peerID }
@@ -363,14 +369,26 @@ type streamConn struct {
 	*quic.Stream
 	session       *Session
 	local, remote net.Addr
+	readBytes     atomic.Uint64
+	writeBytes    atomic.Uint64
 }
 
 func (c *streamConn) Read(value []byte) (int, error) {
+	diagnostics.TerminalHop("quic_stream_read_start", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.Stream.StreamID()), 10), c.readBytes.Load(), c.readBytes.Load()+uint64(len(value)), time.Now())
 	n, err := c.Stream.Read(value)
+	if n > 0 {
+		end := c.readBytes.Add(uint64(n))
+		diagnostics.TerminalHop("quic_stream_read_end", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.Stream.StreamID()), 10), end-uint64(n), end, time.Now())
+	}
 	return n, reconnectRequired(c.session.peerID, err, c.session.closing.Load())
 }
 func (c *streamConn) Write(value []byte) (int, error) {
+	diagnostics.TerminalHop("quic_stream_write_start", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.Stream.StreamID()), 10), c.writeBytes.Load(), c.writeBytes.Load()+uint64(len(value)), time.Now())
 	n, err := c.Stream.Write(value)
+	if n > 0 {
+		end := c.writeBytes.Add(uint64(n))
+		diagnostics.TerminalHop("quic_stream_write_end", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.Stream.StreamID()), 10), end-uint64(n), end, time.Now())
+	}
 	return n, reconnectRequired(c.session.peerID, err, c.session.closing.Load())
 }
 func (c *streamConn) LocalAddr() net.Addr  { return c.local }
@@ -381,14 +399,26 @@ type routedConn struct {
 	*peerquic.RoutedStream
 	session       *Session
 	local, remote net.Addr
+	readBytes     atomic.Uint64
+	writeBytes    atomic.Uint64
 }
 
 func (c *routedConn) Read(value []byte) (int, error) {
+	diagnostics.TerminalHop("quic_stream_read_start", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.RoutedStream.StreamID()), 10), c.readBytes.Load(), c.readBytes.Load()+uint64(len(value)), time.Now())
 	n, err := c.RoutedStream.Read(value)
+	if n > 0 {
+		end := c.readBytes.Add(uint64(n))
+		diagnostics.TerminalHop("quic_stream_read_end", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.RoutedStream.StreamID()), 10), end-uint64(n), end, time.Now())
+	}
 	return n, reconnectRequired(c.session.peerID, err, c.session.closing.Load())
 }
 func (c *routedConn) Write(value []byte) (int, error) {
+	diagnostics.TerminalHop("quic_stream_write_start", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.RoutedStream.StreamID()), 10), c.writeBytes.Load(), c.writeBytes.Load()+uint64(len(value)), time.Now())
 	n, err := c.RoutedStream.Write(value)
+	if n > 0 {
+		end := c.writeBytes.Add(uint64(n))
+		diagnostics.TerminalHop("quic_stream_write_end", c.session.traceLabel+"_"+strconv.FormatInt(int64(c.RoutedStream.StreamID()), 10), end-uint64(n), end, time.Now())
+	}
 	return n, reconnectRequired(c.session.peerID, err, c.session.closing.Load())
 }
 

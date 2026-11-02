@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"net/http"
 	"net/url"
@@ -65,6 +66,7 @@ type StagedInput struct {
 // StageInput copies a local file or downloads an HTTPS resource into directory.
 // directory must already exist; unrelated files there are left untouched.
 func StageInput(ctx context.Context, input, directory string, client *http.Client) (StagedInput, error) {
+	defer diagnostics.UpdateStep("input_stage")()
 	if ctx == nil || input == "" {
 		return StagedInput{}, ErrInput
 	}
@@ -145,6 +147,7 @@ func InspectBuild(path, version string) (Source, error) {
 // explicit custom-input or already-installed-binary workflow; official
 // artifacts must use the version authenticated by their signed index.
 func InspectCandidate(ctx context.Context, path string) (Source, error) {
+	defer diagnostics.UpdateStep("candidate_inspection")()
 	if ctx == nil {
 		return Source{}, ErrInput
 	}

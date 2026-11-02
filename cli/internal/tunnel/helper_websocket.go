@@ -664,7 +664,14 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 		}
 		c.current = &output
 	}
+	start := uint64(0)
+	if c.current.endSequence >= uint64(len(c.current.data)) {
+		start = c.current.endSequence - uint64(len(c.current.data))
+	}
 	n := copy(p, c.current.data)
+	if diagnostics.TerminalHopsEnabled() && c.target != nil {
+		diagnostics.TerminalHop("client_helper_read", c.target.SessionID, start, start+uint64(n), time.Now())
+	}
 	c.current.data = c.current.data[n:]
 	if len(c.current.data) == 0 {
 		sequence := c.current.endSequence

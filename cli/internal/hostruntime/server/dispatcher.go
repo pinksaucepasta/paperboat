@@ -500,11 +500,13 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID, s.received)
 		cancel()
 		if err == nil {
+			diagnostics.TerminalHop("host_output_received", s.sessionID, event.StartSequence, event.EndSequence, time.Now())
 			if !s.liveChecked(time.Now()) {
 				event.Release()
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
 			s.idleWait = terminalExitObservationInterval
+			diagnostics.TerminalHop("host_output_next", s.sessionID, event.StartSequence, event.EndSequence, time.Now())
 			s.received = event.EndSequence
 			return protocol.BinaryFrame{Channel: event.Channel, StartSequence: event.StartSequence, Data: event.Data, Release: event.Release}, nil
 		}
@@ -578,6 +580,7 @@ func (s *terminalOutputStream) liveChecked(now time.Time) bool {
 const liveCheckInterval = time.Second
 
 func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {
+	defer diagnostics.UpdateStep("terminal_snapshot")()
 	if s.expectedGeneration != 0 {
 		return s.manager.SnapshotAtGeneration(s.sessionID, s.expectedGeneration)
 	}

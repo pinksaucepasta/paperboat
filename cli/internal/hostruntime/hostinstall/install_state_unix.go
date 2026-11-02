@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
 	"os/user"
@@ -259,6 +260,7 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 }
 
 func stageBinary(source, destination string, identity installsource.Source) (resultErr error) {
+	defer diagnostics.UpdateStep("protected_binary_stage")()
 	if err := identity.Verify(source); err != nil {
 		return err
 	}

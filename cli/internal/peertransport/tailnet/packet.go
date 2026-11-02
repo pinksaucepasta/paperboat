@@ -3,6 +3,8 @@ package tailnet
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/quic-go/quic-go/qlog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -60,6 +62,13 @@ func (p *Packet) Write(b []byte) (n int, err error) {
 	}
 	if len(b) > MaxPayload {
 		return 0, ErrPayloadTooLarge
+	}
+	if diagnostics.TerminalHopsEnabled() {
+		sum := uint64(qlog.CalculateDatagramPayloadChecksum(b))
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "udp_write_start", "datagram_checksum", sum, "bytes", len(b))
+		defer func() {
+			diagnosticlog.TryInfo("native packet lifecycle", "stage", "udp_write_end", "datagram_checksum", sum, "bytes", n, "failed", err != nil)
+		}()
 	}
 	return p.conn.Write(b)
 }

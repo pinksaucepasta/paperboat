@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
@@ -17,17 +18,26 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	for {
 		buffer := history.AcquireBuffer()
 		n, err := process.Read(buffer)
+		readAt := time.Now()
 		if n > 0 {
 			// Outside opMu: input, resize and attach never wait for the owner to drain.
 			session.fanout.WaitRoom(context.Background(), uint64(n), ownerStallBound)
+			roomAt := time.Now()
 			session.outputMu.Lock()
+			outputLockAt := time.Now()
 			session.opMu.Lock()
+			operationLockAt := time.Now()
 			state, _ := session.lifecycle.Snapshot()
 			if session.process == process && (state == Running || state == Closing) {
 				session.modes.Consume(buffer[:n])
 				session.identification.Consume(buffer[:n])
 				event, appendErr := session.history.AppendBuffer(1, buffer[:n])
 				if appendErr == nil {
+					diagnostics.TerminalHop("pty_read", session.id, event.StartSequence, event.EndSequence, readAt)
+					diagnostics.TerminalHop("pty_room_ready", session.id, event.StartSequence, event.EndSequence, roomAt)
+					diagnostics.TerminalHop("pty_output_locked", session.id, event.StartSequence, event.EndSequence, outputLockAt)
+					diagnostics.TerminalHop("pty_operation_locked", session.id, event.StartSequence, event.EndSequence, operationLockAt)
+					diagnostics.TerminalHop("pty_publish", session.id, event.StartSequence, event.EndSequence, time.Now())
 					if session.screen != nil {
 						_, _ = session.screen.Write(buffer[:n])
 						session.continuation.feed(buffer[:n])

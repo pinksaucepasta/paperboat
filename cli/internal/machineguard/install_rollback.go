@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ func snapshotGuardFiles(paths ...string) (*guardFileRollback, error) {
 }
 
 func snapshotGuardFilesValidated(validate func(string, string, os.FileInfo) error, paths ...string) (*guardFileRollback, error) {
+	defer diagnostics.UpdateStep("guard_rollback_snapshot")()
 	rollback := &guardFileRollback{}
 	for _, path := range paths {
 		item := &guardFileBackup{path: path}

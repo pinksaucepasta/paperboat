@@ -50,6 +50,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	}
 	ctx = diagnostics.WithRecorder(ctx, recorder)
 	restoreLogger := configureProcessLogging(args, recorder, supportref.FromContext(ctx))
+	stopRuntimeCapture := diagnostics.StartTerminalRuntimeCapture()
 	restoreFaultObserver := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
 		_ = recorder.RecordFault(fault)
 	})
@@ -61,6 +62,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	return ctx, func() {
 		// Command-owned producers have stopped before this process cleanup. One
 		// deadline bounds asynchronous logs, disk persistence and SDK flushing.
+		stopRuntimeCapture()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		defer restoreLogger()

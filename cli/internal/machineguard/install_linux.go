@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 // restores only address isolation before user sessions. DNS startup does not gate
 // normal logins. No user-writable binary runs as root.
 func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
+	defer diagnostics.UpdateStep("guard_install")()
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -104,6 +106,8 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		}
 		trustErr = errors.Join(trustErr, err)
 	}
+	endCopy := diagnostics.UpdateStep("guard_candidate_copy_sync")
+	defer func() { endCopy() }()
 	source, err := os.Open(executable)
 	if err != nil {
 		return err
@@ -125,6 +129,8 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err != nil {
 		return err
 	}
+	endCopy()
+	endCopy = func() {}
 	err = os.Rename(temporary, filepath.Join(directory, "pb"))
 	rollback.record(filepath.Join(directory, "pb"))
 	if err != nil {

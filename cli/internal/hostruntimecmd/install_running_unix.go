@@ -18,6 +18,7 @@ import (
 
 	documentation "github.com/pinksaucepasta/paperboat/docs"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -240,6 +241,9 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 // enrolled identity in the supplied request and invoking UID, never in HOME.
 func privilegedInstallCommand(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
 	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID}
+	if diagnostics.TerminalHopsEnabled() {
+		args = append(args, "PAPERBOAT_TERMINAL_HOPS=1")
+	}
 	if runtime.GOOS == "linux" {
 		// Set priorities before Go starts so every installer thread and child inherits them.
 		args = append(args, "/usr/bin/ionice", "-c", service.UpdateIOClass, "/usr/bin/nice", "-n", service.UpdateNice)

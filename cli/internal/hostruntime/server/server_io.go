@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
+	"strconv"
 	"sync"
+	"time"
 
 	pberrors "github.com/pinksaucepasta/paperboat/internal/hostruntime/errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -133,7 +136,12 @@ func (w *lockedWriter) write(frame protocol.Frame) error {
 }
 
 func (w *lockedWriter) writeTerminalOutput(streamID uint32, frame protocol.BinaryFrame) error {
+	diagnostics.TerminalHop("host_write_queue", strconv.FormatUint(uint64(streamID), 10), frame.StartSequence, frame.StartSequence+uint64(len(frame.Data)), time.Now())
 	return w.enqueue(outputQueue, func() error {
+		diagnostics.TerminalHop("host_write_start", strconv.FormatUint(uint64(streamID), 10), frame.StartSequence, frame.StartSequence+uint64(len(frame.Data)), time.Now())
+		defer func() {
+			diagnostics.TerminalHop("host_write_end", strconv.FormatUint(uint64(streamID), 10), frame.StartSequence, frame.StartSequence+uint64(len(frame.Data)), time.Now())
+		}()
 		if connection, ok := w.connection.(ApplicationConnection); ok {
 			return connection.WriteTerminalOutput(streamID, frame)
 		}

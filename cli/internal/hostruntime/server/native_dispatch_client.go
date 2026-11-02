@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -39,11 +41,42 @@ func NewNativeDispatchClient(config NativeDispatchClientConfig) (*NativeDispatch
 
 type nativeDispatchConn struct {
 	net.Conn
-	reader *bufio.Reader
-	stop   func() bool
+	reader     *bufio.Reader
+	stop       func() bool
+	readBytes  atomic.Uint64
+	writeBytes atomic.Uint64
 }
 
-func (c *nativeDispatchConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *nativeDispatchConn) Read(p []byte) (int, error) {
+	n, err := c.reader.Read(p)
+	if n > 0 && diagnostics.TerminalHopsEnabled() {
+		end := c.readBytes.Add(uint64(n))
+		diagnostics.TerminalHop("carrier_host_read", c.traceIdentity(), end-uint64(n), end, time.Now())
+	}
+	return n, err
+}
+
+// Both ends of the protected loopback connection use the same opaque diagnostic label.
+func (c *nativeDispatchConn) traceIdentity() string {
+	local, remote := c.LocalAddr().String(), c.RemoteAddr().String()
+	if local > remote {
+		local, remote = remote, local
+	}
+	return local + "_" + remote
+}
+
+func (c *nativeDispatchConn) Write(p []byte) (int, error) {
+	if !diagnostics.TerminalHopsEnabled() {
+		return c.Conn.Write(p)
+	}
+	start := c.writeBytes.Load()
+	diagnostics.TerminalHop("host_carrier_write_start", c.traceIdentity(), start, start+uint64(len(p)), time.Now())
+	n, err := c.Conn.Write(p)
+	end := c.writeBytes.Add(uint64(n))
+	diagnostics.TerminalHop("host_carrier_write_end", c.traceIdentity(), end-uint64(n), end, time.Now())
+	return n, err
+}
+
 func (c *nativeDispatchConn) Close() error {
 	if c.stop != nil {
 		c.stop()

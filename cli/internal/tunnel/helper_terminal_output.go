@@ -3,6 +3,7 @@ package tunnel
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ func (c *helperTerminalConn) decodeHelperBinary(data []byte) (helperOutput, erro
 	if err != nil || frame.StreamID != c.streamID {
 		c.compressionDecodeFailures.Add(1)
 		return helperOutput{}, errors.New("helper binary frame is invalid")
+	}
+	if diagnostics.TerminalHopsEnabled() && c.target != nil {
+		diagnostics.TerminalHop("client_decode", c.target.SessionID, frame.StartSequence, frame.StartSequence+uint64(len(frame.Data)), time.Now())
 	}
 	c.compressionDecodedBytes.Add(uint64(len(frame.Data)))
 	c.compressionEncodedBytes.Add(uint64(len(data) - protocol.TerminalOutputHeaderBytes))

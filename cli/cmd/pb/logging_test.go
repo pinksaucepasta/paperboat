@@ -134,3 +134,17 @@ func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
 		t.Fatal("untrusted producer retained metadata")
 	}
 }
+
+func TestHopLoggerRetainsObservedTimeAndRejectsPrivateAttributes(t *testing.T) {
+	recorder := diagnostics.NewMemoryRecorder()
+	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "terminal output hop", reflect.ValueOf(diagnostics.TerminalHop).Pointer())
+	record.Add("stage", "pty_read", "observed_unix_us", int64(123456), "range_start", 12, "range_end", 23, "credential", "PRIVATE")
+	if err := handler.Handle(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	events := recorder.Recent()
+	if len(events) != 1 || events[0].Fields["observed_unix_us"] != "123456" || events[0].Fields["range_end"] != "23" || events[0].Fields["credential"] != "" {
+		t.Fatal("hop timestamp or privacy contract lost")
+	}
+}

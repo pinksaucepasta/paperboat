@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"sync"
 	"time"
 
@@ -156,6 +157,7 @@ type pendingOutput struct {
 
 // commit writes one group of pending output and wakes flush waiters.
 func (w *outputWriter) commit() {
+	defer diagnostics.UpdateStep("terminal_output_commit")()
 	w.mu.Lock()
 	sessions := make([]*managedSession, 0, len(w.dirty))
 	for session := range w.dirty {

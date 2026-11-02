@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
 	"path/filepath"
@@ -156,6 +157,7 @@ func (c *verificationCache) remember(path string, identity fileIdentity, s Sourc
 }
 
 func digestFile(path string) (length int64, digest string, resultErr error) {
+	defer diagnostics.UpdateStep("artifact_hash")()
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return 0, "", ErrInvalid
 	}

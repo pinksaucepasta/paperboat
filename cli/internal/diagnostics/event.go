@@ -29,6 +29,12 @@ func invalidDiagnostic(cause error) error {
 }
 
 var allowedFields = map[string]bool{
+	"hop_source_file": true, "hop_source_line": true, "hop_label": true,
+	"range_start": true, "range_end": true, "stream_id": true,
+	"stream_offset": true, "stream_length": true, "datagram_checksum": true, "timer_type": true, "timer_unix_us": true, "stream_local_limit": true, "stream_remote_limit": true,
+	"rtt_us": true, "rtt_variance_us": true, "bytes_in_flight": true,
+	"congestion_window": true, "limit": true, "gc_count": true,
+	"gc_pause_us": true, "sched_pause_us": true, "dropped": true,
 	"direction": true, "bytes": true, "engine_label": true, "peer_label": true, "endpoint_label": true,
 	"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 	"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,

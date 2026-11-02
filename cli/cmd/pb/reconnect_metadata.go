@@ -15,6 +15,9 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 	}
 	frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
 	owners := map[string]string{
+		"terminal output hop":     "/internal/diagnostics.",
+		"update preparation step": "/internal/diagnostics.",
+		"terminal runtime sample": "/internal/diagnostics.",
 		"native underlay packet":  "/internal/peertransport/mesh.",
 		"native underlay session": "/internal/peertransport/mesh.",
 		"carrier cutover":         "/internal/hostruntime/hostinstall.",
@@ -33,7 +36,11 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		return false
 	}
 	keys := map[string]bool{
-		"engine_label": true, "peer_label": true,
+		"hop_source_file": true, "hop_source_line": true, "hop_label": true, "range_start": true, "range_end": true, "observed_unix_us": true,
+		"datagram_checksum": true, "timer_type": true, "timer_unix_us": true, "stream_local_limit": true, "stream_remote_limit": true, "stream_id": true, "stream_offset": true, "stream_length": true, "rtt_us": true,
+		"rtt_variance_us": true, "bytes_in_flight": true, "congestion_window": true,
+		"limit": true, "gc_count": true, "gc_pause_us": true, "sched_pause_us": true,
+		"dropped": true, "engine_label": true, "peer_label": true,
 		"direction": true, "bytes": true, "endpoint_label": true, "state": true,
 		"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 		"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
@@ -66,6 +73,8 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		}
 		return true
 	})
-	fields["observed_unix_us"] = strconv.FormatInt(record.Time.UnixMicro(), 10)
+	if fields["observed_unix_us"] == "" {
+		fields["observed_unix_us"] = strconv.FormatInt(record.Time.UnixMicro(), 10)
+	}
 	return true
 }
