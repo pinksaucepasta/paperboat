@@ -52,7 +52,7 @@ func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
 		for _, raw := range p.Endpoints {
 			endpoints = append(endpoints, netip.MustParseAddrPort(raw)) // validated with the configuration
 		}
-		contacts[pub] = mesh.PeerContact{Disco: disco, Endpoints: endpoints}
+		contacts[pub] = mesh.PeerContact{Disco: disco, Endpoints: endpoints, Live: a.carrierPeers[p.Identity.EndpointID] > 0}
 	}
 	return contacts
 }

@@ -70,8 +70,25 @@ func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, e
 		if backing.ResourceID == "" {
 			return nil, NetworkScope{}, ErrAdmission
 		}
-		release, err := a.retainScopeLocked(backing)
-		return release, backing, err
+		releaseScope, err := a.retainScopeLocked(backing)
+		if err != nil {
+			return nil, NetworkScope{}, err
+		}
+		if a.carrierPeers == nil {
+			a.carrierPeers = make(map[string]int)
+		}
+		a.carrierPeers[peerID]++
+		release := sync.OnceFunc(func() {
+			a.mu.Lock()
+			if a.carrierPeers[peerID] <= 1 {
+				delete(a.carrierPeers, peerID)
+			} else {
+				a.carrierPeers[peerID]--
+			}
+			a.mu.Unlock()
+			releaseScope()
+		})
+		return release, backing, nil
 	}
 	return nil, NetworkScope{}, ErrAdmission
 }

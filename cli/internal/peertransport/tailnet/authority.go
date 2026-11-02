@@ -141,6 +141,7 @@ type Authority struct {
 	streamScopes bool
 	scopeChanges chan struct{}
 	admitted     map[api.AdmittedNetworkScope]int
+	carrierPeers map[string]int // exact peers retained by authenticated QUIC associations
 	// expiresAt gates new flows; admitted flows are fenced by revocation.
 	expiresAt    atomic.Int64
 	mu           sync.Mutex

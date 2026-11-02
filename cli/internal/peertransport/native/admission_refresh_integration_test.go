@@ -30,7 +30,9 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	serverTLS, serverFingerprint := testTLS(t, "machine")
 	clientBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFingerprint, VirtualAddress: "fd7a:115c:a1e0::1"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFingerprint, VirtualAddress: "fd7a:115c:a1e0::2"}
-	clientAuthority := testAuthority(t, clientBinding, testKeys{"native_test": signerPublic})
+	filter := &directFilter{}
+	filter.allowDERP.Store(true)
+	clientAuthority := testAuthority(t, clientBinding, testKeys{"native_test": signerPublic}, filter)
 	serverAuthority := testAuthority(t, serverBinding, testKeys{"native_test": signerPublic})
 	clientBinding.WireGuardPublicKey, clientBinding.KeyGeneration = prepareBinding(t, clientAuthority)
 	serverBinding.WireGuardPublicKey, serverBinding.KeyGeneration = prepareBinding(t, serverAuthority)
@@ -169,6 +171,28 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 	}
 	existing := open("existing", "grant_test", "grant_test")
 	defer existing.Close()
+	echo(existing)
+	// A signed path refresh must not discard keys of this admitted QUIC peer.
+	// Drop new WireGuard initiations, as the r12 underlay did after its refusal;
+	// application admission on the existing connection must still finish.
+	filter.blockHandshakes.Store(true)
+	echo(existing)
+	clientConfig.Generation++
+	clientConfig.Peers[0].Endpoints = []string{"192.0.2.10:41000"}
+	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+	refreshedHeader, err := streamauth.New("refreshed", "terminal", "refreshed", "grant_test", time.Now().Add(time.Minute), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admissionCtx, cancelAdmission := context.WithTimeout(ctx, time.Second)
+	refreshed, admissionErr := session.OpenAuthorized(admissionCtx, refreshedHeader, "grant_test", "terminal")
+	cancelAdmission()
+	filter.blockHandshakes.Store(false)
+	if admissionErr != nil {
+		t.Fatalf("contact refresh blocked admission on the established QUIC connection: %v", admissionErr)
+	}
+	echo(refreshed)
+	refreshed.Close()
 	echo(existing)
 	deny("bad", "invalid", "grant_test")
 	var b [1]byte

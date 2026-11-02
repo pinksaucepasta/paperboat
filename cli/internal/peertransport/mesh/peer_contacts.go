@@ -21,6 +21,9 @@ import (
 // PeerContact is what the signed peer configuration says about reaching a peer directly: its disco key and
 // its own candidate UDP addresses (PLAN 3b "Direct paths without a relay").
 type PeerContact struct {
+	// Live retains transport keys for an authenticated QUIC association. It
+	// never changes peer admission or application scope checks.
+	Live      bool
 	Disco     key.DiscoPublic
 	Endpoints []netip.AddrPort
 }
@@ -50,7 +53,7 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	b.mu.Lock()
 	var changedPeers []key.NodePublic
 	for k, n := range b.clients {
-		if !slices.Equal(n.Endpoints, contacts[k].Endpoints) {
+		if !contacts[k].Live && !slices.Equal(n.Endpoints, contacts[k].Endpoints) {
 			changedPeers = append(changedPeers, k)
 		}
 	}
@@ -74,8 +77,16 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		if !allowed {
 			continue
 		}
-		if b.clients[k] == nil {
+		n := b.clients[k]
+		if n == nil {
 			b.addClientLocked(k, c.Disco, addr)
+			changed = true
+		} else if n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) {
+			// Update a live peer in place, as magicsock's updateFromNode does.
+			updated := n.Clone()
+			updated.DiscoKey = c.Disco
+			updated.Endpoints = slices.Clone(c.Endpoints)
+			b.setClientLocked(k, updated)
 			changed = true
 		}
 	}

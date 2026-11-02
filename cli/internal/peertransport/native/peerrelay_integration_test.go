@@ -25,15 +25,16 @@ import (
 )
 
 type directFilter struct {
-	relayPort      uint16
-	enabled        atomic.Bool
-	writes         atomic.Uint64
-	directData     atomic.Uint64
-	relayData      atomic.Uint64
-	relayHandshake atomic.Uint64
-	derpData       atomic.Uint64
-	allowDERP      atomic.Bool
-	dropped        atomic.Uint64
+	blockHandshakes atomic.Bool
+	relayPort       uint16
+	enabled         atomic.Bool
+	writes          atomic.Uint64
+	directData      atomic.Uint64
+	relayData       atomic.Uint64
+	relayHandshake  atomic.Uint64
+	derpData        atomic.Uint64
+	allowDERP       atomic.Bool
+	dropped         atomic.Uint64
 }
 
 // Retain real authenticated discovery/control while making DERP data unavailable.
@@ -44,6 +45,9 @@ type controlOnlyCarrier struct {
 }
 
 func (c controlOnlyCarrier) Send(k key.NodePublic, p []byte) error {
+	if c.filter.blockHandshakes.Load() && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 1 {
+		return nil
+	}
 	if c.filter.allowDERP.Load() || mesh.IsMeowPacket(p) {
 		err := c.DERPCarrier.Send(k, p)
 		if err == nil && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
