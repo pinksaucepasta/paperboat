@@ -213,7 +213,11 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 		t.Fatalf("expired control authority remains usable: %+v", clientAuthority.RegionalStatus())
 	}
 	h, _ := streamauth.New("regional-expired", "terminal", "regional-expired-stream", "credential_terminal", time.Now().Add(time.Minute), 1<<20)
-	expired, expiredErr := session.OpenAuthorized(ctx, h, "grant_test", "terminal")
+	// Admission now waits for the host's acknowledgement; include it in the
+	// expired-authority probe's existing one-second I/O budget.
+	expiredCtx, stopExpired := context.WithTimeout(ctx, time.Second)
+	expired, expiredErr := session.OpenAuthorized(expiredCtx, h, "grant_test", "terminal")
+	stopExpired()
 	if expiredErr == nil {
 		_ = expired.SetDeadline(time.Now().Add(time.Second))
 		_, writeErr := expired.Write([]byte("must-not-forward"))
