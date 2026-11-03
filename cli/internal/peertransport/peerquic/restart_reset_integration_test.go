@@ -76,7 +76,9 @@ func testRestartedEndpointReset(t *testing.T, sameIdentity bool) {
 		t.Fatal(ctx.Err())
 	}
 	// Lose the endpoint process, including its in-memory connection IDs. Its
-	// persisted TLS identity remains, as during a carrier binary replacement.
+	// persisted TLS identity remains. Crash the socket first: graceful listener
+	// shutdown now sends an application close instead of simulating a crash.
+	_ = serverUDP.Close()
 	_ = listener.Close()
 	replacementUDP, err := net.ListenPacket("udp4", address)
 	if err != nil {

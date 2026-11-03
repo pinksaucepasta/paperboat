@@ -141,6 +141,9 @@ type Listener struct {
 	pto       *ptoTrace
 	closeOnce sync.Once
 	closeErr  error
+	mu        sync.Mutex
+	closed    bool
+	accepted  map[*Session]struct{}
 }
 
 func Listen(iceConn net.Conn, tlsConfig *tls.Config, class Class) (*Listener, error) {
@@ -226,7 +229,24 @@ func (l *Listener) Accept(ctx context.Context) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("accept peer QUIC: %w", err)
 	}
-	return &Session{Connection: connection, pto: l.pto}, nil
+	session := &Session{Connection: connection, pto: l.pto}
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		_ = session.Close()
+		return nil, net.ErrClosed
+	}
+	if l.accepted == nil {
+		l.accepted = make(map[*Session]struct{})
+	}
+	l.accepted[session] = struct{}{}
+	l.mu.Unlock()
+	context.AfterFunc(connection.Context(), func() {
+		l.mu.Lock()
+		delete(l.accepted, session)
+		l.mu.Unlock()
+	})
+	return session, nil
 }
 
 func (l *Listener) Close() error {
@@ -234,8 +254,26 @@ func (l *Listener) Close() error {
 		return nil
 	}
 	l.closeOnce.Do(func() {
+		l.mu.Lock()
+		l.closed = true
+		sessions := make([]*Session, 0, len(l.accepted))
+		for session := range l.accepted {
+			sessions = append(sessions, session)
+		}
+		l.mu.Unlock()
+		// Stop admission, then send every authenticated application close
+		// before destroying the shared UDP transport. Closing its socket first
+		// leaves an established peer waiting for PTO/idle loss detection.
+		listenerErr := l.listener.Close()
+		var closing sync.WaitGroup
+		failures := make([]error, len(sessions))
+		for index, session := range sessions {
+			closing.Add(1)
+			go func() { defer closing.Done(); failures[index] = session.Close() }()
+		}
+		closing.Wait()
 		diagnosticlog.TryInfo("peer QUIC close", "trace_id", l.pto.id, "stage", "listener_packet_close")
-		l.closeErr = errors.Join(l.transport.Conn.Close(), l.listener.Close(), l.transport.Close())
+		l.closeErr = errors.Join(listenerErr, errors.Join(failures...), l.transport.Conn.Close(), l.transport.Close())
 	})
 	return l.closeErr
 }
