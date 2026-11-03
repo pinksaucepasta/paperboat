@@ -169,7 +169,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		return nil, err
 	}
 	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeAuthFrame(nc, []byte(parts[0]), c.config.Namespace, c.config.GenerationDisco); err != nil {
+	if err = writeAuthRequest(nc, parts, c.config.Namespace, c.config.GenerationDisco); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(nc)
@@ -179,11 +179,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	if kind != frameReady || len(b) != 0 {
 		return fail(ErrProtocol)
 	}
-	for _, part := range parts[1:] {
-		if err = writeAuthFrame(nc, []byte(part), c.config.Namespace, c.config.GenerationDisco); err != nil {
-			return fail(err)
-		}
-	}
+
 	_ = nc.SetDeadline(time.Time{})
 	c.generation++
 	cc := &wssClientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
@@ -370,5 +366,16 @@ func (c *WSSClient) read(cc *wssClientConn) {
 }
 func (c *WSSClient) refresh(cc *wssClientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.ctx, c.config.Credential, func(token string) error { return sendGrantParts(token, cc.frame) }, cc.cancel)
+	watchCarrierAuthority(cc.ctx, c.config.Credential, cc.authorize, cc.cancel)
+}
+
+func (cc *wssClientConn) authorize(token string) error {
+	parts, err := grantParts(token)
+	if err != nil {
+		return err
+	}
+	cc.writeMu.Lock()
+	defer cc.writeMu.Unlock()
+	cc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return writeAuthRequest(cc.conn, parts, cc.namespace, cc.generationDisco)
 }

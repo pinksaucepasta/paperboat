@@ -28,6 +28,7 @@ const (
 	framePong
 	framePacket
 	frameAuthGeneration
+	frameAuthBatch
 )
 
 func writeFrame(w io.Writer, kind byte, b []byte) error {
@@ -215,8 +216,7 @@ func (b *budget) allow(now time.Time, size int) bool {
 // gets one grant per chunk of peers (with at most 64 peers each), joined by newlines.
 const MaxGrantParts = 32
 
-// grantParts splits a relay credential into its grants; the first is sent when connecting, the rest as
-// in-place authentication frames on the admitted connection.
+// grantParts splits a bounded relay credential into its independently signed parts.
 func grantParts(credential string) ([]string, error) {
 	parts := strings.Split(credential, "\n")
 	if credential == "" || len(parts) > MaxGrantParts {
@@ -228,17 +228,4 @@ func grantParts(credential string) ([]string, error) {
 		}
 	}
 	return parts, nil
-}
-
-func sendGrantParts(credential string, send func(byte, []byte) error) error {
-	parts, err := grantParts(credential)
-	if err != nil {
-		return err
-	}
-	for _, part := range parts {
-		if err := send(frameAuth, []byte(part)); err != nil {
-			return err
-		}
-	}
-	return nil
 }

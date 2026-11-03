@@ -149,7 +149,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		return fail(err)
 	}
 	stream.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeAuthFrame(stream, []byte(parts[0]), c.config.Namespace, c.config.GenerationDisco); err != nil {
+	if err = writeAuthRequest(stream, parts, c.config.Namespace, c.config.GenerationDisco); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(stream)
@@ -159,11 +159,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	if kind != frameReady || len(b) != 0 {
 		return fail(ErrProtocol)
 	}
-	for _, part := range parts[1:] {
-		if err = writeAuthFrame(stream, []byte(part), c.config.Namespace, c.config.GenerationDisco); err != nil {
-			return fail(err)
-		}
-	}
+
 	stream.SetDeadline(time.Time{})
 	c.generation++
 	cc := &clientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
@@ -368,7 +364,18 @@ func (c *Client) readData(cc *clientConn) {
 }
 func (c *Client) refresh(cc *clientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, func(token string) error { return sendGrantParts(token, cc.frame) }, func() {
+	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, cc.authorize, func() {
 		cc.conn.CloseWithError(quic.ApplicationErrorCode(ErrAdmission.Code), "relay authority revoked")
 	})
+}
+
+func (cc *clientConn) authorize(token string) error {
+	parts, err := grantParts(token)
+	if err != nil {
+		return err
+	}
+	cc.writeMu.Lock()
+	defer cc.writeMu.Unlock()
+	cc.stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return writeAuthRequest(cc.stream, parts, cc.namespace, cc.generationDisco)
 }

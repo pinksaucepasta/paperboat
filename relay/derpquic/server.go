@@ -220,7 +220,7 @@ func (s *Server) servePeer(p *peerConn) {
 	}()
 	stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 	kind, b, err := readFrame(stream)
-	if err != nil || kind != frameAuth && kind != frameAuthGeneration {
+	if err != nil || kind != frameAuth && kind != frameAuthGeneration && kind != frameAuthBatch {
 		s.reject(p, ErrProtocol)
 		return
 	}
@@ -281,7 +281,7 @@ func (s *Server) servePeer(p *peerConn) {
 			return
 		}
 		switch kind {
-		case frameAuth, frameAuthGeneration:
+		case frameAuth, frameAuthGeneration, frameAuthBatch:
 			if err = s.authenticate(p, kind, b); errors.Is(err, ErrExpired) {
 				continue
 			} else if err != nil {
@@ -339,12 +339,8 @@ func (s *Server) reject(p *peerConn, err error) {
 	}
 	p.close(e.Code, e.Message)
 }
-func (s *Server) admit(p *peerConn, token string) error {
-	now := time.Now()
-	g, err := s.verifier.Verify(token, p.state(), now)
-	if err != nil {
-		return err
-	}
+func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
+	var err error
 	k, _ := ParseKey(g.WireGuardPublicKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
