@@ -4,8 +4,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
@@ -29,7 +27,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
@@ -40,6 +37,7 @@ import (
 
 type productionNativePeerConfig struct {
 	controlURL, issuer, stateRoot, machineID string
+	ownerCatalog                             string
 	generation                               uint64
 	transport                                http.RoundTripper
 	identity                                 managedSSHIdentitySource
@@ -245,43 +243,10 @@ func transientNativePeerStart(err error) bool {
 }
 
 func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*productionNativePeerGeneration, error) {
-	endpoint, err := runtimeEnvironmentEndpoint(s.config.stateRoot)
-	if err != nil || endpoint.Generation != s.config.generation {
-		return nil, errors.Join(ErrProductionInvalid, err)
-	}
-	if len(endpoint.Certificate) == 0 {
-		// Approval is asynchronous. Keep the host runtime alive while the
-		// enrollment service polls; no peer listener or relay is exposed until
-		// a certificate can be verified for this exact machine generation.
-		return nil, errNativePeerPending
-	}
-	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: s.config.machineID, Generation: endpoint.Generation}, time.Now().UTC())
+	tlsConfig, relayTLS, self, err := loadNativePeerTLS(s.config.stateRoot, s.config.machineID, s.config.generation)
 	if err != nil {
-		return nil, errors.Join(ErrProductionInvalid, err)
+		return nil, err
 	}
-	issueLeaf := func() (tls.Certificate, error) {
-		now := time.Now().UTC()
-		lifetime := certificate.Claims.ExpiresAt.Sub(now)
-		if lifetime > 24*time.Hour {
-			lifetime = 24 * time.Hour
-		}
-		return endpointidentity.NewTLSCertificate(certificate, endpoint.RootPublicKey, endpoint.QUICPrivateKey, now, lifetime)
-	}
-	leaf, err := issueLeaf()
-	if err != nil {
-		return nil, errors.Join(ErrProductionInvalid, err)
-	}
-	getCertificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		fresh, issueErr := issueLeaf()
-		return &fresh, issueErr
-	}
-	getClientCertificate := func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-		fresh, issueErr := issueLeaf()
-		return &fresh, issueErr
-	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{leaf}, GetCertificate: getCertificate, GetClientCertificate: getClientCertificate} //nolint:gosec
-	relayTLS := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, Certificates: []tls.Certificate{leaf}, GetClientCertificate: getClientCertificate}
-	self := tailnet.NetworkBinding{AccountID: certificate.Claims.AccountID, EndpointID: s.config.machineID, Role: "machine", MachineID: s.config.machineID, EndpointGeneration: endpoint.Generation, MachineGeneration: s.config.generation, QUICCertificateFingerprint: certificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(endpoint.QUICPublicKey())}
 	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: clientconfig.ProfileStore{Path: filepath.Join(s.config.stateRoot, "peer-network"), Secrets: clientconfig.FileSecretStore{Dir: filepath.Join(s.config.stateRoot, "peer-network", "secrets")}}, Issuer: s.config.issuer, Self: self, Keys: s.config.keys})
 	if err != nil {
 		return nil, err
@@ -301,7 +266,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, PrepareCarrier: prepareTerminalCarrierPeer(s.config.stateRoot, s.config.ownerCatalog), AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -370,7 +335,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, nativePeerListenerError{cause: errors.Join(err, owner.Close())}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: self.QUICCertificateFingerprint, authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
 	generation.done.Add(2)
 	go func() {
 		defer generation.done.Done()

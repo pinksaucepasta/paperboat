@@ -91,7 +91,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 	if err := carrier.Start(runCtx); err != nil {
 		return err
 	}
-	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, Ready: make(chan error, 1)}
+	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, MoveTerminals: carrier.MoveTerminals, Ready: make(chan error, 1)}
 	privateControl.RefreshTarget = func(ctx context.Context) error {
 		target, err := dispatch.SSHTarget(ctx)
 		if err != nil {

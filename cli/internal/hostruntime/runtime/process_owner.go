@@ -9,23 +9,22 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 )
 
 // ProcessOwner owns native hostd execution and routes terminals to independent
@@ -90,27 +89,7 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 		resources = runtimeconfig.DefaultResources
 	}
 
-	catalogRoot := environ("PAPERBOAT_SESSION_OWNER_CATALOG")
-	_, source, sourceErr := installsource.Current()
-	if sourceErr != nil {
-		return nil, errors.Join(sourceErr, durable.Close())
-	}
-	active, err := sessionowner.Read(filepath.Join(catalogRoot, source.SHA256[:32]+".json"))
-	if err != nil {
-		return nil, errors.Join(err, durable.Close())
-	}
-	if active.RuntimeRoot != cfg.StateRoot || active.Source.SHA256 != source.SHA256 || active.Source.Length != source.Length {
-		return nil, errors.Join(sessionowner.ErrInvalid, durable.Close())
-	}
-	if err := validateIndependentAccount(active); err != nil {
-		return nil, errors.Join(err, durable.Close())
-	}
-	updater, err := updated.NewClient(environ("PAPERBOAT_UPDATED_SOCKET"), 30*time.Second)
-	if err != nil {
-		return nil, errors.Join(err, durable.Close())
-	}
-	catalog := sessionowner.Catalog{Root: catalogRoot, ConfigRoot: filepath.Dir(catalogRoot), User: "enrolled", Group: "enrolled", OwnerSID: active.OwnerSID, Maximum: resources.MaxSessions + 1}
-	connections, err := sessionowner.NewConnections(ctx, catalog, active, updater.StartSessionOwner, resources.MaxSessions)
+	connections, err := productionSessionOwners(ctx, cfg, environ)
 	if err != nil {
 		return nil, errors.Join(err, durable.Close())
 	}

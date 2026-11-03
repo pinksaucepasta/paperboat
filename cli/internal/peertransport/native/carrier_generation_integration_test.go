@@ -185,6 +185,14 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 		t.Fatal("lost-Initial capture did not drop new-generation packets")
 	}
 	carrierEcho(t, oldStream)
+	generation.Seal()
+	rejected, stopRejected := context.WithTimeout(ctx, 1500*time.Millisecond)
+	if extra, err := old.DialCarrier(rejected, offer); err == nil {
+		extra.Close()
+		t.Fatal("sealed generation admitted a new QUIC flow")
+	}
+	stopRejected()
+	carrierEcho(t, nextStream)
 	for _, consumer := range []string{"exec", "ssh"} {
 		h, err := streamauth.New("denied", consumer, "denied", "credential_terminal", time.Now().Add(time.Minute), 1<<20)
 		if err != nil {

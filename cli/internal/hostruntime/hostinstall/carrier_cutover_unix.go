@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"golang.org/x/sys/unix"
 )
 
 // A source upgrade retains account custody and accepted SSH bridges. When SSH
@@ -26,6 +26,7 @@ type unixCarrierUpgrade struct {
 	capability   []byte
 	previous     *carriercontrol.Client
 	native       *service.NativeTransactionalComponent
+	terminals    *terminalHandover
 }
 
 func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths installPaths) (_ *unixCarrierUpgrade, resultErr error) {
@@ -45,21 +46,22 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 		clear(capability)
 		return nil, err
 	}
-	if err := client.RetireSSH(ctx); err != nil {
-		clear(capability)
-		if errors.Is(err, carriercontrol.ErrBusy) {
-			return nil, nil
-		}
-		return nil, err
+	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
+	if moveErr != nil {
+		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
 	}
 	defer func() {
 		if resultErr != nil {
-			clear(capability)
 			recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
-			resultErr = errors.Join(resultErr, client.ResumeSSH(recovery))
+			resultErr = errors.Join(resultErr, terminals.finish(recovery, true), client.ResumeSSH(recovery))
+			clear(capability)
 		}
 	}()
+	if err := client.DrainSSH(ctx); err != nil {
+		return nil, err
+	}
+
 	candidate, err := prepareCarrierConfig(ctx, request)
 	if err != nil {
 		return nil, err
@@ -89,7 +91,7 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 	if err := publishCarrierFiles(candidate, carrierConfigPath(candidate.Instance)+".next", capability); err != nil {
 		return nil, err
 	}
-	return &unixCarrierUpgrade{stagedConfig: carrierConfigPath(candidate.Instance) + ".next", capability: capability, previous: client, native: native}, nil
+	return &unixCarrierUpgrade{stagedConfig: carrierConfigPath(candidate.Instance) + ".next", capability: capability, previous: client, native: native, terminals: terminals}, nil
 }
 
 // Promote only the already durable descriptor after the old carrier stopped.
@@ -126,11 +128,12 @@ func promoteCarrierConfig(staged string) error {
 	return unix.Fsync(parent)
 }
 
-func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
+func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) (resultErr error) {
 	if u == nil {
 		return nil
 	}
 	defer clear(u.capability)
+	defer func() { resultErr = errors.Join(resultErr, u.terminals.finish(ctx, failed)) }()
 	cleanupErr := os.Remove(u.stagedConfig)
 	if installNotExistOnly(cleanupErr) {
 		cleanupErr = nil

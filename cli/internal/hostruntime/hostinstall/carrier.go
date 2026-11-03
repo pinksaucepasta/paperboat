@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"io"
 	"net"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -239,7 +239,10 @@ func EnsureExistingCarrier(ctx context.Context, c CarrierConfig) error {
 
 // ReadCarrierConfig accepts retained verified source pins and never consults
 // privileged enrollment metadata or assumes the newest feature source.
-func ReadCarrierConfig(ctx context.Context, instance string) (CarrierConfig, error) {
+// ReadCarrierDescriptor verifies protected declaration and source custody. It
+// does not require the still-serving primary's native declaration to match a
+// candidate that the installer may already have staged.
+func ReadCarrierDescriptor(ctx context.Context, instance string) (CarrierConfig, error) {
 	c, err := readCarrierConfigFile(ctx, instance)
 	if err != nil {
 		return c, err
@@ -248,6 +251,14 @@ func ReadCarrierConfig(ctx context.Context, instance string) (CarrierConfig, err
 		return c, err
 	}
 	if err := c.Source.Verify(c.Executable); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func ReadCarrierConfig(ctx context.Context, instance string) (CarrierConfig, error) {
+	c, err := ReadCarrierDescriptor(ctx, instance)
+	if err != nil {
 		return c, err
 	}
 	i, err := carrierInstaller(c)

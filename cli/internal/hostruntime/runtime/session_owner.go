@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,10 @@ type IndependentSessionOwner struct {
 	bridge       *workloadbridge.Server
 	descriptor   sessionowner.Descriptor
 	discardEmpty atomic.Bool
+	carrierMu    sync.Mutex
+	carrier      *terminalCarrier
+	lifetime     context.Context
+	catalogRoot  string
 }
 
 func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, catalogRoot string) (_ *IndependentSessionOwner, resultErr error) {
@@ -94,8 +99,9 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 	if err != nil {
 		return nil, err
 	}
-	owner := &IndependentSessionOwner{sessions: manager, durable: durable, unlock: unlock, descriptor: d}
+	owner := &IndependentSessionOwner{sessions: manager, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
 	owner.bridge = &workloadbridge.Server{
+		CarrierControl:  owner.controlCarrier,
 		ArchiveMetadata: archiveReader,
 		Endpoint:        d.Endpoint, Token: token, Sessions: manager, SessionOnly: true,
 		Identity: &workloadbridge.OwnerIdentity{Schema: sessionowner.Schema, Generation: d.Generation, ExecutableSHA256: d.Source.SHA256},
@@ -108,6 +114,9 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 			}
 			return func() {}, nil
 		}, Retire: func(ctx context.Context) error {
+			if err := owner.stopCarrier(ctx); err != nil {
+				return err
+			}
 			if err := manager.Retire(ctx); err != nil {
 				return err
 			}
@@ -125,7 +134,7 @@ func (o *IndependentSessionOwner) Run(ctx context.Context) error { return o.brid
 // confirms quiescence over authenticated IPC; explicit uninstall can terminate
 // the service's remaining shells as part of removing Paperboat.
 func (o *IndependentSessionOwner) Close(ctx context.Context) error {
-	if err := errors.Join(o.sessions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
+	if err := errors.Join(o.stopCarrier(ctx), o.sessions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
 		return err
 	}
 	if !o.discardEmpty.Load() {

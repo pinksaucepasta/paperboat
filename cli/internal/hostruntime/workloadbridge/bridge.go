@@ -10,12 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"net/http"
@@ -25,6 +19,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const MaxBodyBytes = 8 << 20
@@ -53,6 +54,7 @@ type Server struct {
 	SessionOnly       bool
 	Identity          *OwnerIdentity
 	requests          atomic.Int64
+	CarrierControl    func(context.Context, CarrierRequest) (CarrierResponse, error)
 	Retire            func(context.Context) error
 	admission         sync.RWMutex
 	retired           atomic.Bool
@@ -215,7 +217,7 @@ func (s *Server) handler() http.Handler {
 		if parts[0] == "owner" && parts[1] == "retire" {
 			s.admission.Lock()
 			defer s.admission.Unlock()
-		} else if mutates(parts[0], parts[1]) {
+		} else if mutates(parts[0], parts[1]) || r.URL.Path == "/owner/carrier" {
 			s.admission.RLock()
 			defer s.admission.RUnlock()
 		}
@@ -280,6 +282,8 @@ func (s *Server) handler() http.Handler {
 					}
 				}
 				result = json.RawMessage(`{}`)
+			} else if parts[1] == "carrier" {
+				result, err = s.carrier(ctx, body)
 			} else if parts[1] != "health" {
 				err = session.ErrInvalidSession
 			} else {
@@ -300,7 +304,7 @@ func (s *Server) handler() http.Handler {
 }
 func mutatesRequest(path string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission")
+	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission" || path == "/owner/carrier")
 }
 
 // activateWorker serializes custody changes without holding bridge state over

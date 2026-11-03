@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -27,6 +28,7 @@ const path = "/v1/carrier/control"
 var ErrInvalid = errors.New("invalid native carrier control")
 var ErrUnavailable = errors.New("native carrier control unavailable")
 var ErrBusy = errors.New("native carrier has active SSH connections")
+var ErrDrainBlocked = fmt.Errorf("native carrier SSH drain exceeded %s; close the active SSH/rsync streams and retry the update: %w", managedssh.CarrierDrainLimit, ErrBusy)
 var ErrFenced = errors.New("native carrier identity or SSH target is fenced")
 
 type request struct {
@@ -36,6 +38,7 @@ type request struct {
 	SourceSHA256 string `json:"source_sha256,omitempty"`
 	WorkerID     string `json:"worker_id,omitempty"`
 	WorkerEpoch  uint64 `json:"worker_epoch,omitempty"`
+	Offer        []byte `json:"offer,omitempty"`
 }
 
 type response struct {
@@ -52,7 +55,7 @@ func validHash(value string) bool {
 }
 
 func (r request) valid() bool {
-	if r.Schema != schema || !validHash(r.SHA256) {
+	if r.Schema != schema || !validHash(r.SHA256) || len(r.Offer) != 0 && r.Operation != "move-terminals" {
 		return false
 	}
 	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" {
@@ -62,7 +65,9 @@ func (r request) valid() bool {
 		return false
 	}
 	switch r.Operation {
-	case "health", "retire-ssh", "resume-ssh", "open-ssh":
+	case "move-terminals":
+		return r.SourceSHA256 == "" && len(r.Offer) > 0 && len(r.Offer) <= 8<<10
+	case "health", "retire-ssh", "drain-ssh", "resume-ssh", "open-ssh":
 		return r.SourceSHA256 == ""
 	case "retire-source":
 		return validHash(r.SourceSHA256)
@@ -98,10 +103,11 @@ func decode(reader io.Reader, value any) error {
 }
 
 type Server struct {
-	Endpoint string
-	Token    []byte
-	SHA256   string
-	SSH      *managedssh.Host
+	Endpoint      string
+	Token         []byte
+	SHA256        string
+	SSH           *managedssh.Host
+	MoveTerminals func(context.Context, []byte) error
 	// WorkerFence admits only the named active worker epoch and reports when
 	// that lease is lost. The release callback remains held through the SSH
 	// policy mutation and its cancellation watcher.
@@ -131,7 +137,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		var req request
-		if decode(http.MaxBytesReader(w, r.Body, 4096), &req) != nil || !req.valid() {
+		if decode(http.MaxBytesReader(w, r.Body, 16<<10), &req) != nil || !req.valid() {
 			http.Error(w, "invalid carrier operation", http.StatusBadRequest)
 			return
 		}
@@ -141,9 +147,17 @@ func (s *Server) handler() http.Handler {
 		} else {
 			var operationErr error
 			switch req.Operation {
+			case "move-terminals":
+				if s.MoveTerminals == nil {
+					operationErr = ErrUnavailable
+				} else {
+					operationErr = s.MoveTerminals(r.Context(), req.Offer)
+				}
 			case "open-ssh":
 				open := s.SSH.OpenStreams()
 				result.SSHStreams = &open
+			case "drain-ssh":
+				operationErr = s.SSH.Drain(r.Context())
 			case "retire-ssh":
 				operationErr = s.SSH.Retire()
 			case "resume-ssh":
@@ -170,6 +184,9 @@ func (s *Server) handler() http.Handler {
 			switch {
 			case errors.Is(operationErr, managedssh.ErrSSHSessionsOpen):
 				result.Error = "busy"
+				if req.Operation == "drain-ssh" {
+					result.Error = "drain_blocked"
+				}
 			case errors.Is(operationErr, managedssh.ErrSSHHostStale), errors.Is(operationErr, hostdproto.ErrFenced):
 				result.Error = "fenced"
 			case operationErr != nil:
@@ -329,11 +346,18 @@ func (c *Client) do(ctx context.Context, req request) (response, error) {
 	if err != nil {
 		return response{}, ErrInvalid
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeout := 5 * time.Second
+	if req.Operation == "move-terminals" {
+		timeout = 15 * time.Second
+	}
+	if req.Operation == "drain-ssh" {
+		timeout = managedssh.CarrierDrainLimit + 5*time.Second
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return hostdproto.DialWorkloads(ctx, c.endpoint)
-	}, DisableKeepAlives: true, ResponseHeaderTimeout: 5 * time.Second}
+	}, DisableKeepAlives: true, ResponseHeaderTimeout: timeout}
 	defer transport.CloseIdleConnections()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, "http://carrier"+path, bytes.NewReader(body))
 	if err != nil {
@@ -359,6 +383,8 @@ func (c *Client) do(ctx context.Context, req request) (response, error) {
 		return result, nil
 	case "busy":
 		return response{}, ErrBusy
+	case "drain_blocked":
+		return response{}, ErrDrainBlocked
 	case "fenced":
 		return response{}, ErrFenced
 	default:
@@ -389,3 +415,10 @@ func (c *Client) OpenSSH(ctx context.Context) (int, error) {
 func (c *Client) CheckSourceRetirement(ctx context.Context, sourceSHA256 string) error {
 	return c.call(ctx, "retire-source", sourceSHA256)
 }
+
+func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
+	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "move-terminals", Offer: offer})
+	return err
+}
+
+func (c *Client) DrainSSH(ctx context.Context) error { return c.call(ctx, "drain-ssh", "") }
