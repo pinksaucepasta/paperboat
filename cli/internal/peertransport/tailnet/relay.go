@@ -34,16 +34,17 @@ import (
 )
 
 type relayAuthority struct {
-	mu           sync.Mutex
-	tokens       map[string]string
-	grants       map[string]derpquic.Grant
-	config       *tls.Config
-	node         RegionalNode
-	factory      magicsock.DERPCarrierFactory
-	peerNodes    []*tailcfg.Node
-	controlPeers []key.NodePublic
-	nodes        map[tailcfg.DERPRegionID]RegionalNode
-	usagePeers   map[key.NodePublic]*relayUsageObservation
+	mu              sync.Mutex
+	tokens          map[string]string
+	grants          map[string]derpquic.Grant
+	config          *tls.Config
+	node            RegionalNode
+	factory         magicsock.DERPCarrierFactory
+	peerNodes       []*tailcfg.Node
+	controlPeers    []key.NodePublic
+	nodes           map[tailcfg.DERPRegionID]RegionalNode
+	usagePeers      map[key.NodePublic]*relayUsageObservation
+	generationUsage map[[32]byte]map[key.NodePublic]*relayUsageObservation
 	// hostedData holds one channel per peer that is closed by the next WireGuard data crossing a
 	// relay that is not self-hosted (PathEligibility).
 	hostedData map[key.NodePublic]chan struct{}
@@ -380,44 +381,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 		a.relay.regionalRecoveryConfigured = true
 		a.relay.recovery = a.newRegionalRecoveryLocked()
 	}
-	a.relay.factory = func(_ key.NodePrivate, region func() *tailcfg.DERPRegion) magicsock.DERPCarrier {
-		r := region()
-		a.relay.mu.Lock()
-		var node RegionalNode
-		if r != nil {
-			node = a.relay.nodes[r.RegionID]
-		}
-		a.relay.mu.Unlock()
-		credential := func(context.Context) (string, error) {
-			a.relay.mu.Lock()
-			defer a.relay.mu.Unlock()
-			grant := a.relay.grants[node.NodeID]
-			current := a.relay.nodes[regionalID(node.NodeID)]
-			if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
-				return "", ErrAuthority
-			}
-			if node.NodeID == "" || grant.ExpiresAt <= time.Now().Unix() || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
-				return "", ErrAuthority
-			}
-			return a.relay.tokens[node.NodeID], nil
-		}
-		nodeTLS, pinErr := nodetls.ClientConfig(config, node.TLSSPKISHA256)
-		if pinErr != nil {
-			// Signed candidates are validated on ingestion; fail closed if unavailable.
-			nodeTLS = config.Clone()
-			nodeTLS.VerifyConnection = func(tls.ConnectionState) error { return nodetls.ErrIdentity }
-		}
-		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential})
-		var carrier magicsock.DERPCarrier = client
-		if node.EndpointTCPPort != 0 && contains(node.Transports, "derp_wss") {
-			u := (&url.URL{Scheme: "wss", Host: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort))), Path: "/derp"}).String()
-			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential}), 5*time.Second)
-		}
-		if a.options.TestOnlyDERPCarrier != nil {
-			carrier = a.options.TestOnlyDERPCarrier(carrier)
-		}
-		return &usageObservedCarrier{DERPCarrier: carrier, authority: &a.relay, node: node}
-	}
+	a.relay.factory = a.regionalCarrierFactory(config, [32]byte{}, key.DiscoPublic{})
 	return regions, nil
 }
 
@@ -521,4 +485,45 @@ func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certif
 		}
 	}
 	return nil
+}
+
+func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byte, disco key.DiscoPublic) magicsock.DERPCarrierFactory {
+	return func(_ key.NodePrivate, region func() *tailcfg.DERPRegion) magicsock.DERPCarrier {
+		r := region()
+		a.relay.mu.Lock()
+		var node RegionalNode
+		if r != nil {
+			node = a.relay.nodes[r.RegionID]
+		}
+		a.relay.mu.Unlock()
+		credential := func(context.Context) (string, error) {
+			a.relay.mu.Lock()
+			defer a.relay.mu.Unlock()
+			grant := a.relay.grants[node.NodeID]
+			current := a.relay.nodes[regionalID(node.NodeID)]
+			if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
+				return "", ErrAuthority
+			}
+			if node.NodeID == "" || grant.ExpiresAt <= time.Now().Unix() || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
+				return "", ErrAuthority
+			}
+			return a.relay.tokens[node.NodeID], nil
+		}
+		nodeTLS, pinErr := nodetls.ClientConfig(config, node.TLSSPKISHA256)
+		if pinErr != nil {
+			// Signed candidates are validated on ingestion; fail closed if unavailable.
+			nodeTLS = config.Clone()
+			nodeTLS.VerifyConnection = func(tls.ConnectionState) error { return nodetls.ErrIdentity }
+		}
+		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential, Namespace: namespace, GenerationDisco: disco})
+		var carrier magicsock.DERPCarrier = client
+		if node.EndpointTCPPort != 0 && contains(node.Transports, "derp_wss") {
+			u := (&url.URL{Scheme: "wss", Host: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort))), Path: "/derp"}).String()
+			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential, Namespace: namespace, GenerationDisco: disco}), 5*time.Second)
+		}
+		if a.options.TestOnlyDERPCarrier != nil {
+			carrier = a.options.TestOnlyDERPCarrier(carrier)
+		}
+		return &usageObservedCarrier{DERPCarrier: carrier, authority: &a.relay, node: node, namespace: namespace}
+	}
 }

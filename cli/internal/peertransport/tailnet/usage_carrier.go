@@ -32,6 +32,18 @@ func (r *relayAuthority) updateUsagePeersLocked(peers []NetworkPeer) {
 			current[public] = &relayUsageObservation{}
 		}
 	}
+	for _, observations := range r.generationUsage {
+		for peer := range observations {
+			if current[peer] == nil {
+				delete(observations, peer)
+			}
+		}
+		for peer := range current {
+			if observations[peer] == nil {
+				observations[peer] = &relayUsageObservation{}
+			}
+		}
+	}
 	r.usagePeers = current
 }
 
@@ -42,6 +54,7 @@ type usageObservedCarrier struct {
 	magicsock.DERPCarrier
 	authority *relayAuthority
 	node      RegionalNode
+	namespace [32]byte
 }
 
 func (c *usageObservedCarrier) Transport() string {
@@ -77,7 +90,11 @@ func wireGuardData(data []byte) bool {
 func (c *usageObservedCarrier) record(peer key.NodePublic, receive bool, at time.Time) {
 	c.authority.mu.Lock()
 	defer c.authority.mu.Unlock()
-	observation := c.authority.usagePeers[peer]
+	observations := c.authority.usagePeers
+	if c.namespace != ([32]byte{}) {
+		observations = c.authority.generationUsage[c.namespace]
+	}
+	observation := observations[peer]
 	if observation == nil {
 		return
 	}

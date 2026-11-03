@@ -48,6 +48,7 @@ type Server struct {
 	OnRelayControl         func(tailcfg.DERPRegionID, key.NodePublic, []byte) bool
 	DERPCarrierFactory     magicsock.DERPCarrierFactory
 	Key                    key.NodePrivate
+	DiscoPrivate           key.DiscoPrivate
 	LocalAddr              netip.Addr
 	AllowedPeers           map[key.NodePublic]netip.Addr
 	// PeerContacts are the allowed peers' direct contacts from the signed configuration, applied at Start
@@ -97,6 +98,10 @@ func (s *Server) Start() error {
 	}
 
 	lb := newLocoBackend(priv)
+	if !s.DiscoPrivate.IsZero() {
+		lb.discoPrivate = s.DiscoPrivate
+		lb.discoPublic = sync.OnceValue(func() key.DiscoPublic { return lb.discoPrivate.Public() })
+	}
 	lb.derpCarrierFactory = s.DERPCarrierFactory
 	lb.testOnlyPacketListener = s.TestOnlyPacketListener
 	lb.addr, lb.addrPrefix = s.LocalAddr, pfxOf(s.LocalAddr)
@@ -426,7 +431,7 @@ func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 	// is what lets either side seal the
 	// call-me-maybe messages that advertise our UDP endpoints (see
 	// locoBackend.advertiseEndpoints).
-	conf.ForceDiscoKey = discoPrivateForNode(lb.priv)
+	conf.ForceDiscoKey = lb.discoPrivate
 	netns.SetEnabled(false)
 	e, err := wgengine.NewUserspaceEngine(logf, conf)
 	if err != nil {

@@ -25,6 +25,8 @@ import (
 type Session struct {
 	traceLabel      string
 	terminalCarrier bool
+	carrierNetwork  *tailnet.CarrierNetwork
+	carrierPath     func(string) (string, string)
 	terminalUsed    atomic.Bool
 	owner           *Owner
 	peerID          string
@@ -59,7 +61,10 @@ func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessS
 	}
 	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, Reverse: reverse, Path: func(direction string) (string, string) {
 		if s.terminalCarrier {
-			return "direct", ""
+			if s.carrierPath != nil {
+				return s.carrierPath(direction)
+			}
+			return "unknown", ""
 		}
 		path, err := s.owner.authority.PeerUsagePathDirection(s.peerID, direction)
 		if err != nil {
@@ -181,7 +186,7 @@ func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 	s.routerMu.Lock()
 	if s.router == nil {
 		config := peerquic.DevelopmentStreamRouterConfig()
-		config.CandidateControl = s.receiveCarrierOffer
+		config.CandidateControl = s.receiveCarrierControl
 		router, err := peerquic.NewStreamRouter(s.quic, config)
 		if err != nil {
 			s.routerMu.Unlock()

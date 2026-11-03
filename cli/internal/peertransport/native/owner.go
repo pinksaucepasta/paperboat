@@ -199,7 +199,8 @@ type Config struct {
 	RefreshAuthority func(context.Context) error
 	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
 	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
-	AdmitOffline func(context.Context, OfflineAdmission) error
+	AdmitOffline   func(context.Context, OfflineAdmission) error
+	PrepareCarrier func(context.Context, string, CarrierExchange) (CarrierOffer, error)
 }
 
 type Owner struct {
@@ -209,6 +210,9 @@ type Owner struct {
 	refreshAuthority func(context.Context) error
 	meterIncoming    func(net.Conn, MeterBinding) net.Conn
 	admitOffline     func(context.Context, OfflineAdmission) error
+	prepareCarrier   func(context.Context, string, CarrierExchange) (CarrierOffer, error)
+	carrierMu        sync.Mutex
+	carrierNetworks  map[[32]byte]*carrierNetworkRef
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mu               sync.Mutex
@@ -226,7 +230,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, prepareCarrier: config.PrepareCarrier, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {
@@ -459,6 +463,7 @@ func (o *Owner) Close() error {
 		go func() { defer closing.Done(); failures[i] = session.Close() }()
 	}
 	closing.Wait()
+	o.closeCarrierNetworks()
 	result := errors.Join(failures...)
 	result = errors.Join(result, o.authority.Close())
 	o.workers.Wait()

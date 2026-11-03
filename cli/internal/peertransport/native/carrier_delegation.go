@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"math/big"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
 const carrierDelegationKind = "paperboat.terminal-carrier/v1"
@@ -33,6 +36,8 @@ type CarrierClaims struct {
 	ExpiresUnix       int64
 	Certificate       []byte
 	Endpoints         []string
+	DiscoPublicKey    string
+	OwnerInstance     string
 }
 
 type CarrierOffer struct {
@@ -47,7 +52,9 @@ type CarrierIdentity struct {
 	tls   *tls.Config
 }
 
-func (o *Owner) NewCarrierIdentity(endpoints []netip.AddrPort) (*CarrierIdentity, error) {
+// PrepareCarrierIdentity creates the certificate before discovery starts, so
+// its hash can isolate relay routes without inventing an endpoint placeholder.
+func (o *Owner) PrepareCarrierIdentity() (*CarrierIdentity, error) {
 	if o == nil || o.authority == nil || o.tls == nil {
 		return nil, ErrInvalid
 	}
@@ -79,23 +86,46 @@ func (o *Owner) NewCarrierIdentity(endpoints []netip.AddrPort) (*CarrierIdentity
 		return nil, err
 	}
 	claims := CarrierClaims{Kind: carrierDelegationKind, AccountID: self.AccountID, MachineID: self.MachineID, MachineGeneration: self.MachineGeneration, ParentPublicKey: self.QUICPublicKey, ExpiresUnix: expires, Certificate: der}
-	for _, endpoint := range endpoints {
-		claims.Endpoints = append(claims.Endpoints, endpoint.String())
-	}
 	offer := CarrierOffer{Claims: claims}
-	body, err := json.Marshal(claims)
-	if err != nil {
-		return nil, err
-	}
-	offer.Signature = ed25519.Sign(parentKey, body)
-	if err := offer.verify(self, now); err != nil {
-		return nil, err
-	}
+
 	config := o.tls.Clone()
 	config.Certificates = []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: private}}
 	config.GetCertificate, config.GetClientCertificate = nil, nil
 	config.NextProtos = []string{peerquic.ALPN}
 	return &CarrierIdentity{Offer: offer, tls: config}, nil
+}
+
+func (i *CarrierIdentity) Namespace() [32]byte { return sha256.Sum256(i.Offer.Claims.Certificate) }
+
+// SignCarrierCandidates binds STUN/local candidates and the generation's disco
+// key to the same delegated certificate verified on the old authenticated link.
+func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco string, endpoints []netip.AddrPort) error {
+	if o == nil || identity == nil {
+		return ErrInvalid
+	}
+	self, err := o.authority.Self()
+	if err != nil {
+		return err
+	}
+	parent, ok := o.tls.Certificates[0].PrivateKey.(ed25519.PrivateKey)
+	if !ok {
+		return ErrInvalid
+	}
+	claims := identity.Offer.Claims
+	claims.DiscoPublicKey, claims.OwnerInstance, claims.Endpoints = disco, instance, nil
+	for _, endpoint := range endpoints {
+		claims.Endpoints = append(claims.Endpoints, endpoint.String())
+	}
+	body, err := json.Marshal(claims)
+	if err != nil {
+		return err
+	}
+	offer := CarrierOffer{Claims: claims, Signature: ed25519.Sign(parent, body)}
+	if err := offer.verify(self, time.Now()); err != nil {
+		return err
+	}
+	identity.Offer = offer
+	return nil
 }
 
 func (o CarrierOffer) MarshalBinary() ([]byte, error) {
@@ -126,6 +156,16 @@ func ParseCarrierOffer(encoded []byte) (CarrierOffer, error) {
 func (o CarrierOffer) verify(parent tailnet.NetworkBinding, now time.Time) error {
 	c := o.Claims
 	if parent.Role != "machine" || c.Kind != carrierDelegationKind || c.AccountID != parent.AccountID || c.MachineID != parent.MachineID || c.MachineGeneration != parent.MachineGeneration || c.ParentPublicKey != parent.QUICPublicKey || c.ExpiresUnix <= now.Unix() || c.ExpiresUnix > now.Add(carrierDelegationLifetime).Unix() || len(c.Certificate) > 4096 || len(c.Endpoints) == 0 || len(c.Endpoints) > tailnet.MaxPeerEndpoints {
+		return ErrInvalid
+	}
+	if c.OwnerInstance != "" {
+		raw, err := hex.DecodeString(c.OwnerInstance)
+		if err != nil || len(raw) != 16 || hex.EncodeToString(raw) != c.OwnerInstance {
+			return ErrInvalid
+		}
+	}
+	disco, err := derpquic.ParseDiscoKey(c.DiscoPublicKey)
+	if err != nil || disco.IsZero() {
 		return ErrInvalid
 	}
 	seen := map[netip.AddrPort]bool{}

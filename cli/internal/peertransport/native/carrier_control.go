@@ -1,8 +1,10 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -23,7 +25,7 @@ func (s *Session) OnCarrierMove(move func(context.Context, CarrierOffer) error) 
 	}
 	if s.router == nil {
 		config := peerquic.DevelopmentStreamRouterConfig()
-		config.CandidateControl = s.receiveCarrierOffer
+		config.CandidateControl = s.receiveCarrierControl
 		router, err := peerquic.NewStreamRouter(s.quic, config)
 		if err != nil {
 			return err
@@ -46,7 +48,7 @@ func (s *Session) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	if err != nil || offer.verify(self, time.Now()) != nil {
 		return ErrInvalid
 	}
-	body, err := offer.MarshalBinary()
+	body, err := json.Marshal(carrierControl{Kind: "offer", Exchange: CarrierExchange{Offer: offer}})
 	if err != nil {
 		return err
 	}
@@ -77,7 +79,7 @@ func (s *Session) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	return nil
 }
 
-func (s *Session) receiveCarrierOffer(ctx context.Context, stream *quic.Stream) error {
+func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream) error {
 	defer stream.Close()
 	// Both ends have the updater's bounded preparation lifetime. A peer cannot
 	// keep a classifier or an old generation alive indefinitely.
@@ -97,10 +99,23 @@ func (s *Session) receiveCarrierOffer(ctx context.Context, stream *quic.Stream) 
 	if _, err := io.ReadFull(stream, body); err != nil {
 		return err
 	}
-	offer, err := ParseCarrierOffer(body)
-	if err != nil {
-		return err
+	var request carrierControl
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&request) != nil {
+		return ErrInvalid
 	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return ErrInvalid
+	}
+	if request.Kind == "candidates" {
+		return s.receiveCarrierCandidates(ctx, stream, request.Exchange)
+	}
+	if request.Kind != "offer" {
+		return ErrInvalid
+	}
+	offer := request.Exchange.Offer
 	parent, err := s.owner.authority.Peer(s.peerID)
 	if err != nil || parent != s.binding || offer.verify(parent, time.Now()) != nil {
 		return ErrInvalid
@@ -146,4 +161,72 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 		}
 	}
 	return result
+}
+
+// CarrierExchange travels only over an already authenticated native connection.
+// Peer identity is supplied by the receiving session, never by this payload.
+type CarrierExchange struct {
+	Offer          CarrierOffer
+	DiscoPublicKey string
+	Endpoints      []string
+}
+type carrierControl struct {
+	Kind     string
+	Exchange CarrierExchange
+}
+
+func (s *Session) receiveCarrierCandidates(ctx context.Context, stream *quic.Stream, request CarrierExchange) error {
+	self, err := s.owner.authority.Self()
+	if err != nil || request.Offer.verify(self, time.Now()) != nil || s.owner.prepareCarrier == nil {
+		return ErrInvalid
+	}
+	peer, err := s.owner.authority.Peer(s.peerID)
+	if err != nil || peer != s.binding {
+		return ErrInvalid
+	}
+	offer, err := s.owner.prepareCarrier(ctx, s.peerID, request)
+	if err != nil {
+		return err
+	}
+	body, err := offer.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	var size [4]byte
+	binary.BigEndian.PutUint32(size[:], uint32(len(body)))
+	_, err = stream.Write(append(size[:], body...))
+	return err
+}
+
+func (s *Session) exchangeCarrierCandidates(ctx context.Context, request CarrierExchange) (CarrierOffer, error) {
+	body, err := json.Marshal(carrierControl{Kind: "candidates", Exchange: request})
+	if err != nil || len(body) > maximumCarrierOffer {
+		return CarrierOffer{}, ErrInvalid
+	}
+	var size [4]byte
+	binary.BigEndian.PutUint32(size[:], uint32(len(body)))
+	stream, err := s.quic.OpenCandidateControl(ctx, append(size[:], body...))
+	if err != nil {
+		return CarrierOffer{}, err
+	}
+	defer stream.Close()
+	stop := context.AfterFunc(ctx, func() {
+		if q, ok := stream.(*quic.Stream); ok {
+			q.CancelRead(0)
+			q.CancelWrite(0)
+		}
+	})
+	defer stop()
+	if _, err := io.ReadFull(stream, size[:]); err != nil {
+		return CarrierOffer{}, err
+	}
+	n := binary.BigEndian.Uint32(size[:])
+	if n == 0 || n > maximumCarrierOffer {
+		return CarrierOffer{}, ErrInvalid
+	}
+	body = make([]byte, n)
+	if _, err := io.ReadFull(stream, body); err != nil {
+		return CarrierOffer{}, err
+	}
+	return ParseCarrierOffer(body)
 }

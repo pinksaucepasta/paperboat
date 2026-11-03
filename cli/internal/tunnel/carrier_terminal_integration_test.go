@@ -8,8 +8,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -43,18 +41,20 @@ func TestTerminalMovesAcrossRealCarriersWithoutReplayingInputOrOutput(t *testing
 }
 
 type connectedTerminalMove struct {
-	ownerSocket     string
-	ownerToken      []byte
-	oldRemote       *workloadbridge.Client
-	sessions        *session.Manager
-	authorizer      server.AuthorizerFactory
-	journal         *operation.Journal
-	root            string
-	token           string
-	target          *resolver.TerminalTarget
-	oldServer       *server.Server
-	oldApps         *nativesession.Service
-	deliveredCursor atomic.Int64
+	candidateNetwork *tailnet.CarrierNetwork
+	candidateOffer   native.CarrierOffer
+	ownerSocket      string
+	ownerToken       []byte
+	oldRemote        *workloadbridge.Client
+	sessions         *session.Manager
+	authorizer       server.AuthorizerFactory
+	journal          *operation.Journal
+	root             string
+	token            string
+	target           *resolver.TerminalTarget
+	oldServer        *server.Server
+	oldApps          *nativesession.Service
+	deliveredCursor  atomic.Int64
 }
 
 func newConnectedTerminalMove(t *testing.T, ctx context.Context, issuer, machine, client string, public ed25519.PublicKey, private ed25519.PrivateKey) *connectedTerminalMove {
@@ -286,26 +286,19 @@ func (f *connectedTerminalMove) parallelCarrier(t *testing.T, ctx context.Contex
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { nextOwner.Close() })
-	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	identity, err := nextOwner.PrepareCarrierIdentity()
 	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := nextOwner.NewCarrierIdentity([]netip.AddrPort{socket.LocalAddr().(*net.UDPAddr).AddrPort()})
-	if err != nil {
-		socket.Close()
 		t.Fatal(err)
 	}
 	_, apps := f.endpoint(t)
 	nextCtx, stopNext := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	ready := make(chan struct{})
-	go func() { done <- nextOwner.ListenCarrier(nextCtx, socket, identity, apps.Serve, ready) }()
-	t.Cleanup(func() { stopNext(); socket.Close(); <-done; apps.Wait() })
-	select {
-	case <-ready:
-	case <-time.After(time.Second):
-		t.Fatal("carrier did not publish listener readiness")
+	network, err := nextOwner.StartCarrierNetwork(nextCtx, identity, "", apps.Serve)
+	if err != nil {
+		t.Fatal(err)
 	}
+	f.candidateNetwork, f.candidateOffer = network, identity.Offer
+	t.Cleanup(func() { stopNext(); network.Close(); apps.Wait() })
+
 	return identity.Offer
 }
 
@@ -330,4 +323,19 @@ func (f *connectedTerminalMove) checkWriterOwner(t *testing.T) {
 		t.Fatal("replacement worker cannot resolve the exact file recipient", err)
 	}
 
+}
+
+func (f *connectedTerminalMove) prepareCarrier(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
+	if f == nil || f.candidateNetwork == nil || !bytes.Equal(request.Offer.Claims.Certificate, f.candidateOffer.Claims.Certificate) {
+		return native.CarrierOffer{}, native.ErrInvalid
+	}
+	if err := f.candidateNetwork.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
+		return native.CarrierOffer{}, err
+	}
+	socket, err := f.candidateNetwork.Dial(ctx, peer)
+	if err != nil {
+		return native.CarrierOffer{}, err
+	}
+	socket.Close()
+	return f.candidateOffer, nil
 }

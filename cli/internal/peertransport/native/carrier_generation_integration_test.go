@@ -1,6 +1,7 @@
 package native_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -18,9 +19,17 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"tailscale.com/tstest/integration"
+	"tailscale.com/types/nettype"
 )
 
 func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
+	testDelegatedCarrierGeneration(t, false)
+}
+func TestDelegatedCarrierPunchesAnUnsolicitedInboundFilter(t *testing.T) {
+	testDelegatedCarrierGeneration(t, true)
+}
+
+func testDelegatedCarrierGeneration(t *testing.T, behindNAT bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	public, signer, _ := ed25519.GenerateKey(rand.Reader)
@@ -28,7 +37,11 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	machineTLS, machineFP := testTLS(t, "machine")
 	client := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFP, VirtualAddress: "fd7a:115c:a1e0::1"}
 	machine := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: machineFP, VirtualAddress: "fd7a:115c:a1e0::2"}
-	ca, ma := testAuthority(t, client, testKeys{"native_test": public}), testAuthority(t, machine, testKeys{"native_test": public})
+	var listener nettype.PacketListener
+	if behindNAT {
+		listener = &punchPacketListener{}
+	}
+	ca, ma := testAuthority(t, client, testKeys{"native_test": public}), testAuthority(t, machine, testKeys{"native_test": public}, listener)
 	client.WireGuardPublicKey, client.KeyGeneration = prepareBinding(t, ca)
 	machine.WireGuardPublicKey, machine.KeyGeneration = prepareBinding(t, ma)
 	now := time.Now().Unix()
@@ -41,7 +54,22 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer co.Close()
-	mo, err := native.NewOwner(native.Config{Authority: ma, TLS: machineTLS})
+	var generation *tailnet.CarrierNetwork
+	var identity *native.CarrierIdentity
+	mo, err := native.NewOwner(native.Config{Authority: ma, TLS: machineTLS, PrepareCarrier: func(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
+		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
+			return native.CarrierOffer{}, native.ErrInvalid
+		}
+		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
+			return native.CarrierOffer{}, err
+		}
+		socket, err := generation.Dial(ctx, peer)
+		if err != nil {
+			return native.CarrierOffer{}, err
+		}
+		socket.Close()
+		return identity.Offer, nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,20 +89,7 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	oldStream := openCarrierTerminal(t, ctx, old, "old")
 	defer oldStream.Close()
 	carrierEcho(t, oldStream)
-	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := mo.NewCarrierIdentity([]netip.AddrPort{socket.LocalAddr().(*net.UDPAddr).AddrPort()})
-	if err != nil {
-		socket.Close()
-		t.Fatal(err)
-	}
-	encoded, err := identity.Offer.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	offer, err := native.ParseCarrierOffer(encoded)
+	identity, err = mo.PrepareCarrierIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,20 +98,20 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	directCtx, stopDirect := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	ready := make(chan struct{})
-	go func() { done <- mo.ListenCarrier(directCtx, socket, identity, apps.Serve, ready) }()
-	defer func() { stopDirect(); socket.Close(); <-done; apps.Wait() }()
-	select {
-	case <-ready:
-	case <-time.After(time.Second):
-		t.Fatal("carrier did not publish listener readiness")
+	generation, err = mo.StartCarrierNetwork(directCtx, identity, "", apps.Serve)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer func() { stopDirect(); generation.Close(); apps.Wait() }()
+	offer := identity.Offer
 	// The wire proof is machine-signed and uses only the old authenticated peer.
 	// No NetworkAPI is supplied to either owner; a server round trip cannot occur.
 	moved := make(chan *native.Session, 1)
 	if err := old.OnCarrierMove(func(moveCtx context.Context, offered native.CarrierOffer) error {
 		next, err := old.DialCarrier(moveCtx, offered)
+		if err != nil {
+			t.Logf("candidate move failed: %v", err)
+		}
 		if err == nil {
 			moved <- next
 		}
@@ -110,7 +125,10 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failedIdentity, err := mo.NewCarrierIdentity([]netip.AddrPort{unreachable.LocalAddr().(*net.UDPAddr).AddrPort()})
+	failedIdentity, err := mo.PrepareCarrierIdentity()
+	if err == nil {
+		err = mo.SignCarrierCandidates(failedIdentity, "", generation.DiscoPublic(), []netip.AddrPort{unreachable.LocalAddr().(*net.UDPAddr).AddrPort()})
+	}
 	unreachable.Close()
 	if err != nil {
 		t.Fatal(err)

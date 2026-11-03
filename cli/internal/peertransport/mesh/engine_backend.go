@@ -60,7 +60,8 @@ type locoBackend struct {
 	// discoPublic returns the node's disco public key, memoized to
 	// avoid redoing the curve25519 derivation for every client that
 	// joins.
-	discoPublic func() key.DiscoPublic
+	discoPublic  func() key.DiscoPublic
+	discoPrivate key.DiscoPrivate
 
 	// onDERPRecv is called for non-disco DERP packets before the
 	// peer map lookup. Set before createEngine.
@@ -133,8 +134,8 @@ func (b *locoBackend) Close() error {
 }
 
 func newLocoBackend(priv key.NodePrivate) *locoBackend {
-	lb := &locoBackend{logf: logger.Discard, priv: priv, pub: priv.Public()}
-	lb.discoPublic = sync.OnceValue(func() key.DiscoPublic { return discoPrivateForNode(lb.priv).Public() })
+	lb := &locoBackend{logf: logger.Discard, priv: priv, pub: priv.Public(), discoPrivate: discoPrivateForNode(priv)}
+	lb.discoPublic = sync.OnceValue(func() key.DiscoPublic { return lb.discoPrivate.Public() })
 	return lb
 }
 
@@ -269,7 +270,7 @@ func (b *locoBackend) advertiseEndpointsTo(only key.NodePublic) {
 		return
 	}
 	payload := (&disco.CallMeMaybe{MyNumber: eps}).AppendMarshal(nil)
-	discoPriv := discoPrivateForNode(b.priv)
+	discoPriv := b.discoPrivate
 	mc := b.sys.MagicSock.Get()
 	for _, p := range targets {
 		// Frame and seal the message the same way magicsock's

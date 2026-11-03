@@ -56,9 +56,16 @@ func (a *Authority) peerKeyLocked(endpointID string) (key.NodePublic, error) {
 }
 
 func (r *relayAuthority) usageNode(peer key.NodePublic, direction string, now time.Time) string {
+	return r.generationUsageNode([32]byte{}, peer, direction, now)
+}
+func (r *relayAuthority) generationUsageNode(namespace [32]byte, peer key.NodePublic, direction string, now time.Time) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	observation := r.usagePeers[peer]
+	observations := r.usagePeers
+	if namespace != ([32]byte{}) {
+		observations = r.generationUsage[namespace]
+	}
+	observation := observations[peer]
 	if observation == nil {
 		return ""
 	}

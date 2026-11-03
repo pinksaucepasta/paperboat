@@ -6,11 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"net"
-	"net/netip"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 type carrierPacket struct {
@@ -43,39 +43,69 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 		}
 		return nil
 	}
-	var last error
-	for _, endpoint := range offer.Claims.Endpoints {
-		remote := netip.MustParseAddrPort(endpoint) // verified above
-		network := "udp6"
-		if remote.Addr().Is4() {
-			network = "udp4"
-		}
-		socket, err := (&net.ListenConfig{}).ListenPacket(ctx, network, ":0")
-		if err != nil {
-			return nil, err
-		}
-		transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: net.UDPAddrFromAddrPort(remote)}, config, peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive))
-		if err != nil {
-			last = err
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			continue
-		}
-		session, err := newSession(s.owner, s.peerID, peer, transport, true)
-		if err == nil {
-			err = s.owner.add(session)
-		}
-		if err != nil {
-			transport.Close()
-			return nil, err
-		}
-		return session, nil
+	network, release, err := s.getCarrierNetwork(ctx, offer)
+	if err != nil {
+		return nil, err
 	}
-	return nil, last
+	kept := false
+	defer func() {
+		if !kept {
+			release()
+		}
+	}()
+	for len(network.Endpoints()) == 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-network.EndpointsChanged():
+		}
+	}
+	if err := network.AddPeer(s.peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
+		return nil, err
+	}
+	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic()}
+	for _, endpoint := range network.Endpoints() {
+		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
+	}
+	current, err := s.exchangeCarrierCandidates(ctx, exchange)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(current.Claims.Certificate, offer.Claims.Certificate) || current.verify(peer, time.Now()) != nil {
+		return nil, ErrInvalid
+	}
+	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
+		return nil, err
+	}
+	socket, err := network.Dial(ctx, s.peerID)
+	if err != nil {
+		return nil, err
+	}
+	transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: socket.RemoteAddr()}, config, peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive))
+	if err != nil {
+		return nil, err
+	}
+	session, err := newSession(s.owner, s.peerID, peer, transport, true)
+	if err == nil {
+		err = s.owner.add(session)
+	}
+	if err != nil {
+		transport.Close()
+		return nil, err
+	}
+	session.carrier.OnDone(release)
+	kept = true
+	session.setCarrierNetwork(network)
+	path := network.PeerPath(s.peerID)
+	s.owner.emit(Event{Kind: "carrier_moved", PeerID: s.peerID, Path: path})
+	if path == "direct" {
+		path = "direct-punched"
+	}
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "connected", "path", path)
+	return session, nil
 }
 
-// ListenCarrier is a direct, mutually authenticated terminal-only transport.
+// ListenCarrier is a mutually authenticated terminal-only transport inside WG.
 // The signed parent authority remains its admission and revocation owner.
 func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identity *CarrierIdentity, serve func(context.Context, *Session) error, ready chan<- struct{}) error {
 	if o == nil || ctx == nil || socket == nil || identity == nil || identity.tls == nil || serve == nil || ready == nil {
@@ -109,38 +139,29 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 	defer stop()
 	ownerStop := context.AfterFunc(o.ctx, func() { _ = listener.Close() })
 	defer ownerStop()
-	for {
-		transport, err := listener.Accept(ctx)
-		if err != nil {
-			return err
-		}
-		peer, err := o.carrierPeer(transport.Connection.ConnectionState().TLS)
-		if err != nil {
-			transport.Close()
-			continue
-		}
-		session, err := newSession(o, peer.EndpointID, peer, transport, true)
-		if err != nil {
-			transport.Close()
-			continue
-		}
-		o.mu.Lock()
-		if o.closed {
-			o.mu.Unlock()
-			session.Close()
-			return net.ErrClosed
-		}
-		o.sessions[session] = struct{}{}
-		o.workers.Add(1)
-		o.mu.Unlock()
-		go func() {
-			defer o.workers.Done()
-			defer session.Close()
-			if err := serve(ctx, session); err != nil && !normalPeerServeTermination(err) {
-				o.emit(Event{Kind: "serve_failed", PeerID: peer.EndpointID, Err: err})
-			}
-		}()
+	handshake, cancel := context.WithTimeout(ctx, 10*time.Second)
+	transport, err := listener.Accept(handshake)
+	cancel()
+	if err != nil {
+		return err
 	}
+	peer, err := o.carrierPeer(transport.Connection.ConnectionState().TLS)
+	if err != nil {
+		transport.Close()
+		return err
+	}
+	session, err := newSession(o, peer.EndpointID, peer, transport, true)
+	if err != nil {
+		transport.Close()
+		return err
+	}
+	if err := o.add(session); err != nil {
+		session.Close()
+		return err
+	}
+	defer session.Close()
+	return serve(ctx, session)
+
 }
 
 func (o *Owner) carrierPeer(state tls.ConnectionState) (tailnet.NetworkBinding, error) {

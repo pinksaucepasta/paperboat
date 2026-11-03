@@ -354,7 +354,7 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	if hostRules {
 		admitOffline = func(context.Context, native.OfflineAdmission) error { return nil }
 	}
-	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, AdmitOffline: admitOffline, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
+	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, PrepareCarrier: terminal.prepareCarrier, AdmitOffline: admitOffline, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
 	if err != nil {
 		t.Fatal(err)
 	}
