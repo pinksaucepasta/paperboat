@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -32,7 +33,11 @@ var ErrIdentityRejected = errors.New("the control plane rejected this computer's
 type rejectedError struct{ retryAt time.Time }
 
 func (e rejectedError) Error() string { return ErrIdentityRejected.Error() }
-func (e rejectedError) Unwrap() error { return ErrIdentityRejected }
+
+// A held request carries the same denial as the response that opened the
+// breaker. Backoff suppresses network traffic, never revocation semantics.
+func (e rejectedError) Unwrap() []error       { return []error{ErrIdentityRejected, api.ErrUnauthenticated} }
+func (e rejectedError) DiagnosticStatus() int { return http.StatusUnauthorized }
 
 // QuietFailure marks a refusal that is expected and already explained: it needs no diagnostics
 // event of its own for every held-back request.
