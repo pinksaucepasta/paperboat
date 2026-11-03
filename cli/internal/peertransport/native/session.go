@@ -31,6 +31,7 @@ type Session struct {
 	quic            *peerquic.Session
 	router          *peerquic.StreamRouter
 	routerMu        sync.Mutex
+	moveCarrier     func(context.Context, CarrierOffer) error
 	once            sync.Once
 	closing         atomic.Bool
 	err             error
@@ -178,7 +179,9 @@ func (s *Session) Open(ctx context.Context) (net.Conn, error) {
 func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 	s.routerMu.Lock()
 	if s.router == nil {
-		router, err := peerquic.NewStreamRouter(s.quic, peerquic.DevelopmentStreamRouterConfig())
+		config := peerquic.DevelopmentStreamRouterConfig()
+		config.CandidateControl = s.receiveCarrierOffer
+		router, err := peerquic.NewStreamRouter(s.quic, config)
 		if err != nil {
 			s.routerMu.Unlock()
 			return nil, err

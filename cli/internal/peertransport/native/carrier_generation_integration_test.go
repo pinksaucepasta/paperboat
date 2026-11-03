@@ -87,9 +87,40 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	defer func() { stopDirect(); socket.Close(); <-done; apps.Wait() }()
 	// The wire proof is machine-signed and uses only the old authenticated peer.
 	// No NetworkAPI is supplied to either owner; a server round trip cannot occur.
-	next, err := old.DialCarrier(ctx, offer)
+	moved := make(chan *native.Session, 1)
+	if err := old.OnCarrierMove(func(moveCtx context.Context, offered native.CarrierOffer) error {
+		next, err := old.DialCarrier(moveCtx, offered)
+		if err == nil {
+			moved <- next
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Crash before a new listener can accept: a real UDP dial fails while the
+	// old application continues. No server refresh or terminal bytes are used.
+	unreachable, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	failedIdentity, err := mo.NewCarrierIdentity([]netip.AddrPort{unreachable.LocalAddr().(*net.UDPAddr).AddrPort()})
+	unreachable.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mo.OfferCarrier(ctx, failedIdentity.Offer); err == nil {
+		t.Fatal("unreachable generation was acknowledged as moved")
+	}
+	carrierEcho(t, oldStream)
+	// The old server sends only a bounded, signed address offer on its existing
+	// authenticated QUIC connection, and waits for the client's move ACK.
+	// Its application byte stream remains usable throughout.
+	if err := mo.OfferCarrier(ctx, offer); err != nil {
+		t.Fatal(err)
+	}
+	next := <-moved
+	if next == nil {
+		t.Fatal("carrier offer was acknowledged without a new connection")
 	}
 	defer next.Close()
 	nextStream := openCarrierTerminal(t, ctx, next, "new")
