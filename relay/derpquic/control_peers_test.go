@@ -69,3 +69,20 @@ func TestGrantPartsMergeInTheirOwnSize(t *testing.T) {
 	}
 	t.Logf("%d parts of %d merged in %v", MaxMergedPeers/MaxGrantPeers, MaxGrantPeers, elapsed)
 }
+
+func TestGrantPartsCanAddTheirFirstPeerOrControlEntry(t *testing.T) {
+	for _, controlFirst := range []bool{false, true} {
+		first := Grant{Generation: 3, Peers: []Peer{{WireGuardPublicKey: "peer", Scopes: []Scope{{ResourceID: "resource"}}}}}
+		next := Grant{Generation: 3, RelayControlPeers: []string{"control"}}
+		if controlFirst {
+			first, next = next, first
+		}
+		merged, err := mergeGrants(first.withIndex(), next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := merged.peerEntry("peer"); !exists || !merged.controls("control") {
+			t.Fatal("later grant part lost a peer or discovery-control entry")
+		}
+	}
+}

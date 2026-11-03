@@ -342,6 +342,14 @@ func mergeGrants(current, next Grant) (Grant, error) {
 	if len(current.Peers)+len(addedPeers) > MaxMergedPeers || len(current.RelayControlPeers)+len(addedControl) > MaxMergedPeers {
 		return Grant{}, ErrAdmission
 	}
+	// A first part may contain only peers or only discovery-control entries.
+	// Allocate the other index only after the merged size has been validated.
+	if len(addedPeers) != 0 && index.peers == nil {
+		index.peers = make(map[string]int, len(addedPeers))
+	}
+	if len(addedControl) != 0 && index.control == nil {
+		index.control = make(map[string]bool, len(addedControl))
+	}
 	merged := next
 	merged.Peers, merged.RelayControlPeers = current.Peers, current.RelayControlPeers
 	for _, peer := range next.Peers {
