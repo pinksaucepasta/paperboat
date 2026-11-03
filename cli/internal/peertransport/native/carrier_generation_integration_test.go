@@ -23,13 +23,17 @@ import (
 )
 
 func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
-	testDelegatedCarrierGeneration(t, false)
+	testDelegatedCarrierGeneration(t, false, false)
 }
 func TestDelegatedCarrierPunchesAnUnsolicitedInboundFilter(t *testing.T) {
-	testDelegatedCarrierGeneration(t, true)
+	testDelegatedCarrierGeneration(t, true, false)
 }
 
-func testDelegatedCarrierGeneration(t *testing.T, behindNAT bool) {
+func TestDelegatedCarrierRetainsPreparationAcrossLostInitials(t *testing.T) {
+	testDelegatedCarrierGeneration(t, true, true)
+}
+
+func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	public, signer, _ := ed25519.GenerateKey(rand.Reader)
@@ -38,8 +42,10 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT bool) {
 	client := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFP, VirtualAddress: "fd7a:115c:a1e0::1"}
 	machine := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: machineFP, VirtualAddress: "fd7a:115c:a1e0::2"}
 	var listener nettype.PacketListener
+	var filtered *punchPacketListener
 	if behindNAT {
-		listener = &punchPacketListener{}
+		filtered = &punchPacketListener{}
+		listener = filtered
 	}
 	ca, ma := testAuthority(t, client, testKeys{"native_test": public}), testAuthority(t, machine, testKeys{"native_test": public}, listener)
 	client.WireGuardPublicKey, client.KeyGeneration = prepareBinding(t, ca)
@@ -89,6 +95,9 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT bool) {
 	oldStream := openCarrierTerminal(t, ctx, old, "old")
 	defer oldStream.Close()
 	carrierEcho(t, oldStream)
+	if lostInitials {
+		filtered.stallNewSockets.Store(true)
+	}
 	identity, err = mo.PrepareCarrierIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +178,9 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT bool) {
 	nextStream := openCarrierTerminal(t, ctx, next, "new")
 	defer nextStream.Close()
 	carrierEcho(t, nextStream)
+	if lostInitials && filtered.stalled.Load() == 0 {
+		t.Fatal("lost-Initial capture did not drop new-generation packets")
+	}
 	carrierEcho(t, oldStream)
 	for _, consumer := range []string{"exec", "ssh"} {
 		h, err := streamauth.New("denied", consumer, "denied", "credential_terminal", time.Now().Add(time.Minute), 1<<20)

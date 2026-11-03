@@ -27,6 +27,11 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if s == nil || ctx == nil || s.owner == nil || s.quic == nil || s.quic.Connection.Context().Err() != nil {
 		return nil, ErrInvalid
 	}
+	if _, bounded := ctx.Deadline(); !bounded {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+	}
 	peer, err := s.owner.authority.Peer(s.peerID)
 	if err != nil || peer != s.binding {
 		return nil, tailnet.ErrAdmission
@@ -77,14 +82,11 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
 		return nil, err
 	}
-	socket, err := network.Dial(ctx, s.peerID)
+	transport, err := s.dialCarrierPacket(ctx, network, config)
 	if err != nil {
 		return nil, err
 	}
-	transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: socket.RemoteAddr()}, config, peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive))
-	if err != nil {
-		return nil, err
-	}
+
 	session, err := newSession(s.owner, s.peerID, peer, transport, true)
 	if err == nil {
 		err = s.owner.add(session)
@@ -174,4 +176,27 @@ func (o *Owner) carrierPeer(state tls.ConnectionState) (tailnet.NetworkBinding, 
 	}
 	peer, err := o.authority.PeerForQUICKey(public)
 	return peer, err
+}
+
+// Preparation owns a single bounded attempt while the old terminal serves.
+// As with Owner.Dial, a lost pre-application handshake retries a fresh flow
+// without discarding discovery/relay allocation state or replaying input.
+func (s *Session) dialCarrierPacket(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config) (*peerquic.Session, error) {
+	for {
+		socket, err := network.Dial(ctx, s.peerID)
+		if err != nil {
+			return nil, err
+		}
+		transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: socket.RemoteAddr()}, config, peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive))
+		if err == nil {
+			return transport, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		failure := classifyPeerOperationFailure(ctx, "peer_connect", "native_private_failed", err)
+		if !retryablePeerDial(failure) {
+			return nil, failure
+		}
+	}
 }
