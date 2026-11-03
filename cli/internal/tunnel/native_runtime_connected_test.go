@@ -192,7 +192,7 @@ func TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner(t *
 	}
 }
 
-func connectedProductionRuntime(t *testing.T, mode string) {
+func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	var machine *connectedMachineAccess
 	if mode == "machine_service" || mode == "machine_proxy" {
 		machine = newConnectedMachineAccess(t)
@@ -290,6 +290,9 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	var terminal *connectedTerminalMove
 	if mode == "terminal_move" {
 		terminal = newConnectedTerminalMove(t, ctx, issuer, machineID, cliID, signerPublic, signerPrivate)
+		if len(fault) != 0 {
+			terminal.crashPhase = fault[0]
+		}
 	}
 	state := &connectedConfigState{}
 	networkAPI := connectedNetworkAPI{register: func(request api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {

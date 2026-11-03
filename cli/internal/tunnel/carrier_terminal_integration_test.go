@@ -41,6 +41,8 @@ func TestTerminalMovesAcrossRealCarriersWithoutReplayingInputOrOutput(t *testing
 }
 
 type connectedTerminalMove struct {
+	crashPhase       string
+	candidateStop    context.CancelFunc
 	candidateNetwork *tailnet.CarrierNetwork
 	candidateOffer   native.CarrierOffer
 	ownerSocket      string
@@ -160,6 +162,10 @@ func (f *connectedTerminalMove) serve(ctx context.Context, s *native.Session) er
 
 func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runtime *cliNativeRuntime, old *native.Owner, authority *tailnet.Authority, store config.ProfileStore, leaf tls.Certificate, public ed25519.PublicKey) {
 	t.Helper()
+	if f.crashPhase != "" {
+		f.exerciseFailure(t, ctx, runtime, old, authority, store, leaf, public)
+		return
+	}
 	app := peerApplication{helper: func(ctx context.Context, message helperMessageConnection, target *resolver.TerminalTarget) (Conn, error) {
 		return newInitializedHelperTerminalConn(ctx, message, target, 4)
 	}}
@@ -296,7 +302,7 @@ func (f *connectedTerminalMove) parallelCarrier(t *testing.T, ctx context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.candidateNetwork, f.candidateOffer = network, identity.Offer
+	f.candidateNetwork, f.candidateOffer, f.candidateStop = network, identity.Offer, stopNext
 	t.Cleanup(func() { stopNext(); network.Close(); apps.Wait() })
 
 	return identity.Offer

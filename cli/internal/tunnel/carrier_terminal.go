@@ -163,7 +163,7 @@ func (c *carrierTerminal) attachPrepared(ctx context.Context) (Conn, error) {
 	conn, err := c.application.helper(move.ctx, move.message, move.target)
 	if err == nil {
 		helper, ok := conn.(*helperTerminalConn)
-		if !ok {
+		if !ok || helper == nil {
 			err = ErrPeerTerminalInvalid
 		} else {
 			err = move.session.OnCarrierMove(c.move)
@@ -178,7 +178,13 @@ func (c *carrierTerminal) attachPrepared(ctx context.Context) (Conn, error) {
 		}
 	}
 	if err != nil {
-		if conn != nil {
+		// A failed initializer returns a nil *helperTerminalConn through Conn.
+		// Preserve the initialization error without calling Close on that pointer.
+		if helper, ok := conn.(*helperTerminalConn); ok {
+			if helper != nil {
+				helper.Close()
+			}
+		} else if conn != nil {
 			conn.Close()
 		}
 		move.message.Close()
