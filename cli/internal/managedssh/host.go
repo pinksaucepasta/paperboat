@@ -43,6 +43,7 @@ type Host struct {
 	retired        bool
 	disabled       bool
 	flows          map[*hostFlow]struct{}
+	changed        chan struct{}
 }
 
 // SetAudit installs the audit for a Host built before its queue exists (the carrier's). Call it before the
@@ -250,6 +251,10 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		delete(h.flows, flow)
+		if h.changed != nil {
+			close(h.changed)
+			h.changed = make(chan struct{})
+		}
 		h.active[generation]--
 		if h.active[generation] == 0 {
 			delete(h.active, generation)
