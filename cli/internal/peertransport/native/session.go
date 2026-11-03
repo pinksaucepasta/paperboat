@@ -113,9 +113,9 @@ var ErrStreamRejected = errors.New("native application stream rejected")
 
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
-func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) (*Session, error) {
-	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
-	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID)
+func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session, terminalCarrier bool) (*Session, error) {
+	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session, terminalCarrier: terminalCarrier}
+	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID, !terminalCarrier)
 	if err != nil {
 		return nil, err
 	}

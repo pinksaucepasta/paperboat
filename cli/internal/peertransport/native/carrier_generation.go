@@ -62,9 +62,8 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 			}
 			continue
 		}
-		session, err := newSession(s.owner, s.peerID, peer, transport)
+		session, err := newSession(s.owner, s.peerID, peer, transport, true)
 		if err == nil {
-			session.terminalCarrier = true
 			err = s.owner.add(session)
 		}
 		if err != nil {
@@ -119,12 +118,11 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 			transport.Close()
 			continue
 		}
-		session, err := newSession(o, peer.EndpointID, peer, transport)
+		session, err := newSession(o, peer.EndpointID, peer, transport, true)
 		if err != nil {
 			transport.Close()
 			continue
 		}
-		session.terminalCarrier = true
 		o.mu.Lock()
 		if o.closed {
 			o.mu.Unlock()

@@ -296,7 +296,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", tailnet.ErrAdmission)
 	}
-	session, err := newSession(o, peerID, peer, quicSession)
+	session, err := newSession(o, peerID, peer, quicSession, false)
 	if err != nil {
 		_ = quicSession.Close()
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
@@ -370,7 +370,7 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				}
 				return
 			}
-			session, err := newSession(o, peer.EndpointID, peer, quicSession)
+			session, err := newSession(o, peer.EndpointID, peer, quicSession, false)
 			if err != nil {
 				_ = quicSession.Close()
 				o.emit(Event{Kind: "accept_failed", PeerID: peer.EndpointID, Err: err})
