@@ -65,16 +65,18 @@ type peerConn struct {
 		SetReadDeadline(time.Time) error
 		SetWriteDeadline(time.Time) error
 	}
-	ctx      context.Context
-	cancel   context.CancelFunc
-	closeFn  func(uint64, string)
-	tlsState tls.ConnectionState
-	key      key.NodePublic
-	grant    Grant
-	out      chan queued
-	control  chan []byte
-	rate     *budget
-	sequence atomic.Uint64
+	ctx             context.Context
+	cancel          context.CancelFunc
+	closeFn         func(uint64, string)
+	tlsState        tls.ConnectionState
+	key             key.NodePublic
+	namespace       [32]byte
+	generationDisco key.DiscoPublic
+	grant           Grant
+	out             chan queued
+	control         chan []byte
+	rate            *budget
+	sequence        atomic.Uint64
 	// paired remembers the last peer this connection's grant was found paired with, and both signed grants
 	// at the time, so a run of datagrams to one peer costs one check (guarded by Server.mu).
 	paired pairMemo
@@ -218,11 +220,11 @@ func (s *Server) servePeer(p *peerConn) {
 	}()
 	stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 	kind, b, err := readFrame(stream)
-	if err != nil || kind != frameAuth {
+	if err != nil || kind != frameAuth && kind != frameAuthGeneration {
 		s.reject(p, ErrProtocol)
 		return
 	}
-	if err = s.admit(p, string(b)); err != nil {
+	if err = s.authenticate(p, kind, b); err != nil {
 		s.reject(p, err)
 		return
 	}
@@ -249,7 +251,7 @@ func (s *Server) servePeer(p *peerConn) {
 	defer stop()
 	stopWatch := lease.Poll(func(context.Context) error {
 		s.mu.Lock()
-		current := s.peers[p.key] == p
+		current := s.peers[routeKey(p.key, p.namespace)] == p
 		drained := s.draining && !time.Now().Before(s.deadline)
 		s.mu.Unlock()
 		if drained {
@@ -279,8 +281,8 @@ func (s *Server) servePeer(p *peerConn) {
 			return
 		}
 		switch kind {
-		case frameAuth:
-			if err = s.admit(p, string(b)); errors.Is(err, ErrExpired) {
+		case frameAuth, frameAuthGeneration:
+			if err = s.authenticate(p, kind, b); errors.Is(err, ErrExpired) {
 				continue
 			} else if err != nil {
 				s.reject(p, err)
@@ -358,8 +360,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
-		k, _ := ParseKey(old.WireGuardPublicKey)
-		live := s.peers[k]
+		live := s.liveGrantLocked(old.Grant)
 		if old.ExpiresAt <= now.Unix() && (live == nil || grantID(live.grant) != id) {
 			delete(s.fences, id)
 		}
@@ -378,7 +379,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 			count++
 		}
 	}
-	old := s.peers[k]
+	old := s.peers[routeKey(k, p.namespace)]
 	if old != nil && old != p {
 		if old.grant.AccountID != g.AccountID || old.grant.EndpointID != g.EndpointID || g.Generation < old.grant.Generation {
 			return ErrAdmission
@@ -405,7 +406,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 	}
 	p.key = k
 	p.grant = g
-	s.peers[k] = p
+	s.peers[routeKey(k, p.namespace)] = p
 	// A merged part only adds peers to the admitted grant: its fence (and the peer-relay leases that hold
 	// it) stays. Comparing the whole authority costs every peer the endpoint names, on every part.
 	if previous := s.fences[id]; previous != nil && (merging || sameGrantAuthority(previous.Grant, g)) {
@@ -433,7 +434,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 	return nil
 }
 func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
-	if p == nil || q == nil || s.peers[p.key] != p || s.peers[q.key] != q || s.draining && !now.Before(s.deadline) {
+	if p == nil || q == nil || p.namespace != q.namespace || s.peers[routeKey(p.key, p.namespace)] != p || s.peers[routeKey(q.key, q.namespace)] != q || s.draining && !now.Before(s.deadline) {
 		return false
 	}
 	// Any new, merged or revoked grant changes a signed hash or the connection, so the memo cannot outlive
@@ -450,10 +451,10 @@ func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	q := s.peers[msg.peer]
+	q := s.peers[routeKey(msg.peer, p.namespace)]
 	authorized := s.authorizedLocked(p, q, time.Now())
 	if msg.control {
-		authorized = authorized || p != nil && q != nil && s.peers[p.key] == p && s.peers[q.key] == q && controlAdmitted(p.grant, q.grant)
+		authorized = authorized || p != nil && q != nil && s.peers[routeKey(p.key, p.namespace)] == p && s.peers[routeKey(q.key, q.namespace)] == q && controlAdmitted(p.grant, q.grant)
 	}
 	if !authorized {
 		s.dropped.Add(1)
@@ -485,7 +486,7 @@ func (s *Server) readDatagrams(p *peerConn) {
 		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			return s.authorizedLocked(p, s.peers[k], now)
+			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
 		})
 		if e != nil {
 			s.reject(p, e)
@@ -511,7 +512,7 @@ func (s *Server) writePackets(p *peerConn) {
 			s.mu.Lock()
 			valid := s.authorizedLocked(msg.source, p, time.Now())
 			if msg.control && !msg.service {
-				valid = valid || msg.source != nil && s.peers[msg.source.key] == msg.source && s.peers[p.key] == p && controlAdmitted(msg.source.grant, p.grant)
+				valid = valid || msg.source != nil && s.peers[routeKey(msg.source.key, msg.source.namespace)] == msg.source && s.peers[routeKey(p.key, p.namespace)] == p && controlAdmitted(msg.source.grant, p.grant)
 			}
 			if msg.service {
 				valid = msg.source == p && s.serviceAllowedLocked(p) && s.service != nil && msg.peer == s.service.key && msg.lease != nil

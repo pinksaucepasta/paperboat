@@ -20,10 +20,12 @@ import (
 )
 
 type WSSClientConfig struct {
-	URL        string
-	TLS        *tls.Config
-	Credential func(context.Context) (string, error)
-	Proxy      func(*http.Request) (*url.URL, error)
+	URL             string
+	TLS             *tls.Config
+	Credential      func(context.Context) (string, error)
+	Namespace       [32]byte
+	GenerationDisco key.DiscoPublic
+	Proxy           func(*http.Request) (*url.URL, error)
 }
 
 type WSSClient struct {
@@ -39,18 +41,20 @@ type WSSClient struct {
 }
 
 type wssClientConn struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	ws         *websocket.Conn
-	conn       net.Conn
-	receive    chan packet
-	generation int
-	writeMu    sync.Mutex
-	pingMu     sync.Mutex
-	pings      map[[8]byte]chan struct{}
-	workers    sync.WaitGroup
-	errMu      sync.Mutex
-	err        error
+	ctx             context.Context
+	cancel          context.CancelFunc
+	ws              *websocket.Conn
+	conn            net.Conn
+	receive         chan packet
+	generation      int
+	namespace       [32]byte
+	generationDisco key.DiscoPublic
+	writeMu         sync.Mutex
+	pingMu          sync.Mutex
+	pings           map[[8]byte]chan struct{}
+	workers         sync.WaitGroup
+	errMu           sync.Mutex
+	err             error
 }
 
 func NewWSSClient(config WSSClientConfig) *WSSClient {
@@ -165,7 +169,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		return nil, err
 	}
 	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeFrame(nc, frameAuth, []byte(parts[0])); err != nil {
+	if err = writeAuthFrame(nc, []byte(parts[0]), c.config.Namespace, c.config.GenerationDisco); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(nc)
@@ -176,13 +180,13 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		return fail(ErrProtocol)
 	}
 	for _, part := range parts[1:] {
-		if err = writeFrame(nc, frameAuth, []byte(part)); err != nil {
+		if err = writeAuthFrame(nc, []byte(part), c.config.Namespace, c.config.GenerationDisco); err != nil {
 			return fail(err)
 		}
 	}
 	_ = nc.SetDeadline(time.Time{})
 	c.generation++
-	cc := &wssClientConn{ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &wssClientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(2)
@@ -222,6 +226,9 @@ func (c *WSSClient) Close() error {
 	return c.disconnect()
 }
 func (cc *wssClientConn) frame(kind byte, b []byte) error {
+	if kind == frameAuth {
+		kind, b = authFrame(b, cc.namespace, cc.generationDisco)
+	}
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	_ = cc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))

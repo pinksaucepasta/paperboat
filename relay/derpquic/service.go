@@ -39,13 +39,16 @@ func (s *Server) SetControlService(identity ServiceDescriptor, handler ControlHa
 	return nil
 }
 func (s *Server) serviceAllowedLocked(p *peerConn) bool {
-	return s.service != nil && p != nil && s.peers[p.key] == p && p.grant.PeerRelay != nil && *p.grant.PeerRelay == s.service.identity && (!s.draining || time.Now().Before(s.deadline))
+	return s.service != nil && p != nil && s.peers[routeKey(p.key, p.namespace)] == p && p.grant.PeerRelay != nil && *p.grant.PeerRelay == s.service.identity && (!s.draining || time.Now().Before(s.deadline))
 }
 func (r ControlRequest) SourceDisco() (key.DiscoPublic, error) {
 	r.server.mu.Lock()
 	defer r.server.mu.Unlock()
 	if !r.server.serviceAllowedLocked(r.source) {
 		return key.DiscoPublic{}, ErrAdmission
+	}
+	if r.source.namespace != ([32]byte{}) {
+		return r.source.generationDisco, nil
 	}
 	return ParseDiscoKey(r.source.grant.DiscoPublicKey)
 }
@@ -62,7 +65,14 @@ func (r ControlRequest) AuthorizePair(a, b key.DiscoPublic) (*PairLease, error) 
 	var first, second *peerConn
 	ak, bk := DiscoKeyString(a), DiscoKeyString(b)
 	for _, p := range s.peers {
-		switch p.grant.DiscoPublicKey {
+		if p.namespace != r.source.namespace {
+			continue
+		}
+		disco := p.grant.DiscoPublicKey
+		if p.namespace != ([32]byte{}) {
+			disco = DiscoKeyString(p.generationDisco)
+		}
+		switch disco {
 		case ak:
 			if first != nil {
 				return nil, ErrAdmission
@@ -78,7 +88,7 @@ func (r ControlRequest) AuthorizePair(a, b key.DiscoPublic) (*PairLease, error) 
 	if first == nil || second == nil || r.source != first && r.source != second {
 		return nil, ErrAdmission
 	}
-	lease := &PairLease{server: s, a: first, b: second, disco: [2]key.DiscoPublic{a, b}, account: first.grant.AccountID, fences: [2]*grantFence{s.fences[grantID(first.grant)], s.fences[grantID(second.grant)]}}
+	lease := &PairLease{server: s, a: first, b: second, disco: [2]key.DiscoPublic{discoForGrant(first.grant), discoForGrant(second.grant)}, account: first.grant.AccountID, fences: [2]*grantFence{s.fences[grantID(first.grant)], s.fences[grantID(second.grant)]}}
 	if _, ok := lease.validLocked(); !ok {
 		return nil, ErrAdmission
 	}
@@ -219,3 +229,5 @@ func sameGrantAuthority(a, b Grant) bool {
 	}
 	return reflect.DeepEqual(normalize(a), normalize(b))
 }
+
+func discoForGrant(g Grant) key.DiscoPublic { d, _ := ParseDiscoKey(g.DiscoPublicKey); return d }

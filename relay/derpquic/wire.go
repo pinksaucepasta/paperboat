@@ -27,6 +27,7 @@ const (
 	framePing
 	framePong
 	framePacket
+	frameAuthGeneration
 )
 
 func writeFrame(w io.Writer, kind byte, b []byte) error {

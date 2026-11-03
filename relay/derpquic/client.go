@@ -16,9 +16,11 @@ import (
 )
 
 type ClientConfig struct {
-	Address    string
-	TLS        *tls.Config
-	Credential func(context.Context) (string, error)
+	Address         string
+	TLS             *tls.Config
+	Credential      func(context.Context) (string, error)
+	Namespace       [32]byte
+	GenerationDisco key.DiscoPublic
 }
 type Client struct {
 	config      ClientConfig
@@ -32,15 +34,17 @@ type Client struct {
 	fatal       error
 }
 type clientConn struct {
-	conn       *quic.Conn
-	stream     *quic.Stream
-	writeMu    sync.Mutex
-	receive    chan packet
-	sequence   atomic.Uint64
-	generation int
-	pingMu     sync.Mutex
-	pings      map[[8]byte]chan struct{}
-	workers    sync.WaitGroup
+	conn            *quic.Conn
+	stream          *quic.Stream
+	writeMu         sync.Mutex
+	receive         chan packet
+	sequence        atomic.Uint64
+	generation      int
+	namespace       [32]byte
+	generationDisco key.DiscoPublic
+	pingMu          sync.Mutex
+	pings           map[[8]byte]chan struct{}
+	workers         sync.WaitGroup
 }
 
 func NewClient(config ClientConfig) *Client {
@@ -145,7 +149,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		return fail(err)
 	}
 	stream.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = writeFrame(stream, frameAuth, []byte(parts[0])); err != nil {
+	if err = writeAuthFrame(stream, []byte(parts[0]), c.config.Namespace, c.config.GenerationDisco); err != nil {
 		return fail(err)
 	}
 	kind, b, err := readFrame(stream)
@@ -156,13 +160,13 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		return fail(ErrProtocol)
 	}
 	for _, part := range parts[1:] {
-		if err = writeFrame(stream, frameAuth, []byte(part)); err != nil {
+		if err = writeAuthFrame(stream, []byte(part), c.config.Namespace, c.config.GenerationDisco); err != nil {
 			return fail(err)
 		}
 	}
 	stream.SetDeadline(time.Time{})
 	c.generation++
-	cc := &clientConn{conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &clientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(3)
@@ -207,6 +211,9 @@ func (cc *clientConn) frame(kind byte, b []byte) error {
 	return cc.streamWrite(kind, b)
 }
 func (cc *clientConn) streamWrite(kind byte, b []byte) error {
+	if kind == frameAuth {
+		kind, b = authFrame(b, cc.namespace, cc.generationDisco)
+	}
 	err := writeFrame(cc.stream, kind, b)
 	if err != nil {
 		cc.conn.CloseWithError(0, "relay control failed")
