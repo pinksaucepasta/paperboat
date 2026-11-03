@@ -114,10 +114,12 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 			}
 			return func() {}, nil
 		}, Retire: func(ctx context.Context) error {
-			if err := owner.stopCarrier(ctx); err != nil {
+			// A busy PTY rejects retirement without disturbing its transport.
+			// The bridge admission lock excludes new streams during retirement.
+			if err := manager.Retire(ctx); err != nil {
 				return err
 			}
-			if err := manager.Retire(ctx); err != nil {
+			if err := owner.stopCarrier(ctx); err != nil {
 				return err
 			}
 			owner.discardEmpty.Store(len(manager.List()) == 0)

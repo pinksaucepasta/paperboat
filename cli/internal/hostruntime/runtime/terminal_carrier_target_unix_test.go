@@ -61,6 +61,11 @@ func TestTargetCarrierStagesThroughOwnerRPCAndLeavesPTYRunning(t *testing.T) {
 	connection := f.dial(t, ctx, offer)
 	defer connection.Close()
 	held := f.admit(t, ctx, connection, created)
+	if err := f.client.Retire(ctx); !errors.Is(err, session.ErrUpdateBusy) {
+		t.Fatal("retirement did not preserve its running PTY", err)
+	}
+	// A rejected catalogue retirement must leave the transport serving too.
+	f.admit(t, ctx, connection, created)
 	if _, err := f.client.TerminalCarrier(ctx, workloadbridge.CarrierRequest{Operation: "seal"}); err != nil {
 		t.Fatal(err)
 	}
