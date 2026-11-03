@@ -81,15 +81,7 @@ func (c *carrierTerminal) Write(data []byte) (int, error) {
 func (c *carrierTerminal) Resize(rows, columns uint16) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if err := c.ReconnectingConn.Resize(rows, columns); err != nil {
-		return err
-	}
-	if rows > 0 && columns > 0 {
-		c.mu.Lock()
-		c.target.Rows, c.target.Cols = rows, columns
-		c.mu.Unlock()
-	}
-	return nil
+	return c.ReconnectingConn.Resize(rows, columns)
 }
 func (c *carrierTerminal) TerminalRuntimeVersion() string {
 	c.mu.Lock()
@@ -132,9 +124,6 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 	}()
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	c.mu.Lock()
-	target.Rows, target.Cols = c.target.Rows, c.target.Cols
-	c.mu.Unlock()
 	if err := target.InputQueue.WaitEmpty(ctx); err != nil {
 		return err
 	}

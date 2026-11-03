@@ -334,7 +334,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 		fromSequence = snapshotLatest
 	}
 	attach := func(sequence uint64, liveBoundary bool) (helperFrame, error) {
-		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary, "columns": cols, "rows": rows})
+		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary})
 		attachEnd := diagnostics.ReconnectStep(ctx, "attach")
 		frame, err := c.requestSync(ctx, "terminal.v1", payload)
 		attachEnd(err)

@@ -16,7 +16,7 @@ func (c *helperTerminalConn) initializeShared(ctx context.Context) error {
 	}
 	from := uint64(max(0, c.target.AfterSequence))
 	attach := func(cursor uint64) (helperFrame, error) {
-		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": cursor, "columns": c.target.Cols, "rows": c.target.Rows})
+		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": cursor})
 		return c.requestSync(ctx, "terminal.v1", payload)
 	}
 	frame, err := attach(from)
