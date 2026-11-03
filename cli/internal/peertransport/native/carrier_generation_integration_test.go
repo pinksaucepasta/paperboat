@@ -48,7 +48,8 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	defer mo.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	old, err := co.Dial(ctx, startTestServer(t, mo, ma, regions.Regions[1]), "machine_test", peerquic.ClassInteractive)
+	address := startTestServer(t, mo, ma, regions.Regions[1])
+	old, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +122,27 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	// The old server sends only a bounded, signed address offer on its existing
 	// authenticated QUIC connection, and waits for the client's move ACK.
 	// Its application byte stream remains usable throughout.
+	// A real second QUIC connection has no terminal move handler. It must
+	// remain outside terminal preparation (SSH and other consumers drain later).
+	other, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	header, err := streamauth.New("other", "exec", "other", "credential_exec", time.Now().Add(time.Minute), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherStream, err := other.OpenAuthorized(ctx, header, "grant_test", "exec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherStream.Close()
+	carrierEcho(t, otherStream)
 	if err := mo.OfferCarrier(ctx, offer); err != nil {
 		t.Fatal(err)
 	}
+	carrierEcho(t, otherStream)
 	next := <-moved
 	if next == nil {
 		t.Fatal("carrier offer was acknowledged without a new connection")

@@ -25,6 +25,7 @@ import (
 type Session struct {
 	traceLabel      string
 	terminalCarrier bool
+	terminalUsed    atomic.Bool
 	owner           *Owner
 	peerID          string
 	binding         tailnet.NetworkBinding
@@ -258,6 +259,9 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), scopeResource, capability, "accept", time.Unix(header.DeadlineUnix, 0))
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
+	}
+	if header.Consumer == "terminal" {
+		s.terminalUsed.Store(true)
 	}
 	if err := acknowledgeAdmission(connection); err != nil {
 		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, scoped.Close())

@@ -116,8 +116,8 @@ func (s *Session) receiveCarrierOffer(ctx context.Context, stream *quic.Stream) 
 	return err
 }
 
-// OfferCarrier asks each existing connection to move before the old process
-// drains. A connection without a terminal handler declines and keeps serving.
+// OfferCarrier moves terminal connections before the old process drains.
+// Other applications retain their connection for the bounded retirement drain.
 func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	if o == nil || ctx == nil {
 		return ErrInvalid
@@ -125,7 +125,9 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	o.mu.Lock()
 	sessions := make([]*Session, 0, len(o.sessions))
 	for session := range o.sessions {
-		sessions = append(sessions, session)
+		if session.terminalUsed.Load() {
+			sessions = append(sessions, session)
+		}
 	}
 	o.mu.Unlock()
 	results := make(chan error, len(sessions))
