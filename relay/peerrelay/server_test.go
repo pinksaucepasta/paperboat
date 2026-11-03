@@ -42,6 +42,7 @@ type testFixture struct {
 	service     key.NodePublic
 	ga, gb      derpquic.Grant
 	reconnectA  func(derpquic.Grant) *derpquic.Client
+	generation  func() *testFixture
 }
 
 func testCertificate(t *testing.T) tls.Certificate {
@@ -156,9 +157,9 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 	if mutate != nil {
 		mutate(&f.ga, &f.gb)
 	}
-	client := func(cert tls.Certificate, g derpquic.Grant) *derpquic.Client {
+	open := func(cert tls.Certificate, g derpquic.Grant, namespace [32]byte, disco key.DiscoPublic) *derpquic.Client {
 		token := signGrant(t, priv, g)
-		c := derpquic.NewClient(derpquic.ClientConfig{Address: socket.LocalAddr().String(), TLS: &tls.Config{RootCAs: roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return token, nil }})
+		c := derpquic.NewClient(derpquic.ClientConfig{Address: socket.LocalAddr().String(), Namespace: namespace, GenerationDisco: disco, TLS: &tls.Config{RootCAs: roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return token, nil }})
 		t.Cleanup(func() { c.Close() })
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -166,6 +167,16 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 			t.Fatal(e)
 		}
 		return c
+	}
+	client := func(cert tls.Certificate, g derpquic.Grant) *derpquic.Client {
+		return open(cert, g, [32]byte{}, key.DiscoPublic{})
+	}
+	f.generation = func() *testFixture {
+		next := &testFixture{t: t, server: f.server, relay: f.relay, config: f.config, service: f.service, ga: f.ga, gb: f.gb, da: key.NewDisco(), db: key.NewDisco()}
+		next.active.Store(f.active.Load())
+		namespace := sha256.Sum256([]byte("machine-signed-generation-certificate"))
+		next.a, next.b = open(ca, f.ga, namespace, next.da.Public()), open(cb, f.gb, namespace, next.db.Public())
+		return next
 	}
 	f.a, f.b = client(ca, f.ga), client(cb, f.gb)
 	f.reconnectA = func(g derpquic.Grant) *derpquic.Client { return client(ca, g) }
@@ -310,6 +321,9 @@ func (c *udpClient) bind(t *testing.T) {
 	c.send(t, true, seal(answer))
 }
 func (f *testFixture) bound(response *disco.AllocateUDPRelayEndpointResponse) (*udpClient, *udpClient) {
+	return f.boundCount(response, 1)
+}
+func (f *testFixture) boundCount(response *disco.AllocateUDPRelayEndpointResponse, count int) (*udpClient, *udpClient) {
 	f.t.Helper()
 	a := newUDPClient(f.t, response.AddrPorts[0], f.da, f.db.Public(), response.ServerDisco, response.VNI)
 	b := newUDPClient(f.t, response.AddrPorts[0], f.db, f.da.Public(), response.ServerDisco, response.VNI)
@@ -317,7 +331,15 @@ func (f *testFixture) bound(response *disco.AllocateUDPRelayEndpointResponse) (*
 	b.bind(f.t)
 	waitFor(f.t, func() bool {
 		sessions := f.active.Load().udp.GetSessions()
-		return len(sessions) == 1 && sessions[0].Client1.Endpoint.IsValid() && sessions[0].Client2.Endpoint.IsValid()
+		if len(sessions) != count {
+			return false
+		}
+		for _, session := range sessions {
+			if !session.Client1.Endpoint.IsValid() || !session.Client2.Endpoint.IsValid() {
+				return false
+			}
+		}
+		return true
 	})
 	return a, b
 }
@@ -704,4 +726,32 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 			waitFor(t, func() bool { f.relay.mu.Lock(); defer f.relay.mu.Unlock(); return len(f.relay.allocations) == 0 })
 		})
 	}
+}
+
+func TestCarrierGenerationKeepsBothUDPRelayAllocationsAndRevokesBoth(t *testing.T) {
+	f := newFixture(t, nil)
+	oldAllocation := f.allocate(7)
+	oldA, oldB := f.bound(oldAllocation)
+	next := f.generation()
+	allocation := next.allocate(8)
+	if allocation.VNI == oldAllocation.VNI {
+		t.Fatal("generation reused serving UDP relay allocation")
+	}
+	newA, newB := next.boundCount(allocation, 2)
+	for _, pair := range [][2]*udpClient{{oldA, oldB}, {newA, newB}} {
+		payload := []byte("authorized-generation-data")
+		pair[0].send(t, false, payload)
+		if got := pair[1].read(t); !bytes.Equal(got, payload) {
+			t.Fatal("generation relay bytes differ")
+		}
+	}
+	if len(f.server.AuthoritySubjects()) != 2 {
+		t.Fatal("generation created extra root authority subjects")
+	}
+	f.server.Revoke(f.gb.AccountID, f.gb.EndpointID, 2)
+	waitFor(t, func() bool { return f.relay.Snapshot().Allocations == 0 })
+	oldA.send(t, false, []byte("revoked"))
+	newA.send(t, false, []byte("revoked"))
+	noUDP(t, oldB)
+	noUDP(t, newB)
 }
