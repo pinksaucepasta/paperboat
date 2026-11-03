@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=delegated-generation-revocation
@@ -63,6 +64,9 @@ func (c *CarrierNetwork) Watch(ctx context.Context, revoke func([]string)) {
 			if err == nil {
 				err = c.server.SetPeerContacts(c.contacts)
 			}
+			if err == nil {
+				err = c.refreshRelays()
+			}
 			c.mu.Unlock()
 			if err != nil {
 				revoke(nil)
@@ -76,4 +80,34 @@ func (c *CarrierNetwork) Watch(ctx context.Context, revoke func([]string)) {
 			}
 		}
 	}()
+}
+
+// Fresh signed discovery updates every generation, without publishing its
+// private candidates or creating another control-plane endpoint.
+func (c *CarrierNetwork) refreshRelays() error {
+	c.authority.relay.mu.Lock()
+	recovery := c.authority.relay.recovery
+	control := append([]key.NodePublic(nil), c.authority.relay.controlPeers...)
+	c.authority.relay.mu.Unlock()
+	if recovery == nil {
+		return nil
+	}
+	nodes, _, _, err := recovery.snapshot()
+	if errors.Is(err, ErrExpiredAuthority) {
+		return nil
+	} // preserve admitted offline flows
+	if err != nil {
+		nodes = nil
+	}
+	services, err := c.authority.relayServices(nodes)
+	if err != nil {
+		return err
+	}
+	if err := c.server.SetRelayRegions(relayRegionsSelectedFirst(nodes, "")); err != nil {
+		return err
+	}
+	if err := c.server.SetPeerRelayNodes(services); err != nil {
+		return err
+	}
+	return c.server.SetRelayControlPeers(control)
 }

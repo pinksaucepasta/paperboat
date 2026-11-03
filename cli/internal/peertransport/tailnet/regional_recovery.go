@@ -778,11 +778,18 @@ func regionalProbeDelay() time.Duration {
 }
 
 func (r *regionalRecovery) updateServices(nodes []RegionalNode) error {
-	a := r.authority
+	services, err := r.authority.relayServices(nodes)
+	if err != nil {
+		return err
+	}
+	return r.engine.SetPeerRelayNodes(services)
+}
+
+func (a *Authority) relayServices(nodes []RegionalNode) ([]*tailcfg.Node, error) {
 	a.mu.Lock()
 	if a.current == nil {
 		a.mu.Unlock()
-		return ErrAuthority
+		return nil, ErrAuthority
 	}
 	a.relay.mu.Lock()
 	var services []*tailcfg.Node
@@ -791,7 +798,7 @@ func (r *regionalRecovery) updateServices(nodes []RegionalNode) error {
 		if err != nil {
 			a.relay.mu.Unlock()
 			a.mu.Unlock()
-			return err
+			return nil, err
 		}
 		if service != nil {
 			services = append(services, service)
@@ -799,7 +806,7 @@ func (r *regionalRecovery) updateServices(nodes []RegionalNode) error {
 	}
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
-	return r.engine.SetPeerRelayNodes(services)
+	return services, nil
 }
 
 // Failed nodes back off independently. The sweep timer adds jitter; the cap

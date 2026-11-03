@@ -38,6 +38,7 @@ type CarrierClaims struct {
 	Endpoints         []string
 	DiscoPublicKey    string
 	OwnerInstance     string
+	RelayNodeIDs      []string
 }
 
 type CarrierOffer struct {
@@ -99,7 +100,7 @@ func (i *CarrierIdentity) Namespace() [32]byte { return sha256.Sum256(i.Offer.Cl
 
 // SignCarrierCandidates binds STUN/local candidates and the generation's disco
 // key to the same delegated certificate verified on the old authenticated link.
-func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco string, endpoints []netip.AddrPort) error {
+func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco string, endpoints []netip.AddrPort, relays []string) error {
 	if o == nil || identity == nil {
 		return ErrInvalid
 	}
@@ -113,6 +114,7 @@ func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco
 	}
 	claims := identity.Offer.Claims
 	claims.DiscoPublicKey, claims.OwnerInstance, claims.Endpoints = disco, instance, nil
+	claims.RelayNodeIDs = append([]string(nil), relays...)
 	for _, endpoint := range endpoints {
 		claims.Endpoints = append(claims.Endpoints, endpoint.String())
 	}
@@ -167,6 +169,16 @@ func (o CarrierOffer) verify(parent tailnet.NetworkBinding, now time.Time) error
 	disco, err := derpquic.ParseDiscoKey(c.DiscoPublicKey)
 	if err != nil || disco.IsZero() {
 		return ErrInvalid
+	}
+	if len(c.RelayNodeIDs) > tailnet.MaxRegionalCandidates {
+		return ErrInvalid
+	}
+	seenRelay := map[string]bool{}
+	for _, id := range c.RelayNodeIDs {
+		if id == "" || len(id) > 128 || seenRelay[id] {
+			return ErrInvalid
+		}
+		seenRelay[id] = true
 	}
 	seen := map[netip.AddrPort]bool{}
 	for _, raw := range c.Endpoints {

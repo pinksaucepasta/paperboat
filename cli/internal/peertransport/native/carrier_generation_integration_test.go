@@ -69,6 +69,9 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
 			return native.CarrierOffer{}, err
 		}
+		if err := generation.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
+			return native.CarrierOffer{}, err
+		}
 		socket, err := generation.Dial(ctx, peer)
 		if err != nil {
 			return native.CarrierOffer{}, err
@@ -136,7 +139,7 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 	}
 	failedIdentity, err := mo.PrepareCarrierIdentity()
 	if err == nil {
-		err = mo.SignCarrierCandidates(failedIdentity, "", generation.DiscoPublic(), []netip.AddrPort{unreachable.LocalAddr().(*net.UDPAddr).AddrPort()})
+		err = mo.SignCarrierCandidates(failedIdentity, "", generation.DiscoPublic(), []netip.AddrPort{unreachable.LocalAddr().(*net.UDPAddr).AddrPort()}, generation.RelayNodeIDs())
 	}
 	unreachable.Close()
 	if err != nil {

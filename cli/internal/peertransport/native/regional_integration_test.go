@@ -1,12 +1,14 @@
 package native_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"go.uber.org/goleak"
 	"io"
 	"net"
@@ -15,10 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
@@ -31,7 +33,11 @@ type regionalRelay struct {
 	stop func()
 }
 
-func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
+func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
+func TestDelegatedCarrierNegotiatesAndRenewsItsRegionalRoute(t *testing.T) {
+	testNativeRegionalFailover(t, true)
+}
+func testNativeRegionalFailover(t *testing.T, delegated bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
@@ -47,7 +53,20 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 	clientBinding := tailnet.NetworkBinding{AccountID: "regional", EndpointID: "regional-client", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFP, VirtualAddress: "fd7a:115c:a1e0::41"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "regional", EndpointID: "regional-server", Role: "machine", MachineID: "regional-server", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFP, VirtualAddress: "fd7a:115c:a1e0::42"}
 	clientAuthority := testAuthority(t, clientBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
-	serverAuthority := testAuthority(t, serverBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
+	var err error
+	var serverStore config.ProfileStore
+	var serverAuthority *tailnet.Authority
+	if delegated {
+		raw, _ := testQUICKeys.Load(serverFP)
+		serverBinding.QUICPublicKey = raw.(string)
+		serverStore = config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}
+		serverAuthority, err = tailnet.NewAuthority(tailnet.AuthorityOptions{Store: serverStore, Issuer: "https://api.example.test", Self: serverBinding, Keys: testKeys{"native_test": pub}, TestOnlyPacketListener: &regionalDirectBlock{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		serverAuthority = testAuthority(t, serverBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
+	}
 	clientBinding.WireGuardPublicKey, clientBinding.KeyGeneration = prepareBinding(t, clientAuthority)
 	serverBinding.WireGuardPublicKey, serverBinding.KeyGeneration = prepareBinding(t, serverAuthority)
 	clientDisco, err := clientAuthority.DiscoveryPublicKey()
@@ -119,7 +138,28 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 
 	clientOwner, _ := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
 	defer clientOwner.Close()
-	serverOwner, _ := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS})
+	var generation *tailnet.CarrierNetwork
+	var identity *native.CarrierIdentity
+	serverOwner, _ := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS, PrepareCarrier: func(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
+		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
+			return native.CarrierOffer{}, native.ErrInvalid
+		}
+		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
+			t.Logf("generation candidate admission: %v", err)
+			return native.CarrierOffer{}, err
+		}
+		if err := generation.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
+			t.Logf("generation selected relay %s: %v", request.RelayNodeID, err)
+			return native.CarrierOffer{}, err
+		}
+		socket, err := generation.Dial(ctx, peer)
+		if err != nil {
+			t.Logf("generation return path: %v", err)
+			return native.CarrierOffer{}, err
+		}
+		socket.Close()
+		return identity.Offer, nil
+	}})
 	defer serverOwner.Close()
 	refresh := func() {
 		clientConfig.Generation++
@@ -150,6 +190,60 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 	assertRegionalBytes(t, ctx, session, "before-failover")
 	if got := clientAuthority.RegionalStatus(); got.NodeID != b.node.NodeID || got.Redundancy != tailnet.RedundancyReduced {
 		t.Fatalf("asymmetric candidate intersection: %+v", got)
+	}
+	if delegated {
+		current, err := serverAuthority.Self()
+		if err != nil {
+			t.Fatal(err)
+		}
+		nextAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: serverStore, Issuer: "https://api.example.test", Self: current, Keys: testKeys{"native_test": pub}, TestOnlyPacketListener: &regionalDirectBlock{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := nextAuthority.Restore(ctx); err != nil {
+			t.Fatal(err)
+		}
+		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes[1:])
+		if _, err := nextAuthority.ConfigureRegionalRelays(regionalTLS(serverTLS, roots)); err != nil {
+			t.Fatal(err)
+		}
+		nextOwner, err := native.NewOwner(native.Config{Authority: nextAuthority, TLS: serverTLS})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer nextOwner.Close()
+		identity, err = nextOwner.PrepareCarrierIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, err = startDelegatedRelayEcho(t, ctx, nextOwner, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer generation.Close()
+		next, err := session.DialCarrier(ctx, identity.Offer)
+		if err != nil {
+			t.Fatal("generation did not select the authenticated common relay", err)
+		}
+		defer next.Close()
+		assertRegionalBytes(t, ctx, next, "delegated-common-region")
+		old := b
+		b = start("regional-b", "rack-b", "127.0.0.1:0")
+		nodes = []tailnet.RegionalNode{a.node, b.node}
+		refresh()
+		applyTestConfiguration(t, nextAuthority, signer, serverConfig)
+		fresh := append([]tailnet.RegionalNode(nil), nodes...)
+		for i := range fresh {
+			fresh[i].ObservedAt = time.Now().Unix()
+			fresh[i].CapacityObservedAt = fresh[i].ObservedAt
+			fresh[i].ExpiresAt = fresh[i].ObservedAt + 60
+		}
+		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, fresh)
+		old.stop()
+		renewed, stopRenewed := context.WithTimeout(ctx, 5*time.Second)
+		defer stopRenewed()
+		assertRegionalBytes(t, renewed, next, "delegated-after-signed-relay-rebind")
+		return
 	}
 	refresh()
 	waitRegional := func(wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {
@@ -241,7 +335,9 @@ func regionalTLS(endpoint *tls.Config, roots *x509.CertPool) *tls.Config {
 
 func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, config tailnet.NetworkConfiguration, endpointTLS *tls.Config, selfDisco, peerDisco string, nodes []tailnet.RegionalNode) {
 	t.Helper()
-	now := time.Now().Unix()
+	// One authorization generation has one stable signed grant, including when
+	// an independent carrier consumes the same cached server response later.
+	now := config.IssuedAt
 	expires := min(now+60, config.ExpiresAt)
 	for _, n := range nodes {
 		expires = min(expires, n.ExpiresAt)

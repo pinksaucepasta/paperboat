@@ -167,6 +167,7 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 // Peer identity is supplied by the receiving session, never by this payload.
 type CarrierExchange struct {
 	Offer          CarrierOffer
+	RelayNodeID    string
 	DiscoPublicKey string
 	Endpoints      []string
 }

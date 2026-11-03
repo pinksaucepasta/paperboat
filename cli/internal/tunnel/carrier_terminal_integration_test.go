@@ -332,6 +332,9 @@ func (f *connectedTerminalMove) prepareCarrier(ctx context.Context, peer string,
 	if err := f.candidateNetwork.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
 		return native.CarrierOffer{}, err
 	}
+	if err := f.candidateNetwork.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
+		return native.CarrierOffer{}, err
+	}
 	socket, err := f.candidateNetwork.Dial(ctx, peer)
 	if err != nil {
 		return native.CarrierOffer{}, err

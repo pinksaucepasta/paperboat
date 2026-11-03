@@ -85,6 +85,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		controlPeers := append([]key.NodePublic(nil), a.relay.controlPeers...)
 		a.relay.mu.Unlock()
+		a.notifyScopeChangesLocked()
 		if a.server != nil {
 			_ = a.server.server.SetRelayControlPeers(controlPeers)
 		}

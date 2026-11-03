@@ -133,7 +133,7 @@ func (o *Owner) StartCarrierNetwork(ctx context.Context, identity *CarrierIdenti
 		case <-network.EndpointsChanged():
 		}
 	}
-	if err := o.SignCarrierCandidates(identity, instance, network.DiscoPublic(), network.Endpoints()); err != nil {
+	if err := o.SignCarrierCandidates(identity, instance, network.DiscoPublic(), network.Endpoints(), network.RelayNodeIDs()); err != nil {
 		network.Close()
 		return nil, err
 	}

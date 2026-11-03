@@ -274,6 +274,9 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
 			return native.CarrierOffer{}, err
 		}
+		if err := generation.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
+			return native.CarrierOffer{}, err
+		}
 		socket, err := generation.Dial(ctx, peer)
 		if err != nil {
 			return native.CarrierOffer{}, err

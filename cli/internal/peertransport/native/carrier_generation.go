@@ -68,7 +68,11 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if err := network.AddPeer(s.peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
 		return nil, err
 	}
-	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic()}
+	relay := network.CommonRelay(offer.Claims.RelayNodeIDs, s.owner.authority.RegionalStatus().NodeID)
+	if err := network.PreparePeerRelay(ctx, s.peerID, relay); err != nil {
+		return nil, err
+	}
+	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic(), RelayNodeID: relay}
 	for _, endpoint := range network.Endpoints() {
 		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
 	}
