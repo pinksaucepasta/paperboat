@@ -18,13 +18,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -32,7 +30,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
@@ -141,21 +138,11 @@ func (f *connectedTerminalMove) endpoint(t *testing.T) (*server.Server, *natives
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher, err := process.NewShellLauncher(shell, nil, sessions)
-	if err != nil {
-		t.Fatal(err)
-	}
-	status := health.New("carrier-test", []string{"terminal.v1", "health.v1"}, nil)
-	status.Set("terminal.v1", health.Ready, "", 0)
-	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{Sessions: sessions, Health: status, SessionLauncher: launcher, WorkspaceRoot: f.root, Random: rand.Reader})
-	if err != nil {
-		t.Fatal(err)
-	}
-	available, err := protocol.AvailableCapabilities(dispatcher)
-	if err != nil {
-		t.Fatal(err)
-	}
-	endpoint, err := server.New(server.Config{Negotiator: protocol.Negotiator{Available: available}, Journal: f.journal, Handler: dispatcher, MaxConcurrent: 16, HeartbeatInterval: 5 * time.Second, MutationDeadline: 5 * time.Second})
+	cfg := runtimeconfig.Config{StateRoot: f.root, Version: "carrier-test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
+	endpoint, apps, err := hostruntime.NewTerminalCarrierEndpoint(hostruntime.TerminalCarrierEndpointConfig{
+		Runtime: cfg, Sessions: sessions, Workspace: f.root, Shell: shell,
+		Authorizer: f.authorizer, Journal: f.journal,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,25 +151,6 @@ func (f *connectedTerminalMove) endpoint(t *testing.T) (*server.Server, *natives
 		defer cancel()
 		endpoint.Shutdown(ctx)
 	})
-	limiter, err := server.NewConnectionLimiter(16)
-	if err != nil {
-		t.Fatal(err)
-	}
-	associations, err := server.NewNativeAssociationManager(server.NativeAssociationConfig{Server: endpoint, Authorizer: f.authorizer, Limiter: limiter})
-	if err != nil {
-		t.Fatal(err)
-	}
-	authorize := server.CredentialStreamAuthorizer(f.authorizer)
-	serve := func(_ context.Context, _ streamauth.Header, connection net.Conn) error {
-		return associations.Serve(connection)
-	}
-	apps, err := nativesession.New(nativesession.Config{Authorize: func(ctx context.Context, header streamauth.Header) (string, error) {
-		value, err := authorize(ctx, header)
-		return value.ResourceID, err
-	}, ServeStream: serve, ServeAuthorizedTransfer: serve})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return endpoint, apps
 }
 
@@ -330,8 +298,14 @@ func (f *connectedTerminalMove) parallelCarrier(t *testing.T, ctx context.Contex
 	_, apps := f.endpoint(t)
 	nextCtx, stopNext := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { done <- nextOwner.ListenCarrier(nextCtx, socket, identity, apps.Serve) }()
+	ready := make(chan struct{})
+	go func() { done <- nextOwner.ListenCarrier(nextCtx, socket, identity, apps.Serve, ready) }()
 	t.Cleanup(func() { stopNext(); socket.Close(); <-done; apps.Wait() })
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("carrier did not publish listener readiness")
+	}
 	return identity.Offer
 }
 

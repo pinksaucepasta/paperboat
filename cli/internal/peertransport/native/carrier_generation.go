@@ -77,8 +77,8 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 
 // ListenCarrier is a direct, mutually authenticated terminal-only transport.
 // The signed parent authority remains its admission and revocation owner.
-func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identity *CarrierIdentity, serve func(context.Context, *Session) error) error {
-	if o == nil || ctx == nil || socket == nil || identity == nil || identity.tls == nil || serve == nil {
+func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identity *CarrierIdentity, serve func(context.Context, *Session) error, ready chan<- struct{}) error {
+	if o == nil || ctx == nil || socket == nil || identity == nil || identity.tls == nil || serve == nil || ready == nil {
 		return ErrInvalid
 	}
 	self, err := o.authority.Self()
@@ -104,6 +104,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		return err
 	}
 	defer listener.Close()
+	close(ready)
 	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	defer stop()
 	ownerStop := context.AfterFunc(o.ctx, func() { _ = listener.Close() })

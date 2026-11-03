@@ -83,8 +83,14 @@ func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
 	}
 	directCtx, stopDirect := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { done <- mo.ListenCarrier(directCtx, socket, identity, apps.Serve) }()
+	ready := make(chan struct{})
+	go func() { done <- mo.ListenCarrier(directCtx, socket, identity, apps.Serve, ready) }()
 	defer func() { stopDirect(); socket.Close(); <-done; apps.Wait() }()
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("carrier did not publish listener readiness")
+	}
 	// The wire proof is machine-signed and uses only the old authenticated peer.
 	// No NetworkAPI is supplied to either owner; a server round trip cannot occur.
 	moved := make(chan *native.Session, 1)
