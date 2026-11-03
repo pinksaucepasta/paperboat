@@ -189,7 +189,7 @@ func (m *Manager) attachLocked(session *managedSession, attachmentID string, fro
 			_ = session.fanout.Detach(attachmentID)
 			return AttachResult{}, err
 		}
-		return AttachResult{Snapshot: session.snapshotLocked(), Replay: history.Replay{FromSequence: latest, ToSequence: latest, EarliestSequence: earliest, LatestSequence: latest}, FirstAttachment: firstAttachment}, nil
+		return AttachResult{AttachmentLease: session.fanout.attachmentLease(attachmentID), Snapshot: session.snapshotLocked(), Replay: history.Replay{FromSequence: latest, ToSequence: latest, EarliestSequence: earliest, LatestSequence: latest}, FirstAttachment: firstAttachment}, nil
 	}
 	replayLimit := attachmentReplayLimit(m.config.AttachmentBytes)
 	replay, err := session.history.ReplayOwned(fromSequence, replayLimit)
@@ -232,7 +232,7 @@ func (m *Manager) attachLocked(session *managedSession, attachmentID string, fro
 	}
 	publicReplay := cloneReplay(replay)
 	replay.Release()
-	return AttachResult{Snapshot: session.snapshotLocked(), Replay: publicReplay, FirstAttachment: firstAttachment}, nil
+	return AttachResult{AttachmentLease: session.fanout.attachmentLease(attachmentID), Snapshot: session.snapshotLocked(), Replay: publicReplay, FirstAttachment: firstAttachment}, nil
 }
 
 func cloneReplay(replay history.Replay) history.Replay {

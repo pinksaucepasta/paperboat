@@ -8,11 +8,11 @@ import (
 
 func TestWriterRegistryRoutesToExactMachine(t *testing.T) {
 	r := NewWriterRegistry()
-	r.Attach("ses", "att_a", "cli_a", "machine_a")
+	r.Attach("ses", "att_a", "cli_a", "machine_a", 1)
 	if got, err := r.Recipient("ses", "machine_a"); err != nil || got != "cli_a" {
 		t.Fatalf("sole=%q err=%v", got, err)
 	}
-	r.Attach("ses", "att_b", "cli_b", "machine_b")
+	r.Attach("ses", "att_b", "cli_b", "machine_b", 2)
 	if _, err := r.Recipient("ses", "machine_missing"); !errors.Is(err, ErrNoActiveWriter) {
 		t.Fatalf("ambiguous err=%v", err)
 	}

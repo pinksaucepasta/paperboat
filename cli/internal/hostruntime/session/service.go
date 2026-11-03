@@ -20,6 +20,8 @@ type Service interface {
 	AttachLiveParticipant(sessionID string, participant Participant) (AttachResult, error)
 	AttachLiveParticipantAtGeneration(sessionID string, participant Participant, expectedGeneration uint64) (AttachResult, error)
 	BrowserScreenAttachment(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) ([]byte, uint64, error)
+	DetachAttachment(sessionID, attachmentID string, lease uint64) error
+	WaitNextAttachment(ctx context.Context, sessionID, attachmentID string, from, lease uint64) (history.Event, error)
 	Detach(sessionID, attachmentID string) error
 	DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error
 	AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool

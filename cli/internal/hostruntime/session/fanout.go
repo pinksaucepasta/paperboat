@@ -30,6 +30,7 @@ type Eviction struct {
 }
 
 type attachmentCursor struct {
+	lease         uint64
 	state         AttachmentState
 	receiveOutput bool
 	// backpressure: the controlling owner, whose queue holds the PTY back (WaitRoom) so it sees every byte. Any
@@ -50,6 +51,7 @@ type attachmentCursor struct {
 // Fanout retains one ordered ring of immutable chunks. Attachments track only
 // sequence cursors and byte counts; they never own per-client event slices.
 type Fanout struct {
+	lastLease   uint64
 	mu          sync.Mutex
 	attachments map[string]*attachmentCursor
 	// ringEnd is the largest EndSequence of the retained ring (0 when empty).
@@ -147,7 +149,11 @@ func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutp
 	if existing := f.attachments[attachmentID]; existing != nil && existing.state == Attached {
 		return ErrAttachmentExists
 	}
-	f.attachments[attachmentID] = &attachmentCursor{state: Attached, receiveOutput: receiveOutput, backpressure: backpressure, progressAt: time.Now(), maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
+	if f.lastLease == ^uint64(0) {
+		return ErrResourceLimit
+	}
+	f.lastLease++
+	f.attachments[attachmentID] = &attachmentCursor{lease: f.lastLease, state: Attached, receiveOutput: receiveOutput, backpressure: backpressure, progressAt: time.Now(), maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
 	f.active.Store(attachmentID, struct{}{})
 	return nil
 }
@@ -333,10 +339,18 @@ func (f *Fanout) WaitNext(ctx context.Context, attachmentID string) (history.Eve
 // holds everything before it, which frees that output; a caller whose answer was lost in transit (a poll deadline
 // racing the reply) asks again from the same place and gets the same event, so nothing is skipped.
 func (f *Fanout) WaitNextFrom(ctx context.Context, attachmentID string, from uint64) (history.Event, error) {
+	return f.waitNextFromLease(ctx, attachmentID, from, 0)
+}
+
+func (f *Fanout) waitNextFromLease(ctx context.Context, attachmentID string, from, lease uint64) (history.Event, error) {
 	for {
 		f.mu.Lock()
 		cursor, ok := f.attachments[attachmentID]
 		if !ok {
+			f.mu.Unlock()
+			return history.Event{}, ErrAttachmentUnknown
+		}
+		if lease != 0 && cursor.lease != lease {
 			f.mu.Unlock()
 			return history.Event{}, ErrAttachmentUnknown
 		}

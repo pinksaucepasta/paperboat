@@ -397,7 +397,7 @@ func (c *Client) Call(ctx context.Context, kind, op string, body json.RawMessage
 	for {
 		data, err := c.callOnce(ctx, kind, op, body)
 		// Only the pure remote long-poll deadline authorizes another poll.
-		if err == context.DeadlineExceeded && ctx.Err() == nil && ((kind == "session" && op == "WaitNext") || (kind == "exec" && (op == "next" || op == "wait" || op == "reader_next"))) {
+		if err == context.DeadlineExceeded && ctx.Err() == nil && ((kind == "session" && (op == "WaitNext" || op == "WaitNextAttachment")) || (kind == "exec" && (op == "next" || op == "wait" || op == "reader_next"))) {
 			continue
 		}
 		return data, err
@@ -508,7 +508,7 @@ func mutates(kind, op string) bool {
 	}
 	if kind == "session" {
 		switch op {
-		case "ResourceCounts", "Snapshot", "SnapshotAtGeneration", "List", "AttachmentOwnedBy", "Next", "WaitNext", "InputSequence", "QueryInput", "AttachmentStatus":
+		case "ResourceCounts", "Snapshot", "SnapshotAtGeneration", "List", "AttachmentOwnedBy", "Next", "WaitNext", "WaitNextAttachment", "InputSequence", "QueryInput", "AttachmentStatus":
 			return false
 		default:
 			return true

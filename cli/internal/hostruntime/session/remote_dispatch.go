@@ -17,6 +17,8 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 		return remote.forward(ctx, op, body)
 	}
 	switch op {
+	case "DetachAttachment", "WaitNextAttachment":
+		return serveAttachmentLease(ctx, m, op, body)
 	case "ResourceCounts":
 		var args struct{}
 		if err := decodeRemoteRequest(body, &args); err != nil {

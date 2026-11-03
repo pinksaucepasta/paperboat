@@ -54,10 +54,11 @@ func TestIdleTerminalStreamsBackOffTheirSessionChecks(t *testing.T) {
 	var wait sync.WaitGroup
 	for i := range viewers {
 		id := fmt.Sprintf("att_idle_%02d", i)
-		if _, err := sessions.Attach(created.ID, id, 0); err != nil {
+		attached, err := sessions.Attach(created.ID, id, 0)
+		if err != nil {
 			t.Fatal(err)
 		}
-		stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: id, checkpointSent: true}
+		stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: id, attachmentLease: attached.AttachmentLease, checkpointSent: true}
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
@@ -78,10 +79,11 @@ func TestIdleTerminalStreamsBackOffTheirSessionChecks(t *testing.T) {
 // A shell that exits after a long silence still ends its stream within the longest idle wait.
 func TestIdleTerminalStreamStillEndsWhenTheSessionExits(t *testing.T) {
 	sessions, created := idleTestSessions(t, "sleep 3")
-	if _, err := sessions.Attach(created.ID, "att_exit", 0); err != nil {
+	attached, err := sessions.Attach(created.ID, "att_exit", 0)
+	if err != nil {
 		t.Fatal(err)
 	}
-	stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: "att_exit", checkpointSent: true}
+	stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: "att_exit", attachmentLease: attached.AttachmentLease, checkpointSent: true}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	started := time.Now()

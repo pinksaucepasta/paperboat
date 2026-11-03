@@ -10,6 +10,7 @@ import (
 var ErrNoActiveWriter = errors.New("no_active_writer")
 
 type writerAttachment struct {
+	lease     uint64
 	clientID  string
 	machineID string
 	lastInput time.Time
@@ -22,7 +23,7 @@ type WriterRegistry struct {
 func NewWriterRegistry() *WriterRegistry {
 	return &WriterRegistry{sessions: make(map[string]map[string]writerAttachment)}
 }
-func (r *WriterRegistry) Attach(sessionID, attachmentID, clientID, machineID string) {
+func (r *WriterRegistry) Attach(sessionID, attachmentID, clientID, machineID string, lease uint64) {
 	if sessionID == "" || attachmentID == "" || clientID == "" {
 		return
 	}
@@ -33,7 +34,7 @@ func (r *WriterRegistry) Attach(sessionID, attachmentID, clientID, machineID str
 		attachments = make(map[string]writerAttachment)
 		r.sessions[sessionID] = attachments
 	}
-	attachments[attachmentID] = writerAttachment{clientID: clientID, machineID: machineID}
+	attachments[attachmentID] = writerAttachment{clientID: clientID, machineID: machineID, lease: lease}
 }
 func (r *WriterRegistry) Input(sessionID, attachmentID, clientID string, at time.Time) {
 	if at.IsZero() {
@@ -49,6 +50,21 @@ func (r *WriterRegistry) Input(sessionID, attachmentID, clientID string, at time
 	current.lastInput = at
 	attachments[attachmentID] = current
 }
+
+// DetachAttachment cannot withdraw a recipient registered by a newer carrier.
+func (r *WriterRegistry) DetachAttachment(sessionID, attachmentID string, lease uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	attachments := r.sessions[sessionID]
+	if current, ok := attachments[attachmentID]; !ok || current.lease != lease {
+		return
+	}
+	delete(attachments, attachmentID)
+	if len(attachments) == 0 {
+		delete(r.sessions, sessionID)
+	}
+}
+
 func (r *WriterRegistry) Detach(sessionID, attachmentID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

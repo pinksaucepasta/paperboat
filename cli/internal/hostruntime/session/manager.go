@@ -162,6 +162,7 @@ type Participant struct {
 }
 
 type AttachResult struct {
+	AttachmentLease uint64         `json:"attachment_lease"`
 	Snapshot        Snapshot       `json:"snapshot"`
 	Replay          history.Replay `json:"replay"`
 	FirstAttachment bool           `json:"first_attachment"`

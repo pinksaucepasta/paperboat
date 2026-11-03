@@ -78,7 +78,8 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 		t.Fatal(err)
 	}
 	participant := session.Participant{AttachmentID: "attach-one", AccountID: "account-one", ClientID: "client-one", Role: "owner", Browser: false, ConnectedAt: time.Now().UTC()}
-	if _, err = remote.AttachLiveParticipantAtGeneration(created.ID, participant, created.Generation); err != nil {
+	heldAttachment, err := remote.AttachLiveParticipantAtGeneration(created.ID, participant, created.Generation)
+	if err != nil {
 		t.Fatal(err)
 	}
 	key := session.InputKey{ClientID: participant.ClientID, AttachmentID: participant.AttachmentID, Generation: created.Generation, InputSequence: 1}
@@ -89,7 +90,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	var output string
 	var waitFrom uint64 // the end of what this reader holds
 	for !strings.Contains(output, "reply:before") {
-		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID, waitFrom)
+		event, err := remote.WaitNextAttachment(ctx, created.ID, participant.AttachmentID, waitFrom, heldAttachment.AttachmentLease)
 		if err == nil {
 			waitFrom = event.EndSequence
 		}
@@ -101,13 +102,24 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 			t.Fatal(err)
 		}
 	}
+	oldLease := heldAttachment.AttachmentLease
+	heldAttachment, err = remote.AttachParticipantAtGeneration(created.ID, participant, waitFrom, created.Generation)
+	if err != nil || heldAttachment.AttachmentLease == oldLease {
+		t.Fatal("IPC attachment takeover did not replace its lease", err)
+	}
+	if err := remote.DetachAttachment(created.ID, participant.AttachmentID, oldLease); err != nil {
+		t.Fatal("old IPC cleanup failed", err)
+	}
+	if _, err := remote.WaitNextAttachment(ctx, created.ID, participant.AttachmentID, waitFrom, oldLease); !errors.Is(err, session.ErrAttachmentUnknown) {
+		t.Fatal("old IPC reader retained replacement authority", err)
+	}
 	// Idle terminal polling uses short caller deadlines. Those are ordinary
 	// poll completion, not loss of the owner; subsequent input must still work.
 	// Output after "reply:before" (the rest of its line) may still arrive; drain it so the poll is idle.
 	var pollErr error
 	for drained := 0; drained < 16; drained++ {
 		pollCtx, stopPoll := context.WithTimeout(ctx, 100*time.Millisecond)
-		event, waitErr := remote.WaitNext(pollCtx, created.ID, participant.AttachmentID, waitFrom)
+		event, waitErr := remote.WaitNextAttachment(pollCtx, created.ID, participant.AttachmentID, waitFrom, heldAttachment.AttachmentLease)
 		if waitErr == nil {
 			waitFrom = event.EndSequence
 		}
@@ -124,7 +136,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	}
 	cancelCtx, stopCanceled := context.WithCancel(ctx)
 	stopCanceled()
-	if _, err := remote.WaitNext(cancelCtx, created.ID, participant.AttachmentID, 0); err != context.Canceled {
+	if _, err := remote.WaitNextAttachment(cancelCtx, created.ID, participant.AttachmentID, 0, heldAttachment.AttachmentLease); err != context.Canceled {
 		t.Fatalf("canceled poll became owner failure: %T %v", err, err)
 	}
 	keyAfterPoll := key
@@ -133,7 +145,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 		t.Fatalf("input after idle poll=%+v err=%v", decision, err)
 	}
 	for !strings.Contains(output, "reply:after-poll") {
-		event, err := remote.WaitNext(ctx, created.ID, participant.AttachmentID, waitFrom)
+		event, err := remote.WaitNextAttachment(ctx, created.ID, participant.AttachmentID, waitFrom, heldAttachment.AttachmentLease)
 		if err == nil {
 			waitFrom = event.EndSequence
 		}

@@ -15,6 +15,7 @@ import (
 )
 
 type terminalOutputStream struct {
+	attachmentLease    uint64
 	manager            session.Service
 	sessionID          string
 	attachmentID       string
@@ -146,9 +147,11 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 		return nil, false, ErrInvalidConfiguration
 	}
 	if replay {
-		if _, err := d.attachTerminalParticipant(authorization, request, response.AttachmentID); err != nil {
+		attached, err := d.attachTerminalParticipant(authorization, request, response.AttachmentID)
+		if err != nil {
 			return nil, false, err
 		}
+		response.AttachmentLease = attached.AttachmentLease
 	}
 
 	expectedGeneration := uint64(0)
@@ -159,14 +162,14 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 	if generation == 0 {
 		generation = response.Session.Snapshot.Generation
 	}
-	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
+	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, attachmentLease: response.AttachmentLease, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
 	if authorization.BrowserTerminal || request.AtLiveBoundary {
 		if err := d.prepareTerminalCheckpoint(ctx, authorization, request, response, stream); err != nil {
 			return nil, false, err
 		}
 	}
 	if d.config.Writers != nil {
-		d.config.Writers.Attach(request.SessionID, response.AttachmentID, authorization.ClientID, authorization.SourceMachineID)
+		d.config.Writers.Attach(request.SessionID, response.AttachmentID, authorization.ClientID, authorization.SourceMachineID, response.AttachmentLease)
 	}
 	return stream, true, nil
 }
@@ -181,7 +184,7 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 	ready := false
 	defer func() {
 		if !ready {
-			_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, generation)
+			_ = d.config.Sessions.DetachAttachment(request.SessionID, response.AttachmentID, response.AttachmentLease)
 		}
 	}()
 	checkpoint, boundary, err := d.config.Sessions.BrowserScreenAttachment(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, generation)
@@ -211,6 +214,7 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 }
 
 type terminalAttachResponse struct {
+	AttachmentLease uint64 `json:"attachment_lease"`
 	StreamID        uint32 `json:"stream_id,omitempty"`
 	AttachmentID    string `json:"attachment_id"`
 	InputSequence   uint64 `json:"input_sequence,omitempty"`
@@ -227,7 +231,7 @@ type terminalAttachResponse struct {
 }
 
 func newTerminalAttachResponse(attachmentID string, attached session.AttachResult) terminalAttachResponse {
-	response := terminalAttachResponse{AttachmentID: attachmentID, FirstAttachment: attached.FirstAttachment}
+	response := terminalAttachResponse{AttachmentLease: attached.AttachmentLease, AttachmentID: attachmentID, FirstAttachment: attached.FirstAttachment}
 	response.Session.Snapshot = attached.Snapshot
 	response.Session.Replay.FromSequence = attached.Replay.FromSequence
 	response.Session.Replay.ToSequence = attached.Replay.ToSequence
@@ -250,4 +254,18 @@ func (d *Dispatcher) attachTerminalParticipant(authorization Authorization, requ
 		return d.config.Sessions.AttachLiveParticipant(request.SessionID, participant)
 	}
 	return d.config.Sessions.AttachParticipant(request.SessionID, participant, request.FromSequence)
+}
+
+func (s *terminalOutputStream) Close() error {
+	if s.unregisterScreens != nil {
+		s.unregisterScreens()
+	}
+	if s.broadcast != nil {
+		s.broadcast.Leave(s.sessionID, s.attachmentID)
+	}
+	err := s.manager.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
+	if s.writers != nil {
+		s.writers.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
+	}
+	return err
 }

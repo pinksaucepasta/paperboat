@@ -497,7 +497,7 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			s.idleWait = terminalExitObservationInterval
 		}
 		waitCtx, cancel := context.WithTimeout(ctx, s.idleWait)
-		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID, s.received)
+		event, err := s.manager.WaitNextAttachment(waitCtx, s.sessionID, s.attachmentID, s.received, s.attachmentLease)
 		cancel()
 		if err == nil {
 			diagnostics.TerminalHop("host_output_received", s.sessionID, event.StartSequence, event.EndSequence, time.Now())
@@ -585,20 +585,6 @@ func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {
 		return s.manager.SnapshotAtGeneration(s.sessionID, s.expectedGeneration)
 	}
 	return s.manager.Snapshot(s.sessionID)
-}
-
-func (s *terminalOutputStream) Close() error {
-	if s.unregisterScreens != nil {
-		s.unregisterScreens()
-	}
-	if s.broadcast != nil {
-		s.broadcast.Leave(s.sessionID, s.attachmentID)
-	}
-	err := s.manager.Detach(s.sessionID, s.attachmentID)
-	if s.writers != nil {
-		s.writers.Detach(s.sessionID, s.attachmentID)
-	}
-	return err
 }
 
 func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, payload json.RawMessage) operation.Outcome {
@@ -689,7 +675,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		if attachResponse.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, attachmentID, value.Snapshot.Generation); err != nil {
 			errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "sessions", "input_sequence", "terminal_session_failed", err)
 			if participantBound {
-				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+				_ = d.config.Sessions.DetachAttachment(request.SessionID, attachmentID, value.AttachmentLease)
 			}
 			return domainResult(nil, err)
 		}
@@ -706,7 +692,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			cancel()
 			if err != nil {
 				// A concurrent restart/removal already clears the old-generation participant.
-				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+				_ = d.config.Sessions.DetachAttachment(request.SessionID, attachmentID, value.AttachmentLease)
 				return failure("unavailable")
 			}
 		}

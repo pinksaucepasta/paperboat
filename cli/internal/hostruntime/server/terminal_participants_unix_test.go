@@ -91,7 +91,8 @@ func TestBrowserTerminalStreamSendsAScreenOnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	browser := session.Participant{AttachmentID: "att_browser", AccountID: "acct_owner", ClientID: "client_browser", Role: "owner", ConnectedAt: time.Now().UTC(), Browser: true}
-	if _, err := sessions.AttachLiveParticipantAtGeneration(created.ID, browser, created.Generation); err != nil {
+	attached, err := sessions.AttachLiveParticipantAtGeneration(created.ID, browser, created.Generation)
+	if err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -102,7 +103,7 @@ func TestBrowserTerminalStreamSendsAScreenOnRequest(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	requests := make(chan struct{}, 1)
-	stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: browser.AttachmentID, checkpointSent: true, keyUpdates: make(chan browserbroadcastserver.Epoch), screenRequests: requests, accountID: browser.AccountID, clientID: browser.ClientID, generation: created.Generation}
+	stream := &terminalOutputStream{manager: sessions, sessionID: created.ID, attachmentID: browser.AttachmentID, attachmentLease: attached.AttachmentLease, checkpointSent: true, keyUpdates: make(chan browserbroadcastserver.Epoch), screenRequests: requests, accountID: browser.AccountID, clientID: browser.ClientID, generation: created.Generation}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var event *StreamEvent
@@ -148,11 +149,12 @@ func TestFloodingStreamChecksTheSessionAtMostOncePerInterval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessions.Attach(created.ID, "att_flood", 0); err != nil {
+	attached, err := sessions.Attach(created.ID, "att_flood", 0)
+	if err != nil {
 		t.Fatal(err)
 	}
 	counting := &countingSnapshots{Service: sessions}
-	stream := &terminalOutputStream{manager: counting, sessionID: created.ID, attachmentID: "att_flood", checkpointSent: true}
+	stream := &terminalOutputStream{manager: counting, sessionID: created.ID, attachmentID: "att_flood", attachmentLease: attached.AttachmentLease, checkpointSent: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	events := 0
