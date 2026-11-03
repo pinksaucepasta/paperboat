@@ -721,6 +721,23 @@ func (a *Authority) Peer(endpointID string) (NetworkBinding, error) {
 	return NetworkBinding{}, ErrAdmission
 }
 
+// PeerForQUICKey resolves a currently admitted peer before accepting its direct
+// delegated transport. It performs no discovery or control-plane request.
+func (a *Authority) PeerForQUICKey(public ed25519.PublicKey) (NetworkBinding, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.usableLocked() || len(public) != ed25519.PublicKeySize {
+		return NetworkBinding{}, ErrAuthority
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(public)
+	for _, peer := range a.current.Peers {
+		if peer.Identity.QUICPublicKey == encoded && peerAdmissionExpiry(peer) > time.Now().Unix() {
+			return peer.Identity, nil
+		}
+	}
+	return NetworkBinding{}, ErrAdmission
+}
+
 // PeerAt resolves the signed identity assigned to an accepted virtual address.
 func (a *Authority) PeerAt(address netip.Addr) (NetworkBinding, error) {
 	a.mu.Lock()

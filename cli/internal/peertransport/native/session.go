@@ -23,19 +23,20 @@ import (
 )
 
 type Session struct {
-	traceLabel string
-	owner      *Owner
-	peerID     string
-	binding    tailnet.NetworkBinding
-	quic       *peerquic.Session
-	router     *peerquic.StreamRouter
-	routerMu   sync.Mutex
-	once       sync.Once
-	closing    atomic.Bool
-	err        error
-	scopeMu    sync.Mutex
-	http3Scope *scopeKey
-	carrier    *admission.Lease
+	traceLabel      string
+	terminalCarrier bool
+	owner           *Owner
+	peerID          string
+	binding         tailnet.NetworkBinding
+	quic            *peerquic.Session
+	router          *peerquic.StreamRouter
+	routerMu        sync.Mutex
+	once            sync.Once
+	closing         atomic.Bool
+	err             error
+	scopeMu         sync.Mutex
+	http3Scope      *scopeKey
+	carrier         *admission.Lease
 }
 
 // MeterBinding contains only verified accounting metadata, never credentials.
@@ -55,6 +56,9 @@ func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessS
 		return conn
 	}
 	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, Reverse: reverse, Path: func(direction string) (string, string) {
+		if s.terminalCarrier {
+			return "direct", ""
+		}
 		path, err := s.owner.authority.PeerUsagePathDirection(s.peerID, direction)
 		if err != nil {
 			return "unknown", ""
@@ -193,6 +197,9 @@ func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 // OpenAuthorized sends the canonical operation credential before exposing the
 // stream. Network admission and application authorization remain independent.
 func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, accessSessionID, capability string) (net.Conn, error) {
+	if s.terminalCarrier && (header.Consumer != "terminal" || header.Offline) {
+		return nil, tailnet.ErrAdmission
+	}
 	if !s.owner.authority.Allows(s.peerID, accessSessionID, capability, "dial") {
 		return nil, tailnet.ErrAdmission
 	}
@@ -217,6 +224,9 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	header, err := streamauth.Parse(encoded, time.Now().UTC())
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
+	}
+	if s.terminalCarrier && (header.Consumer != "terminal" || header.Offline) {
+		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
 	}
 	capability := capabilityForConsumer(header.Consumer)
 	if capability == "" {
