@@ -3,90 +3,25 @@ package filetransfer
 import (
 	"errors"
 	"slices"
-	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
 var ErrNoActiveWriter = errors.New("no_active_writer")
 
-type writerAttachment struct {
-	lease     uint64
-	clientID  string
-	machineID string
-	lastInput time.Time
-}
-type WriterRegistry struct {
-	mu       sync.Mutex
-	sessions map[string]map[string]writerAttachment
-}
-
-func NewWriterRegistry() *WriterRegistry {
-	return &WriterRegistry{sessions: make(map[string]map[string]writerAttachment)}
-}
-func (r *WriterRegistry) Attach(sessionID, attachmentID, clientID, machineID string, lease uint64) {
-	if sessionID == "" || attachmentID == "" || clientID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attachments := r.sessions[sessionID]
-	if attachments == nil {
-		attachments = make(map[string]writerAttachment)
-		r.sessions[sessionID] = attachments
-	}
-	attachments[attachmentID] = writerAttachment{clientID: clientID, machineID: machineID, lease: lease}
-}
-func (r *WriterRegistry) Input(sessionID, attachmentID, clientID string, at time.Time) {
-	if at.IsZero() {
-		at = time.Now().UTC()
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attachments := r.sessions[sessionID]
-	current, ok := attachments[attachmentID]
-	if !ok || current.clientID != clientID {
-		return
-	}
-	current.lastInput = at
-	attachments[attachmentID] = current
-}
-
-// DetachAttachment cannot withdraw a recipient registered by a newer carrier.
-func (r *WriterRegistry) DetachAttachment(sessionID, attachmentID string, lease uint64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attachments := r.sessions[sessionID]
-	if current, ok := attachments[attachmentID]; !ok || current.lease != lease {
-		return
-	}
-	delete(attachments, attachmentID)
-	if len(attachments) == 0 {
-		delete(r.sessions, sessionID)
-	}
-}
-
-func (r *WriterRegistry) Detach(sessionID, attachmentID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attachments := r.sessions[sessionID]
-	delete(attachments, attachmentID)
-	if len(attachments) == 0 {
-		delete(r.sessions, sessionID)
-	}
-}
-func (r *WriterRegistry) Recipient(sessionID, machineID string) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	attachments := r.sessions[sessionID]
+// WriterRecipient selects from PTY-owner state, so carrier and hostd
+// replacement cannot erase or fork the current file recipient.
+func WriterRecipient(writers []session.ActiveWriter, machineID string) (string, error) {
 	clients := make(map[string]time.Time)
-	for _, attachment := range attachments {
-		if machineID != "" && attachment.machineID != machineID {
+	for _, writer := range writers {
+		if machineID != "" && writer.MachineID != machineID {
 			continue
 		}
-		if attachment.lastInput.After(clients[attachment.clientID]) {
-			clients[attachment.clientID] = attachment.lastInput
-		} else if _, ok := clients[attachment.clientID]; !ok {
-			clients[attachment.clientID] = time.Time{}
+		if writer.LastInput.After(clients[writer.ClientID]) {
+			clients[writer.ClientID] = writer.LastInput
+		} else if _, ok := clients[writer.ClientID]; !ok {
+			clients[writer.ClientID] = time.Time{}
 		}
 	}
 	var selected string
@@ -107,13 +42,11 @@ func (r *WriterRegistry) Recipient(sessionID, machineID string) (string, error) 
 	return "", ErrNoActiveWriter
 }
 
-func (r *WriterRegistry) EligibleMachines(sessionID string) []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func EligibleWriterMachines(writers []session.ActiveWriter) []string {
 	seen := make(map[string]struct{})
-	for _, attachment := range r.sessions[sessionID] {
-		if attachment.machineID != "" {
-			seen[attachment.machineID] = struct{}{}
+	for _, writer := range writers {
+		if writer.MachineID != "" {
+			seen[writer.MachineID] = struct{}{}
 		}
 	}
 	result := make([]string, 0, len(seen))

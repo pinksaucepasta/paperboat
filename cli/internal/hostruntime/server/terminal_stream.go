@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -20,7 +19,6 @@ type terminalOutputStream struct {
 	sessionID          string
 	attachmentID       string
 	expectedGeneration uint64
-	writers            *filetransfer.WriterRegistry
 	checkpoint         []byte
 	checkpointSequence uint64
 	checkpointOffset   int
@@ -162,14 +160,11 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 	if generation == 0 {
 		generation = response.Session.Snapshot.Generation
 	}
-	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, attachmentLease: response.AttachmentLease, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
+	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, attachmentLease: response.AttachmentLease, expectedGeneration: expectedGeneration, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
 	if authorization.BrowserTerminal || request.AtLiveBoundary {
 		if err := d.prepareTerminalCheckpoint(ctx, authorization, request, response, stream); err != nil {
 			return nil, false, err
 		}
-	}
-	if d.config.Writers != nil {
-		d.config.Writers.Attach(request.SessionID, response.AttachmentID, authorization.ClientID, authorization.SourceMachineID, response.AttachmentLease)
 	}
 	return stream, true, nil
 }
@@ -242,7 +237,7 @@ func newTerminalAttachResponse(attachmentID string, attached session.AttachResul
 
 // The normal request and journal replay bind the same authenticated participant.
 func (d *Dispatcher) attachTerminalParticipant(authorization Authorization, request terminalRequest, attachmentID string) (session.AttachResult, error) {
-	participant := session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}}
+	participant := session.Participant{SourceMachineID: authorization.SourceMachineID, AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}}
 	if isGenerationBoundTerminal(authorization) {
 		if request.AtLiveBoundary && authorization.BrowserTerminal {
 			return d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)
@@ -264,8 +259,5 @@ func (s *terminalOutputStream) Close() error {
 		s.broadcast.Leave(s.sessionID, s.attachmentID)
 	}
 	err := s.manager.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
-	if s.writers != nil {
-		s.writers.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
-	}
 	return err
 }

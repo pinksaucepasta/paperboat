@@ -9,6 +9,7 @@ import (
 // Service is the terminal boundary shared by the process owner and feature runtime.
 // Shutdown on a remote service disconnects the runtime, never the owned processes.
 type Service interface {
+	ActiveWriters(sessionID string) ([]ActiveWriter, error)
 	ResourceCounts() map[string]uint64
 	Create(ctx context.Context, request CreateRequest) (Snapshot, error)
 	BeginUpdate(transactionID string) error

@@ -50,7 +50,6 @@ type DispatcherConfig struct {
 	Random             io.Reader
 	Now                func() time.Time
 	FileTransfers      *filetransfer.Service
-	Writers            *filetransfer.WriterRegistry
 	Exec               execprocess.Service
 	SSH                *managedssh.Host
 	Capabilities       CapabilityGate
@@ -220,9 +219,6 @@ func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Author
 		return session.InputDecision{InputSequence: inputSequence}, session.ErrInvalidInput
 	}
 	decision, err := d.config.Sessions.Write(sessionID, session.InputKey{ClientID: authorization.ClientID, AttachmentID: attachmentID, Generation: generation, InputSequence: inputSequence}, data)
-	if err == nil && d.config.Writers != nil && decision.Status != session.InputUncertain {
-		d.config.Writers.Input(sessionID, attachmentID, authorization.ClientID, d.config.Now())
-	}
 	if decision.InputSequence == 0 {
 		decision.InputSequence = inputSequence
 	}
@@ -321,9 +317,6 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 			err = d.config.Sessions.DetachParticipantAtGeneration(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
 		} else {
 			err = d.config.Sessions.Detach(control.SessionID, control.AttachmentID)
-		}
-		if err == nil && d.config.Writers != nil {
-			d.config.Writers.Detach(control.SessionID, control.AttachmentID)
 		}
 	default:
 		return failure("invalid_request")
@@ -642,10 +635,11 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		if err != nil {
 			return domainResult(nil, err)
 		}
-		eligible := []string{}
-		if d.config.Writers != nil {
-			eligible = d.config.Writers.EligibleMachines(request.SessionID)
+		writers, err := d.config.Sessions.ActiveWriters(request.SessionID)
+		if err != nil {
+			return domainResult(nil, err)
 		}
+		eligible := filetransfer.EligibleWriterMachines(writers)
 		return result(struct {
 			session.Snapshot
 			EligibleTransferDestinationMachineIDs []string `json:"eligible_transfer_destination_machine_ids"`
@@ -712,9 +706,6 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			err = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
 		} else {
 			err = d.config.Sessions.Detach(request.SessionID, request.AttachmentID)
-		}
-		if err == nil && d.config.Writers != nil {
-			d.config.Writers.Detach(request.SessionID, request.AttachmentID)
 		}
 		return domainResult(struct{}{}, err)
 	case "screen":

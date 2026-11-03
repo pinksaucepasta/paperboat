@@ -76,6 +76,9 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if err != nil {
 		return decision, err
 	}
+	if decision.Status != InputUncertain && decision.BytesWritten > 0 {
+		session.sizes.noteInput(key.AttachmentID, time.Now().UTC())
+	}
 	if m.config.Store != nil {
 		// The outcome joins the next group commit instead of a second fsync per key (N11: 2 000 keys 10 ms apart
 		// backed up 5 s on a disk that takes ~5 ms per fsync).
@@ -188,6 +191,9 @@ func (m *Manager) WriteStreamContext(ctx context.Context, sessionID, attachmentI
 	}
 	if n != len(data) {
 		return io.ErrShortWrite
+	}
+	if n > 0 {
+		session.sizes.noteInput(attachmentID, time.Now().UTC())
 	}
 	return nil
 }

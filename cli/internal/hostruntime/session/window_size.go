@@ -27,6 +27,7 @@ type windowSizes struct {
 }
 
 type sizeWindow struct {
+	lastInput  time.Time
 	attached   bool
 	detachedAt time.Time
 	size       pty.Dimensions // the window's last reported size

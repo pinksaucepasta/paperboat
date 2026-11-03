@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
@@ -84,7 +85,7 @@ func newConnectedTerminalMove(t *testing.T, ctx context.Context, issuer, machine
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := auth.Claims{Issuer: issuer, Audience: "paperboat-machine", Subject: "account_connected", JTI: "jti_carrier", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(5 * time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_connected", AccountID: "account_connected", MachineID: machine, UserID: "account_connected", CLIClientSessionID: client, SessionID: snapshot.ID, ExpectedGeneration: int64(snapshot.Generation), AssignmentID: "access_connected"}
+	claims := auth.Claims{Issuer: issuer, Audience: "paperboat-machine", Subject: "account_connected", JTI: "jti_carrier", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(5 * time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_connected", AccountID: "account_connected", MachineID: machine, UserID: "account_connected", CLIClientSessionID: client, SourceMachineID: "machine_controller", SessionID: snapshot.ID, ExpectedGeneration: int64(snapshot.Generation), AssignmentID: "access_connected"}
 	token := connectedSignedJWT(t, private, "paperboat-credential+jwt", claims)
 	journal, err := operation.NewJournal(1024)
 	if err != nil {
@@ -240,36 +241,7 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 		t.Fatal("resize history notification mismatch", err)
 	}
 
-	self, err := authority.Self()
-	if err != nil {
-		t.Fatal(err)
-	}
-	nextAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: "https://api.example.test", Self: self, Keys: connectedNetworkKeys{public}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := nextAuthority.Restore(ctx); err != nil {
-		t.Fatal(err)
-	}
-	nextOwner, err := native.NewOwner(native.Config{Authority: nextAuthority, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, Certificates: []tls.Certificate{leaf}, NextProtos: []string{peerquic.ALPN}}}) //nolint:gosec
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer nextOwner.Close()
-	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := nextOwner.NewCarrierIdentity([]netip.AddrPort{socket.LocalAddr().(*net.UDPAddr).AddrPort()})
-	if err != nil {
-		socket.Close()
-		t.Fatal(err)
-	}
-	_, apps := f.endpoint(t)
-	nextCtx, stopNext := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() { done <- nextOwner.ListenCarrier(nextCtx, socket, identity, apps.Serve) }()
-	defer func() { stopNext(); socket.Close(); <-done; apps.Wait() }()
+	offer := f.parallelCarrier(t, ctx, authority, store, leaf, public)
 	var expected []byte
 	for i := 0; i < 64; i++ {
 		expected = append(expected, []byte(fmt.Sprintf("%04d:%s\n", i, bytes.Repeat([]byte("x"), 250)))...)
@@ -293,7 +265,7 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 		}
 		received <- data
 	}()
-	if err := old.OfferCarrier(ctx, identity.Offer); err != nil {
+	if err := old.OfferCarrier(ctx, offer); err != nil {
 		t.Fatal("planned terminal move failed", err)
 	}
 	if err := old.Close(); err != nil {
@@ -321,8 +293,67 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 	if _, err := io.ReadFull(conn, got); err != nil || !bytes.Equal(got, tail) {
 		t.Fatal("input was replayed or terminal stopped after old host shutdown", err)
 	}
+	f.checkWriterOwner(t)
 	snapshot, err := f.sessions.Snapshot(f.target.SessionID)
 	if err != nil || snapshot.Generation != 1 || snapshot.Dimensions.Rows != 31 || snapshot.Dimensions.Columns != 91 {
 		t.Fatal("PTY generation or window changed during carrier move", err)
 	}
+}
+
+func (f *connectedTerminalMove) parallelCarrier(t *testing.T, ctx context.Context, authority *tailnet.Authority, store config.ProfileStore, leaf tls.Certificate, public ed25519.PublicKey) native.CarrierOffer {
+	t.Helper()
+	self, err := authority.Self()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: "https://api.example.test", Self: self, Keys: connectedNetworkKeys{public}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nextAuthority.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	nextOwner, err := native.NewOwner(native.Config{Authority: nextAuthority, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, Certificates: []tls.Certificate{leaf}, NextProtos: []string{peerquic.ALPN}}}) //nolint:gosec
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { nextOwner.Close() })
+	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := nextOwner.NewCarrierIdentity([]netip.AddrPort{socket.LocalAddr().(*net.UDPAddr).AddrPort()})
+	if err != nil {
+		socket.Close()
+		t.Fatal(err)
+	}
+	_, apps := f.endpoint(t)
+	nextCtx, stopNext := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- nextOwner.ListenCarrier(nextCtx, socket, identity, apps.Serve) }()
+	t.Cleanup(func() { stopNext(); socket.Close(); <-done; apps.Wait() })
+	return identity.Offer
+}
+
+func (f *connectedTerminalMove) checkWriterOwner(t *testing.T) {
+	t.Helper()
+	// A fresh worker connection has none of the old carrier's process-local
+	// registry. File delivery must still find the exact current writer.
+	client, err := workloadbridge.NewClient(f.ownerSocket, f.ownerToken, "session-owner", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	remote, err := client.Sessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writers, err := remote.ActiveWriters(f.target.SessionID)
+	if err != nil || len(writers) != 1 || writers[0].MachineID != "machine_controller" || writers[0].ClientID != "cli_connected" || writers[0].LastInput.IsZero() {
+		t.Fatal("writer authority or activity was lost across carrier/worker replacement", err)
+	}
+	if recipient, err := filetransfer.WriterRecipient(writers, "machine_controller"); err != nil || recipient != "cli_connected" {
+		t.Fatal("replacement worker cannot resolve the exact file recipient", err)
+	}
+
 }

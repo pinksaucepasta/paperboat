@@ -16,7 +16,6 @@ import (
 
 func TestOldTerminalStreamCannotReadOrDetachReplacement(t *testing.T) {
 	dispatcher, root := execDispatcher(t)
-	dispatcher.config.Writers = filetransfer.NewWriterRegistry()
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	created, err := dispatcher.config.Sessions.Create(ctx, session.CreateRequest{ID: "ses_handoff", Name: "handoff", Command: pty.Command{Path: "/bin/sh", Args: []string{"-c", "exec cat"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
@@ -51,7 +50,11 @@ func TestOldTerminalStreamCannotReadOrDetachReplacement(t *testing.T) {
 	if err := old.Close(); err != nil {
 		t.Fatal("old stream cleanup should be a no-op", err)
 	}
-	if machines := dispatcher.config.Writers.EligibleMachines(created.ID); len(machines) != 1 || machines[0] != auth.SourceMachineID {
+	writers, err := dispatcher.config.Sessions.ActiveWriters(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machines := filetransfer.EligibleWriterMachines(writers); len(machines) != 1 || machines[0] != auth.SourceMachineID {
 		t.Fatal("old cleanup removed the replacement file recipient")
 	}
 	if _, err := dispatcher.HandleTerminalInput(ctx, auth, created.ID, "att_handoff", created.Generation, 1, []byte("after\n")); err != nil {

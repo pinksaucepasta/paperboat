@@ -17,6 +17,16 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 		return remote.forward(ctx, op, body)
 	}
 	switch op {
+	case "ActiveWriters":
+		var args struct{ Sessionid string }
+		if err := decodeRemoteRequest(body, &args); err != nil {
+			return nil, ErrInvalidSession
+		}
+		writers, err := m.ActiveWriters(args.Sessionid)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct{ V0 []ActiveWriter }{writers})
 	case "DetachAttachment", "WaitNextAttachment":
 		return serveAttachmentLease(ctx, m, op, body)
 	case "ResourceCounts":

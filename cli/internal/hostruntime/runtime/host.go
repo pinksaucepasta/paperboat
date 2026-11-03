@@ -280,7 +280,13 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 
 	healthSource := &runtimeHealthSource{}
-	writers := filetransfer.NewWriterRegistry()
+	recipient := func(sessionID, machineID string) (string, error) {
+		writers, err := sessions.ActiveWriters(sessionID)
+		if err != nil {
+			return "", err
+		}
+		return filetransfer.WriterRecipient(writers, machineID)
+	}
 	executionConfig := execprocess.Config{
 		WorkspaceRoot: config.WorkspaceRoot, BaseEnvironment: config.AgentEnvironment,
 		MaximumActive: resources.MaxConcurrentOps, MaximumOperations: resources.MaxConcurrentOps * 32,
@@ -316,7 +322,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		WorkspaceRoot: config.WorkspaceRoot, Random: random,
 		ConfigApply:   dependencies.ConfigApply,
 		ConfigCompare: dependencies.ConfigCompare,
-		FileTransfers: transferService, Writers: writers, Exec: executions,
+		FileTransfers: transferService, Exec: executions,
 		SSH: dependencies.ManagedSSH, Capabilities: dependencies.Capabilities,
 		Inspector: browserInspector(dependencies.Inspector),
 	})
@@ -335,7 +341,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			if request.DestinationMachineID == config.MachineID {
 				return "", nil
 			}
-			return writers.Recipient(request.SessionID, request.DestinationMachineID)
+			return recipient(request.SessionID, request.DestinationMachineID)
 		},
 	}
 	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
@@ -496,7 +502,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if browserTerminalHandler != nil {
 		mux.Handle("/v1/browser-terminal", browserTerminalHandler)
 	}
-	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: writers.Recipient})
+	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: recipient})
 	if localTransferErr != nil {
 		return nil, localTransferErr
 	}

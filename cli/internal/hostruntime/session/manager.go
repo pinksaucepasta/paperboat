@@ -151,12 +151,13 @@ type Snapshot struct {
 }
 
 type Participant struct {
-	AttachmentID string    `json:"attachment_id"`
-	AccountID    string    `json:"account_id"`
-	ClientID     string    `json:"client_id"`
-	Role         string    `json:"role"`
-	ConnectedAt  time.Time `json:"connected_at"`
-	Browser      bool      `json:"-"`
+	SourceMachineID string    `json:"-"`
+	AttachmentID    string    `json:"attachment_id"`
+	AccountID       string    `json:"account_id"`
+	ClientID        string    `json:"client_id"`
+	Role            string    `json:"role"`
+	ConnectedAt     time.Time `json:"connected_at"`
+	Browser         bool      `json:"-"`
 	// Dimensions is the window's size when it attached; 0x0 until it reports one.
 	Dimensions pty.Dimensions `json:"-"`
 }
