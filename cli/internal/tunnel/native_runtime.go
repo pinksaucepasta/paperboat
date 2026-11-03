@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -355,6 +356,16 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 	if err != nil {
 		return nil, err
 	}
+	var sequence *atomic.Int64
+	var sequenceSink func(int)
+	if consumer == "terminal" {
+		sequence = &atomic.Int64{}
+		sequence.Store(int64(target.AfterSequence))
+		sequenceSink = target.SequenceSink
+		target.SequenceSink = func(value int) {
+			sequence.Store(int64(value))
+		}
+	}
 	group := &cliNativeStreamGroup{session: session, target: target, application: application, consumer: consumer, now: now}
 	if application.helper != nil {
 		authEnd := diagnostics.ReconnectStep(ctx, "application_authenticate")
@@ -367,8 +378,17 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 		connection, err := application.helper(ctx, message, target)
 		if err != nil {
 			_ = message.Close()
+			return nil, err
 		}
-		return connection, err
+		if consumer == "terminal" {
+			helper, ok := connection.(*helperTerminalConn)
+			if !ok {
+				connection.Close()
+				return nil, ErrPeerTerminalInvalid
+			}
+			return newCarrierTerminal(ctx, helper, session, application, target, now, sequence, sequenceSink)
+		}
+		return connection, nil
 	}
 	if application.raw != nil {
 		stream, err := group.OpenStream(ctx)

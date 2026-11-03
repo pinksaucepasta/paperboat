@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -65,5 +66,27 @@ func TestTerminalInputQueueReconcileFollowsANewAttachment(t *testing.T) {
 	}
 	if next, err := queue.Enqueue([]byte("y")); err != nil || next != 1 {
 		t.Fatalf("next=%d err=%v", next, err)
+	}
+}
+
+func TestTerminalInputQueueMoveWaitRequiresEveryDecision(t *testing.T) {
+	q := NewTerminalInputQueue(2)
+	first, err := q.Enqueue([]byte("one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := q.Enqueue([]byte("two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Complete(first)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := q.WaitEmpty(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal("move ignored an undecided input", err)
+	}
+	q.Complete(second)
+	if err := q.WaitEmpty(t.Context()); err != nil {
+		t.Fatal("acknowledged input blocked the move", err)
 	}
 }

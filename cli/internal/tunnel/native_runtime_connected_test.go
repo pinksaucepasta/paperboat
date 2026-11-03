@@ -275,7 +275,8 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		machineNode.Transports = []string{"derp_quic", "derp_wss"}
 	}
 	machineBinding := tailnet.NetworkBinding{AccountID: accountID, EndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: identity.MachineCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.MachineCertificate.Claims.QUICPublicKey), VirtualAddress: "fd7a:115c:a1e0::92"}
-	machineAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: connectedStore(t), Issuer: issuer, Self: machineBinding, Keys: connectedNetworkKeys{signerPublic}})
+	machineStore := connectedStore(t)
+	machineAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: machineStore, Issuer: issuer, Self: machineBinding, Keys: connectedNetworkKeys{signerPublic}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,6 +287,10 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	}
 	machineBinding.KeyGeneration++
 	machineBinding.DiscoPublicKey, _ = machineAuthority.DiscoveryPublicKey()
+	var terminal *connectedTerminalMove
+	if mode == "terminal_move" {
+		terminal = newConnectedTerminalMove(t, ctx, issuer, machineID, cliID, signerPublic, signerPrivate)
+	}
 	state := &connectedConfigState{}
 	networkAPI := connectedNetworkAPI{register: func(request api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 		state.mu.Lock()
@@ -296,6 +301,10 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		if machine != nil {
 			clientConfig.Peers[0].Scopes[0].Capability = "private_access"
 			machineConfig.Peers[0].Scopes[0].Capability = "private_access"
+		}
+		if terminal != nil {
+			clientConfig.Peers[0].Scopes[0].Capability = "terminal"
+			machineConfig.Peers[0].Scopes[0].Capability = "terminal"
 		}
 		if hostRules {
 			hostScope := machineConfig.Peers[0].Scopes[0]
@@ -356,6 +365,9 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	listenDone := make(chan error, 1)
 	go func() {
 		listenDone <- machineOwner.Listen(ctx, regions[0], func(serveCtx context.Context, session *native.Session) error {
+			if terminal != nil {
+				return terminal.serve(serveCtx, session)
+			}
 			if machine != nil {
 				return machine.serve(serveCtx, session)
 			}
@@ -443,6 +455,12 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("machine receiver did not stop")
 		}
+		return
+	}
+	if terminal != nil {
+		terminal.exercise(t, ctx, runtime, machineOwner, machineAuthority, machineStore, machineLeaf, signerPublic)
+		cancel()
+		<-listenDone
 		return
 	}
 	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)

@@ -99,6 +99,7 @@ func (e *helperRemoteError) Error() string {
 }
 
 type helperOutput struct {
+	byteCursor  bool
 	data        []byte
 	endSequence uint64
 }
@@ -164,6 +165,8 @@ type helperTerminalConn struct {
 	checkpointSequence uint64
 	checkpointBytes    int
 	readMu             sync.Mutex
+	readSequence       uint64
+	readLinear         bool
 	current            *helperOutput
 	out                chan helperOutput
 	done               chan struct{}
@@ -331,7 +334,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 		fromSequence = snapshotLatest
 	}
 	attach := func(sequence uint64, liveBoundary bool) (helperFrame, error) {
-		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary})
+		payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": sequence, "at_live_boundary": liveBoundary, "columns": cols, "rows": rows})
 		attachEnd := diagnostics.ReconnectStep(ctx, "attach")
 		frame, err := c.requestSync(ctx, "terminal.v1", payload)
 		attachEnd(err)
@@ -669,6 +672,13 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 		start = c.current.endSequence - uint64(len(c.current.data))
 	}
 	n := copy(p, c.current.data)
+	c.readLinear = c.current.byteCursor
+	c.readSequence = 0
+	if c.readLinear {
+		c.readSequence = start + uint64(n)
+	} else if n == len(c.current.data) {
+		c.readSequence = c.current.endSequence
+	}
 	if diagnostics.TerminalHopsEnabled() && c.target != nil {
 		diagnostics.TerminalHop("client_helper_read", c.target.SessionID, start, start+uint64(n), time.Now())
 	}
