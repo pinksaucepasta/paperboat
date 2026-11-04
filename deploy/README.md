@@ -199,9 +199,10 @@ anything must not be deployed in the same step as the code that needs it). Edges
 with the previous tags. Release the lock, then tell the lane that was waiting what happened.
 
 **6. Recheck and smoke.** After every server or edge deploy, first the edge gate:
-`deploy/check-edges.sh <live preview hostname> local=<oracle ip> anvit=<anvit ip>` (from oracle). It fails when
-an edge logged control failures in the last 90 s or a preview does not complete TLS; a failure means roll back
-(step 5). The 2026-11-04 outage (server .3 answer field rejected by every .2 edge) would have failed it. Then: public health (`/healthz`, `/readyz`), the `server-version`
+`PROBE='<command that runs a shell on the paired probe machine>' deploy/check-edges.sh local=<oracle ip>
+anvit=<anvit ip>` (from oracle). It creates its own preview on the probe, GETs it through every edge (200
+required) and stops it, and fails when an edge logged control failures in the last 90 s; a failure means roll
+back (step 5). The 2026-11-04 outage (server .3 answer field rejected by every .2 edge) would have failed it. Then: public health (`/healthz`, `/readyz`), the `server-version`
 commit, one preview created and fetched through each edge, and `docker logs --since 5m` of the active
 server container with no new `level=ERROR` family. Then ask Lane A (thread "Lane A — CLI & Linux
 devices") for one smoke run against the deployed server, naming the version and what changed. A check that
