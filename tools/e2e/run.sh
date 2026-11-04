@@ -70,7 +70,8 @@ fi
 if has send; then
   step "send"
   docker exec -u pbt e2e-a bash -c 'echo e2e-file >/home/pbt/e2e.txt'
-  pbx e2e-a send /home/pbt/e2e.txt --to e2e-b
+  # The receiver reports its capabilities a few seconds after pairing; send refuses until then.
+  for try in $(seq 12); do pbx e2e-a send /home/pbt/e2e.txt --to e2e-b && break; [ $try -lt 12 ] || exit 1; sleep 5; done
   inbox=$(pbx e2e-b inbox path)
   for _ in $(seq 20); do docker exec -u pbt e2e-b grep -rq e2e-file "$inbox" && break; sleep 1; done
   docker exec -u pbt e2e-b grep -rq e2e-file "$inbox"
