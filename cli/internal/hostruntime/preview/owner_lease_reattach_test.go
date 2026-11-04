@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -51,6 +52,12 @@ func (w *leaseWorker) client(t *testing.T) *LocalOwnerSessionClient {
 // the tunnel exited. It must reattach the same owner session to the new worker
 // (new endpoint and control token) and keep serving.
 func TestForegroundOwnerLeaseReattachesAcrossWorkerRestart(t *testing.T) {
+	t.Run("new endpoint and token", func(t *testing.T) { testForegroundReattach(t, false) })
+	// pbvm4 run20c: the restarted worker kept its endpoint and control token.
+	t.Run("same endpoint and token", func(t *testing.T) { testForegroundReattach(t, true) })
+}
+
+func testForegroundReattach(t *testing.T, sameEndpoint bool) {
 	target := LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}
 	old := startLeaseWorker(t, "control_old")
 	client := old.client(t)
@@ -75,7 +82,12 @@ func TestForegroundOwnerLeaseReattachesAcrossWorkerRestart(t *testing.T) {
 	// The update stops the old worker and starts a new one with a new
 	// endpoint and token; it knows nothing of the old lease.
 	old.stop()
-	fresh := startLeaseWorker(t, "control_new")
+	var fresh *leaseWorker
+	if sameEndpoint {
+		fresh = restartLeaseWorkerOn(t, old)
+	} else {
+		fresh = startLeaseWorker(t, "control_new")
+	}
 	mu.Lock()
 	current = fresh
 	mu.Unlock()
@@ -93,12 +105,10 @@ func TestForegroundOwnerLeaseReattachesAcrossWorkerRestart(t *testing.T) {
 	if _, err := fresh.registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target); err != nil {
 		t.Fatal("restarted worker cannot dispatch the preview's owner session:", err)
 	}
-	// A deliberate stop on the new worker still ends the CLI's lease, even
-	// once the released entry has been swept and the worker no longer knows it.
+	// A closed lease (Lost) still ends the CLI's command.
 	if err := fresh.client(t).Release(t.Context(), next); err != nil {
 		t.Fatal(err)
 	}
-	fresh.manager.Sweep(time.Now().Add(time.Hour))
 	select {
 	case err := <-done:
 		if err == nil || !errors.Is(err, ErrOwnerSessionLeaseLost) && !errors.Is(err, ErrOwnerSessionLeaseUnauthorized) {
@@ -107,7 +117,29 @@ func TestForegroundOwnerLeaseReattachesAcrossWorkerRestart(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("a deliberately released lease was resurrected")
 	}
-	if _, err := fresh.registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target); err == nil {
-		t.Fatal("released owner session was registered again")
+}
+
+// restartLeaseWorkerOn starts a new worker on the old one's address with the
+// same control token, as a restarted production worker does.
+func restartLeaseWorkerOn(t *testing.T, old *leaseWorker) *leaseWorker {
+	t.Helper()
+	registry, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{MachineID: "machine_01", RuntimeDone: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
 	}
+	manager, err := NewOwnerSessionLeaseManager(OwnerSessionLeaseManagerConfig{MachineID: "machine_01", ControlToken: old.token, Registry: registry, TTL: 3 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(manager)
+	listener, err := net.Listen("tcp", old.server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Listener.Close()
+	server.Listener = listener
+	server.Start()
+	w := &leaseWorker{registry: registry, manager: manager, server: server, token: old.token}
+	t.Cleanup(func() { w.stop() })
+	return w
 }

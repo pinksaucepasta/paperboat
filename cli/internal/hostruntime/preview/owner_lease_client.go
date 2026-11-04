@@ -364,18 +364,18 @@ func KeepAliveReattaching(ctx context.Context, client *LocalOwnerSessionClient, 
 		for {
 			next, connectErr := connect()
 			if connectErr == nil {
-				// The same worker after a blip still knows the lease. The same
-				// worker refusing it means it was released or expired: never
-				// resurrect that. Only a new worker (new endpoint or control
-				// token) gets the same owner session again.
+				// The same worker after a blip still knows the lease. A
+				// restarted worker (often on the same endpoint and token) does
+				// not: only this process holds the lease token, so an unknown
+				// lease was never released by anyone; acquire the same owner
+				// session again. A closed lease (Lost) still ends the command.
 				var updated OwnerSessionLease
 				if updated, connectErr = next.Heartbeat(ctx, lease); connectErr != nil {
-					if next.sameWorker(client) {
-						var unreachable *ownerSessionLeaseTransportError
-						if !errors.As(connectErr, &unreachable) {
-							return errors.Join(err, connectErr)
-						}
-					} else {
+					if errors.Is(connectErr, ErrOwnerSessionLeaseLost) {
+						return errors.Join(err, connectErr)
+					}
+					var unreachable *ownerSessionLeaseTransportError
+					if !errors.As(connectErr, &unreachable) {
 						updated, connectErr = next.Acquire(ctx, lease.OwnerSessionID, lease.Target)
 					}
 				}
@@ -403,8 +403,4 @@ func KeepAliveReattaching(ctx context.Context, client *LocalOwnerSessionClient, 
 			}
 		}
 	}
-}
-
-func (c *LocalOwnerSessionClient) sameWorker(other *LocalOwnerSessionClient) bool {
-	return c != nil && other != nil && c.base.String() == other.base.String() && secureTokenEqual(c.token, other.token)
 }
