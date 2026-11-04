@@ -8,7 +8,9 @@ Prints one receipt per row; exits 1 if any row failed. Needs the ENV vault unloc
 """
 import argparse
 import json
+import os
 from pathlib import Path
+import platform
 import re
 import subprocess
 import sys
@@ -34,6 +36,29 @@ def sudo(password, *args):
     import terminal_command
     result = terminal_command.run(['sudo', '-k', '--', str(PB), *args], password=password, timeout=240)
     return result.returncode, re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\', '', result.stdout)
+
+
+DARWIN = platform.system() == 'Darwin'
+
+
+def guard_active():
+    if DARWIN:
+        job = sh('sudo', '-n', 'launchctl', 'print', 'system/io.paperboat.machineguard')[1]
+        return 'state = running' in job and 'deny-only' not in job  # an uninstalled guard keeps its deny-only job
+    return sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active'
+
+
+def guard_denies():
+    """The cached-address protection that survives a guard uninstall."""
+    if DARWIN:
+        return 'block drop quick on ! lo0 inet from any to 127.100.0.0/16' in sh('sudo', '-n', 'pfctl', '-a', 'com.apple/000.paperboat-machineguard', '-s', 'rules')[1]
+    return sh('systemctl', 'is-enabled', 'paperboat-machineguard-deny')[0] == 0
+
+
+def daemon_unit_text():
+    if DARWIN:
+        return sh('launchctl', 'print', 'gui/%d/com.pinksaucepasta.paperboatd' % os.getuid())[1]
+    return sh('systemctl', '--user', 'cat', 'paperboatd')[1]
 
 
 class Row:
@@ -158,13 +183,13 @@ def rows(args):
     out.append(r)
 
     r = Row('C009', 'daemon run'); r.help()
-    unit = sh('systemctl', '--user', 'cat', 'paperboatd')[1]
-    r.expect('daemon' in unit and 'ExecStart' in unit, 'user service does not start pb daemon')
+    unit = daemon_unit_text()
+    r.expect('daemon' in unit and ('program' in unit if DARWIN else 'ExecStart' in unit), 'user service does not start pb daemon')
     out.append(r)
 
 
     guard = Row('C005', 'daemon machine-guard'); guard.help(); guard.invalid('bogus')
-    guard.expect(sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active', 'machine guard service is not active')
+    guard.expect(guard_active(), 'machine guard service is not active')
     out.append(guard)
     r = Row('C007', 'daemon machine-guard run'); r.help()
     r.expect(sh('pgrep', '-f', 'daemon machine-guard run')[0] == 0, 'machine guard run entrypoint is not running under supervision')
@@ -174,13 +199,13 @@ def rows(args):
     if args.sudo_password:
         code, o = sudo(args.sudo_password, 'daemon', 'machine-guard', 'install', '--json')
         install.expect(code == 0 and '"installed":true' in o.replace(' ', ''), 'install (repeat) did not report installed')
-        install.expect(sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active', 'guard not active after install')
+        install.expect(guard_active(), 'guard not active after install')
         code, o = sudo(args.sudo_password, 'daemon', 'machine-guard', 'uninstall', '--json')
         uninstall.expect(code == 0, 'uninstall failed: ' + o[-200:])
-        uninstall.expect(sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() != 'active', 'guard still active after uninstall')
-        uninstall.expect(sh('systemctl', 'is-enabled', 'paperboat-machineguard-deny')[0] == 0, 'cached-address protection was not retained')
+        uninstall.expect(not guard_active(), 'guard still active after uninstall')
+        uninstall.expect(guard_denies(), 'cached-address protection was not retained')
         code, o = sudo(args.sudo_password, 'daemon', 'machine-guard', 'install', '--json')
-        install.expect(code == 0 and sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active', 'reinstall after uninstall failed')
+        install.expect(code == 0 and guard_active(), 'reinstall after uninstall failed')
         install.expect(run('exec', machine, '--', 'true')[0] == 0, 'exec failed after guard reinstall')
     out += [install, uninstall]
     return out
