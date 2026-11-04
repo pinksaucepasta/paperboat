@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -106,7 +105,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 
 func authorizePersistedUninstall(ctx context.Context) error {
 	executable := systemWorkerExecutable()
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-H", "--", "/usr/bin/env",
+	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", "uninstall-persisted")
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {

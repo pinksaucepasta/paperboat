@@ -539,7 +539,7 @@ func authorizeServiceOperation(ctx context.Context, executable, operation string
 	// executable. Set the caller identity after sudo's environment reset so the
 	// privileged boundary can still bind the request to the account that
 	// launched setup.
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-H", "--", "/usr/bin/env",
+	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", operation)
 	command.Stdin = bytes.NewReader(payload)
 	command.Stdout = stdout

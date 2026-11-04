@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
 )
 
@@ -17,7 +16,7 @@ func RepairManagedHost(ctx context.Context) error {
 	if ctx == nil {
 		return context.Canceled
 	}
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-H", "--", "/usr/bin/env",
+	command := sudoCommand(ctx, "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), systemWorkerExecutable(), "__runtime-service", "repair-persisted")
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {
