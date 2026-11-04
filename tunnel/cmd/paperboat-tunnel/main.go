@@ -390,7 +390,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 	}, PreviewHTTPSAuthority: func(ctx context.Context, host string) error {
 		return previewHTTPSMatcher.AuthorizePublicHTTPS(ctx, host, publicPreviewAuthority)
-	}, ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: 4096, MaximumConnections: int(deployment.NodeCapacity) * 128})
+	}, UnknownNameTLS: certificateSelector.TLSConfig(), ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: 4096, MaximumConnections: int(deployment.NodeCapacity) * 128})
 	if err != nil {
 		return nil, fmt.Errorf("configure public TCP listeners: %w", err)
 	}

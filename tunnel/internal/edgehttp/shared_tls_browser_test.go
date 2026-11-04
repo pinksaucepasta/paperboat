@@ -568,3 +568,44 @@ func TestSharedTLSQuotaDeniedRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T
 		t.Fatal("a route with no decision and no quota denial completed TLS")
 	}
 }
+
+// 2026-11-04: a stopped preview (no live decision, gone from the route matcher) dropped the TLS handshake.
+// With the unknown-name page configured the edge completes a real handshake for that name and answers the
+// branded 404 itself; the HTTPS handler (the path to an origin) is never reached.
+func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	shared, err := NewSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, 4, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared.ServeUnknownNamesWithPage(serverTLS)
+	reached := make(chan struct{}, 1)
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached <- struct{}{} })}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
+	}}}
+	response, err := client.Get("https://" + match.Host + "/")
+	if err != nil {
+		t.Fatalf("an unknown name did not complete TLS: %v", err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound || !strings.Contains(string(body), notFoundMessage) {
+		t.Fatalf("unknown name answer = %d %q", response.StatusCode, body)
+	}
+	select {
+	case <-reached:
+		t.Fatal("an unknown name reached the HTTPS handler")
+	default:
+	}
+}

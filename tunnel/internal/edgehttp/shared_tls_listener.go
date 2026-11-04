@@ -2,8 +2,10 @@ package edgehttp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -37,6 +39,19 @@ type SharedTLSListener struct {
 	acceptErr error
 	onFailure func(context.Context, string, error)
 	closeErr  error
+	// unknown completes TLS for a name with no live decision (a stopped or unknown preview) and answers
+	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
+	unknown *tls.Config
+}
+
+// ServeUnknownNamesWithPage sets the TLS config (the edge certificate selector, wildcard fallback) used to
+// answer names that have no live decision with the branded not-found page instead of dropping TLS.
+func (l *SharedTLSListener) ServeUnknownNamesWithPage(config *tls.Config) {
+	if config != nil {
+		config = config.Clone()
+		config.NextProtos = []string{"http/1.1"}
+	}
+	l.unknown = config
 }
 
 func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, maximumConnections int, infrastructureHostname string) (*SharedTLSListener, error) {
@@ -131,19 +146,18 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
 		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
 		defer stop()
-		if err := l.previewHTTPSAuthority(refresh, host); err != nil {
-			return
-		}
-		decisions, err = l.authority.Snapshot(refresh)
-		if err != nil || len(decisions) > 4096 {
-			return
-		}
-		for _, decision := range decisions {
-			if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
-				if decision.Validate(time.Now().UTC()) != nil {
-					return
+		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
+			decisions, err = l.authority.Snapshot(refresh)
+			if err != nil || len(decisions) > 4096 {
+				return
+			}
+			for _, decision := range decisions {
+				if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
+					if decision.Validate(time.Now().UTC()) != nil {
+						return
+					}
+					authorizedHTTPS = true
 				}
-				authorizedHTTPS = true
 			}
 		}
 	}
@@ -180,6 +194,9 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
+		if l.unknown != nil {
+			serveNotFoundPage(replay, l.unknown)
+		}
 		return
 	}
 	select {
@@ -215,3 +232,40 @@ func (l *SharedTLSListener) observe(phase string, err error) {
 		l.onFailure(l.ctx, phase, err)
 	}
 }
+
+// serveNotFoundPage answers one connection with the branded not-found page over TLS, bounded to 10 s.
+// The handshake fails for a name the fallback certificate does not cover.
+func serveNotFoundPage(conn net.Conn, config *tls.Config) {
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Connection", "close")
+		writeErrorPage(w, http.StatusNotFound, notFoundMessage)
+	})}
+	server.SetKeepAlivesEnabled(false)
+	_ = server.Serve(&oneConnListener{conn: tls.Server(conn, config)})
+}
+
+// oneConnListener hands out a single connection, then reports closed once it ends.
+type oneConnListener struct {
+	conn net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (l *oneConnListener) Accept() (net.Conn, error) {
+	if l.done == nil {
+		l.done = make(chan struct{})
+		return &closeNotifyConn{Conn: l.conn, closed: func() { l.once.Do(func() { close(l.done) }) }}, nil
+	}
+	<-l.done
+	return nil, net.ErrClosed
+}
+func (l *oneConnListener) Close() error   { return nil }
+func (l *oneConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
+
+type closeNotifyConn struct {
+	net.Conn
+	closed func()
+}
+
+func (c *closeNotifyConn) Close() error { err := c.Conn.Close(); c.closed(); return err }

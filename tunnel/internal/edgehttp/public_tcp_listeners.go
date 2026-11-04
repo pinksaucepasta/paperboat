@@ -2,6 +2,7 @@ package edgehttp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -23,8 +24,10 @@ type PublicTCPAuthority interface {
 }
 
 type PublicTCPListenerConfig struct {
-	OnFailure              func(context.Context, string, error)
-	PreviewHTTPSAuthority  func(context.Context, string) error
+	OnFailure             func(context.Context, string, error)
+	PreviewHTTPSAuthority func(context.Context, string) error
+	// UnknownNameTLS answers names with no live decision with the branded not-found page (wildcard fallback).
+	UnknownNameTLS         *tls.Config
 	ListenHost             string
 	InfrastructureHostname string
 	Authority              PublicTCPAuthority
@@ -361,6 +364,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 		}
 		p.observe(ctx, phase, cause)
 	})
+	shared.ServeUnknownNamesWithPage(p.cfg.UnknownNameTLS)
 	p.sharedTLS = shared
 	return shared, nil
 }
