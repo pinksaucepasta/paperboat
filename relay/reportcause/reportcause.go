@@ -2,12 +2,36 @@
 package reportcause
 
 import (
+	"github.com/getsentry/sentry-go"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodelifecycle"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
-func init() { reporting.RegisterCause(classify) }
+func init() {
+	gauge := sentry.MetricTypeGauge
+	outcomes := map[string][]string{"outcome": {"success", "rejected"}}
+	reporting.Register(reporting.Extension{
+		Definitions: map[string]reporting.Definition{
+			"selfhost_command":     {Operation: "service_lifecycle", Stage: "selfhost", Name: "selfhost_failed", Code: "selfhost_command_failed"},
+			"selfhost_child":       {Operation: "service_lifecycle", Stage: "selfhost", Name: "selfhost_failed", Code: "selfhost_child_failed"},
+			"selfhost_certificate": {Operation: "dependency_health", Stage: "selfhost", Name: "selfhost_failed", Code: "selfhost_certificate_failed"},
+			"selfhost_claim":       {Operation: "service_lifecycle", Stage: "selfhost", Name: "selfhost_failed", Code: "selfhost_claim_failed"},
+		},
+		Codes:    []string{"selfhost_command_failed", "selfhost_child_failed", "selfhost_certificate_failed", "selfhost_claim_failed"},
+		Causes:   []string{"authority_unavailable", "authority_rejected", "authorization_rejected", "protocol_rejected", "capacity_exhausted", "authority_expired", "relay_closed"},
+		Stages:   map[string]string{"selfhost": "selfhost_failed"},
+		Classify: classify,
+		Metrics: []reporting.Metric{
+			{Name: "paperboat_relay_sessions", Kind: gauge}, {Name: "paperboat_relay_capacity_limit", Kind: gauge},
+			{Name: "paperboat_relay_admissions_total_snapshot", Kind: gauge, Labels: outcomes},
+			{Name: "paperboat_relay_packets_total_snapshot", Kind: gauge, Labels: map[string][]string{"outcome": {"forwarded", "dropped"}}},
+			{Name: "paperboat_peer_relay_allocations", Kind: gauge},
+			{Name: "paperboat_peer_relay_admissions_total_snapshot", Kind: gauge, Labels: outcomes},
+			{Name: "paperboat_peer_relay_packets_total_snapshot", Kind: gauge},
+		},
+	})
+}
 
 func classify(err error) (string, int) {
 	switch {

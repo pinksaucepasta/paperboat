@@ -70,7 +70,7 @@ type Reporter struct {
 }
 
 func New(component string) (*Reporter, error) {
-	if component != "paperboat-relay" && component != "paperboat-tunnel" && component != "paperboat-selfhost" {
+	if !components[component] {
 		return nil, errors.New("unsupported Sentry component")
 	}
 	enabledText := strings.TrimSpace(os.Getenv("PAPERBOAT_SENTRY_ENABLED"))
@@ -272,12 +272,25 @@ func sanitizeLog(log *sentry.Log, component, release, environment string, fleet 
 		level, severity = sentry.LogLevelWarn, sentry.LogSeverityWarning
 	}
 	attrs := map[string]attribute.Value{"component": attribute.StringValue(component), "sentry.release": attribute.StringValue(release), "sentry.environment": attribute.StringValue(environment), "operation": attribute.StringValue(operation), "outcome": attribute.StringValue(outcome), "code": attribute.StringValue(code), "support_reference": attribute.StringValue(reference)}
+	if check := lifecycles[operation]; check != nil {
+		retry, lifecycleSeverity, ok := check(code, outcome)
+		if !ok {
+			return nil
+		}
+		attrs["retry"] = attribute.StringValue(retry)
+		switch lifecycleSeverity {
+		case "warn":
+			level, severity = sentry.LogLevelWarn, sentry.LogSeverityWarning
+		case "debug":
+			level, severity = sentry.LogLevelDebug, sentry.LogSeverityDebug
+		}
+	}
 	if reference != "" {
 		attrs["correlation_id"] = attribute.StringValue(reference)
 	}
 	if stage != "" {
 		attrs["stage"] = attribute.StringValue(stage)
-		attrs["name"] = attribute.StringValue(failureName(stage))
+		attrs["name"] = attribute.StringValue(failureName(component, stage))
 		attrs["cause"] = attribute.StringValue(cause)
 		attrs["error_type"] = attribute.StringValue(errorType)
 	}
@@ -453,19 +466,20 @@ func values(items ...string) map[string]bool {
 var operationLabels = map[string]map[string]bool{"operation": operations, "outcome": outcomes, "code": codes}
 var metricCatalog = map[string]metricSpec{
 	"paperboat.operation.count": {sentry.MetricTypeCounter, operationLabels}, "paperboat.operation.duration": {sentry.MetricTypeDistribution, operationLabels},
-	"paperboat_relay_sessions": {sentry.MetricTypeGauge, nil}, "paperboat_relay_capacity_limit": {sentry.MetricTypeGauge, nil},
-	"paperboat_relay_admissions_total_snapshot": {sentry.MetricTypeGauge, map[string]map[string]bool{"outcome": values("success", "rejected")}}, "paperboat_relay_packets_total_snapshot": {sentry.MetricTypeGauge, map[string]map[string]bool{"outcome": values("forwarded", "dropped")}},
-	"paperboat_peer_relay_allocations": {sentry.MetricTypeGauge, nil}, "paperboat_peer_relay_admissions_total_snapshot": {sentry.MetricTypeGauge, map[string]map[string]bool{"outcome": values("success", "rejected")}}, "paperboat_peer_relay_packets_total_snapshot": {sentry.MetricTypeGauge, nil},
 	"paperboat_reporting_errors_dropped_total_snapshot": {sentry.MetricTypeGauge, nil}, "paperboat_reporting_logs_dropped_total_snapshot": {sentry.MetricTypeGauge, nil}, "paperboat_reporting_metrics_dropped_total_snapshot": {sentry.MetricTypeGauge, nil}, "paperboat_reporting_traces_dropped_total_snapshot": {sentry.MetricTypeGauge, nil},
 	"paperboat_reporting_signal_enabled": {sentry.MetricTypeGauge, map[string]map[string]bool{"signal": values("errors", "logs", "metrics", "traces")}},
 }
 
-var operations = map[string]bool{"relay_admission": true, "relay_session": true, "relay_service": true, "service_lifecycle": true, "dependency_health": true, "control_reconcile": true, "connector_admission": true, "connector_attach": true, "connector_stream": true, "usage_delivery": true, "capacity": true, "backlog": true}
-var outcomes = map[string]bool{"success": true, "failed": true, "rejected": true, "canceled": true, "state_change": true}
-var codes = map[string]bool{"selfhost_command_failed": true, "selfhost_child_failed": true, "selfhost_certificate_failed": true, "selfhost_claim_failed": true, "control_request_failed": true, "ready": true, "ok": true, "internal": true, "invalid": true, "unauthorized": true, "capacity": true, "unavailable": true, "timeout": true, "shutdown": true, "recovered": true, "service_failed": true, "service_setup_failed": true, "service_start_failed": true, "process_panic": true, "internal_failure": true}
+var operations = values("relay_admission", "relay_session", "relay_service", "service_lifecycle", "dependency_health", "control_reconcile", "connector_admission", "connector_attach", "connector_stream", "usage_delivery", "capacity", "backlog")
+var codes = values("control_request_failed", "ready", "ok", "internal", "invalid", "unauthorized", "capacity", "unavailable", "timeout", "shutdown", "recovered", "service_failed", "service_setup_failed", "service_start_failed", "process_panic", "internal_failure")
 
 // Observe emits a bounded fixed-cardinality operation log, trace, and counter.
 func (r *Reporter) Observe(ctx context.Context, operation, outcome, code, reference string, duration time.Duration) {
+	if check := lifecycles[operation]; check != nil {
+		if _, _, ok := check(code, outcome); !ok {
+			return
+		}
+	}
 	if !operations[operation] || !outcomes[outcome] || !codes[code] {
 		return
 	}
@@ -824,7 +838,7 @@ func sanitizeEnvironment(event *sentry.Event, component, release, environment st
 		Level: level, Message: "paperboat service failure", Release: release, Environment: environment,
 		Tags: map[string]string{
 			"component": safeToken(component), "operation": operation, "stage": stage,
-			"name": failureName(stage), "code": code, "cause": cause, "error_type": errorType,
+			"name": failureName(component, stage), "code": code, "cause": cause, "error_type": errorType,
 			"outcome": outcome, "support_reference": reference, "correlation_id": reference,
 		},
 	}

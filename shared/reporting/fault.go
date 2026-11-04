@@ -44,26 +44,30 @@ type Fault struct {
 	SourceLine       int       `json:"source_line,omitempty"`
 }
 
-type failureDefinition struct {
-	operation string
-	stage     string
-	name      string
-	code      string
-	outcome   string
+// Definition is one named failure a service reports: where it happened and the bounded labels it carries.
+// Name may contain %s, replaced by the service name (relay, tunnel) of the reporting component.
+type Definition struct {
+	Operation string
+	Stage     string
+	Name      string
+	Code      string
+	Outcome   string
 }
 
-var failureDefinitions = map[string]failureDefinition{
-	"selfhost_command":     {operation: "service_lifecycle", stage: "selfhost", name: "selfhost_failed", code: "selfhost_command_failed"},
-	"selfhost_child":       {operation: "service_lifecycle", stage: "selfhost", name: "selfhost_failed", code: "selfhost_child_failed"},
-	"selfhost_certificate": {operation: "dependency_health", stage: "selfhost", name: "selfhost_failed", code: "selfhost_certificate_failed"},
-	"selfhost_claim":       {operation: "service_lifecycle", stage: "selfhost", name: "selfhost_failed", code: "selfhost_claim_failed"},
-	"control_request":      {operation: "dependency_health", stage: "control_request", name: "relay_control_request_failed", code: "control_request_failed"},
-	"service_config":       {operation: "service_lifecycle", stage: "configure", name: "relay_service_setup_failed", code: "service_setup_failed", outcome: "rejected"},
-	"service_build":        {operation: "service_lifecycle", stage: "configure", name: "relay_service_setup_failed", code: "service_setup_failed"},
-	"service_start":        {operation: "service_lifecycle", stage: "startup", name: "relay_service_start_failed", code: "service_start_failed"},
-	"service_run":          {operation: "service_lifecycle", stage: "serve", name: "relay_service_failed", code: "service_failed"},
-	"process_panic":        {operation: "service_lifecycle", stage: "process", name: "relay_process_panicked", code: "process_panic"},
+var failureDefinitions = map[string]Definition{
+	"control_request": {Operation: "dependency_health", Stage: "control_request", Name: "%s_control_request_failed", Code: "control_request_failed"},
+	"service_config":  {Operation: "service_lifecycle", Stage: "configure", Name: "%s_service_setup_failed", Code: "service_setup_failed", Outcome: "rejected"},
+	"service_build":   {Operation: "service_lifecycle", Stage: "configure", Name: "%s_service_setup_failed", Code: "service_setup_failed"},
+	"service_start":   {Operation: "service_lifecycle", Stage: "startup", Name: "%s_service_start_failed", Code: "service_start_failed"},
+	"service_run":     {Operation: "service_lifecycle", Stage: "serve", Name: "%s_service_failed", Code: "service_failed"},
+	"process_panic":   {Operation: "service_lifecycle", Stage: "process", Name: "%s_process_panicked", Code: "process_panic"},
 }
+
+// PanicFailure classifies a recovered panic without retaining its value.
+type PanicFailure struct{}
+
+func (PanicFailure) Error() string { return "process panicked" }
+func (PanicFailure) processPanic() {}
 
 type supportReferenceContextKey struct{}
 
@@ -111,9 +115,12 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 	}
 	d, ok := failureDefinitions[definition]
 	if !ok {
-		d = failureDefinition{operation: "service_lifecycle", stage: "unknown", name: "relay_failure", code: "internal_failure"}
+		d = Definition{Operation: "service_lifecycle", Stage: "unknown", Name: "%s_failure", Code: "internal_failure"}
 	}
 	reference := SupportReference(ctx)
+	if reference == "" {
+		reference = requestReference(err)
+	}
 	if reference == "" {
 		reference = Reference()
 	}
@@ -121,7 +128,7 @@ func (r *Reporter) observeFailure(ctx context.Context, definition string, err er
 		return Fault{}
 	}
 	component := "paperboat-relay"
-	if r != nil && (r.component == "paperboat-relay" || r.component == "paperboat-tunnel" || r.component == "paperboat-selfhost") {
+	if r != nil && components[r.component] {
 		component = r.component
 	}
 	fault := projectFault(component, d, reference, err)
@@ -208,17 +215,17 @@ func (r *Reporter) captureFaultLog(ctx context.Context, fault Fault) {
 	entry.Emit("paperboat.operation")
 }
 
-func projectFault(component string, definition failureDefinition, reference string, err error) Fault {
+func projectFault(component string, definition Definition, reference string, err error) Fault {
 	fault := Fault{
 		Schema: "paperboat.edge_event.v1", At: time.Now().UTC(), Severity: "error",
-		Component: component, Operation: definition.operation, Stage: definition.stage,
-		Name: definition.name, Code: definition.code, Cause: "internal", ErrorType: "error",
+		Component: component, Operation: definition.Operation, Stage: definition.Stage,
+		Name: serviceName(component, definition.Name), Code: definition.Code, Cause: "internal", ErrorType: "error",
 		Outcome: "failed", SupportReference: reference, CorrelationID: reference,
 	}
 	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = projectError(err)
-	if definition.outcome != "" {
-		fault.Outcome = definition.outcome
-		if definition.outcome == "rejected" {
+	if definition.Outcome != "" {
+		fault.Outcome = definition.Outcome
+		if definition.Outcome == "rejected" {
 			fault.Severity = "warning"
 		}
 	}
@@ -311,6 +318,18 @@ func projectError(err error) (cause, errorType string, errorChain []string, errn
 	return cause, errorType, errorChain, errno, httpStatus
 }
 
+// SafeErrorMetadata returns bounded enum/type metadata for a wrapped error; it never evaluates Error.
+func SafeErrorMetadata(err error) (cause, errorType string) {
+	cause, errorType, _, _, _ = projectError(err)
+	return cause, errorType
+}
+
+// SafeFailureDetails returns bounded enum/type/status metadata for user-facing diagnostics.
+func SafeFailureDetails(err error) (cause, errorType string, httpStatus int) {
+	cause, errorType, _, _, httpStatus = projectError(err)
+	return cause, errorType, httpStatus
+}
+
 // SafeFailureCause projects a bounded cause enum for console diagnostics.
 func SafeFailureCause(err error) string {
 	cause, _, _, _, _ := projectError(err)
@@ -335,15 +354,6 @@ func safeErrorType(typ reflect.Type) string {
 	}
 	return name
 }
-
-// domainCause classifies a service's own typed errors; set once at startup by RegisterCause.
-var domainCause func(error) (string, int)
-
-// RegisterCause installs the service's classifier for its own typed errors (rank 0 means unknown).
-func RegisterCause(classify func(error) (string, int)) { domainCause = classify }
-
-// SameError reports whether err is exactly target (comparable types only), never by message.
-func SameError(err, target error) bool { return sameError(err, target) }
 
 func classifyCause(err error) (string, int) {
 	if _, ok := err.(interface{ processPanic() }); ok {
@@ -377,10 +387,8 @@ func classifyCause(err error) (string, int) {
 			}
 		}
 	}
-	if domainCause != nil {
-		if cause, rank := domainCause(err); rank > 0 {
-			return cause, rank
-		}
+	if cause, rank := domainCause(err); rank > 0 {
+		return cause, rank
 	}
 	if sameError(err, http.ErrServerClosed) {
 		return "server_closed", 81
@@ -452,41 +460,19 @@ func sameError(err, target error) bool {
 }
 
 func validStage(stage string) bool {
-	switch stage {
-	case "selfhost", "control_request", "serve", "configure", "startup", "process", "unknown":
-		return true
-	default:
-		return false
-	}
+	_, ok := stageNames[stage]
+	return ok
 }
 
-func failureName(stage string) string {
-	switch stage {
-	case "selfhost":
-		return "selfhost_failed"
-	case "control_request":
-		return "relay_control_request_failed"
-	case "serve":
-		return "relay_service_failed"
-	case "configure":
-		return "relay_service_setup_failed"
-	case "startup":
-		return "relay_service_start_failed"
-	case "process":
-		return "relay_process_panicked"
-	default:
-		return "relay_failure"
+func failureName(component, stage string) string {
+	name, ok := stageNames[stage]
+	if !ok {
+		name = stageNames["unknown"]
 	}
+	return serviceName(component, name)
 }
 
-func validCause(cause string) bool {
-	switch cause {
-	case "internal", "process_panic", "context_canceled", "deadline_exceeded", "authority_unavailable", "authority_rejected", "authorization_rejected", "protocol_rejected", "capacity_exhausted", "authority_expired", "relay_closed", "server_closed", "not_found", "permission_denied", "conflict", "rate_limited", "service_unavailable", "invalid_request", "upstream_failure", "connection_closed", "end_of_stream", "truncated_stream", "connection_refused", "connection_reset", "broken_pipe", "network_unreachable", "address_in_use", "invalid_argument", "resource_exhausted", "network_timeout", "dns_failure", "system_error":
-		return true
-	default:
-		return false
-	}
-}
+func validCause(cause string) bool { return causes[cause] }
 
 func validErrorType(value string) bool {
 	if value == "" || len(value) > 64 {

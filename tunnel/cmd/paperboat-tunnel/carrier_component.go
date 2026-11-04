@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 

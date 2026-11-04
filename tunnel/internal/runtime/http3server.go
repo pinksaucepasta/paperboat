@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"log/slog"
 	"net"
 	"net/http"

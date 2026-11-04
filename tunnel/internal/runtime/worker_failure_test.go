@@ -14,10 +14,10 @@ import (
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/reporting"
 )
 
 func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
