@@ -214,6 +214,15 @@ func TestSetupAndPairingRejectDarwinAMD64BeforePersistence(t *testing.T) {
 	}
 }
 
+func TestSetupAndPairingAcceptDarwinARM64(t *testing.T) {
+	publicIdentityKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	service := New(nil, nil, Policy{AllowedPlatforms: []string{"darwin", "linux"}, PairingLifetime: time.Minute}, nil)
+	pairing := PairingInput{Verifier: "verifier", Alias: "mac", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", PublicIdentityKey: publicIdentityKey}
+	if err := service.validatePairing(pairing); err != nil {
+		t.Fatalf("darwin arm64 pairing error = %v", err)
+	}
+}
+
 func TestConnectionDescriptorSerializesCanonicalPayload(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Minute)
 	response := ConnectionDescriptor{

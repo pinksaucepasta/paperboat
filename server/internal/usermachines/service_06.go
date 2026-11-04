@@ -18,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
-	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -257,7 +256,7 @@ func (s *Service) validatePairingPlatform(token, platform, architecture string) 
 		return ErrEnrollmentTokenInvalid
 	}
 	platform, architecture = strings.ToLower(strings.TrimSpace(platform)), strings.ToLower(strings.TrimSpace(architecture))
-	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
+	if !supportedMachineTarget(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
 		token != "" && EnrollmentTokenUsesPowerShell(token) != (platform == "windows") {
 		return ErrPairingPlatformUnsupported
 	}
@@ -320,6 +319,16 @@ func canonicalWorkspaceRoot(platform, root string) (string, bool) {
 	}
 	canonical := prefix + separator + strings.Join(clean, `\`)
 	return canonical, canonical == root
+}
+
+// supportedMachineTarget is the set of operating systems and CPUs a machine can pair from. It is independent of the
+// release matrix: a platform pairs as soon as its binary exists, whether or not the release pipeline publishes it yet.
+func supportedMachineTarget(platform, architecture string) bool {
+	switch platform + "/" + architecture {
+	case "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "windows/arm64":
+		return true
+	}
+	return false
 }
 
 func validMachineArchitecture(value string) bool {
