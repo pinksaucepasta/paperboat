@@ -4,6 +4,7 @@ import argparse
 import functools
 import http.server
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -17,7 +18,7 @@ from pairing_lifecycle import invoke
 from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
-TEAM_WORKSPACE = 'paperboat-smoke-paid'
+TEAM_WORKSPACE = os.environ.get('PAPERBOAT_SMOKE_TEAM', 'paperboat-smoke-paid')  # the retained paid team of the signed-in account
 
 
 def visit(url):
