@@ -144,7 +144,7 @@ on() {
     ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
     dadape) SSHPASS="$DADAPE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" anvit@dadape "$*" ;;
     apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$APPLE_LOGIN" \
-      "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; export PATH=/opt/homebrew/bin:$PATH; $*" ;;
+      "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; export PATH=/opt/homebrew/bin:\$PATH; $*" ;;
     victus) local encoded
       encoded=$(printf '%s' "$*" | iconv -t UTF-16LE | base64 -w0)
       SSHPASS="$VICTUS_PASS" sshpass -e ssh "${SSH_OPTS[@]}" pujan@victus "powershell -NoProfile -NonInteractive -EncodedCommand $encoded" ;;
