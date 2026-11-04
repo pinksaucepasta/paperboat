@@ -20,7 +20,7 @@ func TestPostgresTeamListStatementsDoNotGrowWithMembers(t *testing.T) {
 		if err != nil {
 			f.t.Fatal(err)
 		}
-		return statements.Load(), len(out[0].Members)
+		return statements.Load(), out[0].MemberCount
 	}
 	small, _ := count()
 	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT $1||g,$1||g,$1||g||'@example.test','active' FROM generate_series(1,1000) g`, f.team+"_m")

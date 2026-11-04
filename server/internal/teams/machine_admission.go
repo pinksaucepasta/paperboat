@@ -80,7 +80,8 @@ func readMachineRequestsTx(ctx context.Context, tx *db.Tx, team string, out *Tea
 
 // ViewFor hides other members' machine requests from members who are not owners or admins.
 func ViewFor(t Team, account string) Team {
-	if actor, ok := currentMember(t, account); ok && Allowed(actor.Role, PermissionSettingsManage) {
+	t.MyRole = viewerRole(t, account)
+	if Allowed(t.MyRole, PermissionSettingsManage) {
 		return t
 	}
 	own := []MachineAdmission{}
@@ -100,4 +101,12 @@ func requestRowTx(ctx context.Context, tx *db.Tx, team, machine string) (request
 		err = ErrNotFound
 	}
 	return requestedBy, err
+}
+
+// viewerRole is the account's role from the team's members when they are read, else the role the read recorded.
+func viewerRole(t Team, account string) string {
+	if actor, ok := currentMember(t, account); ok {
+		return actor.Role
+	}
+	return t.MyRole
 }

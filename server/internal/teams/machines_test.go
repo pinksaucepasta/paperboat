@@ -235,11 +235,11 @@ func TestPostgresTeamMachineAuthority(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now(),state='deleted' WHERE id=$1`, machine); err != nil {
 		t.Fatal(err)
 	}
-	view, err := s.Get(ctx, owner, team)
+	view, err := s.Machines(ctx, owner, team, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, binding := range view.Machines {
+	for _, binding := range view.Items {
 		if binding.MachineID == machine {
 			t.Fatal("removed machine appeared in team view")
 		}

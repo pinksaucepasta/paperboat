@@ -8381,18 +8381,6 @@
           "deleted": {
             "type": "boolean"
           },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TeamMember"
-            }
-          },
-          "grants": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TeamGrant"
-            }
-          },
           "display_name": {
             "type": "string"
           },
@@ -8414,12 +8402,6 @@
               "$ref": "#/components/schemas/TeamMachineAdmission"
             }
           },
-          "machines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TeamMachine"
-            }
-          },
           "machine_grants": {
             "type": "array",
             "items": {
@@ -8432,6 +8414,25 @@
           "sso_signed_in": {
             "type": "boolean",
             "description": "For the viewer: whether their SSO sign-in satisfies the team. Without it the team lists only its name."
+          },
+          "member_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Page the rows with GET /v1/teams/{team_id}/members."
+          },
+          "grant_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Page the rows with GET /v1/teams/{team_id}/grants."
+          },
+          "machine_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Page the rows with GET /v1/teams/{team_id}/machines."
+          },
+          "my_role": {
+            "type": "string",
+            "description": "The viewer's role in the team."
           }
         },
         "required": [
@@ -8440,10 +8441,11 @@
           "owner_account",
           "generation",
           "deleted",
-          "members",
-          "grants",
           "display_name",
-          "suspended"
+          "suspended",
+          "member_count",
+          "grant_count",
+          "machine_count"
         ]
       },
       "TeamActivityItem": {
@@ -15533,6 +15535,84 @@
           "total",
           "next_offset"
         ]
+      },
+      "TeamMemberPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/TeamMember"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Opaque team-scoped cursor; absent when no later page exists."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every member row of the team (active or not)."
+          }
+        }
+      },
+      "TeamGrantPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/TeamGrant"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Opaque team-scoped cursor; absent when no later page exists."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Stored grants plus the policy's grants."
+          }
+        }
+      },
+      "TeamMachinePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/TeamMachine"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Opaque team-scoped cursor; absent when no later page exists."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every machine shared into the team."
+          }
+        }
       }
     },
     "responses": {
@@ -31957,6 +32037,87 @@
             }
           }
         ]
+      },
+      "get": {
+        "operationId": "team_grants_list",
+        "summary": "List team grants",
+        "description": "Keyset page for a current team member; Stored grants ordered by resource kind, resource id and account, then the policy's grants. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor returned by the preceding page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded page with the total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamGrantPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/browser-access/policies/{resource_kind}/{resource_id}/{route_id}": {
@@ -47863,6 +48024,172 @@
           }
         },
         "operationId": "post_v1_machines_id_audit_backlog"
+      }
+    },
+    "/v1/teams/{team_id}/members": {
+      "get": {
+        "operationId": "team_members",
+        "summary": "List team members",
+        "description": "Keyset page for a current team member; Members ordered by account id. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor returned by the preceding page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded page with the total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamMemberPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/machines": {
+      "get": {
+        "operationId": "team_machines_list",
+        "summary": "List machines shared into the team",
+        "description": "Keyset page for a current team member; Machines ordered by machine id. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor returned by the preceding page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded page with the total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamMachinePage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   }

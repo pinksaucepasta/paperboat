@@ -84,17 +84,24 @@ type Grant struct {
 	Active       bool   `json:"active"`
 }
 type Team struct {
-	DisplayName  string           `json:"display_name"`
-	Name         string           `json:"name"`
-	ENVStatus    string           `json:"env_status"`
-	TeamID       string           `json:"team_id"`
-	OwnerAccount string           `json:"owner_account"`
-	Generation   uint64           `json:"generation"`
-	Deleted      bool             `json:"deleted"`
-	Suspended    bool             `json:"suspended"`
-	Members      []Member         `json:"members"`
-	Grants       []Grant          `json:"grants"`
-	Machines     []MachineBinding `json:"machines"`
+	DisplayName  string `json:"display_name"`
+	Name         string `json:"name"`
+	ENVStatus    string `json:"env_status"`
+	TeamID       string `json:"team_id"`
+	OwnerAccount string `json:"owner_account"`
+	Generation   uint64 `json:"generation"`
+	Deleted      bool   `json:"deleted"`
+	Suspended    bool   `json:"suspended"`
+	// Members, Grants and Machines are read in full for a write's authorization and never sent: clients page
+	// them (Service.Members, Grants, Machines) and read the totals below.
+	Members      []Member         `json:"-"`
+	Grants       []Grant          `json:"-"`
+	Machines     []MachineBinding `json:"-"`
+	MemberCount  int              `json:"member_count"`
+	GrantCount   int              `json:"grant_count"`
+	MachineCount int              `json:"machine_count"`
+	// MyRole is the viewer's role in the team ("" when not a current member).
+	MyRole string `json:"my_role,omitempty"`
 	// ApproveNewMachines: machines that members add wait for an owner or admin.
 	ApproveNewMachines bool `json:"approve_new_machines"`
 	// AllowPrivateAccess: members may reach the ports of machines shared into the team, given a

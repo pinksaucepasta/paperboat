@@ -118,9 +118,18 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	// GET identity fields are visible to current members, with timestamps on the wire.
 	var identity map[string]any
 	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID, nil, 200, &identity)
-	members := identity["members"].([]any)
-	first := members[0].(map[string]any)
-	if first["email"] != ownerEmail || first["display_name"] != "Owner" || identity["display_name"] != teamID {
+	if _, sent := identity["members"]; sent || identity["member_count"] != float64(1) || identity["my_role"] != "owner" {
+		t.Fatalf("team detail carries member rows or lacks the count and role: %v", identity)
+	}
+	var memberPage teams.Page[teams.Member]
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members", nil, 200, &memberPage)
+	var firstRow map[string]any
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members?limit=1", nil, 200, &firstRow)
+	first := firstRow["items"].([]any)[0].(map[string]any)
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members?limit=0", nil, 400, nil)
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members?cursor=bogus", nil, 400, nil)
+	call(memberToken, http.MethodGet, "/v1/teams/"+teamID+"/members", nil, 403, nil)
+	if first["email"] != ownerEmail || first["display_name"] != "Owner" || identity["display_name"] != teamID || memberPage.Total != 1 {
 		t.Fatal("team identity contract missing")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, first["joined_at"].(string)); err != nil {
@@ -142,7 +151,11 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	call(memberToken, http.MethodPost, "/v1/team-invitations/"+invite.InvitationID+"/accept", teams.AcceptRequest{OperationID: "accept"}, 200, &team)
-	for _, m := range team.Members {
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members", nil, 200, &memberPage)
+	if len(memberPage.Items) != 2 || team.MemberCount != 2 {
+		t.Fatalf("members after accept: %d rows, count %d", len(memberPage.Items), team.MemberCount)
+	}
+	for _, m := range memberPage.Items {
 		if m.AccountID == member && m.Role != "admin" {
 			t.Fatal("invited role lost on acceptance")
 		}
@@ -155,7 +168,8 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	call(memberToken, http.MethodGet, "/v1/teams/"+teamID, nil, 403, nil)
 	call(ownerToken, http.MethodPost, "/v1/teams/"+teamID+"/invitations", teams.InviteRequest{OperationID: "identity_reinvite", ExpectedGeneration: team.Generation, Email: memberEmail}, 200, &invite)
 	call(memberToken, http.MethodPost, "/v1/team-invitations/"+invite.InvitationID+"/accept", teams.AcceptRequest{OperationID: "identity_reaccept"}, 200, &team)
-	for _, m := range team.Members {
+	call(ownerToken, http.MethodGet, "/v1/teams/"+teamID+"/members", nil, 200, &memberPage)
+	for _, m := range memberPage.Items {
 		if m.AccountID == member && m.Role != "member" {
 			t.Fatal("default invitation role is not member")
 		}

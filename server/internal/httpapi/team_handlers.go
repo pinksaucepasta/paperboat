@@ -17,6 +17,9 @@ type teamAPI interface {
 	GrantTerminalSession(context.Context, string, string, teams.TerminalSessionGrantRequest) (teams.Team, error)
 	List(context.Context, string) ([]teams.Team, error)
 	Get(context.Context, string, string) (teams.Team, error)
+	Members(context.Context, string, string, string, int) (teams.Page[teams.Member], error)
+	Grants(context.Context, string, string, string, int) (teams.Page[teams.Grant], error)
+	Machines(context.Context, string, string, string, int) (teams.Page[teams.MachineBinding], error)
 	Mutate(context.Context, string, string, teams.MutationRequest) (teams.Team, error)
 	Invite(context.Context, string, string, teams.InviteRequest) (teams.Invitation, error)
 	Accept(context.Context, string, string, teams.AcceptRequest) (teams.Team, error)
@@ -43,15 +46,24 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 			case "roles":
 				out = teams.Matrix()
 			case "activity":
-				limit := 0
-				if raw := r.URL.Query().Get("limit"); raw != "" {
-					limit, err = strconv.Atoi(raw)
-					if err != nil || limit < 1 || limit > teams.MaximumActivityLimit {
-						err = teams.ErrInvalid
-						break
-					}
+				var limit int
+				if limit, err = pageLimitParam(r, teams.MaximumActivityLimit); err == nil {
+					out, err = service.Activity(r.Context(), account, team, r.URL.Query().Get("cursor"), limit)
 				}
-				out, err = service.Activity(r.Context(), account, team, r.URL.Query().Get("cursor"), limit)
+			case "members", "grants", "machines":
+				var limit int
+				if limit, err = pageLimitParam(r, teams.MaximumPageLimit); err != nil {
+					break
+				}
+				cursor := r.URL.Query().Get("cursor")
+				switch action {
+				case "members":
+					out, err = service.Members(r.Context(), account, team, cursor, limit)
+				case "grants":
+					out, err = service.Grants(r.Context(), account, team, cursor, limit)
+				default:
+					out, err = service.Machines(r.Context(), account, team, cursor, limit)
+				}
 			case "get":
 				out, err = service.Get(r.Context(), account, team)
 			case "mutate":
@@ -170,6 +182,9 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 	handle("GET /v1/team-roles", "roles", false)
 	handle("GET /v1/teams/{team_id}/activity", "activity", false)
 	handle("GET /v1/teams/{team_id}", "get", false)
+	handle("GET /v1/teams/{team_id}/members", "members", false)
+	handle("GET /v1/teams/{team_id}/grants", "grants", false)
+	handle("GET /v1/teams/{team_id}/machines", "machines", false)
 	handle("POST /v1/teams/{team_id}/actions", "mutate", true)
 	handle("POST /v1/teams/{team_id}/invitations", "invite", true)
 	handle("POST /v1/team-invitations/{invitation_id}/accept", "accept", true)
@@ -191,4 +206,17 @@ func teamViewFor(out any, account string) any {
 		return views
 	}
 	return out
+}
+
+// pageLimitParam reads ?limit (absent means the service default, 0).
+func pageLimitParam(r *http.Request, maximum int) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > maximum {
+		return 0, teams.ErrInvalid
+	}
+	return limit, nil
 }

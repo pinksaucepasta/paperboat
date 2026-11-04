@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 
 	"github.com/jackc/pgx/v5"
@@ -52,62 +53,44 @@ func AuditTx(ctx context.Context, tx *db.Tx, account, team, action, operation st
 
 // ReadTx reads a team and locks its row, for a change that depends on what it read.
 func ReadTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
-	return readTx(ctx, tx, id, " FOR UPDATE")
+	return readTx(ctx, tx, id, " FOR UPDATE", false)
 }
 
-// readSnapshotTx reads a team without locking it, inside a read-only snapshot.
-func readSnapshotTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
-	return readTx(ctx, tx, id, "")
+// readSummaryTx reads a team without locking it, inside a read-only snapshot, and without its member, grant
+// and machine rows: it carries their counts, and clients page the rows (pages.go).
+func readSummaryTx(ctx context.Context, tx *db.Tx, id string) (Team, error) {
+	return readTx(ctx, tx, id, "", true)
 }
 
-func readTx(ctx context.Context, tx *db.Tx, id, lock string) (Team, error) {
+// grantRowFilter selects the stored grants a team shows; the team ENV's and inspect/replay grants are the policy's.
+const grantRowFilter = `resource_kind<>'env' AND permission NOT IN ('inspect','replay')`
+
+func readTx(ctx context.Context, tx *db.Tx, id, lock string, summary bool) (Team, error) {
 	out := Team{TeamID: id, Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
 	err := tx.QueryRow(ctx, `SELECT sso_required,approve_new_machines,coalesce((SELECT p.allow_private_access FROM workspace_policies p WHERE p.team_id=$1),false),coalesce(display_name,team_id),coalesce(display_name,team_id),owner_account,generation,deleted_at IS NOT NULL,suspended,CASE WHEN deleted_at IS NOT NULL THEN 'deleted' WHEN suspended THEN 'suspended' ELSE coalesce((SELECT CASE WHEN rotation_required THEN 'rotation_pending' ELSE 'ready' END FROM environment_vault_teams WHERE team_id=$1),'not_initialized') END FROM teams WHERE team_id=$1`+lock, id).Scan(&out.SSORequired, &out.ApproveNewMachines, &out.AllowPrivateAccess, &out.Name, &out.DisplayName, &out.OwnerAccount, &out.Generation, &out.Deleted, &out.Suspended, &out.ENVStatus)
 	if err != nil {
 		return out, mapTeamReadNotFound(err)
 	}
-	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN m.account_id=$2 THEN 'owner' ELSE m.role END,m.active,u.primary_email,u.display_name,m.joined_at,m.directory_user_id IS NOT NULL,m.sso_exempt FROM team_members m JOIN users u ON u.id=m.account_id WHERE m.team_id=$1 ORDER BY m.account_id`, id, out.OwnerAccount)
-	if err != nil {
-		return out, err
-	}
-	for rows.Next() {
-		var m Member
-		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.Email, &m.DisplayName, &m.JoinedAt, &m.DirectoryManaged, &m.SSOExempt); err != nil {
-			rows.Close()
+	if summary {
+		err = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM team_members WHERE team_id=$1),
+ (SELECT count(*) FROM team_resource_grants WHERE team_id=$1 AND `+grantRowFilter+`),
+ (SELECT count(*) FROM team_resource_bindings b JOIN live_user_machines m ON m.id=b.resource_id WHERE b.team_id=$1 AND b.resource_kind='machine')`, id).Scan(&out.MemberCount, &out.GrantCount, &out.MachineCount)
+		if err != nil {
 			return out, err
 		}
-		out.Members = append(out.Members, m)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
-	}
-	// The team ENV's and inspect/replay grants are the policy's (policyGrantsTx, below); their
-	// old rows stay unread.
-	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 AND resource_kind<>'env' AND permission NOT IN ('inspect','replay') ORDER BY resource_kind,resource_id,account_id`, id)
-	if err != nil {
-		return out, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var g Grant
-		if err = rows.Scan(&g.AccountID, &g.ResourceKind, &g.ResourceID, &g.Permission, &g.Generation, &g.Active); err != nil {
-			return out, err
-		}
-		out.Grants = append(out.Grants, g)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
+	} else if err = readMembersAndGrantsTx(ctx, tx, id, &out); err != nil {
 		return out, err
 	}
 	teamPolicy, err := teamPolicyTx(ctx, tx, id)
 	if err != nil {
 		return out, err
 	}
-	out.Grants = append(out.Grants, policyGrants(teamPolicy, id)...)
-	rows, err = tx.Query(ctx, `SELECT terminal_session_id,audience,coalesce(account_id,''),role,generation,active FROM team_terminal_session_grants WHERE team_id=$1 ORDER BY terminal_session_id,audience,account_id`, id)
+	if policy := policyGrants(teamPolicy, id); summary {
+		out.GrantCount += len(policy)
+	} else {
+		out.Grants = append(out.Grants, policy...)
+	}
+	rows, err := tx.Query(ctx, `SELECT terminal_session_id,audience,coalesce(account_id,''),role,generation,active FROM team_terminal_session_grants WHERE team_id=$1 ORDER BY terminal_session_id,audience,account_id`, id)
 	if err != nil {
 		return out, err
 	}
@@ -124,8 +107,11 @@ func readTx(ctx context.Context, tx *db.Tx, id, lock string) (Team, error) {
 	if err != nil {
 		return out, err
 	}
-	if err = readMachinesTx(ctx, tx, id, &out); err != nil {
-		return out, err
+	if !summary {
+		if err = readMachinesTx(ctx, tx, id, &out); err != nil {
+			return out, err
+		}
+		out.MemberCount, out.GrantCount, out.MachineCount = len(out.Members), len(out.Grants), len(out.Machines)
 	}
 	out.MachineGrants = machineGrants(teamPolicy)
 	err = readMachineRequestsTx(ctx, tx, id, &out)
@@ -366,11 +352,14 @@ func (s *Service) Get(ctx context.Context, account, team string) (Team, error) {
 	var out Team
 	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var err error
-		out, err = readSnapshotTx(ctx, tx, team)
+		out, err = readSummaryTx(ctx, tx, team)
 		if err != nil {
 			return err
 		}
-		if _, ok := currentMember(out, account); !ok || out.Deleted {
+		if out.MyRole, err = viewerRoleTx(ctx, tx, team, account); err != nil {
+			return err
+		}
+		if out.MyRole == "" || out.Deleted {
 			return ErrForbidden
 		}
 		return nil
@@ -385,18 +374,18 @@ func (s *Service) Get(ctx context.Context, account, team string) (Team, error) {
 func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 	out := []Team{}
 	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT t.team_id FROM teams t JOIN team_members m USING(team_id) WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL ORDER BY t.team_id LIMIT 129`, account)
+		rows, err := tx.Query(ctx, `SELECT t.team_id,CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END FROM teams t JOIN team_members m USING(team_id) WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL ORDER BY t.team_id LIMIT 129`, account)
 		if err != nil {
 			return err
 		}
-		ids := []string{}
+		ids, roles := []string{}, map[string]string{}
 		for rows.Next() {
-			var id string
-			if err = rows.Scan(&id); err != nil {
+			var id, role string
+			if err = rows.Scan(&id, &role); err != nil {
 				rows.Close()
 				return err
 			}
-			ids = append(ids, id)
+			ids, roles[id] = append(ids, id), role
 		}
 		err = rows.Err()
 		rows.Close()
@@ -407,10 +396,11 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 			return ErrLimit
 		}
 		for _, id := range ids {
-			t, err := readSnapshotTx(ctx, tx, id)
+			t, err := readSummaryTx(ctx, tx, id)
 			if err != nil {
 				return err
 			}
+			t.MyRole = roles[id]
 			if t.SSORequired {
 				var ok bool
 				if err = tx.QueryRow(ctx, `SELECT team_member_sso_ok($1,$2)`, id, account).Scan(&ok); err != nil {
@@ -419,7 +409,7 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 				t.SSOSignedIn = &ok
 				if !ok {
 					// Without a recent SSO sign-in the team shows only that it needs one.
-					t = Team{TeamID: t.TeamID, Name: t.Name, DisplayName: t.DisplayName, Generation: t.Generation, SSORequired: true, SSOSignedIn: &ok,
+					t = Team{TeamID: t.TeamID, MyRole: t.MyRole, Name: t.Name, DisplayName: t.DisplayName, Generation: t.Generation, SSORequired: true, SSOSignedIn: &ok,
 						Members: []Member{}, Grants: []Grant{}, Machines: []MachineBinding{}, MachineGrants: []MachineGrant{}, MachineRequests: []MachineAdmission{}, TerminalSessionGrants: []TerminalSessionGrant{}}
 				}
 			}
@@ -433,4 +423,49 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 func pruneInvitationsTx(ctx context.Context, tx *db.Tx, team string) error {
 	_, err := tx.Exec(ctx, `DELETE FROM team_invitations WHERE team_id=$1 AND invitation_id IN(SELECT invitation_id FROM team_invitations WHERE team_id=$1 AND (accepted_at IS NOT NULL OR cancelled_at IS NOT NULL) ORDER BY COALESCE(accepted_at,cancelled_at) DESC,invitation_id DESC OFFSET $2)`, team, MaximumInvitationHistory)
 	return err
+}
+
+func readMembersAndGrantsTx(ctx context.Context, tx *db.Tx, id string, out *Team) error {
+	rows, err := tx.Query(ctx, `SELECT m.account_id,m.membership_generation,CASE WHEN m.account_id=$2 THEN 'owner' ELSE m.role END,m.active,u.primary_email,u.display_name,m.joined_at,m.directory_user_id IS NOT NULL,m.sso_exempt FROM team_members m JOIN users u ON u.id=m.account_id WHERE m.team_id=$1 ORDER BY m.account_id`, id, out.OwnerAccount)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var m Member
+		if err = rows.Scan(&m.AccountID, &m.MembershipGeneration, &m.Role, &m.Active, &m.Email, &m.DisplayName, &m.JoinedAt, &m.DirectoryManaged, &m.SSOExempt); err != nil {
+			rows.Close()
+			return err
+		}
+		out.Members = append(out.Members, m)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	// The team ENV's and inspect/replay grants are the policy's (policyGrantsTx, below); their
+	// old rows stay unread.
+	rows, err = tx.Query(ctx, `SELECT account_id,resource_kind,resource_id,permission,generation,active FROM team_resource_grants WHERE team_id=$1 AND `+grantRowFilter+` ORDER BY resource_kind,resource_id,account_id`, id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g Grant
+		if err = rows.Scan(&g.AccountID, &g.ResourceKind, &g.ResourceID, &g.Permission, &g.Generation, &g.Active); err != nil {
+			return err
+		}
+		out.Grants = append(out.Grants, g)
+	}
+	return rows.Err()
+}
+
+// viewerRoleTx is the account's role in a team, or "" when it is not a current member.
+func viewerRoleTx(ctx context.Context, tx *db.Tx, team, account string) (string, error) {
+	var role string
+	err := tx.QueryRow(ctx, `SELECT CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END FROM teams t JOIN team_members m ON m.team_id=t.team_id AND m.account_id=$2 AND m.active WHERE t.team_id=$1`, team, account).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return role, err
 }
