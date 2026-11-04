@@ -76,10 +76,21 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if len(relays) == 0 {
 		relays = []string{""}
 	}
+	// Connect every common relay at once: a dead edge costs nothing extra and
+	// a slow one (dadape: >800 ms cold) is ready by the time its turn comes.
+	warm := make(map[string]<-chan error, len(relays))
+	for _, relay := range relays {
+		if relay == "" {
+			continue
+		}
+		done := make(chan error, 1)
+		warm[relay] = done
+		go func(relay string) { done <- network.WarmRelay(ctx, relay) }(relay)
+	}
 	var transport *peerquic.Session
 	var attemptErr error
 	for i, relay := range relays {
-		transport, err = s.carrierAttempt(ctx, network, config, offer, peer, relay, i == len(relays)-1)
+		transport, err = s.carrierAttempt(ctx, network, config, offer, peer, relay, warm[relay], i == len(relays)-1)
 		if err == nil {
 			break
 		}
@@ -121,15 +132,15 @@ const carrierRelayAttemptLimit = 800 * time.Millisecond
 // attempt keeps the remaining offer budget.
 const carrierAttemptLimit = 3 * time.Second
 
-func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config, offer CarrierOffer, peer tailnet.NetworkBinding, relay string, last bool) (*peerquic.Session, error) {
+func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config, offer CarrierOffer, peer tailnet.NetworkBinding, relay string, warm <-chan error, last bool) (*peerquic.Session, error) {
 	if !last {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, carrierAttemptLimit)
 		defer cancel()
 	}
 	diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt_start", "reason", relay)
-	prepare, stop := context.WithTimeout(ctx, carrierRelayAttemptLimit)
-	err := network.PreparePeerRelay(prepare, s.peerID, relay)
+	prepare, stop := relayPrepareContext(ctx, last)
+	err := waitRelay(prepare, warm, func() error { return network.PreparePeerRelay(prepare, s.peerID, relay) })
 	stop()
 	if err != nil {
 		return nil, err
@@ -149,6 +160,44 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 		return nil, err
 	}
 	return s.dialCarrierPacket(ctx, network, config)
+}
+
+// relayPrepareContext cuts a relay's preparation short only when another edge
+// follows it; the last edge keeps the move's budget (dadape direct2b cut both
+// edges at 800 ms and fell back to a 16 s reconnect).
+func relayPrepareContext(ctx context.Context, last bool) (context.Context, context.CancelFunc) {
+	if last {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, carrierRelayAttemptLimit)
+}
+
+// waitRelay waits for the relay's warm connection, then selects it for the
+// peer. Both steps run off the caller so a relay step that does not honour
+// ctx (dadape direct3b sat 10 s) cannot hold the move past its bound.
+func waitRelay(ctx context.Context, warm <-chan error, selectRelay func() error) error {
+	done := make(chan error, 1)
+	go func() {
+		if warm != nil {
+			select {
+			case err := <-warm:
+				if err != nil {
+					done <- err
+					return
+				}
+			case <-ctx.Done():
+				done <- ctx.Err()
+				return
+			}
+		}
+		done <- selectRelay()
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ListenCarrier is a mutually authenticated terminal-only transport inside WG.

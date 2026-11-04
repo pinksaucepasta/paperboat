@@ -47,6 +47,20 @@ func (c *CarrierNetwork) CommonRelays(remote []string, preferred string) []strin
 	return out
 }
 
+// WarmRelay connects to one authorized relay ahead of its use, so a move does
+// not pay a cold relay handshake (Tailscale keeps its DERP home connected the
+// same way). Peer routes are not changed.
+func (c *CarrierNetwork) WarmRelay(ctx context.Context, nodeID string) error {
+	allowed := false
+	for _, id := range c.RelayNodeIDs() {
+		allowed = allowed || id == nodeID
+	}
+	if !allowed {
+		return ErrRegionalAuthority
+	}
+	return c.server.PrepareRelay(ctx, regionalID(nodeID))
+}
+
 // Select per peer, retaining all other peers' active relay routes. Candidate
 // signalling over the old connection lets both sides connect to this same
 // authorized node without a control-plane request or peer fan-out.
