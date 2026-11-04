@@ -784,6 +784,21 @@ path = pathlib.Path(sys.argv[1]); document = json.loads(path.read_text())
 document["signed"]["targets"]["pb-darwin-arm64"]["custom"]["schema"] = "paperboat.tuf-asset/v1"
 path.write_text(json.dumps(document) + "\n")
 PY_WITHDRAWN
+  # A live product the release set does not know is refused; one the set lacks (macOS after Linux-only releases) is not.
+  python3 - "$release_root/current/tuf/metadata/targets.json" <<'PY_UNKNOWN'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1]); document = json.loads(path.read_text())
+document["signed"]["targets"]["pb-freebsd-amd64"] = document["signed"]["targets"]["pb-linux-arm64"]
+path.write_text(json.dumps(document) + "\n")
+PY_UNKNOWN
+  before=$(snapshot)
+  expect_candidate_rejection unknown-live-product "live TUF targets metadata contains an unknown release product"
+  python3 - "$release_root/current/tuf/metadata/targets.json" <<'PY_UNKNOWN'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1]); document = json.loads(path.read_text())
+del document["signed"]["targets"]["pb-freebsd-amd64"]
+path.write_text(json.dumps(document) + "\n")
+PY_UNKNOWN
 
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"

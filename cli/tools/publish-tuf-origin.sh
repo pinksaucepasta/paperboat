@@ -235,8 +235,9 @@ def read_targets(path, label):
     targets = signed.get("targets")
     if not isinstance(targets, dict) or not targets or (label == "candidate" and set(targets) != set(expected)):
         raise SystemExit(f"{label} TUF targets metadata does not contain the exact release asset set")
-    if label == "live" and not set(expected).issubset(targets):
-        raise SystemExit("live TUF targets metadata is missing a current release product")
+    # A product that joins the set (macOS after a Linux-only history) is not live yet; unknown ones never are.
+    if label == "live" and not set(targets) <= set(expected):
+        raise SystemExit("live TUF targets metadata contains an unknown release product")
     return targets
 
 def version_parts(value, name):
@@ -389,6 +390,11 @@ for name in expected:
     if fresh:
         if candidate_version_parts != requested_version_parts:
             raise SystemExit("initial publication must select every launch target at the requested version")
+        selected.append(name)
+        continue
+    if name not in live_metadata:
+        if candidate_version_parts != requested_version_parts:
+            raise SystemExit(f"a product new to the live set must be selected at the requested version: {name}")
         selected.append(name)
         continue
     live_version_parts, _, _, _, _, _ = live_metadata[name]
