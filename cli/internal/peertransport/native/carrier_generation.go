@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
+	"errors"
 	"net"
 	"time"
 
@@ -68,27 +69,28 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if err := network.AddPeer(s.peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
 		return nil, err
 	}
-	relay := network.CommonRelay(offer.Claims.RelayNodeIDs, s.owner.authority.RegionalStatus().NodeID)
-	if err := network.PreparePeerRelay(ctx, s.peerID, relay); err != nil {
-		return nil, err
+	// Try each common relay edge in turn, each attempt bounded, so a dead or
+	// refusing relay costs about a second, not the whole offer budget. Direct
+	// paths are tried in every attempt; the relay is the guarantee.
+	relays := network.CommonRelays(offer.Claims.RelayNodeIDs, s.owner.authority.RegionalStatus().NodeID)
+	if len(relays) == 0 {
+		relays = []string{""}
 	}
-	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic(), RelayNodeID: relay}
-	for _, endpoint := range network.Endpoints() {
-		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
+	var transport *peerquic.Session
+	var attemptErr error
+	for i, relay := range relays {
+		transport, err = s.carrierAttempt(ctx, network, config, offer, peer, relay, i == len(relays)-1)
+		if err == nil {
+			break
+		}
+		attemptErr = errors.Join(attemptErr, err)
+		diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt", "failed", true, "error_type", moveErrorType(err))
+		if ctx.Err() != nil {
+			break
+		}
 	}
-	current, err := s.exchangeCarrierCandidates(ctx, exchange)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(current.Claims.Certificate, offer.Claims.Certificate) || current.verify(peer, time.Now()) != nil {
-		return nil, ErrInvalid
-	}
-	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
-		return nil, err
-	}
-	transport, err := s.dialCarrierPacket(ctx, network, config)
-	if err != nil {
-		return nil, err
+	if transport == nil {
+		return nil, attemptErr
 	}
 
 	session, err := newSession(s.owner, s.peerID, peer, transport, true)
@@ -109,6 +111,43 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	}
 	diagnosticlog.TryInfo("terminal carrier move", "stage", "connected", "path", path)
 	return session, nil
+}
+
+// carrierRelayAttemptLimit bounds one relay edge's preparation so a dead relay
+// is detected in about a second and the other edge is tried.
+const carrierRelayAttemptLimit = time.Second
+
+// carrierAttemptLimit bounds one whole candidate exchange and dial; the last
+// attempt keeps the remaining offer budget.
+const carrierAttemptLimit = 3 * time.Second
+
+func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config, offer CarrierOffer, peer tailnet.NetworkBinding, relay string, last bool) (*peerquic.Session, error) {
+	if !last {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, carrierAttemptLimit)
+		defer cancel()
+	}
+	prepare, stop := context.WithTimeout(ctx, carrierRelayAttemptLimit)
+	err := network.PreparePeerRelay(prepare, s.peerID, relay)
+	stop()
+	if err != nil {
+		return nil, err
+	}
+	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic(), RelayNodeID: relay}
+	for _, endpoint := range network.Endpoints() {
+		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
+	}
+	current, err := s.exchangeCarrierCandidates(ctx, exchange)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(current.Claims.Certificate, offer.Claims.Certificate) || current.verify(peer, time.Now()) != nil {
+		return nil, ErrInvalid
+	}
+	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
+		return nil, err
+	}
+	return s.dialCarrierPacket(ctx, network, config)
 }
 
 // ListenCarrier is a mutually authenticated terminal-only transport inside WG.

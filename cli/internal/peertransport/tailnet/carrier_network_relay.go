@@ -27,25 +27,24 @@ func (c *CarrierNetwork) RelayNodeIDs() []string {
 	return ids
 }
 
-// The signed target offer and our cached grants determine the common relay.
-// The old connection's selection is a preference, never extra authority.
-func (c *CarrierNetwork) CommonRelay(remote []string, preferred string) string {
-	own := c.RelayNodeIDs()
-	for _, id := range own {
-		for _, other := range remote {
-			if id == preferred && id == other {
-				return id
-			}
-		}
-	}
-	for _, id := range own {
+// The signed target offer and our cached grants determine the common relays,
+// preferred first. The old connection's selection is a preference, never extra
+// authority. A dead or refusing relay is skipped by the caller (each account
+// has two edges).
+func (c *CarrierNetwork) CommonRelays(remote []string, preferred string) []string {
+	var out []string
+	for _, id := range c.RelayNodeIDs() {
 		for _, other := range remote {
 			if id == other {
-				return id
+				if id == preferred {
+					out = append([]string{id}, out...)
+				} else {
+					out = append(out, id)
+				}
 			}
 		}
 	}
-	return ""
+	return out
 }
 
 // Select per peer, retaining all other peers' active relay routes. Candidate
