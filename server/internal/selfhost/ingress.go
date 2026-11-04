@@ -313,21 +313,6 @@ func (s *Service) observeIngressIteration(ctx context.Context, err error) {
 		supportreport.CaptureFromContext(faultCtx, component, operation, "worker_recovery", "worker_recovered", nil)
 	}
 }
-func (s *Service) Run(ctx context.Context) {
-	timer := time.NewTicker(15 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			request, cancel := context.WithTimeout(ctx, 15*time.Second)
-			_ = s.ReconcileIngress(request)
-			cancel()
-		}
-	}
-}
-
 func publicIngressTransport(host string, ip netip.Addr) *http.Transport {
 	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	return &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {

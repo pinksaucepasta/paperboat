@@ -928,6 +928,13 @@ func New(opts Options) (*App, error) {
 	if teamInboxReceiptWorker != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_inbox", teamInboxReceiptWorker.Run, progress))
 	}
+	// Self-host ingress probes reach out from the server: one leader probes, not every instance (F21-55).
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_selfhost_ingress", periodicPreviewTunnelWorker(15*time.Second, func(ctx context.Context) error {
+		probe, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		_ = selfhostService.ReconcileIngress(probe) // failures are reported inside, per installation
+		return nil
+	}), progress))
 	if edgeControlService != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
@@ -973,7 +980,6 @@ func New(opts Options) (*App, error) {
 		draining:             draining,
 		machineEvents:        machineEventHub,
 		supportReports:       supportService,
-		selfhost:             selfhostService,
 		healthMonitor:        healthMonitor,
 		cfg:                  opts.Config,
 		logger:               opts.Logger,

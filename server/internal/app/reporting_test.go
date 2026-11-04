@@ -136,7 +136,7 @@ func TestSelfhostReportingContextBindsReporter(t *testing.T) {
 		_ = reporter.Run(ctx)
 	}()
 
-	bound := selfhostReportingContext(ctx, reporter)
+	bound := reporter.Context(ctx, "")
 	fault := supportreport.ObserveFromContext(bound, "paperboat-server", "worker_edge_dns", "reconciliation", "edge_dns_reconcile_failed", syscall.ECONNRESET)
 	if fault.Cause != "connection_reset" || !supportreport.ValidReference(fault.SupportReference) {
 		t.Fatalf("self-host context did not bind report identity: %+v", fault)

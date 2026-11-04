@@ -104,15 +104,6 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	runContext, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	selfhostContext := selfhostReportingContext(runContext, a.supportReports)
-	selfhostDone := make(chan struct{})
-	go func() {
-		defer close(selfhostDone)
-		if a.selfhost != nil {
-			a.selfhost.Run(selfhostContext)
-		}
-	}()
-	defer func() { cancelRun(); <-selfhostDone }()
 	telemetryEvents, telemetryErr := telemetry.NewEventLog(1024)
 	if telemetryErr != nil {
 		return fmt.Errorf("start telemetry event log: %w", telemetryErr)
@@ -261,13 +252,6 @@ func (a *App) beginShutdown() {
 	if a.machineEvents != nil {
 		a.machineEvents.Drain()
 	}
-}
-
-func selfhostReportingContext(ctx context.Context, reporter *supportreport.Service) context.Context {
-	if reporter == nil {
-		return ctx
-	}
-	return reporter.Context(ctx, "")
 }
 
 func stopReportingAfterTelemetryDrain(events *telemetry.EventLog, stopReporting func()) {
