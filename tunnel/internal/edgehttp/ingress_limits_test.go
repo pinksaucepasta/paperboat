@@ -385,3 +385,17 @@ func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
 		t.Fatalf("current key not reconfigured: %+v", state)
 	}
 }
+
+// F21-47: an edge that has not heard from the server (self-hosted without an answer yet) enforces
+// the shared defaults, the same set the server sends.
+func TestEdgeWithoutAnswerUsesTheSharedDefaultLimits(t *testing.T) {
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	set := edgelimits.Default()
+	if registry.ingressLimits.Publication != ingressLimitConfig(set.Publication) || registry.ingressLimits.Account != ingressLimitConfig(set.Account) {
+		t.Fatalf("edge limits = %+v / %+v", registry.ingressLimits.Publication, registry.ingressLimits.Account)
+	}
+}

@@ -532,7 +532,7 @@ func reserveUsageKeyOperation(ctx context.Context, tx *db.Tx, operationKey, acti
 }
 
 func NewEdgeService(store *db.DB, credential string) *EdgeService {
-	return &EdgeService{store: store, credential: credential, audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
+	return &EdgeService{store: store, credential: credential, ingressLimits: edgelimits.Default(), audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *EdgeService) SetClock(clock func() time.Time) {
