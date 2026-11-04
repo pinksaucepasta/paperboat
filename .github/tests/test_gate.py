@@ -20,13 +20,17 @@ class SmokePrerequisiteTest(unittest.TestCase):
             (root / "cli").mkdir()
             (root / "bin").mkdir()
             (root / "deploy").mkdir()
-            for name in ("check_domains", "check_doc_links", "check_doc_envvars", "check_migrations", "check_server_deployed"):
+            for name in ("check_domains", "check_doc_links", "check_doc_envvars", "check_migrations", "check_server_deployed",
+                         "check_duplicate_packages"):
                 (root / f"tools/{name}.py").write_text("")
                 (root / f"tools/test_{name}.py").write_text(
                     "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
             (root / "deploy/test_fixture.py").write_text(
                 "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
             shutil.copy2(GATE, root / "tools/gate.sh")
+            # Every tool the gate calls is stubbed here; a missing stub fails every gate assertion at once.
+            (root / "tools/check-shared-imports.sh").write_text("#!/bin/sh\nexit 0\n")
+            (root / "tools/check-shared-imports.sh").chmod(0o755)
             (root / "CHECKLIST.md").write_text(checklist)
             if smoke is not None:
                 (root / "tools/device-smoke/results/smoke.json").write_text(json.dumps(smoke))
