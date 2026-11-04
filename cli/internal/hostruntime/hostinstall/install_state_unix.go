@@ -265,6 +265,37 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 	return request, nil
 }
 
+// stageSyncBytes bounds how much unwritten binary data one stage leaves to the
+// kernel. One 90 MB copy then a single fsync saturated dadape's SD card for
+// ~10 s; processes faulting in their own pages (session owners, hostd) stalled
+// for 5-6 s and every running terminal paused (direct2c). dpkg bounds its
+// writeback the same way (sync_file_range after each file).
+const stageSyncBytes = 8 << 20
+
+type writeSyncer interface {
+	io.Writer
+	Sync() error
+}
+
+// syncedCopy copies src to dst, syncing every stageSyncBytes so writeback stays
+// short; the caller still syncs the tail.
+func syncedCopy(dst writeSyncer, src io.Reader) (int64, error) {
+	var written int64
+	for {
+		n, err := io.CopyN(dst, src, stageSyncBytes)
+		written += n
+		if err == io.EOF {
+			return written, nil
+		}
+		if err != nil {
+			return written, err
+		}
+		if err := dst.Sync(); err != nil {
+			return written, err
+		}
+	}
+}
+
 func stageBinary(source, destination string, identity installsource.Source) (resultErr error) {
 	defer diagnostics.UpdateStep("protected_binary_stage")()
 	if err := identity.Verify(source); err != nil {
@@ -293,7 +324,7 @@ func stageBinary(source, destination string, identity installsource.Source) (res
 	if err := temporary.Chmod(0o755); err != nil {
 		return hostInstallFailure("staging installation failed", err, temporary.Close())
 	}
-	written, err := io.Copy(temporary, io.LimitReader(input, 256<<20+1))
+	written, err := syncedCopy(temporary, io.LimitReader(input, 256<<20+1))
 	if diskFull(err) {
 		return hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err, temporary.Close())
 	}
