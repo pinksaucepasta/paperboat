@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 )
 
 type sessionStore struct {
-	value      clientstate.Session
-	failCommit bool
+	value         clientstate.Session
+	failCommit    bool
+	failAfterSave bool
 }
 
 func (s *sessionStore) Load() (clientstate.Session, error) { return s.value, nil }
@@ -25,6 +27,10 @@ func (s *sessionStore) Save(v clientstate.Session) error {
 		return errors.New("state commit failed")
 	}
 	s.value = v
+	if s.failAfterSave {
+		s.failAfterSave = false
+		return errors.New("state directory sync failed")
+	}
 	return nil
 }
 func (s *sessionStore) Clear() error { s.value = clientstate.Session{}; return nil }
@@ -75,5 +81,26 @@ func TestRefreshRetainsAttemptAcrossFailedCommit(t *testing.T) {
 	}
 	if store.value.RefreshAttempt != "" || store.value.RefreshToken != "successor-refresh" {
 		t.Fatal("successor not committed")
+	}
+}
+
+func TestFailedLoginCommitDoesNotLeaveRevokedState(t *testing.T) {
+	var revokes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/auth/token/revoke" {
+			revokes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TokenSet{AccessToken: "initial", RefreshToken: "initial-refresh", TokenType: "Bearer", ExpiresIn: 3600, CLIClientSessionID: "session-initial"}})
+	}))
+	defer server.Close()
+	store := &sessionStore{failAfterSave: true}
+	source := &Source{API: &api.Client{BaseURL: server.URL, Options: api.CallOptions{HTTPClient: server.Client()}}, Store: store, Now: time.Now}
+	if err := source.Login(context.Background(), "api-test-token", "test", "linux"); err == nil {
+		t.Fatal("failed state commit accepted")
+	}
+	if revokes.Load() != 1 || store.value.ID != "" {
+		t.Fatal("failed initialization retained a revoked session")
 	}
 }

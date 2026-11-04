@@ -49,9 +49,21 @@ func (s *Source) Login(ctx context.Context, token, label, osName string) error {
 		if tokens.RefreshToken == "" {
 			return err
 		}
+		// An atomic rename may have committed before its directory sync failed.
+		// Retain revoke ownership before cleanup, then erase only the confirmed-revoked session.
+		var retainErr error
+		if next.ID != "" {
+			next.Revoking = true
+			retainErr = s.Store.Save(next)
+		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return errors.Join(err, s.API.RevokeToken(cleanupCtx, tokens.RefreshToken))
+		revokeErr := s.API.RevokeToken(cleanupCtx, tokens.RefreshToken)
+		var clearErr error
+		if revokeErr == nil {
+			clearErr = s.Store.Clear()
+		}
+		return errors.Join(err, retainErr, revokeErr, clearErr)
 	}
 	return nil
 }
