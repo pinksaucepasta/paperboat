@@ -106,6 +106,13 @@ mkdir -p "$RESULTS_DIR"
 # ---------------------------------------------------------------- devices
 PB_HP='$HOME/.local/bin/pb'
 PB_APPLE='/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb'
+# The apple device is the real Mac, or with SMOKE_APPLE_JUMP_PASSFILE the Tart VM behind it (APPLE_PASS is then the
+# VM user's password, the file holds the Mac's; SMOKE_APPLE_PB is the pb path in the VM).
+APPLE_LOGIN=pujan.pm@apple; APPLE_OPTS=()
+if [ -n "${SMOKE_APPLE_JUMP_PASSFILE:-}" ]; then
+  APPLE_LOGIN=admin@192.168.64.2; PB_APPLE=${SMOKE_APPLE_PB:?set SMOKE_APPLE_PB to the pb path in the VM}
+  APPLE_OPTS=(-o "ProxyCommand=sshpass -f $SMOKE_APPLE_JUMP_PASSFILE ssh -o StrictHostKeyChecking=accept-new -W %h:%p pujan.pm@apple")
+fi
 PB_VICTUS=""
 if [[ ",$TARGETS," == *,victus,* ]]; then
   PB_VICTUS=$(python3 "$HERE/install_path.py" "$WINDOWS_INSTALL_JSON") || exit 2
@@ -136,7 +143,7 @@ on() {
     hp) ssh "${SSH_OPTS[@]}" -o BatchMode=yes anvit@hp "$*" ;;
     ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
     dadape) SSHPASS="$DADAPE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" anvit@dadape "$*" ;;
-    apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" pujan.pm@apple \
+    apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$APPLE_LOGIN" \
       "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; $*" ;;
     victus) local encoded
       encoded=$(printf '%s' "$*" | iconv -t UTF-16LE | base64 -w0)
@@ -431,7 +438,7 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   [ -f "$UPDATE_DIR/$bin" ] || { record "update:$t" FAIL 0 "missing $UPDATE_DIR/$bin"; return; }
   case "$t" in
     hp) scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "anvit@hp:$dst" ;;
-    apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "pujan.pm@apple:$dst" ;;
+    apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$UPDATE_DIR/$bin" "$APPLE_LOGIN:$dst" ;;
     victus) SSHPASS="$VICTUS_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "pujan@victus:$dst" ;;
   esac
   # Verify shell identity before activation, then query that same PTY after it.
