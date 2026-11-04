@@ -553,6 +553,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("create edge gateway: %w", err)
 	}
 	privateAccessBridge, err := edgehttp.NewPrivateAccessStreamBridge(edgehttp.PrivateAccessStreamBridgeConfig{
+		IdleTimeout: deployment.PublicTCPIdle(),
 		OnFailure: func(ctx context.Context, phase string, cause error) {
 			if reporting.SupportReference(ctx) == "" {
 				telemetryLifecycle.mu.Lock()

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -784,5 +785,58 @@ func TestPrivateTCPAdmissionRulesUseTheRoutesActiveAdmission(t *testing.T) {
 	r := rules[0]
 	if r.Kind != route.TunnelPrivateTCP || r.ConnectorSessionID != "session_1" || r.TunnelID != "route_runtime_1" || r.AssignmentGeneration != 2 || r.ConfigGeneration != 1 || r.Node != "node_1" {
 		t.Fatalf("rule=%+v", r)
+	}
+}
+
+// F21-37: a quiet private TCP stream (the helper/pb access tunnel path) is closed after the idle
+// limit and gives its slot back; data moving in either direction keeps it open.
+func TestPrivateTCPStreamClosesWhenIdle(t *testing.T) {
+	now := time.Now().UTC()
+	identity := testEdgePreviewIdentity(2, 3)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	request := edgePrivateAccessRequest(now)
+	request.ResourceKind, request.ResourceID, request.Audience = "tunnel", "tunnel_1", "paperboat-tunnel-tcp"
+	request.Protocol, request.Method, request.Host, request.Path = "tcp", "", "", ""
+	request.AccountID, request.MachineID, request.CarrierSessionID, request.ConnectorID = identity.AccountID, identity.HostID, identity.SessionID, identity.ConnectorID
+	request.ProcessGeneration, request.ConfigGeneration = identity.ProcessGeneration, identity.Generation
+	targetEdge, targetOrigin := net.Pipe()
+	defer targetOrigin.Close()
+	authorizer := privateAccessGrantAuthorizerFunc(func(context.Context, string, connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
+		return control.PrivateAccessGrantDecision{Allowed: true, ExpiresAt: now.Add(time.Minute)}, nil
+	})
+	bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{Authorizer: authorizer, IdleTimeout: 300 * time.Millisecond, Target: PrivateAccessTargetFunc(func(context.Context, connectorprotocol.PrivateAccessRequest) (io.ReadWriteCloser, error) {
+		return targetEdge, nil
+	}), Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = bridge.Serve(runCtx, server) }()
+	metadata := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: request.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: request.CarrierSessionID, ProcessGeneration: request.ProcessGeneration, Generation: request.ConfigGeneration, RouteID: request.RouteID, RequestID: request.RequestID, Kind: connectorprotocol.PrivateAccessTCP}
+	stream, err := client.OpenStream(context.Background(), metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if err := connectorprotocol.WritePrivateAccessOpen(stream, connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-grant", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := connectorprotocol.ReadPrivateAccessResult(stream, now); err != nil || result.Status != http.StatusOK {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	// Traffic every 150 ms keeps it open past the 300 ms limit.
+	for i := 0; i < 4; i++ {
+		go io.WriteString(stream, "x")
+		one := make([]byte, 1)
+		if _, err := io.ReadFull(targetOrigin, one); err != nil {
+			t.Fatalf("active stream closed at round %d: %v", i, err)
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	// Silence: the origin side sees the close within the limit.
+	_ = targetOrigin.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := targetOrigin.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("idle stream not closed: %v", err)
 	}
 }

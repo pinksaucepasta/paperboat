@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -45,7 +46,10 @@ type PrivateAccessStreamBridgeConfig struct {
 	MaximumStreams   int
 	AuthorizeTimeout time.Duration
 	OpenTimeout      time.Duration
-	Clock            func() time.Time
+	// IdleTimeout closes a private TCP stream after this long without data in either direction;
+	// zero means no limit (F21-37).
+	IdleTimeout time.Duration
+	Clock       func() time.Time
 }
 
 type PrivateAccessStreamBridge struct {
@@ -55,6 +59,7 @@ type PrivateAccessStreamBridge struct {
 	maximum          int
 	authorizeTimeout time.Duration
 	openTimeout      time.Duration
+	idleTimeout      time.Duration
 	clock            func() time.Time
 }
 
@@ -77,7 +82,7 @@ func NewPrivateAccessStreamBridge(config PrivateAccessStreamBridgeConfig) (*Priv
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &PrivateAccessStreamBridge{onFailure: config.OnFailure, authorizer: config.Authorizer, target: config.Target, maximum: config.MaximumStreams, authorizeTimeout: config.AuthorizeTimeout, openTimeout: config.OpenTimeout, clock: config.Clock}, nil
+	return &PrivateAccessStreamBridge{onFailure: config.OnFailure, authorizer: config.Authorizer, target: config.Target, maximum: config.MaximumStreams, authorizeTimeout: config.AuthorizeTimeout, openTimeout: config.OpenTimeout, idleTimeout: config.IdleTimeout, clock: config.Clock}, nil
 }
 
 func (b *PrivateAccessStreamBridge) Serve(ctx context.Context, server *datacarrier.Server) error {
@@ -242,8 +247,17 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 	defer stopWatch()
 	phase = "private_stream_copy"
 	copyDone := make(chan error, 2)
-	go func() { _, err := io.Copy(target, stream); copyDone <- err }()
-	go func() { _, err := io.Copy(stream, target); copyDone <- err }()
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	go func() { _, err := io.Copy(target, activityReader{stream, &last}); copyDone <- err }()
+	go func() { _, err := io.Copy(stream, activityReader{target, &last}); copyDone <- err }()
+	if b.idleTimeout > 0 && open.Request.Protocol == "tcp" {
+		stopIdle := closeWhenIdle(b.idleTimeout, &last, make(chan struct{}), func() {
+			_ = target.Close()
+			_ = stream.Close()
+		})
+		defer stopIdle()
+	}
 	var first error
 	completed := 0
 	select {
