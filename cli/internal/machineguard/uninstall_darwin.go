@@ -294,7 +294,7 @@ func cleanupDarwinTrustEntriesWithRunner(ctx context.Context, cfg Config, knownR
 		sha1Digest := sha1.Sum(root.certificate.Raw)
 		fingerprint := strings.ToUpper(hex.EncodeToString(sha1Digest[:]))
 		if darwinHasCertificateFingerprint(string(output), fingerprint) {
-			if _, err = run(ctx, "/usr/bin/security", "delete-certificate", "-t", "-Z", fingerprint, darwinSystemKeychain); err != nil {
+			if _, err = run(ctx, "/usr/bin/security", "delete-certificate", "-Z", fingerprint, darwinSystemKeychain); err != nil {
 				return err
 			}
 		}

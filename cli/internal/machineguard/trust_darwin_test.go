@@ -118,7 +118,9 @@ func TestDarwinPartialTrustRetirementPreservesOtherNamespace(t *testing.T) {
 		case "find-certificate":
 			return []byte("SHA-1 hash: " + fingerprint + "\n"), nil
 		case "delete-certificate":
-			if len(args) != 5 || args[3] != fingerprint {
+			// No -t: removing admin-domain trust settings needs a GUI authorization an SSH session cannot give;
+			// deleting the System keychain certificate drops its trust.
+			if len(args) != 4 || args[1] != "-Z" || args[2] != fingerprint {
 				t.Fatalf("retired wrong trust: %v", args)
 			}
 			deletes++

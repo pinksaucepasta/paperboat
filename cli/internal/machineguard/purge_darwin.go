@@ -261,7 +261,7 @@ func purgeDarwinOrphanTrust(ctx context.Context, run darwinTrustRunner) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if _, err := run(ctx, "/usr/bin/security", "delete-certificate", "-t", "-Z", fingerprint, darwinSystemKeychain); err != nil {
+		if _, err := run(ctx, "/usr/bin/security", "delete-certificate", "-Z", fingerprint, darwinSystemKeychain); err != nil {
 			return fmt.Errorf("remove orphaned machine guard trust: %w", err)
 		}
 	}
