@@ -219,6 +219,7 @@ type Owner struct {
 	closed           bool
 	sessions         map[*Session]struct{}
 	handshakes       map[string]*peerHandshake
+	restarted        map[string]bool // peers that closed a dialed session on purpose; guarded by mu
 	workers          sync.WaitGroup
 }
 
@@ -258,6 +259,9 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	client, err := o.authority.Client(descriptor, peerID)
 	clientEnd(err)
 	if err != nil {
+		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
+	}
+	if client, err = o.freshClientAfterPeerClose(descriptor, peerID, client); err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
 	// A peer whose own endpoints the signed configuration gives is reachable directly with no relay
@@ -305,6 +309,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		_ = quicSession.Close()
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
+	go o.watchPeerClose(session)
 	if err := o.add(session); err != nil {
 		_ = session.Close()
 		return nil, err

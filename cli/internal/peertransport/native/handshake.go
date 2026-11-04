@@ -2,11 +2,14 @@ package native
 
 import (
 	"context"
+	"errors"
 	"net"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/quic-go/quic-go"
 )
 
 type peerHandshake struct {
@@ -64,4 +67,32 @@ func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), er
 		release(false)
 		return nil, net.ErrClosed
 	}
+}
+
+// A peer that closes a dialed session on purpose (its carrier is stopping for an update) takes its
+// WireGuard keys with it, so the next dial's first flight on the cached lease would go out on dead keys
+// and be lost until the 1 s handshake idle timeout retires the lease (pbvm4 run8: 1001 ms, then 6 ms).
+// Retire the idle lease up front instead, as that timeout would.
+func (o *Owner) watchPeerClose(s *Session) {
+	<-s.quic.Connection.Context().Done()
+	var closed *quic.ApplicationError
+	if !s.closing.Load() && errors.As(context.Cause(s.quic.Connection.Context()), &closed) && closed.Remote && closed.ErrorCode == 0 {
+		o.mu.Lock()
+		if o.restarted == nil {
+			o.restarted = make(map[string]bool)
+		}
+		o.restarted[s.peerID] = true
+		o.mu.Unlock()
+	}
+}
+
+func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, error) {
+	o.mu.Lock()
+	closed := o.restarted[peerID]
+	delete(o.restarted, peerID)
+	o.mu.Unlock()
+	if !closed || !o.authority.RetireIdleClient(client) {
+		return client, nil
+	}
+	return o.authority.Client(descriptor, peerID)
 }
