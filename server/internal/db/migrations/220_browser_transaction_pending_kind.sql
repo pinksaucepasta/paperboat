@@ -1,6 +1,6 @@
 -- +goose Up
 -- Begin stores resource_kind machine_service_pending for a host under the machine-service domain that has no
--- route yet; the check rejected it and every browser sign-in there failed 503. Added NOT VALID, validated in 219.
+-- route yet; the check rejected it and every browser sign-in there failed 503. Added NOT VALID, validated in 221.
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE paperboat.browser_access_transactions DROP CONSTRAINT browser_access_transactions_resource_kind_check;
 ALTER TABLE paperboat.browser_access_transactions ADD CONSTRAINT browser_access_transactions_resource_kind_check
