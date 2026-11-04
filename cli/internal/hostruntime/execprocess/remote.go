@@ -132,7 +132,14 @@ func (e *remoteExecution) OpenReader(from uint64) (ReaderService, error) {
 	return &remoteReader{execution: e, id: out.ReaderID}, nil
 }
 func (e *remoteExecution) Write(data []byte) (int, error) {
-	out, err := e.invoke(context.Background(), "write", remoteRequest{Data: data})
+	return e.WriteContext(context.Background(), data)
+}
+
+// WriteContext forwards input with the caller's bound. RemoteServer's write
+// accepts only executions with WriteContext, so without it a server that serves
+// a forwarded execution (hostd routing to session owners) refused all stdin.
+func (e *remoteExecution) WriteContext(ctx context.Context, data []byte) (int, error) {
+	out, err := e.invoke(ctx, "write", remoteRequest{Data: data})
 	return out.Written, err
 }
 func (e *remoteExecution) CloseInput() error {
