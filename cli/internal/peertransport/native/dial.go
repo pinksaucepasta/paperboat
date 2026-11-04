@@ -48,6 +48,12 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	// after one second. Do not return an intermediate 503 while recovery runs.
 	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
 	defer cancel()
+	// Private HTTP/3 negotiates its own ALPN, which a generation does not serve.
+	if class != peerquic.ClassPreview {
+		if session := o.dialRoute(dialCtx, peerID, nil, class); session != nil {
+			return session, nil
+		}
+	}
 	for {
 		session, err := o.dialAttempt(dialCtx, descriptor, peerID, class)
 		if err == nil {

@@ -60,10 +60,10 @@ func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessS
 		return conn
 	}
 	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, Reverse: reverse, Path: func(direction string) (string, string) {
+		if s.carrierPath != nil {
+			return s.carrierPath(direction)
+		}
 		if s.terminalCarrier {
-			if s.carrierPath != nil {
-				return s.carrierPath(direction)
-			}
 			return "unknown", ""
 		}
 		path, err := s.owner.authority.PeerUsagePathDirection(s.peerID, direction)
@@ -182,20 +182,30 @@ func (s *Session) Open(ctx context.Context) (net.Conn, error) {
 	}
 	return &streamConn{Stream: stream, session: s, local: directAddr("local"), remote: directAddr(s.peerID)}, nil
 }
+// ensureRouterLocked starts reading incoming streams, so carrier offers reach
+// this session even when it never accepts an application stream.
+func (s *Session) ensureRouterLocked() error {
+	if s.router != nil {
+		return nil
+	}
+	config := peerquic.DevelopmentStreamRouterConfig()
+	config.CandidateControl = s.receiveCarrierControl
+	router, err := peerquic.NewStreamRouter(s.quic, config)
+	if err != nil {
+		return err
+	}
+	s.router = router
+	return nil
+}
+
 func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 	s.routerMu.Lock()
-	if s.router == nil {
-		config := peerquic.DevelopmentStreamRouterConfig()
-		config.CandidateControl = s.receiveCarrierControl
-		router, err := peerquic.NewStreamRouter(s.quic, config)
-		if err != nil {
-			s.routerMu.Unlock()
-			return nil, err
-		}
-		s.router = router
-	}
+	err := s.ensureRouterLocked()
 	router := s.router
 	s.routerMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	stream, err := router.Accept(ctx)
 	if err != nil {
 		return nil, reconnectRequired(s.peerID, err, s.closing.Load())

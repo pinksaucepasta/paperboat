@@ -220,6 +220,7 @@ type Owner struct {
 	sessions         map[*Session]struct{}
 	handshakes       map[string]*peerHandshake
 	restarted        map[string]bool // peers that closed a dialed session on purpose; guarded by mu
+	routes           map[string]*carrierRoute // client: each machine's active carrier generation; guarded by mu
 	workers          sync.WaitGroup
 }
 
@@ -308,6 +309,15 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	if err != nil {
 		_ = quicSession.Close()
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
+	}
+	// A dialed session reads offers from its first moment: a generation that
+	// serves every application moves sessions without a terminal too.
+	session.routerMu.Lock()
+	routerErr := session.ensureRouterLocked()
+	session.routerMu.Unlock()
+	if routerErr != nil {
+		_ = session.Close()
+		return nil, routerErr
 	}
 	go o.watchPeerClose(session)
 	if err := o.add(session); err != nil {

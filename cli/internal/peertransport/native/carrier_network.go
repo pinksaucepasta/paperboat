@@ -17,8 +17,7 @@ type carrierNetworkRef struct {
 // A generation shares one engine across terminals, and releases it when its
 // last pending dial or established connection ends. Certificate expiry bounds
 // new admission; it never interrupts an established, renewed terminal.
-func (s *Session) getCarrierNetwork(ctx context.Context, offer CarrierOffer) (*tailnet.CarrierNetwork, func(), error) {
-	o := s.owner
+func (o *Owner) getCarrierNetwork(ctx context.Context, offer CarrierOffer) (*tailnet.CarrierNetwork, func(), error) {
 	o.carrierMu.Lock()
 	defer o.carrierMu.Unlock()
 	if err := o.ctx.Err(); err != nil {

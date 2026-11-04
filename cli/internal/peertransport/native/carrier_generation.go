@@ -40,16 +40,11 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if err := offer.verify(peer, time.Now()); err != nil {
 		return nil, err
 	}
-	config := s.owner.tls.Clone()
-	config.NextProtos = []string{peerquic.ALPN}
-	config.VerifyConnection = func(state tls.ConnectionState) error {
-		current, err := s.owner.authority.Peer(s.peerID)
-		if err != nil || current != peer || offer.verify(current, time.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || !bytes.Equal(state.PeerCertificates[0].Raw, offer.Claims.Certificate) {
-			return ErrInvalid
-		}
-		return nil
+	if session := s.owner.dialRoute(ctx, s.peerID, &offer, peerquic.ClassInteractive); session != nil {
+		return session, nil
 	}
-	network, release, err := s.getCarrierNetwork(ctx, offer)
+	config := s.owner.carrierTLS(s.peerID, peer, offer)
+	network, release, err := s.owner.getCarrierNetwork(ctx, offer)
 	if err != nil {
 		return nil, err
 	}
@@ -104,23 +99,51 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 		return nil, attemptErr
 	}
 
-	session, err := newSession(s.owner, s.peerID, peer, transport, true)
-	if err == nil {
-		err = s.owner.add(session)
-	}
+	session, err := s.owner.carrierSession(s.peerID, peer, offer, transport, network, release)
 	if err != nil {
-		transport.Close()
 		return nil, err
 	}
-	session.carrier.OnDone(release)
 	kept = true
-	session.setCarrierNetwork(network)
+	if offer.Claims.AllApplications {
+		s.owner.setRoute(ctx, s.peerID, offer)
+	}
 	path := network.PeerPath(s.peerID)
 	s.owner.emit(Event{Kind: "carrier_moved", PeerID: s.peerID, Path: path})
 	if path == "direct" {
 		path = "direct-punched"
 	}
 	diagnosticlog.TryInfo("terminal carrier move", "stage", "connected", "path", path)
+	return session, nil
+}
+
+// carrierTLS authenticates exactly the offer's delegated certificate under the
+// peer's current signed binding.
+func (o *Owner) carrierTLS(peerID string, peer tailnet.NetworkBinding, offer CarrierOffer) *tls.Config {
+	config := o.tls.Clone()
+	config.NextProtos = []string{peerquic.ALPN}
+	config.VerifyConnection = func(state tls.ConnectionState) error {
+		current, err := o.authority.Peer(peerID)
+		if err != nil || current != peer || offer.verify(current, time.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || !bytes.Equal(state.PeerCertificates[0].Raw, offer.Claims.Certificate) {
+			return ErrInvalid
+		}
+		return nil
+	}
+	return config
+}
+
+// carrierSession owns transport and the network reference from here on.
+func (o *Owner) carrierSession(peerID string, peer tailnet.NetworkBinding, offer CarrierOffer, transport *peerquic.Session, network *tailnet.CarrierNetwork, release func()) (*Session, error) {
+	session, err := newSession(o, peerID, peer, transport, !offer.Claims.AllApplications)
+	if err == nil {
+		err = o.add(session)
+	}
+	if err != nil {
+		transport.Close()
+		release()
+		return nil, err
+	}
+	session.carrier.OnDone(release)
+	session.setCarrierNetwork(network)
 	return session, nil
 }
 
@@ -159,7 +182,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
 		return nil, err
 	}
-	return s.dialCarrierPacket(ctx, network, config)
+	return s.owner.dialCarrierPacket(ctx, network, s.peerID, config, peerquic.ClassInteractive)
 }
 
 // relayPrepareContext cuts a relay's preparation short only when another edge
@@ -245,7 +268,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		transport.Close()
 		return err
 	}
-	session, err := newSession(o, peer.EndpointID, peer, transport, true)
+	session, err := newSession(o, peer.EndpointID, peer, transport, !identity.Offer.Claims.AllApplications)
 	if err != nil {
 		transport.Close()
 		return err
@@ -274,13 +297,13 @@ func (o *Owner) carrierPeer(state tls.ConnectionState) (tailnet.NetworkBinding, 
 // Preparation owns a single bounded attempt while the old terminal serves.
 // As with Owner.Dial, a lost pre-application handshake retries a fresh flow
 // without discarding discovery/relay allocation state or replaying input.
-func (s *Session) dialCarrierPacket(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config) (*peerquic.Session, error) {
+func (o *Owner) dialCarrierPacket(ctx context.Context, network *tailnet.CarrierNetwork, peerID string, config *tls.Config, class peerquic.Class) (*peerquic.Session, error) {
 	for {
-		socket, err := network.Dial(ctx, s.peerID)
+		socket, err := network.Dial(ctx, peerID)
 		if err != nil {
 			return nil, err
 		}
-		transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: socket.RemoteAddr()}, config, peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive))
+		transport, err := peerquic.DialPacket(ctx, &carrierPacket{PacketConn: socket, remote: socket.RemoteAddr()}, config, peerquic.DevelopmentSessionConfig(class))
 		if err == nil {
 			return transport, nil
 		}

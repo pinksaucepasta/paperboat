@@ -39,6 +39,9 @@ type CarrierClaims struct {
 	DiscoPublicKey    string
 	OwnerInstance     string
 	RelayNodeIDs      []string
+	// AllApplications says the generation serves every application, not only
+	// terminals: a client that moved routes its new connections to it.
+	AllApplications bool
 }
 
 type CarrierOffer struct {

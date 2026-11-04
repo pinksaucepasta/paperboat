@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/quic-go/quic-go"
 )
@@ -42,14 +41,8 @@ func (s *Session) OnCarrierMove(move func(context.Context, CarrierOffer) error) 
 	if s.moveCarrier != nil {
 		return ErrInvalid
 	}
-	if s.router == nil {
-		config := peerquic.DevelopmentStreamRouterConfig()
-		config.CandidateControl = s.receiveCarrierControl
-		router, err := peerquic.NewStreamRouter(s.quic, config)
-		if err != nil {
-			return err
-		}
-		s.router = router
+	if err := s.ensureRouterLocked(); err != nil {
+		return err
 	}
 	s.moveCarrier = move
 	return nil
@@ -150,8 +143,18 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	s.routerMu.Unlock()
 	result := byte(0)
 	moveErr := ErrInvalid
-	if move != nil {
+	switch {
+	case move != nil:
 		moveErr = move(ctx, offer)
+	case offer.Claims.AllApplications && s.owner.hasRoute(s.peerID, offer):
+		moveErr = nil
+	case offer.Claims.AllApplications:
+		// No terminal here: connect the generation once so this client's new
+		// connections open on it; this connection keeps its open streams.
+		var next *Session
+		if next, moveErr = s.DialCarrier(ctx, offer); moveErr == nil {
+			next.Close()
+		}
 	}
 	if moveErr == nil {
 		result = 1
@@ -161,8 +164,9 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	return err
 }
 
-// OfferCarrier moves terminal connections before the old process drains.
-// Other applications retain their connection for the bounded retirement drain.
+// OfferCarrier moves terminal connections before the old process drains. A
+// generation that serves every application is offered to every connection, so
+// each client's new connections open on it; open streams stay for the drain.
 func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	if o == nil || ctx == nil {
 		return ErrInvalid
@@ -170,7 +174,7 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	o.mu.Lock()
 	sessions := make([]*Session, 0, len(o.sessions))
 	for session := range o.sessions {
-		if session.terminalUsed.Load() {
+		if session.terminalUsed.Load() || offer.Claims.AllApplications {
 			sessions = append(sessions, session)
 		}
 	}
