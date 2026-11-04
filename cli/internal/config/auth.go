@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/clientstate"
+	clientstate "github.com/pinksaucepasta/paperboat/shared/client/state"
 	"os"
 	"path/filepath"
 	"strings"

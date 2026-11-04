@@ -1,6 +1,6 @@
 //go:build windows
 
-package clientstate
+package state
 
 import (
 	"errors"

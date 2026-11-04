@@ -1,5 +1,5 @@
-// Package clientstate defines per-instance credentials independently of profile paths or keyrings.
-package clientstate
+// Package state defines per-instance credentials independently of profile paths or keyrings.
+package state
 
 import "time"
 

@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package clientstate
+package state
 
 import (
 	"errors"
