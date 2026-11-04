@@ -26,9 +26,12 @@ const (
 	// TopicMachineServices moves when a machine's published service snapshot (ports) changes. It used to
 	// move the inventory topic, which made every daemon of the account re-list its machines.
 	TopicMachineServices = "machine_services"
+	// TopicPrivateRoutes moves when the private-access routes a machine can open change (a route becoming
+	// ready, stopping, moving edge or changing audience). Time-only expiry does not move it.
+	TopicPrivateRoutes = "private_routes"
 )
 
-var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices}
+var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices, TopicPrivateRoutes}
 
 // ValidTopic reports whether name is a topic a host may wait on.
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }
