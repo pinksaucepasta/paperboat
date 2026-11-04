@@ -333,3 +333,78 @@ func ownerSessionLeaseHTTPError(status int, data []byte) error {
 		return fmt.Errorf("%w: status %d", ErrOwnerSessionLeaseInvalid, status)
 	}
 }
+
+// ownerSessionReattachLimit bounds how long a foreground preview waits for a
+// restarted worker (pb update replaces it in seconds) before it gives up.
+const ownerSessionReattachLimit = 90 * time.Second
+
+// KeepAliveReattaching keeps a foreground owner-session lease alive across a
+// worker restart. The lease lives in the worker's memory, so after pb update
+// the new worker no longer knows it (Unauthorized) or is briefly unreachable.
+// Like a terminal reattaching after a carrier change, the CLI then connects to
+// the new worker (connect rereads its endpoint and control token) and acquires
+// the same owner session and target again; hostd keeps serving the preview
+// under that owner session. A deliberately closed lease (Lost) still ends it.
+// reattached reports each replacement lease and client to the caller.
+func KeepAliveReattaching(ctx context.Context, client *LocalOwnerSessionClient, lease OwnerSessionLease, connect func() (*LocalOwnerSessionClient, error), reattached func(*LocalOwnerSessionClient, OwnerSessionLease)) error {
+	if client == nil || ctx == nil || connect == nil || reattached == nil {
+		return ErrOwnerSessionLeaseInvalid
+	}
+	for {
+		err := client.KeepAlive(ctx, lease)
+		if err == nil || ctx.Err() != nil {
+			return nil
+		}
+		var transport *ownerSessionLeaseTransportError
+		if !errors.Is(err, ErrOwnerSessionLeaseUnauthorized) && !errors.As(err, &transport) {
+			return err
+		}
+		deadline := time.Now().Add(ownerSessionReattachLimit)
+		delay := 250 * time.Millisecond
+		for {
+			next, connectErr := connect()
+			if connectErr == nil {
+				// The same worker after a blip still knows the lease. The same
+				// worker refusing it means it was released or expired: never
+				// resurrect that. Only a new worker (new endpoint or control
+				// token) gets the same owner session again.
+				var updated OwnerSessionLease
+				if updated, connectErr = next.Heartbeat(ctx, lease); connectErr != nil {
+					if next.sameWorker(client) {
+						var unreachable *ownerSessionLeaseTransportError
+						if !errors.As(connectErr, &unreachable) {
+							return errors.Join(err, connectErr)
+						}
+					} else {
+						updated, connectErr = next.Acquire(ctx, lease.OwnerSessionID, lease.Target)
+					}
+				}
+				if connectErr == nil {
+					client, lease = next, updated
+					reattached(client, lease)
+					break
+				}
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return errors.Join(err, connectErr)
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+			}
+			if delay *= 2; delay > 2*time.Second {
+				delay = 2 * time.Second
+			}
+		}
+	}
+}
+
+func (c *LocalOwnerSessionClient) sameWorker(other *LocalOwnerSessionClient) bool {
+	return c != nil && other != nil && c.base.String() == other.base.String() && secureTokenEqual(c.token, other.token)
+}

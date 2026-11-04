@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -188,6 +189,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	var ownerSessionID string
 	var ownerLease preview.OwnerSessionLease
 	var ownerLeaseClient *preview.LocalOwnerSessionClient
+	var ownerLeaseMu sync.Mutex // guards ownerLeaseClient/ownerLease against a heartbeat reattach
 	var heartbeatCancel context.CancelFunc
 	var heartbeatDone chan struct{}
 	var heartbeatErrors chan error
@@ -214,6 +216,8 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			}
 		}
 		var releaseErr error
+		ownerLeaseMu.Lock()
+		defer ownerLeaseMu.Unlock()
 		if ownerLeaseClient != nil && ownerLease.ID != "" && !retainOwnerLease {
 			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(command.Context()), 2*time.Second)
 			releaseErr = ownerLeaseClient.Release(releaseCtx, ownerLease)
@@ -261,8 +265,15 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			heartbeatCancel = heartbeatStop
 			heartbeatDone = make(chan struct{})
 			heartbeatErrors = make(chan error, 1)
+			client, lease := ownerLeaseClient, ownerLease
 			go func() {
-				err := ownerLeaseClient.KeepAlive(heartbeatContext, ownerLease)
+				// pb update replaces the worker that holds this lease; reattach
+				// to the new one instead of ending a running preview or tunnel.
+				err := preview.KeepAliveReattaching(heartbeatContext, client, lease, previewOwnerSessionClientForCommand, func(next *preview.LocalOwnerSessionClient, updated preview.OwnerSessionLease) {
+					ownerLeaseMu.Lock()
+					ownerLeaseClient, ownerLease = next, updated
+					ownerLeaseMu.Unlock()
+				})
 				if err != nil {
 					heartbeatErrors <- err
 					cancel()
