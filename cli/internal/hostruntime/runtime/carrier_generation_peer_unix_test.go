@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 )
 
 // Each running carrier generation owns one slot's state files; a fifth
@@ -116,5 +118,28 @@ func TestDelegatedCarrierTakesThePrimaryRoleOnlyWhenFreeAndActive(t *testing.T) 
 	}
 	if len(retired.peer.promote) != 0 {
 		t.Fatal("a retired generation took the primary role")
+	}
+}
+
+// Offer reports never block the generation and publish only the latest offer;
+// a renewal that raced the promotion's withdrawal never republishes an offer.
+func TestCarrierGenerationReportsKeepTheLatestAndNeverFollowTheWithdrawal(t *testing.T) {
+	g := &productionNativePeerGeneration{reports: make(chan native.CarrierOffer, 1)}
+	first, renewed := native.CarrierOffer{Signature: []byte{1}}, native.CarrierOffer{Signature: []byte{2}}
+	g.reportCarrierGeneration(first)
+	g.reportCarrierGeneration(renewed) // the reporter is still busy: this must not block
+	if got := <-g.reports; len(got.Signature) != 1 || got.Signature[0] != 2 {
+		t.Fatalf("reported %v, want the renewed offer only", got.Signature)
+	}
+	g.reportCarrierGeneration(native.CarrierOffer{})
+	g.reportCarrierGeneration(renewed)
+	if got := <-g.reports; len(got.Signature) != 0 {
+		t.Fatal("a renewal replaced the withdrawal")
+	}
+	g.reportCarrierGeneration(renewed)
+	select {
+	case got := <-g.reports:
+		t.Fatalf("an offer %v was reported after the withdrawal", got.Signature)
+	default:
 	}
 }

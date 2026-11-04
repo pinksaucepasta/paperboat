@@ -39,10 +39,15 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 		return err
 	}
 	g.carrier = identity
-	reportCarrierGeneration(run, identity.Current())
+	g.reports = make(chan native.CarrierOffer, 1)
+	g.reportCarrierGeneration(identity.Current())
 	renew, stopRenew := context.WithCancel(run)
 	g.stopRenew = stopRenew
-	g.done.Add(2)
+	g.done.Add(3)
+	go func() {
+		defer g.done.Done()
+		g.sendCarrierReports(run)
+	}()
 	go func() {
 		defer g.done.Done()
 		g.errors <- g.authority.Run(run, g.control, nil)
@@ -63,7 +68,7 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 				g.errors <- err
 				return
 			}
-			reportCarrierGeneration(renew, offer)
+			g.reportCarrierGeneration(offer)
 		}
 	}()
 	return nil
@@ -120,7 +125,7 @@ func (s *productionNativePeerService) promoteGeneration(ctx context.Context, g *
 	if g.requestRefresh != nil {
 		g.requestRefresh()
 	}
-	reportCarrierGeneration(ctx, native.CarrierOffer{})
+	g.reportCarrierGeneration(native.CarrierOffer{})
 	expires := time.Unix(g.carrier.Current().Claims.ExpiresUnix, 0)
 	g.done.Add(1)
 	go func() {
@@ -150,11 +155,39 @@ func closeIdleCarrierNetwork(ctx context.Context, owner *native.Owner, network *
 	}
 }
 
-func reportCarrierGeneration(ctx context.Context, offer native.CarrierOffer) {
-	report, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if err := nativegen.Report(report, offer); err != nil {
-		diagnosticlog.TryWarn("carrier generation report failed", "stage", "report_generation", "error_type", fmt.Sprintf("%T", err))
+// reportCarrierGeneration hands offer to the generation's one reporter and
+// returns at once: a slow control plane must never delay serving, revocation or
+// promotion. Only the latest offer is kept, and once the zero offer (the
+// withdrawal at promotion) is handed over, a renewal that raced it is dropped,
+// so a stale offer is never published after the withdrawal.
+func (g *productionNativePeerGeneration) reportCarrierGeneration(offer native.CarrierOffer) {
+	g.reportMu.Lock()
+	defer g.reportMu.Unlock()
+	if g.withdrawn {
+		return
+	}
+	g.withdrawn = len(offer.Signature) == 0
+	select {
+	case <-g.reports:
+	default:
+	}
+	g.reports <- offer
+}
+
+// sendCarrierReports publishes each handed-over offer in order until ctx ends.
+func (g *productionNativePeerGeneration) sendCarrierReports(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case offer := <-g.reports:
+			report, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err := nativegen.Report(report, offer)
+			cancel()
+			if err != nil {
+				diagnosticlog.TryWarn("carrier generation report failed", "stage", "report_generation", "error_type", fmt.Sprintf("%T", err))
+			}
+		}
 	}
 }
 

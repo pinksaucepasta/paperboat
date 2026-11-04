@@ -104,6 +104,11 @@ type productionNativePeerGeneration struct {
 	carrier   *native.CarrierIdentity
 	network   *tailnet.CarrierNetwork
 	stopRenew context.CancelFunc
+	// reports holds the latest offer for the generation's one reporter
+	// (reportCarrierGeneration); withdrawn, under reportMu, drops any later one.
+	reports   chan native.CarrierOffer
+	reportMu  sync.Mutex
+	withdrawn bool
 	done      sync.WaitGroup
 	once      sync.Once
 }
