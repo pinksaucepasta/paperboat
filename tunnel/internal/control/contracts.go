@@ -54,6 +54,7 @@ type RouteAssignment struct {
 	MachineIdentityPublicKey   string          `json:"machine_identity_public_key,omitempty"`
 	MachineIdentityThumbprint  string          `json:"machine_identity_thumbprint,omitempty"`
 	TunnelID                   string          `json:"tunnel_id,omitempty"`
+	ResourceID                 string          `json:"resource_id,omitempty"` // the tunnel, when TunnelID names its carrier
 	ConnectorID                string          `json:"connector_id"`
 	Generation                 uint64          `json:"connector_generation"`
 	ConnectorSessionID         string          `json:"connector_session_id,omitempty"`

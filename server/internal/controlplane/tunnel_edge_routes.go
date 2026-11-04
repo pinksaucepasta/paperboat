@@ -101,6 +101,7 @@ func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) 
 		"machine_identity_public_key":  row.MachineIdentityPublicKey,
 		"machine_identity_thumbprint":  row.MachineIdentityThumbprint,
 		"tunnel_id":                    row.TunnelID,
+		"resource_id":                  row.ResourceID, // the tunnel; tunnel_id names the carrier the route rides
 		"connector_id":                 row.ConnectorID,
 		"connector_generation":         row.ConnectorGeneration,
 		"connector_session_id":         row.ConnectorSessionID,

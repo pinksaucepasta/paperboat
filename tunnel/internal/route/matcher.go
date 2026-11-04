@@ -67,6 +67,7 @@ type RouteRule struct {
 	MachineIdentityPublicKey   string
 	MachineIdentityThumbprint  string
 	TunnelID                   string
+	ResourceID                 string // browser-access resource (the tunnel) when TunnelID names its carrier
 	ConnectorID                string
 	ConnectorSessionID         string
 	ConnectorProcessGeneration uint64

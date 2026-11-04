@@ -3821,6 +3821,7 @@ SELECT ('epa_' || x.route_id)::text AS assignment_id,
        tr.generation AS route_revision,
        t.account_id AS account_id,
        (ra.admission->'binding'->>'tunnel_id')::text AS tunnel_id,
+       t.id AS resource_id,
        (ra.admission->'binding'->>'connector_id')::text AS connector_id,
        ra.machine_id AS host_id,
        ra.public_identity_key AS machine_identity_public_key,
@@ -3917,6 +3918,7 @@ type ListTunnelEdgeRouteAssignmentsForNodeV1Row struct {
 	RouteRevision              int64
 	AccountID                  string
 	TunnelID                   string
+	ResourceID                 string
 	ConnectorID                string
 	HostID                     string
 	MachineIdentityPublicKey   string
@@ -3976,6 +3978,7 @@ func (q *Queries) ListTunnelEdgeRouteAssignmentsForNodeV1(ctx context.Context, a
 			&i.RouteRevision,
 			&i.AccountID,
 			&i.TunnelID,
+			&i.ResourceID,
 			&i.ConnectorID,
 			&i.HostID,
 			&i.MachineIdentityPublicKey,

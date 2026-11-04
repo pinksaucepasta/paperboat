@@ -336,7 +336,7 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 	if id == "" {
 		id = m.Rule.ID
 	}
-	input := control.BrowserAuthorizeRequest{Token: token, Host: m.Host, ResourceKind: kind, ResourceID: m.Rule.TunnelID, RouteID: id}
+	input := control.BrowserAuthorizeRequest{Token: token, Host: m.Host, ResourceKind: kind, ResourceID: browserResourceID(m.Rule), RouteID: id}
 	if machine {
 		input.CredentialKind = "machine"
 	}
@@ -392,4 +392,13 @@ func crossSiteSubresource(r *http.Request) bool {
 		return false
 	}
 	return r.Header.Get("Sec-Fetch-Mode") != "navigate" || r.Header.Get("Sec-Fetch-Dest") != "document" || (r.Method != http.MethodGet && r.Method != http.MethodHead)
+}
+
+// browserResourceID is the resource a browser session is bound to: the tunnel for a route that rides a
+// runtime carrier (TunnelID then names the carrier), otherwise TunnelID (previews, connector tunnels).
+func browserResourceID(rule route.RouteRule) string {
+	if rule.ResourceID != "" {
+		return rule.ResourceID
+	}
+	return rule.TunnelID
 }

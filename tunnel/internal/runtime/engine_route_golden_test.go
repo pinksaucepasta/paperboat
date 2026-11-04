@@ -53,6 +53,11 @@ func TestEdgeAdmitsTheServersEngineRouteGolden(t *testing.T) {
 	if err != nil || !snapshot.Canonical || len(snapshot.Routes) != 1 {
 		t.Fatalf("edge decoder refused the server's engine route: %+v %v", snapshot, err)
 	}
+	// 2026-11-05: the edge authorized a private tunnel's viewer with tunnel_id, which names the runtime
+	// route the tunnel rides, and the server refused its own owner. Browser access uses resource_id.
+	if r := snapshot.Routes[0]; r.ResourceID == "" || r.ResourceID == r.TunnelID {
+		t.Fatalf("engine route resource_id = %q (tunnel_id %q), want the tunnel itself", r.ResourceID, r.TunnelID)
+	}
 	admissions, err := CanonicalDurableAdmissions(snapshot.Routes)
 	if err != nil || len(admissions) != 1 {
 		t.Fatalf("engine route did not convert to a durable admission: %v", err)

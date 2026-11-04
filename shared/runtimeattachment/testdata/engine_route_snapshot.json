@@ -43,6 +43,7 @@
         "route_id": "route_tunnelep_225354727613071"
       },
       "tunnel_id": "tunnelep_225354727613071_route",
+      "resource_id": "tunnelep_225354727613071",
       "viewer_policy_generation": 3,
       "wildcard_suffix": null
     }

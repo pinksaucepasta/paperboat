@@ -189,6 +189,7 @@ type routeAssignmentWire struct {
 	MachineIdentityPublicKey   string          `json:"machine_identity_public_key"`
 	MachineIdentityThumbprint  string          `json:"machine_identity_thumbprint"`
 	TunnelID                   string          `json:"tunnel_id"`
+	ResourceID                 string          `json:"resource_id,omitempty"`
 	ConnectorID                string          `json:"connector_id"`
 	Generation                 uint64          `json:"connector_generation"`
 	ConnectorSessionID         string          `json:"connector_session_id"`
@@ -313,7 +314,7 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		assignment := RouteAssignment{
 			RouteID: wire.RouteID, Revision: wire.Revision, Environment: wire.Environment, AccountID: wire.AccountID,
 			HostID: wire.HostID, MachineIdentityPublicKey: wire.MachineIdentityPublicKey, MachineIdentityThumbprint: wire.MachineIdentityThumbprint,
-			TunnelID: wire.TunnelID, ConnectorID: wire.ConnectorID, Generation: wire.Generation,
+			TunnelID: wire.TunnelID, ResourceID: wire.ResourceID, ConnectorID: wire.ConnectorID, Generation: wire.Generation,
 			ConnectorSessionID: wire.ConnectorSessionID, ConnectorProcessGeneration: wire.ConnectorProcessGeneration,
 			ConfigGeneration: wire.ConfigGeneration, ConfigContentHash: wire.ConfigContentHash,
 			AssignmentID: wire.AssignmentID, AssignmentGeneration: wire.AssignmentGeneration,

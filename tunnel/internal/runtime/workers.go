@@ -961,7 +961,7 @@ func CanonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRul
 		base := route.RouteRule{
 			ID: assignment.RouteID, Revision: assignment.Revision, Environment: assignment.Environment,
 			RouteID: assignment.RouteID, RouteGeneration: assignment.Revision,
-			AccountID: assignment.AccountID, HostID: assignment.HostID, TunnelID: assignment.TunnelID, ConnectorID: assignment.ConnectorID,
+			AccountID: assignment.AccountID, HostID: assignment.HostID, TunnelID: assignment.TunnelID, ResourceID: assignment.ResourceID, ConnectorID: assignment.ConnectorID,
 			MachineIdentityPublicKey: assignment.MachineIdentityPublicKey, MachineIdentityThumbprint: assignment.MachineIdentityThumbprint,
 			ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: assignment.ConnectorProcessGeneration,
 			ConfigGeneration: assignment.ConfigGeneration, ConfigContentHash: assignment.ConfigContentHash,
