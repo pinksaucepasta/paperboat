@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -510,29 +511,32 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 		var previewOwner *string
 		var issued, expiry, absolute, authExpiry time.Time
 		if err := tx.QueryRow(ctx, q, key).Scan(&grant, &account, &storedHost, &skind, &sid, &storedGen, &storedRoute, &storedPolicyGeneration, &previewOwner, &owner, &mode, &storedTeam, &storedTG, &storedMG, &storedBG, &storedGG, &trustedSessionID, &sessionVersion, &issued, &expiry, &absolute, &authExpiry, &storedPolicyTeam, &storedPolicyTeamGeneration, &storedPolicyMembershipGeneration, &storedPolicyBindingGeneration); err != nil {
-			return mapMissing(err)
+			return refusedAuthorize(ctx, mapMissing(err), "session_not_found", kind, id, route, "", "", "")
 		}
 		kind, id, route, selectorErr := storedSelectors(ctx, tx, skind, sid, storedGen, kind, id, route, now)
 		if selectorErr != nil {
 			return selectorErr
 		}
-		if storedPolicyGeneration == nil || host != storedHost || kind != skind || id != sid || route != storedRoute || !admitted && (!expiry.After(now) || !absolute.After(now) || !authExpiry.After(now)) {
-			return ErrNotAuthorized
+		if storedPolicyGeneration == nil || host != storedHost || kind != skind || id != sid || route != storedRoute {
+			return refusedAuthorize(ctx, ErrNotAuthorized, "selector_mismatch", kind, id, route, skind, sid, storedRoute)
+		}
+		if !admitted && (!expiry.After(now) || !absolute.After(now) || !authExpiry.After(now)) {
+			return refusedAuthorize(ctx, ErrNotAuthorized, "session_expired", kind, id, route, "", "", "")
 		}
 		var currentSessionExpiry time.Time
 		if err := tx.QueryRow(ctx, `SELECT expires_at FROM sessions WHERE id=$1 AND user_id=$2 AND version=$3 AND revoked_at IS NULL AND ($5 OR expires_at>$4)`, trustedSessionID, account, sessionVersion, now, admitted).Scan(&currentSessionExpiry); err != nil {
-			return mapMissing(err)
+			return refusedAuthorize(ctx, mapMissing(err), "parent_session", kind, id, route, "", "", "")
 		}
 		authExpiry = minTime(authExpiry, currentSessionExpiry)
 		a, err := resolveBrowserBound(ctx, tx, account, host, kind, id, route, now)
 		if err != nil {
-			return err
+			return refusedAuthorize(ctx, err, "resource", kind, id, route, "", "", "")
 		}
 		if (kind != "preview" && a.sessionGeneration() != storedGen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || a.route != storedRoute || a.policyGeneration != *storedPolicyGeneration || !sameViewerPolicyTeam(a, storedPolicyTeam, storedPolicyTeamGeneration, storedPolicyMembershipGeneration, storedPolicyBindingGeneration) {
-			return ErrNotAuthorized
+			return refusedAuthorize(ctx, ErrNotAuthorized, "binding_changed", kind, id, route, fmt.Sprint(storedGen, "/", a.sessionGeneration()), owner+"/"+a.owner, mode+"/"+a.mode)
 		}
 		if !sameTeamAuthority(a, storedTeam, storedTG, storedMG, storedBG, storedGG) {
-			return ErrNotAuthorized
+			return refusedAuthorize(ctx, ErrNotAuthorized, "team_authority", kind, id, route, "", "", "")
 		}
 		newExpiry := minTime(now.Add(s.sessionPolicy.ResourceIdleLifetime), absolute, authExpiry, a.sessionCap)
 		if admitted {
@@ -877,4 +881,13 @@ func redeemDenied(ctx context.Context, tx *db.Tx, id, host string, sh, hh [32]by
 		return ErrExpired
 	}
 	return ErrAccessDenied
+}
+
+// refusedAuthorize logs which check refused a browser session's authorize (identifiers only, never the
+// token), then returns err unchanged; the edge cannot tell the steps apart, operators can.
+func refusedAuthorize(ctx context.Context, err error, step, kind, id, route, storedKind, storedID, storedRoute string) error {
+	if errors.Is(err, ErrNotAuthorized) {
+		slog.WarnContext(ctx, "browser authorize refused", "step", step, "kind", kind, "resource_id", id, "route_id", route, "stored_kind", storedKind, "stored_resource_id", storedID, "stored_route_id", storedRoute)
+	}
+	return err
 }
