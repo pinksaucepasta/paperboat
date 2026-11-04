@@ -127,7 +127,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 		ctx, cancel = context.WithTimeout(ctx, carrierAttemptLimit)
 		defer cancel()
 	}
-	diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt_start")
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt_start", "reason", relay)
 	prepare, stop := context.WithTimeout(ctx, carrierRelayAttemptLimit)
 	err := network.PreparePeerRelay(prepare, s.peerID, relay)
 	stop()
