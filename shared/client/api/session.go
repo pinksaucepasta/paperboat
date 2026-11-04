@@ -29,14 +29,18 @@ type DeviceEnrollment struct {
 
 // Client receives credentials and product identification from its owner.
 type Client struct {
+	Workspace  string
 	BaseURL    string
 	Options    CallOptions
 	Credential func(context.Context) (string, error)
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+	path, err := WorkspaceRequestPath(c.Workspace, path)
+	if err != nil {
+		return err
+	}
 	var token string
-	var err error
 	if c.Credential != nil {
 		token, err = c.Credential(ctx)
 		if err != nil {
