@@ -39,6 +39,9 @@ type request struct {
 	WorkerID     string `json:"worker_id,omitempty"`
 	WorkerEpoch  uint64 `json:"worker_epoch,omitempty"`
 	Offer        []byte `json:"offer,omitempty"`
+	// PeerID and Exchange name the client a prepare-peer call readies this generation for.
+	PeerID   string `json:"peer_id,omitempty"`
+	Exchange []byte `json:"exchange,omitempty"`
 }
 
 type response struct {
@@ -47,7 +50,12 @@ type response struct {
 	Error  string `json:"error,omitempty"`
 	// SSHStreams answers only open-ssh, so clients that never ask never see it.
 	SSHStreams *int `json:"ssh_streams,omitempty"`
+	// Offer answers generation-offer and prepare-peer: this generation's signed carrier offer.
+	Offer []byte `json:"offer,omitempty"`
 }
+
+// maximumMessage bounds a control request or response; an offer is at most 8 KiB.
+const maximumMessage = 32 << 10
 
 func validHash(value string) bool {
 	b, err := hex.DecodeString(value)
@@ -56,6 +64,12 @@ func validHash(value string) bool {
 
 func (r request) valid() bool {
 	if r.Schema != schema || !validHash(r.SHA256) || len(r.Offer) != 0 && r.Operation != "move-terminals" {
+		return false
+	}
+	if r.Operation == "prepare-peer" {
+		return r.SourceSHA256 == "" && r.WorkerID == "" && r.WorkerEpoch == 0 && r.PeerID != "" && len(r.PeerID) <= 128 && len(r.Exchange) > 0 && len(r.Exchange) <= 12<<10
+	}
+	if r.PeerID != "" || len(r.Exchange) != 0 {
 		return false
 	}
 	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" {
@@ -67,7 +81,7 @@ func (r request) valid() bool {
 	switch r.Operation {
 	case "move-terminals":
 		return r.SourceSHA256 == "" && len(r.Offer) > 0 && len(r.Offer) <= 8<<10
-	case "health", "retire-ssh", "resume-ssh", "open-ssh":
+	case "health", "retire-ssh", "resume-ssh", "open-ssh", "generation-offer":
 		return r.SourceSHA256 == ""
 	case "retire-source":
 		return validHash(r.SourceSHA256)
@@ -108,6 +122,10 @@ type Server struct {
 	SHA256        string
 	SSH           *managedssh.Host
 	MoveTerminals func(context.Context, []byte) error
+	// GenerationOffer is this generation's signed offer when it serves as a
+	// delegated generation; PreparePeer readies it for a client moving to it.
+	GenerationOffer func() ([]byte, error)
+	PreparePeer     func(ctx context.Context, peerID string, exchange []byte) ([]byte, error)
 	// WorkerFence admits only the named active worker epoch and reports when
 	// that lease is lost. The release callback remains held through the SSH
 	// policy mutation and its cancellation watcher.
@@ -137,7 +155,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		var req request
-		if decode(http.MaxBytesReader(w, r.Body, 16<<10), &req) != nil || !req.valid() {
+		if decode(http.MaxBytesReader(w, r.Body, maximumMessage), &req) != nil || !req.valid() {
 			http.Error(w, "invalid carrier operation", http.StatusBadRequest)
 			return
 		}
@@ -152,6 +170,16 @@ func (s *Server) handler() http.Handler {
 					operationErr = ErrUnavailable
 				} else {
 					operationErr = s.MoveTerminals(r.Context(), req.Offer)
+				}
+			case "generation-offer":
+				operationErr = ErrUnavailable
+				if s.GenerationOffer != nil {
+					result.Offer, operationErr = s.GenerationOffer()
+				}
+			case "prepare-peer":
+				operationErr = ErrUnavailable
+				if s.PreparePeer != nil {
+					result.Offer, operationErr = s.PreparePeer(r.Context(), req.PeerID, req.Exchange)
 				}
 			case "open-ssh":
 				open := s.SSH.OpenStreams()
@@ -351,7 +379,7 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 		return response{}, ErrInvalid
 	}
 	timeout := 5 * time.Second
-	if req.Operation == "move-terminals" {
+	if req.Operation == "move-terminals" || req.Operation == "prepare-peer" {
 		timeout = native.CarrierMoveBudget + 5*time.Second
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -373,7 +401,7 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	}
 	defer httpResponse.Body.Close()
 	var result response
-	if httpResponse.StatusCode != http.StatusOK || decode(io.LimitReader(httpResponse.Body, 4097), &result) != nil || result.Schema != schema {
+	if httpResponse.StatusCode != http.StatusOK || decode(io.LimitReader(httpResponse.Body, maximumMessage), &result) != nil || result.Schema != schema {
 		return response{}, ErrUnavailable
 	}
 	if result.SHA256 != c.sha256 {
@@ -413,6 +441,26 @@ func (c *Client) OpenSSH(ctx context.Context) (int, error) {
 
 func (c *Client) CheckSourceRetirement(ctx context.Context, sourceSHA256 string) error {
 	return c.call(ctx, "retire-source", sourceSHA256)
+}
+
+// GenerationOffer is the generation's signed carrier offer.
+func (c *Client) GenerationOffer(ctx context.Context) ([]byte, error) {
+	result, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "generation-offer"})
+	if err == nil && len(result.Offer) == 0 {
+		err = ErrUnavailable
+	}
+	return result.Offer, err
+}
+
+// PreparePeer readies the generation for peerID's move (the candidate
+// exchange arrives on the client's connection to an older generation) and
+// returns its current offer.
+func (c *Client) PreparePeer(ctx context.Context, peerID string, exchange []byte) ([]byte, error) {
+	result, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "prepare-peer", PeerID: peerID, Exchange: exchange})
+	if err == nil && len(result.Offer) == 0 {
+		err = ErrUnavailable
+	}
+	return result.Offer, err
 }
 
 func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {

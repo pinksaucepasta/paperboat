@@ -72,11 +72,30 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 	if err != nil {
 		return nil, err
 	}
+	// Every connected client opens its new connections on the candidate from
+	// here; open streams stay on the old generation until they close. A client
+	// that declines stays on the old one until it retires.
+	moveErr := moveCarrierClients(ctx, candidate, capability, client)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "move_clients", "failed", moveErr != nil)
 	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
 	if moveErr != nil {
 		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
 	}
 	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals}, nil
+}
+
+// moveCarrierClients has the serving generation offer the candidate's signed
+// generation offer to every client connected to it (Owner.OfferCarrier).
+func moveCarrierClients(ctx context.Context, candidate CarrierConfig, capability []byte, previous *carriercontrol.Client) error {
+	next, err := carriercontrol.NewClient(candidate.ControlEndpoint, capability, candidate.Source.SHA256)
+	if err != nil {
+		return err
+	}
+	offer, err := next.GenerationOffer(ctx)
+	if err != nil {
+		return err
+	}
+	return previous.MoveTerminals(ctx, offer)
 }
 
 // activate marks the already serving candidate generation active: readers of

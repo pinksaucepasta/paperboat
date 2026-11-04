@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -14,7 +13,6 @@ import (
 	nativeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // relayReason says whether the candidate exchange named a relay (bounded).
@@ -38,21 +36,9 @@ func (o *IndependentSessionOwner) controlCarrier(ctx context.Context, request wo
 		if json.Unmarshal(request.Exchange, &exchange) != nil || !bytes.Equal(exchange.Offer.Claims.Certificate, o.carrier.offer.Claims.Certificate) {
 			return result, ErrProductionInvalid
 		}
-		if err := o.carrier.network.AddPeer(request.PeerID, exchange.DiscoPublicKey, exchange.Endpoints); err != nil {
-			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_add", "failed", true, "error_type", fmt.Sprintf("%T", err))
+		if err := readyCarrierPeer(ctx, o.carrier.network, request.PeerID, exchange); err != nil {
 			return result, err
 		}
-		// The relay is the fallback path; a refused relay registration must not
-		// block a direct (punched) move. Dial below decides (pbvm4 run3b).
-		if err := o.carrier.network.PreparePeerRelay(ctx, request.PeerID, exchange.RelayNodeID); err != nil {
-			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_relay", "failed", true, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
-		}
-		socket, err := o.carrier.network.Dial(ctx, request.PeerID)
-		diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_dial", "failed", err != nil, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
-		if err != nil {
-			return result, err
-		}
-		socket.Close()
 
 	case "seal":
 		if request.Slot != 0 || len(request.Offer) != 0 || o.carrier == nil {

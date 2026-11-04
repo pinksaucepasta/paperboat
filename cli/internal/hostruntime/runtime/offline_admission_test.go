@@ -156,7 +156,7 @@ func TestCarrierSSHSessionsAreQueuedInTheCarrierBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if _, err := auditCarrierSSH(root, host); err != nil {
+	if _, err := auditCarrierSSH(filepath.Join(root, "carrier-0-offline-audit.json"), host); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := host.ReconcileTarget(context.Background(), 5, uint16(listener.Addr().(*net.TCPAddr).Port)); err != nil {
@@ -172,7 +172,7 @@ func TestCarrierSSHSessionsAreQueuedInTheCarrierBacklog(t *testing.T) {
 	_, _ = io.ReadFull(client, make([]byte, 3))
 	_ = client.Close()
 	<-done
-	reopened, err := offlineaudit.Open(filepath.Join(root, "carrier-offline-audit.json"), nil)
+	reopened, err := offlineaudit.Open(filepath.Join(root, "carrier-0-offline-audit.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

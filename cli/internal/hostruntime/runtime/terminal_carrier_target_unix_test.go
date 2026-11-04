@@ -173,6 +173,7 @@ type targetCarrierFixture struct {
 	primaryAddress  mesh.Addr
 	parent          *native.Session
 	extraTarget     *terminalCarrier
+	generation      *productionNativePeerService
 	unknownRelay    bool
 	issuer          string
 	signer          ed25519.PrivateKey
