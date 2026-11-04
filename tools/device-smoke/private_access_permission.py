@@ -98,10 +98,23 @@ child.send_signal(signal.SIGTERM)
 
 # Runs on the owner: change the team's allow_private_access setting through the team mutation.
 SETTING = r'''
-import glob, json, os, sys, urllib.parse, urllib.request, uuid
+import base64, glob, json, os, subprocess, sys, urllib.parse, urllib.request, uuid
 home = os.path.expanduser('~')
-token = open(glob.glob(home + '/.config/paperboat/credentials/secrets/profile-*-access.secret')[0]).read().strip()
-server = json.load(open(home + '/.config/paperboat/config.json'))['server_url']
+if os.uname().sysname == 'Darwin':
+    # macOS keeps the CLI token in the login keychain (go-keyring, service paperboat) and may have no config.json
+    cfg = home + '/Library/Application Support/paperboat'
+    ref = json.load(open(glob.glob(cfg + '/credentials/profiles/*.json')[0]))['access_secret_ref']
+    token = subprocess.run(['/usr/bin/security', 'find-generic-password', '-s', 'paperboat', '-wa', ref],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    if token.startswith('go-keyring-base64:'):
+        token = base64.b64decode(token[len('go-keyring-base64:'):]).decode()
+    elif token.startswith('go-keyring-encoded:'):
+        token = bytes.fromhex(token[len('go-keyring-encoded:'):]).decode()
+    shown = json.loads(subprocess.run([home + '/.local/bin/pb', 'config', 'show', '--json'], capture_output=True, text=True).stdout)
+    server = shown.get('data', shown)['server_url']
+else:
+    token = open(glob.glob(home + '/.config/paperboat/credentials/secrets/profile-*-access.secret')[0]).read().strip()
+    server = json.load(open(home + '/.config/paperboat/config.json'))['server_url']
 team, value = sys.argv[1], sys.argv[2] == 'on'
 def call(method, path, body=None, key=None):
     headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
@@ -233,7 +246,8 @@ def main():
 
     original = None
     script = encoded(ORIGIN)
-    ssh(owner, f'(setsid nohup python3 -c {shlex.quote("import base64,sys;exec(base64.b64decode(%r).decode())" % script)} 1500 > {log}.out 2>&1 < /dev/null & echo $! > {log}.pid)')
+    detach = '' if ssh(owner, 'uname -s').stdout.strip() == 'Darwin' else 'setsid '  # macOS has no setsid
+    ssh(owner, f'({detach}nohup python3 -c {shlex.quote("import base64,sys;exec(base64.b64decode(%r).decode())" % script)} 1500 > {log}.out 2>&1 < /dev/null & echo $! > {log}.pid)')
     try:
         port = str(json.loads(eventually('origin', lambda: ssh(owner, f'head -1 {log}.out').stdout.strip() or None, 30)))
         original = json.loads(ssh(owner, exec_script(owner, SETTING, team, 'show')).stdout.strip().splitlines()[-1])['allow_private_access']
