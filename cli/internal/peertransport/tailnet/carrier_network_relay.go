@@ -102,5 +102,13 @@ func relayFailureType(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline"
 	}
-	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
+	// Name the first typed cause, not a wrapper such as fmt.wrapError.
+	name := ""
+	for ; err != nil; err = errors.Unwrap(err) {
+		name = strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
+		if name != "fmt.wrapError" && name != "errors.errorString" {
+			return name
+		}
+	}
+	return name
 }
