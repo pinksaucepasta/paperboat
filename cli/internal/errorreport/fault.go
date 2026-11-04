@@ -3,16 +3,11 @@ package errorreport
 import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
-	"io"
-	"io/fs"
-	"net"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -73,32 +68,7 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 			f.Errno, f.HTTPStatus = 0, 0
 		}
 	}()
-	remaining := []error{err}
-	seen := make(map[error]bool)
-	priority := 0
-	nativeErrno, nativePriority := 0, 0
-	httpPriority, operationalPriority := 0, 0
-	operationalCause, operationalErrno, operationalType := "internal", 0, "error"
-	for count := 0; len(remaining) > 0 && count < 16; count++ {
-		current := remaining[0]
-		remaining = remaining[1:]
-		if current == nil {
-			continue
-		}
-		t := reflect.TypeOf(current)
-		if t.Comparable() {
-			if seen[current] {
-				continue
-			}
-			seen[current] = true
-		}
-		name := reporting.TypeName(t)
-		if len(f.ErrorChain) < 8 && (len(f.ErrorChain) == 0 || f.ErrorChain[len(f.ErrorChain)-1] != name) {
-			f.ErrorChain = append(f.ErrorChain, name)
-		}
-		if value := reflect.ValueOf(current); value.Kind() == reflect.Pointer && value.IsNil() {
-			continue
-		}
+	p := reporting.Project(err, reporting.Options{Classify: []reporting.NodeClassifier{remoteCause}, Visit: func(current error) {
 		if staged, ok := current.(interface{ DiagnosticStage() string }); ok {
 			if stage := faultStage(staged.DiagnosticStage()); stage != "unknown" {
 				f.Stage = stage
@@ -109,149 +79,19 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 				f.Code = code
 			}
 		}
-		cause, errno, rank := nodeCause(current)
-		// A deadline can be the primary cause while cleanup also failed with a
-		// native error. Preserve that independent diagnostic evidence.
-		if errno != 0 && rank > nativePriority {
-			nativeErrno, nativePriority = errno, rank
-		}
-		status := 0
-		if coded, ok := current.(interface{ DiagnosticStatus() int }); ok {
-			status = coded.DiagnosticStatus()
-		}
-		if status >= 400 && status <= 599 {
-			statusRank := rank
-			if status >= 500 {
-				statusRank++
-			}
-			if statusRank > httpPriority {
-				f.HTTPStatus, httpPriority = status, statusRank
-			}
-		}
-		if rank > priority {
-			f.Cause, f.Errno, f.ErrorType, priority = cause, errno, name, rank
-		}
-		if rank > operationalPriority && cause != "context_canceled" && !(status >= 400 && status < 500) {
-			operationalCause, operationalErrno, operationalType, operationalPriority = cause, errno, name, rank
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) > 16-count {
-				children = children[:16-count]
-			}
-			remaining = append(remaining, children...)
-		case interface{ Unwrap() error }:
-			remaining = append(remaining, wrapped.Unwrap())
-		}
-	}
-	if f.HTTPStatus >= 400 && f.HTTPStatus < 500 {
-		if rejectionOnly(err) {
-			f.Outcome, f.Severity = "rejected", "warning"
-		} else {
-			f.Cause, f.Errno, f.ErrorType = operationalCause, operationalErrno, operationalType
-		}
-	}
-	if f.Cause == "context_canceled" && !cancellationOnly(err) {
-		f.Cause = "internal"
+	}})
+	f.Cause, f.ErrorType, f.ErrorChain, f.Errno, f.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
+	if p.Rejected {
+		f.Outcome, f.Severity = "rejected", "warning"
 	}
 	if f.Cause == "context_canceled" {
 		f.Outcome, f.Severity = "canceled", "info"
 	}
-	if nativeErrno != 0 {
-		f.Errno = nativeErrno
-	}
 	return f
 }
 
-// Rejection is expected only when every bounded terminal branch is a
-// protocol rejection or ordinary cancellation. A status wrapper cannot hide
-// an independent storage, decoding or network failure beneath it.
-func rejectionOnly(err error) bool {
-	pending := []error{err}
-	sawStatus := false
-	for visited := 0; len(pending) > 0; visited++ {
-		if visited >= 16 {
-			return false
-		}
-		current := pending[0]
-		pending = pending[1:]
-		if current == nil {
-			return false
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			return false
-		}
-		if value.Type().Comparable() && current == context.Canceled {
-			continue
-		}
-		rejected := false
-		if coded, ok := current.(interface{ DiagnosticStatus() int }); ok {
-			status := coded.DiagnosticStatus()
-			rejected = status >= 400 && status < 500
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) == 0 || len(children)+len(pending) > 15-visited {
-				return false
-			}
-			pending = append(pending, children...)
-		case interface{ Unwrap() error }:
-			child := wrapped.Unwrap()
-			if child == nil && rejected {
-				sawStatus = true
-				continue
-			}
-			pending = append(pending, child)
-		default:
-			if !rejected {
-				return false
-			}
-			sawStatus = true
-		}
-	}
-	return sawStatus
-}
-
-// Cancellation is orderly only when every bounded terminal cause is canceled.
-// Unresolved cycles, oversized joins and typed nils cannot prove that claim.
-func cancellationOnly(err error) bool {
-	remaining := []error{err}
-	for visited := 0; len(remaining) > 0; visited++ {
-		if visited >= 16 {
-			return false
-		}
-		current := remaining[0]
-		remaining = remaining[1:]
-		if current == nil {
-			return false
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			return false
-		}
-		if value.Type().Comparable() && current == context.Canceled {
-			continue
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
-				return false
-			}
-			remaining = append(remaining, children...)
-		case interface{ Unwrap() error }:
-			remaining = append(remaining, wrapped.Unwrap())
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func nodeCause(err error) (string, int, int) {
+// remoteCause reads the cause a remote or protected diagnostic carries, if it is in the finite vocabulary.
+func remoteCause(err error) (string, int, int) {
 	if remote, ok := err.(interface {
 		DiagnosticCause() string
 		DiagnosticErrno() int
@@ -259,94 +99,18 @@ func nodeCause(err error) (string, int, int) {
 		cause, number := remote.DiagnosticCause(), remote.DiagnosticErrno()
 		if ValidCause(cause) && number >= 0 && number <= 65535 {
 			rank := 60
-			if cause == "context_canceled" {
+			switch cause {
+			case "context_canceled":
 				rank = 1
-			}
-			if cause == "internal" {
+			case "internal":
 				rank = 2
-			}
-			if cause == "deadline_exceeded" {
+			case "deadline_exceeded":
 				rank = 90
 			}
 			return cause, number, rank
 		}
 	}
-	if reflect.TypeOf(err).Comparable() {
-		if err == context.Canceled {
-			return "context_canceled", 0, 1
-		}
-		if err == context.DeadlineExceeded {
-			return "deadline_exceeded", 0, 90
-		}
-		if err == fs.ErrNotExist {
-			return "not_found", 0, 60
-		}
-		if err == fs.ErrPermission {
-			return "permission_denied", 0, 60
-		}
-		if err == net.ErrClosed {
-			return "connection_closed", 0, 60
-		}
-		if err == io.EOF {
-			return "end_of_stream", 0, 60
-		}
-		if err == io.ErrUnexpectedEOF {
-			return "truncated_stream", 0, 60
-		}
-	}
-	if status, ok := err.(interface{ DiagnosticStatus() int }); ok {
-		switch status.DiagnosticStatus() {
-		case 401, 403:
-			return "permission_denied", 0, 70
-		case 404:
-			return "not_found", 0, 70
-		case 409:
-			return "conflict", 0, 70
-		case 429:
-			return "rate_limited", 0, 70
-		case 503:
-			return "service_unavailable", 0, 70
-		default:
-			if status.DiagnosticStatus() >= 400 && status.DiagnosticStatus() < 500 {
-				return "invalid_request", 0, 70
-			}
-			if status.DiagnosticStatus() >= 500 && status.DiagnosticStatus() <= 599 {
-				return "upstream_failure", 0, 70
-			}
-		}
-	}
-	if errno, ok := err.(syscall.Errno); ok {
-		// Errno.Is understands native Windows file/path/ACL errors as well as
-		// Unix errno values. Comparing only POSIX constants loses that mapping.
-		switch {
-		case errno.Is(fs.ErrNotExist):
-			return "not_found", int(errno), 60
-		case errno.Is(fs.ErrPermission):
-			return "permission_denied", int(errno), 60
-		case errno.Is(fs.ErrExist):
-			return "conflict", int(errno), 60
-		}
-		cause := reporting.ErrnoCause(errno)
-		return cause, int(errno), 60
-	}
-	if dns, ok := err.(*net.DNSError); ok {
-		if dns.IsTimeout {
-			return "network_timeout", 0, 50
-		}
-		return "dns_failure", 0, 50
-	}
-	if network, ok := err.(net.Error); ok && network.Timeout() {
-		return "network_timeout", 0, 40
-	}
-	// Wrappers do not turn a pure cancellation into a substantive failure.
-	// An unknown terminal cause does: joining it with cleanup cancellation
-	// must not hide the failure or suppress its exception.
-	switch err.(type) {
-	case interface{ Unwrap() error }, interface{ Unwrap() []error }:
-		return "internal", 0, 0
-	default:
-		return "internal", 0, 2
-	}
+	return "", 0, 0
 }
 
 // ValidCause validates the finite cause vocabulary used by local and protected wire diagnostics.

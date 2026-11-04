@@ -183,7 +183,7 @@ func TestPrivateAccessMixedMissingAndOperationalCauseRemainsUnavailable(t *testi
 	if denied.Allowed || denied.Reason != ReasonInternal {
 		t.Fatalf("mixed error was projected as a benign resource denial: %#v", denied)
 	}
-	for _, value := range []string{"syscall.Errno", `"http_status":503`, reference} {
+	for _, value := range []string{"Errno", `"http_status":503`, reference} {
 		if !strings.Contains(logs.String(), value) {
 			t.Errorf("mixed missing/outage diagnostics omitted %q: %s", value, logs.String())
 		}
@@ -221,7 +221,7 @@ func TestPrivateAccessMixedMachineDenialAndIORemainsOperational(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("mixed machine denial/outage status/body=%d/%s", response.Code, response.Body.String())
 	}
-	for _, value := range []string{"syscall.Errno", `"http_status":503`, reference} {
+	for _, value := range []string{"Errno", `"http_status":503`, reference} {
 		if !strings.Contains(logs.String(), value) {
 			t.Errorf("mixed machine denial diagnostics omitted %q: %s", value, logs.String())
 		}
@@ -282,7 +282,7 @@ func TestPrivateAccessRequestReadFailureIsUnavailableAndActionable(t *testing.T)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("body I/O failure status/body=%d/%s", response.Code, response.Body.String())
 	}
-	for _, value := range []string{"syscall.Errno", `"http_status":503`, reference} {
+	for _, value := range []string{"Errno", `"http_status":503`, reference} {
 		if !strings.Contains(logs.String(), value) {
 			t.Errorf("body I/O failure diagnostics omitted %q: %s", value, logs.String())
 		}
@@ -323,7 +323,7 @@ func TestPrivateAccessSuccessWriteFailureIsReported(t *testing.T) {
 	if writer.status != http.StatusOK {
 		t.Fatalf("successful authorization status=%d, want 200", writer.status)
 	}
-	for _, value := range []string{"syscall.Errno", reference} {
+	for _, value := range []string{"Errno", reference} {
 		if !strings.Contains(logs.String(), value) {
 			t.Errorf("response write diagnostics omitted %q: %s", value, logs.String())
 		}
@@ -364,7 +364,7 @@ func TestPrivateAccessErrorResponseWriteFailureIsReported(t *testing.T) {
 	if writer.status != http.StatusUnauthorized {
 		t.Fatalf("grant denial status=%d, want 401", writer.status)
 	}
-	for _, value := range []string{"syscall.Errno", `"http_status":401`, reference} {
+	for _, value := range []string{"Errno", `"http_status":401`, reference} {
 		if !strings.Contains(logs.String(), value) {
 			t.Errorf("error response write diagnostics omitted %q: %s", value, logs.String())
 		}
@@ -434,7 +434,7 @@ func TestGrantHTTPMixedIdempotencyConflictRemainsOperationalAndRecovers(t *testi
 				t.Fatal("idempotency failure exposed private error prose")
 			}
 			if tc.want == http.StatusServiceUnavailable {
-				for _, value := range []string{"syscall.Errno", `"http_status":503`, reference} {
+				for _, value := range []string{"Errno", `"http_status":503`, reference} {
 					if !strings.Contains(logs.String(), value) {
 						t.Errorf("mixed conflict diagnostics omitted %q: %s", value, logs.String())
 					}
@@ -499,7 +499,7 @@ func TestPrivateAccessVerifierDistinguishesRejectionFromOutage(t *testing.T) {
 	if strings.Count(logs.String(), `"outcome":"failed"`) != 2 || strings.Count(logs.String(), `"outcome":"rejected"`) != 1 {
 		t.Fatalf("verifier outcomes were not logged once as failure plus expected rejection: %s", logs.String())
 	}
-	if !strings.Contains(logs.String(), "syscall.Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
+	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
 		t.Fatalf("joined I/O failure lost its bounded cause or 503 status: %s", logs.String())
 	}
 }
@@ -595,7 +595,7 @@ func TestGrantIssueVerifierOutageIsActionableAndInvalidProofStaysRejected(t *tes
 	if strings.Count(logs.String(), `"outcome":"failed"`) != 2 || strings.Count(logs.String(), `"outcome":"rejected"`) != 1 {
 		t.Fatalf("machine verifier outcomes were not recorded once: %s", logs.String())
 	}
-	if !strings.Contains(logs.String(), "syscall.Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
+	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
 		t.Fatalf("joined proof and I/O failure lost its bounded cause or 503 status: %s", logs.String())
 	}
 }

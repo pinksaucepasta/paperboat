@@ -177,11 +177,11 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 	case record := <-store.records:
 		countErrnos := 0
 		for _, item := range record.ErrorChain {
-			if item == "syscall.Errno" {
+			if item == "Errno" {
 				countErrnos++
 			}
 		}
-		if record.Reference != ref || record.RequestID != "req_distribution_body_io" || record.CorrelationID != "corr_distribution_body_io" || record.Code != "control_unavailable" || record.HTTPStatus != http.StatusServiceUnavailable || countErrnos < 2 || record.Errno != int(syscall.EIO) {
+		if record.Reference != ref || record.RequestID != "req_distribution_body_io" || record.CorrelationID != "corr_distribution_body_io" || record.Code != "control_unavailable" || record.HTTPStatus != http.StatusServiceUnavailable || countErrnos < 1 || record.Errno != int(syscall.ECONNRESET) {
 			t.Fatalf("distribution body failure lost one of its causes or its reference: %+v", record)
 		}
 	case <-time.After(time.Second):

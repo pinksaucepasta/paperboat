@@ -122,7 +122,7 @@ func TestAccessorRoutesSeparateCredentialRejectionFromAuthorityOutage(t *testing
 	if got := strings.Count(logs.String(), `"outcome":"rejected"`); got != 2 {
 		t.Errorf("recorded %d expected credential rejections, want 2: %s", got, logs.String())
 	}
-	if !strings.Contains(logs.String(), "syscall.Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
+	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
 		t.Errorf("joined credential and I/O failures lost bounded cause or 503 status: %s", logs.String())
 	}
 }

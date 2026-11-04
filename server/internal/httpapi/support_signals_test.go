@@ -141,7 +141,7 @@ func TestSupportSignalsConnectedHTTPOutcomesAndParent(t *testing.T) {
 			}
 		}
 		if records[i].Code == "authorization_unavailable" && records[i].Errno == int(syscall.EIO) {
-			if records[i].Cause != "system_error" || records[i].HTTPStatus != 503 || records[i].CorrelationID != ref || records[i].Outcome != "failed" || !strings.Contains(strings.Join(records[i].ErrorChain, ","), "syscall.Errno") {
+			if records[i].Cause != "system_error" || records[i].HTTPStatus != 503 || records[i].CorrelationID != ref || records[i].Outcome != "failed" || !strings.Contains(strings.Join(records[i].ErrorChain, ","), "Errno") {
 				t.Fatalf("mixed proof and I/O failure lost its original bounded cause/status: %+v", records[i])
 			}
 		}

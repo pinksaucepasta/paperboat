@@ -707,8 +707,8 @@ func faultTags(fault Fault) map[string]string {
 
 func faultContext(fault Fault) sentry.Context {
 	chain := append([]string(nil), fault.ErrorChain...)
-	if len(chain) > maxErrorChain {
-		chain = chain[:maxErrorChain]
+	if len(chain) > reporting.MaxErrorChain {
+		chain = chain[:reporting.MaxErrorChain]
 	}
 	ctx := sentry.Context{"error_chain": chain, "errno": fault.Errno, "outcome": fault.Outcome, "severity": fault.Severity}
 	if fault.HTTPStatus >= 400 && fault.HTTPStatus <= 599 {
@@ -803,7 +803,7 @@ func sanitize(e *sentry.Event) *sentry.Event {
 
 func safeFaultContext(value sentry.Context) sentry.Context {
 	chain, ok := value["error_chain"].([]string)
-	if !ok || len(chain) > maxErrorChain {
+	if !ok || len(chain) > reporting.MaxErrorChain {
 		return nil
 	}
 	clean := make([]string, 0, len(chain))

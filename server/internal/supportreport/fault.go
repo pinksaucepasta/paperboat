@@ -4,15 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
-	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
-	"syscall"
 
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 )
@@ -22,12 +20,6 @@ var ErrPanic = faultPanicError{}
 type faultPanicError struct{}
 
 func (faultPanicError) Error() string { return "panic recovered" }
-
-const maxErrorChain = 8
-
-// Driver and HTTP wrappers must not hide the originating native failure.
-// Classification walks more nodes than the bounded list emitted in diagnostics.
-const maxErrorNodes = 32
 
 // Fault is the bounded, content-free projection shared by server logs, local
 // support records, and Sentry. It deliberately has no error-message field.
@@ -78,10 +70,17 @@ func (f Fault) LogAttrs() []any {
 	return attrs
 }
 
-// diagnosticStatus is implemented by bounded provider/API error types and the
-// HTTP response wrapper. It gives the projector status semantics without
-// parsing Error() text.
-type diagnosticStatus interface{ DiagnosticStatus() int }
+// annotatedStatus is the HTTP status a producer attached to err: the response
+// wrapper's own, or a bounded provider/API error's DiagnosticStatus.
+func annotatedStatus(err error) (status int, response bool) {
+	if wrapper, ok := err.(interface{ ResponseStatus() int }); ok {
+		return wrapper.ResponseStatus(), true
+	}
+	if coded, ok := err.(interface{ DiagnosticStatus() int }); ok {
+		return coded.DiagnosticStatus(), false
+	}
+	return 0, false
+}
 
 type responseStatusError struct {
 	status            int
@@ -91,7 +90,7 @@ type responseStatusError struct {
 
 func (e responseStatusError) Error() string           { return "HTTP response failed" }
 func (e responseStatusError) Unwrap() error           { return e.cause }
-func (e responseStatusError) DiagnosticStatus() int   { return e.status }
+func (e responseStatusError) ResponseStatus() int     { return e.status }
 func (e responseStatusError) ExpectedRetryable() bool { return e.expectedRetryable }
 
 // WithDiagnosticStatus associates an already selected API response status with
@@ -146,30 +145,26 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 		code = "internal_error"
 	}
 
-	chain := safeErrorChain(err)
-	errorType := "none"
-	responseStatusErrorType := reflect.TypeOf(responseStatusError{}).PkgPath() + "." + reflect.TypeOf(responseStatusError{}).Name()
-	for _, name := range chain {
-		// HTTP status is a synthetic wrapper around the producer's failure.
-		// Keep it in ErrorChain while exposing the underlying type as the more
-		// useful, actionable ErrorType.
-		if name != responseStatusErrorType {
-			errorType = name
+	p := serverProjection(err)
+	cause, errno, errorType, chain := p.Cause, p.Errno, p.ErrorType, p.ErrorChain
+	responseStatus := 0
+	for current, depth := err, 0; current != nil && depth < reporting.MaxErrorChain; current, depth = errors.Unwrap(current), depth+1 {
+		if status, response := annotatedStatus(current); response {
+			responseStatus = status
 			break
 		}
 	}
-	causeStatus, responseStatus := diagnosticHTTPStatuses(err)
-	status := responseStatus
-	if status == 0 {
-		status = causeStatus
+	status := p.HTTPStatus
+	if responseStatus >= 400 && responseStatus <= 599 {
+		status = responseStatus
 	}
-	statusForCause := causeStatus
-	if statusForCause == 0 {
-		statusForCause = status
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		cause, errno = "deadline_exceeded", 0
+	} else if cause == "internal" && p.HTTPStatus == 0 && status != 0 {
+		cause = reporting.StatusCause(status)
 	}
-	cause, errno := classifyCause(ctx, err, statusForCause)
-	if errno == 0 {
-		errno = firstErrno(err)
+	if err == nil {
+		cause, errorType = "none", "none"
 	}
 	outcome, severity := "failed", "error"
 	if cause == "context_canceled" {
@@ -179,7 +174,7 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 		if code == "worker_recovered" {
 			outcome = "success"
 		}
-	} else if responseStatus >= 400 && responseStatus < 500 && soleExpectedResponseFailure(err, false) {
+	} else if status >= 400 && status < 500 && soleExpectedResponseFailure(err, false) {
 		outcome, severity = "rejected", "warning"
 	} else if status >= 500 && soleExpectedResponseFailure(err, true) {
 		severity = "warning"
@@ -206,14 +201,14 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 // independent joined failure or an incomplete/cyclic error tree.
 func soleExpectedResponseFailure(err error, retryable bool) bool {
 	if !retryable {
-		cause, _ := classifyCause(context.Background(), err, 0)
+		cause := serverProjection(err).Cause
 		if cause != "internal" && cause != "none" && cause != "context_canceled" {
 			return false
 		}
 	}
-	seen := make(map[error]struct{}, maxErrorChain)
+	seen := make(map[error]struct{}, reporting.MaxErrorChain)
 	annotated := false
-	for depth := 0; err != nil && depth < maxErrorChain; depth++ {
+	for depth := 0; err != nil && depth < reporting.MaxErrorChain; depth++ {
 		if nilDiagnosticError(err) {
 			return false
 		}
@@ -227,8 +222,7 @@ func soleExpectedResponseFailure(err error, retryable bool) bool {
 			if classified, ok := err.(interface{ ExpectedRetryable() bool }); ok && classified.ExpectedRetryable() {
 				annotated = true
 			}
-		} else if classified, ok := err.(diagnosticStatus); ok {
-			status := classified.DiagnosticStatus()
+		} else if status, _ := annotatedStatus(err); status != 0 {
 			if status >= 500 {
 				return false
 			}
@@ -277,126 +271,6 @@ func safeSourceFile(value string) string {
 	return out.String()
 }
 
-func diagnosticHTTPStatuses(err error) (causeStatus, responseStatus int) {
-	for _, current := range safeErrorNodes(err) {
-		if value, ok := current.(responseStatusError); ok {
-			if value.status >= 100 && value.status <= 599 {
-				responseStatus = value.status
-			}
-			continue
-		}
-		if value, ok := current.(diagnosticStatus); ok {
-			status := value.DiagnosticStatus()
-			if status >= 100 && status <= 599 {
-				if causeStatus == 0 {
-					causeStatus = status
-				}
-				if responseStatus == 0 {
-					responseStatus = status
-				}
-			}
-		}
-	}
-	if responseStatus == 0 {
-		responseStatus = causeStatus
-	}
-	return causeStatus, responseStatus
-}
-
-func classifyCause(ctx context.Context, err error, status int) (string, int) {
-	if matchesError(err, context.DeadlineExceeded) || matchesError(ctx.Err(), context.DeadlineExceeded) {
-		return "deadline_exceeded", 0
-	}
-	for _, current := range safeErrorNodes(err) {
-		switch value := current.(type) {
-		case interface{ DiagnosticErrno() int }:
-			if number := value.DiagnosticErrno(); number > 0 && number <= 65535 {
-				return "system_error", number
-			}
-		case *net.DNSError:
-			if value.IsNotFound {
-				return "dns_not_found", 0
-			}
-			if value.IsTimeout {
-				return "dns_timeout", 0
-			}
-			if value.IsTemporary {
-				return "dns_temporary", 0
-			}
-			return "dns_failure", 0
-		case *x509.UnknownAuthorityError:
-			return "tls_unknown_authority", 0
-		case x509.HostnameError:
-			return "tls_hostname", 0
-		case *tls.CertificateVerificationError:
-			return "tls_verification", 0
-		case syscall.Errno:
-			return reporting.ErrnoCause(value), boundedErrno(value)
-		case net.Error:
-			if value.Timeout() {
-				return "network_timeout", 0
-			}
-		}
-		if stateError, ok := current.(interface{ SQLState() string }); ok {
-			if cause := postgresCause(stateError.SQLState()); cause != "" {
-				return cause, 0
-			}
-		}
-	}
-
-	switch {
-	case matchesError(err, os.ErrNotExist), matchesError(err, syscall.ENOENT):
-		return "not_found", 0
-	case matchesError(err, os.ErrPermission), matchesError(err, syscall.EACCES), matchesError(err, syscall.EPERM):
-		return "permission_denied", 0
-	case matchesError(err, syscall.ECONNREFUSED):
-		return "connection_refused", int(syscall.ECONNREFUSED)
-	case matchesError(err, syscall.EHOSTUNREACH), matchesError(err, syscall.ENETUNREACH):
-		return "network_unreachable", firstErrno(err)
-	case matchesError(err, syscall.ECONNRESET):
-		return "connection_reset", int(syscall.ECONNRESET)
-	case matchesError(err, syscall.ETIMEDOUT):
-		return "network_timeout", int(syscall.ETIMEDOUT)
-	case matchesError(err, syscall.EPIPE):
-		return "broken_pipe", int(syscall.EPIPE)
-	case matchesError(err, syscall.EEXIST):
-		return "conflict", int(syscall.EEXIST)
-	case matchesError(err, syscall.ENOSPC), matchesError(err, syscall.EMFILE), matchesError(err, syscall.ENFILE):
-		return "resource_exhausted", firstErrno(err)
-	case matchesError(err, net.ErrClosed):
-		return "connection_closed", 0
-	case matchesError(err, io.EOF):
-		return "end_of_stream", 0
-	case matchesError(err, io.ErrUnexpectedEOF):
-		return "truncated_stream", 0
-	}
-	if status >= 400 && status <= 599 {
-		return reporting.StatusCause(status), 0
-	}
-	if (matchesError(err, context.Canceled) || matchesError(ctx.Err(), context.Canceled)) && !hasNonWrapperErrorLeaf(err) {
-		return "context_canceled", 0
-	}
-	if err == nil {
-		return "none", 0
-	}
-	return "internal", 0
-}
-
-func hasNonWrapperErrorLeaf(err error) bool {
-	for _, current := range safeErrorNodes(err) {
-		if matchesError(current, context.Canceled) || matchesError(current, context.DeadlineExceeded) {
-			continue
-		}
-		switch current.(type) {
-		case interface{ Unwrap() error }, interface{ Unwrap() []error }:
-			continue
-		default:
-			return true
-		}
-	}
-	return false
-}
-
 func boundedHTTPStatus(status int) int {
 	if status < 400 || status > 599 {
 		return 0
@@ -429,121 +303,6 @@ func postgresCause(state string) string {
 	default:
 		return "postgres_error"
 	}
-}
-
-func boundedErrno(value syscall.Errno) int {
-	if value == 0 || value > 65535 {
-		return 0
-	}
-	return int(value)
-}
-
-func firstErrno(err error) int {
-	for _, current := range safeErrorNodes(err) {
-		if value, ok := current.(syscall.Errno); ok {
-			return boundedErrno(value)
-		}
-		if value, ok := current.(interface{ DiagnosticErrno() int }); ok {
-			if number := value.DiagnosticErrno(); number > 0 && number <= 65535 {
-				return number
-			}
-		}
-	}
-	return 0
-}
-
-func matchesError(err, target error) bool {
-	if target == nil {
-		return err == nil
-	}
-	for _, current := range safeErrorNodes(err) {
-		currentType := reflect.TypeOf(current)
-		targetType := reflect.TypeOf(target)
-		if currentType != nil && targetType != nil && reflect.ValueOf(current).Comparable() && reflect.ValueOf(target).Comparable() && current == target {
-			return true
-		}
-		if matcher, ok := current.(interface{ Is(error) bool }); ok && matcher.Is(target) {
-			return true
-		}
-	}
-	return false
-}
-
-func safeErrorChain(err error) []string {
-	nodes := safeErrorNodes(err)
-	if len(nodes) > maxErrorChain {
-		nodes = nodes[:maxErrorChain]
-	}
-	chain := make([]string, 0, len(nodes))
-	for _, current := range nodes {
-		name := safeErrorType(current)
-		if name != "" {
-			chain = append(chain, name)
-		}
-	}
-	return chain
-}
-
-func safeErrorType(err error) string {
-	if err == nil {
-		return ""
-	}
-	t := reflect.TypeOf(err)
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	name := t.Name()
-	if name == "" {
-		name = "error"
-	}
-	if path := t.PkgPath(); path != "" {
-		name = path + "." + name
-	}
-	if len(name) > 128 {
-		return "error"
-	}
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && !strings.ContainsRune("_./-", r) {
-			return "error"
-		}
-	}
-	return name
-}
-
-func safeErrorNodes(err error) []error {
-	if err == nil {
-		return nil
-	}
-	queue := []error{err}
-	seen := make(map[error]struct{}, maxErrorNodes)
-	nodes := make([]error, 0, maxErrorNodes)
-	for len(queue) > 0 && len(nodes) < maxErrorNodes {
-		current := queue[0]
-		queue = queue[1:]
-		if current == nil || nilDiagnosticError(current) {
-			continue
-		}
-		if reflect.ValueOf(current).Comparable() {
-			if _, ok := seen[current]; ok {
-				continue
-			}
-			seen[current] = struct{}{}
-		}
-		nodes = append(nodes, current)
-		if joined, ok := current.(interface{ Unwrap() []error }); ok {
-			children := joined.Unwrap()
-			remaining := maxErrorNodes - len(nodes) - len(queue)
-			if remaining > 0 {
-				if len(children) > remaining {
-					children = children[:remaining]
-				}
-				queue = append(queue, children...)
-			}
-		} else if wrapped, ok := current.(interface{ Unwrap() error }); ok {
-			queue = append(queue, wrapped.Unwrap())
-		}
-	}
-	return nodes
 }
 
 func nilDiagnosticError(err error) bool {
@@ -598,4 +357,40 @@ func knownCause(value string) bool {
 	return strings.Contains(" "+knownFaultCauses+" ", " "+value+" ")
 }
 
-const knownFaultCauses = `none internal context_canceled deadline_exceeded dns_not_found dns_timeout dns_temporary dns_failure tls_unknown_authority tls_hostname tls_verification network_timeout network_unreachable not_found permission_denied conflict rate_limited service_unavailable invalid_request upstream_failure connection_refused connection_reset connection_closed broken_pipe end_of_stream truncated_stream address_in_use invalid_argument resource_exhausted system_error postgres_unique_violation postgres_foreign_key postgres_check_violation postgres_serialization postgres_deadlock postgres_lock_unavailable postgres_query_canceled postgres_connection postgres_authentication postgres_error`
+const knownFaultCauses = `none process_panic server_closed internal context_canceled deadline_exceeded dns_not_found dns_timeout dns_temporary dns_failure tls_unknown_authority tls_hostname tls_verification network_timeout network_unreachable not_found permission_denied conflict rate_limited service_unavailable invalid_request upstream_failure connection_refused connection_reset connection_closed broken_pipe end_of_stream truncated_stream address_in_use invalid_argument resource_exhausted system_error postgres_unique_violation postgres_foreign_key postgres_check_violation postgres_serialization postgres_deadlock postgres_lock_unavailable postgres_query_canceled postgres_connection postgres_authentication postgres_error`
+
+// serverProjection is the shared traversal with the server's own causes: PostgreSQL states, TLS and DNS detail.
+func serverProjection(err error) reporting.Projection {
+	return reporting.Project(err, reporting.Options{Classify: []reporting.NodeClassifier{serverCause}})
+}
+
+func serverCause(err error) (string, int, int) {
+	switch value := err.(type) {
+	case interface{ DiagnosticErrno() int }:
+		if number := value.DiagnosticErrno(); number > 0 && number <= 65535 {
+			return "system_error", number, 64
+		}
+	case *net.DNSError:
+		switch {
+		case value.IsNotFound:
+			return "dns_not_found", 0, 50
+		case value.IsTimeout:
+			return "dns_timeout", 0, 50
+		case value.IsTemporary:
+			return "dns_temporary", 0, 50
+		}
+		return "dns_failure", 0, 50
+	case *x509.UnknownAuthorityError:
+		return "tls_unknown_authority", 0, 60
+	case x509.HostnameError:
+		return "tls_hostname", 0, 60
+	case *tls.CertificateVerificationError:
+		return "tls_verification", 0, 60
+	}
+	if stateError, ok := err.(interface{ SQLState() string }); ok {
+		if cause := postgresCause(stateError.SQLState()); cause != "" {
+			return cause, 0, 60
+		}
+	}
+	return "", 0, 0
+}

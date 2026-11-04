@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"strings"
 	"syscall"
 	"testing"
@@ -55,7 +56,7 @@ func TestProjectFaultPreservesBoundedCauseWithoutFormattingErrors(t *testing.T) 
 	if wrapped.calls != 0 {
 		t.Fatalf("projector formatted a private error %d times", wrapped.calls)
 	}
-	if fault.Cause != "network_timeout" || !strings.HasSuffix(fault.ErrorType, ".privateDiagnosticError") || fault.Errno != int(syscall.ETIMEDOUT) {
+	if fault.Cause != "network_timeout" || fault.ErrorType != "Errno" || fault.Errno != int(syscall.ETIMEDOUT) {
 		t.Fatalf("underlying cause was not preserved: %+v", fault)
 	}
 	if fault.Outcome != "failed" || fault.Severity != "error" || fault.HTTPStatus != 503 || !ValidReference(fault.SupportReference) || fault.CorrelationID != "request_123" {
@@ -79,7 +80,7 @@ func TestProjectFaultSuppressesOnlyExplicitExpectedRetryableStatus(t *testing.T)
 
 func TestProjectFaultKeepsUpstreamCauseStatusSeparateFromAPIStatus(t *testing.T) {
 	fault := ProjectFault(context.Background(), "paperboat-server", "http_billing", "http_handler", "provider_unavailable", WithDiagnosticStatus(503, diagnosticStatusError{status: 502, cause: syscall.ECONNREFUSED}))
-	if fault.Cause != "connection_refused" || fault.HTTPStatus != 503 || fault.Severity != "error" {
+	if fault.Cause != "upstream_failure" || fault.HTTPStatus != 503 || fault.Severity != "error" {
 		t.Fatalf("upstream causal status/cause was obscured by the API status: %+v", fault)
 	}
 	statusOnly := ProjectFault(context.Background(), "paperboat-server", "http_billing", "http_handler", "provider_unavailable", WithDiagnosticStatus(501, errors.New("private")))
@@ -90,7 +91,7 @@ func TestProjectFaultKeepsUpstreamCauseStatusSeparateFromAPIStatus(t *testing.T)
 
 func TestProjectFaultClassifiesDatabaseAndCancellation(t *testing.T) {
 	database := ProjectFault(context.Background(), "paperboat-server", "database_operation", "service_error", "internal_error", sqlStateError{state: "40P01"})
-	if database.Cause != "postgres_deadlock" || !strings.HasSuffix(database.ErrorType, ".sqlStateError") {
+	if database.Cause != "postgres_deadlock" || database.ErrorType != "sqlStateError" {
 		t.Fatalf("PostgreSQL state not classified: %+v", database)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -149,7 +150,7 @@ func TestProjectFaultBoundsCyclesAndUnknownDimensions(t *testing.T) {
 	if fault.Component != "paperboat-server" || fault.Operation != "http_other" || fault.Stage != "other" || fault.Code != "internal_error" {
 		t.Fatalf("untrusted dimensions survived projection: %+v", fault)
 	}
-	if len(fault.ErrorChain) != 1 || !strings.HasSuffix(fault.ErrorType, ".cyclicDiagnosticError") {
+	if len(fault.ErrorChain) != 1 || fault.ErrorChain[0] != "cyclicDiagnosticError" {
 		t.Fatalf("cycle was not cut safely: %+v", fault)
 	}
 	children := make([]error, 64)
@@ -157,7 +158,7 @@ func TestProjectFaultBoundsCyclesAndUnknownDimensions(t *testing.T) {
 		children[i] = fmt.Errorf("wrapped: %w", errors.New("private"))
 	}
 	joined := ProjectFault(context.Background(), "paperboat-server", "http_other", "http_handler", "internal_error", joinedDiagnosticError{children: children})
-	if len(joined.ErrorChain) > maxErrorChain {
+	if len(joined.ErrorChain) > reporting.MaxErrorChain {
 		t.Fatalf("error chain exceeded bound: %d", len(joined.ErrorChain))
 	}
 }

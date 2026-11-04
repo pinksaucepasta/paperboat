@@ -2,10 +2,7 @@ package reporting
 
 import (
 	"context"
-	"io"
-	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,7 +10,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -222,7 +218,8 @@ func projectFault(component string, definition Definition, reference string, err
 		Name: serviceName(component, definition.Name), Code: definition.Code, Cause: "internal", ErrorType: "error",
 		Outcome: "failed", SupportReference: reference, CorrelationID: reference,
 	}
-	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = projectError(err)
+	p := Project(err, Options{})
+	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
 	if definition.Outcome != "" {
 		fault.Outcome = definition.Outcome
 		if definition.Outcome == "rejected" {
@@ -231,109 +228,27 @@ func projectFault(component string, definition Definition, reference string, err
 	}
 	if fault.Cause == "context_canceled" {
 		fault.Outcome, fault.Severity = "canceled", "info"
-	} else if fault.HTTPStatus >= http.StatusBadRequest && fault.HTTPStatus < http.StatusInternalServerError {
+	} else if p.Rejected {
 		fault.Outcome, fault.Severity = "rejected", "warning"
 	}
 	return fault
 }
 
-func projectError(err error) (cause, errorType string, errorChain []string, errno, httpStatus int) {
-	cause, errorType = "internal", "error"
-	if r := reflect.TypeOf(err); r != nil {
-		errorType = safeErrorType(r)
-	}
-	remaining := []error{err}
-	seen := make(map[error]bool)
-	priority := 0
-	unresolved := false
-	for count := 0; len(remaining) > 0 && count < 16; count++ {
-		current := remaining[0]
-		remaining = remaining[1:]
-		if current == nil {
-			continue
-		}
-		typ := reflect.TypeOf(current)
-		if typ != nil && typ.Comparable() {
-			if seen[current] {
-				if !sameError(current, context.Canceled) && !sameError(current, context.DeadlineExceeded) {
-					unresolved = true
-				}
-				continue
-			}
-			seen[current] = true
-		}
-		name := safeErrorType(typ)
-		if len(errorChain) < 8 && (len(errorChain) == 0 || errorChain[len(errorChain)-1] != name) {
-			errorChain = append(errorChain, name)
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			unresolved = true
-			continue
-		}
-		classifiedCause, rank := classifyCause(current)
-		if rank > priority {
-			cause, priority = classifiedCause, rank
-			errno, httpStatus = 0, 0
-			if value, ok := current.(syscall.Errno); ok {
-				errno = int(value)
-			}
-			if status, ok := current.(interface{ DiagnosticStatus() int }); ok {
-				value := status.DiagnosticStatus()
-				if value >= http.StatusBadRequest && value <= 599 {
-					httpStatus = value
-				}
-			}
-		}
-		leaf := true
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) > 16-count {
-				unresolved = true
-				children = children[:16-count]
-			}
-			for _, child := range children {
-				if child != nil {
-					leaf = false
-				}
-			}
-			remaining = append(remaining, children...)
-		case interface{ Unwrap() error }:
-			child := wrapped.Unwrap()
-			leaf = child == nil
-			remaining = append(remaining, child)
-		}
-		if leaf && rank == 0 && priority < 2 {
-			cause, priority, errno, httpStatus = "internal", 2, 0, 0
-		}
-	}
-	// A bounded, incomplete or cyclic chain cannot establish normal cancellation.
-	if cause == "context_canceled" && (unresolved || len(remaining) > 0) {
-		cause, errno, httpStatus = "internal", 0, 0
-	}
-	if len(errorChain) > 0 {
-		errorType = errorChain[0]
-	}
-	return cause, errorType, errorChain, errno, httpStatus
-}
-
 // SafeErrorMetadata returns bounded enum/type metadata for a wrapped error; it never evaluates Error.
 func SafeErrorMetadata(err error) (cause, errorType string) {
-	cause, errorType, _, _, _ = projectError(err)
-	return cause, errorType
+	p := Project(err, Options{})
+	return p.Cause, p.ErrorType
 }
 
 // SafeFailureDetails returns bounded enum/type/status metadata for user-facing diagnostics.
 func SafeFailureDetails(err error) (cause, errorType string, httpStatus int) {
-	cause, errorType, _, _, httpStatus = projectError(err)
-	return cause, errorType, httpStatus
+	p := Project(err, Options{})
+	return p.Cause, p.ErrorType, p.HTTPStatus
 }
 
 // SafeFailureCause projects a bounded cause enum for console diagnostics.
 func SafeFailureCause(err error) string {
-	cause, _, _, _, _ := projectError(err)
-	return cause
+	return Project(err, Options{}).Cause
 }
 
 func safeErrorType(typ reflect.Type) string {
@@ -353,83 +268,6 @@ func safeErrorType(typ reflect.Type) string {
 		}
 	}
 	return name
-}
-
-func classifyCause(err error) (string, int) {
-	if _, ok := err.(interface{ processPanic() }); ok {
-		return "process_panic", 95
-	}
-	if sameError(err, context.Canceled) {
-		return "context_canceled", 1
-	}
-	if sameError(err, context.DeadlineExceeded) {
-		return "deadline_exceeded", 90
-	}
-	if status, ok := err.(interface{ DiagnosticStatus() int }); ok {
-		code := status.DiagnosticStatus()
-		switch code {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			return "permission_denied", 88
-		case http.StatusNotFound:
-			return "not_found", 88
-		case http.StatusConflict:
-			return "conflict", 88
-		case http.StatusTooManyRequests:
-			return "rate_limited", 88
-		case http.StatusServiceUnavailable:
-			return "service_unavailable", 88
-		default:
-			if code >= http.StatusBadRequest && code < http.StatusInternalServerError {
-				return "invalid_request", 88
-			}
-			if code >= http.StatusInternalServerError && code <= 599 {
-				return "upstream_failure", 88
-			}
-		}
-	}
-	if cause, rank := domainCause(err); rank > 0 {
-		return cause, rank
-	}
-	if sameError(err, http.ErrServerClosed) {
-		return "server_closed", 81
-	}
-	if sameError(err, os.ErrNotExist) {
-		return "not_found", 65
-	}
-	if sameError(err, os.ErrPermission) {
-		return "permission_denied", 65
-	}
-	if sameError(err, fs.ErrNotExist) {
-		return "not_found", 65
-	}
-	if sameError(err, fs.ErrPermission) {
-		return "permission_denied", 65
-	}
-	if sameError(err, net.ErrClosed) {
-		return "connection_closed", 65
-	}
-	if sameError(err, io.EOF) {
-		return "end_of_stream", 65
-	}
-	if sameError(err, io.ErrUnexpectedEOF) {
-		return "truncated_stream", 65
-	}
-	if errno, ok := err.(syscall.Errno); ok {
-		if cause := ErrnoCause(errno); cause != "system_error" {
-			return cause, 64
-		}
-		return "system_error", 60
-	}
-	if dns, ok := err.(*net.DNSError); ok {
-		if dns.IsTimeout {
-			return "network_timeout", 50
-		}
-		return "dns_failure", 50
-	}
-	if network, ok := err.(net.Error); ok && network.Timeout() {
-		return "network_timeout", 40
-	}
-	return "internal", 0
 }
 
 func sameError(err, target error) bool {
