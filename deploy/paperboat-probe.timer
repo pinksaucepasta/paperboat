@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Paperboat synthetic probe every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+# A run that outlives the minute is skipped, not stacked: the oneshot service cannot start twice.
+
+[Install]
+WantedBy=timers.target

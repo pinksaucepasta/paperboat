@@ -1,0 +1,24 @@
+{
+  "required_status_checks": {
+    "strict": true,
+    "checks": [
+      {"context": "Server checks"},
+      {"context": "Vet and test shared"},
+      {"context": "Vet and test cli"},
+      {"context": "Vet and test relay"},
+      {"context": "Vet and test tunnel"},
+      {"context": "Vet and test helper"},
+      {"context": "Repository policy checks"},
+      {"context": "Console lint and types"}
+    ]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews": true
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
