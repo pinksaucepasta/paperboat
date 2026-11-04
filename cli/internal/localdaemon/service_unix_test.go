@@ -80,7 +80,7 @@ func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 					}
 				}
 			} else {
-				for _, expected := range []string{"launchctl bootstrap gui/501", "launchctl kickstart -k gui/501/" + hostservice.DaemonLabel, "launchctl print gui/501/" + hostservice.DaemonLabel} {
+				for _, expected := range []string{"launchctl bootstrap gui/501", "launchctl kickstart gui/501/" + hostservice.DaemonLabel, "launchctl print gui/501/" + hostservice.DaemonLabel} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("calls missing %q:\n%s", expected, joined)
 					}

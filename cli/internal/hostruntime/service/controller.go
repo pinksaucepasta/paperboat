@@ -246,6 +246,7 @@ func (c LaunchdController) Apply(ctx context.Context, path string, upgrading boo
 // startJob owns launchd's bootout/bootstrap reservation race for both install
 // and transactional restart paths. A successful stale print is not sufficient:
 // the label must still accept kickstart before the job is considered started.
+// Callers that need a new process stop the job first (bootout).
 func (c LaunchdController) startJob(ctx context.Context, path string, bootstrap, verify bool) error {
 	service := c.service()
 	for {
@@ -259,7 +260,10 @@ func (c LaunchdController) startJob(ctx context.Context, path string, bootstrap,
 				}
 			}
 		}
-		err := c.Runner.Run(ctx, "launchctl", "kickstart", "-k", service)
+		// Plain kickstart starts a stopped job and leaves a running one alone, like systemctl start.
+		// A RunAtLoad job is already starting after bootstrap; -k killed it and paid a second
+		// startup on every macOS install, setup and restart (tailscale: load, then start).
+		err := c.Runner.Run(ctx, "launchctl", "kickstart", service)
 		if err == nil {
 			if verify {
 				return c.Runner.Run(ctx, "launchctl", "print", service)

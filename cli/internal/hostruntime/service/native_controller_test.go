@@ -137,9 +137,9 @@ func TestLaunchdNativeLifecycleStopBootsOutAndStartReRegistersDeclaration(t *tes
 		"launchctl bootout system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl print system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl bootout system/com.pinksaucepasta.paperboat.hostd",
-		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.hostd",
+		"launchctl kickstart system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl bootstrap system /Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist",
-		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.hostd",
+		"launchctl kickstart system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl print system/com.pinksaucepasta.paperboat.hostd",
 	}
 	if len(runner.calls) != len(want) {
@@ -163,7 +163,7 @@ func TestLaunchdStartWaitsForThrottledJobToRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"launchctl kickstart -k system/" + HostdLabel,
+		"launchctl kickstart system/" + HostdLabel,
 		"launchctl print system/" + HostdLabel,
 		"launchctl print system/" + HostdLabel,
 	}
@@ -190,12 +190,12 @@ func TestLaunchdStartRetriesReservedLabelAfterStalePrint(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl kickstart gui/501/" + DaemonLabel,
 		"launchctl bootstrap gui/501 " + path,
 		"launchctl print gui/501/" + DaemonLabel,
-		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl kickstart gui/501/" + DaemonLabel,
 		"launchctl bootstrap gui/501 " + path,
-		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl kickstart gui/501/" + DaemonLabel,
 		"launchctl print gui/501/" + DaemonLabel,
 	}
 	if len(runner.calls) != len(want) {
@@ -225,10 +225,10 @@ func TestLaunchdStartRetriesOperationInProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl kickstart gui/501/" + DaemonLabel,
 		"launchctl bootstrap gui/501 " + path,
 		"launchctl print gui/501/" + DaemonLabel,
-		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl kickstart gui/501/" + DaemonLabel,
 		"launchctl print gui/501/" + DaemonLabel,
 	}
 	if len(runner.calls) != len(want) {
@@ -417,5 +417,23 @@ func TestSystemdUserInspectTreatsAbsentUserManagerAsNotRunning(t *testing.T) {
 	runner := &outputCommandRunner{errors: []error{&CommandError{Tool: "systemctl", Output: "Failed to connect to bus: No medium found", Cause: errors.New("exit status 1")}}}
 	if _, err := (SystemdController{Runner: runner, Unit: "paperboat-hostd-u1000.service"}).Inspect(context.Background(), ""); err == nil {
 		t.Fatal("an unreachable system manager was reported as not running")
+	}
+}
+
+// Enable bootstraps a RunAtLoad job, which launchd starts; Start must not kill that fresh process.
+func TestLaunchdEnableThenStartDoesNotRestartTheStartedJob(t *testing.T) {
+	runner := &outputCommandRunner{outputs: []string{"", "", "state = running\nactive count = 1\npid = 42\n"}}
+	controller := LaunchdController{Runner: runner, UID: 501, Label: HostdLabel}
+	path := "/Library/LaunchDaemons/" + HostdLabel + ".plist"
+	if err := controller.Enable(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Start(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range runner.calls {
+		if strings.Join(call, " ") == "launchctl kickstart -k system/"+HostdLabel {
+			t.Fatalf("Start killed the job launchd just started: calls=%v", runner.calls)
+		}
 	}
 }
