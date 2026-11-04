@@ -24,11 +24,13 @@ import subprocess
 import sys
 import time
 
+from remote_timeout import timeout_words
+
 
 
 def sh(prefix, pb, args, timeout=150, stdin=None):
     """Runs pb on one side: prefix is the ssh/docker command line, quoted once for its remote shell."""
-    remote = ' '.join(shlex.quote(x) for x in ['timeout', '120', pb] + list(args))
+    remote = ' '.join(shlex.quote(x) for x in timeout_words(prefix) + [pb] + list(args))
     done = subprocess.run(shlex.split(prefix) + [remote], capture_output=True, text=True, timeout=timeout, input=stdin)
     return done.returncode, done.stdout, done.stderr
 

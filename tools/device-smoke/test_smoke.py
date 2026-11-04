@@ -1115,5 +1115,15 @@ print(json.dumps({'version':'1','environment':environment,
 sys.exit(7 if action=='delete' and fault=='failed_delete' else 0)
 '''
 
+class RemoteTimeout(unittest.TestCase):
+    def test_macos_has_no_timeout_words_and_linux_keeps_them(self):
+        import remote_timeout
+        for system, words in (('Darwin\n', []), ('Linux\n', ['timeout', '120'])):
+            remote_timeout.timeout_words.cache_clear()
+            done = SimpleNamespace(returncode=0, stdout=system)
+            with patch('remote_timeout.subprocess.run', return_value=done):
+                self.assertEqual(remote_timeout.timeout_words('ssh host'), words)
+
+
 if __name__ == '__main__':
     unittest.main()
