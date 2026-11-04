@@ -38,7 +38,7 @@ export function PolicyEditor({
   }, [text])
   const validation = useQuery({
     queryKey: ["policy-validate", workspace, checked],
-    queryFn: () => validatePolicy(workspace, checked),
+    queryFn: ({ signal }) => validatePolicy(workspace, checked, signal),
     staleTime: Infinity,
     retry: false,
   })
@@ -88,7 +88,7 @@ export function PolicyEditor({
           workspace={workspace}
           title="Review changes"
           verb="Save"
-          review={() => validatePolicy(workspace, text)}
+          review={(signal) => validatePolicy(workspace, text, signal)}
           run={(fields) => savePolicy(workspace, { policy: text, expected_version: policy.version, ...fields })}
           onClose={() => setReviewing(false)}
           onDone={() => {

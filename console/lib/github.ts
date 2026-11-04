@@ -43,8 +43,13 @@ export const githubStatusQuery = queryOptions({
 const json = { "content-type": "application/json" }
 const linkPath = (id: string) => `github/native-links/${encodeURIComponent(id)}`
 
-export const reviewLink = (id: string, token: string) =>
-  api<GitHubLinkReview>(`${linkPath(id)}/review`, { method: "POST", headers: json, body: JSON.stringify({ token }) })
+export const reviewLink = (id: string, token: string, signal?: AbortSignal) =>
+  api<GitHubLinkReview>(`${linkPath(id)}/review`, {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ token }),
+    signal,
+  })
 
 /** One use: returns GitHub's authorization page for this request. */
 export const approveLink = (id: string, token: string) =>
@@ -80,7 +85,11 @@ export async function finishConnect(code: string, state: string) {
     error?: { code?: string; message?: string }
   } | null
   if (!response.ok || !body?.data) {
-    throw new ApiError(response.status, body?.error?.code ?? "provider_unavailable", body?.error?.message ?? "GitHub is unavailable.")
+    throw new ApiError(
+      response.status,
+      body?.error?.code ?? "provider_unavailable",
+      body?.error?.message ?? "GitHub is unavailable.",
+    )
   }
   return body.data
 }

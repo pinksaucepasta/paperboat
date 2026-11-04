@@ -45,7 +45,11 @@ function Missing() {
 
 function Review({ link, token }: { link: string; token: string }) {
   const time = useTimeFormat()
-  const review = useQuery({ queryKey: ["github-link", link], queryFn: () => reviewLink(link, token), retry: false })
+  const review = useQuery({
+    queryKey: ["github-link", link],
+    queryFn: ({ signal }) => reviewLink(link, token, signal),
+    retry: false,
+  })
   const approve = useMutation({
     mutationFn: () => approveLink(link, token),
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
@@ -85,10 +89,14 @@ function Review({ link, token }: { link: string; token: string }) {
         }
       />
       <p className="text-sm text-white/75">
-        Paperboat keeps your config files in a private GitHub repository you choose. Approve only if you just ran this from
-        your terminal.
+        Paperboat keeps your config files in a private GitHub repository you choose. Approve only if you just ran this
+        from your terminal.
       </p>
-      {failed && <p className="text-sm text-white">{failed instanceof ApiError ? (githubErrors[failed.code] ?? failed.message) : failed.message}</p>}
+      {failed && (
+        <p className="text-sm text-white">
+          {failed instanceof ApiError ? (githubErrors[failed.code] ?? failed.message) : failed.message}
+        </p>
+      )}
       <div className="flex gap-3">
         <Button
           size="lg"
@@ -117,7 +125,9 @@ function Problem({ error }: { error: Error }) {
   return (
     <Outcome
       icon={<XCircleIcon className="size-8 text-white" />}
-      title={expired ? "This link expired" : code === "github_link_used" ? "Already done" : "Couldn’t open this request"}
+      title={
+        expired ? "This link expired" : code === "github_link_used" ? "Already done" : "Couldn’t open this request"
+      }
     >
       {githubErrors[code] ?? error.message} {code === "github_link_other_account" ? "" : startAgain}
     </Outcome>
@@ -176,12 +186,16 @@ export function GitHubCallback() {
     retry: false,
     staleTime: Infinity,
   })
-  const errorCode = declined ?? (finish.error instanceof ApiError ? finish.error.code : finish.error ? "provider_unavailable" : "")
+  const errorCode =
+    declined ?? (finish.error instanceof ApiError ? finish.error.code : finish.error ? "provider_unavailable" : "")
   const back = finish.data?.return_to
   const returnTo = back && back.startsWith("/") && !back.startsWith("//") ? back : "/config"
   return (
     <BrandScreen>
-      <div className="flex flex-col items-center gap-6" data-github-callback={finish.data ? "connected" : errorCode ? "error" : "pending"}>
+      <div
+        className="flex flex-col items-center gap-6"
+        data-github-callback={finish.data ? "connected" : errorCode ? "error" : "pending"}
+      >
         {finish.data ? (
           <Outcome icon={<CheckCircleIcon className="size-8 text-white" />} title="GitHub connected">
             Connected as <span className="font-medium text-white">{finish.data.login ?? "your GitHub account"}</span>.

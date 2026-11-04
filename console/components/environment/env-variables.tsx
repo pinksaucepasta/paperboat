@@ -18,7 +18,7 @@ const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 export function EnvVariables({ scope }: { scope: EnvScope }) {
   const client = useQueryClient()
   const key = ["env-names", scope]
-  const names = useQuery({ queryKey: key, queryFn: () => listNames(scope), staleTime: 0 })
+  const names = useQuery({ queryKey: key, queryFn: ({ signal }) => listNames(scope, signal), staleTime: 0 })
   const [editing, setEditing] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const refresh = () => client.invalidateQueries({ queryKey: key })

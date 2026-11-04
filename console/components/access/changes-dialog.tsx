@@ -27,7 +27,7 @@ export function ChangesDialog({
   title: string
   verb: string
   /** The changes known before running (the editor validates the draft); restore learns them from a 412. */
-  review?: () => Promise<Validation>
+  review?: (signal: AbortSignal) => Promise<Validation>
   run: (fields: { message?: string; confirm?: string }) => Promise<Policy>
   onClose: () => void
   onDone: () => void
@@ -37,7 +37,7 @@ export function ChangesDialog({
   const [pending, setPending] = useState<{ changes: AccessChange[]; confirm: string } | null>(null)
   const reviewed = useQuery({
     queryKey: ["policy-review", workspace, title],
-    queryFn: () => review!(),
+    queryFn: ({ signal }) => review!(signal),
     enabled: Boolean(review),
     gcTime: 0,
     retry: false,
@@ -144,7 +144,9 @@ export function ChangeList({ changes }: { changes: AccessChange[] }) {
             <span className="font-medium">{change.subject}</span>{" "}
             <span className="text-muted-foreground">{actionLabels[change.action] ?? change.action} on</span>{" "}
             <span className="font-medium">{change.target}</span>
-            {change.ports && <span className="text-muted-foreground"> · ports {change.ports.replaceAll(",", ", ")}</span>}
+            {change.ports && (
+              <span className="text-muted-foreground"> · ports {change.ports.replaceAll(",", ", ")}</span>
+            )}
           </span>
         </li>
       ))}

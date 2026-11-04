@@ -98,8 +98,8 @@ export async function unlockVault(password: string): Promise<void> {
   await vaultCrypto({ action: "unlock", vault, password })
 }
 
-async function currentVault(): Promise<Vault> {
-  const vault = await readVault()
+async function currentVault(signal?: AbortSignal): Promise<Vault> {
+  const vault = await readVault(signal)
   if (!vault) throw new Error("No ENV vault exists for this account.")
   return vault
 }
@@ -116,9 +116,9 @@ function sameScope(
   )
 }
 
-async function readScope(scope: EnvScope): Promise<Scope | null> {
+async function readScope(scope: EnvScope, signal?: AbortSignal): Promise<Scope | null> {
   try {
-    const anchor = await api<Scope>(`${scopePath(scope)}?${query(scope)}`)
+    const anchor = await api<Scope>(`${scopePath(scope)}?${query(scope)}`, { signal })
     if (!sameScope(scope, anchor)) throw new Error("The encrypted scope did not match the one requested.")
     return anchor
   } catch (error) {
@@ -127,7 +127,7 @@ async function readScope(scope: EnvScope): Promise<Scope | null> {
   }
 }
 
-async function readRecords(scope: EnvScope): Promise<EnvRecord[]> {
+async function readRecords(scope: EnvScope, signal?: AbortSignal): Promise<EnvRecord[]> {
   const records: EnvRecord[] = []
   const seen = new Set<string>()
   let through: number | undefined
@@ -136,7 +136,7 @@ async function readRecords(scope: EnvScope): Promise<EnvRecord[]> {
     const params = query(scope, { after_sequence: "0", limit: "200" })
     if (through !== undefined) params.set("through_sequence", String(through))
     if (cursor) params.set("cursor", cursor)
-    const page = await api<RecordsPage>(`${scopePath(scope)}/records?${params}`)
+    const page = await api<RecordsPage>(`${scopePath(scope)}/records?${params}`, { signal })
     if (page.records.length > 200 || (through !== undefined && page.sequence !== through)) {
       throw new Error("ENV record paging was invalid. Nothing is shown.")
     }
@@ -158,11 +158,11 @@ async function readRecords(scope: EnvScope): Promise<EnvRecord[]> {
 }
 
 /** Variable names in a scope, sorted. Needs the vault unlocked; values are never read out. */
-export async function listNames(scope: EnvScope): Promise<string[]> {
-  const vault = await currentVault()
-  if (!(await readScope(scope))) return []
+export async function listNames(scope: EnvScope, signal?: AbortSignal): Promise<string[]> {
+  const vault = await currentVault(signal)
+  if (!(await readScope(scope, signal))) return []
   const names: string[] = []
-  for (const record of await readRecords(scope)) {
+  for (const record of await readRecords(scope, signal)) {
     const read = await vaultCrypto<{ name: string; deleted: boolean }>({ action: "record-name", vault, record })
     if (read.deleted !== record.deleted) throw new Error("An ENV record did not match its encrypted contents.")
     if (!read.deleted) names.push(read.name)

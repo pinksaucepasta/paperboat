@@ -6,6 +6,7 @@ mock.module("next/server", () => ({ connection: async () => {} }))
 process.env.PAPERBOAT_SERVER_URL = "http://control.example.test"
 const { prefetchMachinesPage } = await import("@/lib/server/prefetch")
 const { api, machinesQuery } = await import("@/lib/api")
+const { validatePolicy } = await import("@/lib/policy")
 const { cursorPage } = await import("@/lib/cursor-pages")
 
 const realFetch = globalThis.fetch
@@ -59,6 +60,14 @@ describe("a hung endpoint", () => {
   test("a cursor-paged list stops when its query is cancelled", async () => {
     const caller = new AbortController()
     const settled = cursorPage("machines", { workspace: "personal" }, 1, caller.signal).catch((e: Error) => e.name)
+    caller.abort()
+    expect(await settled).toBe("AbortError")
+    expect(aborted).toHaveLength(1)
+  })
+
+  test("a POST-style read (policy validation) stops when its query is cancelled", async () => {
+    const caller = new AbortController()
+    const settled = validatePolicy("personal", "{}", caller.signal).catch((e: Error) => e.name)
     caller.abort()
     expect(await settled).toBe("AbortError")
     expect(aborted).toHaveLength(1)

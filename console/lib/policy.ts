@@ -205,10 +205,11 @@ export const policyVersionsQuery = (workspace: string) =>
     enabled: Boolean(workspace),
   })
 
-export function validatePolicy(workspace: string, policy: string) {
+export function validatePolicy(workspace: string, policy: string, signal?: AbortSignal) {
   return call<Validation>("Checking the policy", `${ws(workspace)}/policy/validate`, {
     method: "POST",
     json: { policy },
+    signal,
   })
 }
 

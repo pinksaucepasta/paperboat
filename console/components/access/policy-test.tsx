@@ -71,7 +71,7 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
   })
   const tests = useQuery({
     queryKey: ["policy-validate", workspace, text],
-    queryFn: () => validatePolicy(workspace, text),
+    queryFn: ({ signal }) => validatePolicy(workspace, text, signal),
     staleTime: Infinity,
     retry: false,
   })
