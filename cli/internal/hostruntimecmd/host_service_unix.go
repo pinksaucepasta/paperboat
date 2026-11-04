@@ -10,9 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -38,10 +38,8 @@ func ExecuteHostService(ctx context.Context, args []string, stderr io.Writer) in
 	if err := notifier.Starting(); err != nil {
 		return finishRuntimeCommand(ctx, "daemon", stderr, err, 1)
 	}
-	stateRoot := "/var/lib/paperboat"
-	if runtime.GOOS == "darwin" {
-		stateRoot = "/Library/Application Support/Paperboat"
-	}
+	// Uninstall restores sleep from, and removes, this account's own state (hostinstall.RuntimeStateDir).
+	stateRoot := hostinstall.RuntimeStateDir(*uid)
 	applier := hostservice.NewPlatformApplier(filepath.Join(stateRoot, "power-baseline.json"))
 	server, err := hostservice.New(hostservice.Config{
 		SocketPath: hostservice.DefaultSocketPath(), StatePath: filepath.Join(stateRoot, "availability-policy.json"),

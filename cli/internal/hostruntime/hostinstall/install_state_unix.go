@@ -90,6 +90,11 @@ func platformPaths(uid int) installPaths {
 	return p
 }
 
+// RuntimeStateDir is the account's root-owned runtime state directory. The host
+// service keeps its availability policy and power baseline here, beside hostd's
+// token, so uninstall restores and removes exactly what it wrote.
+func RuntimeStateDir(uid int) string { return platformPaths(uid).runtimeState }
+
 // LoadEnrolledOwner returns the committed, root-protected installation
 // identity for the requested Unix account. The privileged updater uses this
 // to launch owner-scoped readiness probes without trusting caller input.

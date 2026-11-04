@@ -88,7 +88,8 @@ func (a *platformApplier) captureBaseline(ctx context.Context) error {
 	}
 	body, _ := json.Marshal(pmsetBaseline{Schema: ProtocolV1, Values: values})
 	directory := filepath.Dir(a.baselinePath)
-	if err := secureDirectory(directory, 0o700); err != nil {
+	// Shared with hostd's token like the policy file (server.go); the baseline itself is 0600.
+	if err := secureDirectory(directory, 0o755); err != nil {
 		return err
 	}
 	file, err := os.OpenFile(a.baselinePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
