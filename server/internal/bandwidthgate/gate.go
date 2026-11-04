@@ -27,7 +27,8 @@ const (
 	// answer: an account known to be over its allowance stays refused while billing
 	// is slow (fail closed), but only for a bounded time without a fresh answer.
 	knownDeniedHold = 2 * time.Minute
-	cacheMax        = 4096
+	// cacheMax bounds the per-account cache; one entry is about 100 bytes.
+	cacheMax = 65536
 	// backgroundTimeout bounds the lookup a failed hot-path answer starts, so a database too
 	// slow for the hot path still settles the account's answer within seconds.
 	backgroundTimeout = 5 * time.Second
@@ -93,12 +94,35 @@ func (g *Gate) Denied(ctx context.Context, account string, at time.Time) bool {
 		g.refreshInBackground(account, at)
 	}
 	g.mu.Lock()
-	if g.cache == nil || len(g.cache) >= cacheMax {
-		g.cache = make(map[string]entry)
-	}
-	g.cache[account] = entry{denied: denied, until: now.Add(ttl), deniedAt: deniedAt}
+	g.put(account, entry{denied: denied, until: now.Add(ttl), deniedAt: deniedAt}, now)
 	g.mu.Unlock()
 	return denied
+}
+
+// put stores an entry with g.mu held. A full cache drops expired entries, then entries never
+// denied, then any entry: it is never wiped, so a recent denial survives other accounts' churn.
+func (g *Gate) put(account string, e entry, now time.Time) {
+	if g.cache == nil {
+		g.cache = make(map[string]entry)
+	}
+	if _, ok := g.cache[account]; !ok && len(g.cache) >= cacheMax {
+		for _, pass := range []func(entry) bool{
+			func(o entry) bool { return !now.Before(o.until) && now.Sub(o.deniedAt) >= knownDeniedHold },
+			func(o entry) bool { return now.Sub(o.deniedAt) >= knownDeniedHold },
+			func(entry) bool { return true },
+		} {
+			for k, o := range g.cache {
+				if pass(o) {
+					delete(g.cache, k)
+					break
+				}
+			}
+			if len(g.cache) < cacheMax {
+				break
+			}
+		}
+	}
+	g.cache[account] = e
 }
 
 // refreshInBackground repeats a failed lookup without the hot path's deadline and caches its
@@ -129,10 +153,7 @@ func (g *Gate) refreshInBackground(account string, at time.Time) {
 		if denied {
 			next.deniedAt = now
 		}
-		if g.cache == nil || len(g.cache) >= cacheMax {
-			g.cache = make(map[string]entry)
-		}
-		g.cache[account] = next
+		g.put(account, next, now)
 	}()
 }
 
