@@ -188,10 +188,26 @@ func runFreshEnrollmentCleanup(command *cobra.Command) error {
 			}
 			return managedssh.UninstallManagedIdentityPublicKey(home, uint32(os.Geteuid()))
 		}, func() error { return freshEnrollmentRuntimePurge(command) },
+		func() error { return discardUnfinishedEnrollment(command) },
 		func() error { return purgeUserPaperboatState(command, preservedInboxes) })
 }
 
-func performFreshEnrollmentCleanup(inboxErr error, removeDaemon, removeSSHConfig, removeSSHIdentity, purgeRuntime, purgeState func() error) error {
+// discardUnfinishedEnrollment removes the pairing journal that makes pb pair
+// demand a reset. Only pairing reads it (the runtime never does), so it goes
+// even when the system runtime could not be removed; otherwise a failed purge
+// leaves pair and reset pointing at each other.
+func discardUnfinishedEnrollment(command *cobra.Command) error {
+	root, _ := command.Flags().GetString("state-root")
+	if root == "" {
+		var err error
+		if root, err = helperconfig.DefaultStateRoot(os.Getenv); err != nil {
+			return err
+		}
+	}
+	return bootstrap.ClearResume(root)
+}
+
+func performFreshEnrollmentCleanup(inboxErr error, removeDaemon, removeSSHConfig, removeSSHIdentity, purgeRuntime, discardEnrollment, purgeState func() error) error {
 	daemonStopped := false
 	runtimePurged := false
 	cleanupErr := performUninstallCleanup([]uninstallCleanupStep{
@@ -200,6 +216,7 @@ func performFreshEnrollmentCleanup(inboxErr error, removeDaemon, removeSSHConfig
 		{name: "remove managed OpenSSH configuration", run: removeSSHConfig},
 		{name: "remove managed SSH public identity", run: removeSSHIdentity},
 		{name: "remove system Paperboat runtime", run: func() error { err := purgeRuntime(); runtimePurged = err == nil; return err }},
+		{name: "discard unfinished enrollment", run: discardEnrollment},
 		{name: "remove user Paperboat state", run: func() error {
 			if inboxErr != nil {
 				return errors.New("Paperboat Inbox location could not be proven; state removal was skipped")

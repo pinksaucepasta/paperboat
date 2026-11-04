@@ -100,7 +100,7 @@ func (e uninstallStepFailure) Error() string { return e.name + ": Paperboat clea
 func (e uninstallStepFailure) Unwrap() error { return e.err }
 
 func uninstallFailureStepNames(err error) []string {
-	allowed := map[string]bool{"remove installed CLI manuals": true, "resolve Paperboat Inbox preservation": true, "stop local daemon": true, "remove managed OpenSSH configuration": true, "remove managed SSH public identity": true, "remove system Paperboat runtime": true, "remove installed Paperboat product": true, "remove user Paperboat state": true}
+	allowed := map[string]bool{"remove installed CLI manuals": true, "resolve Paperboat Inbox preservation": true, "stop local daemon": true, "remove managed OpenSSH configuration": true, "remove managed SSH public identity": true, "remove system Paperboat runtime": true, "discard unfinished enrollment": true, "remove installed Paperboat product": true, "remove user Paperboat state": true}
 	seen := make(map[string]bool)
 	var names []string
 	remaining := []error{err}

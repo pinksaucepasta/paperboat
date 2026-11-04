@@ -191,6 +191,7 @@ func TestFreshEnrollmentCleanupRetainsStateAfterServiceFailure(t *testing.T) {
 		func() error { return nil },
 		func() error { return nil },
 		func() error { runtimeAttempted = true; return nil },
+		func() error { return nil },
 		func() error { statePurged = true; return nil },
 	)
 	if err == nil || !strings.Contains(err.Error(), "stop local daemon") || !strings.Contains(err.Error(), "remove user Paperboat state") {
@@ -201,6 +202,46 @@ func TestFreshEnrollmentCleanupRetainsStateAfterServiceFailure(t *testing.T) {
 	}
 	if statePurged {
 		t.Fatal("credentials/state were deleted after unresolved daemon failure")
+	}
+}
+
+// F1-09 (pbmac): a failed re-pair left an unfinished enrollment; reset's root
+// purge failed, so the journal was retained and pb pair kept demanding pb reset.
+func TestFreshEnrollmentResetDiscardsTheUnfinishedEnrollmentWhenTheRuntimePurgeFails(t *testing.T) {
+	root := t.TempDir()
+	record := bootstrap.NewResumeRecord("https://api.example.test", "public-key", "OLD-ENROLLMENT-TOKEN-0123456", "machine", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
+	if err := bootstrap.SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	command := freshEnrollmentResetCommand()
+	if err := command.Flags().Set("state-root", root); err != nil {
+		t.Fatal(err)
+	}
+	statePurged := false
+	err := performFreshEnrollmentCleanup(nil,
+		func() error { return nil },
+		func() error { return nil },
+		func() error { return nil },
+		func() error { return errors.New("host runtime command failed") },
+		func() error { return discardUnfinishedEnrollment(command) },
+		func() error { statePurged = true; return nil },
+	)
+	if err == nil || !strings.Contains(err.Error(), "remove system Paperboat runtime") || strings.Contains(err.Error(), "discard unfinished enrollment") {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if statePurged {
+		t.Fatal("credentials were deleted although the runtime purge failed")
+	}
+	if _, err := os.Lstat(bootstrap.ResumePath(root)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unfinished enrollment survived reset: %v", err)
+	}
+	// The next pair with a new token starts fresh instead of asking for pb reset again.
+	if matches, err := bootstrap.ResumeMatchesEnrollmentToken(root, "NEW-ENROLLMENT-TOKEN-0123456"); err != nil || matches {
+		t.Fatalf("resume after reset: matches=%v err=%v", matches, err)
+	}
+	// A second reset over the already clean state is a no-op.
+	if err := discardUnfinishedEnrollment(command); err != nil {
+		t.Fatal(err)
 	}
 }
 
