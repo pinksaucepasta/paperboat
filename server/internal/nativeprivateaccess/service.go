@@ -7,6 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"net"
 	"reflect"
@@ -75,8 +76,9 @@ func (s Service) Issue(ctx context.Context, request Request) (grant Grant, retur
 		}
 		outcome := "authorized"
 		if returnErr != nil {
+			var limit *planlimits.SDKLimitError
 			outcome = "uncertain"
-			if errors.Is(returnErr, ErrDenied) || errors.Is(returnErr, ErrInvalid) || errors.Is(returnErr, machineservices.ErrTeamPrivateAccessOff) {
+			if errors.As(returnErr, &limit) || errors.Is(returnErr, ErrDenied) || errors.Is(returnErr, ErrInvalid) || errors.Is(returnErr, machineservices.ErrTeamPrivateAccessOff) {
 				outcome = "denied"
 			}
 		}

@@ -453,3 +453,27 @@ func TestCertificatesEnvironmentReferencesOverlayWithoutSecretFields(t *testing.
 		t.Fatal("certificate configuration unexpectedly exposed a secret value")
 	}
 }
+
+func TestValidationRejectsUnboundedSDKLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name, field string
+		change      func(*Config)
+	}{
+		{"session rate", "rate_limits", func(c *Config) { c.RateLimits.SDKSessionPerMinute = 0 }},
+		{"session burst", "rate_limits", func(c *Config) { c.RateLimits.SDKSessionBurst = 0 }},
+		{"descriptor rate", "rate_limits", func(c *Config) { c.RateLimits.SDKDescriptorPerMinute = 0 }},
+		{"descriptor burst", "rate_limits", func(c *Config) { c.RateLimits.SDKDescriptorBurst = 0 }},
+		{"token sessions", "billing.limits.sdk", func(c *Config) { c.Billing.Limits.SDK.SessionsPerToken = 0 }},
+		{"account sessions", "billing.limits.sdk", func(c *Config) { c.Billing.Limits.SDK.SessionsPerAccount = 1 }},
+		{"token operations", "billing.limits.sdk", func(c *Config) { c.Billing.Limits.SDK.OperationsPerToken = 0 }},
+		{"account operations", "billing.limits.sdk", func(c *Config) { c.Billing.Limits.SDK.OperationsPerAccount = 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			tc.change(&c)
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.field) {
+				t.Fatal("unbounded SDK configuration accepted")
+			}
+		})
+	}
+}

@@ -3410,6 +3410,10 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-04 | SDK F24-09 | Lane R: POST /v1/helper-trust/revocations now requires {"active_jtis":[]} (up to 1024 live watched credential IDs, including expired admissions); proof signs body, server filters exact environment and refuses overflow; report sdk_operation_ended to release reservations and enforce one active operation per signed operation/session.
+SDK lane: token-backed descriptors omit source_machine_id and select the token workspace; 429 code sdk_limit_reached carries Retry-After and details.outcome=not_started; TestSDKRetryAfterDoesNotRestartExec remains yours. Server tests cover rates/counts for exec, files and private access.
+
+
 2026-11-04 | SDK F24-08 | Lane R: POST /v1/machines/{id}/audit-backlog with sdk_operation_ended, capability exec/private_access/file_transfer, peer account/session, operation_id, session_id=access_session_id, outcome succeeded/failed/canceled/uncertain and occurred_at; destination proof, exact persisted binding and event idempotency required, no payloads. | This releases the operation reservation and records its token/workspace attribution.
 
 

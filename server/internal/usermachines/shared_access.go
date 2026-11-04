@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -236,6 +237,13 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 				in.TeamID = sql.NullString{String: authorizedTeams[0], Valid: true}
 			default:
 				return ErrAmbiguousTeamAccess
+			}
+		}
+		if token, ok := auth.APITokenFromContext(ctx); ok {
+			if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
+				return tx.QueryRow(ctx, q, args...)
+			}, in.UserID, token, "operations"); err != nil {
+				return err
 			}
 		}
 		in.CredentialKind = string(kind)

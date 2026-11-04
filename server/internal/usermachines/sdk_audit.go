@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -15,8 +16,9 @@ import (
 func (s *Service) recordSDKAuthorization(ctx context.Context, account, session, target, operation, capability string, err error) error {
 	outcome := "authorized"
 	if err != nil {
+		var limit *planlimits.SDKLimitError
 		outcome = "uncertain"
-		if errors.Is(err, auth.ErrOutsideTokenScope) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransferIntent) || errors.Is(err, ErrExecOperationInvalid) || errors.Is(err, workspace.ErrForbidden) || errors.Is(err, teaminbox.ErrPending) || errors.Is(err, ErrMachineCapabilityUnavailable) || errors.Is(err, ErrMachineOffline) {
+		if errors.As(err, &limit) || errors.Is(err, auth.ErrOutsideTokenScope) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidTransferIntent) || errors.Is(err, ErrExecOperationInvalid) || errors.Is(err, workspace.ErrForbidden) || errors.Is(err, teaminbox.ErrPending) || errors.Is(err, ErrMachineCapabilityUnavailable) || errors.Is(err, ErrMachineOffline) {
 			outcome = "denied"
 		}
 	}

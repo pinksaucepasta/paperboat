@@ -174,6 +174,10 @@ type APITokens struct {
 // RateLimits bound sign-in and credential attempts per client network, in memory, before any
 // database work (PLAN F21-14).
 type RateLimits struct {
+	SDKSessionPerMinute    int `json:"sdk_session_per_minute"`
+	SDKSessionBurst        int `json:"sdk_session_burst"`
+	SDKDescriptorPerMinute int `json:"sdk_descriptor_per_minute"`
+	SDKDescriptorBurst     int `json:"sdk_descriptor_burst"`
 	// SignInPerMinute/SignInBurst: browser, CLI device, API-token and operator sign-in requests.
 	SignInPerMinute int `json:"sign_in_per_minute"`
 	SignInBurst     int `json:"sign_in_burst"`
@@ -211,6 +215,7 @@ type PlanLimit struct {
 // PlanLimits counts only live things (revoked, deleted, closed or expired ones never count);
 // existing ones keep working when a workspace is over, only a new one is refused.
 type PlanLimits struct {
+	SDK      SDKLimits `json:"sdk"`
 	Machines PlanLimit `json:"machines"`
 	// Publications are previews and tunnels together, concurrently active.
 	Publications PlanLimit `json:"publications"`
@@ -221,6 +226,18 @@ type PlanLimits struct {
 	ViewersPerSharedTerminal int `json:"viewers_per_shared_terminal"`
 	// PublicTCP bounds concurrent public raw-TCP tunnels (user decision 2026-10-27).
 	PublicTCP PublicTCPLimit `json:"public_tcp"`
+}
+
+// SDKLimits counts live token sessions and outstanding operation reservations per creator and token.
+type SDKLimits struct {
+	SessionsPerToken     int `json:"sessions_per_token"`
+	SessionsPerAccount   int `json:"sessions_per_account"`
+	OperationsPerToken   int `json:"operations_per_token"`
+	OperationsPerAccount int `json:"operations_per_account"`
+}
+
+func (l SDKLimits) valid() bool {
+	return l.SessionsPerToken > 0 && l.SessionsPerAccount >= l.SessionsPerToken && l.OperationsPerToken > 0 && l.OperationsPerAccount >= l.OperationsPerToken
 }
 
 // PublicTCPLimit is the concurrent public raw-TCP tunnel limit: Free and Pro per personal workspace, a team
@@ -518,9 +535,9 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		RateLimits:        RateLimits{SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, MaxClients: 100000},
+		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -673,7 +690,7 @@ func (c Config) Validate() error {
 	if t := c.APITokens; t.MaxLifetimeDays < 1 || t.DefaultLifetimeDays < 1 || t.DefaultLifetimeDays > t.MaxLifetimeDays || t.MaxPerMember < 1 || t.RetrySeconds < 60 || t.RetrySeconds > 3600 {
 		errs = append(errs, fmt.Errorf("api_tokens limits must be positive, default_lifetime_days at most max_lifetime_days and retry_seconds between 60 and 3600"))
 	}
-	if l := c.RateLimits; l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.MaxClients < 1000 {
+	if l := c.RateLimits; l.SDKSessionPerMinute < 1 || l.SDKSessionBurst < 1 || l.SDKDescriptorPerMinute < 1 || l.SDKDescriptorBurst < 1 || l.SignInPerMinute < 1 || l.SignInBurst < 1 || l.TokenFailuresPerMinute < 1 || l.TokenFailuresBurst < 1 || l.MachinePeerNetworkConfigPerMinute < 1 || l.MachinePeerNetworkConfigBurst < 1 || l.MaxClients < 1000 {
 		errs = append(errs, errors.New("rate_limits must be positive and max_clients at least 1000"))
 	}
 	if c.Billing.TeamTrialDays < 0 || c.Billing.TeamTrialDays > 730 {
@@ -687,6 +704,9 @@ func (c Config) Validate() error {
 	}
 	if (c.Billing.PersonalAllowanceBytes != nil && *c.Billing.PersonalAllowanceBytes < 0) || (c.Billing.TeamAllowanceBytes != nil && *c.Billing.TeamAllowanceBytes < 0) {
 		errs = append(errs, fmt.Errorf("configured billing allowances must be nonnegative"))
+	}
+	if !c.Billing.Limits.SDK.valid() {
+		errs = append(errs, fmt.Errorf("billing.limits.sdk: positive token limits and account limits at least as large are required"))
 	}
 	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.PublicTCP.Free < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
 		errs = append(errs, fmt.Errorf("billing.limits: each plan limit needs free > 0, pro >= free and team_ceiling >= pro, and viewers_per_shared_terminal > 0"))

@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
@@ -63,6 +64,7 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	handler := NewRouter(Options{Config: config.Default(), Auth: auth.NewService(store, writer, nil, []string{"test-api-token-key"}, false),
 		DeviceAuth: auth.NewDeviceService(store, writer, config.Default().CLIAuth, []string{"test-api-token-session-key"}),
 		Workspaces: workspace.New(store), APITokens: tokens, Favorites: favorites.NewService(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	lastRetryAfter := ""
 	do := func(method, path, bearer, body string) (int, map[string]any) {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -70,6 +72,7 @@ func TestAPITokenBearerRequests(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
+		lastRetryAfter = rec.Header().Get("Retry-After")
 		var out map[string]any
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
 		// Successful responses use the server's data envelope, as every client expects.
@@ -140,6 +143,17 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if status, out = do(http.MethodPost, "/v1/auth/api-token-sessions", ownerSession, `{"client_label":"x","device_type":"server","os":"linux"}`); status != http.StatusUnauthorized || code(out) != "api_token_required" {
 		t.Fatalf("a session cannot start another session = %d %v", status, out)
 	}
+	// SDK throttling reaches the real authenticated HTTP boundary with a typed retry response.
+	rates := config.Default().RateLimits
+	rates.SDKSessionPerMinute, rates.SDKSessionBurst = 1, 1
+	planlimits.ConfigureSDKRates(rates)
+	t.Cleanup(func() { planlimits.ConfigureSDKRates(config.Default().RateLimits) })
+	_ = session(ownerSecret)
+	status, out = do(http.MethodPost, "/v1/auth/api-token-sessions", ownerSecret, `{"client_label":"sdk limited","device_type":"container","os":"linux"}`)
+	if status != http.StatusTooManyRequests || code(out) != "sdk_limit_reached" || lastRetryAfter == "" {
+		t.Fatalf("SDK session throttle: status=%d code=%s retry-after=%s", status, code(out), lastRetryAfter)
+	}
+	planlimits.ConfigureSDKRates(config.Default().RateLimits)
 	// No token, nor a session made from one, can mint a token: it could be wider or outlive it.
 	for _, c := range []struct{ name, bearer, code string }{
 		{"scoped token", secret, "outside_token_scope"},

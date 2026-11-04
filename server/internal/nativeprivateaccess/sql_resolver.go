@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 type SQLResolver struct {
@@ -27,6 +29,11 @@ func NewSQLResolver(database *db.DB) (*SQLResolver, error) {
 func (r *SQLResolver) ResolveNativePrivate(ctx context.Context, in Request) (Target, error) {
 	if r == nil || r.database == nil || ctx == nil || in.AccountID == "" || in.UserID != in.AccountID || in.CLIClientSessionID == "" || in.ResourceKind != "machine_service" || in.Protocol != "tcp" {
 		return Target{}, ErrInvalid
+	}
+	if token, ok := auth.APITokenFromContext(ctx); ok {
+		if err := planlimits.AllowSDKRequest(in.UserID, token, "descriptors"); err != nil {
+			return Target{}, err
+		}
 	}
 	return r.resolveMachineService(ctx, in)
 }

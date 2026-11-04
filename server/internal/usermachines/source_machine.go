@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 // sourceMachineAllowed reports whether the user may act from this machine: the machine the CLI runs on
@@ -26,7 +27,10 @@ func (s *Service) sourceMachineAllowed(ctx context.Context, userID, machineID st
 
 // descriptorSourceAllowed accepts either an enrolled source or a token's own CLI peer endpoint.
 func (s *Service) descriptorSourceAllowed(ctx context.Context, user, source, session, target, capability string) error {
-	if _, token := auth.APITokenFromContext(ctx); token {
+	if tokenID, token := auth.APITokenFromContext(ctx); token {
+		if err := planlimits.AllowSDKRequest(user, tokenID, "descriptors"); err != nil {
+			return err
+		}
 		if source != "" {
 			return auth.ErrOutsideTokenScope
 		}

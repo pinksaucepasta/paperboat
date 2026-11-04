@@ -748,6 +748,10 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
+		if writeSDKLimitError(w, r, err) {
+			return
+		}
+
 		if errors.Is(err, auth.ErrOutsideTokenScope) {
 			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or machine action.")
 			return
@@ -798,6 +802,10 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			return
 		}
 		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest, usermachines.TransferIntent{Direction: body.TransferDirection, Mode: body.TransferMode, DeclaredBytes: body.DeclaredBytes})
+		if writeSDKLimitError(w, r, err) {
+			return
+		}
+
 		if errors.Is(err, auth.ErrOutsideTokenScope) {
 			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or file transfer.")
 			return

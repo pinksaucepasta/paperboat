@@ -36,6 +36,9 @@ func nativePrivateGrant(service *nativeprivateaccess.Service) http.HandlerFunc {
 			return
 		}
 		grant, err := service.Issue(r.Context(), nativeprivateaccess.Request{AccountID: p.User.ID, UserID: p.User.ID, CLIClientSessionID: p.Client.SessionID, OperationID: body.OperationID, ResourceKind: body.ResourceKind, ResourceID: body.ResourceID, RouteID: body.RouteID, Protocol: body.Protocol})
+		if writeSDKLimitError(w, r, err) {
+			return
+		}
 		switch {
 		case err == nativeprivateaccess.ErrInvalid:
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Native private access request is invalid.")

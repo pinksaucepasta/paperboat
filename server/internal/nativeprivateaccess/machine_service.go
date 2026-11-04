@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"reflect"
@@ -96,6 +97,13 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	e = tx.QueryRowContext(ctx, `SELECT id FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND user_machine_id=$2 AND cli_client_session_id=$3 AND machine_service_port=$4 AND machine_service_source_kind=$5 AND machine_service_source_id=$6 AND machine_service_source_generation=$7 AND team_id IS NOT DISTINCT FROM nullif($8,'') AND state='active' AND revoked_at IS NULL AND expires_at>$9 AND ($10='' OR operation_id=$10) AND machine_service_team_fence=paperboat.machine_service_team_fence(user_id,user_machine_id,machine_service_source_kind,machine_service_source_id,team_id) ORDER BY created_at DESC LIMIT 1`, in.UserID, in.ResourceID, in.CLIClientSessionID, port, authority.SourceKind, authority.SourceID, authority.Generation, authority.TeamID, now, tokenOperation).Scan(&out.AccessSessionID)
 	inserted := false
 	if pureNativeRejection(e, sql.ErrNoRows) {
+		if token, ok := auth.APITokenFromContext(ctx); ok {
+			if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
+				return tx.QueryRowContext(ctx, q, args...)
+			}, in.UserID, token, "operations"); err != nil {
+				return Target{}, err
+			}
+		}
 		inserted = true
 		out.AccessSessionID = "session_" + uuid.NewString()
 		_, e = tx.ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,team_id,capabilities,operation_id,machine_service_port,machine_service_source_kind,machine_service_source_id,machine_service_source_generation,machine_service_team_fence) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'',$6,nullif($7,''),ARRAY['private_access'],$8,$9,$10,$11,$12,paperboat.machine_service_team_fence($3,$2,$10,$11,nullif($7,'')))`, out.AccessSessionID, in.ResourceID, in.UserID, out.EnvironmentID, in.CLIClientSessionID, admission.Deadline(now, r.AdmissionLifetime), authority.TeamID, in.OperationID, port, authority.SourceKind, authority.SourceID, authority.Generation)

@@ -1,13 +1,14 @@
 package usermachines
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
-	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
@@ -76,22 +77,42 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 			t.Fatal("live operation retained access after token revoke")
 		}
 	}
-	revoked, err := f.store.Queries().ListRevokedControlCredentialJTIs(ctx, dbsqlc.ListRevokedControlCredentialJTIsParams{Now: now, RowLimit: 10000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, jti := range revoked {
-		found[jti] = true
-	}
+	live := make([]string, 0, 2)
 	for _, d := range []struct {
 		auth  map[string]any
 		class string
 	}{{exec.Auth, "exec_operation"}, {file.Auth, "file_transfer"}} {
 		raw, _ := d.auth["token"].(string)
 		claims, err := signer.VerifyCredential(raw, f.service.issuer, d.class, now)
-		if err != nil || !found[claims.JTI] {
-			t.Fatal("admitted operation missing from credential revocation feed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		live = append(live, claims.JTI)
+	}
+	edge := controlplane.NewEdgeService(f.store, "")
+	revoked, err := edge.OperationRevocations(ctx, "env_"+f.suffix, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, id := range revoked {
+		found[id] = true
+	}
+	for _, id := range live {
+		if !found[id] {
+			t.Fatal("admitted operation missing from host revocation feed")
+		}
+	}
+	foreign, err := edge.OperationRevocations(ctx, "foreign-environment", live)
+	if err != nil || len(foreign) != 0 {
+		t.Fatal("host read another environment's revocations")
+	}
+	if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, make([]string, controlplane.MaxLiveOperationJTIs+1)); err == nil {
+		t.Fatal("unbounded live credential list accepted")
+	}
+	for _, invalid := range [][]string{nil, {""}, {"duplicate_jti", "duplicate_jti"}, {strings.Repeat("x", 129)}} {
+		if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, invalid); !errors.Is(err, controlplane.ErrLiveOperationJTIsInvalid) {
+			t.Fatal("invalid host watch list was not rejected")
 		}
 	}
 	if _, err := resolver.MachineServiceCurrent(ctx, request, private.Target.AccessSessionID, private.Target); err == nil {
@@ -100,6 +121,11 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	if _, err := f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_after_revoke", true); err == nil {
 		t.Fatal("revoked token obtained new descriptor")
 	}
+	testSDKRevocationFeedBounds(t, f, session, edge, live)
+}
+
+func testSDKRevocationFeedBounds(t *testing.T, f workspaceMachineFixture, session string, edge *controlplane.EdgeService, live []string) {
+	ctx := f.ctx
 	// A bounded feed must fail closed rather than silently omit a revoked operation.
 	if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions
  (credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,state,revoked_at,helper_terminal_session_id,capabilities,operation_id)
@@ -107,8 +133,18 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
  FROM generate_series(1,10001) g`, f.suffix, f.machine, f.account, "env_"+f.suffix, session); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controlplane.NewEdgeService(f.store, "").Revocations(ctx); err == nil {
+	if _, err := edge.Revocations(ctx); err == nil {
+		t.Fatal("global revocation feed silently truncated credentials")
+	}
+	if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, live); err == nil {
 		t.Fatal("revocation feed silently truncated live-operation revocations")
+	}
+
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=now()-interval '1 minute' WHERE id LIKE $1`, "overflow_"+f.suffix+"_%"); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := edge.OperationRevocations(ctx, "env_"+f.suffix, live); err != nil || len(current) != 2 {
+		t.Fatal("completed credential history filled the live host revocation feed")
 	}
 
 }

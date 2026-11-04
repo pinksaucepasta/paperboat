@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 var (
@@ -32,6 +33,9 @@ func (s *DeviceService) StartAPITokenSession(ctx context.Context, in APITokenSes
 	if in.Label == "" || len(in.Label) > s.cfg.MaxClientLabelLength || strings.TrimSpace(in.OS) == "" || !slices.Contains([]string{"desktop", "server", "container"}, in.DeviceType) {
 		return TokenSet{}, &DeviceError{Code: "validation_failed"}
 	}
+	if err := planlimits.AllowSDKRequest(in.Account, in.TokenID, "sessions"); err != nil {
+		return TokenSet{}, err
+	}
 	access, refresh := randomToken(32), randomToken(32)
 	sessionID := newID("session")
 	scopes := normalizedScopes(s.cfg.AllowedScopes)
@@ -42,6 +46,11 @@ func (s *DeviceService) StartAPITokenSession(ctx context.Context, in APITokenSes
 			return ErrAPITokenUnusable
 		}
 		if err != nil {
+			return err
+		}
+		if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
+			return tx.QueryRow(ctx, q, args...)
+		}, in.Account, in.TokenID, "sessions"); err != nil {
 			return err
 		}
 		now := s.now()

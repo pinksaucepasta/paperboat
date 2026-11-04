@@ -275,6 +275,10 @@ func apiTokenSessionCreate(machines *auth.DeviceService) http.HandlerFunc {
 			return
 		}
 		out, err := machines.StartAPITokenSession(r.Context(), auth.APITokenSessionRequest{TokenID: p.APIToken.TokenID, Account: p.User.ID, Label: in.ClientLabel, DeviceType: in.DeviceType, OS: in.OS})
+		if writeSDKLimitError(w, r, err) {
+			return
+		}
+
 		if errors.Is(err, auth.ErrAPITokenUnusable) {
 			writeAPITokenInvalid(w, r)
 			return
