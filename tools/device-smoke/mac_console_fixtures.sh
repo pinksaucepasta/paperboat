@@ -20,11 +20,14 @@ PORT_P=8080 PORT_T=45992
 jf() { python3 -c 'import json,sys;d=json.loads(sys.stdin.read());d=d.get("data",d);print(eval(sys.argv[1],{},{"d":d}))' "$1"; }
 origin_up() { # origin_up PORT NAME: http.server on loopback, pid file $D/NAME.pid
   curl -fs -o /dev/null "http://127.0.0.1:$1/" && return 0
-  (cd "$D" && nohup python3 -m http.server "$1" --bind 127.0.0.1 </dev/null >/dev/null 2>&1 & echo $! >"$D/$2.pid")
+  # a launchd job outlives the ssh session that started it (a nohup child was killed with the session)
+  launchctl remove "pbsmoke.$2" 2>/dev/null
+  launchctl submit -l "pbsmoke.$2" -- "$(command -v python3)" -m http.server "$1" --bind 127.0.0.1 --directory "$D"
+  echo "pbsmoke.$2" >"$D/$2.pid"
   for _ in 1 2 3 4 5 6 7 8 9 10; do curl -fs -o /dev/null "http://127.0.0.1:$1/" && return 0; sleep 1; done
   echo "FAIL origin on $1 did not start" >&2; return 1
 }
-origin_down() { [ -f "$D/$1.pid" ] && kill "$(cat "$D/$1.pid")" 2>/dev/null; rm -f "$D/$1.pid"; }
+origin_down() { launchctl remove "pbsmoke.$1" 2>/dev/null; rm -f "$D/$1.pid"; }
 mine() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["machine_id"])' \
   "${PAPERBOAT_RUNTIME_STATE_ROOT:-$HOME/Library/Application Support/Paperboat/runtime}/machine-registration.json"; }
 
