@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,9 +19,9 @@ import (
 
 // sharedSessionWorkspaces is the client bound to each workspace a shared session may be in: only the
 // selected one when the user chose it, otherwise every workspace of the account.
-func sharedSessionWorkspaces(ctx context.Context, client *api.Client) ([]*api.Client, []api.Workspace, error) {
+func sharedSessionWorkspaces(ctx context.Context, client *api.Client) ([]*api.Client, []clientapi.Workspace, error) {
 	if workspaceExplicit(ctx) {
-		return []*api.Client{client}, []api.Workspace{{ID: client.Workspace()}}, nil
+		return []*api.Client{client}, []clientapi.Workspace{{ID: client.Workspace()}}, nil
 	}
 	page, err := client.ListWorkspaces(ctx)
 	if err != nil {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -33,8 +34,8 @@ func TestResponseTypesIgnoreFieldsAddedByANewerServer(t *testing.T) {
 	for _, prototype := range []any{
 		E2EERoot{}, PeerTransportKeySet{}, []PendingEndpointIdentity{}, EndpointCertificateDocument{},
 		PreviewDNSInstructions{}, PreviewLeasePage{}, PreviewLease{}, DiagnosticUploadIntent{},
-		InspectorAccess{}, []InspectorTarget{}, NativePrivateGrant{}, TunnelDNSInstructions{}, WorkspacePage{},
-		WorkspacePage{Items: []Workspace{{ID: "personal", Name: "Personal", Kind: "personal", Role: "owner"}}},
+		InspectorAccess{}, []InspectorTarget{}, NativePrivateGrant{}, TunnelDNSInstructions{}, clientapi.WorkspacePage{},
+		clientapi.WorkspacePage{Items: []clientapi.Workspace{{ID: "personal", Name: "Personal", Kind: "personal", Role: "owner"}}},
 	} {
 		kind := reflect.TypeOf(prototype)
 		t.Run(kind.String(), func(t *testing.T) {

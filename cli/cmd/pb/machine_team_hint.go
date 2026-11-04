@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"io"
 	"net/url"
 	"os"
@@ -51,7 +52,7 @@ func resolveInOtherWorkspaces(ctx context.Context, client *api.Client, requested
 	}
 	type match struct {
 		machine   api.UserMachine
-		workspace api.Workspace
+		workspace clientapi.Workspace
 	}
 	var matches []match
 	for _, workspace := range page.Items {
@@ -89,7 +90,7 @@ func resolveInOtherWorkspaces(ctx context.Context, client *api.Client, requested
 	return api.UserMachine{}, ambiguous
 }
 
-func describeWorkspace(workspace api.Workspace) string {
+func describeWorkspace(workspace clientapi.Workspace) string {
 	if workspace.Kind == "team" {
 		return "team " + workspace.ID
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -116,12 +117,12 @@ func selectWorkspace(command *cobra.Command, args []string) (bool, error) {
 	return err == nil, err
 }
 
-func saveSelectedWorkspace(command *cobra.Command, cfg *config.Config, accountID, selector string, available []api.Workspace) error {
+func saveSelectedWorkspace(command *cobra.Command, cfg *config.Config, accountID, selector string, available []clientapi.Workspace) error {
 	selector = strings.TrimSpace(selector)
 	if err := api.ValidateWorkspaceSelector(selector); err != nil {
 		return invocationError(err)
 	}
-	var selected *api.Workspace
+	var selected *clientapi.Workspace
 	for index := range available {
 		if available[index].ID == selector {
 			selected = &available[index]

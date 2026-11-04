@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ func TestWorkspaceListIsUnscopedAndMachineListIsScoped(t *testing.T) {
 			if r.URL.RawQuery != "" {
 				t.Fatalf("workspace list query = %q, want unscoped", r.URL.RawQuery)
 			}
-			writeData(w, http.StatusOK, WorkspacePage{Items: []Workspace{
+			writeData(w, http.StatusOK, clientapi.WorkspacePage{Items: []clientapi.Workspace{
 				{ID: "personal", Name: "Personal", Kind: "personal", Role: "owner"},
 				{ID: "team-a", Name: "Team A", Kind: "team", Role: "member"},
 			}})
