@@ -3,6 +3,7 @@ package tailnet
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -190,5 +191,68 @@ func TestAdmissionRefreshSkipsTheBudgetButHonoursA429(t *testing.T) {
 	defer cancelHeld()
 	if err := a.RefreshForAdmission(held, client); err == nil {
 		t.Fatal("admission refresh ignored a 429 hold")
+	}
+}
+
+// A 429 on a stream's admission renewal waits only the server's Retry-After and retries, instead of refusing the
+// stream and holding every admission for the 12 s refill (pbvm4 feat9: 20:35:55.3 refusal, then 11.8 s sends).
+// Cadence renewals still keep the refill floor.
+func TestAdmissionRefreshRetriesAfterTheServersRetryAfter(t *testing.T) {
+	b := &tokenBucket{refill: time.Hour, burst: 1}
+	useBudget(t, b)
+	a, c, signer, _ := networkTestAuthority(t)
+	var calls atomic.Int32
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		if calls.Add(1) == 1 {
+			return "", &api.APIError{Status: 429, Code: "rate_limited", RetryAfter: 300 * time.Millisecond}
+		}
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := a.RefreshForAdmission(ctx, client); err != nil {
+		t.Fatalf("admission renewal after a 429: %v", err)
+	}
+	if took := time.Since(start); took < 300*time.Millisecond || took > time.Second || calls.Load() != 2 {
+		t.Fatalf("admission renewal took %v in %d requests, want the 300 ms Retry-After and one retry", took, calls.Load())
+	}
+	if wait := b.take(time.Now(), false); wait < 59*time.Minute {
+		t.Fatalf("cadence renewal wait after a 429 = %v, want the refill floor", wait)
+	}
+}
+
+// Admissions of a burst of new operations share one renewal: one that started after a stream arrived already
+// carries every grant committed before it.
+func TestConcurrentAdmissionRefreshesShareOneRequest(t *testing.T) {
+	useBudget(t, &tokenBucket{refill: time.Hour, burst: 1})
+	a, c, signer, _ := networkTestAuthority(t)
+	var calls atomic.Int32
+	var mu sync.Mutex
+	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		calls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		c.Generation++
+		return networkToken(t, signer, c), nil
+	}}
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			if err := a.RefreshForAdmission(t.Context(), client); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if got := calls.Load(); got > 2 {
+		t.Fatalf("%d renewals for 10 concurrent admissions, want at most 2", got)
+	}
+	// A stream arriving after the last renewal started still gets its own.
+	before := calls.Load()
+	if err := a.RefreshForAdmission(t.Context(), client); err != nil || calls.Load() != before+1 {
+		t.Fatalf("later admission reused an older renewal: %v", err)
 	}
 }

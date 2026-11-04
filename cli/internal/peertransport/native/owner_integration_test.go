@@ -790,13 +790,16 @@ func testPeers(peer tailnet.NetworkBinding, direction string, expires int64) []t
 
 func applyTestConfiguration(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, value tailnet.NetworkConfiguration) {
 	t.Helper()
+	if err := authority.Apply(t.Context(), testConfigurationToken(value, signer)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testConfigurationToken(value tailnet.NetworkConfiguration, signer ed25519.PrivateKey) string {
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-network-config+jwt", "kid": "native_test"})
 	body, _ := json.Marshal(value)
 	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
-	token := unsigned + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(unsigned)))
-	if err := authority.Apply(t.Context(), token); err != nil {
-		t.Fatal(err)
-	}
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(unsigned)))
 }
 
 func testTLS(t *testing.T, name string) (*tls.Config, string) {

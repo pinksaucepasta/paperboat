@@ -106,19 +106,31 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 			return err
 		}
 	}
-	return a.refresh(ctx, client)
+	return a.refresh(ctx, client, time.Time{})
 }
 
 // RefreshForAdmission renews before admitting a stream whose server-signed credential names a grant this host does
 // not hold yet (a grant just added). Like a server-announced change it never waits for the budget, only for a 429's
 // hold: it is one request per new grant, and waiting for a token let admission time out (F9-04, hp 2026-10-27).
+//
+// Like Tailscale's controlclient updateRoutine, a 429 waits the server's Retry-After and retries within ctx
+// instead of refusing the stream, and every admission whose stream arrived before a renewal started shares
+// that renewal: a burst of new operations is one request, not one each (pbvm4 feat9: per-stream renewals hit
+// the machine's 429, refused a stream and held every admission 12 s).
 func (a *Authority) RefreshForAdmission(ctx context.Context, client NetworkAPI) error {
-	if a.budgeted() {
-		if err := renewalBudget.wait(ctx, true); err != nil {
+	asked := time.Now()
+	for retry := false; ; retry = true {
+		if retry || a.budgeted() {
+			if err := renewalBudget.wait(ctx, true); err != nil {
+				return err
+			}
+		}
+		err := a.refresh(ctx, client, asked)
+		var apiErr *api.APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests {
 			return err
 		}
 	}
-	return a.refresh(ctx, client)
 }
 
 // budgeted reports whether this engine's renewals count against the machine's renewal budget: every engine
@@ -127,7 +139,9 @@ func (a *Authority) budgeted() bool { return budgetedEngine(a) }
 
 var budgetedEngine = func(a *Authority) bool { return a.options.Self.Role != "cli" }
 
-func (a *Authority) refresh(ctx context.Context, client NetworkAPI) error {
+// refresh renews the signed configuration. A non-zero since is satisfied without a request by a renewal
+// that sent its request after since: the server signed that configuration after anything committed before.
+func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.Time) error {
 	if client == nil || ctx == nil {
 		return ErrAuthority
 	}
@@ -142,6 +156,10 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !since.IsZero() && a.refreshedFrom.After(since) {
+		return nil
+	}
+	started := time.Now()
 	operation, err := uuid.NewRandom()
 	if err != nil {
 		return err
@@ -168,10 +186,12 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI) error {
 	}
 	if err := a.Apply(ctx, result.Configuration); err != nil {
 		if errors.Is(err, ErrStaleAuthority) {
+			a.refreshedFrom = started
 			return nil
 		}
 		return err
 	}
+	a.refreshedFrom = started
 	a.setRelayDenial(result.RelayDenial())
 	if a.membershipGrants.Swap(result.MembershipGrants) != result.MembershipGrants && result.MembershipGrants {
 		a.RequestRefresh() // ask for membership grants on the next renewal
@@ -280,7 +300,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			}
 			urgent = false
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := a.refresh(request, client)
+			err := a.refresh(request, client, time.Time{})
 			lastRefresh = time.Now()
 			cancel()
 			if err != nil {

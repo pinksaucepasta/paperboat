@@ -183,9 +183,11 @@ type Authority struct {
 	relay            relayAuthority
 	recoveryWorkers  sync.WaitGroup
 	refreshSlot      chan struct{}
-	refreshWake      chan struct{}
-	refreshUrgent    chan struct{}
-	refreshNow       chan struct{}
+	// refreshedFrom is when the last applied renewal sent its request (guarded by refreshSlot).
+	refreshedFrom time.Time
+	refreshWake   chan struct{}
+	refreshUrgent chan struct{}
+	refreshNow    chan struct{}
 }
 
 type authorizedClient struct {
