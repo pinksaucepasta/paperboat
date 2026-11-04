@@ -1,5 +1,5 @@
-// Package clientsession owns serialized renewable credentials for an embedded client.
-package clientsession
+// Package session owns serialized renewable credentials for an embedded client.
+package session
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package clientsession
+package session
 
 import (
 	"context"
