@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/nativegen"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"net"
@@ -269,6 +270,8 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	if s.config.carrierGeneration != "" {
 		// Only the primary registers the machine's network and reports endpoints.
 		control = terminalCarrierNetwork{api}
+		// The generation publishes its signed offer with this machine-authenticated client.
+		nativegen.Use(api)
 	}
 	request, cancelRequest := context.WithTimeout(ctx, 15*time.Second)
 	err = authority.RestoreOrRegister(request, control)
