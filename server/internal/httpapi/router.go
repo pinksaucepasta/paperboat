@@ -538,7 +538,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.HandleFunc("POST /v1/machines/pairings/reset", userMachinePairingReset(opts.Machines))
 			if opts.DeviceAuth != nil {
 				if opts.NativePrivateAccess != nil {
-					mux.Handle("POST /v1/native-private-access/grants", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", nativePrivateGrant(opts.NativePrivateAccess))))
+					mux.Handle("POST /v1/native-private-access/grants", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, nativePrivateGrant(opts.NativePrivateAccess)))))
 				}
 				mux.Handle("POST /v1/machines/setup", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", machineSetup(opts.Machines))))
 				mux.Handle("POST /v1/machines/{machine_id}/machine-installations", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", authenticatedMachineInstallation(opts.Machines))))

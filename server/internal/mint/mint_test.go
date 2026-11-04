@@ -234,7 +234,7 @@ func TestNativePrivateCredentialBindsExactLoopbackTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_native_private_1", IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: "env_1", AccountID: "acct_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", AssignmentID: "umas_1", OperationID: "operation_private_1", ResourceKind: "machine_service", ResourceID: "machine_1", RouteID: "tcp:22", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:22", ExpectedGeneration: 2, RouteGeneration: 3, TargetGeneration: 4, InstallationGeneration: 2, BootID: "boot-012345678901", PolicyGeneration: 3, AnnouncementGeneration: 4}
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "usr_1", JTI: "jti_native_private_1", IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "native_private", WorkspaceID: "personal", ActorAccountID: "usr_1", Scopes: []string{"private:native"}, EnvironmentID: "env_1", AccountID: "acct_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", AssignmentID: "umas_1", OperationID: "operation_private_1", ResourceKind: "machine_service", ResourceID: "machine_1", RouteID: "tcp:22", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:22", ExpectedGeneration: 2, RouteGeneration: 3, TargetGeneration: 4, InstallationGeneration: 2, BootID: "boot-012345678901", PolicyGeneration: 3, AnnouncementGeneration: 4}
 	token, err := provider.SignCredential(input)
 	if err != nil {
 		t.Fatal(err)
@@ -714,7 +714,7 @@ func TestMachineServiceCredentialBindsRuntimeEpochs(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "caller", JTI: "native-machine-test", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: "environment", AccountID: "caller", UserID: "caller", MachineID: "machine", CLIClientSessionID: "cli", AssignmentID: "access", OperationID: "machine-service-test", ResourceKind: "machine_service", ResourceID: "machine", RouteID: "tcp:5432", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpectedGeneration: 1, RouteGeneration: 2, TargetGeneration: 3, InstallationGeneration: 1, BootID: "boot-012345678901", PolicyGeneration: 2, AnnouncementGeneration: 3}
+	input := CredentialInput{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "caller", JTI: "native-machine-test", IssuedAt: now, ExpiresAt: now.Add(5 * time.Minute), CredentialClass: "native_private", WorkspaceID: "personal", ActorAccountID: "caller", Scopes: []string{"private:native"}, EnvironmentID: "environment", AccountID: "caller", UserID: "caller", MachineID: "machine", CLIClientSessionID: "cli", AssignmentID: "access", OperationID: "machine-service-test", ResourceKind: "machine_service", ResourceID: "machine", RouteID: "tcp:5432", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpectedGeneration: 1, RouteGeneration: 2, TargetGeneration: 3, InstallationGeneration: 1, BootID: "boot-012345678901", PolicyGeneration: 2, AnnouncementGeneration: 3}
 	token, err := provider.SignCredential(input)
 	if err != nil {
 		t.Fatal(err)

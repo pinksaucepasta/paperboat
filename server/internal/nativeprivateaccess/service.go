@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"net"
 	"reflect"
 	"strconv"
@@ -93,7 +94,11 @@ func (s Service) Issue(ctx context.Context, request Request) (Grant, error) {
 	if err != nil {
 		return Grant{}, err
 	}
-	credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.Issuer, Audience: "paperboat-machine", Subject: target.UserID, JTI: "token_" + uuid.NewString(), IssuedAt: now, CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: target.EnvironmentID, AccountID: target.AccountID, MachineID: target.MachineID, UserID: target.UserID, CLIClientSessionID: request.CLIClientSessionID, AssignmentID: target.AccessSessionID, OperationID: request.OperationID, ResourceKind: target.ResourceKind, ResourceID: target.ResourceID, RouteID: target.RouteID, Protocol: target.Protocol, TargetScheme: target.TargetScheme, TargetAddress: target.TargetAddress, ExpectedGeneration: target.ResourceGeneration, RouteGeneration: target.RouteGeneration, TargetGeneration: target.TargetGeneration, InstallationGeneration: target.InstallationGeneration, BootID: target.BootID, PolicyGeneration: target.PolicyGeneration, AnnouncementGeneration: target.AnnouncementGeneration})
+	selected := "personal"
+	if scope, ok := workspace.FromContext(ctx); ok && scope.TeamID != "" {
+		selected = scope.TeamID
+	}
+	credential, err := issuer.Issue(mint.CredentialInput{WorkspaceID: selected, ActorAccountID: target.UserID, Issuer: s.Issuer, Audience: "paperboat-machine", Subject: target.UserID, JTI: "token_" + uuid.NewString(), IssuedAt: now, CredentialClass: "native_private", Scopes: []string{"private:native"}, EnvironmentID: target.EnvironmentID, AccountID: target.AccountID, MachineID: target.MachineID, UserID: target.UserID, CLIClientSessionID: request.CLIClientSessionID, AssignmentID: target.AccessSessionID, OperationID: request.OperationID, ResourceKind: target.ResourceKind, ResourceID: target.ResourceID, RouteID: target.RouteID, Protocol: target.Protocol, TargetScheme: target.TargetScheme, TargetAddress: target.TargetAddress, ExpectedGeneration: target.ResourceGeneration, RouteGeneration: target.RouteGeneration, TargetGeneration: target.TargetGeneration, InstallationGeneration: target.InstallationGeneration, BootID: target.BootID, PolicyGeneration: target.PolicyGeneration, AnnouncementGeneration: target.AnnouncementGeneration})
 	if err != nil {
 		return Grant{}, err
 	}

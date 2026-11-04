@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
 	"reflect"
 	"strconv"
@@ -39,6 +41,12 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	defer func() {
 		returnErr = preserveNativeSQLTransactionCleanup(returnErr, tx.Rollback())
 	}()
+	if e := auth.AuthorizeAPITokenSession(ctx, tx, in.UserID, in.CLIClientSessionID, in.ResourceID, "private_access", port); e != nil {
+		if e == auth.ErrOutsideTokenScope {
+			return Target{}, ErrDenied
+		}
+		return Target{}, e
+	}
 	authority, e := machineservices.ResolveTx(ctx, tx, in.UserID, in.ResourceID, port)
 	if e != nil {
 		if pureNativeRejection(e, machineservices.ErrDenied) {
@@ -48,6 +56,12 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 			return Target{}, ErrDenied
 		}
 		return Target{}, e
+	}
+	if _, token := auth.APITokenFromContext(ctx); token {
+		scope, _ := workspace.FromContext(ctx)
+		if authority.TeamID != scope.TeamID {
+			return Target{}, ErrDenied
+		}
 	}
 	now := r.now()
 	out := Target{AccountID: in.AccountID, UserID: in.UserID, ResourceKind: "machine_service", ResourceID: in.ResourceID, MachineID: in.ResourceID, RouteID: in.RouteID, Protocol: "tcp", TargetScheme: "tcp", PolicyGeneration: authority.Generation}

@@ -748,7 +748,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		return "", errors.New("credential claims are invalid")
 	}
 	claims := map[string]any{"iss": input.Issuer, "aud": input.Audience, "sub": input.Subject, "jti": input.JTI, "iat": issuedAt.Unix(), "exp": expiresAt.Unix(), "scope": input.Scopes, "credential_class": input.CredentialClass, "environment_id": input.EnvironmentID}
-	if processCredentialClass(input.CredentialClass) {
+	if processCredentialClass(input.CredentialClass) || input.CredentialClass == "native_private" {
 		if !validProcessContext(input.CredentialClass, input.Scopes, input.WorkspaceID, input.ActorAccountID, input.UserID) {
 			return "", errors.New("verified process workspace and actor are required")
 		}
@@ -1004,7 +1004,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 	case time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > policy.maxTTL:
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialTTLInvalid}
 	}
-	if processCredentialClass(expectedClass) && !validProcessContext(expectedClass, claims.Scopes, claims.WorkspaceID, claims.ActorAccountID, claims.UserID) {
+	if (processCredentialClass(expectedClass) || expectedClass == "native_private") && !validProcessContext(expectedClass, claims.Scopes, claims.WorkspaceID, claims.ActorAccountID, claims.UserID) {
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 	}
 	switch expectedClass {
