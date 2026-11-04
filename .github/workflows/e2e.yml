@@ -1,0 +1,46 @@
+name: End-to-end
+
+# R-02: real server services on PostgreSQL, two systemd containers each running a real pb.
+# Stages (E2E_STAGES): pair exec send preview. Not yet a required check.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: 'Stages to run'
+        default: 'pair'
+      break_step:
+        description: 'Deliberately fail (testing the job itself): any non-empty value'
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: e2e_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
+      E2E_STAGES: ${{ inputs.stages || 'pair' }}
+      E2E_BREAK: ${{ inputs.break_step }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: |
+            server/go.sum
+            cli/go.sum
+            go.work.sum
+      - run: tools/e2e/run.sh
