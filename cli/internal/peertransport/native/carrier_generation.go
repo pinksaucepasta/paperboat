@@ -114,8 +114,8 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 }
 
 // carrierRelayAttemptLimit bounds one relay edge's preparation so a dead relay
-// is detected in about a second and the other edge is tried.
-const carrierRelayAttemptLimit = time.Second
+// is detected in under a second and the other edge is tried.
+const carrierRelayAttemptLimit = 800 * time.Millisecond
 
 // carrierAttemptLimit bounds one whole candidate exchange and dial; the last
 // attempt keeps the remaining offer budget.
@@ -127,6 +127,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 		ctx, cancel = context.WithTimeout(ctx, carrierAttemptLimit)
 		defer cancel()
 	}
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt_start")
 	prepare, stop := context.WithTimeout(ctx, carrierRelayAttemptLimit)
 	err := network.PreparePeerRelay(prepare, s.peerID, relay)
 	stop()

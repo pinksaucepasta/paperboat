@@ -33,11 +33,19 @@ type regionalRelay struct {
 	stop func()
 }
 
-func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
+func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false, false) }
 func TestDelegatedCarrierNegotiatesAndRenewsItsRegionalRoute(t *testing.T) {
-	testNativeRegionalFailover(t, true)
+	testNativeRegionalFailover(t, true, false)
 }
-func testNativeRegionalFailover(t *testing.T, delegated bool) {
+
+// Requirement (pbvm4 run8/run13): the relay is the move's guarantee. With the
+// staged carrier's first relay edge dead, the move must use the other edge,
+// give up on the dead one within about a second, and log a typed reason.
+func TestDelegatedCarrierMovesThroughTheOtherEdgeWhenItsRelayIsDead(t *testing.T) {
+	testNativeRegionalFailover(t, true, true)
+}
+
+func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
@@ -122,8 +130,14 @@ func testNativeRegionalFailover(t *testing.T, delegated bool) {
 	a, b := start("regional-a", "rack-a", "127.0.0.1:0"), start("regional-b", "rack-b", "127.0.0.1:0")
 	defer func() { a.stop(); b.stop() }()
 	nodes := []tailnet.RegionalNode{a.node, b.node}
+	var c *regionalRelay
+	if deadEdge {
+		c = start("regional-c", "rack-c", "127.0.0.1:0")
+		defer c.stop()
+		nodes = append(nodes, c.node)
+	}
 	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
-	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes[1:])
+	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, []tailnet.RegionalNode{b.node})
 	clientRegions, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots))
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +146,7 @@ func testNativeRegionalFailover(t *testing.T, delegated bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(clientRegions) != 2 || len(serverRegions) != 1 {
+	if len(clientRegions) != len(nodes) || len(serverRegions) != 1 {
 		t.Fatalf("regional shortlist=%d/%d", len(clientRegions), len(serverRegions))
 	}
 
@@ -203,7 +217,12 @@ func testNativeRegionalFailover(t *testing.T, delegated bool) {
 		if err := nextAuthority.Restore(ctx); err != nil {
 			t.Fatal(err)
 		}
-		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, nodes[1:])
+		generationNodes := []tailnet.RegionalNode{b.node}
+		if deadEdge {
+			// The old connection keeps relay b; the staged carrier knows only a and c.
+			generationNodes = []tailnet.RegionalNode{a.node, c.node}
+		}
+		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, generationNodes)
 		if _, err := nextAuthority.ConfigureRegionalRelays(regionalTLS(serverTLS, roots)); err != nil {
 			t.Fatal(err)
 		}
@@ -221,6 +240,26 @@ func testNativeRegionalFailover(t *testing.T, delegated bool) {
 			t.Fatal(err)
 		}
 		defer generation.Close()
+		if deadEdge {
+			logs := captureDiagnosticLog(t)
+			a.stop()
+			started := time.Now()
+			next, err := session.DialCarrier(ctx, identity.Offer)
+			if err != nil {
+				t.Fatal("move did not use the other relay edge", err)
+			}
+			defer next.Close()
+			assertRegionalBytes(t, ctx, next, "delegated-other-edge")
+			attemptAt, failedAt, connectedAt, path := logs.moveEvidence(t)
+			if attemptAt.IsZero() || failedAt.IsZero() || failedAt.Sub(attemptAt) >= time.Second {
+				t.Fatalf("dead relay edge not abandoned within 1 s with a typed reason: attempt=%v failed=%v", attemptAt, failedAt)
+			}
+			if path != "regional_relay" || connectedAt.Sub(failedAt) > time.Second {
+				t.Fatalf("move did not use the other relay edge within 1 s: path=%q after %v", path, connectedAt.Sub(failedAt))
+			}
+			t.Logf("dead edge abandoned after %v; other edge connected %v later; DialCarrier %v", failedAt.Sub(attemptAt), connectedAt.Sub(failedAt), time.Since(started))
+			return
+		}
 		next, err := session.DialCarrier(ctx, identity.Offer)
 		if err != nil {
 			t.Fatal("generation did not select the authenticated common relay", err)
