@@ -11,13 +11,15 @@ export type MachinePages<T> = { items: T[]; total: number; complete: boolean }
 export async function fetchAllPages<T>(
   fetchPage: (
     params: Record<string, string>,
+    signal?: AbortSignal,
   ) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
   extra: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<MachinePages<T> | null> {
   const items: T[] = []
   let total = 0
   for (let offset = 0; offset < maxMachines; offset += pageSize) {
-    const page = await fetchPage({ limit: String(pageSize), offset: String(offset), ...extra })
+    const page = await fetchPage({ limit: String(pageSize), offset: String(offset), ...extra }, signal)
     if (!page) return offset === 0 ? null : { items, total, complete: false }
     // An empty list can arrive as null (a Go nil slice); it means no items, not a broken page.
     const got = page.items ?? []

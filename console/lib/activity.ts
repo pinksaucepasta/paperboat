@@ -62,7 +62,12 @@ const areaActions: Record<Exclude<ActivityArea, "all">, string> = {
 /** The audit log's filters and export (F19); off until that server is deployed. */
 export const activityLive = { filters: true, export: true, streaming: true } as const
 
-export const activityPeriods = { all: "Any time", day: "Last 24 hours", week: "Last 7 days", month: "Last 30 days" } as const
+export const activityPeriods = {
+  all: "Any time",
+  day: "Last 24 hours",
+  week: "Last 7 days",
+  month: "Last 30 days",
+} as const
 export type ActivityPeriod = keyof typeof activityPeriods
 const periodMs: Record<ActivityPeriod, number> = { all: 0, day: 86_400_000, week: 604_800_000, month: 2_592_000_000 }
 
@@ -102,11 +107,11 @@ export function activityExportHref(input: ActivityFilter, format: "csv" | "json"
 export const activityQuery = (input: ActivityFilter) =>
   infiniteQueryOptions({
     queryKey: ["activity", activityParams(input).toString()] as const,
-    queryFn: ({ pageParam }) => {
+    queryFn: ({ pageParam, signal }) => {
       const params = activityParams(input)
       params.set("limit", "50")
       if (pageParam) params.set("cursor", pageParam)
-      return api<{ items: ActivityEvent[]; next_cursor?: string }>(`activity?${params}`)
+      return api<{ items: ActivityEvent[]; next_cursor?: string }>(`activity?${params}`, { signal })
     },
     initialPageParam: "",
     getNextPageParam: (page) => page.next_cursor || undefined,

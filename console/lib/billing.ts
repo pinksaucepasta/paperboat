@@ -10,7 +10,9 @@ export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
 
 /** "6 of 1,000", or "6 · Unlimited" when the plan has no limit. */
 export const formatLimit = ({ used, limit }: Limit) =>
-  limit === null ? `${used.toLocaleString("en-US")} · Unlimited` : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}`
+  limit === null
+    ? `${used.toLocaleString("en-US")} · Unlimited`
+    : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}`
 export type BillingProduct = components["schemas"]["WorkspaceBillingProduct"]
 export type BillingInterval = "month" | "year"
 
@@ -87,7 +89,8 @@ export function usageWindowStart(billing: BillingWorkspace, now = new Date()): s
 export const billingProductsQuery = (workspace: Workspace | undefined) =>
   queryOptions({
     queryKey: ["billing-products", workspace?.id ?? ""],
-    queryFn: async () => (await api<{ items: BillingProduct[] }>(`${billingPath(workspace!)}/products`)).items,
+    queryFn: async ({ signal }) =>
+      (await api<{ items: BillingProduct[] }>(`${billingPath(workspace!)}/products`, { signal })).items,
     enabled: Boolean(workspace),
     staleTime: 5 * minute,
   })
@@ -137,7 +140,8 @@ const post = (path: string, body: object, key = idempotencyKey()) =>
 export const seatPreviewQuery = (workspace: Workspace, quantity: number) =>
   queryOptions({
     queryKey: ["billing-seats-preview", workspace.id, quantity],
-    queryFn: ({ signal }) => api<ChangePreview>(`${billingPath(workspace)}/seats/preview?quantity=${quantity}`, { signal }),
+    queryFn: ({ signal }) =>
+      api<ChangePreview>(`${billingPath(workspace)}/seats/preview?quantity=${quantity}`, { signal }),
     enabled: billingLive.seats,
   })
 

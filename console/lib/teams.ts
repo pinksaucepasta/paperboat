@@ -81,7 +81,8 @@ export const teamQuery = (team: string) =>
 export const teamInvitationsQuery = (team: string) =>
   queryOptions({
     queryKey: ["team-invitations", team],
-    queryFn: async () => (await api<{ items: TeamInvitation[] }>(`${teamPath(team)}/invitations`)).items,
+    queryFn: async ({ signal }) =>
+      (await api<{ items: TeamInvitation[] }>(`${teamPath(team)}/invitations`, { signal })).items,
     staleTime: minute,
   })
 
@@ -90,7 +91,7 @@ export const myInvitationsQuery = queryOptions({
   queryKey: ["my-invitations"],
   // `direction=received` is the server default once the mail producer ships; until then the page
   // also filters out invitations the user sent.
-  queryFn: async () => (await api<{ items: TeamInvitation[] }>("team-invitations")).items,
+  queryFn: async ({ signal }) => (await api<{ items: TeamInvitation[] }>("team-invitations", { signal })).items,
   staleTime: minute,
 })
 

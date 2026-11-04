@@ -37,21 +37,26 @@ export type ConfigEnvironment = {
 export type ConfigAccountStatus = { state: string; environments: ConfigEnvironment[] }
 
 /** Every machine's sync, page by page (the server caps a page at 200), so none past the first is missed. */
-export async function fetchConfigStatus(): Promise<ConfigAccountStatus> {
+export async function fetchConfigStatus(signal?: AbortSignal): Promise<ConfigAccountStatus> {
   let state = ""
-  const pages = await fetchAllPages(async (params) => {
-    const page = await api<ConfigAccountStatus & { pagination: { total: number } }>(
-      `config-sync/status?${new URLSearchParams(params)}`,
-    )
-    state ||= page.state
-    return { items: page.environments, pagination: page.pagination }
-  }, {})
+  const pages = await fetchAllPages(
+    async (params, pageSignal) => {
+      const page = await api<ConfigAccountStatus & { pagination: { total: number } }>(
+        `config-sync/status?${new URLSearchParams(params)}`,
+        { signal: pageSignal },
+      )
+      state ||= page.state
+      return { items: page.environments, pagination: page.pagination }
+    },
+    {},
+    signal,
+  )
   return { state, environments: pages?.items ?? [] }
 }
 
 export const configStatusQuery = queryOptions({
   queryKey: ["config-sync"],
-  queryFn: fetchConfigStatus,
+  queryFn: ({ signal }) => fetchConfigStatus(signal),
   refetchInterval: 15_000,
 })
 

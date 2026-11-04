@@ -269,17 +269,17 @@ const personal: Workspace = { id: "personal", name: "Personal", kind: "personal"
 
 export const workspacesQuery = queryOptions({
   queryKey: queryKeys.workspaces,
-  queryFn: async () => (await api<Data<"/v1/workspaces">>("workspaces")).items,
+  queryFn: async ({ signal }) => (await api<Data<"/v1/workspaces">>("workspaces", { signal })).items,
   staleTime: 5 * minute,
 })
 
 type MachinePage = MachinePages<Machine>
 
-const machinePage = (params: Record<string, string>) =>
-  api<{ items: Machine[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`)
+const machinePage = (params: Record<string, string>, signal?: AbortSignal) =>
+  api<{ items: Machine[]; pagination: { total: number } }>(`machines?${new URLSearchParams(params)}`, { signal })
 
-async function fetchMachines(params: Record<string, string>): Promise<MachinePage> {
-  const page = await machinePage(params)
+async function fetchMachines(params: Record<string, string>, signal?: AbortSignal): Promise<MachinePage> {
+  const page = await machinePage(params, signal)
   return { items: page.items, total: page.pagination.total, complete: page.items.length >= page.pagination.total }
 }
 
@@ -291,7 +291,7 @@ async function fetchMachines(params: Record<string, string>): Promise<MachinePag
 export const machinesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.machines(workspace),
-    queryFn: async () => (await fetchAllPages(machinePage, { workspace }))!,
+    queryFn: async ({ signal }) => (await fetchAllPages(machinePage, { workspace }, signal))!,
     refetchInterval: 15_000,
   })
 
@@ -315,7 +315,7 @@ export const machineSummaryQuery = (workspace: string) =>
 export const machineSearchQuery = (workspace: string, q: string) =>
   queryOptions({
     queryKey: ["machines", workspace, "search", q],
-    queryFn: () => fetchMachines({ limit: "20", workspace, q }),
+    queryFn: ({ signal }) => fetchMachines({ limit: "20", workspace, q }, signal),
     staleTime: 30_000,
   })
 
@@ -343,8 +343,10 @@ export const usageQuery = (workspace: string, period: UsagePeriod) =>
 export const usageSinceQuery = (workspace: string, start: string) =>
   queryOptions({
     queryKey: ["usage-since", workspace, start],
-    queryFn: () =>
-      api<Usage>(`usage?${new URLSearchParams({ start, end: new Date().toISOString(), limit: "200", workspace })}`),
+    queryFn: ({ signal }) =>
+      api<Usage>(`usage?${new URLSearchParams({ start, end: new Date().toISOString(), limit: "200", workspace })}`, {
+        signal,
+      }),
     enabled: Boolean(workspace && start),
     staleTime: 5 * minute,
   })
@@ -402,7 +404,7 @@ export type Edge = Data<"/v1/edges">["items"][number]
 
 export const edgesQuery = queryOptions({
   queryKey: ["edges"],
-  queryFn: async () => (await api<Data<"/v1/edges">>("edges?limit=100")).items,
+  queryFn: async ({ signal }) => (await api<Data<"/v1/edges">>("edges?limit=100", { signal })).items,
   staleTime: 60_000,
 })
 
@@ -412,10 +414,11 @@ export type NodeLatency = Data<"/v1/machines/{machine_id}/network-latency">["ite
 export const machineLatencyQuery = (machineId: string) =>
   queryOptions({
     queryKey: ["machine-latency", machineId],
-    queryFn: async () =>
+    queryFn: async ({ signal }) =>
       (
         await api<Data<"/v1/machines/{machine_id}/network-latency">>(
           `machines/${encodeURIComponent(machineId)}/network-latency`,
+          { signal },
         )
       ).items,
     staleTime: 60_000,
@@ -479,12 +482,16 @@ export type RunningCounts = { terminals: number; tunnels: number; previews: numb
 export type Paged<T> = { items: T[]; complete: boolean }
 
 /** Pages of 200 by cursor, at most 10 (2,000 items), so a large workspace can't stall a tab. */
-export async function allPages<T>(path: string, params: Record<string, string> = {}): Promise<Paged<T>> {
+export async function allPages<T>(
+  path: string,
+  params: Record<string, string> = {},
+  signal?: AbortSignal,
+): Promise<Paged<T>> {
   const items: T[] = []
   let cursor = ""
   for (let page = 0; page < 10; page++) {
     const query = new URLSearchParams({ ...params, limit: "200", ...(cursor && { cursor }) })
-    const result = await api<{ items: T[]; next_cursor?: string }>(`${path}?${query}`)
+    const result = await api<{ items: T[]; next_cursor?: string }>(`${path}?${query}`, { signal })
     items.push(...result.items)
     if (!result.next_cursor) return { items, complete: true }
     cursor = result.next_cursor
@@ -501,12 +508,16 @@ export async function allPages<T>(path: string, params: Record<string, string> =
 export const runningQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["running", workspace],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const data = await api<{ items: ({ machine_id: string } & RunningCounts)[]; truncated: boolean }>(
         `machines/running-counts?${new URLSearchParams({ workspace })}`,
+        { signal },
       )
       const counts = new Map(
-        data.items.map(({ machine_id, terminals, tunnels, previews }) => [machine_id, { terminals, tunnels, previews }]),
+        data.items.map(({ machine_id, terminals, tunnels, previews }) => [
+          machine_id,
+          { terminals, tunnels, previews },
+        ]),
       )
       return { counts, truncated: data.truncated }
     },

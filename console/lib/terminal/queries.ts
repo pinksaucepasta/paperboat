@@ -38,7 +38,7 @@ function terminalsPath(params: Record<string, string>) {
 export const terminalsPageQuery = (options: { closed: boolean; q: string; page: number; machine?: string }) =>
   queryOptions({
     queryKey: [...terminalKeys.list, "page", options],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const page = await api<TerminalPage>(
         terminalsPath({
           limit: String(terminalPageSize),
@@ -47,6 +47,7 @@ export const terminalsPageQuery = (options: { closed: boolean; q: string; page: 
           ...(options.q && { q: options.q }),
           ...(options.machine && { machine_id: options.machine }),
         }),
+        { signal },
       )
       return { items: page.sessions, total: page.pagination.total }
     },
@@ -58,11 +59,17 @@ export const terminalsPageQuery = (options: { closed: boolean; q: string; page: 
 export const terminalCountsQuery = (machine?: string) =>
   queryOptions({
     queryKey: [...terminalKeys.list, "counts", machine ?? ""],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const total = async (closed: boolean) =>
         (
           await api<TerminalPage>(
-            terminalsPath({ limit: "1", closed: String(closed), live: "false", ...(machine && { machine_id: machine }) }),
+            terminalsPath({
+              limit: "1",
+              closed: String(closed),
+              live: "false",
+              ...(machine && { machine_id: machine }),
+            }),
+            { signal },
           )
         ).pagination.total
       const [open, closed] = await Promise.all([total(false), total(true)])
@@ -187,6 +194,6 @@ export type BrowserSession = { session: TerminalSession; access_method: "account
 export const browserSessionQuery = (id: string) =>
   queryOptions({
     queryKey: ["terminal-sessions", id, "browser-session"] as const,
-    queryFn: () => guestApi<BrowserSession>(`${sessionPath(id)}/browser-session`),
+    queryFn: ({ signal }) => guestApi<BrowserSession>(`${sessionPath(id)}/browser-session`, { signal }),
     retry: false,
   })

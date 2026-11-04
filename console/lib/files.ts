@@ -63,7 +63,8 @@ export const fileKeys = {
 export const inboxQuery = (machineId: string, workspace: string) =>
   queryOptions({
     queryKey: [...fileKeys.inboxes, machineId],
-    queryFn: ({ signal }) => api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`, { signal }),
+    queryFn: ({ signal }) =>
+      api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`, { signal }),
     // The machine answers live, so poll gently and let a 409 machine_offline stand.
     refetchInterval: 30_000,
     retry: false,
@@ -72,9 +73,12 @@ export const inboxQuery = (machineId: string, workspace: string) =>
 export const requestsQuery = (workspace: string) =>
   queryOptions({
     queryKey: fileKeys.requests(workspace),
-    queryFn: async () =>
-      (await api<{ requests: InboxRequest[] }>(`team-inbox/requests?workspace=${encodeURIComponent(workspace)}`))
-        .requests,
+    queryFn: async ({ signal }) =>
+      (
+        await api<{ requests: InboxRequest[] }>(`team-inbox/requests?workspace=${encodeURIComponent(workspace)}`, {
+          signal,
+        })
+      ).requests,
     refetchInterval: 30_000,
   })
 

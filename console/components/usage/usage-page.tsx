@@ -43,10 +43,10 @@ const kindLabels: Record<string, string> = {
 const usageForQuery = (workspace: string, period: UsagePeriod, machineId: string | null) =>
   queryOptions({
     queryKey: ["usage", period, workspace, machineId ?? ""],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = usageParams(workspace, period)
       if (machineId) params.set("machine_id", machineId)
-      return api<Usage>(`usage?${params}`)
+      return api<Usage>(`usage?${params}`, { signal })
     },
     staleTime: 60_000,
   })

@@ -48,20 +48,28 @@ export const networkKeys = {
 }
 
 /** Every installation in the scope, page by page (the server caps a page at 200). */
-export async function fetchInstallations(scope: ReturnType<typeof scopeOf>): Promise<Installation[]> {
-  const pages = await fetchAllPages(async (params) => {
-    const page = await api<{ installations: Installation[]; pagination: { total: number } }>(
-      `selfhost/installations?${scopeQuery(scope)}&${new URLSearchParams(params)}`,
-    )
-    return { items: page.installations, pagination: page.pagination }
-  }, {})
+export async function fetchInstallations(
+  scope: ReturnType<typeof scopeOf>,
+  signal?: AbortSignal,
+): Promise<Installation[]> {
+  const pages = await fetchAllPages(
+    async (params, pageSignal) => {
+      const page = await api<{ installations: Installation[]; pagination: { total: number } }>(
+        `selfhost/installations?${scopeQuery(scope)}&${new URLSearchParams(params)}`,
+        { signal: pageSignal },
+      )
+      return { items: page.installations, pagination: page.pagination }
+    },
+    {},
+    signal,
+  )
   return pages?.items ?? []
 }
 
 export const installationsQuery = (scope: ReturnType<typeof scopeOf>) =>
   queryOptions({
     queryKey: networkKeys.installations(`${scope.kind}:${scope.id ?? ""}`),
-    queryFn: () => fetchInstallations(scope),
+    queryFn: ({ signal }) => fetchInstallations(scope, signal),
     // Readiness follows the node's own registration and health reports.
     refetchInterval: 10_000,
   })

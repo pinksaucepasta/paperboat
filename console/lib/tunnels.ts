@@ -47,7 +47,7 @@ export const previewsPageQuery = (options: {
 }) =>
   queryOptions({
     queryKey: [...tunnelKeys.previews(options.workspace), "page", options],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       cursorPage<Preview>(
         "previews",
         {
@@ -57,6 +57,7 @@ export const previewsPageQuery = (options: {
           ...(options.machine && { machine_id: options.machine }),
         },
         options.page,
+        signal,
       ),
     placeholderData: keepPreviousData,
     refetchInterval: 10_000,
@@ -66,11 +67,12 @@ export const previewsPageQuery = (options: {
 export const previewCountsQuery = (workspace: string, machine?: string) =>
   queryOptions({
     queryKey: [...tunnelKeys.previews(workspace), "counts", machine ?? ""],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const total = async (state: string) =>
         (
           await api<{ total: number }>(
             `previews?${new URLSearchParams({ workspace, state, limit: "1", ...(machine && { machine_id: machine }) })}`,
+            { signal },
           )
         ).total
       const [live, ended] = await Promise.all([total("active"), total("ended")])
@@ -83,7 +85,7 @@ export const previewCountsQuery = (workspace: string, machine?: string) =>
 export const tunnelsPageQuery = (options: { workspace: string; q: string; page: number; machine?: string }) =>
   queryOptions({
     queryKey: [...tunnelKeys.tunnels(options.workspace), "page", options],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       cursorPage<Tunnel>(
         "tunnels",
         {
@@ -92,6 +94,7 @@ export const tunnelsPageQuery = (options: { workspace: string; q: string; page: 
           ...(options.machine && { machine_id: options.machine }),
         },
         options.page,
+        signal,
       ),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
@@ -114,14 +117,16 @@ export const tunnelHealthQuery = (id: string) =>
 export const routesQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.routes(id),
-    queryFn: async () =>
-      (await allPages<TunnelRoute>(`${tunnelPath(id)}/routes`)).items.filter((route) => route.desired_state !== "deleted"),
+    queryFn: async ({ signal }) =>
+      (await allPages<TunnelRoute>(`${tunnelPath(id)}/routes`, {}, signal)).items.filter(
+        (route) => route.desired_state !== "deleted",
+      ),
   })
 
 export const domainsQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.domains(id),
-    queryFn: async () => (await allPages<TunnelDomain>(`${tunnelPath(id)}/domains`)).items,
+    queryFn: async ({ signal }) => (await allPages<TunnelDomain>(`${tunnelPath(id)}/domains`, {}, signal)).items,
     // Domains move through DNS and certificate states on their own.
     refetchInterval: 15_000,
   })
@@ -129,7 +134,8 @@ export const domainsQuery = (id: string) =>
 export const instructionsQuery = (id: string, domainId: string) =>
   queryOptions({
     queryKey: tunnelKeys.instructions(id, domainId),
-    queryFn: ({ signal }) => api<DnsInstructions>(`${tunnelPath(id)}/domains/${encodeURIComponent(domainId)}/instructions`, { signal }),
+    queryFn: ({ signal }) =>
+      api<DnsInstructions>(`${tunnelPath(id)}/domains/${encodeURIComponent(domainId)}/instructions`, { signal }),
   })
 
 /**

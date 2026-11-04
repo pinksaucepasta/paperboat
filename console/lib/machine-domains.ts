@@ -136,8 +136,8 @@ export function recordName(domain: string, zone?: string): string {
 export const domainCheckQuery = (domain: string) =>
   queryOptions({
     queryKey: ["domain-check", domain],
-    queryFn: async (): Promise<DomainCheck> => {
-      const response = await send(`/api/domain-check?${new URLSearchParams({ domain })}`)
+    queryFn: async ({ signal }): Promise<DomainCheck> => {
+      const response = await send(`/api/domain-check?${new URLSearchParams({ domain })}`, { signal })
       const body = (await response.json().catch(() => null)) as {
         data?: DomainCheck
         error?: { code?: string; message?: string }

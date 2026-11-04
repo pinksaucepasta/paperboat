@@ -33,7 +33,8 @@ const params = (workspace: string, q: string, kind?: Kind) => ({
 export const domainsPageQuery = (options: { workspace: string; q: string; page: number; kind?: Kind }) =>
   queryOptions({
     queryKey: ["domains", options.workspace, "page", options],
-    queryFn: () => cursorPage<DomainItem>("domains", params(options.workspace, options.q, options.kind), options.page),
+    queryFn: ({ signal }) =>
+      cursorPage<DomainItem>("domains", params(options.workspace, options.q, options.kind), options.page, signal),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   })
@@ -42,11 +43,12 @@ export const domainsPageQuery = (options: { workspace: string; q: string; page: 
 export const domainUsesQuery = (workspace: string, name: string) =>
   queryOptions({
     queryKey: ["domains", workspace, "uses", name],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const total = async (kind: Kind) =>
         (
           await api<{ total: number }>(
             `domains?${new URLSearchParams({ ...params(workspace, name, kind), limit: "1" })}`,
+            { signal },
           )
         ).total
       const [tunnels, previews] = await Promise.all([total("tunnel"), total("preview")])

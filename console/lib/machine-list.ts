@@ -24,8 +24,8 @@ function serverFilters(filters: Filters): Record<string, string> {
 export const machineListQuery = (workspace: string, text: string, filters: Filters, page: number) =>
   queryOptions({
     queryKey: queryKeys.machineList(workspace, text, filters, page),
-    queryFn: () =>
-      cursorPage<Machine>("machines", { workspace, ...(text && { q: text }), ...serverFilters(filters) }, page),
+    queryFn: ({ signal }) =>
+      cursorPage<Machine>("machines", { workspace, ...(text && { q: text }), ...serverFilters(filters) }, page, signal),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   })

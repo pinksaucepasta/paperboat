@@ -5,7 +5,8 @@ mock.module("next/headers", () => ({ cookies: async () => new Map([["pb-workspac
 mock.module("next/server", () => ({ connection: async () => {} }))
 process.env.PAPERBOAT_SERVER_URL = "http://control.example.test"
 const { prefetchMachinesPage } = await import("@/lib/server/prefetch")
-const { api } = await import("@/lib/api")
+const { api, machinesQuery } = await import("@/lib/api")
+const { cursorPage } = await import("@/lib/cursor-pages")
 
 const realFetch = globalThis.fetch
 let aborted: string[] = []
@@ -42,6 +43,24 @@ describe("a hung endpoint", () => {
     const read = api("machines/overview", { signal: caller.signal })
     caller.abort()
     expect(read).rejects.toMatchObject({ name: "AbortError" })
+    expect(aborted).toHaveLength(1)
+  })
+
+  test("a paged query's every page request stops when the query is cancelled", async () => {
+    const caller = new AbortController()
+    const run = machinesQuery("personal").queryFn as (context: { signal: AbortSignal }) => Promise<unknown>
+    const paged = run({ signal: caller.signal })
+    const settled = paged.catch((error: Error) => error.name)
+    caller.abort()
+    expect(await settled).toBe("AbortError")
+    expect(aborted).toHaveLength(1)
+  })
+
+  test("a cursor-paged list stops when its query is cancelled", async () => {
+    const caller = new AbortController()
+    const settled = cursorPage("machines", { workspace: "personal" }, 1, caller.signal).catch((e: Error) => e.name)
+    caller.abort()
+    expect(await settled).toBe("AbortError")
     expect(aborted).toHaveLength(1)
   })
 })

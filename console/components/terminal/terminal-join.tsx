@@ -32,7 +32,7 @@ export function TerminalJoin({ id, withCode }: { id: string; withCode: boolean }
   // Who is signed in, if anyone; a 401 here is just "nobody", not a reason to send them to sign in.
   const me = useQuery({
     queryKey: ["terminal-join", "me"],
-    queryFn: () => guestApi<Me>("me"),
+    queryFn: ({ signal }) => guestApi<Me>("me", { signal }),
     retry: false,
     enabled: access.isError,
   })

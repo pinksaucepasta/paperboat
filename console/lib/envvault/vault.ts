@@ -78,9 +78,9 @@ const scopePath = (scope: EnvScope) => `environment/scopes/${scope.kind}/${encod
 const notFound = (error: unknown) => error instanceof ApiError && error.status === 404
 
 /** The account's encrypted vault, or null before `pb env vault init` has created one. */
-export async function readVault(): Promise<Vault | null> {
+export async function readVault(signal?: AbortSignal): Promise<Vault | null> {
   try {
-    return await api<Vault>("environment-vault?workspace=personal")
+    return await api<Vault>("environment-vault?workspace=personal", { signal })
   } catch (error) {
     if (notFound(error)) return null
     throw error

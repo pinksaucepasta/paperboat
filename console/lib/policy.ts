@@ -51,7 +51,13 @@ export type Validation = {
 }
 
 /** `key_delivered: false`: env_read is allowed but no key holder has delivered the team ENV key yet. */
-export type Decision = { allowed: boolean; reason: string; rules?: string[]; guardrail?: string; key_delivered?: boolean }
+export type Decision = {
+  allowed: boolean
+  reason: string
+  rules?: string[]
+  guardrail?: string
+  key_delivered?: boolean
+}
 export type Explanation = { decision?: Decision }
 
 export type PolicyVersion = {
@@ -139,7 +145,7 @@ const ws = (workspace: string) => `workspaces/${encodeURIComponent(workspace)}`
 export const policyQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["policy", workspace],
-    queryFn: () => call<Policy>("Loading the policy", `${ws(workspace)}/policy`),
+    queryFn: ({ signal }) => call<Policy>("Loading the policy", `${ws(workspace)}/policy`, { signal }),
     enabled: Boolean(workspace),
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })
@@ -157,7 +163,7 @@ export type WorkspaceTags = {
 export const tagsQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["policy", workspace, "tags"],
-    queryFn: () => call<WorkspaceTags>("Loading tags", `${ws(workspace)}/tags`),
+    queryFn: ({ signal }) => call<WorkspaceTags>("Loading tags", `${ws(workspace)}/tags`, { signal }),
     enabled: tagsLive && Boolean(workspace),
   })
 
@@ -165,7 +171,13 @@ export const tagsQuery = (workspace: string) =>
  * Sets one machine's tags (new tags are created; a tag left without machines is dropped unless a
  * rule uses it). Like a policy save: 412 lists the access it changes, to confirm; 409 means reload.
  */
-export function setMachineTags(workspace: string, machineId: string, tags: string[], expected: number, confirm?: string) {
+export function setMachineTags(
+  workspace: string,
+  machineId: string,
+  tags: string[],
+  expected: number,
+  confirm?: string,
+) {
   return call<{ tags: string[]; policy_version: number }>(
     "Saving tags",
     `${ws(workspace)}/machines/${encodeURIComponent(machineId)}/tags`,
@@ -179,15 +191,17 @@ export const tagNamePattern = /^tag:[a-z0-9][a-z0-9._-]{0,62}$/
 export const policyVersionQuery = (workspace: string, version: number) =>
   queryOptions({
     queryKey: ["policy", workspace, "version", version],
-    queryFn: () => call<Policy>("Loading the version", `${ws(workspace)}/policy?version=${version}`),
+    queryFn: ({ signal }) =>
+      call<Policy>("Loading the version", `${ws(workspace)}/policy?version=${version}`, { signal }),
     staleTime: Infinity,
   })
 
 export const policyVersionsQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["policy", workspace, "versions"],
-    queryFn: async () =>
-      (await call<{ versions: PolicyVersion[] }>("Loading the history", `${ws(workspace)}/policy/versions`)).versions,
+    queryFn: async ({ signal }) =>
+      (await call<{ versions: PolicyVersion[] }>("Loading the history", `${ws(workspace)}/policy/versions`, { signal }))
+        .versions,
     enabled: Boolean(workspace),
   })
 
@@ -222,8 +236,9 @@ export function explainPolicy(
 export const apiTokensQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["api-tokens", workspace],
-    queryFn: async () =>
-      (await call<{ api_tokens: APIToken[] }>("Loading API tokens", `${ws(workspace)}/api-tokens`)).api_tokens,
+    queryFn: async ({ signal }) =>
+      (await call<{ api_tokens: APIToken[] }>("Loading API tokens", `${ws(workspace)}/api-tokens`, { signal }))
+        .api_tokens,
     enabled: Boolean(workspace),
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })

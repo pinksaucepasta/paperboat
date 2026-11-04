@@ -14,13 +14,17 @@ export const cursorPageSize = 50
  */
 const starts = new Map<string, string[]>()
 
-export async function cursorPage<T>(path: string, params: Record<string, string>, page: number) {
+export async function cursorPage<T>(path: string, params: Record<string, string>, page: number, signal?: AbortSignal) {
   const key = `${path}?${new URLSearchParams(params)}`
   const known = starts.get(key) ?? [""]
   let at = Math.min(page, known.length) - 1
   for (;;) {
-    const query = new URLSearchParams({ ...params, limit: String(cursorPageSize), ...(known[at] && { cursor: known[at] }) })
-    const result = await api<CursorPage<T>>(`${path}?${query}`)
+    const query = new URLSearchParams({
+      ...params,
+      limit: String(cursorPageSize),
+      ...(known[at] && { cursor: known[at] }),
+    })
+    const result = await api<CursorPage<T>>(`${path}?${query}`, { signal })
     if (result.next_cursor) known[at + 1] = result.next_cursor
     starts.set(key, known)
     // The page asked for, or the last one when the list is shorter than it.

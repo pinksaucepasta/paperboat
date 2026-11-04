@@ -30,7 +30,7 @@ export function EnvironmentList({ machine: tabMachine }: { machine?: Machine }) 
   const me = useApiQuery(meQuery)
   const { scope: machineId } = useListScope(tabMachine)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
-  const vault = useQuery({ queryKey: ["env-vault"], queryFn: readVault, staleTime: 0 })
+  const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
   if (!workspace || !me.data || vault.isPending) return <Skeleton className="h-40 w-full rounded-lg" />
   if (vault.isError) {
     return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
