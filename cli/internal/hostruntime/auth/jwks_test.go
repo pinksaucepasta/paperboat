@@ -240,3 +240,39 @@ func TestJWKSRefreshCooldownCollapsesUnknownKeyMisses(t *testing.T) {
 		t.Fatal("newly published key not found after the cooldown")
 	}
 }
+
+// pbvm4 run8: a restarted carrier began with an empty key cache, because the persisted document was dropped after the
+// 5 minute default although the server had said it stays current for an hour (a running process trusts it that long),
+// so the first stream's credential check waited for a network fetch (stream_authorize 2.2 s).
+func TestJWKSPersistedDocumentKeepsTheServersLifetimeAcrossRestart(t *testing.T) {
+	clock := &fixedClock{now: time.Now().UTC()}
+	key := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	path := filepath.Join(t.TempDir(), "authorization", "jwks.json")
+	config := func(fetcher JWKSFetcher) JWKSConfig {
+		return JWKSConfig{Clock: clock, TTL: 5 * time.Minute, PersistencePath: path, Fetcher: fetcher}
+	}
+	first, err := NewJWKSCache(config(maxAgeFetcher{body: func() string { return jwksFor("persisted", key) }, maxAge: time.Hour}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	offline := fetcherFunc(func(context.Context) (io.ReadCloser, error) { return nil, errors.New("offline") })
+	clock.now = clock.now.Add(10 * time.Minute)
+	restarted, err := NewJWKSCache(config(offline))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := restarted.Lookup(context.Background(), "persisted"); !ok {
+		t.Fatal("restarted process dropped a persisted key the server still calls current")
+	}
+	clock.now = clock.now.Add(51 * time.Minute)
+	expired, err := NewJWKSCache(config(offline))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := expired.Lookup(context.Background(), "persisted"); ok {
+		t.Fatal("persisted key outlived the document's lifetime")
+	}
+}

@@ -232,7 +232,7 @@ func (c *JWKSCache) fetch(ctx context.Context) error {
 	c.ttl = ttl
 	c.mu.Lock()
 	now := c.config.Clock.Now()
-	if err := c.persist(encoded, now); err != nil {
+	if err := c.persist(encoded, now, ttl); err != nil {
 		c.mu.Unlock()
 		return err
 	}
@@ -263,9 +263,11 @@ func (c *JWKSCache) fetch(ctx context.Context) error {
 }
 
 type persistedJWKS struct {
-	Schema      string          `json:"schema"`
-	ValidatedAt time.Time       `json:"validated_at"`
-	Document    json.RawMessage `json:"document"`
+	Schema      string    `json:"schema"`
+	ValidatedAt time.Time `json:"validated_at"`
+	// TTL is how long the server said the document stays current, as the running process trusted it.
+	TTL      time.Duration   `json:"ttl"`
+	Document json.RawMessage `json:"document"`
 }
 
 func (c *JWKSCache) loadPersisted() {
@@ -285,24 +287,25 @@ func (c *JWKSCache) loadPersisted() {
 	decoder.DisallowUnknownFields()
 	var persisted persistedJWKS
 	var extra any
-	if decoder.Decode(&persisted) != nil || decoder.Decode(&extra) != io.EOF || persisted.Schema != "paperboat.jwks-cache/v1" || persisted.ValidatedAt.IsZero() {
+	if decoder.Decode(&persisted) != nil || decoder.Decode(&extra) != io.EOF || persisted.Schema != "paperboat.jwks-cache/v1" || persisted.ValidatedAt.IsZero() || persisted.TTL <= 0 || persisted.TTL > maximumJWKSMaxAge {
 		return
 	}
 	now := c.config.Clock.Now()
-	if persisted.ValidatedAt.After(now.Add(time.Minute)) || !now.Before(persisted.ValidatedAt.Add(c.config.TTL)) {
+	expiresAt := persisted.ValidatedAt.Add(persisted.TTL)
+	if persisted.ValidatedAt.After(now.Add(time.Minute)) || !now.Before(expiresAt) {
 		return
 	}
 	keys, _, err := decodeJWKS(persisted.Document, c.config.MaxKeys)
 	if err != nil {
 		return
 	}
-	expiresAt := persisted.ValidatedAt.Add(c.config.TTL)
+	c.ttl = persisted.TTL
 	for keyID, key := range keys {
 		c.keys[keyID] = cachedKey{key: key, expiresAt: expiresAt}
 	}
 }
 
-func (c *JWKSCache) persist(document []byte, validatedAt time.Time) error {
+func (c *JWKSCache) persist(document []byte, validatedAt time.Time, ttl time.Duration) error {
 	path := c.config.PersistencePath
 	if path == "" {
 		return nil
@@ -321,7 +324,7 @@ func (c *JWKSCache) persist(document []byte, validatedAt time.Time) error {
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(persistedJWKS{Schema: "paperboat.jwks-cache/v1", ValidatedAt: validatedAt.UTC(), Document: append(json.RawMessage(nil), document...)})
+	body, err := json.Marshal(persistedJWKS{Schema: "paperboat.jwks-cache/v1", ValidatedAt: validatedAt.UTC(), TTL: ttl, Document: append(json.RawMessage(nil), document...)})
 	if err != nil {
 		return err
 	}
