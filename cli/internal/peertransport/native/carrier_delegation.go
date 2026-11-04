@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -50,56 +51,105 @@ type CarrierOffer struct {
 }
 
 // CarrierIdentity owns the new generation's private key. Only Offer travels
-// over the old authenticated connection.
+// over the old authenticated connection. Offer is set before the generation
+// starts; afterwards Current is the renewed offer (RenewCarrierIdentity).
 type CarrierIdentity struct {
-	Offer CarrierOffer
-	tls   *tls.Config
+	Offer   CarrierOffer
+	tls     *tls.Config
+	private ed25519.PrivateKey
+	mu      sync.Mutex
+	leaf    *tls.Certificate
 }
 
 // PrepareCarrierIdentity creates the certificate before discovery starts, so
-// its hash can isolate relay routes without inventing an endpoint placeholder.
+// its key can isolate relay routes without inventing an endpoint placeholder.
 func (o *Owner) PrepareCarrierIdentity() (*CarrierIdentity, error) {
 	if o == nil || o.authority == nil || o.tls == nil {
 		return nil, ErrInvalid
 	}
-	self, err := o.authority.Self()
-	if err != nil || self.Role != "machine" || len(o.tls.Certificates) != 1 || len(o.tls.Certificates[0].Certificate) == 0 {
-		return nil, ErrInvalid
-	}
-	parentKey, ok := o.tls.Certificates[0].PrivateKey.(ed25519.PrivateKey)
-	if !ok || base64.RawURLEncoding.EncodeToString(parentKey.Public().(ed25519.PublicKey)) != self.QUICPublicKey {
-		return nil, ErrInvalid
-	}
-	parentLeaf, err := x509.ParseCertificate(o.tls.Certificates[0].Certificate[0])
+	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
-	expires := min(now.Add(carrierDelegationLifetime).Unix(), parentLeaf.NotAfter.Unix())
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, err
-	}
-	template := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: self.MachineID}, NotBefore: now.Add(-time.Minute), NotAfter: time.Unix(expires, 0), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+	self, der, expires, err := o.delegationCertificate(private)
 	if err != nil {
 		return nil, err
 	}
 	claims := CarrierClaims{Kind: carrierDelegationKind, AccountID: self.AccountID, MachineID: self.MachineID, MachineGeneration: self.MachineGeneration, ParentPublicKey: self.QUICPublicKey, ExpiresUnix: expires, Certificate: der}
-	offer := CarrierOffer{Claims: claims}
-
+	identity := &CarrierIdentity{Offer: CarrierOffer{Claims: claims}, private: private, leaf: &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: private}}
 	config := o.tls.Clone()
-	config.Certificates = []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: private}}
 	config.GetCertificate, config.GetClientCertificate = nil, nil
 	config.NextProtos = []string{peerquic.ALPN}
-	return &CarrierIdentity{Offer: offer, tls: config}, nil
+	identity.tls = config
+	return identity, nil
 }
 
-func (i *CarrierIdentity) Namespace() [32]byte { return sha256.Sum256(i.Offer.Claims.Certificate) }
+// serverTLS presents the current (renewed) delegated certificate. Each
+// incoming flow takes its own copy, so renewal never touches an open one.
+func (i *CarrierIdentity) serverTLS() *tls.Config {
+	config := i.tls.Clone()
+	i.mu.Lock()
+	config.Certificates = []tls.Certificate{*i.leaf}
+	i.mu.Unlock()
+	return config
+}
+
+// delegationCertificate issues a self-signed certificate for private that
+// expires with the delegation, never after the parent machine certificate.
+func (o *Owner) delegationCertificate(private ed25519.PrivateKey) (tailnet.NetworkBinding, []byte, int64, error) {
+	self, err := o.authority.Self()
+	if err != nil || self.Role != "machine" || len(o.tls.Certificates) != 1 || len(o.tls.Certificates[0].Certificate) == 0 {
+		return self, nil, 0, ErrInvalid
+	}
+	parentKey, ok := o.tls.Certificates[0].PrivateKey.(ed25519.PrivateKey)
+	if !ok || base64.RawURLEncoding.EncodeToString(parentKey.Public().(ed25519.PublicKey)) != self.QUICPublicKey {
+		return self, nil, 0, ErrInvalid
+	}
+	parent := o.tls.Certificates[0]
+	// A long-lived generation renews past the first leaf; the parent issues fresh ones.
+	if o.tls.GetCertificate != nil {
+		if fresh, err := o.tls.GetCertificate(nil); err == nil && fresh != nil && len(fresh.Certificate) != 0 {
+			parent = *fresh
+		}
+	}
+	parentLeaf, err := x509.ParseCertificate(parent.Certificate[0])
+	if err != nil {
+		return self, nil, 0, err
+	}
+	now := time.Now().UTC()
+	expires := min(now.Add(carrierDelegationLifetime).Unix(), parentLeaf.NotAfter.Unix())
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return self, nil, 0, err
+	}
+	template := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: self.MachineID}, NotBefore: now.Add(-time.Minute), NotAfter: time.Unix(expires, 0), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, private.Public(), private)
+	return self, der, expires, err
+}
+
+// Namespace keys the generation's network and relay routes. It follows the
+// delegated key, not the certificate, so a renewed delegation keeps it.
+func (i *CarrierIdentity) Namespace() [32]byte { return i.Current().Namespace() }
+
+// Current is the generation's latest signed offer.
+func (i *CarrierIdentity) Current() CarrierOffer {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.Offer
+}
+
+func (o CarrierOffer) Namespace() [32]byte { return certificateNamespace(o.Claims.Certificate) }
+
+// certificateNamespace hashes the certificate's ed25519 key; an unparsable
+// certificate (which never verifies) hashes as itself.
+func certificateNamespace(der []byte) [32]byte {
+	if leaf, err := x509.ParseCertificate(der); err == nil {
+		if public, ok := leaf.PublicKey.(ed25519.PublicKey); ok {
+			return sha256.Sum256(public)
+		}
+	}
+	return sha256.Sum256(der)
+}
 
 // SignCarrierCandidates binds STUN/local candidates and the generation's disco
 // key to the same delegated certificate verified on the old authenticated link.
@@ -107,30 +157,61 @@ func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco
 	if o == nil || identity == nil {
 		return ErrInvalid
 	}
-	self, err := o.authority.Self()
-	if err != nil {
-		return err
-	}
-	parent, ok := o.tls.Certificates[0].PrivateKey.(ed25519.PrivateKey)
-	if !ok {
-		return ErrInvalid
-	}
-	claims := identity.Offer.Claims
+	claims := identity.Current().Claims
 	claims.DiscoPublicKey, claims.OwnerInstance, claims.Endpoints = disco, instance, nil
 	claims.RelayNodeIDs = append([]string(nil), relays...)
 	for _, endpoint := range endpoints {
 		claims.Endpoints = append(claims.Endpoints, endpoint.String())
 	}
+	_, err := o.signDelegation(identity, claims, nil)
+	return err
+}
+
+// RenewCarrierIdentity extends a serving generation's delegation by another
+// lifetime with the same key, signing the network's current candidates, so
+// new clients keep reaching the same generation. Open connections never
+// depended on the old offer's expiry.
+func (o *Owner) RenewCarrierIdentity(identity *CarrierIdentity, network *tailnet.CarrierNetwork) (CarrierOffer, error) {
+	if o == nil || identity == nil || network == nil {
+		return CarrierOffer{}, ErrInvalid
+	}
+	_, der, expires, err := o.delegationCertificate(identity.private)
+	if err != nil {
+		return CarrierOffer{}, err
+	}
+	claims := identity.Current().Claims
+	claims.ExpiresUnix, claims.Certificate, claims.DiscoPublicKey, claims.Endpoints = expires, der, network.DiscoPublic(), nil
+	claims.RelayNodeIDs = network.RelayNodeIDs()
+	for _, endpoint := range network.Endpoints() {
+		claims.Endpoints = append(claims.Endpoints, endpoint.String())
+	}
+	return o.signDelegation(identity, claims, &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: identity.private})
+}
+
+func (o *Owner) signDelegation(identity *CarrierIdentity, claims CarrierClaims, leaf *tls.Certificate) (CarrierOffer, error) {
+	self, err := o.authority.Self()
+	if err != nil {
+		return CarrierOffer{}, err
+	}
+	parent, ok := o.tls.Certificates[0].PrivateKey.(ed25519.PrivateKey)
+	if !ok {
+		return CarrierOffer{}, ErrInvalid
+	}
 	body, err := json.Marshal(claims)
 	if err != nil {
-		return err
+		return CarrierOffer{}, err
 	}
 	offer := CarrierOffer{Claims: claims, Signature: ed25519.Sign(parent, body)}
 	if err := offer.verify(self, time.Now()); err != nil {
-		return err
+		return CarrierOffer{}, err
 	}
+	identity.mu.Lock()
 	identity.Offer = offer
-	return nil
+	if leaf != nil {
+		identity.leaf = leaf
+	}
+	identity.mu.Unlock()
+	return offer, nil
 }
 
 func (o CarrierOffer) MarshalBinary() ([]byte, error) {

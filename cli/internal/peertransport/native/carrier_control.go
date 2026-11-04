@@ -143,18 +143,21 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	s.routerMu.Unlock()
 	result := byte(0)
 	moveErr := ErrInvalid
+	// A generation that serves every application takes this client's new
+	// connections; its open streams, terminals included, stay here (a terminal
+	// moves with the session owner's own handover).
 	switch {
-	case move != nil:
-		moveErr = move(ctx, offer)
 	case offer.Claims.AllApplications && s.owner.hasRoute(s.peerID, offer):
 		moveErr = nil
 	case offer.Claims.AllApplications:
-		// No terminal here: connect the generation once so this client's new
-		// connections open on it; this connection keeps its open streams.
+		// Connect the generation once so this client's new connections open on
+		// it; this connection keeps its open streams.
 		var next *Session
 		if next, moveErr = s.DialCarrier(ctx, offer); moveErr == nil {
 			next.Close()
 		}
+	case move != nil:
+		moveErr = move(ctx, offer)
 	}
 	if moveErr == nil {
 		result = 1

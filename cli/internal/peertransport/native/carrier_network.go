@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"crypto/sha256"
 	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
@@ -23,7 +22,7 @@ func (o *Owner) getCarrierNetwork(ctx context.Context, offer CarrierOffer) (*tai
 	if err := o.ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	namespace := sha256.Sum256(offer.Claims.Certificate)
+	namespace := offer.Namespace()
 	entry := o.carrierNetworks[namespace]
 	if entry == nil {
 		network, err := o.authority.NewCarrierNetwork(ctx, namespace, nil)

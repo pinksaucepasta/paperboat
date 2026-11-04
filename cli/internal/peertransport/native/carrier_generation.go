@@ -1,7 +1,6 @@
 package native
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
@@ -116,14 +115,14 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	return session, nil
 }
 
-// carrierTLS authenticates exactly the offer's delegated certificate under the
-// peer's current signed binding.
+// carrierTLS authenticates the offer's delegated key under the peer's current
+// signed binding; a renewed delegation presents a newer certificate for it.
 func (o *Owner) carrierTLS(peerID string, peer tailnet.NetworkBinding, offer CarrierOffer) *tls.Config {
 	config := o.tls.Clone()
 	config.NextProtos = []string{peerquic.ALPN}
 	config.VerifyConnection = func(state tls.ConnectionState) error {
 		current, err := o.authority.Peer(peerID)
-		if err != nil || current != peer || offer.verify(current, time.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || !bytes.Equal(state.PeerCertificates[0].Raw, offer.Claims.Certificate) {
+		if err != nil || current != peer || offer.verify(current, time.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || certificateNamespace(state.PeerCertificates[0].Raw) != offer.Namespace() {
 			return ErrInvalid
 		}
 		return nil
@@ -176,7 +175,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(current.Claims.Certificate, offer.Claims.Certificate) || current.verify(peer, time.Now()) != nil {
+	if current.Namespace() != offer.Namespace() || current.verify(peer, time.Now()) != nil {
 		return nil, ErrInvalid
 	}
 	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
@@ -230,15 +229,15 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		return ErrInvalid
 	}
 	self, err := o.authority.Self()
-	if err != nil || identity.Offer.verify(self, time.Now()) != nil {
+	if err != nil || identity.Current().verify(self, time.Now()) != nil {
 		socket.Close()
 		return ErrInvalid
 	}
-	config := identity.tls.Clone()
+	config := identity.serverTLS()
 	config.ClientAuth = tls.RequireAnyClientCert
 	config.VerifyConnection = func(state tls.ConnectionState) error {
 		current, err := o.authority.Self()
-		if err != nil || identity.Offer.verify(current, time.Now()) != nil {
+		if err != nil || identity.Current().verify(current, time.Now()) != nil {
 			return ErrInvalid
 		}
 		peer, err := o.carrierPeer(state)
@@ -268,7 +267,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		transport.Close()
 		return err
 	}
-	session, err := newSession(o, peer.EndpointID, peer, transport, !identity.Offer.Claims.AllApplications)
+	session, err := newSession(o, peer.EndpointID, peer, transport, !identity.Current().Claims.AllApplications)
 	if err != nil {
 		transport.Close()
 		return err

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -45,7 +46,7 @@ func TestCarrierGenerationTakesEveryNewConnection(t *testing.T) {
 	var generation *tailnet.CarrierNetwork
 	var identity *native.CarrierIdentity
 	mo, err := native.NewOwner(native.Config{Authority: ma, TLS: machineTLS, PrepareCarrier: func(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
-		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
+		if identity == nil || request.Offer.Namespace() != identity.Namespace() {
 			return native.CarrierOffer{}, native.ErrInvalid
 		}
 		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
@@ -59,7 +60,7 @@ func TestCarrierGenerationTakesEveryNewConnection(t *testing.T) {
 			return native.CarrierOffer{}, err
 		}
 		socket.Close()
-		return identity.Offer, nil
+		return identity.Current(), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -104,21 +105,40 @@ func TestCarrierGenerationTakesEveryNewConnection(t *testing.T) {
 	}
 	carrierEcho(t, oldStream)
 	for _, consumer := range []string{"exec", "ssh", "exec"} {
-		fresh, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
-		if err != nil {
-			t.Fatal(err)
-		}
-		stream := openConsumer(t, ctx, fresh, consumer)
-		stream.SetDeadline(time.Now().Add(2 * time.Second))
-		var mark [1]byte
-		if _, err := io.ReadFull(stream, mark[:]); err != nil || mark[0] != 'G' {
-			t.Fatal("a new connection did not open on the generation", consumer, err)
-		}
-		carrierEcho(t, stream)
-		stream.Close()
-		fresh.Close()
+		dialGeneration(t, ctx, co, address, consumer)
 	}
 	carrierEcho(t, oldStream)
+
+	// A long-lived generation renews its delegation with the same key: its
+	// network stays, and a client still holding the first offer connects to
+	// the renewed certificate.
+	first := identity.Current()
+	renewed, err := mo.RenewCarrierIdentity(identity, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Namespace() != first.Namespace() || bytes.Equal(renewed.Claims.Certificate, first.Claims.Certificate) || !renewed.Claims.AllApplications || identity.Current().Signature == nil {
+		t.Fatal("renewal changed the generation or kept its certificate")
+	}
+	dialGeneration(t, ctx, co, address, "exec")
+	carrierEcho(t, oldStream)
+}
+
+func dialGeneration(t *testing.T, ctx context.Context, co *native.Owner, address mesh.Addr, consumer string) {
+	t.Helper()
+	fresh, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	stream := openConsumer(t, ctx, fresh, consumer)
+	defer stream.Close()
+	stream.SetDeadline(time.Now().Add(2 * time.Second))
+	var mark [1]byte
+	if _, err := io.ReadFull(stream, mark[:]); err != nil || mark[0] != 'G' {
+		t.Fatal("a new connection did not open on the generation", consumer, err)
+	}
+	carrierEcho(t, stream)
 }
 
 func openConsumer(t *testing.T, ctx context.Context, s *native.Session, consumer string) net.Conn {

@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"crypto/sha256"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -67,7 +66,7 @@ func (o *Owner) hasRoute(peerID string, offer CarrierOffer) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	route := o.routes[peerID]
-	return route != nil && sha256.Sum256(route.offer.Claims.Certificate) == sha256.Sum256(offer.Claims.Certificate)
+	return route != nil && route.offer.Namespace() == offer.Namespace()
 }
 
 // dialRoute opens a new connection on peerID's active generation, or returns
@@ -78,7 +77,7 @@ func (o *Owner) dialRoute(ctx context.Context, peerID string, want *CarrierOffer
 	o.mu.Lock()
 	route := o.routes[peerID]
 	o.mu.Unlock()
-	if route == nil || want != nil && sha256.Sum256(route.offer.Claims.Certificate) != sha256.Sum256(want.Claims.Certificate) {
+	if route == nil || want != nil && route.offer.Namespace() != want.Namespace() {
 		return nil
 	}
 	peer, err := o.authority.Peer(peerID)
