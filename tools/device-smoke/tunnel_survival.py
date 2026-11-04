@@ -4,6 +4,7 @@ import functools
 import http.server
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -101,8 +102,11 @@ def main():
                     [str(PB), 'update', '--from', str(copy)], check=True, timeout=300, capture_output=True))
             finally:
                 shutil.rmtree(installed, ignore_errors=True)
-            unit = 'paperboat-hostd-u%d.service' % os.getuid()
-            survive(endpoint, identifier, 'a host-service restart', lambda: sudo('systemctl', 'restart', unit))
+            if platform.system() == 'Darwin':
+                restart_host = lambda: sudo('launchctl', 'kickstart', '-k', 'system/com.pinksaucepasta.paperboat.hostd.u%d' % os.getuid())
+            else:
+                restart_host = lambda: sudo('systemctl', 'restart', 'paperboat-hostd-u%d.service' % os.getuid())
+            survive(endpoint, identifier, 'a host-service restart', restart_host)
         except BaseException as error:
             primary_error = error
             raise
