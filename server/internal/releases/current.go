@@ -30,6 +30,7 @@ var supportedPlatformArchitectures = [...]struct {
 	platform     string
 	architecture string
 }{
+	{platform: "darwin", architecture: "arm64"},
 	{platform: "linux", architecture: "amd64"},
 	{platform: "linux", architecture: "arm64"},
 }

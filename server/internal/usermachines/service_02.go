@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"slices"
@@ -135,7 +136,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 	workspaceRoot, validWorkspace := canonicalWorkspaceRoot(in.Platform, in.WorkspaceRoot)
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(in.PublicIdentityKey))
 	if userID == "" || invalidMachineAlias(in.Alias) || !validMachineArchitecture(in.Architecture) ||
-		!supportedMachineTarget(strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))) ||
+		!releases.SupportedPlatformArchitecture(strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))) ||
 		!validWorkspace ||
 		!slices.Contains(s.policy.AllowedPlatforms, strings.ToLower(strings.TrimSpace(in.Platform))) ||
 		keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
