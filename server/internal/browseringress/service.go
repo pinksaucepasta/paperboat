@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"log/slog"
 	"net"
 	"time"
 
@@ -52,27 +53,34 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 	}
 	if a.ResourceKind == "tunnel" {
 		if a.ViewerPolicyGeneration < 1 {
-			return d, wire.ErrIngressDenied
+			return d, refused(ctx, a, "viewer_policy_missing")
 		}
 		policyGeneration = a.ViewerPolicyGeneration
 		d, err = (ingressprojection.SQLIngressSource{DB: s.DB}).RestrictedRoute(ctx, node, epoch, a.AccessMode, a.RouteID, a.Hostname)
 	} else if a.ResourceKind == "preview" {
 		d, err = s.preview(ctx, a, node, epoch)
 	} else {
-		return d, wire.ErrIngressDenied
+		return d, refused(ctx, a, "resource_kind")
 	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return d, wire.ErrIngressDenied
+		if err == pgx.ErrNoRows || err == wire.ErrIngressDenied {
+			return d, refused(ctx, a, "no_edge_decision")
 		}
 		return d, err
 	}
 	if a.ResourceKind == "tunnel" && d.PolicyGeneration != uint64(a.ViewerPolicyGeneration) {
-		return wire.IngressDecision{}, wire.ErrIngressDenied
+		return wire.IngressDecision{}, refused(ctx, a, "viewer_policy_generation")
 	}
 	b := &d.Binding
-	if b.AccountID != a.OwnerAccountID || b.ResourceGeneration != uint64(a.ResourceGeneration) || b.RouteID != a.RouteID || b.RouteGeneration != uint64(a.RouteGeneration) || b.Hostname != a.Hostname {
-		return wire.IngressDecision{}, wire.ErrIngressDenied
+	switch {
+	case b.AccountID != a.OwnerAccountID:
+		return wire.IngressDecision{}, refused(ctx, a, "owner")
+	case b.ResourceGeneration != uint64(a.ResourceGeneration):
+		return wire.IngressDecision{}, refused(ctx, a, "resource_generation")
+	case b.RouteID != a.RouteID, b.RouteGeneration != uint64(a.RouteGeneration):
+		return wire.IngressDecision{}, refused(ctx, a, "route")
+	case b.Hostname != a.Hostname:
+		return wire.IngressDecision{}, refused(ctx, a, "hostname")
 	}
 	b.Audience = a.AccessMode
 	if policyGeneration != 0 {
@@ -178,3 +186,10 @@ WHERE p.id=$1 AND p.account_id=$2 AND a.route_id=$3 AND a.edge_node_id=$4 AND a.
  AND identity.issued_at<=$6 AND identity.expires_at>$6
  AND n.state='ready' AND n.ready AND n.last_heartbeat_at>$6::timestamptz-interval '2 minutes'
 LIMIT 1`
+
+// refused logs which check refused a browser ingress decision (no credentials), then answers the
+// ordinary denial; the edge cannot tell the steps apart, operators can.
+func refused(ctx context.Context, a browseraccess.Authorization, step string) error {
+	slog.WarnContext(ctx, "browser ingress refused", "step", step, "resource_kind", a.ResourceKind, "resource_id", a.ResourceID, "route_id", a.RouteID)
+	return wire.ErrIngressDenied
+}

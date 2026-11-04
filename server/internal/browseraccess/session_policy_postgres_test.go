@@ -176,19 +176,23 @@ func TestTunnelOwnerSessionSurvivesAnOrdinaryTunnelEditPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorize := func() error {
-		_, e := s.Authorize(ctx, AuthorizeRequest{Token: grant.Token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route})
-		return e
+	authorize := func() (Authorization, error) {
+		return s.Authorize(ctx, AuthorizeRequest{Token: grant.Token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route})
 	}
 	exec(`UPDATE paperboat.tunnels SET generation=generation+1,name='renamed' WHERE id=$1`, tunnel)
-	if err := authorize(); err != nil {
+	a, err := authorize()
+	if err != nil {
 		t.Fatalf("an ordinary tunnel edit refused the owner's session: %v", err)
+	}
+	// The edge's ingress decision binds the tunnel's current generation; the authorization must report it.
+	if a.ResourceGeneration != 2 {
+		t.Fatalf("authorization resource generation = %d, want the tunnel's current generation 2", a.ResourceGeneration)
 	}
 	if _, otherIssue := issue(otherSession, other); !otherIssue.Denied {
 		t.Fatal("another account was let into a private tunnel")
 	}
 	exec(`UPDATE paperboat.tunnels SET access_mode='public' WHERE id=$1`, tunnel)
-	if err := authorize(); err == nil {
+	if _, err := authorize(); err == nil {
 		t.Fatal("an access-mode change did not revoke the browser session")
 	}
 }

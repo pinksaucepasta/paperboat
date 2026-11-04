@@ -70,7 +70,7 @@ type routeCandidate struct {
 
 func resolveTunnelRequest(ctx context.Context, tx *db.Tx, host, path string, now time.Time) (authority, error) {
 	rows, err := tx.Query(ctx, `
-SELECT t.id,t.account_id,t.access_mode,t.access_generation,r.id,r.generation,
+SELECT t.id,t.account_id,t.access_mode,t.generation,t.access_generation,r.id,r.generation,
        COALESCE(t.expires_at,$2::timestamptz+interval '100 years'),t.created_by_host_id,
        t.stable_endpoint,r.match_type,r.match_hostname,r.wildcard_suffix,r.path_prefix,r.priority,
        COALESCE(d.match_type,''),COALESCE(d.hostname,'')
@@ -98,7 +98,7 @@ WHERE t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NUL
 		var matchType, stableEndpoint string
 		var exact, suffix, pathPrefix, domainMatchType, domainHostname *string
 		var priority int32
-		if err := rows.Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.route, &a.routeGeneration, &a.expires, &a.machine,
+		if err := rows.Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.accessGeneration, &a.route, &a.routeGeneration, &a.expires, &a.machine,
 			&stableEndpoint, &matchType, &exact, &suffix, &pathPrefix, &priority, &domainMatchType, &domainHostname); err != nil {
 			return authority{}, err
 		}

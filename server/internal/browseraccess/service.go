@@ -193,16 +193,18 @@ type authority struct {
 	ownerTeam                                string
 	previewOwnerSession                      string
 	generation, routeGeneration              int64
-	policyAudience                           string
-	policyGeneration                         int64
-	policyTeam                               string
-	policyTeamGeneration                     int64
-	policyMembershipGeneration               int64
-	policyBindingGeneration                  int64
-	expires                                  time.Time
-	sessionCap                               time.Time
-	team                                     string
-	td                                       teams.Decision
+	// accessGeneration fences browser sessions on a tunnel: it moves on access changes, not on ordinary edits.
+	accessGeneration           int64
+	policyAudience             string
+	policyGeneration           int64
+	policyTeam                 string
+	policyTeamGeneration       int64
+	policyMembershipGeneration int64
+	policyBindingGeneration    int64
+	expires                    time.Time
+	sessionCap                 time.Time
+	team                       string
+	td                         teams.Decision
 }
 
 func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, error) {
@@ -276,7 +278,7 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 			return ErrNotAuthorized
 		}
 		end := minTime(now.Add(handoffTTL), sessionExpiry, a.expires)
-		result, err := tx.Exec(ctx, `UPDATE browser_access_transactions SET account_id=$2,resource_kind=$3,resource_id=$4,resource_generation=$5,preview_owner_session_id=$6,owner_account_id=$7,access_mode=$8,team_id=$9,team_generation=$10,membership_generation=$11,binding_generation=$12,grant_generation=$13,trusted_session_id=$14,trusted_session_version=$15,trusted_session_expires_at=$16,handoff_hash=$17,handoff_expires_at=$18,viewer_policy_generation=$19,issued_at=$20,route_id=$21,viewer_policy_team_id=$25,viewer_policy_team_generation=$26,viewer_policy_membership_generation=$27,viewer_policy_binding_generation=$28 WHERE transaction_id=$1 AND issued_at IS NULL AND resource_kind=$22 AND resource_id=$23 AND route_id=$24`, in.TransactionID, in.Principal.UserID, a.kind, a.id, a.generation, nullString(a.previewOwnerSession), a.owner, a.mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), in.Principal.ID, sessionVersion, sessionExpiry, hh[:], end, a.policyGeneration, now, a.route, kind, resourceID, routeID, nullString(a.policyTeam), nullInt64(a.policyTeamGeneration), nullInt64(a.policyMembershipGeneration), nullInt64(a.policyBindingGeneration))
+		result, err := tx.Exec(ctx, `UPDATE browser_access_transactions SET account_id=$2,resource_kind=$3,resource_id=$4,resource_generation=$5,preview_owner_session_id=$6,owner_account_id=$7,access_mode=$8,team_id=$9,team_generation=$10,membership_generation=$11,binding_generation=$12,grant_generation=$13,trusted_session_id=$14,trusted_session_version=$15,trusted_session_expires_at=$16,handoff_hash=$17,handoff_expires_at=$18,viewer_policy_generation=$19,issued_at=$20,route_id=$21,viewer_policy_team_id=$25,viewer_policy_team_generation=$26,viewer_policy_membership_generation=$27,viewer_policy_binding_generation=$28 WHERE transaction_id=$1 AND issued_at IS NULL AND resource_kind=$22 AND resource_id=$23 AND route_id=$24`, in.TransactionID, in.Principal.UserID, a.kind, a.id, a.sessionGeneration(), nullString(a.previewOwnerSession), a.owner, a.mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), in.Principal.ID, sessionVersion, sessionExpiry, hh[:], end, a.policyGeneration, now, a.route, kind, resourceID, routeID, nullString(a.policyTeam), nullInt64(a.policyTeamGeneration), nullInt64(a.policyMembershipGeneration), nullInt64(a.policyBindingGeneration))
 		if err != nil {
 			return err
 		}
@@ -353,7 +355,7 @@ func (s *Service) Redeem(ctx context.Context, in RedeemRequest) (RedeemResult, e
 		if err != nil {
 			return err
 		}
-		if (kind != "preview" && a.generation != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || a.route != routeID || a.policyGeneration != *policyGeneration || !sameViewerPolicyTeam(a, policyTeam, policyTeamGeneration, policyMembershipGeneration, policyBindingGeneration) {
+		if (kind != "preview" && a.sessionGeneration() != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || a.route != routeID || a.policyGeneration != *policyGeneration || !sameViewerPolicyTeam(a, policyTeam, policyTeamGeneration, policyMembershipGeneration, policyBindingGeneration) {
 			return ErrNotAuthorized
 		}
 		absolute := minTime(now.Add(s.sessionPolicy.ResourceAbsoluteLifetime), authExp, a.sessionCap)
@@ -365,7 +367,7 @@ func (s *Service) Redeem(ctx context.Context, in RedeemRequest) (RedeemResult, e
 		if active >= 128 {
 			return ErrCapacity
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO browser_access_sessions(grant_id,token_hash,account_id,hostname,resource_kind,resource_id,resource_generation,route_id,viewer_policy_generation,preview_owner_session_id,owner_account_id,access_mode,team_id,team_generation,membership_generation,binding_generation,grant_generation,trusted_session_id,trusted_session_version,trusted_session_expires_at,issued_at,last_seen_at,absolute_expires_at,expires_at,viewer_policy_team_id,viewer_policy_team_generation,viewer_policy_membership_generation,viewer_policy_binding_generation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21,$22,$23,$24,$25,$26,$27)`, grant, th[:], account, host, kind, id, a.generation, a.route, a.policyGeneration, nullString(a.previewOwnerSession), owner, mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), sessionID, sessionVersion, authExp, now, absolute, expiry, nullString(a.policyTeam), nullInt64(a.policyTeamGeneration), nullInt64(a.policyMembershipGeneration), nullInt64(a.policyBindingGeneration))
+		_, err = tx.Exec(ctx, `INSERT INTO browser_access_sessions(grant_id,token_hash,account_id,hostname,resource_kind,resource_id,resource_generation,route_id,viewer_policy_generation,preview_owner_session_id,owner_account_id,access_mode,team_id,team_generation,membership_generation,binding_generation,grant_generation,trusted_session_id,trusted_session_version,trusted_session_expires_at,issued_at,last_seen_at,absolute_expires_at,expires_at,viewer_policy_team_id,viewer_policy_team_generation,viewer_policy_membership_generation,viewer_policy_binding_generation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21,$22,$23,$24,$25,$26,$27)`, grant, th[:], account, host, kind, id, a.sessionGeneration(), a.route, a.policyGeneration, nullString(a.previewOwnerSession), owner, mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), sessionID, sessionVersion, authExp, now, absolute, expiry, nullString(a.policyTeam), nullInt64(a.policyTeamGeneration), nullInt64(a.policyMembershipGeneration), nullInt64(a.policyBindingGeneration))
 		if err != nil {
 			return err
 		}
@@ -435,7 +437,7 @@ func (s *Service) IssueMachineCredential(ctx context.Context, in MachineCredenti
 		if active >= 128 {
 			return ErrCapacity
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO browser_machine_credentials(credential_id,token_hash,account_id,hostname,resource_kind,resource_id,route_id,action,resource_generation,preview_owner_session_id,owner_account_id,access_mode,team_id,team_generation,membership_generation,binding_generation,grant_generation,issued_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, id, h[:], in.AccountID, host, a.kind, a.id, a.route, in.Action, a.generation, nullString(a.previewOwnerSession), a.owner, a.mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), now, out.ExpiresAt)
+		_, e = tx.Exec(ctx, `INSERT INTO browser_machine_credentials(credential_id,token_hash,account_id,hostname,resource_kind,resource_id,route_id,action,resource_generation,preview_owner_session_id,owner_account_id,access_mode,team_id,team_generation,membership_generation,binding_generation,grant_generation,issued_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, id, h[:], in.AccountID, host, a.kind, a.id, a.route, in.Action, a.sessionGeneration(), nullString(a.previewOwnerSession), a.owner, a.mode, nullString(a.team), nullUint(a.td.TeamGeneration), nullUint(a.td.MembershipGeneration), nullUint(a.td.BindingGeneration), nullUint(a.td.GrantGeneration), now, out.ExpiresAt)
 		return e
 	})
 	if err != nil {
@@ -478,7 +480,7 @@ func (s *Service) authorizeMachine(ctx context.Context, key any, host, kind, id,
 		if e != nil {
 			return e
 		}
-		if (kind != "preview" && a.generation != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || !sameTeamAuthority(a, team, tg, mg, bg, gg) {
+		if (kind != "preview" && a.sessionGeneration() != gen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || !sameTeamAuthority(a, team, tg, mg, bg, gg) {
 			return ErrNotAuthorized
 		}
 		if admitted {
@@ -526,7 +528,7 @@ func (s *Service) authorize(ctx context.Context, host, kind, id, route, predicat
 		if err != nil {
 			return err
 		}
-		if (kind != "preview" && a.generation != storedGen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || a.route != storedRoute || a.policyGeneration != *storedPolicyGeneration || !sameViewerPolicyTeam(a, storedPolicyTeam, storedPolicyTeamGeneration, storedPolicyMembershipGeneration, storedPolicyBindingGeneration) {
+		if (kind != "preview" && a.sessionGeneration() != storedGen) || ((kind == "preview" || a.previewOwnerSession != "") && (previewOwner == nil || *previewOwner != a.previewOwnerSession)) || a.owner != owner || a.mode != mode || a.route != storedRoute || a.policyGeneration != *storedPolicyGeneration || !sameViewerPolicyTeam(a, storedPolicyTeam, storedPolicyTeamGeneration, storedPolicyMembershipGeneration, storedPolicyBindingGeneration) {
 			return ErrNotAuthorized
 		}
 		if !sameTeamAuthority(a, storedTeam, storedTG, storedMG, storedBG, storedGG) {
@@ -659,8 +661,8 @@ func resolveResource(ctx context.Context, tx *db.Tx, host, kind, id, route strin
 	if kind != "tunnel" {
 		return a, ErrInvalid
 	}
-	q := `SELECT t.id,t.account_id,t.access_mode,t.access_generation,r.id,r.generation,COALESCE(t.expires_at,$4::timestamptz+interval '100 years'),t.created_by_host_id,coalesce(t.owner_team_id,'') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE ($2='' OR t.id=$2) AND ($3='' OR r.id=$3) AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$4) AND r.desired_state='active' AND (t.stable_endpoint=$1 OR EXISTS (SELECT 1 FROM tunnel_domains d WHERE d.tunnel_id=t.id AND d.route_id=r.id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND ((r.protocol='tls' AND d.certificate_strategy='none' AND d.certificate_state='not_applicable' AND d.match_type='exact') OR (r.protocol<>'tls' AND d.certificate_state='ready')) AND (d.hostname=substring($1 from 9) OR (d.match_type='one_label_wildcard' AND substring($1 from 9) LIKE '%.'||substring(d.hostname from 3) AND substring(substring($1 from 9) from 1 for length(substring($1 from 9))-length(substring(d.hostname from 3))-1) NOT LIKE '%.%')))) ORDER BY r.priority,r.id LIMIT 1`
-	err := tx.QueryRow(ctx, q, "https://"+host, id, route, now).Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.route, &a.routeGeneration, &a.expires, &a.machine, &a.ownerTeam)
+	q := `SELECT t.id,t.account_id,t.access_mode,t.generation,t.access_generation,r.id,r.generation,COALESCE(t.expires_at,$4::timestamptz+interval '100 years'),t.created_by_host_id,coalesce(t.owner_team_id,'') FROM tunnels t JOIN tunnel_routes r ON r.tunnel_id=t.id WHERE ($2='' OR t.id=$2) AND ($3='' OR r.id=$3) AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$4) AND r.desired_state='active' AND (t.stable_endpoint=$1 OR EXISTS (SELECT 1 FROM tunnel_domains d WHERE d.tunnel_id=t.id AND d.route_id=r.id AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND ((r.protocol='tls' AND d.certificate_strategy='none' AND d.certificate_state='not_applicable' AND d.match_type='exact') OR (r.protocol<>'tls' AND d.certificate_state='ready')) AND (d.hostname=substring($1 from 9) OR (d.match_type='one_label_wildcard' AND substring($1 from 9) LIKE '%.'||substring(d.hostname from 3) AND substring(substring($1 from 9) from 1 for length(substring($1 from 9))-length(substring(d.hostname from 3))-1) NOT LIKE '%.%')))) ORDER BY r.priority,r.id LIMIT 1`
+	err := tx.QueryRow(ctx, q, "https://"+host, id, route, now).Scan(&a.id, &a.owner, &a.mode, &a.generation, &a.accessGeneration, &a.route, &a.routeGeneration, &a.expires, &a.machine, &a.ownerTeam)
 	if err != nil {
 		return a, mapMissing(err)
 	}
@@ -669,6 +671,16 @@ func resolveResource(ctx context.Context, tx *db.Tx, host, kind, id, route strin
 	a.sessionCap = a.expires
 	return a, nil
 }
+
+// sessionGeneration is the generation a browser session is bound to: a tunnel's access generation (edits
+// do not sign its viewers out; access changes do), a preview's stable route generation, otherwise the resource's.
+func (a authority) sessionGeneration() int64 {
+	if a.kind == "tunnel" {
+		return a.accessGeneration
+	}
+	return a.generation
+}
+
 func applyPrincipal(ctx context.Context, tx *db.Tx, a authority, account string) (authority, error) {
 	if resolved, handled, err := applyMachineServicePrincipal(ctx, tx, a, account); handled {
 		return resolved, err
