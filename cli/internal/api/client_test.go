@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +53,7 @@ func TestClientConfigurationUsesServerOwnedURLWithoutAuthentication(t *testing.T
 		if authorization := r.Header.Get("Authorization"); authorization != "" {
 			t.Fatalf("authorization=%q", authorization)
 		}
-		writeData(w, http.StatusOK, ClientConfiguration{
+		writeData(w, http.StatusOK, clientapi.ClientConfiguration{
 			Version:            "1",
 			CLIVerificationURL: "https://dashboard.paperboat.test/cli/authorize",
 			MachinesURL:        "https://dashboard.paperboat.test/dashboard/machines",
@@ -163,7 +164,7 @@ func TestManagedSSHAuthorizedKeysReportsSafeContractMismatch(t *testing.T) {
 
 func TestClientConfigurationRejectsInvalidURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeData(w, http.StatusOK, ClientConfiguration{Version: "1", MachinesURL: "/dashboard/machines"})
+		writeData(w, http.StatusOK, clientapi.ClientConfiguration{Version: "1", MachinesURL: "/dashboard/machines"})
 	}))
 	defer srv.Close()
 
@@ -951,7 +952,7 @@ func TestPublicCallBoundsResponseAndKeepsOversizeCausePrivate(t *testing.T) {
 	}
 	err := publicCall(context.Background(), server.URL, "/v1/auth/test", nil, "", &out, server.Client())
 	var decodeErr *ResponseDecodeError
-	if !errors.As(err, &decodeErr) || !errors.Is(err, errPublicResponseTooLarge) {
+	if !errors.As(err, &decodeErr) || !errors.Is(err, clientapi.ErrResponseTooLarge) {
 		t.Fatalf("oversized response was not rejected with its cause: %T %v", err, err)
 	}
 	if strings.Contains(err.Error(), privateMarker) {

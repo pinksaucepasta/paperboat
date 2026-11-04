@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -37,7 +38,7 @@ func TestBootstrapRecoveryRequiresCurrentEnrolledProfile(t *testing.T) {
 					if r.Header.Get("Authorization") != "Bearer refresh-current" || json.NewDecoder(r.Body).Decode(&body) != nil || body.AttemptID == "" {
 						t.Error("normal profile refresh lost its authority or replay binding")
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TokenSet{AccessToken: "access-renewed", RefreshToken: "refresh-renewed", TokenType: "Bearer", ExpiresIn: 3600, CLIClientSessionID: "cli-current"}})
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": clientapi.TokenSet{AccessToken: "access-renewed", RefreshToken: "refresh-renewed", TokenType: "Bearer", ExpiresIn: 3600, CLIClientSessionID: "cli-current"}})
 				case "/v1/me":
 					meCalls.Add(1)
 					token := "access-current"
