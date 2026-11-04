@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import pty
 import re
 import select
@@ -29,6 +30,9 @@ import uuid
 PB = Path.home() / '.local/bin/pb'
 WAIT_SECONDS = 180
 DIAGNOSTICS = '$HOME/.local/state/paperboat/diagnostics'
+DARWIN = platform.system() == 'Darwin'
+# macOS keeps state under Library; the target may be either OS, so its search covers both.
+MAC_DIAGNOSTICS = '$HOME/Library/Application Support/Paperboat/state/diagnostics'
 
 
 class Output:
@@ -45,7 +49,8 @@ def run(*args, stdin=None, timeout=90, records_value=False):
 
 
 def own_machine_id():
-    root = Path(os.environ.get('PAPERBOAT_RUNTIME_ROOT', Path.home() / '.local/state/paperboat/runtime'))
+    default = Path.home() / ('Library/Application Support/Paperboat/runtime' if DARWIN else '.local/state/paperboat/runtime')
+    root = Path(os.environ.get('PAPERBOAT_RUNTIME_ROOT', default))
     return json.loads((root / 'machine-registration.json').read_text())['machine_id']
 
 
@@ -129,8 +134,10 @@ def leaked(values, target):
     found = []
     text = '\n'.join(Output.seen)
     patterns = [flag for value in values for flag in ('-e', value)]
-    local = subprocess.run(['grep', '-rlF', *patterns, os.path.expandvars(DIAGNOSTICS)], capture_output=True, text=True).stdout
-    remote_command = 'grep -rlF %s %s 2>/dev/null; true' % (' '.join(patterns), DIAGNOSTICS)
+    local_directory = MAC_DIAGNOSTICS if DARWIN else DIAGNOSTICS
+    local = subprocess.run(['grep', '-rlF', *patterns, os.path.expandvars(local_directory)], capture_output=True, text=True).stdout
+    remote_directories = DIAGNOSTICS + (' "%s"' % MAC_DIAGNOSTICS if DARWIN else '')
+    remote_command = 'grep -rlF %s %s 2>/dev/null; true' % (' '.join(patterns), remote_directories)
     remote = run('exec', target, '--', 'sh', '-c', remote_command, records_value=True)[1]
     for label, value in zip(('personal', 'override'), values):
         if value in text:

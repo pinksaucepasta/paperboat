@@ -9,6 +9,10 @@ non-interactive `ssh HOST bash` with the launch script on stdin, then read the r
 started before the hook was installed keeps its old environment, which is the documented reload
 step: "Remote-SSH: Kill VS Code Server on Host", then reconnect. The probe value is compared by
 SHA-256, never printed. Cleans up the probe, the hook, the server and its files on every exit.
+
+A macOS host is detected over ssh (`uname -s`). It has no /proc, so the server's environment is read with
+`ps eww`; its login shell is zsh, so the hook is the zsh one (~/.zshenv); the server is the darwin-arm64
+build; hashes use shasum. Over ssh the host's login keychain must already be unlocked for the ENV vault.
 """
 import hashlib
 import json
@@ -16,6 +20,8 @@ import secrets
 import subprocess
 import sys
 import time
+
+from env_ssh_hook import UNSET_MAC, host_is_mac
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
@@ -25,6 +31,7 @@ UNSET = (f'c=$({PB} env unset {PROBE} --json 2>/dev/null | python3 -c "import js
          f'print(json.load(sys.stdin).get(\'data\',{{}}).get(\'confirmation_token\',\'\'))");'
          f' [ -n "$c" ] && {PB} env unset {PROBE} --json --confirm "$c" >/dev/null 2>&1')
 SERVER_URL = 'https://update.code.visualstudio.com/latest/server-linux-x64/stable'
+SERVER_URL_MAC = SERVER_URL.replace('server-linux-x64', 'server-darwin-arm64')
 
 # What Remote-SSH does on the host: fetch the server once, start it detached, report its pid.
 LAUNCH = f'''
@@ -45,6 +52,13 @@ v=$(tr '\\0' '\\n' </proc/$pid/environ | sed -n 's/^{PROBE}=//p')
 [ -n "$v" ] && printf %s "$v" | sha256sum | cut -d' ' -f1 || echo absent
 '''
 
+# The same without /proc (macOS): `ps eww` appends a process's environment to its command line.
+READ_MAC = f'''pid=$1
+for i in $(seq 50); do kill -0 $pid 2>/dev/null && grep -Eq "listening|Extension host agent" {DIR}/server.log && break; sleep 0.2; done
+v=$(ps eww -p $pid | tr ' ' '\\n' | sed -n 's/^{PROBE}=//p')
+[ -n "$v" ] && printf %s "$v" | shasum -a 256 | cut -d' ' -f1 || echo absent
+'''
+
 
 def ssh(host, command, stdin=None, timeout=300):
     args = ['ssh', '-o', 'BatchMode=yes', '-T', host] + ([command] if command else [])
@@ -57,18 +71,18 @@ def must(result, step):
     return result.stdout
 
 
-def start_server(host):
-    out = must(ssh(host, 'bash', stdin=LAUNCH), 'start VS Code server over ssh bash')
+def start_server(host, launch=LAUNCH):
+    out = must(ssh(host, 'bash', stdin=launch), 'start VS Code server over ssh bash')
     return next(line.split()[1] for line in out.splitlines() if line.startswith('PID '))
 
 
-def server_probe(host, pid):
-    return must(ssh(host, f'bash -s {pid}', stdin=READ), 'read server environment').strip()
+def server_probe(host, pid, read=READ):
+    return must(ssh(host, f'bash -s {pid}', stdin=read), 'read server environment').strip()
 
 
-def wait_hook_sees_probe(host, want, seconds=90):
+def wait_hook_sees_probe(host, want, seconds=90, sha='sha256sum'):
     """The runtime serves a shell's ENV from a 60 s cache: wait until a new shell loads the probe just set."""
-    show = f'printf %s "${PROBE}" | sha256sum | cut -d" " -f1'
+    show = f'printf %s "${PROBE}" | {sha} | cut -d" " -f1'
     end = time.monotonic() + seconds
     while must(ssh(host, show), 'read probe in a new shell').strip() != want:
         assert time.monotonic() < end, 'new shells did not load the probe within the hook cache time'
@@ -84,20 +98,23 @@ def main():
     value = secrets.token_urlsafe(24)
     want = hashlib.sha256(value.encode()).hexdigest()
     report = {'host': host}
+    mac = host_is_mac(host)
+    shell, launch, read, sha = (('zsh', LAUNCH.replace(SERVER_URL, SERVER_URL_MAC), READ_MAC, 'shasum -a 256') if mac
+                                else ('bash', LAUNCH, READ, 'sha256sum'))
     try:
         must(ssh(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
-        stale = start_server(host)
-        must(ssh(host, f'{PB} env hook bash --install'), 'hook install')
-        wait_hook_sees_probe(host, want)
-        report['server_started_before_hook_has_probe'] = server_probe(host, stale) == want
+        stale = start_server(host, launch)
+        must(ssh(host, f'{PB} env hook {shell} --install'), 'hook install')
+        wait_hook_sees_probe(host, want, sha=sha)
+        report['server_started_before_hook_has_probe'] = server_probe(host, stale, read) == want
         stop_server(host, stale)  # the documented reload step
-        fresh = start_server(host)
-        report['server_after_reload_has_probe'] = server_probe(host, fresh) == want
+        fresh = start_server(host, launch)
+        report['server_after_reload_has_probe'] = server_probe(host, fresh, read) == want
         stop_server(host, fresh)
         report['ok'] = report['server_after_reload_has_probe'] and not report['server_started_before_hook_has_probe']
     finally:
         ssh(host, f'pkill -f "{DIR}"; rm -rf {DIR}; {PB} env hook --uninstall >/dev/null 2>&1;'
-                  f' {UNSET}; true')
+                  f' {UNSET_MAC if mac else UNSET}; true')
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get('ok') else 1
 
