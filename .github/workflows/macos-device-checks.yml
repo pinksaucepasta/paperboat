@@ -1,0 +1,96 @@
+name: macOS device checks
+
+# One-Mac device checks against the live server. Dispatched by tools/macos-runner.sh, which stores a
+# short-lived enrollment token in the PB_MAC_ENROLL_TOKEN secret (10 minute lifetime: pair first).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or branch to build and test
+        default: main
+      os:
+        description: Runner image
+        type: choice
+        options: [macos-15, macos-14]
+        default: macos-15
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: device checks on ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 45
+    env:
+      TOKEN_FILE: ${{ runner.temp }}/enroll-token
+      RESULTS: ${{ runner.temp }}/results.jsonl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pb for darwin/arm64
+        run: |
+          V=dev-$(git rev-parse --short HEAD)
+          P=github.com/pinksaucepasta/paperboat/internal/buildinfo
+          L="-X $P.Version=$V -X $P.Commit=$(git rev-parse HEAD) -X $P.ProtocolVersion=1 -X $P.DefaultServerURL=https://api.pprbt.dev -X $P.DefaultReleaseURL=https://api.pprbt.dev"
+          (cd cli && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$L" -o "$RUNNER_TEMP/pb" ./cmd/pb)
+      - name: Login keychain for CLI tokens
+        run: |
+          K="$HOME/Library/Keychains/login.keychain-db"
+          security create-keychain -p pbci "$K" || true
+          security default-keychain -s "$K"
+          security unlock-keychain -p pbci "$K"
+          security set-keychain-settings "$K"
+      - name: Install and pair
+        env:
+          PB_MAC_ENROLL_TOKEN: ${{ secrets.PB_MAC_ENROLL_TOKEN }}
+        run: |
+          echo "::add-mask::$PB_MAC_ENROLL_TOKEN"
+          (umask 077; printf '%s' "$PB_MAC_ENROLL_TOKEN" > "$TOKEN_FILE")
+          "$RUNNER_TEMP/pb" install --json >/dev/null
+          "$HOME/.local/bin/pb" pair --enrollment-token-file "$TOKEN_FILE" \
+            --name "ghmac-${{ github.run_id }}-${{ strategy.job-index }}"
+          rm -f "$TOKEN_FILE"
+      - name: Device checks
+        run: |
+          cd tools/device-smoke
+          M="ghmac-${{ github.run_id }}-${{ strategy.job-index }}"
+          : > "$RESULTS"
+          # check NAME SECONDS CMD...: keep only the JSON result lines; a check with none is a FAIL line.
+          check() {
+            name=$1; secs=$2; shift 2
+            python3 "$GITHUB_WORKSPACE/tools/macos-check.py" "$name" "$secs" "$RESULTS" "$@" || echo "FAILED: $name"
+          }
+          for c in service crash-service reinstall pair-refusal setup; do check "install-$c" 300 python3 install_lifecycle.py "$c"; done
+          check command-rows 1500 python3 command_rows.py "$M"
+          check account-inventory 120 python3 account_inventory.py
+          for c in capabilities settings; do check "machine-$c" 300 python3 machine_lifecycle.py "$c"; done
+          check completion 300 python3 completion_lifecycle.py "$M"
+          check bugreport 300 python3 bugreport_lifecycle.py "$M"
+          check config-set 120 python3 config_lifecycle.py set "$RUNNER_TEMP/config-state"
+          check config-verify 120 python3 config_lifecycle.py verify "$RUNNER_TEMP/config-state"
+          # env_vault_lifecycle.py is not run: it initializes then resets the account vault with its own
+          # password, which would strand the shared test account's vault.
+          cat "$RESULTS"
+      - name: Machine record cleanup
+        if: always()
+        run: |
+          PB="$HOME/.local/bin/pb"
+          [ -x "$PB" ] || exit 0
+          python3 -c "import json,pathlib; print('removing machine', json.loads((pathlib.Path.home()/'Library/Application Support/Paperboat/runtime/machine-registration.json').read_text())['machine_id'])" || true
+          "$PB" uninstall --confirmation "UNINSTALL PAPERBOAT" --hostname "$(hostname)"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ inputs.os }}
+          path: ${{ runner.temp }}/results.jsonl
+          if-no-files-found: ignore
