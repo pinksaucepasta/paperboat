@@ -74,7 +74,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 				t.Fatal("browser HTTP2 not preserved")
 			}
 			if denied {
-				if response.StatusCode != 404 {
+				if response.StatusCode != 403 {
 					t.Fatalf("revoked browser status=%d", response.StatusCode)
 				}
 			} else if response.StatusCode != 200 || string(body) != "authorized application" {

@@ -29,6 +29,9 @@ func (a *browserAuthorityTest) Begin(context.Context, string, string) (control.B
 }
 func (a *browserAuthorityTest) Redeem(_ context.Context, tx, state, handoff, host string) (control.BrowserSession, error) {
 	a.calls.Add(1)
+	if handoff == "bah_denied" {
+		return control.BrowserSession{}, control.ErrBrowserDenied
+	}
 	if tx != "bat_test" || state != "nonce" || handoff != "bah_test" || host != "app.example.test" {
 		return control.BrowserSession{}, control.ErrBrowserDenied
 	}
@@ -186,7 +189,7 @@ func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *te
 	w = httptest.NewRecorder()
 	_, finish, ok = b.authorize(w, r, m)
 	finish()
-	if ok || w.Code != 404 {
+	if ok || w.Code != 403 {
 		t.Fatal("denial forwarded")
 	}
 	a.failure = errors.New("control lost")
@@ -237,5 +240,33 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 		if ok != c.allowed || (!c.allowed && (w.Code != 403 || a.calls.Load() != 0)) {
 			t.Fatalf("%s: allowed=%v status=%d", c.name, ok, w.Code)
 		}
+	}
+}
+
+func TestBrowserCallbackDeniedAnswers403WithSwitchAccountLink(t *testing.T) {
+	a := &browserAuthorityTest{}
+	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
+	r := httptest.NewRequest("POST", "https://app.example.test"+browserCallbackPath, strings.NewReader("transaction_id=bat_test&handoff=bah_denied"))
+	r.Header.Set("Origin", "https://login.example.test")
+	r.Header.Set("Cookie", "__Host-pb-handoff=bat_test.nonce")
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	b.callback(w, r)
+	body := w.Body.String()
+	if w.Code != 403 || !strings.Contains(body, deniedMessage) || !strings.Contains(body, "Use a different account") ||
+		!strings.Contains(body, "https://login.example.test/.paperboat/access/login?switch=1&amp;transaction_id=bat_test") {
+		t.Fatalf("status=%d body=%s", w.Code, body)
+	}
+}
+
+func TestBrowserUnauthenticatedBeginStillRedirectsToSignIn(t *testing.T) {
+	b := BrowserAccess{Authority: &browserAuthorityTest{}, LoginOrigin: "https://login.example.test"}
+	r := httptest.NewRequest("GET", "https://app.example.test/x", nil)
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "document")
+	w := httptest.NewRecorder()
+	b.begin(w, r, "app.example.test")
+	if w.Code != 303 || w.Header().Get("Location") != "https://login.example.test/.paperboat/access/login?transaction_id=bat_test" {
+		t.Fatalf("status=%d location=%s", w.Code, w.Header().Get("Location"))
 	}
 }

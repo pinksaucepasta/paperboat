@@ -81,8 +81,15 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	// A signed-in account without access is refused as such, not as an unknown or expired link.
 	exec(`INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`, session+"_viewer", viewer, "hash_viewer_"+suffix, "csrf_viewer_"+suffix, now.Add(2*time.Hour))
 	refused, _ := svc.Begin(ctx, BeginRequest{Host: host, ReturnPath: "/ok"})
-	if _, err = svc.Issue(ctx, IssueRequest{TransactionID: refused.TransactionID, Principal: auth.Session{ID: session + "_viewer", UserID: viewer}}); !errors.Is(err, ErrAccessDenied) {
-		t.Fatalf("viewer without access: %v, want ErrAccessDenied", err)
+	deniedIssue, err := svc.Issue(ctx, IssueRequest{TransactionID: refused.TransactionID, Principal: auth.Session{ID: session + "_viewer", UserID: viewer}})
+	if err != nil || !deniedIssue.Denied || deniedIssue.Handoff == "" {
+		t.Fatalf("viewer without access: %+v %v, want a denied handoff", deniedIssue, err)
+	}
+	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: deniedIssue.Handoff, Host: host}); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("denied handoff exchange: %v, want ErrAccessDenied", err)
+	}
+	if _, err = svc.Redeem(ctx, RedeemRequest{TransactionID: refused.TransactionID, State: refused.State, Handoff: "bah_wrong", Host: host}); !errors.Is(err, ErrNotAuthorized) {
+		t.Fatalf("denied transaction with a wrong handoff: %v, want ErrNotAuthorized", err)
 	}
 	// Obtain a fresh issued handoff for the redemption race.
 	begin, _ = svc.Begin(ctx, BeginRequest{Host: host, ReturnPath: "/ok"})

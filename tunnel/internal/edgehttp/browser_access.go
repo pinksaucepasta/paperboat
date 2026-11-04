@@ -154,6 +154,10 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	session, err := b.Authority.Redeem(ctx, transaction, nonce, r.PostForm.Get("handoff"), host)
 	clearBrowserHandoff(w)
+	if errors.Is(err, control.ErrBrowserDenied) {
+		b.deniedPage(ctx, w, host)
+		return
+	}
 	if err != nil {
 		browserError(w, r, err)
 		return
@@ -164,6 +168,18 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserEdgeCookie, Value: session.Token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
 	http.Redirect(w, r, session.ReturnPath, http.StatusSeeOther)
+}
+
+// deniedPage is the 403 for a signed-in account without access. "Use a different account" starts a fresh sign-in
+// with switch=1 for the console to offer an account change; without a new transaction the page has no link.
+func (b *BrowserAccess) deniedPage(ctx context.Context, w http.ResponseWriter, host string) {
+	tx, err := b.Authority.Begin(ctx, host, "/")
+	if err != nil || tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) {
+		writeErrorPage(w, http.StatusForbidden, deniedMessage)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: browserHandoffCookie, Value: tx.TransactionID + "." + tx.State, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, Expires: tx.ExpiresAt})
+	writeErrorPageLink(w, http.StatusForbidden, deniedMessage, "Use a different account", b.LoginOrigin+"/.paperboat/access/login?switch=1&transaction_id="+url.QueryEscape(tx.TransactionID))
 }
 func safeBrowserReturn(path string) bool {
 	if len(path) == 0 || len(path) > 2048 || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "\\\r\n\x00") {
@@ -180,7 +196,7 @@ func browserError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
 		writeErrorPage(w, 401, signInMessage)
 	case errors.Is(err, control.ErrBrowserDenied):
-		writeErrorPage(w, http.StatusNotFound, "")
+		writeErrorPage(w, http.StatusForbidden, deniedMessage)
 	default:
 		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 	}
@@ -191,7 +207,7 @@ func lazyActivationError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
 		writeErrorPage(w, http.StatusUnauthorized, signInMessage)
 	case errors.Is(err, control.ErrBrowserDenied):
-		writeErrorPage(w, http.StatusNotFound, "")
+		writeErrorPage(w, http.StatusForbidden, deniedMessage)
 	case errors.Is(err, control.ErrLazyGenerationConflict):
 		writeErrorPage(w, http.StatusConflict, "This preview was just updated. Reload the page.")
 	case errors.Is(err, control.ErrLazyCapacity):

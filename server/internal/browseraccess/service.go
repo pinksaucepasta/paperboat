@@ -59,6 +59,8 @@ type IssueResult struct {
 	Handoff        string    `json:"handoff"`
 	CallbackOrigin string    `json:"callback_origin"`
 	ExpiresAt      time.Time `json:"expires_at"`
+	// Denied: the account may not open this address. The handoff still goes to the edge, whose redeem answers 403.
+	Denied bool `json:"denied"`
 }
 type RedeemRequest struct {
 	TransactionID string `json:"transaction_id"`
@@ -247,7 +249,16 @@ func (s *Service) Issue(ctx context.Context, in IssueRequest) (IssueResult, erro
 			a, err = resolveBrowserBound(ctx, tx, in.Principal.UserID, host, kind, resourceID, routeID, now)
 		}
 		if err == ErrNotAuthorized { // a joined storage error stays a storage error
-			return ErrAccessDenied
+			end := minTime(now.Add(handoffTTL), sessionExpiry)
+			result, e := tx.Exec(ctx, `UPDATE browser_access_transactions SET account_id=$2,denied=true,handoff_hash=$3,handoff_expires_at=$4,issued_at=$5 WHERE transaction_id=$1 AND issued_at IS NULL`, in.TransactionID, in.Principal.UserID, hh[:], end, now)
+			if e != nil {
+				return e
+			}
+			if result.RowsAffected() != 1 {
+				return ErrNotAuthorized
+			}
+			out = IssueResult{TransactionID: in.TransactionID, Handoff: handoff, CallbackOrigin: "https://" + host, ExpiresAt: end, Denied: true}
+			return nil
 		}
 		if err != nil {
 			return err
@@ -297,6 +308,13 @@ func (s *Service) Redeem(ctx context.Context, in RedeemRequest) (RedeemResult, e
 	var out RedeemResult
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var stateRaw, handoffRaw []byte
+		var denied bool
+		if err := tx.QueryRow(ctx, `SELECT denied FROM browser_access_transactions WHERE transaction_id=$1`, in.TransactionID).Scan(&denied); err != nil {
+			return mapMissing(err)
+		}
+		if denied {
+			return redeemDenied(ctx, tx, in.TransactionID, host, sh, hh, now)
+		}
 		var storedHost, returnPath, account, kind, id, routeID, owner, mode, sessionID string
 		var previewOwner *string
 		var policyTeam *string
@@ -829,4 +847,22 @@ func recordID(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + "_" + value.String(), nil
+}
+
+// redeemDenied checks a denied transaction's host, state and handoff exactly like a granted one, then answers
+// ErrAccessDenied. Nothing is created; the handoff stays valid until it expires, so a reload shows the same page.
+func redeemDenied(ctx context.Context, tx *db.Tx, id, host string, sh, hh [32]byte, now time.Time) error {
+	var stateRaw, handoffRaw []byte
+	var storedHost string
+	var exp, handExp time.Time
+	if err := tx.QueryRow(ctx, `SELECT state_hash,handoff_hash,hostname,expires_at,handoff_expires_at FROM browser_access_transactions WHERE transaction_id=$1 FOR UPDATE`, id).Scan(&stateRaw, &handoffRaw, &storedHost, &exp, &handExp); err != nil {
+		return mapMissing(err)
+	}
+	if storedHost != host || !equalHash(stateRaw, sh) || !equalHash(handoffRaw, hh) {
+		return ErrNotAuthorized
+	}
+	if !exp.After(now) || !handExp.After(now) {
+		return ErrExpired
+	}
+	return ErrAccessDenied
 }

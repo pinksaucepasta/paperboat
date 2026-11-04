@@ -16,8 +16,13 @@ body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:c
 main{max-width:30rem;padding:2rem}
 .brand{font-weight:600;letter-spacing:-.025em;font-size:1.5rem;color:#1d52eb;margin:0 0 2rem}
 h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;line-height:1.5;color:#475569}
-</style></head><body><main><p class="brand">paperboat</p><h1>{{.Title}}</h1><p>{{.Message}}</p></main></body></html>
+</style></head><body><main><p class="brand">paperboat</p><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .LinkURL}}<p style="margin-top:1rem"><a href="{{.LinkURL}}" style="color:#1d52eb">{{.LinkText}}</a></p>{{end}}</main></body></html>
 `))
+
+// deniedMessage is the 403 sentence for a signed-in account without access. Prior art: cloudflared answers a failed
+// Access JWT check with 403 on the app address (~/ref/cloudflared/ingress/middleware/jwtvalidator.go); Teleport app
+// access expects 403 for a denied user (~/ref/teleport/lib/web/app/handler_test.go).
+const deniedMessage = "This account does not have access to this app."
 
 const (
 	signInMessage     = "Sign in to Paperboat in your browser, then open this address again."
@@ -41,6 +46,11 @@ var defaultErrorMessages = map[int]string{
 
 // writeErrorPage answers with the branded page. An empty message uses the status's default sentence.
 func writeErrorPage(w http.ResponseWriter, status int, message string) {
+	writeErrorPageLink(w, status, message, "", "")
+}
+
+// writeErrorPageLink adds one link under the sentence (an empty linkURL adds none).
+func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, linkURL string) {
 	if message == "" {
 		message = defaultErrorMessages[status]
 	}
@@ -52,5 +62,5 @@ func writeErrorPage(w http.ResponseWriter, status int, message string) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	_ = errorPageTemplate.Execute(w, struct{ Title, Message string }{http.StatusText(status), message})
+	_ = errorPageTemplate.Execute(w, struct{ Title, Message, LinkText, LinkURL string }{http.StatusText(status), message, linkText, linkURL})
 }
