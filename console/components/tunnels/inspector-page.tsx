@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { useApiQuery } from "@/lib/api"
 import { useInspectorChannel, type ChannelPhase } from "@/lib/inspector/channel"
 import { useCaptureFeed, type Capture } from "@/lib/inspector/feed"
-import { hostOf, previewQuery, type Preview } from "@/lib/tunnels"
+import { hostOf, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { CaptureDetail, CaptureRow, pathOf } from "@/components/tunnels/inspector-detail"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Crumb, CrumbLink, PageHeader } from "@/components/page-header"
@@ -30,7 +30,7 @@ const METHODS = ["All", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTION
 
 /** Previews → Inspect: a preview's captured requests, live (PLAN F17). */
 export function InspectorPage({ id }: { id: string }) {
-  const query = useApiQuery({ ...previewQuery(id), refetchInterval: 10_000 })
+  const query = useApiQuery({ ...previewQuery(id), refetchInterval: previewPoll(10_000) })
   const preview = query.data
   const now = useNow(10_000)
   return (

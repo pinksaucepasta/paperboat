@@ -169,6 +169,23 @@ export const previewQuery = (id: string) =>
     queryFn: () => api<Preview>(previewPath(id)),
   })
 
+/**
+ * How often to re-read a preview that may still change: `false` once it ended (expired, stopped,
+ * failed) and, with `untilReady`, once it is ready. A page that is not shown never polls: the
+ * query client leaves refetchIntervalInBackground off.
+ */
+export const previewPoll =
+  (ms: number, untilReady = false) =>
+  (query: { state: { data?: Preview } }) => {
+    const data = query.state.data
+    const settled =
+      data &&
+      (["expired", "stopped"].includes(data.state) ||
+        data.allocation_state === "failed" ||
+        (untilReady && data.state === "ready"))
+    return settled ? false : ms
+  }
+
 /** A fresh owner session per create (3 to 128 characters, no whitespace); the machine binds it on first dispatch. */
 function ownerSessionId() {
   return `console_${idempotencyKey()}`

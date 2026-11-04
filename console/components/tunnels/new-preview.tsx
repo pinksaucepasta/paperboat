@@ -10,7 +10,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
-import { createPreview, hostOf, previewQuery, type Preview } from "@/lib/tunnels"
+import { createPreview, hostOf, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { useNow } from "@/lib/use-now"
 import { CopyRow } from "@/components/copy-button"
 import { HostnameInput } from "@/components/domains/hostname-input"
@@ -215,13 +215,7 @@ export function Starting({
   const now = useNow(1_000)
   const preview = useQuery({
     ...previewQuery(id),
-    // Poll until it settles: ready, or a state it won't leave (expired, stopped, failed).
-    refetchInterval: (query) => {
-      const data = query.state.data
-      const settled =
-        data && (["ready", "expired", "stopped"].includes(data.state) || data.allocation_state === "failed")
-      return settled ? false : 1_000
-    },
+    refetchInterval: previewPoll(1_000, true),
   })
   const data = preview.data
   const failed = data && (data.state === "expired" || data.state === "stopped" || data.allocation_state === "failed")
