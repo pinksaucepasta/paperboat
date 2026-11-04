@@ -2992,6 +2992,37 @@ OPEN, not final: one central writable database with regional read replicas. To d
 - primary failover, and what clients see during it.
 Rows: none yet; becomes an F21 row when the build is scheduled.
 
+Design proposal (2026-11-04, waits for user approval; node enrollment left out on purpose, direction pending):
+- **Region map.** Discovery gains `control_regions: [{id, api_origin, state: healthy|degraded|draining}]`, signed with
+  the rest. One writer: each instance upserts `server_instances(id, region, started_at, last_seen, draining)` every
+  10 s. A region is healthy when at least one non-draining instance was seen within 30 s. Clients rank regions by
+  measured RTT like the DERP map (tailscale net/netcheck/netcheck.go PreferredDERP) and keep the choice until a
+  request to it fails twice or the region turns draining.
+- **One primary, regional replicas.** Every instance has two pools: `primary` (writes, LISTEN, advisory locks,
+  migrations; the F21-15 direct pool) and `replica` (its region's read replica, or the primary where none exists).
+  Teleport runs many auth servers on one shared Postgres backend (lib/backend/pgbk/pgbk.go) and fans changes out
+  through one change feed (pgbk/background.go, wal2json); we keep that shape: one database of record, no
+  multi-writer. Headscale and NetBird management run a single control instance on one database and have no answer here.
+- **Replica-safe reads** (named per query, default primary): listings and history shown to people (machines, previews,
+  tunnels, activity, usage, audit export pages), discovery, release metadata. Everything else reads the primary.
+- **Never from a replica:** authentication (sessions, API tokens, machine credentials), authorization decisions,
+  grant and descriptor issuance, revocation checks, idempotency and nonce reservations, any read followed by a write
+  in the same request. So a revoke is never read as granted from a lagging replica; no generation floor is needed in
+  pass 1. If authz reads ever move to replicas, they carry a floor: the client sends the generation it last saw and
+  the replica serves only when `pg_last_wal_replay_lsn()` has passed the LSN recorded with that generation, else the
+  read goes to the primary.
+- **Pushes.** NOTIFY does not reach hot standbys, so every instance's machine-events hub LISTENs on the primary pool
+  (one connection per instance).
+- **Write routing.** No forwarding layer: a far-region instance writes to the primary over the WAN. Keep a request
+  to one transaction (one round-trip set); budget about RTT x statements per write path and measure enroll, pair,
+  grant and revoke from the farthest region before adding regions.
+- **Primary failover.** The database provider promotes a replica (PlanetScale, F21-15). During it, writes return a
+  typed 503 `control_plane_read_only` with Retry-After; replica reads keep serving; machines keep their last verified
+  state (F21-01 offline-until-revoked). Instances reconnect the primary pool with backoff; no app-level election.
+- **Drain.** Setting `draining` on an instance makes its health check fail at the region load balancer; on a whole
+  region it marks the region draining in the map, clients move at their next discovery, and long-lived streams
+  (browser terminal, connector control) are closed with a reconnect hint after a bounded grace (60 s).
+
 #### Inspector: a fresh machine's first preview can miss its first requests (Lane I, open, 2026-10-24)
 
 Seen 2 times in about 40 runs of check-preview-inspector.js (aaf3f121 on 2026-10-23, round 21 dev-97238006): on the
