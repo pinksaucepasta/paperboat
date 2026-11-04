@@ -53,6 +53,9 @@ type Config struct {
 	Backups                BackupReporting   `json:"backups"`
 	Reporting              Reporting         `json:"reporting"`
 	Environment            Environment       `json:"environment"`
+	// ServerInstances is how many server instances share this database (0 or 1: one). Above one, every
+	// per-process secret must be shared configuration: startup refuses generated signing keys (F21-56).
+	ServerInstances int `json:"server_instances"`
 	// SelfhostAllowPrivateIngress lets self-hosted node claim and ingress verification accept private
 	// (RFC 1918 / ULA) addresses: a staging stack on a LAN. Refused in production, where it would open the
 	// claim dialer to internal addresses.
@@ -614,6 +617,12 @@ func (c Config) Validate() error {
 		return err
 	}
 	var errs []error
+	if c.ServerInstances < 0 || c.ServerInstances > 64 {
+		errs = append(errs, errors.New("server_instances must be between 0 and 64"))
+	}
+	if c.ServerInstances > 1 && len(c.Secrets.MintSigningKeys) == 0 {
+		errs = append(errs, errors.New("server_instances above 1 requires shared mint signing keys (secrets.mint_signing_keys); generated keys differ per instance"))
+	}
 	if err := c.Mail.Validate(c.Secrets.ResendAPIKey); err != nil {
 		errs = append(errs, err)
 	}
