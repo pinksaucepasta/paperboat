@@ -58,7 +58,8 @@ def main():
         command(pb, 'doctor', '--json')
         invoke(pb, 'exec', machine['alias'], '--', 'true', raw=True, timeout=45)
     elif args.check == 'post-reboot':
-        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        boot = (Path('/proc/sys/kernel/random/boot_id').read_text().strip() if os.uname().sysname == 'Linux'
+                else subprocess.run(['sysctl', '-n', 'kern.boottime'], capture_output=True, text=True, check=True).stdout.strip())
         if not args.previous_boot_id or boot == args.previous_boot_id:
             raise RuntimeError('device did not reboot since the saved observation')
         command(pb, 'doctor', '--json')
