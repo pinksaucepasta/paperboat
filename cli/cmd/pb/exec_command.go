@@ -271,7 +271,10 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	sawTerminalEvent := false
 	emittedStarted := false
 	lastEventSequence := uint64(0)
-	recovery := reattach.New(reattach.Policy{Attempts: 2, Backoff: execRecoveryBackoff, Retryable: retryableExecReattachment})
+	// The command keeps running in its session owner through pb update; the
+	// stream may be gone while the runtime restarts, so reattach for about
+	// 30 s instead of 300 ms (pbvm4 feat runs: update restarts take seconds).
+	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: retryableExecReattachment})
 	var code int
 	var inputCloseFailure error
 	contextDone := c.Context.Done()
@@ -407,8 +410,12 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	return finishExecResult(c.Writer, c.ErrWriter, request.OperationID, jsonOutput, sawTerminalEvent, code, err)
 }
 
+const execReattachAttempts = 20
+
+// execRecoveryBackoff grows by 100 ms per attempt up to 2 s; 20 attempts span
+// about 30 s.
 func execRecoveryBackoff(attempt int) time.Duration {
-	return time.Duration(attempt) * 100 * time.Millisecond
+	return min(time.Duration(attempt)*100*time.Millisecond, 2*time.Second)
 }
 func retryableExecReattachment(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError

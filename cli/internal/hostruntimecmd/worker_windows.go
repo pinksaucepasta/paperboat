@@ -343,7 +343,7 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 		return startWindowsRuntimeWorkerForRelease(ctx, r.Executable, socket, tokenPath, sid, r.WorkerID, r.Version, r.APIMin, r.APIMax)
 	})
 
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: statePath, SID: sid, Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, DrainExecutions: host.DrainExecutions, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute,
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: statePath, SID: sid, Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute,
 		MaintenancePending: !install.Committed,
 		VerifyMaintenanceCommitted: func(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {

@@ -94,15 +94,11 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		resultErr = withCleanup("hostd failed or its cleanup did not finish", resultErr, workerErr, serverErr, notifier.Stopping(), host.ShutdownHostd(shutdownCtx))
 	}()
 
-	var drainExecutions func(context.Context) error
-	if drainer, ok := host.(interface{ DrainExecutions(context.Context) error }); ok {
-		drainExecutions = drainer.DrainExecutions
-	}
 	maintenancePending, verifyCommit, err := nativeMaintenanceConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{MaintenancePending: maintenancePending, VerifyMaintenanceCommitted: verifyCommit, SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, OpenSSH: host.OpenSSHStreams, DrainExecutions: drainExecutions, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{MaintenancePending: maintenancePending, VerifyMaintenanceCommitted: verifyCommit, SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, OpenSSH: host.OpenSSHStreams, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
 	if err != nil {
 		return err
 	}

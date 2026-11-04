@@ -12,14 +12,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
 
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
@@ -32,7 +29,7 @@ import (
 type ProcessOwner struct {
 	sessions      session.Service
 	sessionOwners *sessionowner.Connections
-	executions    *execprocess.Manager
+	executions    execprocess.Service
 	durable       *store.Store
 	status        Host
 	listen        string
@@ -57,12 +54,7 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 	if err = validateMachineWorkspace(workspace); err != nil {
 		return nil, err
 	}
-	shell, err := validatedMachineShell(environ("PAPERBOAT_SHELL"))
-	if err != nil {
-		return nil, err
-	}
-	environment, err := process.BaseEnvironment(shell)
-	if err != nil {
+	if _, err := validatedMachineShell(environ("PAPERBOAT_SHELL")); err != nil {
 		return nil, err
 	}
 	tokenPath := filepath.Join(cfg.StateRoot, "agent", "token")
@@ -79,7 +71,7 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 	if !LoopbackAddress(listen) {
 		return nil, ErrHostInvalid
 	}
-	environment = append(environment, "PAPERBOAT_FILE_TRANSFER_ENDPOINT=http://"+listen+"/v1/file-transfers", "PAPERBOAT_FILE_TRANSFER_STAGING_ENDPOINT=http://"+listen+"/v1/local-file-transfers", "PAPERBOAT_RUNTIME_AGENT_TOKEN_FILE="+tokenPath, "PAPERBOAT_WORKSPACE_ROOT="+workspace)
+	environment := []string{"PAPERBOAT_FILE_TRANSFER_ENDPOINT=http://" + listen + "/v1/file-transfers", "PAPERBOAT_FILE_TRANSFER_STAGING_ENDPOINT=http://" + listen + "/v1/local-file-transfers", "PAPERBOAT_RUNTIME_AGENT_TOKEN_FILE=" + tokenPath, "PAPERBOAT_WORKSPACE_ROOT=" + workspace}
 	durable, err := store.Open(ctx, store.Config{Root: cfg.StateRoot})
 	if err != nil {
 		return nil, err
@@ -98,12 +90,12 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 		connections.Close()
 		return nil, errors.Join(err, durable.Close())
 	}
-	executions, err := execprocess.NewPersistent(ctx, execprocess.Config{WorkspaceRoot: workspace, BaseEnvironment: environment, MaximumActive: resources.MaxConcurrentOps, MaximumOperations: resources.MaxConcurrentOps * 32, ReplayBytes: int(cfg.Limits.PendingOutputBytes), CancelGrace: 2 * time.Second, Store: durable})
+	remote, err := connections.Executions()
 	if err != nil {
 		connections.Close()
-		_ = durable.Close()
-		return nil, err
+		return nil, errors.Join(err, durable.Close())
 	}
+	executions := hostdExecutions{RemoteManager: remote, environment: environment}
 	owner := &ProcessOwner{sessions: sessions, sessionOwners: connections, executions: executions, durable: durable, listen: listen}
 	owner.status.sessions = sessions
 	owner.status.executions = executions
@@ -139,36 +131,13 @@ func (o *ProcessOwner) ShutdownHostd(ctx context.Context) error {
 		}
 	}
 	o.sessionOwners.Close()
-	return errors.Join(bridgeErr, o.executions.Shutdown(ctx), o.durable.Close())
-}
-func (o *ProcessOwner) WorkloadStatus() hostdproto.WorkloadStatus {
-	executions := o.executions.ActiveSnapshots()
-	identities := []string{}
-	for _, e := range executions {
-		identities = append(identities, "exec:"+e.OperationID)
-	}
-	sort.Strings(identities)
-	fingerprint := strings.Join(identities, "\x00")
-	protected := uint64(len(executions))
-	o.status.workloadMu.Lock()
-	defer o.status.workloadMu.Unlock()
-	if o.status.workloadGeneration == 0 {
-		o.status.workloadGeneration = 1
-		o.status.workloadFingerprint = fingerprint
-	} else if o.status.workloadFingerprint != fingerprint {
-		o.status.workloadGeneration++
-		o.status.workloadFingerprint = fingerprint
-	}
-	return hostdproto.WorkloadStatus{Generation: o.status.workloadGeneration, Protected: protected}
+	return errors.Join(bridgeErr, o.durable.Close())
 }
 
-// DrainExecutions waits for host-owned commands to finish naturally. The
-// hostd maintenance controller closes exec admission before calling this.
-func (o *ProcessOwner) DrainExecutions(ctx context.Context) error {
-	if o == nil || o.executions == nil {
-		return execprocess.ErrInvalid
-	}
-	return o.executions.WaitIdle(ctx)
+// WorkloadStatus reports no protected workloads: commands run in session
+// owners, which an update does not replace.
+func (o *ProcessOwner) WorkloadStatus() hostdproto.WorkloadStatus {
+	return hostdproto.WorkloadStatus{Generation: 1}
 }
 
 func (o *ProcessOwner) UpdateGate() hostdproto.UpdateGateHandler { return o }

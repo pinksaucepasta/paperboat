@@ -32,6 +32,8 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"native scope admission":  "/internal/peertransport/tailnet.",
 		"carrier shutdown":        "/internal/hostruntime/runtime.",
 		"carrier control call":    "/internal/hostruntime/carriercontrol.",
+		"hostd maintenance busy":  "/internal/hostruntime/hostdproto.",
+		"preview owner lease":     "/internal/hostruntime/preview.",
 	}
 	owner := owners[record.Message]
 	if owner == "" || !strings.Contains(frame.Function, owner) {

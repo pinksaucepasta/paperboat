@@ -50,10 +50,9 @@ type SocketConfig struct {
 	Workloads func() WorkloadStatus
 	// OpenSSH counts the managed SSH connections the worker bridges itself; an update asks it
 	// before it starts so a manual update can refuse while one is open.
-	OpenSSH         func(context.Context) (int, error)
-	DrainExecutions func(context.Context) error
-	WorkerControl   WorkerControlHandler
-	UpdateGate      UpdateGateHandler
+	OpenSSH       func(context.Context) (int, error)
+	WorkerControl WorkerControlHandler
+	UpdateGate    UpdateGateHandler
 
 	// peerUID is test-only injection for platform credential checks. Production
 	// callers always use the OS-specific implementation.
@@ -257,7 +256,7 @@ func (s *Server) serveOne(ctx context.Context, connection *net.UnixConn) (result
 	if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "prepare_maintenance" {
 		peerCtx, stopWatching := watchPeerDisconnect(ctx, connection)
 		maintenanceCtx, cancel := context.WithTimeout(peerCtx, MaximumUpdateGateDuration)
-		status, preparationErr := s.controller.PrepareMaintenanceWithDrain(maintenanceCtx, control.Force, s.config.Workloads, s.config.DrainExecutions)
+		status, preparationErr := s.controller.PrepareMaintenanceWithDrain(maintenanceCtx, control.Force, s.config.Workloads, nil)
 		cancel()
 		stopWatching()
 		response, err = &WorkerControlResponse{Status: &status, Completed: true}, preparationErr

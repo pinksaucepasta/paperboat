@@ -49,12 +49,11 @@ type SocketConfig struct {
 	APIMax                     uint16
 	Random                     io.Reader
 
-	RequestTimeout  time.Duration
-	MaxConcurrent   int
-	Workloads       func() WorkloadStatus
-	DrainExecutions func(context.Context) error
-	WorkerControl   WorkerControlHandler
-	UpdateGate      UpdateGateHandler
+	RequestTimeout time.Duration
+	MaxConcurrent  int
+	Workloads      func() WorkloadStatus
+	WorkerControl  WorkerControlHandler
+	UpdateGate     UpdateGateHandler
 }
 
 type Server struct {
@@ -251,7 +250,7 @@ func (s *Server) serveOne(ctx context.Context, connection net.Conn) (result erro
 	if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "prepare_maintenance" {
 		peerCtx, stopWatching := watchPeerDisconnect(ctx, connection)
 		maintenanceCtx, cancel := context.WithTimeout(peerCtx, MaximumUpdateGateDuration)
-		status, preparationErr := s.controller.PrepareMaintenanceWithDrain(maintenanceCtx, control.Force, s.config.Workloads, s.config.DrainExecutions)
+		status, preparationErr := s.controller.PrepareMaintenanceWithDrain(maintenanceCtx, control.Force, s.config.Workloads, nil)
 		cancel()
 		stopWatching()
 		response, err = &WorkerControlResponse{Status: &status, Completed: true}, preparationErr

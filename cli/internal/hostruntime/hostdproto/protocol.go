@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"regexp"
@@ -675,16 +676,23 @@ func (c *Controller) PrepareMaintenance(ctx context.Context, force bool, workloa
 // PrepareMaintenanceWithDrain closes hostd admission, waits for admitted
 // requests and the supplied naturally completing workloads, then applies the
 // existing protected-workload policy.
+// maintenanceBusy names the step that refused maintenance in the diagnostics
+// (pbvm4 feat3/feat4 rolled back with only "maintenance is busy").
+func maintenanceBusy(step string) error {
+	diagnosticlog.TryWarn("hostd maintenance busy", "stage", step)
+	return ErrMaintenanceBusy
+}
+
 func (c *Controller) PrepareMaintenanceWithDrain(ctx context.Context, force bool, workloads func() WorkloadStatus, drain func(context.Context) error) (Status, error) {
 	if ctx == nil {
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("no_context")
 	}
 	prepareCtx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
 	if c.maintenanceActiveLocked() {
 		c.mu.Unlock()
 		cancel()
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("maintenance_active")
 	}
 	c.maintenanceGeneration++
 	generation := c.maintenanceGeneration
@@ -718,19 +726,19 @@ func (c *Controller) PrepareMaintenanceWithDrain(ctx context.Context, force bool
 		select {
 		case <-done:
 		case <-prepareCtx.Done():
-			return Status{}, ErrMaintenanceBusy
+			return Status{}, maintenanceBusy("mutation_wait")
 		}
 	}
 	if err := prepareCtx.Err(); err != nil {
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("canceled")
 	}
 	if drain != nil {
 		if err := drain(prepareCtx); err != nil {
-			return Status{}, ErrMaintenanceBusy
+			return Status{}, maintenanceBusy("drain")
 		}
 	}
 	if err := prepareCtx.Err(); err != nil {
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("canceled_after_drain")
 	}
 	// No admitted mutation can now alter process membership. Exits only reduce it.
 	workload := WorkloadStatus{}
@@ -740,10 +748,10 @@ func (c *Controller) PrepareMaintenanceWithDrain(ctx context.Context, force bool
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if prepareCtx.Err() != nil || c.maintenanceGeneration != generation || !c.maintenanceActiveLocked() {
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("lease_lost")
 	}
 	if !force && workload.Protected != 0 {
-		return Status{}, ErrMaintenanceBusy
+		return Status{}, maintenanceBusy("protected_workloads")
 	}
 	status := statusFor(c.active, StateActive)
 	if c.active.epoch == 0 {

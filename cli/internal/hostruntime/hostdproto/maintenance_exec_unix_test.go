@@ -120,23 +120,8 @@ func TestCanceledNativeDrainReopensFenceAndLeavesExecRunning(t *testing.T) {
 }
 
 func TestCanceledSocketMaintenanceReopensAfterPeerDisconnect(t *testing.T) {
-	manager, root := maintenanceExecManager(t)
-	command, _, err := manager.Start(context.Background(), execprocess.Request{
-		OperationID: "operation_socket_maintenance_cancel",
-		Argv:        []string{"/bin/sh", "-c", "sleep 0.3"},
-		CWD:         root,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	config := testSocketConfig(t)
-	drainEntered := make(chan struct{})
 	config.Workloads = func() WorkloadStatus { return WorkloadStatus{Generation: 1} }
-	config.DrainExecutions = func(ctx context.Context) error {
-		close(drainEntered)
-		return manager.WaitIdle(ctx)
-	}
 	server, stop, serverDone := startSocketServer(t, config)
 	t.Cleanup(func() { stopSocketServer(t, stop, serverDone) })
 	client := testSocketClient(t, config)
@@ -147,22 +132,37 @@ func TestCanceledSocketMaintenanceReopensAfterPeerDisconnect(t *testing.T) {
 	if _, err := client.Request(context.Background(), activateFor(welcome)); err != nil {
 		t.Fatal(err)
 	}
+	// A held owner mutation keeps maintenance waiting until the peer leaves.
+	held, err := server.AcquireActive("runtime-maintenance", welcome.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held()
 
 	prepareCtx, cancelPrepare := context.WithCancel(context.Background())
 	prepareDone := make(chan error, 1)
 	go func() { prepareDone <- client.PrepareMaintenance(prepareCtx, false) }()
-	select {
-	case <-drainEntered:
-	case <-time.After(time.Second):
-		cancelPrepare()
-		t.Fatal("socket maintenance did not enter the execution drain")
+	deadline := time.Now().Add(time.Second)
+	for {
+		release, err := server.AcquireActive("runtime-maintenance", welcome.Epoch)
+		if errors.Is(err, ErrMaintenanceBusy) {
+			break
+		}
+		if err == nil {
+			release()
+		}
+		if time.Now().After(deadline) {
+			cancelPrepare()
+			t.Fatal("socket maintenance did not start waiting for the held mutation")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	cancelPrepare()
 	if err := <-prepareDone; !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled socket maintenance error=%v", err)
 	}
 
-	deadline := time.Now().Add(time.Second)
+	deadline = time.Now().Add(time.Second)
 	for {
 		release, err := server.AcquireActive("runtime-maintenance", welcome.Epoch)
 		if err == nil {
@@ -173,14 +173,5 @@ func TestCanceledSocketMaintenanceReopensAfterPeerDisconnect(t *testing.T) {
 			t.Fatalf("peer cancellation left native admission fenced: %v", err)
 		}
 		time.Sleep(5 * time.Millisecond)
-	}
-	if snapshot := command.Snapshot(); snapshot.State == execprocess.StateExited || snapshot.State == execprocess.StateCanceled || snapshot.State == execprocess.StateFailed {
-		t.Fatalf("peer cancellation terminated the running command: %+v", snapshot)
-	}
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer waitCancel()
-	snapshot, err := command.Wait(waitCtx)
-	if err != nil || snapshot.State != execprocess.StateExited || snapshot.Result == nil || snapshot.Result.Code != 0 {
-		t.Fatalf("command did not survive peer cancellation: snapshot=%+v err=%v", snapshot, err)
 	}
 }

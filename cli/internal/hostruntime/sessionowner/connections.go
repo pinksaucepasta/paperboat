@@ -22,6 +22,7 @@ type Connections struct {
 	descriptors map[string]Descriptor
 	start       func(context.Context, string) error
 	router      *Router
+	execs       map[string]string // operation ID -> generation
 }
 
 func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, start func(context.Context, string) error, maxSessions int) (*Connections, error) {

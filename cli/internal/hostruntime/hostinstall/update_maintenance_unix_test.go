@@ -93,16 +93,17 @@ func TestSuppliedMaintenanceWaitTimeoutIsTheBusyOutcome(t *testing.T) {
 	if err := os.WriteFile(tokenPath, token, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Owner state that is slow to settle keeps maintenance past the wait bound.
+	settle := make(chan struct{})
 	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(root, "state", "fence.json"), UID: os.Getuid(), GID: os.Getgid(), Token: token, APIMin: 1, APIMax: 1,
-		Workloads:       func() hostdproto.WorkloadStatus { return hostdproto.WorkloadStatus{Generation: 1} },
-		DrainExecutions: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }})
+		Workloads: func() hostdproto.WorkloadStatus { <-settle; return hostdproto.WorkloadStatus{Generation: 1} }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx) }()
-	defer func() { cancel(); <-done }()
+	defer func() { close(settle); cancel(); <-done }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		client, clientErr := hostdproto.NewClient(socket, token, time.Second)

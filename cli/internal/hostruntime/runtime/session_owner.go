@@ -14,6 +14,7 @@ import (
 
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -26,6 +27,7 @@ import (
 // The account's terminal store and PTYs have exactly one process owner.
 type IndependentSessionOwner struct {
 	sessions     *session.Manager
+	executions   *execprocess.Manager
 	durable      *store.Store
 	unlock       func() error
 	bridge       *workloadbridge.Server
@@ -99,12 +101,19 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 	if err != nil {
 		return nil, err
 	}
-	owner := &IndependentSessionOwner{sessions: manager, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
+	// Explicit executions live here, not in hostd, so an update that replaces
+	// hostd never waits for or cuts a running command (pbvm4 feat3/feat4).
+	executions, err := ownerExecutions(ctx, d.Workspace, d.Shell, durable)
+	if err != nil {
+		return nil, errors.Join(err, manager.Shutdown(ctx))
+	}
+	owner := &IndependentSessionOwner{sessions: manager, executions: executions, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
 	owner.bridge = &workloadbridge.Server{
 		CarrierControl:  owner.controlCarrier,
 		ArchiveMetadata: archiveReader,
 		Endpoint:        d.Endpoint, Token: token, Sessions: manager, SessionOnly: true,
-		Identity: &workloadbridge.OwnerIdentity{Schema: sessionowner.Schema, Generation: d.Generation, ExecutableSHA256: d.Source.SHA256},
+		Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 4096},
+		Identity:   &workloadbridge.OwnerIdentity{Schema: sessionowner.Schema, Generation: d.Generation, ExecutableSHA256: d.Source.SHA256},
 		Fence: func() hostdproto.Status {
 			return hostdproto.Status{State: hostdproto.StateActive, WorkerID: d.Generation, Epoch: 1, APIVersion: 1}
 		},
@@ -114,8 +123,11 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 			}
 			return func() {}, nil
 		}, Retire: func(ctx context.Context) error {
-			// A busy PTY rejects retirement without disturbing its transport.
-			// The bridge admission lock excludes new streams during retirement.
+			// A busy PTY or a running command rejects retirement without
+			// disturbing it. The bridge admission lock excludes new work.
+			if len(executions.ActiveSnapshots()) != 0 {
+				return session.ErrUpdateBusy
+			}
 			if err := manager.Retire(ctx); err != nil {
 				return err
 			}
@@ -136,7 +148,7 @@ func (o *IndependentSessionOwner) Run(ctx context.Context) error { return o.brid
 // confirms quiescence over authenticated IPC; explicit uninstall can terminate
 // the service's remaining shells as part of removing Paperboat.
 func (o *IndependentSessionOwner) Close(ctx context.Context) error {
-	if err := errors.Join(o.stopCarrier(ctx), o.sessions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
+	if err := errors.Join(o.stopCarrier(ctx), o.sessions.Shutdown(ctx), o.executions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
 		return err
 	}
 	if !o.discardEmpty.Load() {
