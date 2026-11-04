@@ -709,9 +709,15 @@ func TestSocketNativeCommitReleasesOnlyProtectedStartupFence(t *testing.T) {
 			if err := client.AbortMaintenance(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := server.AcquireActive(worker.WorkerID, worker.Epoch); !errors.Is(err, ErrMaintenanceBusy) {
-				t.Fatalf("failed proof/abort released startup admission: %v", err)
+			if !startupFenced(server) {
+				t.Fatal("failed proof/abort released the startup fence")
 			}
+			// The fence gates the commit only; the serving generation admits work.
+			admitted, err := server.AcquireActive(worker.WorkerID, worker.Epoch)
+			if err != nil {
+				t.Fatalf("pending candidate refused work: %v", err)
+			}
+			admitted()
 			if _, err := client.Request(context.Background(), Status{State: StateEmpty}); err != nil {
 				t.Fatalf("pending candidate stopped answering status: %v", err)
 			}
@@ -720,8 +726,8 @@ func TestSocketNativeCommitReleasesOnlyProtectedStartupFence(t *testing.T) {
 				if err := complete(); !errors.Is(err, ErrInvalidFrame) {
 					t.Fatalf("malformed owner receipt released startup: %v", err)
 				}
-				if _, err := server.AcquireActive(worker.WorkerID, worker.Epoch); !errors.Is(err, ErrMaintenanceBusy) {
-					t.Fatalf("malformed owner receipt bypassed fence: %v", err)
+				if !startupFenced(server) {
+					t.Fatal("malformed owner receipt released the startup fence")
 				}
 			}
 			gateValid.Store(true)
@@ -738,6 +744,12 @@ func TestSocketNativeCommitReleasesOnlyProtectedStartupFence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func startupFenced(server *Server) bool {
+	server.controller.mu.Lock()
+	defer server.controller.mu.Unlock()
+	return server.controller.maintenancePending
 }
 
 type startupCommitGate struct {
@@ -794,8 +806,8 @@ func TestSocketCanceledNativeCompletionLeavesStartupFence(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("peer cancellation did not stop commit verifier")
 	}
-	if _, err := server.AcquireActive(worker.WorkerID, worker.Epoch); !errors.Is(err, ErrMaintenanceBusy) {
-		t.Fatalf("canceled proof cleared startup fence: %v", err)
+	if !startupFenced(server) {
+		t.Fatal("canceled proof cleared startup fence")
 	}
 	canCommit.Store(true)
 	if err := client.CompleteMaintenance(context.Background()); err != nil {

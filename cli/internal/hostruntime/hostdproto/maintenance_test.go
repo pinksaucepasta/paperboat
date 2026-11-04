@@ -104,7 +104,7 @@ func TestOwnerStopAcknowledgementDrainsInputBeforeReplacementAdmission(t *testin
 	}
 }
 
-func TestRestartedCandidateMaintenanceKeepsReadinessButFencesMutation(t *testing.T) {
+func TestRestartedCandidateAdmitsWorkButKeepsCommitFence(t *testing.T) {
 	now := time.Now()
 	previous, err := NewController(ControllerConfig{APIMin: 1, APIMax: 1, Clock: func() time.Time { return now }})
 	if err != nil {
@@ -143,14 +143,15 @@ func TestRestartedCandidateMaintenanceKeepsReadinessButFencesMutation(t *testing
 	if _, err := candidate.Activate(activateFor(next)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := candidate.AcquireActive(next.WorkerID, next.Epoch); !errors.Is(err, ErrMaintenanceBusy) {
-		t.Fatalf("candidate admitted mutation before native commit after restart: %v", err)
+	// The candidate took over serving; refusing here would leave no generation
+	// admitting until the native commit (pbvm4 feat8).
+	admitted, err := candidate.AcquireActive(next.WorkerID, next.Epoch)
+	if err != nil {
+		t.Fatalf("candidate refused work while its native commit is pending: %v", err)
 	}
+	admitted()
 	candidate.AbortMaintenance()
 	now = now.Add(24 * time.Hour)
-	if _, err := candidate.AcquireActive(next.WorkerID, next.Epoch); !errors.Is(err, ErrMaintenanceBusy) {
-		t.Fatalf("abort/expiry bypassed native commit: %v", err)
-	}
 	if err := candidate.CompleteMaintenance(context.Background()); !errors.Is(err, ErrMaintenanceBusy) {
 		t.Fatalf("uncommitted source cleared startup fence: %v", err)
 	}

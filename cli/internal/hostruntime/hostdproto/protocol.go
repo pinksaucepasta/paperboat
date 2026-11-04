@@ -635,7 +635,13 @@ func (c *Controller) AcquireActive(workerID string, epoch uint64) (func(), error
 	if c.active.workerID != workerID || c.active.epoch != epoch || epoch == 0 {
 		return nil, ErrFenced
 	}
-	if c.replacing || c.maintenanceActiveLocked() {
+	// The startup fence (maintenancePending) does not refuse work: this
+	// generation already took the listeners over and the previous one stopped
+	// admitting, so refusing here leaves no generation serving until the native
+	// commit (pbvm4 feat8: 3 s of refused exec/SSH/dispatch). It still gates
+	// the owner commit below. Prior art: Teleport lib/service/signals.go, nginx
+	// binary upgrade: the new process serves as soon as it is ready.
+	if c.replacing || c.maintenanceHeldLocked() {
 		return nil, ErrMaintenanceBusy
 	}
 	if c.mutations == 0 {
@@ -658,7 +664,12 @@ func (c *Controller) AcquireActive(workerID string, epoch uint64) (func(), error
 const OwnerMaintenanceLease = 5 * time.Minute
 
 func (c *Controller) maintenanceActiveLocked() bool {
-	if c.maintenancePending || c.maintenancePreparing {
+	return c.maintenancePending || c.maintenanceHeldLocked()
+}
+
+// maintenanceHeldLocked reports an explicit maintenance preparation or lease.
+func (c *Controller) maintenanceHeldLocked() bool {
+	if c.maintenancePreparing {
 		return true
 	}
 	if !c.maintenanceUntil.IsZero() && !c.now().Before(c.maintenanceUntil) {

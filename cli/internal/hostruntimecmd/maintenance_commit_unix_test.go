@@ -22,7 +22,7 @@ import (
 // The privileged status response is the native startup fence's commit proof.
 // Readiness, a matching version, and an old image cannot substitute for the
 // exact committed executing image; a staging handoff can outlive native commit.
-func TestNativeStartupAdmissionRequiresExactPrivilegedCommitProof(t *testing.T) {
+func TestNativeStartupFenceRequiresExactPrivilegedCommitProof(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires a privileged native updater peer")
 	}
@@ -87,13 +87,10 @@ func TestNativeStartupAdmissionRequiresExactPrivilegedCommitProof(t *testing.T) 
 				if !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 					t.Fatal("noncommitted source accepted", err)
 				}
-				if _, err = controller.AcquireActive(welcome.WorkerID, welcome.Epoch); !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
-					t.Fatal("mutation crossed pending native commit", err)
-				}
 				return
 			}
 			if err != nil {
-				t.Fatal("exact committed source did not release admission", err)
+				t.Fatal("exact committed source did not complete the startup fence", err)
 			}
 			release, err := controller.AcquireActive(welcome.WorkerID, welcome.Epoch)
 			if err != nil {
