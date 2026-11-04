@@ -59,7 +59,7 @@
   )
 
   // Rename from the page, then put the name back.
-  button(document, (t, b) => b.getAttribute("aria-label") === "Edit name and description")?.click()
+  button(document, (t, b) => /^Edit name/.test(b.getAttribute("aria-label") ?? ""))?.click()
   const nameInput = await until(() => [...main().querySelectorAll("input")].find((i) => i.value === alias))
   pass("Edit opens the name field", Boolean(nameInput))
   if (nameInput) {
@@ -70,7 +70,7 @@
     pass("rename is saved on the server", Boolean(renamed))
     // The title shows the new name before it can be edited again.
     await until(() => main().querySelector("h1")?.innerText === `${alias}-x`)
-    button(document, (t, b) => b.getAttribute("aria-label") === "Edit name and description")?.click()
+    button(document, (t, b) => /^Edit name/.test(b.getAttribute("aria-label") ?? ""))?.click()
     const again = await until(() => [...main().querySelectorAll("input")].find((i) => i.value === `${alias}-x`))
     if (again) {
       type(again, alias)
