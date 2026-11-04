@@ -47,23 +47,20 @@ type OwnerIdentity struct {
 }
 
 type Server struct {
-	ArchiveMetadata func(context.Context, string) (ArchiveMetadata, error)
-	Endpoint        string
-	Token           []byte
-	Sessions        session.Service
-	SessionOnly     bool
-	Identity        *OwnerIdentity
-	requests        atomic.Int64
-	CarrierControl  func(context.Context, CarrierRequest) (CarrierResponse, error)
-	Retire          func(context.Context) error
-	admission       sync.RWMutex
-	retired         atomic.Bool
-	Executions      *execprocess.RemoteServer
-	Fence           func() hostdproto.Status
-	AcquireActive   func(string, uint64) (func(), error)
-	// AcquireStream admits a long-lived feature stream that maintenance may
-	// revoke after a bounded drain; nil falls back to AcquireActive.
-	AcquireStream     func(string, uint64) (func(), <-chan struct{}, error)
+	ArchiveMetadata   func(context.Context, string) (ArchiveMetadata, error)
+	Endpoint          string
+	Token             []byte
+	Sessions          session.Service
+	SessionOnly       bool
+	Identity          *OwnerIdentity
+	requests          atomic.Int64
+	CarrierControl    func(context.Context, CarrierRequest) (CarrierResponse, error)
+	Retire            func(context.Context) error
+	admission         sync.RWMutex
+	retired           atomic.Bool
+	Executions        *execprocess.RemoteServer
+	Fence             func() hostdproto.Status
+	AcquireActive     func(string, uint64) (func(), error)
 	Ready             chan error
 	MaximumConcurrent int
 	workerMu          sync.Mutex
@@ -170,14 +167,7 @@ func (s *Server) handler() http.Handler {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			var release func()
-			var revoked <-chan struct{}
-			var leaseErr error
-			if s.AcquireStream != nil {
-				release, revoked, leaseErr = s.AcquireStream(worker, epoch)
-			} else {
-				release, leaseErr = s.AcquireActive(worker, epoch)
-			}
+			release, leaseErr := s.AcquireActive(worker, epoch)
 			if leaseErr != nil || release == nil {
 				reason := "admission_failed"
 				if errors.Is(leaseErr, hostdproto.ErrMaintenanceBusy) {
@@ -199,12 +189,7 @@ func (s *Server) handler() http.Handler {
 			if err := http.NewResponseController(w).Flush(); err != nil {
 				return
 			}
-			// Maintenance revokes long streams after a bounded drain; ending
-			// the response signals the holder's lost channel.
-			select {
-			case <-r.Context().Done():
-			case <-revoked:
-			}
+			<-r.Context().Done()
 			return
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")

@@ -361,7 +361,7 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 	if err != nil {
 		return err
 	}
-	host.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive, server.AcquireStream)
+	host.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
 	if err := host.StartBridge(ctx); err != nil {
 		return err
 	}
