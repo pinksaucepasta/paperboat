@@ -55,13 +55,19 @@ func (s *Session) OnCarrierMove(move func(context.Context, CarrierOffer) error) 
 	return nil
 }
 
+// CarrierMoveBudget bounds one move on both ends. The old connection keeps
+// serving until the replacement is attached, so a slow cold relay (dadape
+// relay1d: over 9 s) lengthens the update, not the pause. It stays under the
+// session owner's 30 s RPC bound that carries the previous generation's move.
+const CarrierMoveBudget = 25 * time.Second
+
 // OfferCarrier waits for the client to finish moving, not merely to receive an
 // address. Failure leaves the old connection serving; the updater can reconnect.
 func (s *Session) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	if s == nil || ctx == nil {
 		return ErrInvalid
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, CarrierMoveBudget)
 	defer cancel()
 	self, err := s.owner.authority.Self()
 	if err != nil || offer.verify(self, time.Now()) != nil {
@@ -102,7 +108,7 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	defer stream.Close()
 	// Both ends have the updater's bounded preparation lifetime. A peer cannot
 	// keep a classifier or an old generation alive indefinitely.
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, CarrierMoveBudget)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(0); stream.CancelWrite(0) })
 	defer stop()

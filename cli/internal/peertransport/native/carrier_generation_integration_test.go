@@ -23,17 +23,23 @@ import (
 )
 
 func TestDelegatedCarrierInheritsMachineAuthorityAndRevocation(t *testing.T) {
-	testDelegatedCarrierGeneration(t, false, false)
+	testDelegatedCarrierGeneration(t, false, false, 0)
 }
 func TestDelegatedCarrierPunchesAnUnsolicitedInboundFilter(t *testing.T) {
-	testDelegatedCarrierGeneration(t, true, false)
+	testDelegatedCarrierGeneration(t, true, false, 0)
 }
 
 func TestDelegatedCarrierRetainsPreparationAcrossLostInitials(t *testing.T) {
-	testDelegatedCarrierGeneration(t, true, true)
+	testDelegatedCarrierGeneration(t, true, true, 0)
 }
 
-func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) {
+// dadape relay1d: a cold relay took over 9 s and the 10 s move budget expired.
+// A preparation that slow must still move while the old connection serves.
+func TestDelegatedCarrierMovesAfterASlowPreparation(t *testing.T) {
+	testDelegatedCarrierGeneration(t, false, false, 11*time.Second)
+}
+
+func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool, prepareDelay time.Duration) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	public, signer, _ := ed25519.GenerateKey(rand.Reader)
@@ -66,6 +72,11 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
 			return native.CarrierOffer{}, native.ErrInvalid
 		}
+		select {
+		case <-time.After(prepareDelay):
+		case <-ctx.Done():
+			return native.CarrierOffer{}, ctx.Err()
+		}
 		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
 			return native.CarrierOffer{}, err
 		}
@@ -83,7 +94,7 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 		t.Fatal(err)
 	}
 	defer mo.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second+native.CarrierMoveBudget+3*prepareDelay)
 	defer cancel()
 	address := startTestServer(t, mo, ma, regions.Regions[1])
 	old, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)

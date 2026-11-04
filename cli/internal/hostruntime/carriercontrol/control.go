@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 )
 
 const schema = "paperboat.carrier-control/v1"
@@ -351,7 +352,7 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	}
 	timeout := 5 * time.Second
 	if req.Operation == "move-terminals" {
-		timeout = 15 * time.Second
+		timeout = native.CarrierMoveBudget + 5*time.Second
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -419,5 +420,6 @@ func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
 	return err
 }
 
-// controlWriteTimeout exceeds every client-side operation bound (move-terminals 15 s).
-const controlWriteTimeout = 20 * time.Second
+// controlWriteTimeout exceeds every client-side operation bound (move-terminals
+// CarrierMoveBudget + 5 s).
+const controlWriteTimeout = native.CarrierMoveBudget + 10*time.Second

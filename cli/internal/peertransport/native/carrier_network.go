@@ -139,6 +139,16 @@ func (o *Owner) StartCarrierNetwork(ctx context.Context, identity *CarrierIdenti
 	}
 	close(prepared)
 	network.Watch(ctx, func(peers []string) { o.closeCarrierPeers(peers, network) })
+	// Connect every signed relay before any client moves, as Tailscale keeps its
+	// DERP home connected ahead of use (~/ref/tailscale/wgengine/magicsock/derp.go:301).
+	// A cold relay from a slow host took over 9 s (dadape relay1d).
+	for _, id := range network.RelayNodeIDs() {
+		go func() {
+			warm, cancel := context.WithTimeout(ctx, CarrierMoveBudget)
+			defer cancel()
+			_ = network.WarmRelay(warm, id)
+		}()
+	}
 	return network, nil
 }
 
