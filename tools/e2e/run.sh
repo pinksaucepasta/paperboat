@@ -120,7 +120,7 @@ if has multi; then
   [ -n "$victim" ] || { echo "no instance holds worker leadership" >&2; exit 1; }
   [ "$(grep -l "worker leader acquired" "$work"/server?.log | wc -l)" = 1 ] || { echo "more than one leader" >&2; exit 1; }
   kill -9 "${pids[$victim]}"; killed=$(date +%s); echo "killed leader instance $victim at $killed"
-  ! kill -0 "${pids[$victim]}" 2>/dev/null || { echo "instance $victim survived SIGKILL" >&2; exit 1; }
+  wait "${pids[$victim]}" || [ $? = 137 ] || { echo "instance $victim did not die of SIGKILL" >&2; exit 1; } # reaps it
   sleep 3
   code=$( (pbx e2e-a machine revoke e2e-c 2>&1 || true) | grep -o -- '--confirm [A-Za-z0-9]\{6\}' | head -1 | cut -d' ' -f2)
   [ -n "$code" ] || { echo "no revoke confirmation code" >&2; exit 1; }
