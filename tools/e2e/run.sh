@@ -71,7 +71,9 @@ if has send; then
   step "send"
   docker exec -u pbt e2e-a bash -c 'echo e2e-file >/home/pbt/e2e.txt'
   pbx e2e-a send /home/pbt/e2e.txt --to e2e-b
-  pbx e2e-b exec e2e-b -- sh -c 'find "$HOME" -name e2e.txt | grep -q .'
+  inbox=$(pbx e2e-b inbox path)
+  for _ in $(seq 20); do docker exec -u pbt e2e-b grep -rq e2e-file "$inbox" && break; sleep 1; done
+  docker exec -u pbt e2e-b grep -rq e2e-file "$inbox"
   echo "stage send: PASS"
 fi
 if has preview; then
