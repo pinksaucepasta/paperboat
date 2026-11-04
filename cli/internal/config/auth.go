@@ -8,8 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
+	"github.com/pinksaucepasta/paperboat/internal/clientstate"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,34 +61,8 @@ type ProfileStore struct {
 	write   func(string, []byte, os.FileMode) error
 }
 
-func NormalizeIssuer(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", safeConfigCause("invalid Paperboat server URL", err)
-	}
-	if u.Scheme == "" || u.Host == "" || u.User != nil {
-		return "", errors.New("invalid Paperboat server URL")
-	}
-	u.Scheme = strings.ToLower(u.Scheme)
-	hostname := strings.ToLower(u.Hostname())
-	port := u.Port()
-	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
-		port = ""
-	}
-	if port == "" {
-		if strings.Contains(hostname, ":") {
-			u.Host = "[" + hostname + "]"
-		} else {
-			u.Host = hostname
-		}
-	} else {
-		u.Host = net.JoinHostPort(hostname, port)
-	}
-	u.Path = strings.TrimRight(u.Path, "/")
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
-}
+// NormalizeIssuer keeps CLI callers on the host adapter while shared clients own issuer normalization.
+func NormalizeIssuer(raw string) (string, error) { return clientstate.NormalizeIssuer(raw) }
 
 func profileKey(issuer string) string {
 	sum := sha256.Sum256([]byte(issuer))
