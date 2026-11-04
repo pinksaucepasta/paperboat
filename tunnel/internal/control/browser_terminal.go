@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 	"net/http"
 	"net/url"
 	"sync"
@@ -125,13 +125,7 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 		TerminalSessionID string `json:"terminal_session_id"`
 		AttachmentID      string `json:"attachment_id"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&reply); err != nil {
-		connection.CloseNow()
-		return BrowserTerminalAdmission{}, failure("response_invalid", 0, err)
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+	if err := strictjson.DecodeResponse(raw, &reply, 16); err != nil {
 		connection.CloseNow()
 		return BrowserTerminalAdmission{}, failure("response_invalid", 0, err)
 	}

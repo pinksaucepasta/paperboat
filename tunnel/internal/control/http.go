@@ -486,7 +486,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	if len(data) > maximum {
 		return ErrControlUnavailable
 	}
-	if err := strictjson.Decode(data, output, 64); err != nil {
+	if err := strictjson.DecodeResponse(data, output, 64); err != nil {
 		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	return nil

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 	"io"
 	"net/http"
 	"net/url"
@@ -143,12 +144,7 @@ func (c *BrowserAccessClient) call(ctx context.Context, action string, input, ou
 	if len(data) > 32<<10 {
 		return ErrControlUnavailable
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(output); err != nil {
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+	if err := strictjson.DecodeResponse(data, output, 64); err != nil {
 		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	return nil
