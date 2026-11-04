@@ -63,6 +63,16 @@ def main():
         if not args.previous_boot_id or boot == args.previous_boot_id:
             raise RuntimeError('device did not reboot since the saved observation')
         command(pb, 'doctor', '--json')
+        # A healthy local doctor is not enough: the server must see the runtime again (macOS once stayed offline).
+        deadline = time.monotonic() + 180
+        while True:
+            from pairing_lifecycle import invoke
+            machines = invoke(pb, 'machine', 'list', '--json')['machines']
+            if any(m['id'] == before['machine_id'] and m.get('online') for m in machines):
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError('machine did not come back online in the server inventory after the reboot')
+            time.sleep(5)
     elif args.check == 'shell-install':
         if not args.shell or not Path(args.shell).is_absolute():
             raise RuntimeError('shell must be an absolute installed executable')
