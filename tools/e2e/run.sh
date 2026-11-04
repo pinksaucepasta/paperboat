@@ -45,7 +45,7 @@ for name in a b; do
   $X ./pb install >/dev/null
   { if [ -n "${E2E_BREAK:-}" ]; then printf bad-token; else
       python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["e2e-"+sys.argv[2]])' "$work/tokens.json" $name; fi; } |
-    $X bash -c 'umask 077; cat >token'
+    ${X/docker exec/docker exec -i} bash -c 'umask 077; cat >token'
   for try in 1 2 3 4 5 6; do
     out=$($X .local/bin/pb pair --enrollment-token-file /home/pbt/token --name e2e-$name --json || true)
     grep -q '"ok": *true' <<<"$out" && break
