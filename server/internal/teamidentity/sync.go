@@ -50,7 +50,7 @@ func (s *Service) syncTick(ctx context.Context) error {
 	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day') AND NOT s.dirty`); err != nil {
 		errs = append(errs, err)
 	}
-	rows, err := s.db.SQL().QueryContext(ctx, `SELECT s.team_id FROM paperboat.team_identity_state s JOIN paperboat.teams t USING(team_id) WHERE s.dirty AND t.workos_organization_id IS NOT NULL AND t.deleted_at IS NULL ORDER BY s.synced_at NULLS FIRST LIMIT 5`)
+	rows, err := s.db.SQL().QueryContext(ctx, `SELECT s.team_id FROM paperboat.team_identity_state s JOIN paperboat.teams t USING(team_id) WHERE s.dirty AND t.workos_organization_id IS NOT NULL AND t.deleted_at IS NULL AND (s.retry_after IS NULL OR s.retry_after <= now()) ORDER BY s.retry_after NULLS FIRST, s.synced_at NULLS FIRST LIMIT 5`)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
@@ -70,6 +70,10 @@ func (s *Service) syncTick(ctx context.Context) error {
 	errs = append(errs, s.processJIT(ctx), s.deleteOrganizations(ctx))
 	return errors.Join(errs...)
 }
+
+// syncRetryBackoff is how long a team whose WorkOS read failed waits before the next attempt: failing teams
+// never hold the batch of five that healthy dirty teams need.
+const syncRetryBackoff = time.Minute
 
 // syncLockCheck is how often the sync pings the connection that holds its session lock.
 const syncLockCheck = 5 * time.Second
@@ -220,7 +224,7 @@ func (s *Service) syncFailed(ctx context.Context, team string, cause error) {
 	if errors.Is(cause, ErrDirectoryTooLarge) {
 		message = ErrDirectoryTooLarge.Error()
 	}
-	_, _ = s.db.SQL().ExecContext(context.WithoutCancel(ctx), `UPDATE paperboat.team_identity_state SET sync_error=$2 WHERE team_id=$1 AND sync_error IS DISTINCT FROM $2`, team, message)
+	_, _ = s.db.SQL().ExecContext(context.WithoutCancel(ctx), `UPDATE paperboat.team_identity_state SET sync_error=$2, retry_after=now()+make_interval(secs => $3) WHERE team_id=$1`, team, message, syncRetryBackoff.Seconds())
 }
 
 func writeState(ctx context.Context, tx *db.Tx, team string, state OrganizationState) error {
@@ -233,7 +237,7 @@ func writeState(ctx context.Context, tx *db.Tx, team string, state OrganizationS
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO team_identity_state(team_id,domains,connections,directory,directory_groups,directory_users,synced_at,sync_error,dirty)
  VALUES($1,$2,$3,$4,$5,$6,now(),NULL,false) ON CONFLICT(team_id) DO UPDATE SET domains=EXCLUDED.domains,connections=EXCLUDED.connections,
- directory=EXCLUDED.directory,directory_groups=EXCLUDED.directory_groups,directory_users=EXCLUDED.directory_users,synced_at=now(),sync_error=NULL,dirty=false`,
+ directory=EXCLUDED.directory,directory_groups=EXCLUDED.directory_groups,directory_users=EXCLUDED.directory_users,synced_at=now(),sync_error=NULL,retry_after=NULL,dirty=false`,
 		team, domains, connections, directory, groups, len(state.Users)); err != nil {
 		return err
 	}
