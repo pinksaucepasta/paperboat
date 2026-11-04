@@ -98,6 +98,9 @@ func (f *targetCarrierFixture) prepareGeneration(ctx context.Context, peer strin
 		socket.Close()
 		return extra.offer, nil
 	}
+	if f.unknownRelay {
+		request.RelayNodeID = "relay_refused"
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return native.CarrierOffer{}, err

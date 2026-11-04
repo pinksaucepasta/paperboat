@@ -42,9 +42,10 @@ func (o *IndependentSessionOwner) controlCarrier(ctx context.Context, request wo
 			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_add", "failed", true, "error_type", fmt.Sprintf("%T", err))
 			return result, err
 		}
+		// The relay is the fallback path; a refused relay registration must not
+		// block a direct (punched) move. Dial below decides (pbvm4 run3b).
 		if err := o.carrier.network.PreparePeerRelay(ctx, request.PeerID, exchange.RelayNodeID); err != nil {
 			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_relay", "failed", true, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
-			return result, err
 		}
 		socket, err := o.carrier.network.Dial(ctx, request.PeerID)
 		diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_dial", "failed", err != nil, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))

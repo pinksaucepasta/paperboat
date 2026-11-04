@@ -23,7 +23,21 @@ func TestPrimaryCarrierMovesHeldTerminalToStagedGeneration(t *testing.T) {
 	if !targetCarrierRoot(t) {
 		return
 	}
+	testPrimaryCarrierMove(t, false)
+}
+
+// pbvm4 run3b: the staged generation's relay registration was refused; the
+// relay is only the fallback, so the direct move must still complete.
+func TestPrimaryCarrierMoveSurvivesRefusedRelayPreparation(t *testing.T) {
+	if !targetCarrierRoot(t) {
+		return
+	}
+	testPrimaryCarrierMove(t, true)
+}
+
+func testPrimaryCarrierMove(t *testing.T, unknownRelay bool) {
 	f := newTargetCarrierFixture(t)
+	f.unknownRelay = unknownRelay
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	shell, err := filepath.EvalSymlinks("/bin/sh")

@@ -173,6 +173,7 @@ type targetCarrierFixture struct {
 	primaryAddress  mesh.Addr
 	parent          *native.Session
 	extraTarget     *terminalCarrier
+	unknownRelay    bool
 	issuer          string
 	signer          ed25519.PrivateKey
 	mu              sync.Mutex
