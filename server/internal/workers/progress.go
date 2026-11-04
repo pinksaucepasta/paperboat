@@ -43,6 +43,8 @@ type Progress struct {
 	entries map[string]*progressEntry
 	stall   time.Duration
 	now     func() time.Time
+	// OnIteration, when set before the workers start, sees every iteration begin (multi-instance run counts).
+	OnIteration func(name string, interval time.Duration)
 }
 type progressContextKey struct{}
 type progressContext struct {
@@ -110,6 +112,9 @@ func BeginIteration(ctx context.Context, interval time.Duration) func(error) {
 	e.iterationFailed = false
 	e.iterationFailure = nil
 	p.mu.Unlock()
+	if p.OnIteration != nil {
+		p.OnIteration(v.name, interval)
+	}
 	var once sync.Once
 	return func(err error) {
 		once.Do(func() {

@@ -40,3 +40,31 @@ jobs:
             cli/go.sum
             go.work.sum
       - run: tools/e2e/run.sh
+
+  # F21-57 / F21-55: three server instances behind one proxy, one SIGKILLed mid-run. Not a required check.
+  multi:
+    name: End-to-end, 3 server instances
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: e2e_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
+      E2E_STAGES: pair exec multi
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: |
+            server/go.sum
+            cli/go.sum
+            go.work.sum
+      - run: tools/e2e/run.sh

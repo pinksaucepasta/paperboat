@@ -191,3 +191,16 @@ func TestProgressUnstartedAndConcurrentSnapshotsAreBounded(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestOnIterationSeesEveryIterationStart(t *testing.T) {
+	p := NewProgress(time.Minute)
+	p.Register("worker_machines")
+	var seen []string
+	p.OnIteration = func(name string, interval time.Duration) { seen = append(seen, fmt.Sprint(name, interval)) }
+	ctx := p.Context(t.Context(), "worker_machines")
+	BeginIteration(ctx, time.Second)(nil)
+	BeginIteration(ctx, time.Second)(nil)
+	if !reflect.DeepEqual(seen, []string{"worker_machines1s", "worker_machines1s"}) {
+		t.Fatalf("seen %v", seen)
+	}
+}

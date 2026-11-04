@@ -38,11 +38,17 @@ func TestE2EServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, listen := os.Getenv("PAPERBOAT_E2E_URL"), os.Getenv("PAPERBOAT_E2E_LISTEN")
-	const internal = "127.0.0.1:18080"
+	internal := os.Getenv("PAPERBOAT_E2E_INTERNAL")
+	if internal == "" {
+		internal = "127.0.0.1:18080"
+	}
 	cfg := config.Default()
 	cfg.Database = config.Database{Driver: "postgres", DSN: dsn}
 	cfg.HTTP.Address, cfg.HTTP.PublicBaseURL, cfg.HTTP.BrowserLoginOrigin = internal, base, base
 	cfg.ReleaseBaseURL = base
+	if key := os.Getenv("PAPERBOAT_E2E_MINT_KEY"); key != "" { // multi stage: every instance signs with one key
+		cfg.ServerInstances, cfg.Secrets.MintSigningKeys, cfg.CLIAuth.MintActiveKeyID = 3, []string{key}, strings.SplitN(key, ":", 2)[0]
+	}
 	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base+"/cli", base+"/machines"
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
 	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
@@ -54,7 +60,7 @@ func TestE2EServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = migrations.Close()
-	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
+	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,20 +69,38 @@ func TestE2EServe(t *testing.T) {
 	running := make(chan error, 1)
 	go func() { running <- application.Run(ctx) }()
 
-	target, _ := url.Parse("http://" + internal)
-	tlsServer := &http.Server{Addr: listen, Handler: logRequests(t, httputil.NewSingleHostReverseProxy(target)), ReadHeaderTimeout: 5 * time.Second,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-	go func() {
-		_ = tlsServer.ListenAndServeTLS(os.Getenv("PAPERBOAT_E2E_TLS_CERT"), os.Getenv("PAPERBOAT_E2E_TLS_KEY"))
-	}()
-	defer tlsServer.Close()
+	waitForStop := func() {
+		for tick := time.NewTicker(time.Second); ; <-tick.C {
+			select {
+			case err := <-running:
+				t.Fatalf("application stopped: %v", err)
+			default:
+			}
+			if _, err := os.Stat(filepath.Join(directory, "stop")); err == nil {
+				return
+			}
+		}
+	}
+	if os.Getenv("PAPERBOAT_E2E_FOLLOWER") != "" { // another instance of the multi stage: serve only
+		waitForStop()
+		return
+	}
+	if listen != "" { // single stage: TLS in front of the one instance; the multi stage runs TestE2EProxy
+		target, _ := url.Parse("http://" + internal)
+		tlsServer := &http.Server{Addr: listen, Handler: logRequests(t, httputil.NewSingleHostReverseProxy(target)), ReadHeaderTimeout: 5 * time.Second,
+			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+		go func() {
+			_ = tlsServer.ListenAndServeTLS(os.Getenv("PAPERBOAT_E2E_TLS_CERT"), os.Getenv("PAPERBOAT_E2E_TLS_KEY"))
+		}()
+		defer tlsServer.Close()
+	}
 
 	// A signed-in console session for a seeded account, as perf_budgets does, plus a paid entitlement.
 	hash := func(value string) string { sum := sha256.Sum256([]byte(value)); return hex.EncodeToString(sum[:]) }
 	account, session, csrf := "usr_e2e", "e2e-session", "e2e-csrf"
 	for _, statement := range []string{
 		`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES('usr_e2e','workos_e2e','e2e@example.test','active')`,
-		`INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ('ume_e2e','usr_e2e','sub_e2e','connected-test','active',2,1073741824,now()-interval '1 hour',now()+interval '1 day')`,
+		`INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ('ume_e2e','usr_e2e','sub_e2e','connected-test','active',3,1073741824,now()-interval '1 hour',now()+interval '1 day')`,
 	} {
 		if _, err := application.db.SQL().ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
@@ -112,7 +136,7 @@ func TestE2EServe(t *testing.T) {
 		return out.Data
 	}
 	tokens := map[string]string{}
-	for _, name := range []string{"e2e-a", "e2e-b"} {
+	for _, name := range []string{"e2e-a", "e2e-b", "e2e-c"} {
 		tokens[name], _ = post("/v1/machine-enrollments", `{"shell":"posix"}`)["bootstrap_token"].(string)
 	}
 	for name, value := range tokens {
@@ -124,16 +148,7 @@ func TestE2EServe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "tokens.json"), payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for tick := time.NewTicker(time.Second); ; <-tick.C {
-		select {
-		case err := <-running:
-			t.Fatalf("application stopped: %v", err)
-		default:
-		}
-		if _, err := os.Stat(filepath.Join(directory, "stop")); err == nil {
-			return
-		}
-	}
+	waitForStop()
 }
 
 // logRequests prints one line per request so a failing run shows which route answered what.

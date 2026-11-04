@@ -830,6 +830,9 @@ func New(opts Options) (*App, error) {
 	})
 	// Membership is authoritative; provider retries run outside its transaction.
 	progress := workers.NewProgress(opts.Config.Reporting.WorkerStallTimeout)
+	progress.OnIteration = func(name string, interval time.Duration) { // the F21-55 per-job run count
+		opts.Logger.Debug("worker iteration", "worker", name, "interval", interval)
+	}
 	serverWorkers := []workers.Worker{
 		observedWorker(supportService, "worker_transactional_mail", mailService.Run, progress),
 		observedWorker(supportService, "worker_account_deletion", accountDeletionOutbox.Run, progress),
