@@ -57,7 +57,7 @@ def fixture_repository():
 def main():
     before = registration()
     bare = fixture_repository()
-    machine_file = Path.home() / '.config/paperboat/config-sync.toml'
+    machine_file = Path(run('config', 'sync', 'path')['path'])  # ~/.config/paperboat on Linux, Application Support on macOS
     backup = machine_file.read_text() if machine_file.exists() else None
     local = Path.home() / '.cache/paperboat-smoke/config-sync-aliases'
     local.write_text("alias smoke='echo smoke'\n")
