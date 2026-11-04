@@ -48,9 +48,8 @@ func Confirm(options ConfirmOptions) (bool, error) {
 	if options.Context != nil {
 		programOptions = append(programOptions, tea.WithContext(options.Context))
 	}
-	model := confirmModel{options: options, width: 80, height: 24, description: viewport.New(viewport.WithWidth(80), viewport.WithHeight(17))}
-	model.description.SetContent(ansi.Wrap(options.Description, 80, ""))
-	final, err := tea.NewProgram(model, programOptions...).Run()
+	sized, _ := confirmModel{options: options, description: viewport.New()}.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	final, err := tea.NewProgram(sized, programOptions...).Run()
 	if err != nil {
 		return false, runFailure(options.Context, err, "run confirmation failed")
 	}
@@ -66,8 +65,10 @@ func (m confirmModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = promptWidth(size.Width)
 		m.height = max(1, size.Height)
 		m.description.SetWidth(m.width)
-		m.description.SetHeight(max(1, m.height-7))
-		m.description.SetContent(ansi.Wrap(m.options.Description, m.width, ""))
+		wrapped := ansi.Wrap(m.options.Description, m.width, "")
+		// Size the viewport to the text so the control sits right under it.
+		m.description.SetHeight(max(1, min(strings.Count(wrapped, "\n")+1, m.height-7)))
+		m.description.SetContent(wrapped)
 		return m, nil
 	}
 	if key, ok := message.(tea.KeyPressMsg); ok {

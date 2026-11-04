@@ -105,3 +105,13 @@ func TestConfirmationCannotApproveWhenTerminalCannotShowConsent(t *testing.T) {
 		t.Fatal("resized confirmation cannot proceed")
 	}
 }
+
+func TestConfirmControlSitsUnderShortMessage(t *testing.T) {
+	updated, _ := confirmModel{options: ConfirmOptions{Title: "Remove?", Description: "One line."}}.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	lines := strings.Split(updated.(confirmModel).View().Content, "\n")
+	for index, line := range lines {
+		if strings.Contains(line, "Confirm") && index > 5 {
+			t.Fatalf("Confirm at row %d: %q", index, lines)
+		}
+	}
+}

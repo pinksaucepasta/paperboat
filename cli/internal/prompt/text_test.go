@@ -72,3 +72,18 @@ func TestTextViewFitsNarrowWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestTextAndSecretInputsHaveNoTruncationMarker(t *testing.T) {
+	text := textModel{width: 80, input: newPromptInput()}
+	text.input.SetValue("3000")
+	secret := secretModel{width: 80, input: newPromptInput()}
+	secret.input.EchoMode = textinput.EchoPassword
+	secret.input.SetValue("value")
+	for name, view := range map[string]string{"text": text.View().Content, "secret": secret.View().Content} {
+		for _, line := range strings.Split(view, "\n") {
+			if strings.Contains(line, "...") || ansi.StringWidth(line) > 80 {
+				t.Fatalf("%s input line %q", name, line)
+			}
+		}
+	}
+}

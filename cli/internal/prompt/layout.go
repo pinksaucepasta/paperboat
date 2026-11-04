@@ -57,8 +57,8 @@ func promptLine(value string, width int) string {
 
 func promptInputWidth(width int) int {
 	width = promptWidth(width)
-	indent := min(2, width-1)
-	return max(1, width-indent)
+	// textinput.View adds the "> " prompt and the cursor cell to its width.
+	return max(1, width-min(2, width-1)-3)
 }
 
 func promptInputView(value string, width int) string {

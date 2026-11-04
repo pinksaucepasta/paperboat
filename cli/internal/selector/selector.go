@@ -109,11 +109,11 @@ func ProgramOptions(input *os.File, output io.Writer) []tea.ProgramOption {
 }
 
 // NewView wraps rendered content with the screen settings v1 passed as program
-// options: all-motion mouse, and the alternate screen unless a persistent
+// options: cell-motion mouse (clicks, drags and wheel only), and the alternate screen unless a persistent
 // screen is already active.
 func NewView(content string) tea.View {
 	view := tea.NewView(content)
-	view.MouseMode = tea.MouseModeAllMotion
+	view.MouseMode = tea.MouseModeCellMotion
 	view.AltScreen = persistentScreen.Load() == 0 || suspendedScreen.Load() > 0
 	return view
 }
@@ -846,7 +846,7 @@ func filterInputWidth(width int, requireFilter bool) int {
 	if requireFilter {
 		label = "Search files"
 	}
-	return max(1, width-2-ansi.StringWidth(label+"  "))
+	return max(1, width-2-ansi.StringWidth(label+"  ")-3) // textinput adds "> " and the cursor
 }
 
 func headerLineCount(header string) int {

@@ -464,3 +464,17 @@ func TestLoadingRetainsErrorPanicWithoutFormatting(t *testing.T) {
 type selectorPrivateFailure struct{}
 
 func (selectorPrivateFailure) Error() string { panic("private error must not be formatted") }
+
+func TestViewUsesCellMotionMouse(t *testing.T) {
+	if mode := NewView("x").MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode = %v, want cell motion", mode)
+	}
+}
+
+func TestFilterLineHasNoTruncationMarker(t *testing.T) {
+	model := chooserModel{options: Options{Title: "t"}, choices: NewModel([]Item{{ID: "a", Title: "a"}}, 5), input: textinput.New(), width: 100, height: 20}
+	model.input.Focus()
+	if view := model.render(); strings.Contains(view, "...") {
+		t.Fatalf("filter line truncated: %q", view)
+	}
+}
