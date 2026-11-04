@@ -50,10 +50,11 @@ func (c controlOnlyCarrier) Send(k key.NodePublic, p []byte) error {
 		return nil
 	}
 	if c.filter.allowDERP.Load() || mesh.IsMeowPacket(p) {
-		err := c.DERPCarrier.Send(k, p)
-		if err == nil && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
-			c.filter.derpData.Add(1)
+		var counter *atomic.Uint64
+		if len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
+			counter = &c.filter.derpData
 		}
+		_, err := countedWrite(counter, len(p), func() (int, error) { return len(p), c.DERPCarrier.Send(k, p) })
 		return err
 	}
 	return nil
@@ -88,55 +89,59 @@ func (c *filteredPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	if udp, ok := addr.(*net.UDPAddr); ok {
 		port = udp.Port
 	}
-	if uint16(port) == c.filter.relayPort {
-		n, err := c.UDPConn.WriteTo(p, addr)
-		c.countRelayData(p, n, err)
-		return n, err
-	}
-	if !c.filter.enabled.Load() {
-		c.filter.dropped.Add(1)
-		return len(p), nil
-	}
-	c.filter.writes.Add(1)
-	n, err := c.UDPConn.WriteTo(p, addr)
-	c.countDirectData(p, n, err)
-	return n, err
+	return c.write(p, uint16(port), func() (int, error) { return c.UDPConn.WriteTo(p, addr) })
 }
 
 func (c *filteredPacketConn) WriteToUDPAddrPort(p []byte, addr netip.AddrPort) (int, error) {
-	if addr.Port() == c.filter.relayPort {
-		n, err := c.UDPConn.WriteToUDPAddrPort(p, addr)
-		c.countRelayData(p, n, err)
-		return n, err
+	return c.write(p, addr.Port(), func() (int, error) { return c.UDPConn.WriteToUDPAddrPort(p, addr) })
+}
+
+func (c *filteredPacketConn) write(p []byte, port uint16, write func() (int, error)) (int, error) {
+	if port == c.filter.relayPort {
+		return countedWrite(c.filter.relayCounter(p), len(p), write)
 	}
 	if !c.filter.enabled.Load() {
 		c.filter.dropped.Add(1)
 		return len(p), nil
 	}
 	c.filter.writes.Add(1)
-	n, err := c.UDPConn.WriteToUDPAddrPort(p, addr)
-	c.countDirectData(p, n, err)
-	return n, err
+	var counter *atomic.Uint64
+	if len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
+		counter = &c.filter.directData
+	}
+	return countedWrite(counter, len(p), write)
 }
 
-func (c *filteredPacketConn) countDirectData(p []byte, n int, err error) {
-	if err == nil && n == len(p) && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
-		c.filter.directData.Add(1)
+// countedWrite counts p before it leaves. Counting after the syscall races the
+// test: the peer can answer and the check run before the sending goroutine is
+// scheduled again (seen: echo received 60us before the server's count). A
+// failed or short write takes its count back.
+func countedWrite(counter *atomic.Uint64, want int, write func() (int, error)) (int, error) {
+	if counter == nil {
+		return write()
 	}
+	counter.Add(1)
+	n, err := write()
+	if err != nil || n != want {
+		counter.Add(^uint64(0))
+	}
+	return n, err
 }
 
 // Discovery probes also traverse the relay; only WireGuard transport data
 // demonstrates that an endpoint selected it for application traffic.
-func (c *filteredPacketConn) countRelayData(p []byte, n int, err error) {
+func (f *directFilter) relayCounter(p []byte) *atomic.Uint64 {
 	var header packet.GeneveHeader
-	if err == nil && n == len(p) && len(p) >= packet.GeneveFixedHeaderLength+32 && header.Decode(p) == nil && !header.Control && header.Protocol == packet.GeneveProtocolWireGuard {
-		switch binary.LittleEndian.Uint32(p[packet.GeneveFixedHeaderLength:]) {
-		case 1, 2, 3:
-			c.filter.relayHandshake.Add(1)
-		case 4:
-			c.filter.relayData.Add(1)
-		}
+	if len(p) < packet.GeneveFixedHeaderLength+32 || header.Decode(p) != nil || header.Control || header.Protocol != packet.GeneveProtocolWireGuard {
+		return nil
 	}
+	switch binary.LittleEndian.Uint32(p[packet.GeneveFixedHeaderLength:]) {
+	case 1, 2, 3:
+		return &f.relayHandshake
+	case 4:
+		return &f.relayData
+	}
+	return nil
 }
 
 func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) { testAutomaticPeerRelay(t, false) }
