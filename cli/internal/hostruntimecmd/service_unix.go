@@ -106,7 +106,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 
 func authorizePersistedUninstall(ctx context.Context) error {
 	executable := systemWorkerExecutable()
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "--", "/usr/bin/env",
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-H", "--", "/usr/bin/env",
 		"PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", "uninstall-persisted")
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {

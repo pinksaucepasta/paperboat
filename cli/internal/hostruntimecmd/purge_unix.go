@@ -38,7 +38,7 @@ func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Wr
 		return err
 	}
 	arguments := append([]string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + strconv.Itoa(os.Getuid()), executable, "__runtime-service", "purge"}, args...)
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", arguments...)
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", append([]string{"-H"}, arguments...)...)
 	command.Stderr = io.Discard
 	var output purgeOutput
 	command.Stdout = &output

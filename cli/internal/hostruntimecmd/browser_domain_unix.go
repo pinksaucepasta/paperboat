@@ -23,7 +23,7 @@ func ConfigureBrowserDomain(ctx context.Context, domain string) error {
 		return err
 	}
 	args := []string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + owner, executable, "__runtime-service", "browser-domain"}
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", args...)
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", append([]string{"-H"}, args...)...)
 	if os.Geteuid() == 0 {
 		command = exec.CommandContext(ctx, "/usr/bin/env", args[2:]...)
 	}
