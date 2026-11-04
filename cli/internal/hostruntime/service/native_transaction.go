@@ -8,7 +8,10 @@ import (
 )
 
 const maxNativeServiceDefinitionSize = 128 << 10
-const nativeServiceOperationTimeout = 30 * time.Second
+// nativeServiceOperationTimeout matches systemd's DefaultTimeoutStartSec (90 s).
+// At 30 s, systemctl was killed while dadape's update service was still
+// starting (34.7 s with the SD card busy) and the whole update failed.
+const nativeServiceOperationTimeout = 90 * time.Second
 
 func nativeServiceContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	if ctx == nil {
