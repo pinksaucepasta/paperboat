@@ -569,16 +569,26 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 	err := s.DB.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		stale = false
 		seen := map[string]bool{}
+		ids, generations, sessions := make([]string, 0, len(observations)), make([]int64, 0, len(observations)), make([]string, 0, len(observations))
 		for _, o := range observations {
 			if connectorprotocol.ValidateIdentifier(o.RouteID) != nil || connectorprotocol.ValidateIdentifier(o.SessionID) != nil || o.AttachmentGeneration == 0 || seen[o.RouteID] {
 				return ErrInvalid
 			}
 			seen[o.RouteID] = true
-			endpointRoute, err := endpoints.IsRouteTx(ctx, tx, o.RouteID)
-			if err != nil {
-				return err
-			}
-			if endpointRoute {
+			ids, generations, sessions = append(ids, o.RouteID), append(generations, int64(o.AttachmentGeneration)), append(sessions, o.SessionID)
+		}
+		// Two reads for the whole page instead of two per observation (F21-45): which routes are
+		// endpoint routes, and each carrier's stored state. Writes below stay fenced by their own WHERE.
+		endpointRoutes, err := endpointRouteSet(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		states, err := carrierStates(ctx, tx, edge, ids, generations, sessions)
+		if err != nil {
+			return err
+		}
+		for _, o := range observations {
+			if endpointRoutes[o.RouteID] {
 				if _, err := endpoints.ObserveTx(ctx, tx, edge.NodeID, edge.ProcessEpoch, o); err != nil {
 					return err
 				}
@@ -587,17 +597,14 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 			// Edges repeat every observation every few seconds. An unchanged, recently
 			// written one is only read: rewriting it (and the route rows below) on each
 			// report made concurrent serializable edge reports collide and fail.
-			var active, unchanged, current bool
-			err = tx.QueryRow(ctx, `SELECT active,COALESCE(ready=$6,false),COALESCE(observed_at>now()-$7::interval,false) FROM runtime_carrier_attachments WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready, observationRefresh.String()).Scan(&active, &unchanged, &current)
-			if errors.Is(err, pgx.ErrNoRows) {
+			state, found := states[o.RouteID]
+			if !found {
 				stale = true
 				continue
 			}
-			if err != nil {
-				return err
-			}
+			active, unchanged, current := state.active, state.set && state.ready == o.Ready, state.current
 			if !(unchanged && current) {
-				err = tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
+				err := tx.QueryRow(ctx, `UPDATE runtime_carrier_attachments SET ready=$6,observed_at=now() WHERE route_id=$1 AND generation=$2 AND session_id=$3 AND edge_node_id=$4 AND edge_process_epoch=$5 AND (NOT $6 OR paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false)) RETURNING active`, o.RouteID, o.AttachmentGeneration, o.SessionID, edge.NodeID, edge.ProcessEpoch, o.Ready).Scan(&active)
 				if errors.Is(err, pgx.ErrNoRows) {
 					stale = true
 					continue
@@ -638,6 +645,46 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 		return ErrStale
 	}
 	return err
+}
+
+type carrierState struct{ active, ready, set, current bool }
+
+func endpointRouteSet(ctx context.Context, tx *db.Tx, ids []string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `SELECT id FROM endpoint_routes WHERE id=ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// carrierStates reads the stored state of every reported carrier; a missing route is stale.
+func carrierStates(ctx context.Context, tx *db.Tx, edge previewattachment.PreviewEdgeIdentity, ids []string, generations []int64, sessions []string) (map[string]carrierState, error) {
+	rows, err := tx.Query(ctx, `SELECT a.route_id,a.active,coalesce(a.ready,false),a.ready IS NOT NULL,COALESCE(a.observed_at>now()-$6::interval,false)
+FROM unnest($1::text[],$2::bigint[],$3::text[]) o(route_id,generation,session_id)
+JOIN runtime_carrier_attachments a ON a.route_id=o.route_id AND a.generation=o.generation AND a.session_id=o.session_id AND a.edge_node_id=$4 AND a.edge_process_epoch=$5`, ids, generations, sessions, edge.NodeID, edge.ProcessEpoch, observationRefresh.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]carrierState{}
+	for rows.Next() {
+		var id string
+		var st carrierState
+		if err := rows.Scan(&id, &st.active, &st.ready, &st.set, &st.current); err != nil {
+			return nil, err
+		}
+		out[id] = st
+	}
+	return out, rows.Err()
 }
 
 func newCarrierSessionID(random io.Reader) (string, error) {
