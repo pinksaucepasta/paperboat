@@ -830,7 +830,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		claims["machine_id"], claims["user_id"], claims["account_id"] = input.MachineID, input.UserID, input.AccountID
 		claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
 	case "exec_operation":
-		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validOperationID(input.OperationID) {
+		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validOperationID(input.OperationID) {
 			return "", errors.New("exec operation bindings are required")
 		}
 		claims["machine_id"], claims["source_machine_id"], claims["user_id"], claims["cli_client_session_id"], claims["operation_id"] = input.MachineID, input.SourceMachineID, input.UserID, input.CLIClientSessionID, input.OperationID
@@ -1050,7 +1050,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "exec_operation":
-		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
+		if claims.MachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "ssh_operation":

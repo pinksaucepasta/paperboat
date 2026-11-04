@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/shared/policy"
@@ -747,6 +748,11 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 			return
 		}
 		response, err := service.ExecDescriptor(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.OperationID, body.NativeOnlyAccepted)
+		if errors.Is(err, auth.ErrOutsideTokenScope) {
+			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or machine action.")
+			return
+		}
+
 		if errors.Is(err, usermachines.ErrAmbiguousTeamAccess) {
 			writeError(w, r, http.StatusConflict, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
 			return

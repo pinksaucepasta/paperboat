@@ -274,10 +274,19 @@ func TestSignCredentialExecOperationBindsExactOperation(t *testing.T) {
 	if err != nil || claims.OperationID != input.OperationID || claims.SourceMachineID != input.SourceMachineID {
 		t.Fatalf("claims=%#v err=%v", claims, err)
 	}
-	missingSource := input
-	missingSource.SourceMachineID = ""
-	if _, err := provider.SignCredential(missingSource); err == nil {
-		t.Fatal("missing source endpoint binding accepted")
+	sessionSource := input
+	sessionSource.SourceMachineID = ""
+	sessionToken, err := provider.SignCredential(sessionSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionClaims, err := provider.VerifyCredential(sessionToken, input.Issuer, "exec_operation", now)
+	if err != nil || sessionClaims.SourceMachineID != "" || sessionClaims.CLIClientSessionID != input.CLIClientSessionID {
+		t.Fatal("session source binding lost")
+	}
+	sessionSource.CLIClientSessionID = ""
+	if _, err := provider.SignCredential(sessionSource); err == nil {
+		t.Fatal("missing peer endpoint accepted")
 	}
 	input.OperationID = ""
 	if _, err := provider.SignCredential(input); err == nil {

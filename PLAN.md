@@ -3337,6 +3337,9 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-04 | SDK server F24-04–06 | Lane R: admit source_machine_id empty only with the exact signed cli_client_session_id matching the authenticated role=cli peer; enforce target/workspace/operation and file direction/mode; file host admission currently requires a machine source.
+
+
 One line per completed section or notable event: `date | section | commit | smoke results
 file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-14 | S0 handoff merge + initial import | 75a0130 | — | old repos read-only from here

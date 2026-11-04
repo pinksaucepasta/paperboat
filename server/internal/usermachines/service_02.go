@@ -776,13 +776,8 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 	if !execOperationIDPattern.MatchString(operationID) {
 		return ExecDescriptor{}, ErrExecOperationInvalid
 	}
-	if sourceMachineID == "" || cliClientSessionID == "" {
-		return ExecDescriptor{}, ErrNotFound
-	}
-	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
+	if err := s.descriptorSourceAllowed(ctx, userID, sourceMachineID, cliClientSessionID, userMachineID, "exec"); err != nil {
 		return ExecDescriptor{}, err
-	} else if !allowed {
-		return ExecDescriptor{}, ErrNotFound
 	}
 	row, err := s.machineForCapability(ctx, s.db.Queries(), dbsqlc.GetUserMachineForCapabilityParams{ID: userMachineID, UserID: userID, Capability: "exec"})
 	if errors.Is(err, sql.ErrNoRows) {

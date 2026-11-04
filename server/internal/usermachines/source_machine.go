@@ -3,6 +3,8 @@ package usermachines
 import (
 	"context"
 	"database/sql"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 )
 
 // sourceMachineAllowed reports whether the user may act from this machine: the machine the CLI runs on
@@ -20,4 +22,25 @@ func (s *Service) sourceMachineAllowed(ctx context.Context, userID, machineID st
 		return false, nil
 	}
 	return allowed, err
+}
+
+// descriptorSourceAllowed accepts either an enrolled source or a token's own CLI peer endpoint.
+func (s *Service) descriptorSourceAllowed(ctx context.Context, user, source, session, target, capability string) error {
+	if _, token := auth.APITokenFromContext(ctx); token {
+		if source != "" {
+			return auth.ErrOutsideTokenScope
+		}
+		return auth.AuthorizeAPITokenSession(ctx, s.db.SQL(), user, session, target, capability, 0)
+	}
+	if source == "" || session == "" {
+		return ErrNotFound
+	}
+	allowed, err := s.sourceMachineAllowed(ctx, user, source)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrNotFound
+	}
+	return nil
 }
