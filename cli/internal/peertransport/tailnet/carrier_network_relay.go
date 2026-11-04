@@ -2,8 +2,15 @@ package tailnet
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/quic-go/quic-go"
 )
 
 func (c *CarrierNetwork) RelayNodeIDs() []string {
@@ -71,8 +78,30 @@ func (c *CarrierNetwork) PreparePeerRelay(ctx context.Context, endpointID, nodeI
 	}
 	err = c.server.SetPeerRelayRegion(peer, id)
 	c.mu.Unlock()
-	if err != nil {
-		return err
+	if err == nil {
+		err = c.server.PrepareRelay(ctx, id)
 	}
-	return c.server.PrepareRelay(ctx, id)
+	if err != nil {
+		// Never a silent relay failure: name the relay's own close code.
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "relay_prepare", "failed", true, "error_type", relayFailureType(err))
+	}
+	return err
+}
+
+// relayFailureType is bounded metadata: the relay's QUIC application close
+// code (derpquic Error.Code: 1 admission, 2 protocol, 3 overload, 4 expired,
+// 5 quota) or the Go error type.
+func relayFailureType(err error) string {
+	var relay *derpquic.Error
+	if errors.As(err, &relay) {
+		return fmt.Sprintf("relay_refused_%d", relay.Code)
+	}
+	var app *quic.ApplicationError
+	if errors.As(err, &app) {
+		return fmt.Sprintf("relay_close_%d", app.ErrorCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline"
+	}
+	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
 }
