@@ -422,3 +422,29 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 		t.Fatalf("invalid limits = %+v, %v", got, err)
 	}
 }
+
+// F21-38: the client sends the version of the route answer it holds and keeps it when the
+// server answers "unchanged", so an idle edge does not re-receive its whole route set.
+func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
+	var sent []string
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		var in struct {
+			Version string `json:"version"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		sent = append(sent, in.Version)
+		if in.Version == "v1" {
+			return response(http.StatusOK, `{"complete":true,"unchanged":true,"version":"v1"}`), nil
+		}
+		return response(http.StatusOK, `{"complete":true,"version":"v1","routes":[{"assignment_id":"assignment_1","route_id":"route_1","kind":"tunnel_http_wss"}]}`), nil
+	})
+	for i := 0; i < 3; i++ {
+		snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1")
+		if err != nil || !snapshot.Canonical || len(snapshot.Routes) != 1 || snapshot.Routes[0].RouteID != "route_1" {
+			t.Fatalf("pull %d: %+v, %v", i, snapshot, err)
+		}
+	}
+	if strings.Join(sent, ",") != ",v1,v1" {
+		t.Fatalf("versions sent = %q", sent)
+	}
+}

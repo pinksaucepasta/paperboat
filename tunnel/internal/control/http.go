@@ -47,6 +47,11 @@ type HTTPClient struct {
 	controlTrace   func(context.Context, string) (string, string, func(string, string))
 	signerMu       sync.RWMutex
 	signer         DistributionRequestSigner
+	// routesVersion and routesHeld are the last canonical route answer; the server answers
+	// "unchanged" to its version (F21-38).
+	routesMu      sync.Mutex
+	routesVersion string
+	routesHeld    RouteSnapshot
 }
 
 func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
@@ -228,15 +233,33 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		return RouteSnapshot{}, ErrControlInvalid
 	}
 	var result struct {
-		Complete *bool                 `json:"complete"`
-		Routes   []routeAssignmentWire `json:"routes"`
+		Complete  *bool                 `json:"complete"`
+		Unchanged bool                  `json:"unchanged"`
+		Version   string                `json:"version"`
+		Routes    []routeAssignmentWire `json:"routes"`
 	}
 	request := struct {
 		NodeID       string `json:"edge_node_id"`
 		ProcessEpoch string `json:"process_epoch,omitempty"`
+		Version      string `json:"version,omitempty"`
 	}{NodeID: nodeID, ProcessEpoch: processEpoch}
+	if processEpoch != "" {
+		c.routesMu.Lock()
+		request.Version = c.routesVersion
+		c.routesMu.Unlock()
+	}
 	if err := c.post(ctx, "/v1/edge/routes/desired-state", request, &result); err != nil {
 		return RouteSnapshot{}, err
+	}
+	if result.Unchanged {
+		c.routesMu.Lock()
+		defer c.routesMu.Unlock()
+		if request.Version == "" || result.Version != request.Version {
+			return RouteSnapshot{}, ErrControlUnavailable
+		}
+		held := c.routesHeld
+		held.Routes = append([]RouteAssignment(nil), held.Routes...)
+		return held, nil
 	}
 	if len(result.Routes) > maxCanonicalRouteAssignments {
 		return RouteSnapshot{}, ErrControlUnavailable
@@ -298,7 +321,13 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 	if complete && processEpoch != "" {
 		canonical = true
 	}
-	return RouteSnapshot{Routes: routes, Complete: complete, Canonical: canonical}, nil
+	snapshot := RouteSnapshot{Routes: routes, Complete: complete, Canonical: canonical}
+	if processEpoch != "" {
+		c.routesMu.Lock()
+		c.routesVersion, c.routesHeld = result.Version, snapshot
+		c.routesMu.Unlock()
+	}
+	return snapshot, nil
 }
 
 func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr error) {

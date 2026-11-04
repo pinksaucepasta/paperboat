@@ -917,6 +917,8 @@ func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		NodeID       string `json:"edge_node_id"`
 		ProcessEpoch string `json:"process_epoch,omitempty"`
+		// Version is the version of the canonical answer the edge holds (F21-38).
+		Version string `json:"version,omitempty"`
 	}
 	if !s.decode(w, r, &input) {
 		return
@@ -935,7 +937,18 @@ func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		for _, row := range legacyRows {
 			items = append(items, legacyEdgeRouteJSON(row))
 		}
-		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "routes": items})
+		encoded, err := json.Marshal(items)
+		if err != nil {
+			writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
+			return
+		}
+		sum := sha256.Sum256(encoded)
+		version := hex.EncodeToString(sum[:])
+		if input.Version == version {
+			writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version})
+			return
+		}
+		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "version": version, "routes": items})
 		return
 	}
 	rows, err := s.Routes(r.Context(), input.NodeID)

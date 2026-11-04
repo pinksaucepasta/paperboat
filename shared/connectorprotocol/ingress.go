@@ -1,12 +1,16 @@
 package connectorprotocol
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -300,4 +304,34 @@ func sameNativeAuthorization(a, b *PrivateAccessOpen) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+// IngressVersion orders decisions, quota denials and http-01 responses by their stable form (the
+// decision id and its issue and expiry times are per-answer values) and returns a version of the
+// whole answer. An edge that sends the version it holds gets only fresh times when nothing else
+// changed (F21-38). Prior art: cloudflared applies remote config only on a version change.
+func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, http01 []HTTP01Response) string {
+	stable := make([][]byte, len(decisions))
+	order := make([]int, len(decisions))
+	for i, d := range decisions {
+		d.DecisionID, d.IssuedAt, d.ExpiresAt = "", time.Time{}, time.Time{}
+		stable[i], _ = json.Marshal(d)
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool { return bytes.Compare(stable[order[a]], stable[order[b]]) < 0 })
+	sorted := make([]IngressDecision, len(decisions))
+	hash := sha256.New()
+	for position, i := range order {
+		sorted[position] = decisions[i]
+		hash.Write(stable[i])
+		hash.Write([]byte{'\n'})
+	}
+	copy(decisions, sorted)
+	sort.Slice(denied, func(a, b int) bool {
+		return denied[a].RouteID+" "+denied[a].Hostname < denied[b].RouteID+" "+denied[b].Hostname
+	})
+	sort.Slice(http01, func(a, b int) bool { return http01[a].Token < http01[b].Token })
+	rest, _ := json.Marshal([]any{denied, http01})
+	hash.Write(rest)
+	return hex.EncodeToString(hash.Sum(nil))
 }

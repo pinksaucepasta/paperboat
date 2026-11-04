@@ -28,6 +28,7 @@ type IngressAuthority struct {
 	fetched       time.Time
 	invalidated   bool
 	invalidations uint64 // a fetch started before the latest Invalidate does not clear it
+	version       string // of the held set; asked back so an unchanged set comes as fresh times only
 	failures      int
 	retryAt       time.Time
 	lastErr       error
@@ -178,7 +179,7 @@ func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connecto
 		generation := a.invalidations
 		a.mu.Unlock()
 		fetch, cancel := context.WithTimeout(ctx, 2*time.Second)
-		snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch)
+		snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch, a.heldVersion())
 		cancel()
 		a.mu.Lock()
 		a.recordLocked(time.Now().UTC(), snapshot, err, generation == a.invalidations)
@@ -204,7 +205,20 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		}
 		return
 	}
-	a.decisions, a.fetched = snapshot.Decisions, now
+	if snapshot.Unchanged {
+		if err := a.refreshTimesLocked(now, snapshot); err != nil {
+			a.version = ""
+			a.recordLocked(now, IngressSnapshot{}, err, fenced)
+		} else {
+			a.fetched = now
+			if fenced {
+				a.invalidated = false
+			}
+			a.failures, a.retryAt, a.lastErr, a.outOfSync = 0, time.Time{}, nil, time.Time{}
+		}
+		return
+	}
+	a.decisions, a.fetched, a.version = snapshot.Decisions, now, snapshot.Version
 	if fenced {
 		a.invalidated = false
 	}
@@ -217,6 +231,32 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	for _, r := range snapshot.HTTP01 {
 		a.http01[r.Token] = r
 	}
+}
+
+// heldVersion is the version of the held set, or empty when it must be fetched whole.
+func (a *IngressAuthority) heldVersion() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.fetched.IsZero() {
+		return ""
+	}
+	return a.version
+}
+
+// refreshTimesLocked gives the held decisions the fresh times of an unchanged answer.
+func (a *IngressAuthority) refreshTimesLocked(now time.Time, snapshot IngressSnapshot) error {
+	if len(snapshot.Expiries) != len(a.decisions) {
+		return ErrControlUnavailable
+	}
+	next := append([]connectorprotocol.IngressDecision(nil), a.decisions...)
+	for i := range next {
+		next[i].IssuedAt, next[i].ExpiresAt = snapshot.IssuedAt, snapshot.Expiries[i]
+		if next[i].Validate(now) != nil {
+			return ErrControlUnavailable
+		}
+	}
+	a.decisions = next
+	return nil
 }
 
 // HTTP01KeyAuthorization returns the key authorization the last good snapshot

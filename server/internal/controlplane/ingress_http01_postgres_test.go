@@ -77,4 +77,27 @@ func TestIngressSnapshotCarriesHTTP01ResponsesPerEdgeOnPostgres(t *testing.T) {
 	if got := snapshot(other); len(got) != 0 {
 		t.Fatalf("edge outside the domain received a response: %v", got)
 	}
+	// F21-38: an edge that sends the version it holds gets only fresh times back.
+	post := func(body string) map[string]any {
+		request := httptest.NewRequest(http.MethodPost, "/v1/edge/ingress/desired-state", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		service.handleIngress(recorder, request)
+		var out map[string]any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &out); err != nil || recorder.Code != http.StatusOK {
+			t.Fatalf("status %d body %s", recorder.Code, recorder.Body.String())
+		}
+		return out
+	}
+	full := post(fmt.Sprintf(`{"edge_node_id":%q,"process_epoch":"epoch-0001"}`, edge))
+	version, _ := full["version"].(string)
+	if version == "" || full["unchanged"] != nil {
+		t.Fatalf("full answer = %v", full)
+	}
+	if again := post(fmt.Sprintf(`{"edge_node_id":%q,"process_epoch":"epoch-0001","version":%q}`, edge, version)); again["unchanged"] != true || again["decisions"] != nil || again["version"] != version {
+		t.Fatalf("answer to the current version = %v", again)
+	}
+	if stale := post(fmt.Sprintf(`{"edge_node_id":%q,"process_epoch":"epoch-0001","version":"old"}`, edge)); stale["unchanged"] != nil || stale["decisions"] == nil {
+		t.Fatalf("answer to a stale version = %v", stale)
+	}
 }

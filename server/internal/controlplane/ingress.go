@@ -7,6 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 )
@@ -23,6 +24,9 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		NodeID       string `json:"edge_node_id"`
 		ProcessEpoch string `json:"process_epoch"`
+		// Version is the version of the answer the edge holds; when it is still current only fresh
+		// times come back (F21-38).
+		Version string `json:"version,omitempty"`
 	}
 	if !s.decode(w, r, &input) {
 		return
@@ -51,12 +55,35 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if len(denied) > 4096 {
 		denied = denied[:4096]
 	}
-	snapshotBody := map[string]any{"complete": true, "decisions": decisions, "quota_denied": denied}
-	// Released edges decode this snapshot strictly, so the field exists only where http-01 is configured (staging).
+	var responses []wire.HTTP01Response
+	// The field exists only where http-01 is configured (staging).
 	if s.http01 != nil {
-		snapshotBody["http01_responses"] = s.http01.ForEdge(input.NodeID)
+		responses = s.http01.ForEdge(input.NodeID)
+	}
+	version := wire.IngressVersion(decisions, denied, responses)
+	if input.Version == version {
+		expires := make([]time.Time, len(decisions))
+		for i, d := range decisions {
+			expires[i] = d.ExpiresAt
+		}
+		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
+		return
+	}
+	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied}
+	if s.http01 != nil {
+		snapshotBody["http01_responses"] = responses
 	}
 	writeEdgeJSON(w, http.StatusOK, snapshotBody)
+}
+
+// latestIssuedAt is the newest issue time of the answer; a kept decision never gets a longer window.
+func latestIssuedAt(decisions []wire.IngressDecision) (latest time.Time) {
+	for _, d := range decisions {
+		if d.IssuedAt.After(latest) {
+			latest = d.IssuedAt
+		}
+	}
+	return latest
 }
 
 const (

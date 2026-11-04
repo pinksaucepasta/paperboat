@@ -16,18 +16,30 @@ type IngressSnapshot struct {
 	Decisions   []connectorprotocol.IngressDecision
 	QuotaDenied []connectorprotocol.IngressQuotaDenial
 	HTTP01      []connectorprotocol.HTTP01Response
+	// Version identifies this answer. Unchanged marks an answer to a request that carried the
+	// current version: it holds only IssuedAt and Expiries (one per kept decision, in order).
+	Version   string
+	Unchanged bool
+	IssuedAt  time.Time
+	Expiries  []time.Time
 }
 
-// IngressDecisions returns the current snapshot for this edge process.
-func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch string) (IngressSnapshot, error) {
+// IngressDecisions returns the current snapshot for this edge process; a non-empty version is the
+// one the edge holds (F21-38).
+func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, version string) (IngressSnapshot, error) {
 	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil {
 		return IngressSnapshot{}, ErrControlInvalid
 	}
 	input := struct {
-		NodeID string `json:"edge_node_id"`
-		Epoch  string `json:"process_epoch"`
-	}{nodeID, epoch}
+		NodeID  string `json:"edge_node_id"`
+		Epoch   string `json:"process_epoch"`
+		Version string `json:"version,omitempty"`
+	}{nodeID, epoch, version}
 	var output struct {
+		Version         string                                 `json:"version"`
+		Unchanged       bool                                   `json:"unchanged"`
+		IssuedAt        time.Time                              `json:"issued_at"`
+		Expiries        []time.Time                            `json:"expires_at"`
 		Complete        bool                                   `json:"complete"`
 		Decisions       []connectorprotocol.IngressDecision    `json:"decisions"`
 		QuotaDenied     []connectorprotocol.IngressQuotaDenial `json:"quota_denied"`
@@ -35,6 +47,12 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch string)
 	}
 	if err := c.postNodeWithMaximumAndIdentity(ctx, "/v1/edge/ingress/desired-state", nodeID, epoch, input, &output, 16<<20); err != nil {
 		return IngressSnapshot{}, err
+	}
+	if output.Unchanged {
+		if !output.Complete || version == "" || output.Version != version || len(output.Expiries) > maximumIngressDecisions {
+			return IngressSnapshot{}, ErrControlUnavailable
+		}
+		return IngressSnapshot{Version: version, Unchanged: true, IssuedAt: output.IssuedAt, Expiries: output.Expiries}, nil
 	}
 	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.QuotaDenied) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
 		return IngressSnapshot{}, ErrControlUnavailable
@@ -50,5 +68,5 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch string)
 			return IngressSnapshot{}, ErrControlUnavailable
 		}
 	}
-	return IngressSnapshot{Decisions: output.Decisions, QuotaDenied: output.QuotaDenied, HTTP01: output.HTTP01Responses}, nil
+	return IngressSnapshot{Decisions: output.Decisions, QuotaDenied: output.QuotaDenied, HTTP01: output.HTTP01Responses, Version: output.Version}, nil
 }

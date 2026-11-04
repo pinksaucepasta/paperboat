@@ -262,3 +262,73 @@ func TestIngressAuthorityKeepsPublicDecisionsThroughAControlOutage(t *testing.T)
 		t.Fatal("still out of sync after a good refresh")
 	}
 }
+
+// F21-38: an edge that holds the current version gets fresh times only. An idle edge with 200
+// decisions pulling every refresh interval for a minute moves a small fraction of the full bytes,
+// and a changed set is fetched whole.
+func TestIngressAuthorityAsksForAVersionAndIdleBytesStaySmall(t *testing.T) {
+	base := ingressAuthorityTestDecision(time.Now().UTC())
+	var bytesSent, fullBytes atomic.Int64
+	var fulls, unchanged atomic.Int32
+	changed := atomic.Bool{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Version string `json:"version"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		now := time.Now().UTC()
+		decisions := make([]connectorprotocol.IngressDecision, 200)
+		for i := range decisions {
+			d := base
+			d.DecisionID, d.Binding.Hostname, d.Binding.RouteID = "decision_"+strings.Repeat("x", 8)+string(rune('a'+i%26))+string(rune('a'+i/26)), "h"+string(rune('a'+i%26))+string(rune('a'+i/26))+".customer.test", "route_"+string(rune('a'+i%26))+string(rune('a'+i/26))
+			d.IssuedAt, d.ExpiresAt = now, now.Add(8*time.Second+time.Duration(i)*time.Millisecond)
+			decisions[i] = d
+		}
+		if changed.Load() {
+			decisions = decisions[:199]
+		}
+		version := connectorprotocol.IngressVersion(decisions, nil, nil)
+		body := map[string]any{"complete": true, "version": version, "decisions": decisions}
+		if in.Version == version {
+			expires := make([]time.Time, len(decisions))
+			for i, d := range decisions {
+				expires[i] = d.ExpiresAt
+			}
+			body = map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": now, "expires_at": expires}
+			unchanged.Add(1)
+		} else {
+			fulls.Add(1)
+		}
+		encoded, _ := json.Marshal(body)
+		bytesSent.Add(int64(len(encoded)))
+		if in.Version != version {
+			fullBytes.Store(int64(len(encoded)))
+		}
+		w.Write(encoded)
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: base.EdgeNodeID, ProcessEpoch: base.EdgeProcessEpoch}
+	for i := 0; i < 12; i++ { // a minute of refresh intervals
+		if got, err := authority.snapshot(t.Context(), true); err != nil || len(got) != 200 {
+			t.Fatalf("pull %d: %d %v", i, len(got), err)
+		}
+	}
+	if fulls.Load() != 1 || unchanged.Load() != 11 {
+		t.Fatalf("%d full and %d unchanged answers, want 1 and 11", fulls.Load(), unchanged.Load())
+	}
+	if perMinute, budget := bytesSent.Load(), fullBytes.Load()*3; perMinute > budget {
+		t.Fatalf("idle edge moved %d bytes in a minute, budget %d", perMinute, budget)
+	}
+	got, _ := authority.snapshot(t.Context(), true)
+	if time.Until(got[0].ExpiresAt) < 7*time.Second {
+		t.Fatal("unchanged answer did not refresh the decision times")
+	}
+	changed.Store(true)
+	if got, err := authority.snapshot(t.Context(), true); err != nil || len(got) != 199 || fulls.Load() != 2 {
+		t.Fatalf("changed set: %d decisions, %d full answers, %v", len(got), fulls.Load(), err)
+	}
+}
