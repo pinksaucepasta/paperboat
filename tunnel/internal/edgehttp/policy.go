@@ -62,7 +62,10 @@ type Config struct {
 	// PreviewPending, when set, reports a preview host the server has admitted on this edge but
 	// whose carrier route is not attached yet; its requests wait for it instead of a 404.
 	PreviewPending func(host string) bool
-	HelperAccess   interface {
+	// RouteUnavailable, when set, reports a host whose route is known but failed its probe: it gets the
+	// "could not reach the app" page (502) instead of a 404.
+	RouteUnavailable func(host string) bool
+	HelperAccess     interface {
 		VerifyHelperAccess(context.Context, string) (admission.Claims, error)
 	}
 	Revocations interface {
@@ -152,7 +155,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	}
 	var legacyHandler http.Handler = legacy
 	if privateUpstream == "" {
-		legacyHandler = http.NotFoundHandler()
+		legacyHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeErrorPage(w, http.StatusNotFound, "") })
 	}
 	var next http.Handler = legacyHandler
 	if previewTransport != nil || canonicalTransport != nil || config.RuntimeCarrierTransport != nil {
@@ -192,11 +195,11 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 						runtimeHandler.ServeHTTP(writer, request)
 						return
 					}
-					http.NotFound(writer, request)
+					writeErrorPage(writer, http.StatusNotFound, "")
 					return
 				case route.TunnelHTTPSWSS:
 					if canonical == nil {
-						http.NotFound(writer, request)
+						writeErrorPage(writer, http.StatusNotFound, "")
 						return
 					}
 					canonical.ServeHTTP(writer, request)
@@ -240,20 +243,20 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if errors.Is(err, ErrIngressQuotaExhausted) {
 			// A typed refusal at admission: the visitor learns why, and direct access is unaffected.
 			writer.Header().Set("X-Paperboat-Error", "bandwidth_quota_exhausted")
-			http.Error(writer, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.", http.StatusTooManyRequests)
+			writeErrorPage(writer, http.StatusTooManyRequests, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.")
 			return
 		}
 		if errors.Is(err, ErrIngressLimitExceeded) {
 			// The edge's abuse limits (edgelimits): too many connections or opens right now.
 			writer.Header().Set("X-Paperboat-Error", "edge_rate_limited")
 			writer.Header().Set("Retry-After", "1")
-			http.Error(writer, edgeRateLimitedMessage, http.StatusTooManyRequests)
+			writeErrorPage(writer, http.StatusTooManyRequests, edgeRateLimitedMessage)
 			return
 		}
 		// A visitor hitting an address whose app is not running should learn that, not just "Bad Gateway".
 		// The reason is deliberately generic: it never carries the underlying cause.
 		writer.Header().Set("X-Paperboat-Error", "upstream_unavailable")
-		http.Error(writer, upstreamUnavailableMessage, http.StatusBadGateway)
+		writeErrorPage(writer, http.StatusBadGateway, upstreamUnavailableMessage)
 	}
 }
 
@@ -360,7 +363,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		runtimeHost, suffix, hasSuffix := strings.Cut(strings.TrimPrefix(r.URL.Path, prefix), "/")
 		_, kind, allowed := p.allowedHost(runtimeHost)
 		if !allowed || kind != "runtime_https_wss" || !normalizeRequestTarget(r, p.config.BrowserTerminalEdgeHost) || (browserTerminal && (hasSuffix || r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "")) || (!hasSuffix && (r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "")) {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		r = r.Clone(r.Context())
@@ -377,7 +380,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, inspectorEdgePrefix) {
 		if p.config.InspectorAccess == nil {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 		} else {
 			p.config.InspectorAccess.ServeHTTP(w, r)
 		}
@@ -387,7 +390,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == browserCallbackPath && p.config.BrowserAccess != nil {
 			p.config.BrowserAccess.callback(w, r)
 		} else {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 		}
 		return
 	}
@@ -398,7 +401,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok = false
 		candidateHost, valid := dispatchHost(r.Host)
 		if !valid {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		candidateLease, acquired, acquireErr := p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
@@ -426,7 +429,12 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				p.config.BrowserAccess.begin(w, r, candidateHost)
 				return
 			}
-			http.NotFound(w, r)
+			if p.config.RouteUnavailable != nil && p.config.RouteUnavailable(candidateHost) {
+				w.Header().Set("X-Paperboat-Error", "upstream_unavailable")
+				writeErrorPage(w, http.StatusBadGateway, upstreamUnavailableMessage)
+				return
+			}
+			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		matched, lease = acquired, candidateLease
@@ -434,17 +442,17 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer lease.Close()
 		host, expectedKind, ok = matched.Host, string(matched.Rule.Kind), true
 		if expectedKind == string(route.TunnelHTTPSWSS) && (matched.Rule.MatchType == route.MatchManagedExact || strings.HasSuffix(host, "."+strings.ToLower(p.config.TunnelBaseDomain))) && !route.ValidManagedTunnelHostname(host, p.config.TunnelBaseDomain) {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		r = r.WithContext(context.WithValue(lease.Context(), routeMatchContextKey{}, matched))
 	}
 	if !ok || !normalizeRequestTarget(r, host) || headerBytes(r.Header) > p.config.MaxHeaderBytes {
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
 	if r.ContentLength > p.config.MaxBodyBytes {
-		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		writeErrorPage(w, http.StatusRequestEntityTooLarge, "")
 		return
 	}
 	clientIP := p.clientIP(r)
@@ -471,7 +479,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer finish()
 	}
 	if matched.Rule.AccessMode == "team" && !browserAuthorized {
-		http.Error(w, "Authentication required", 401)
+		writeErrorPage(w, 401, signInMessage)
 		return
 	}
 	privateRoute := !browserAuthorized && matched.Rule.AccessMode == "private" && (expectedKind == dataCarrierPreviewPrivateRouteKind || expectedKind == string(route.TunnelHTTPSWSS))
@@ -481,7 +489,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// private access based on browser cookies, Authorization, or custom
 		// headers.
 		if !privateAuthorized {
-			http.Error(w, http.StatusText(privateStatus), privateStatus)
+			writeErrorPage(w, privateStatus, "")
 			return
 		}
 	}
@@ -501,7 +509,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestID, requestIDErr = p.trustedRequestID()
 	}
 	if requestIDErr != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "")
 		return
 	}
 	r.Header.Set("Forwarded", formatForwarded(clientIP, host))
@@ -529,7 +537,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if kind, state, reason, found = p.awaitPreviewRoute(r.Context(), host); !found {
 					w.Header().Set("X-Paperboat-Error", "preview_starting")
 					w.Header().Set("Retry-After", "1")
-					http.Error(w, previewStartingMessage, http.StatusServiceUnavailable)
+					writeErrorPage(w, http.StatusServiceUnavailable, previewStartingMessage)
 					return
 				}
 			}
@@ -537,12 +545,12 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			kind, state, found = string(matched.Rule.Kind), "ready", true
 		}
 		if !found || kind != expectedKind {
-			http.NotFound(w, r)
+			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		if kind == "runtime_https_wss" && state != "ready" {
 			w.Header().Set("Retry-After", "5")
-			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			writeErrorPage(w, http.StatusServiceUnavailable, "")
 			return
 		}
 		if (kind == "preview_public_https_wss" || kind == dataCarrierPreviewPrivateRouteKind) && state != "ready" {
@@ -553,22 +561,22 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if websocket && retry && closeRetryableWebSocket(w, r) {
 				return
 			}
-			http.Error(w, http.StatusText(status), status)
+			writeErrorPage(w, status, "")
 			return
 		}
 	}
 	if expectedKind == "runtime_https_wss" && !helperPublicPath(r.URL.Path) {
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
 	if expectedKind == "runtime_https_wss" && r.URL.Path == "/v1/browser-terminal" && websocket {
 		if r.Method != http.MethodGet || r.URL.RawQuery != "" || p.config.BrowserTerminal == nil || p.config.BrowserTerminalHub == nil || p.config.RuntimeCarrierTransport == nil {
-			http.Error(w, "Browser terminal unavailable", http.StatusServiceUnavailable)
+			writeErrorPage(w, http.StatusServiceUnavailable, "The browser terminal is not available right now. Wait a moment and reload the page.")
 			return
 		}
 		ticket, valid := browserTerminalTicket(r.Header)
 		if !valid || len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") == "" {
-			http.Error(w, "Invalid browser terminal ticket", http.StatusForbidden)
+			writeErrorPage(w, http.StatusForbidden, "This terminal link has expired. Open the terminal again from the Paperboat console.")
 			return
 		}
 		p.serveBrowserTerminal(w, r, host, matched, ticket)
@@ -580,11 +588,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if matched.Rule.ResourceKind == "runtime" && claims.MachineID != matched.Rule.HostID {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			writeErrorPage(w, http.StatusForbidden, "")
 			return
 		}
 		if !credentialAllowsHelperPath(claims.CredentialClass, r.Method, r.URL.Path) {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			writeErrorPage(w, http.StatusForbidden, "")
 			return
 		}
 		ctx, cancel := context.WithCancel(r.Context())
@@ -647,18 +655,18 @@ func helperPublicPath(path string) bool {
 
 func (p *Policy) authorizeHelperAccess(w http.ResponseWriter, r *http.Request) (admission.Claims, bool) {
 	if p.config.HelperAccess == nil || p.config.Revocations == nil || p.config.RevocationCheckInterval <= 0 {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "")
 		return admission.Claims{}, false
 	}
 	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
 	scheme, token, ok := strings.Cut(authorization, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) != token || token == "" {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		writeErrorPage(w, http.StatusUnauthorized, "")
 		return admission.Claims{}, false
 	}
 	claims, err := p.config.HelperAccess.VerifyHelperAccess(r.Context(), token)
 	if err != nil || claims.Revoked {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		writeErrorPage(w, http.StatusUnauthorized, "")
 		return admission.Claims{}, false
 	}
 	return claims, true

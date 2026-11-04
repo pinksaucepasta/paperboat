@@ -595,6 +595,28 @@ func (r *Registry) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate,
 		}
 		key = r.wildcardActiveKeyLocked(host)
 	}
+	return r.activeCertificateLocked(key, host, now)
+}
+
+// WildcardCertificate returns the active wildcard certificate that covers host, ignoring any
+// on-demand exact-certificate policy. The edge uses it only to answer TLS for a known route
+// that is temporarily unavailable, so the visitor sees an error page instead of a dropped handshake.
+func (r *Registry) WildcardCertificate(host string) (*tls.Certificate, error) {
+	host, wildcard, err := normalizeHostname(host)
+	if err != nil || wildcard {
+		return nil, ErrCertificateMissing
+	}
+	now := r.now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, ErrClosed
+	}
+	r.expireLocked(now)
+	return r.activeCertificateLocked(r.wildcardActiveKeyLocked(host), host, now)
+}
+
+func (r *Registry) activeCertificateLocked(key, host string, now time.Time) (*tls.Certificate, error) {
 	e := r.entries[key]
 	if e == nil || e.state != StateActive {
 		if r.expiredForHostLocked(host) {

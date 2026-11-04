@@ -123,31 +123,31 @@ func clearBrowserHandoff(w http.ResponseWriter) {
 func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 	browserSecurityHeaders(w)
 	if !b.validate() {
-		http.Error(w, "Browser access unavailable", 503)
+		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return
 	}
 	if r.Method != http.MethodPost || len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != b.LoginOrigin || browserReservedDuplicates(r) {
-		http.Error(w, "Invalid login return", 403)
+		writeErrorPage(w, 403, "This sign-in link is not valid. Open the address again to start a new sign-in.")
 		return
 	}
 	state, ok := browserCookie(r, browserHandoffCookie)
 	if !ok {
-		http.Error(w, "Login transaction expired", 401)
+		writeErrorPage(w, 401, "This sign-in took too long. Open the address again to sign in.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" || r.ParseForm() != nil || len(r.PostForm) != 2 || len(r.PostForm["transaction_id"]) != 1 || len(r.PostForm["handoff"]) != 1 {
-		http.Error(w, "Invalid login return", 400)
+		writeErrorPage(w, 400, "This sign-in link is not valid. Open the address again to start a new sign-in.")
 		return
 	}
 	transaction, nonce, found := strings.Cut(state, ".")
 	if !found || transaction != r.PostForm.Get("transaction_id") {
-		http.Error(w, "Invalid login return", 403)
+		writeErrorPage(w, 403, "This sign-in link is not valid. Open the address again to start a new sign-in.")
 		return
 	}
 	host, valid := dispatchHost(r.Host)
 	if !valid || r.Host != host {
-		http.Error(w, "Invalid login return", 400)
+		writeErrorPage(w, 400, "This sign-in link is not valid. Open the address again to start a new sign-in.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -159,7 +159,7 @@ func (b *BrowserAccess) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if session.Token == "" || !session.ExpiresAt.After(time.Now()) || !safeBrowserReturn(session.ReturnPath) {
-		http.Error(w, "Browser access unavailable", 503)
+		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserEdgeCookie, Value: session.Token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
@@ -178,38 +178,38 @@ func browserNavigation(r *http.Request) bool {
 func browserError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
-		http.Error(w, "Authentication required", 401)
+		writeErrorPage(w, 401, signInMessage)
 	case errors.Is(err, control.ErrBrowserDenied):
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 	default:
-		http.Error(w, "Browser authorization unavailable", 503)
+		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 	}
 }
 
 func lazyActivationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, control.ErrBrowserUnauthenticated):
-		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		writeErrorPage(w, http.StatusUnauthorized, signInMessage)
 	case errors.Is(err, control.ErrBrowserDenied):
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 	case errors.Is(err, control.ErrLazyGenerationConflict):
-		http.Error(w, "Preview policy generation changed", http.StatusConflict)
+		writeErrorPage(w, http.StatusConflict, "This preview was just updated. Reload the page.")
 	case errors.Is(err, control.ErrLazyCapacity):
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "Lazy preview activation capacity exceeded", http.StatusTooManyRequests)
+		writeErrorPage(w, http.StatusTooManyRequests, "Too many previews are starting right now. Wait a moment and reload the page.")
 	case errors.Is(err, control.ErrLazyForwardingFailed):
-		http.Error(w, "Preview forwarding failed; no request was replayed", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "The preview did not receive this request. Reload the page to send it again.")
 	case errors.Is(err, control.ErrLazyCooldown):
 		w.Header().Set("Retry-After", "2")
-		http.Error(w, "Preview activation recently failed; retry after two seconds", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "This preview did not start. Wait two seconds and reload the page.")
 	case errors.Is(err, control.ErrLazyHostOffline):
-		http.Error(w, "Preview host is offline", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "The machine behind this preview is offline. Turn it on, then reload the page.")
 	case errors.Is(err, control.ErrLazyOriginUnavailable):
-		http.Error(w, "Preview origin is unavailable", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, upstreamUnavailableMessage)
 	case errors.Is(err, control.ErrLazyActivationTimeout), errors.Is(err, context.DeadlineExceeded):
-		http.Error(w, "Preview activation timed out", http.StatusGatewayTimeout)
+		writeErrorPage(w, http.StatusGatewayTimeout, "This preview took too long to start. Reload the page to try again.")
 	default:
-		http.Error(w, "Preview activation unavailable", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "This preview could not start. Wait a moment and reload the page.")
 	}
 }
 
@@ -239,12 +239,12 @@ func (b *BrowserAccess) activateLazy(ctx context.Context, host, token string, ma
 func (b *BrowserAccess) begin(w http.ResponseWriter, r *http.Request, host string) {
 	browserSecurityHeaders(w)
 	if !browserNavigation(r) {
-		http.Error(w, "Authentication required", 401)
+		writeErrorPage(w, 401, signInMessage)
 		return
 	}
 	path := r.URL.RequestURI()
 	if !safeBrowserReturn(path) {
-		http.Error(w, "Invalid return path", 400)
+		writeErrorPage(w, 400, "This address cannot be opened after sign-in. Open the app address directly.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -255,7 +255,7 @@ func (b *BrowserAccess) begin(w http.ResponseWriter, r *http.Request, host strin
 		return
 	}
 	if tx.TransactionID == "" || tx.State == "" || strings.Contains(tx.TransactionID, ".") || !tx.ExpiresAt.After(time.Now()) {
-		http.Error(w, "Browser authorization unavailable", 503)
+		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: browserHandoffCookie, Value: tx.TransactionID + "." + tx.State, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, Expires: tx.ExpiresAt})
@@ -279,18 +279,18 @@ func browserDecisionMatches(d connectorprotocol.IngressDecision, m route.RouteMa
 // transport's body and upgraded stream; permission is never cached across users.
 func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m route.RouteMatch) (*http.Request, func(), bool) {
 	if !b.validate() {
-		http.Error(w, "Browser access unavailable", 503)
+		writeErrorPage(w, 503, "Paperboat could not check your access just now. Wait a moment and reload the page.")
 		return r, func() {}, false
 	}
 	if browserReservedDuplicates(r) {
-		http.Error(w, "Invalid access cookie", 401)
+		writeErrorPage(w, 401, "Your Paperboat sign-in cookie is not valid. Clear cookies for this site and open the address again.")
 		return r, func() {}, false
 	}
 	token, ok := browserCookie(r, browserEdgeCookie)
 	machine := false
 	if values := r.Header.Values("Paperboat-Access-Token"); len(values) > 0 {
 		if len(values) != 1 || values[0] == "" || strings.TrimSpace(values[0]) != values[0] {
-			http.Error(w, "Invalid access credential", 401)
+			writeErrorPage(w, 401, "The access credential sent with this request is not valid. Create a new one and try again.")
 			return r, func() {}, false
 		}
 		token, ok, machine = values[0], true, true
@@ -300,12 +300,12 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		return r, func() {}, false
 	}
 	if !machine && crossSiteSubresource(r) {
-		http.Error(w, "Cross-site request is not authorized", 403)
+		writeErrorPage(w, 403, "This request came from another site and was blocked. Open the address directly in your browser.")
 		return r, func() {}, false
 	}
 	if !machine && (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions || isWebSocketUpgrade(r.Header)) {
 		if len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") != "https://"+m.Host {
-			http.Error(w, "Origin is not authorized", 403)
+			writeErrorPage(w, 403, "This request came from another site and was blocked. Open the address directly in your browser.")
 			return r, func() {}, false
 		}
 	}
@@ -332,7 +332,7 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		return r, func() {}, false
 	}
 	if !browserDecisionMatches(d, m) {
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 		return r, func() {}, false
 	}
 	lease, err := runtimeadmission.Admit(r.Context(), d.ExpiresAt, nil)

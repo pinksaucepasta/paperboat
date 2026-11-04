@@ -42,7 +42,12 @@ type CertificateSelectorConfig struct {
 	Source            CertificateSource
 	OnDemandRequester OnDemandCertificateRequester
 	OnDemandMatcher   OnDemandCertificateMatcher
-	HandshakeTimeout  time.Duration
+	// Unavailable and Wildcard together keep TLS up for a route that is known but unavailable.
+	Unavailable interface{ Has(string) bool }
+	Wildcard    interface {
+		WildcardCertificate(string) (*tls.Certificate, error)
+	}
+	HandshakeTimeout time.Duration
 }
 
 type certificateDemandCall struct {
@@ -51,12 +56,16 @@ type certificateDemandCall struct {
 	finishedAt time.Time
 }
 type CertificateSelector struct {
-	source   CertificateSource
-	onDemand OnDemandCertificateRequester
-	matcher  OnDemandCertificateMatcher
-	timeout  time.Duration
-	mu       sync.Mutex
-	demand   map[string]*certificateDemandCall
+	source      CertificateSource
+	onDemand    OnDemandCertificateRequester
+	matcher     OnDemandCertificateMatcher
+	unavailable interface{ Has(string) bool }
+	wildcard    interface {
+		WildcardCertificate(string) (*tls.Certificate, error)
+	}
+	timeout time.Duration
+	mu      sync.Mutex
+	demand  map[string]*certificateDemandCall
 }
 
 func NewCertificateSelector(config CertificateSelectorConfig) (*CertificateSelector, error) {
@@ -66,7 +75,7 @@ func NewCertificateSelector(config CertificateSelectorConfig) (*CertificateSelec
 	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 2 * time.Second
 	}
-	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall)}, nil
+	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, unavailable: config.Unavailable, wildcard: config.Wildcard, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall)}, nil
 }
 
 func (s *CertificateSelector) TLSConfig() *tls.Config {
@@ -86,6 +95,12 @@ func (s *CertificateSelector) lookup(ctx context.Context, hostname string) (*tls
 		return nil, tlscert.ErrCertificateMissing
 	}
 	hostname = canonical
+	if s.unavailable != nil && s.wildcard != nil && s.unavailable.Has(hostname) {
+		// Complete TLS with the platform wildcard so the edge can show its "could not reach the app" page.
+		if certificate, err := s.wildcard.WildcardCertificate(hostname); err == nil && certificateCoversHost(certificate, hostname) {
+			return certificate, nil
+		}
+	}
 	exact := s.matcher != nil && s.matcher.RequiresExactCertificate(hostname)
 	certificate, sourceErr := s.source.GetCertificate(&tls.ClientHelloInfo{ServerName: hostname})
 	if sourceErr == nil && certificate != nil && ((!exact && certificateCoversHost(certificate, hostname)) || (exact && certificateCoversExactHost(certificate, hostname))) {

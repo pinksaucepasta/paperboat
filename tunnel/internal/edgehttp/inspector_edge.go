@@ -68,33 +68,33 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	if a == nil || a.Authority == nil || a.Carriers == nil || a.PreviewCarriers == nil || r == nil {
-		http.Error(w, "Inspector unavailable", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "The inspector is not available right now. Wait a moment and reload the page.")
 		return
 	}
 	action, ok := inspectorOperation(r.Method, r.URL.Path)
 	if !ok {
-		http.NotFound(w, r)
+		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
 	grants := r.Header.Values(inspectorGrantHeader)
 	if len(grants) != 1 || grants[0] == "" || len(grants[0]) > 512 || strings.TrimSpace(grants[0]) != grants[0] || strings.ContainsAny(grants[0], "\x00\r\n\t ") {
-		http.Error(w, "Inspector authorization required", http.StatusUnauthorized)
+		writeErrorPage(w, http.StatusUnauthorized, signInMessage)
 		return
 	}
 	selectors, body, err := inspectorRequestSelectors(w, r)
 	if err != nil {
-		http.Error(w, "Invalid inspector request", http.StatusBadRequest)
+		writeErrorPage(w, http.StatusBadRequest, badRequestMessage)
 		return
 	}
 	if selectors.ResourceKind != "preview" && selectors.ResourceKind != "tunnel" || connectorprotocol.ValidateIdentifier(selectors.ResourceID) != nil || connectorprotocol.ValidateIdentifier(selectors.RouteID) != nil || selectors.ResourceKind == "preview" && selectors.ResourceID != selectors.RouteID {
-		http.Error(w, "Invalid inspector request", http.StatusBadRequest)
+		writeErrorPage(w, http.StatusBadRequest, badRequestMessage)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), inspectorEdgeTimeout)
 	defer cancel()
 	access, err := a.Authority.Authorize(ctx, grants[0], selectors.ResourceKind, selectors.ResourceID, selectors.RouteID, action)
 	if err != nil {
-		http.Error(w, "Inspector authorization unavailable", http.StatusForbidden)
+		writeErrorPage(w, http.StatusForbidden, "")
 		return
 	}
 	requestID := "request_" + uuid.NewString()
@@ -104,7 +104,7 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	stream, err := a.openInspectorStream(ctx, access, requestID)
 	if err != nil {
 		a.observe(ctx, err)
-		http.Error(w, "Inspector owner is unavailable", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "The inspector could not reach its owner. Wait a moment and reload the page.")
 		return
 	}
 	defer stream.Close()
@@ -124,13 +124,13 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := out.Write(stream); err != nil {
 		a.observe(ctx, err)
-		http.Error(w, "Inspector owner is unavailable", http.StatusServiceUnavailable)
+		writeErrorPage(w, http.StatusServiceUnavailable, "The inspector could not reach its owner. Wait a moment and reload the page.")
 		return
 	}
 	response, err := http.ReadResponse(bufio.NewReader(io.LimitReader(stream, inspectorEdgeReplyLimit+64<<10)), out)
 	if err != nil {
 		a.observe(ctx, err)
-		http.Error(w, "Inspector owner is unavailable", http.StatusBadGateway)
+		writeErrorPage(w, http.StatusBadGateway, "The inspector could not reach its owner. Wait a moment and reload the page.")
 		return
 	}
 	defer response.Body.Close()
@@ -140,7 +140,7 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			err = errInspectorResponseLimit
 		}
 		a.observe(ctx, err)
-		http.Error(w, "Inspector response is too large", http.StatusBadGateway)
+		writeErrorPage(w, http.StatusBadGateway, "This inspector answer is too large to show. Narrow the search and try again.")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

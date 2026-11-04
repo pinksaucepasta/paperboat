@@ -259,7 +259,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		_ = certificateClient.Close()
 		return nil, fmt.Errorf("create TLS certificate distribution worker: %w", err)
 	}
+	unavailableRoutes := &route.UnavailableHosts{}
 	certificateSelector, err := edgeruntime.NewCertificateSelector(edgeruntime.CertificateSelectorConfig{
+		Unavailable:       unavailableRoutes,
+		Wildcard:          certificateRegistry,
 		Source:            certificateRegistry,
 		OnDemandRequester: onDemandRequester,
 		OnDemandMatcher:   certificateRegistry,
@@ -427,7 +430,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		return durableRoutes.SetIngressLimits(*answer.IngressLimits)
 	}}
-	routeWorker := &edgeruntime.RouteWorker{Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
+	routeWorker := &edgeruntime.RouteWorker{Unavailable: unavailableRoutes, Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
 	usageWorker := &edgeruntime.UsageWorker{Reporter: reporter, Queue: queue, Sink: client, Prepare: meter, Persist: meter.Persist, Interval: 250 * time.Millisecond}
 	controlDependency := &edgeruntime.ControlDependency{Reporter: reporter, Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
 	trusted, err := edgehttp.ParseTrustedProxies(append(deployment.TrustedProxyCIDRs, "127.0.0.1/32"))
@@ -545,7 +548,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			}
 		}
 		reporter.ObserveFailure(ctx, "upstream_request", cause)
-	}, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
+	}, RouteUnavailable: unavailableRoutes.Has, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
 		return runtimeExpected.Expects(host, now)
 	}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)

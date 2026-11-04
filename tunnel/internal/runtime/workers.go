@@ -259,7 +259,9 @@ func (w *NodeWorker) now() time.Time {
 }
 
 type RouteWorker struct {
-	Reporter *reporting.Reporter
+	// Unavailable, when set, receives the hostnames of route groups whose probe failed.
+	Unavailable *route.UnavailableHosts
+	Reporter    *reporting.Reporter
 	// Registry owns the canonical durable HTTP generation. Legacy helper and
 	// retained preview assignments use LegacyRegistry so a successful empty
 	// canonical snapshot cannot erase their independent ownership.
@@ -649,6 +651,13 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			activeAssignments, readyAssignments, probeFailures, failedAssignments = w.resolveCanonicalGroups(ctx, selectedAssignments, w.canonicalAssignments)
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if w.Unavailable != nil {
+				hosts := make([]string, 0, len(failedAssignments))
+				for _, a := range failedAssignments {
+					hosts = append(hosts, a.PublicHost)
+				}
+				w.Unavailable.Replace(hosts)
 			}
 			// A failed remaining group must not retain routes withdrawn from
 			// this complete snapshot. Publish their removal before retrying it.
