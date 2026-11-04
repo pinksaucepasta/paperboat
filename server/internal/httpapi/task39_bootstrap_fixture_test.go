@@ -184,6 +184,7 @@ func task39Stack(t *testing.T, database *db.DB, base string) (router http.Handle
 	cfg.HTTP.PublicBaseURL = base
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain, cfg.ReleaseBaseURL = "local.example.test", "runtime.example.test", base
 	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
+	cfg.HTTP.BrowserLoginOrigin, cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base, base+"/cli/authorize", base+"/dashboard/machines"
 	if err := cfg.ValidateClientDiscovery(); err != nil {
 		t.Fatal(err)
 	}
