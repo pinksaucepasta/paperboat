@@ -1,8 +1,8 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
-import { fetchAllPages } from "@/lib/machine-pages"
+import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 
 /*
  * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
@@ -30,7 +30,12 @@ export type Installation = {
 }
 
 /** selfhost.Policy: relay `mixed | self-hosted-only`, tunnel `managed-only | self-hosted-only`. */
-export type Pool = { mode: "mixed" | "managed-only" | "self-hosted-only"; installation_ids: string[] }
+export type Pool = {
+  mode: "mixed" | "managed-only" | "self-hosted-only"
+  installation_ids: string[]
+  /** The saved pool's servers, named (read only; not sent back when saving). */
+  members?: { installation_id: string; name: string; endpoint_host: string }[]
+}
 
 /** The scope a workspace's nodes and tunnel pool belong to. */
 export function scopeOf(workspace: Workspace | undefined) {
@@ -47,34 +52,48 @@ export const networkKeys = {
   pool: (capability: Capability, scope: string) => ["selfhost", "pool", capability, scope] as const,
 }
 
-/** Every installation in the scope, page by page (the server caps a page at 200). */
-export async function fetchInstallations(
-  scope: ReturnType<typeof scopeOf>,
-  signal?: AbortSignal,
-): Promise<Installation[]> {
-  const pages = await fetchAllPages(
-    async (params, pageSignal) => {
-      const page = await api<{ installations: Installation[]; pagination: { total: number } }>(
-        `selfhost/installations?${scopeQuery(scope)}&${new URLSearchParams(params)}`,
-        { signal: pageSignal },
-      )
-      return { items: page.installations, pagination: page.pagination }
-    },
-    {},
-    signal,
-  )
-  return pages?.items ?? []
-}
+type InstallationsWire = { installations: Installation[] | null; pagination: { total: number; next_cursor?: string } }
 
-export const installationsQuery = (scope: ReturnType<typeof scopeOf>) =>
+const readInstallations = (raw: InstallationsWire) => ({
+  items: raw.installations,
+  total: raw.pagination.total,
+  next_cursor: raw.pagination.next_cursor,
+})
+
+/** One page of the scope's installations, searched and paged by the server. */
+export const installationsQuery = (scope: ReturnType<typeof scopeOf>, q: string, page: number) =>
   queryOptions({
-    queryKey: networkKeys.installations(`${scope.kind}:${scope.id ?? ""}`),
-    queryFn: ({ signal }) => fetchInstallations(scope, signal),
+    queryKey: [...networkKeys.installations(`${scope.kind}:${scope.id ?? ""}`), q, page],
+    queryFn: ({ signal }) =>
+      cursorPage<Installation, InstallationsWire>(
+        "selfhost/installations",
+        { ...Object.fromEntries(scopeQuery(scope)), ...(q && { q }) },
+        page,
+        signal,
+        readInstallations,
+      ),
+    placeholderData: keepPreviousData,
     // Readiness follows the node's own registration and health reports.
     refetchInterval: 10_000,
   })
 
-/** Relay pools are account-only; tunnel pools follow the workspace. */
+/** The enrolled servers a pool may hold, searched on the server and read page by page (load more). */
+export const poolServersQuery = (capability: Capability, scope: ReturnType<typeof scopeOf>, q: string) =>
+  infiniteQueryOptions({
+    queryKey: [...networkKeys.installations(`${scope.kind}:${scope.id ?? ""}`), "pool-servers", capability, q],
+    queryFn: async ({ pageParam, signal }) => {
+      const query = new URLSearchParams({ limit: String(cursorPageSize), capability, enrollment_state: "enrolled" })
+      for (const [key, value] of scopeQuery(scope)) query.set(key, value)
+      if (q) query.set("q", q)
+      if (pageParam) query.set("cursor", pageParam)
+      const page = await api<InstallationsWire>(`selfhost/installations?${query}`, { signal })
+      return { items: page.installations ?? [], total: page.pagination.total, next_cursor: page.pagination.next_cursor }
+    },
+    initialPageParam: "",
+    getNextPageParam: (page) => page.next_cursor || undefined,
+    refetchInterval: 10_000,
+  })
+
 export const poolQuery = (capability: Capability, scope: ReturnType<typeof scopeOf>) => {
   const effective = capability === "relay" ? scopeOf(undefined) : scope
   return queryOptions({
@@ -112,7 +131,10 @@ export const verifyIngress = (installation: Installation) =>
 
 export const savePool = (capability: Capability, scope: ReturnType<typeof scopeOf>, pool: Pool) => {
   const effective = capability === "relay" ? scopeOf(undefined) : scope
-  return write<Pool>(`selfhost/pools/${capability}?${scopeQuery(effective)}`, "PUT", pool)
+  return write<Pool>(`selfhost/pools/${capability}?${scopeQuery(effective)}`, "PUT", {
+    mode: pool.mode,
+    installation_ids: pool.installation_ids,
+  })
 }
 
 /** One server, with the installations it runs (relay, tunnel server, or both). */

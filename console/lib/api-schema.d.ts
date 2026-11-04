@@ -7740,6 +7740,12 @@ export interface components {
              */
             mode: "managed-only" | "mixed" | "self-hosted-only";
             installation_ids: string[];
+            /** @description The pool's active servers in pool order, named (read only). */
+            members?: {
+                installation_id: string;
+                name: string;
+                endpoint_host: string;
+            }[];
         } & (unknown & unknown);
         SelfhostPolicyEnvelope: {
             data: components["schemas"]["SelfhostPolicy"];
@@ -11062,6 +11068,8 @@ export interface components {
                     offset: number;
                     total: number;
                     next_offset: number | null;
+                    /** @description Pass as cursor for the next page; absent on the last. */
+                    next_cursor?: string;
                 };
                 /** @description Counts across the complete filtered authorized inventory before pagination. */
                 counts: {
@@ -11680,6 +11688,8 @@ export interface operations {
                 ready?: boolean;
                 /** @description name: by name, then capability and id. newest: the most recently created installation first. */
                 sort?: "name" | "newest";
+                /** @description Keyset position from pagination.next_cursor: the page after it in the list's sort order. Not with offset. */
+                cursor?: string;
             };
             header?: never;
             path?: never;

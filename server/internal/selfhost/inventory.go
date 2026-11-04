@@ -3,8 +3,11 @@ package selfhost
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -14,12 +17,16 @@ type InventoryOptions struct {
 	Ready                          *bool
 	// Newest orders the newest installation first (sort=newest); the default order is by name.
 	Newest bool
+	// After continues the list after the row a previous page'"'"'s next_cursor named; used instead of Offset.
+	After string
 }
 type InventoryPagination struct {
 	Limit      int  `json:"limit"`
 	Offset     int  `json:"offset"`
 	Total      int  `json:"total"`
 	NextOffset *int `json:"next_offset"`
+	// NextCursor is the keyset position of the page after this one, in the list's sort order.
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 type InventoryCounts struct {
 	Ready    int `json:"ready"`
@@ -36,7 +43,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 	if o.Limit == 0 {
 		o.Limit = 50
 	}
-	if o.Limit < 1 || o.Limit > 200 || o.Offset < 0 || o.Offset > 2147483647 || !utf8.ValidString(o.Q) || len(o.Q) > 160 || strings.ContainsRune(o.Q, '\x00') || (o.Capability != "" && o.Capability != "relay" && o.Capability != "tunnel") || (o.EnrollmentState != "" && o.EnrollmentState != "pending" && o.EnrollmentState != "enrolled") {
+	if o.Limit < 1 || o.Limit > 200 || o.Offset < 0 || o.Offset > 2147483647 || !utf8.ValidString(o.Q) || len(o.Q) > 160 || strings.ContainsRune(o.Q, '\x00') || (o.Capability != "" && o.Capability != "relay" && o.Capability != "tunnel") || (o.EnrollmentState != "" && o.EnrollmentState != "pending" && o.EnrollmentState != "enrolled") || (o.After != "" && o.Offset != 0) || len(o.After) > 512 {
 		return o, ErrInvalid
 	}
 	return o, nil
@@ -83,18 +90,25 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 	if err != nil {
 		return out, err
 	}
-	order := "name,capability,id"
+	order, keyed := "name,capability,id", `($12::text IS NULL OR (name,capability,id)>($12,$13::text,$14::text))`
 	if options.Newest {
-		order = "created_at DESC,id DESC"
+		order, keyed = "created_at DESC,id DESC", `($12::timestamptz IS NULL OR (created_at,id)<($12,$13::text))`
 	}
-	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready FROM filtered ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, options.Limit, options.Offset)...)
+	after, err := decodeInventoryCursor(options.After, options.Newest)
+	argc := 3 - btoi(options.Newest)
 	if err != nil {
 		return out, err
 	}
+	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready,created_at FROM filtered WHERE `+keyed+` ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, append([]any{options.Limit + 1, options.Offset}, after[:argc]...)...)...)
+	if err != nil {
+		return out, err
+	}
+	var created []time.Time
 	for rows.Next() {
 		var i Installation
 		var complete bool
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready); err != nil {
+		var at time.Time
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &at); err != nil {
 			return out, errors.Join(err, rows.Close())
 		}
 		i.EnrollmentState = "pending"
@@ -106,15 +120,27 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 			i.TrustNotice = "Browser HTTP TLS terminates on this server; origin TLS pass-through remains origin-terminated."
 		}
 		out.Installations = append(out.Installations, i)
+		created = append(created, at)
 	}
 	err = rows.Err()
 	closeErr := rows.Close()
 	if err = errors.Join(err, closeErr); err != nil {
 		return out, err
 	}
-	if len(out.Installations) > 0 && options.Offset+len(out.Installations) < out.Pagination.Total {
-		next := options.Offset + len(out.Installations)
-		out.Pagination.NextOffset = &next
+	// The page read one row past the limit: another follows when it is there.
+	if len(out.Installations) > options.Limit {
+		out.Installations, created = out.Installations[:options.Limit], created[:options.Limit]
+		last := out.Installations[options.Limit-1]
+		key := []string{last.Name, last.Capability, last.InstallationID}
+		if options.Newest {
+			key = []string{created[options.Limit-1].UTC().Format(time.RFC3339Nano), last.InstallationID}
+		}
+		raw, _ := json.Marshal(key)
+		out.Pagination.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+		if options.After == "" {
+			next := options.Offset + options.Limit
+			out.Pagination.NextOffset = &next
+		}
 	}
 	return out, tx.Commit()
 }
@@ -148,4 +174,37 @@ func (s *Service) GetInstallation(ctx context.Context, actor, id string, operato
 		i.TrustNotice = "Browser HTTP TLS terminates on this server; origin TLS pass-through remains origin-terminated."
 	}
 	return i, nil
+}
+
+// decodeInventoryCursor returns the three cursor arguments of the list's order (nil for the first page).
+func decodeInventoryCursor(cursor string, newest bool) ([3]any, error) {
+	var out [3]any
+	if cursor == "" {
+		return out, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	var key []string
+	if err != nil || json.Unmarshal(raw, &key) != nil || len(key) != 3-btoi(newest) {
+		return out, ErrInvalid
+	}
+	for i, part := range key {
+		if !utf8.ValidString(part) || strings.ContainsRune(part, 0) {
+			return out, ErrInvalid
+		}
+		out[i] = part
+	}
+	if newest {
+		if _, err := time.Parse(time.RFC3339Nano, key[0]); err != nil {
+			return out, ErrInvalid
+		}
+		out[2] = nil
+	}
+	return out, nil
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

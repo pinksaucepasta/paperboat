@@ -167,6 +167,30 @@
             "items": {
               "type": "string"
             }
+          },
+          "members": {
+            "type": "array",
+            "description": "The pool's active servers in pool order, named (read only).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "installation_id",
+                "name",
+                "endpoint_host"
+              ],
+              "properties": {
+                "installation_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "endpoint_host": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "allOf": [
@@ -13683,6 +13707,10 @@
                       "null"
                     ],
                     "minimum": 0
+                  },
+                  "next_cursor": {
+                    "type": "string",
+                    "description": "Pass as cursor for the next page; absent on the last."
                   }
                 }
               },
@@ -16073,6 +16101,16 @@
               "default": "name"
             },
             "description": "name: by name, then capability and id. newest: the most recently created installation first."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "description": "Keyset position from pagination.next_cursor: the page after it in the list's sort order. Not with offset."
           }
         ],
         "description": " Stable ordering by name, capability, installation_id. Unknown or duplicate query parameters are rejected; workspace is not accepted. Filters precede paging."

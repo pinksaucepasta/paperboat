@@ -98,6 +98,10 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 		if readErr != nil || got.Mode != teamPool.Mode || len(got.InstallationIDs) != 1 || got.InstallationIDs[0] != teamInstalled.InstallationID {
 			t.Fatalf("team member could not read team pool: %+v %v", got, readErr)
 		}
+		// The pool names its servers, so a picker never shows a bare id.
+		if len(got.Members) != 1 || got.Members[0].InstallationID != teamInstalled.InstallationID || got.Members[0].Name == "" || got.Members[0].Name == got.Members[0].InstallationID {
+			t.Fatalf("team pool members not named: %+v", got.Members)
+		}
 		if _, writeErr := service.SetPoolScoped(ctx, actor, "tunnel", teamPool, teamScope); !errors.Is(writeErr, ErrUnauthorized) {
 			t.Fatalf("team member changed team pool: %v", writeErr)
 		}
@@ -113,17 +117,17 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 			t.Fatalf("team nonmember %s was authorized: %v", operation.name, err)
 		}
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"mixed", []string{installed.InstallationID}}); !errors.Is(err, ErrInvalid) {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "mixed", InstallationIDs: []string{installed.InstallationID}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("mixed edges accepted: %v", err)
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"managed-only", []string{installed.InstallationID}}); !errors.Is(err, ErrInvalid) {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{installed.InstallationID}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("managed selected private nodes: %v", err)
 	}
 	var before bool
 	if err = database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_pool_eligible($1,$2,'tunnel')`, installed.NodeID, account).Scan(&before); err != nil || before {
 		t.Fatalf("default managed used private node: %v %v", before, err)
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"self-hosted-only", []string{installed.InstallationID}}); err != nil {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "self-hosted-only", InstallationIDs: []string{installed.InstallationID}}); err != nil {
 		t.Fatalf("scoped pool rejected: %v", err)
 	}
 	personalPool, err := service.PoolScoped(ctx, account, "tunnel", Scope{Kind: "account", ID: account})
@@ -147,13 +151,13 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"managed-only", []string{}}); !errors.Is(err, ErrLiveEdgeModeChange) {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{}}); !errors.Is(err, ErrLiveEdgeModeChange) {
 		t.Fatalf("implicit live ownership switch accepted: %v", err)
 	}
-	if _, err = service.SetPool(ctx, account, "relay", Policy{"mixed", []string{}}); err != nil {
+	if _, err = service.SetPool(ctx, account, "relay", Policy{Mode: "mixed", InstallationIDs: []string{}}); err != nil {
 		t.Fatalf("relay policy affected: %v", err)
 	}
-	if _, err = service.SetPool(ctx, other, "tunnel", Policy{"managed-only", []string{}}); err != nil {
+	if _, err = service.SetPool(ctx, other, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{}}); err != nil {
 		t.Fatalf("other account affected: %v", err)
 	}
 	var managedEligible bool
@@ -167,7 +171,7 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_domains SET expected_records='[{"name":"test","type":"A","value":"203.0.113.1","ttl":300}]' WHERE account_id=$1`, account); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"self-hosted-only", []string{installed.InstallationID}}); err != nil {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "self-hosted-only", InstallationIDs: []string{installed.InstallationID}}); err != nil {
 		t.Fatalf("verified route rejected: %v", err)
 	}
 	var eligible bool
@@ -204,7 +208,7 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"self-hosted-only", ids}); err != nil {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "self-hosted-only", InstallationIDs: ids}); err != nil {
 		t.Fatalf("more than two enrolled eligible edges rejected: %v", err)
 	}
 	var used int
@@ -265,17 +269,17 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, tunnel); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetPool(ctx, account, "tunnel", Policy{"managed-only", []string{}}); !errors.Is(err, ErrLiveEdgeModeChange) {
+	if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{}}); !errors.Is(err, ErrLiveEdgeModeChange) {
 		t.Fatalf("active preview did not fence mode switch: %v", err)
 	}
 	for _, terminal := range []string{"owner_lost", "failed"} {
 		if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.preview_leases SET terminal_state=$2,stopped_at=now() WHERE id=$1`, preview, terminal); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = service.SetPool(ctx, account, "tunnel", Policy{"managed-only", []string{}}); err != nil {
+		if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "managed-only", InstallationIDs: []string{}}); err != nil {
 			t.Fatalf("future-deadline %s preview blocked mode switch: %v", terminal, err)
 		}
-		if _, err = service.SetPool(ctx, account, "tunnel", Policy{"self-hosted-only", ids}); err != nil {
+		if _, err = service.SetPool(ctx, account, "tunnel", Policy{Mode: "self-hosted-only", InstallationIDs: ids}); err != nil {
 			t.Fatalf("mode restore after %s preview failed: %v", terminal, err)
 		}
 	}

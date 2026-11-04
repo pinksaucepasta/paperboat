@@ -108,6 +108,28 @@ func TestScopedInstallationInventoryPaginationOnPostgres(t *testing.T) {
 			t.Fatalf("newest first item %d is %s, want %s", i, installation.InstallationID, want)
 		}
 	}
+	// The cursor walks both orders without gaps or repeats, keeping the total.
+	for _, newest := range []bool{false, true} {
+		cursor, walked := "", map[string]bool{}
+		for pages := 0; pages < 7; pages++ {
+			page, err := service.ListScopedInventory(ctx, owner, Scope{}, false, InventoryOptions{Limit: 100, Q: "Registry", Newest: newest, After: cursor})
+			if err != nil || page.Pagination.Total != 300 {
+				t.Fatalf("cursor page %d (newest=%v): %+v %v", pages, newest, page.Pagination, err)
+			}
+			for _, i := range page.Installations {
+				if walked[i.InstallationID] {
+					t.Fatalf("cursor repeated %s (newest=%v)", i.InstallationID, newest)
+				}
+				walked[i.InstallationID] = true
+			}
+			if cursor = page.Pagination.NextCursor; cursor == "" {
+				break
+			}
+		}
+		if len(walked) != 300 {
+			t.Fatalf("cursor walk (newest=%v) reached %d of 300", newest, len(walked))
+		}
+	}
 	ready := true
 	filtered, err := service.ListScopedInventory(ctx, owner, Scope{}, false, InventoryOptions{Limit: 1, Q: "Registry", Capability: "relay", EnrollmentState: "enrolled", Ready: &ready})
 	if err != nil || filtered.Pagination.Total != 100 || filtered.Counts.Ready != 100 || len(filtered.Installations) != 1 {

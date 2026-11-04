@@ -30,6 +30,15 @@ type Installation struct {
 type Policy struct {
 	Mode            string   `json:"mode"`
 	InstallationIDs []string `json:"installation_ids"`
+	// Members names the pool's servers in pool order, so a picker never shows a bare id (read only).
+	Members []PoolMember `json:"members,omitempty"`
+}
+
+// PoolMember is one active server of a pool as a picker shows it.
+type PoolMember struct {
+	InstallationID string `json:"installation_id"`
+	Name           string `json:"name"`
+	EndpointHost   string `json:"endpoint_host"`
 }
 
 var ErrLiveEdgeModeChange = fmt.Errorf("%w: stop active workspace previews and tunnels before changing edge ownership; configure customer DNS and certificates before restarting them", ErrInvalid)
@@ -141,8 +150,36 @@ func (s *Service) PoolScoped(ctx context.Context, actor, capability string, scop
 	if err != nil {
 		return out, err
 	}
-	err = json.Unmarshal(raw, &out.InstallationIDs)
+	if err = json.Unmarshal(raw, &out.InstallationIDs); err != nil {
+		return out, err
+	}
+	out.Members, err = s.poolMembers(ctx, out.InstallationIDs)
 	return out, err
+}
+
+// poolMembers reads the names of a pool's active servers (a pool holds at most 32), in pool order.
+func (s *Service) poolMembers(ctx context.Context, ids []string) ([]PoolMember, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	raw, _ := json.Marshal(ids)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.name,coalesce(n.endpoint_host,'')
+FROM jsonb_array_elements_text($1::jsonb) WITH ORDINALITY AS wanted(id, position)
+JOIN paperboat.selfhost_installations i ON i.id=wanted.id AND i.state='active'
+JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
+ORDER BY wanted.position`, string(raw))
+	if err != nil {
+		return nil, err
+	}
+	var out []PoolMember
+	for rows.Next() {
+		var m PoolMember
+		if err = rows.Scan(&m.InstallationID, &m.Name, &m.EndpointHost); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		out = append(out, m)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 func (s *Service) SetPool(ctx context.Context, actor, capability string, p Policy) (Policy, error) {
 	return s.SetPoolScoped(ctx, actor, capability, p, Scope{})

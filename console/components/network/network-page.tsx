@@ -1,11 +1,12 @@
 "use client"
 
 import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { clientConfigQuery, edgesQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { copyWithToast } from "@/lib/clipboard"
+import { cursorPageSize } from "@/lib/cursor-pages"
 import { placeName } from "@/lib/format"
 import {
   groupNodes,
@@ -13,6 +14,7 @@ import {
   installationsQuery,
   pairNode,
   poolQuery,
+  poolServersQuery,
   removeInstallation,
   savePool,
   scopeOf,
@@ -22,9 +24,11 @@ import {
   type Node,
   type Pool,
 } from "@/lib/network"
+import { usePageParam } from "@/lib/use-page-param"
 import { cn } from "@/lib/utils"
 import { CommandBlock } from "@/components/add-machine-dialog"
-import { ConfirmAction } from "@/components/list-toolbar"
+import { ListPager } from "@/components/list-pager"
+import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Section } from "@/components/section"
@@ -60,13 +64,12 @@ function nodeState(node: Node): { ok: boolean; label: string } {
 export function NetworkPage() {
   const workspace = useWorkspace()
   const scope = scopeOf(workspace)
-  const installations = useApiQuery({ ...installationsQuery(scope), enabled: Boolean(workspace) })
+  const [search, setSearch] = useState("")
+  const q = useDeferredValue(search.trim())
+  const pages = usePageParam(q)
+  const installations = useApiQuery({ ...installationsQuery(scope, q, pages.page), enabled: Boolean(workspace) })
   const [adding, setAdding] = useState(false)
-  const nodes = groupNodes(installations.data ?? [])
-  const enrolled = (capability: Capability) =>
-    (installations.data ?? []).filter(
-      (installation) => installation.capability === capability && installation.enrollment_state === "enrolled",
-    )
+  const nodes = groupNodes(installations.data?.items ?? [])
 
   return (
     <div className="flex flex-col gap-10">
@@ -87,30 +90,38 @@ export function NetworkPage() {
           <p className="border-b border-divider py-3 text-sm text-muted-foreground">
             Couldn’t load your servers. {installations.error.message}
           </p>
-        ) : nodes.length === 0 ? (
+        ) : nodes.length === 0 && !q ? (
           <p className="border-b border-divider py-3 text-sm text-muted-foreground">
             Run a relay or tunnel server on your own Linux server, then pair it here.
           </p>
         ) : (
-          <table className="w-full table-fixed text-sm">
-            <colgroup>
-              <col className="w-[24%]" />
-              <col className="hidden w-[24%] md:table-column" />
-              <col className="hidden sm:table-column" />
-              <col className="w-[22%]" />
-              <col className="w-12" />
-            </colgroup>
-            <tbody className="divide-y divide-divider border-b border-divider">
-              {nodes.map((node) => (
-                <NodeRow key={node.id} node={node} />
-              ))}
-            </tbody>
-          </table>
+          <>
+            {(installations.data.total > cursorPageSize || q) && (
+              <div className="py-2">
+                <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+              </div>
+            )}
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[24%]" />
+                <col className="hidden w-[24%] md:table-column" />
+                <col className="hidden sm:table-column" />
+                <col className="w-[22%]" />
+                <col className="w-12" />
+              </colgroup>
+              <tbody className="divide-y divide-divider border-b border-divider">
+                {nodes.map((node) => (
+                  <NodeRow key={node.id} node={node} />
+                ))}
+              </tbody>
+            </table>
+            <ListPager page={pages.page} size={cursorPageSize} total={installations.data.total} go={pages.go} />
+          </>
         )}
       </Section>
 
-      <PoolSection capability="relay" scope={scope} servers={enrolled("relay")} />
-      <PoolSection capability="tunnel" scope={scope} servers={enrolled("tunnel")} />
+      <PoolSection capability="relay" scope={scope} />
+      <PoolSection capability="tunnel" scope={scope} />
       <PaperboatServers />
 
       {adding && <AddServerDialog workspaceName={workspace?.name ?? "Personal"} onClose={() => setAdding(false)} />}
@@ -218,16 +229,14 @@ const poolCopy = {
 }
 
 /** Which servers carry one kind of traffic: Paperboat's (and yours, for relays), or only yours. */
-function PoolSection({
-  capability,
-  scope,
-  servers,
-}: {
-  capability: Capability
-  scope: ReturnType<typeof scopeOf>
-  servers: Installation[]
-}) {
+function PoolSection({ capability, scope }: { capability: Capability; scope: ReturnType<typeof scopeOf> }) {
   const queryClient = useQueryClient()
+  const [search, setSearch] = useState("")
+  const q = useDeferredValue(search.trim())
+  const found = useInfiniteQuery(poolServersQuery(capability, scope, q))
+  const servers = found.data?.pages.flatMap((page) => page.items) ?? []
+  // Whether any server exists comes from the unfiltered total, not from what a search matched.
+  const anyServer = useInfiniteQuery(poolServersQuery(capability, scope, "")).data?.pages[0]?.total ?? 0
   const copy = poolCopy[capability]
   const pool = useApiQuery(poolQuery(capability, scope))
   const [draft, setDraft] = useState<Pool>()
@@ -274,7 +283,7 @@ function PoolSection({
             {(["shared", "own"] as const).map((option) => {
               const selected = option === "own" ? own : Boolean(current) && !own
               const text = option === "own" ? copy.own : copy.shared
-              const disabled = !current || (option === "own" && !servers.length)
+              const disabled = !current || (option === "own" && !anyServer)
               return (
                 <button
                   key={option}
@@ -293,7 +302,7 @@ function PoolSection({
                     {text.title}
                   </span>
                   <span className="text-muted-foreground">
-                    {option === "own" && !servers.length
+                    {option === "own" && !anyServer
                       ? `Pair a ${capability === "relay" ? "relay" : "tunnel server"} first.`
                       : text.body}
                   </span>
@@ -302,23 +311,64 @@ function PoolSection({
             })}
           </div>
           {own && (
-            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-              {servers.map((server) => (
-                <li key={server.installation_id}>
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                    <Checkbox
-                      checked={current!.installation_ids.includes(server.installation_id)}
-                      onCheckedChange={(on) => toggle(server.installation_id, on)}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                    <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
-                      {server.endpoint_host}
-                    </span>
-                    <StatusDot online={server.ready} />
-                  </label>
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+                <span className="text-sm text-muted-foreground">
+                  {current!.installation_ids.length} of 32 chosen · {found.data?.pages[0]?.total ?? 0}{" "}
+                  {q ? "found" : "servers"}
+                </span>
+              </div>
+              <ul className="flex flex-col divide-y divide-divider border-y border-divider">
+                {current!.installation_ids
+                  .filter((id) => !servers.some((server) => server.installation_id === id))
+                  .map((id) => {
+                    const member = pool.data?.members?.find((entry) => entry.installation_id === id)
+                    return (
+                      <li key={id}>
+                        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+                          <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
+                          <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
+                          {member && (
+                            <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
+                              {member.endpoint_host}
+                            </span>
+                          )}
+                        </label>
+                      </li>
+                    )
+                  })}
+                {servers.map((server) => (
+                  <li key={server.installation_id}>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+                      <Checkbox
+                        checked={current!.installation_ids.includes(server.installation_id)}
+                        disabled={
+                          !current!.installation_ids.includes(server.installation_id) &&
+                          current!.installation_ids.length >= 32
+                        }
+                        onCheckedChange={(on) => toggle(server.installation_id, on)}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{server.name}</span>
+                      <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
+                        {server.endpoint_host}
+                      </span>
+                      <StatusDot online={server.ready} />
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              {found.hasNextPage && (
+                <Button
+                  variant="secondary"
+                  className="self-start"
+                  onClick={() => found.fetchNextPage()}
+                  disabled={found.isFetchingNextPage}
+                >
+                  {found.isFetchingNextPage ? "Loading…" : "Load more"}
+                </Button>
+              )}
+            </div>
           )}
           {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
           {dirty && (

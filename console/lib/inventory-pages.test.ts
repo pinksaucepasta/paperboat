@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { fetchInstallations, scopeOf } from "@/lib/network"
+import { installationsQuery, poolServersQuery, scopeOf } from "@/lib/network"
 
 const realFetch = globalThis.fetch
 const count = 450
-const asked: string[] = []
+const asked: URL[] = []
 
-/** A server holding `count` items, answering the offset-paged installations list as the control plane does (200 max). */
+/** A server holding `count` installations, answering the keyset-paged list as the control plane does. */
 beforeEach(() => {
   asked.length = 0
   globalThis.fetch = (async (input: string) => {
-    asked.push(input)
     const url = new URL(input, "http://console.test")
+    asked.push(url)
     const limit = Math.min(Number(url.searchParams.get("limit")), 200)
-    const offset = Number(url.searchParams.get("offset"))
-    const ids = Array.from({ length: Math.max(0, Math.min(limit, count - offset)) }, (_, i) => offset + i + 1)
-    const pagination = { limit, offset, total: count, next_offset: offset + limit < count ? offset + limit : null }
+    const start = Number(url.searchParams.get("cursor") ?? "0")
+    const ids = Array.from({ length: Math.max(0, Math.min(limit, count - start)) }, (_, i) => start + i + 1)
+    const next = start + limit < count ? String(start + limit) : undefined
     const data = {
-      pagination,
+      pagination: { limit, offset: 0, total: count, ...(next && { next_cursor: next }) },
       installations: ids.map((n) => ({ installation_id: `i${n}`, node_id: `n${n}`, capability: "relay" })),
     }
     return Response.json({ data })
@@ -26,11 +26,40 @@ afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-describe("inventories past the first 200", () => {
-  test("self-host installations reach installation 450", async () => {
-    const installations = await fetchInstallations(scopeOf(undefined))
-    expect(installations).toHaveLength(count)
-    expect(installations.at(-1)?.installation_id).toBe("i450")
-    expect(asked.every((url) => url.includes("limit=200"))).toBe(true)
+// PQ-04: the Network page shows one server page at a time with the server's total; it never walks the whole list.
+describe("installations page on the server", () => {
+  test("page 1 is one request; page 2 follows the server's cursor; the total is the server's", async () => {
+    const run = (page: number) =>
+      installationsQuery(scopeOf(undefined), "", page).queryFn!({ signal: new AbortController().signal } as never)
+    const first = await run(1)
+    expect(asked).toHaveLength(1)
+    expect(asked[0].searchParams.get("cursor")).toBeNull()
+    expect(first.items).toHaveLength(50)
+    expect(first.total).toBe(count)
+    const second = await run(2)
+    expect(asked).toHaveLength(2)
+    expect(asked[1].searchParams.get("cursor")).toBe("50")
+    expect(second.items[0].installation_id).toBe("i51")
+  })
+})
+
+// The pool picker never stops at its first page: load more follows the server's cursor to the last server.
+describe("pool picker reaches every server", () => {
+  test("load more walks the cursor past the first page and searches on the server", async () => {
+    const options = poolServersQuery("relay", scopeOf(undefined), "edge")
+    const fetchPage = (pageParam: string) =>
+      options.queryFn!({ pageParam, signal: new AbortController().signal } as never)
+    let page = await fetchPage(options.initialPageParam as string)
+    let seen = page.items.length
+    while (options.getNextPageParam!(page as never, [] as never, "" as never, [] as never)) {
+      page = await fetchPage(options.getNextPageParam!(page as never, [] as never, "" as never, [] as never) as string)
+      seen += page.items.length
+    }
+    expect(seen).toBe(count)
+    expect(
+      asked.every(
+        (url) => url.searchParams.get("q") === "edge" && url.searchParams.get("enrollment_state") === "enrolled",
+      ),
+    ).toBe(true)
   })
 })

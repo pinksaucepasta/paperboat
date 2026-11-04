@@ -3,7 +3,7 @@ package selfhost
 import "testing"
 
 func TestInstallationInventoryOptionsValidateBeforeDatabase(t *testing.T) {
-	for _, options := range []InventoryOptions{{Limit: -1}, {Limit: 201}, {Offset: -1}, {Offset: 2147483648}, {Q: "\x00"}, {Capability: "exec"}, {EnrollmentState: "ready"}} {
+	for _, options := range []InventoryOptions{{Limit: -1}, {Limit: 201}, {Offset: -1}, {Offset: 2147483648}, {After: "x", Offset: 1}, {Q: "\x00"}, {Capability: "exec"}, {EnrollmentState: "ready"}} {
 		if _, err := options.normalized(); err != ErrInvalid {
 			t.Fatalf("options accepted: %+v %v", options, err)
 		}
