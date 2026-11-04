@@ -16,9 +16,11 @@ func TestPostgresTeamPagesEqualTheFullRead(t *testing.T) {
 	f.exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) SELECT $1,$2||g,1,'member',true FROM generate_series(1,250) g`, f.team, f.team+"_m")
 	t.Cleanup(func() {
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_resource_grants WHERE team_id=$1`, f.team)
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_kind IN ('preview','tunnel')`, f.team)
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_members WHERE account_id LIKE $1`, f.team+"_m%")
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id LIKE $1`, f.team+"_m%")
 	})
+	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) SELECT $1,k,k||'_'||r,$2 FROM unnest(ARRAY['preview','tunnel']) k, generate_series(1,2) r`, f.team, f.owner)
 	f.exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) SELECT $1,a,k,k||'_'||r,'use',1,true FROM unnest($2::text[]) a, unnest(ARRAY['preview','tunnel']) k, generate_series(1,2) r`, f.team, []string{f.member, f.other, f.admin})
 	var generation uint64
 	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, f.team).Scan(&generation); err != nil {
