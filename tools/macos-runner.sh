@@ -12,7 +12,7 @@ out=$(mktemp); trap 'rm -f "$out"; gh secret delete PB_MAC_ENROLL_TOKEN >/dev/nu
 CHROME=/home/ubuntu/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell \
   node "$PW/mint.mjs" "$PW/s2.json" "$out" >/dev/null
 python3 -c 'import json,sys; sys.stdout.write(json.load(open(sys.argv[1]))["data"]["bootstrap_token"])' "$out" |
-  gh secret set PB_MAC_ENROLL_TOKEN --body-file -
+  gh secret set PB_MAC_ENROLL_TOKEN
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh workflow run macos-device-checks.yml --ref "$ref" -f ref="$ref" -f os="$os"
 sleep 10

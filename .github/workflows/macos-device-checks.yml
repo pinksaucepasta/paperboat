@@ -22,9 +22,6 @@ jobs:
     name: device checks on ${{ inputs.os }}
     runs-on: ${{ inputs.os }}
     timeout-minutes: 45
-    env:
-      TOKEN_FILE: ${{ runner.temp }}/enroll-token
-      RESULTS: ${{ runner.temp }}/results.jsonl
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,6 +51,7 @@ jobs:
           PB_MAC_ENROLL_TOKEN: ${{ secrets.PB_MAC_ENROLL_TOKEN }}
         run: |
           echo "::add-mask::$PB_MAC_ENROLL_TOKEN"
+          TOKEN_FILE=$RUNNER_TEMP/enroll-token
           (umask 077; printf '%s' "$PB_MAC_ENROLL_TOKEN" > "$TOKEN_FILE")
           "$RUNNER_TEMP/pb" install --json >/dev/null
           "$HOME/.local/bin/pb" pair --enrollment-token-file "$TOKEN_FILE" \
@@ -61,7 +59,7 @@ jobs:
           rm -f "$TOKEN_FILE"
       - name: Device checks
         run: |
-          cd tools/device-smoke
+          cd tools/device-smoke; RESULTS=$RUNNER_TEMP/results.jsonl
           M="ghmac-${{ github.run_id }}-${{ strategy.job-index }}"
           : > "$RESULTS"
           # check NAME SECONDS CMD...: keep only the JSON result lines; a check with none is a FAIL line.
