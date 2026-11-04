@@ -31,6 +31,7 @@ func operationalHealthWorkerWithCheck(interval time.Duration, readHealth func(co
 			if ctx.Err() != nil {
 				return nil
 			}
+			finishProgress := workers.BeginIteration(ctx, interval)
 			samples := tracker.Snapshot()
 			workersHealthy, warming := publishWorkerHealth(reporter, samples)
 			// Startup is unknown, never a fabricated successful cycle. The monitor's
@@ -42,6 +43,7 @@ func operationalHealthWorkerWithCheck(interval time.Duration, readHealth func(co
 			health, healthErr := readHealth(ctx)
 			publishBackupHealth(reporter, health)
 			observeBackupHealthResult(reporter, ctx, &observation, healthErr)
+			finishProgress(healthErr)
 			finish(healthErr == nil && !warming && workersHealthy && ctx.Err() == nil && health.Backup.State == backupreport.HealthCurrent && health.Restore.State == backupreport.HealthCurrent)
 			select {
 			case <-ctx.Done():

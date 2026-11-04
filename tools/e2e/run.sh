@@ -112,7 +112,12 @@ if has multi; then
     done ) &
   loop=$!
   sleep 20
-  kill -9 "${pids[2]}"; killed=$(date +%s); echo "killed instance 2 at $killed"
+  victim=
+  for n in 1 2 3; do grep -q "worker leader acquired" "$work/server$n.log" && victim=$n; done
+  [ -n "$victim" ] || { echo "no instance holds worker leadership" >&2; exit 1; }
+  [ "$(grep -l "worker leader acquired" "$work"/server?.log | wc -l)" = 1 ] || { echo "more than one leader" >&2; exit 1; }
+  kill -9 "${pids[$victim]}"; killed=$(date +%s); echo "killed leader instance $victim at $killed"
+  ! kill -0 "${pids[$victim]}" 2>/dev/null || { echo "instance $victim survived SIGKILL" >&2; exit 1; }
   sleep 3
   code=$( (pbx e2e-a machine revoke e2e-c 2>&1 || true) | grep -o -- '--confirm [A-Za-z0-9]\{6\}' | head -1 | cut -d' ' -f2)
   [ -n "$code" ] || { echo "no revoke confirmation code" >&2; exit 1; }
@@ -121,7 +126,7 @@ if has multi; then
   [ "$revoked" = 1 ] || { echo "revoke did not take effect" >&2; exit 1; }
   ! timeout 25 docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt e2e-a .local/bin/pb exec e2e-c -- true >/dev/null 2>&1 || { echo "exec reached the revoked machine" >&2; exit 1; }
   echo "revoke took effect"
-  sleep 25; touch "$work/execstop"; wait $loop
-  python3 tools/e2e/multi_check.py "$work" "$bound" "$killed" 2
+  sleep 40; touch "$work/execstop"; wait $loop
+  python3 tools/e2e/multi_check.py "$work" "$bound" "$killed" "$victim"
   echo "stage multi: PASS"
 fi
