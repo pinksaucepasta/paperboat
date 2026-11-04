@@ -46,6 +46,14 @@ func TestE2EServe(t *testing.T) {
 	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base+"/cli", base+"/machines"
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
 	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
+	migrations, err := db.Open(cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(context.Background(), migrations); err != nil {
+		t.Fatal(err)
+	}
+	_ = migrations.Close()
 	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 	if err != nil {
 		t.Fatal(err)
