@@ -92,6 +92,9 @@ jobs:
         with:
           bun-version-file: console/package.json
       - run: bun install --frozen-lockfile
+      # Generated code must match its source: the API types come from server/docs/openapi.json (sqlc output
+      # is checked by make generate-check in the server job).
+      - run: bun run api:types && git diff --exit-code -- lib/api-schema.d.ts || { echo "console/lib/api-schema.d.ts is stale: run bun run api:types" >&2; exit 1; }
       - run: bun run lint
       - run: bunx next typegen
       - run: bunx tsc --noEmit
