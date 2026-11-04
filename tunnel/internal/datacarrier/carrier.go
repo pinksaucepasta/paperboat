@@ -297,6 +297,20 @@ func (s *Server) OpenStream(ctx context.Context, open StreamOpen) (*Stream, erro
 // while lifetimeCtx owns the established stream. This prevents an open
 // timeout from canceling a successfully returned streaming response.
 func (s *Server) OpenStreamWithLifetime(openCtx, lifetimeCtx context.Context, open StreamOpen) (*Stream, error) {
+	return s.openStream(openCtx, lifetimeCtx, open, false)
+}
+
+// OpenLastResortStream is OpenStreamWithLifetime that also opens on a carrier whose host sent a
+// goaway: a draining host still serves until it closes, so a caller with no other carrier for the
+// route uses it rather than refusing the request (a worker handover before the new carrier attached).
+func (s *Server) OpenLastResortStream(openCtx, lifetimeCtx context.Context, open StreamOpen) (*Stream, error) {
+	return s.openStream(openCtx, lifetimeCtx, open, true)
+}
+
+// DrainingNow reports whether the host's goaway is in effect.
+func (s *Server) DrainingNow() bool { return s.drainingNow(time.Now()) }
+
+func (s *Server) openStream(openCtx, lifetimeCtx context.Context, open StreamOpen, draining bool) (*Stream, error) {
 	if s == nil || openCtx == nil || lifetimeCtx == nil {
 		return nil, ErrInvalidConfig
 	}
@@ -306,7 +320,7 @@ func (s *Server) OpenStreamWithLifetime(openCtx, lifetimeCtx context.Context, op
 	if !s.config.Identity.matches(open) {
 		return nil, ErrIdentityMismatch
 	}
-	if s.drainingNow(time.Now()) {
+	if !draining && s.drainingNow(time.Now()) {
 		return nil, ErrCarrierDraining
 	}
 	if err := s.config.Authorize.AuthorizeStream(openCtx, s.config.Identity, open); err != nil {

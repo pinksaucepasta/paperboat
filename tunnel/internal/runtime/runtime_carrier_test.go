@@ -180,10 +180,10 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 	}
 }
 
-// Audit T10: when the host sends a goaway on its runtime carrier, the edge takes that carrier's
-// routes out at once (new requests get the route-unavailable answer instead of a closing carrier)
-// and keeps the carrier until the host closes it.
-func TestRuntimeCarrierRoutesLeaveOnHostGoaway(t *testing.T) {
+// Audit T10: when the host sends a goaway on its runtime carrier, its routes stay (the transport
+// prefers another live carrier of the route and uses this one only while it is the last, so a
+// worker handover loses no request) and the edge keeps the carrier until the host closes it.
+func TestRuntimeCarrierRoutesStayOnHostGoaway(t *testing.T) {
 	a := runtimeAdmission(t)
 	source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
 	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
@@ -233,17 +233,23 @@ func TestRuntimeCarrierRoutesLeaveOnHostGoaway(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = hostEnd.Close()
-	waitRuntime(t, func() bool { return routes.Len() == 0 })
+	waitRuntime(t, server.DrainingNow)
 	select {
 	case err := <-done:
 		t.Fatalf("handler left before the host closed its carrier: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	// The goaway ends while the carrier is still open: it is in service again with its routes.
-	for deadline := time.Now().Add(6 * time.Second); routes.Len() != 1; time.Sleep(20 * time.Millisecond) {
+	if routes.Len() != 1 {
+		t.Fatal("a goaway detached the routes of a carrier that still serves")
+	}
+	// The goaway ends while the carrier is still open: it is a normal carrier again.
+	for deadline := time.Now().Add(6 * time.Second); server.DrainingNow(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatal("routes stayed detached after the goaway ended on a carrier that is still open")
+			t.Fatal("the goaway did not end on a carrier that is still open")
 		}
+	}
+	if routes.Len() != 1 {
+		t.Fatal("routes left when the goaway ended")
 	}
 	_ = server.Close()
 	select {

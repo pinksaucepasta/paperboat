@@ -219,7 +219,11 @@ type ExpectedAdmissionRegistry struct {
 	// byIdentity indexes the admitted admissions by carrier identity (sorted by key); rebuilt with
 	// every change, so a carrier's lookup does not scan every admission (audit T2).
 	byIdentity map[Identity][]ExpectedAdmission
-	changed    chan struct{}
+	// superseded holds endpoint admissions a newer attachment of the same machine replaced, until
+	// supersededGrace ends (see superseded.go); supersededByIdentity indexes them like byIdentity.
+	superseded           map[string]ExpectedAdmission
+	supersededByIdentity map[Identity][]ExpectedAdmission
+	changed              chan struct{}
 }
 
 type ExpectedAdmissionRegistryConfig struct {
@@ -289,6 +293,7 @@ func (r *ExpectedAdmissionRegistry) Replace(admissions []ExpectedAdmission, now 
 		r.mu.Unlock()
 		return ErrCarrierClosed
 	}
+	r.superseded = supersededBy(prior, r.superseded, next, now)
 	r.byKey = next
 	r.pending = make(map[string]ExpectedAdmission)
 	r.publishLocked()
@@ -497,7 +502,13 @@ func (r *ExpectedAdmissionRegistry) ForIdentity(identity Identity, now time.Time
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return append([]ExpectedAdmission{}, r.byIdentity[identity]...)
+	result := append([]ExpectedAdmission{}, r.byIdentity[identity]...)
+	for _, admission := range r.supersededByIdentity[identity] {
+		if now.Before(admission.ExpiresAt) {
+			result = append(result, admission)
+		}
+	}
+	return result
 }
 
 // Changed returns a channel closed at the registry's next change.
@@ -519,6 +530,10 @@ func (r *ExpectedAdmissionRegistry) publishLocked() {
 		sort.Slice(admissions, func(i, j int) bool { return admissions[i].key() < admissions[j].key() })
 	}
 	r.byIdentity = byIdentity
+	r.supersededByIdentity = make(map[Identity][]ExpectedAdmission)
+	for _, admission := range r.superseded {
+		r.supersededByIdentity[admission.Identity] = append(r.supersededByIdentity[admission.Identity], admission)
+	}
 	previous := r.changed
 	r.changed = make(chan struct{})
 	close(previous)
@@ -623,7 +638,13 @@ func (r *ExpectedAdmissionRegistry) AuthorizeStream(ctx context.Context, identit
 		return ErrCarrierClosed
 	}
 	now := time.Now().UTC()
-	for _, admission := range r.byKey {
+	candidates := append([]ExpectedAdmission{}, r.byIdentity[identity]...)
+	for _, admission := range r.supersededByIdentity[identity] {
+		if now.Before(admission.ExpiresAt) {
+			candidates = append(candidates, admission)
+		}
+	}
+	for _, admission := range candidates {
 		if admission.Admitted && admission.Identity == identity && admission.RouteID == open.RouteID {
 			if restrictedPreviewAccess(admission.AccessMode) {
 				decision, ok := PrivateAccessDecisionFromContext(ctx)

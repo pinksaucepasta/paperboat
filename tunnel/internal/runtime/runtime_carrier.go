@@ -287,6 +287,11 @@ func (w *RuntimeCarrierWorker) withdraw() {
 	for _, r := range w.routes() {
 		a, ok := allowed[r.RouteID]
 		if !ok || a.Identity != r.Identity || a.AttachmentGeneration != r.AttachmentGeneration || a.RouteRevision != r.Revision {
+			// A route a newer attachment of the same machine took over stays until that carrier
+			// attaches it here (make-before-break at a worker handover; bounded by supersededGrace).
+			if r.EndpointRoute && w.Expected.Superseded(r.Identity, r.RouteID, time.Now().UTC()) {
+				continue
+			}
 			w.detachRoute(r)
 		}
 	}
@@ -318,6 +323,8 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 	}
 	attached := map[string]datacarrier.ExpectedAdmission{}
 	var outputErrors chan error
+	// drainEnd is set while the host's goaway lasts.
+	var drainEnd <-chan time.Time
 	defer func() {
 		for _, a := range attached {
 			w.detachAdmission(a)
@@ -385,6 +392,10 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 			wait = min(max(time.Until(nextExpiry), handlerMinimumWait), handlerRecheck)
 		}
 		timer := time.NewTimer(wait)
+		draining := server.Draining()
+		if drainEnd != nil {
+			draining = nil
+		}
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -394,27 +405,19 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 			return nil
 		case <-changes:
 		case <-timer.C:
-		case <-server.Draining():
-			// The host is going away (T10): its routes leave this edge now, so new requests get
-			// the route-unavailable answer instead of a carrier that is closing; open streams
-			// finish. A carrier still open when the goaway ends is in service again and its
-			// routes come back on the next pass.
+		case <-draining:
+			// The host is going away (T10). Its routes stay: the transports send new requests to
+			// another live carrier of the route first and use this one only while it is the last,
+			// so a worker handover loses no request before the new carrier attaches (cloudflared
+			// unregisters a connection and serves on until its grace period ends). Open streams
+			// finish. When the goaway ends the carrier is a normal one again.
 			timer.Stop()
-			for key, a := range attached {
-				w.detachAdmission(a)
-				delete(attached, key)
-			}
-			w.changed()
-			drained := time.NewTimer(max(time.Until(server.DrainUntil()), 0))
-			select {
-			case <-ctx.Done():
-				drained.Stop()
-				return ctx.Err()
-			case <-server.Done():
-				drained.Stop()
-				return nil
-			case <-drained.C:
-				server.EndDrain(time.Now())
+			drainEnd = time.After(max(time.Until(server.DrainUntil()), 0))
+		case <-drainEnd:
+			timer.Stop()
+			drainEnd = nil
+			if !server.EndDrain(time.Now()) && !server.DrainUntil().IsZero() {
+				drainEnd = time.After(max(time.Until(server.DrainUntil()), 0))
 			}
 		case err := <-outputErrors:
 			timer.Stop()

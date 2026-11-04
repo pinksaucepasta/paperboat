@@ -83,6 +83,8 @@ type DataCarrierPreviewHub struct {
 	mu        sync.Mutex
 	closed    bool
 	byRoute   map[string]*dataCarrierPreviewRegistration
+	// lastStream is when the edge last opened a stream on this carrier (unix nanoseconds).
+	lastStream atomic.Int64
 }
 
 type DataCarrierPreviewHubConfig struct {
@@ -186,6 +188,14 @@ func (h *DataCarrierPreviewHub) Edge() (nodeID, processEpoch string) {
 		return "", ""
 	}
 	return h.edgeNodeID, h.edgeEpoch
+}
+
+// LastStream is when the edge last opened a stream on this carrier; zero before the first.
+func (h *DataCarrierPreviewHub) LastStream() time.Time {
+	if nanos := h.lastStream.Load(); nanos != 0 {
+		return time.Unix(0, nanos)
+	}
+	return time.Time{}
 }
 
 func (h *DataCarrierPreviewHub) Done() <-chan struct{} {
@@ -320,6 +330,7 @@ func (h *DataCarrierPreviewHub) acceptLoop() {
 		if stream == nil {
 			continue
 		}
+		h.lastStream.Store(time.Now().UnixNano())
 		if open == (connector.StreamOpen{}) {
 			open, err = connectorprotocol.ReadStreamOpen(stream)
 		} else {

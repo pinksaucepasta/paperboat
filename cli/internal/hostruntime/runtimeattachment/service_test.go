@@ -24,6 +24,8 @@ import (
 
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
+	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
@@ -623,5 +625,65 @@ func TestClosingRuntimeCarrierSendsHostGoaway(t *testing.T) {
 			t.Fatalf("goaway = %+v %+v, %v", open, notice, err)
 		}
 		return
+	}
+}
+
+// pbvm4 feat9: the old worker closed its carriers right after its goaway while the edge still
+// sent it the preview's requests. Make-before-break: after the goaway the worker keeps serving
+// as long as the edge opens streams on its carrier, and closes once the edge has moved to the
+// next worker's carrier (handoverQuiet without a stream), never later than carrierDrainGrace.
+func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if hubs, _ := service.Hubs(); len(hubs) != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime carrier never came into service")
+		}
+	}
+	shutdown := make(chan struct{})
+	go func() { _ = service.Shutdown(context.Background()); close(shutdown) }()
+	var request connector.StreamOpen
+	for {
+		stream, open, err := edge.AcceptStream(ctx)
+		if err != nil {
+			t.Fatalf("no goaway: %v", err)
+		}
+		_ = stream.Close()
+		if open.Kind == sharedprotocol.Goaway {
+			request = open
+			break
+		}
+	}
+	// The edge has not moved yet: it keeps sending requests for longer than handoverQuiet.
+	request.Kind = "http"
+	until := time.Now().Add(handoverQuiet + time.Second)
+	for index := 0; time.Now().Before(until); index++ {
+		request.RequestID = fmt.Sprintf("request-%d", index)
+		stream, err := edge.OpenStream(ctx)
+		if err == nil {
+			err = connectorprotocol.WriteStreamOpen(stream, request)
+			_ = stream.Close()
+		}
+		if err != nil {
+			t.Fatalf("the draining worker stopped serving while the edge still sent it requests: %v", err)
+		}
+		select {
+		case <-shutdown:
+			t.Fatal("the worker closed while the edge still sent it requests")
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	moved := time.Now()
+	select {
+	case <-shutdown:
+		if waited := time.Since(moved); waited < handoverQuiet-200*time.Millisecond {
+			t.Fatalf("closed %v after the last request, want about %v", waited, handoverQuiet)
+		}
+	case <-time.After(carrierDrainGrace):
+		t.Fatal("the worker did not close after the edge stopped sending it requests")
 	}
 }

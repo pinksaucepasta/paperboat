@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +81,9 @@ type Service struct {
 	// answered is closed by the first successful attachment answer.
 	answered     chan struct{}
 	answeredOnce sync.Once
+	// leaving is set by Shutdown: no attachment round runs while the edges move to the next
+	// worker, so this one cannot take its carriers back.
+	leaving atomic.Bool
 }
 
 // EndpointsServed implements preview.AgentCarriers: every edge of the latest attachment admits
@@ -247,9 +251,13 @@ func (s *Service) Start(ctx context.Context) error {
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
-	// Each edge hears that its carrier is going away while the carriers still run; canceling
-	// below closes them.
+	// Make-before-break, as cloudflared unregisters a connection and serves on for its grace
+	// period (connection/control.go waitForUnregister): each edge hears that its carrier is going
+	// away and sends new requests to the next worker's carrier once that one has attached there;
+	// until then this one keeps serving. Canceling below closes the carriers.
+	s.leaving.Store(true)
 	s.sendGoaways()
+	s.awaitHandover(ctx, time.Now())
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.cancel()
@@ -304,7 +312,7 @@ func (s *Service) run(ctx context.Context) {
 		// unresponsive candidate would then fail the whole check on every poll
 		// and keep the carrier from ever connecting. Each attachment check owns
 		// a bounded context derived from the service lifetime instead.
-		if !pacer.due(time.Now(), carriersReady(lives, publisherKey)) {
+		if s.leaving.Load() || !pacer.due(time.Now(), carriersReady(lives, publisherKey)) {
 			return nil
 		}
 		checkCtx, cancelCheck := context.WithTimeout(ctx, attachmentCheckTimeout)
@@ -727,8 +735,40 @@ func (s *Service) sendGoaways() {
 	sent.Wait()
 }
 
-// carrierDrainGrace is how long a closing carrier's open streams may finish.
-const carrierDrainGrace = 5 * time.Second
+// carrierDrainGrace is how long a closing carrier keeps serving after its goaway (the edges move
+// to the next worker's carrier within it) and how long its open streams may then finish.
+const carrierDrainGrace = 10 * time.Second
+
+// handoverQuiet: once the edges have opened no stream on this worker's carriers for this long
+// after the goaway, they have moved to the next worker's carriers (an edge pulls a changed
+// endpoint admission within a second) and this worker may close.
+const handoverQuiet = 2 * time.Second
+
+// awaitHandover waits, after the goaways sent at start, until no edge opened a stream on a live
+// carrier for handoverQuiet, at most carrierDrainGrace.
+func (s *Service) awaitHandover(ctx context.Context, start time.Time) {
+	deadline := start.Add(carrierDrainGrace)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		hubs, _ := s.Hubs()
+		last := start
+		for _, hub := range hubs {
+			if at := hub.LastStream(); at.After(last) {
+				last = at
+			}
+		}
+		now := time.Now()
+		if len(hubs) == 0 || now.Sub(last) >= handoverQuiet || !now.Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
 
 func (s *Service) closeLive(l *live) error {
 	if l == nil {
