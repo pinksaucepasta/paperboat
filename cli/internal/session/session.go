@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -158,41 +159,62 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		}
 	}()
 
-	// Local -> remote (through the paste interceptor).
+	// Local -> remote (through the paste interceptor). Stdin keeps being read
+	// while the sink is blocked on input the remote does not take (a paste into
+	// a program that never reads), so a later Ctrl-C is still seen: it drops the
+	// unsent backlog, which the host would discard anyway, and goes next (F3-11).
+	// Reads made meanwhile are joined, so small tty reads (macOS) do not each
+	// take a slot of the transport's input window. Like mosh, which reads stdin
+	// on every select (mosh/src/frontend/stmclient.cc:490).
 	inputDone := make(chan struct{})
+	input := &pendingInput{}
+	input.ready = sync.NewCond(&input.mu)
+	readerDone := make(chan struct{})
 	go func() {
-		defer close(inputDone)
+		defer close(readerDone)
+		detached := false
+		defer func() { input.finish(detached) }()
 		buf := make([]byte, 32*1024)
 		for {
 			n, readErr := readLocalInput(inputCtx, os.Stdin, buf)
 			if options.isReadOnly() {
 				if bytes.IndexByte(buf[:n], 3) >= 0 {
+					detached = true
 					streamErr <- errViewerDetached
 					return
 				}
-				if readErr != nil {
-					return
-				}
-				continue
-			}
-			if n > 0 {
-				started := time.Now()
-				if _, writeErr := stdinSink.Write(buf[:n]); writeErr != nil {
-					if errors.Is(writeErr, tunnel.ErrWriteUncertain) {
-						if discarder, ok := stdinSink.(interface{ Discard() }); ok {
-							discarder.Discard()
-						}
-						continue
-					}
-					streamErr <- fmt.Errorf("send terminal input: %w", writeErr)
-					return
-				}
-				if observer, ok := conn.(interface{ ObserveInputWrite(int, time.Duration) }); ok {
-					observer.ObserveInputWrite(n, time.Since(started))
-				}
+			} else if n > 0 && !input.push(buf[:n]) {
+				return
 			}
 			if readErr != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		defer close(inputDone)
+		defer func() { input.stop(); <-readerDone }()
+		for {
+			data, detached, ok := input.take()
+			if detached {
+				return
+			}
+			if !ok {
 				break
+			}
+			started := time.Now()
+			if _, writeErr := stdinSink.Write(data); writeErr != nil {
+				if errors.Is(writeErr, tunnel.ErrWriteUncertain) {
+					if discarder, ok := stdinSink.(interface{ Discard() }); ok {
+						discarder.Discard()
+					}
+					continue
+				}
+				streamErr <- fmt.Errorf("send terminal input: %w", writeErr)
+				return
+			}
+			if observer, ok := conn.(interface{ ObserveInputWrite(int, time.Duration) }); ok {
+				observer.ObserveInputWrite(len(data), time.Since(started))
 			}
 		}
 		_ = stdinSink.Close()
@@ -299,3 +321,65 @@ func pushSize(conn tunnel.Conn, remoteSize func() (uint16, uint16)) {
 
 // ErrNotTerminal is returned by callers that require an interactive terminal.
 var ErrNotTerminal = errors.New("stdin is not a terminal")
+
+// maxPendingInputBytes bounds input read but not yet taken by the sink; past it
+// the reader waits for the sink, except for a Ctrl-C.
+const maxPendingInputBytes = 4 << 20
+
+// pendingInput hands stdin bytes from the reader to the sink writer.
+type pendingInput struct {
+	mu       sync.Mutex
+	ready    *sync.Cond
+	data     []byte
+	eof      bool
+	detached bool
+	stopped  bool
+}
+
+// push queues p; a Ctrl-C behind a backlog drops it. It returns false
+// once the writer has stopped.
+func (q *pendingInput) push(p []byte) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	interrupt := bytes.IndexByte(p, 3) >= 0
+	for !q.stopped && !interrupt && len(q.data) >= maxPendingInputBytes {
+		q.ready.Wait()
+	}
+	if interrupt && len(q.data) > 0 {
+		// The sink is stuck: what was read before the Ctrl-C, in this read too, is the backlog it drops.
+		q.data = q.data[:0]
+		p = p[bytes.LastIndexByte(p, 3):]
+	}
+	q.data = append(q.data, p...)
+	q.ready.Broadcast()
+	return !q.stopped
+}
+
+func (q *pendingInput) finish(detached bool) {
+	q.mu.Lock()
+	q.eof, q.detached = true, detached
+	q.ready.Broadcast()
+	q.mu.Unlock()
+}
+
+func (q *pendingInput) stop() {
+	q.mu.Lock()
+	q.stopped = true
+	q.ready.Broadcast()
+	q.mu.Unlock()
+}
+
+// take waits for input; ok is false at end of input once everything was taken.
+func (q *pendingInput) take() (data []byte, detached, ok bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.data) == 0 && !q.eof {
+		q.ready.Wait()
+	}
+	if q.detached {
+		return nil, true, false
+	}
+	data, q.data = q.data, nil
+	q.ready.Broadcast()
+	return data, false, len(data) > 0
+}
