@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
@@ -51,6 +52,10 @@ func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordin
 	}
 	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(coordinator.Catalog))
 }
+
+// pinStagingWindow matches the catalogue's staging window: a pin this new may
+// belong to an install that has not published its descriptor yet.
+const pinStagingWindow = 10 * time.Minute
 
 // pinSweepBound is how many pin directories one sweep reads: every
 // session-owner reference, one stable carrier, and one unreferenced candidate,
@@ -116,6 +121,12 @@ func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string
 			continue
 		}
 		if _, err := hex.DecodeString(name); err != nil {
+			continue
+		}
+		// An update stages its candidate's pin before publishing the
+		// descriptor that references it; a sweep in between must not delete
+		// it (pbvm4 run20: install failed opening its own candidate pin).
+		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < pinStagingWindow {
 			continue
 		}
 		child, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

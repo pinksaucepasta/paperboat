@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // Since the terminal ceiling became 256 (b9ebbc8d), the installed catalogue's Maximum is 257 and the
@@ -104,10 +105,24 @@ func TestSessionOwnerPinPrunePreservesReferencesAndUntrustedFiles(t *testing.T) 
 	if err := os.WriteFile(neighbour, []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Every pin above is older than an install's staging window.
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * pinStagingWindow)
+	for _, entry := range entries {
+		if err := os.Chtimes(filepath.Join(root, entry.Name()), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// pbvm4 run20: an update's freshly staged candidate pin, not yet named by
+	// any descriptor, must survive the sweep.
+	staged := pin("candidate staged by a running install")
 	if err := pruneUnixSessionOwnerPins(context.Background(), root, map[string]bool{retained: true}, 22); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{retained, wrongHash, writableDirectory, writableFile, foreignOwner, pipePin, linked, neighbour} {
+	for _, path := range []string{staged, retained, wrongHash, writableDirectory, writableFile, foreignOwner, pipePin, linked, neighbour} {
 		if _, err := os.Lstat(path); err != nil {
 			t.Fatalf("preserved path disappeared: %s: %v", filepath.Base(path), err)
 		}
@@ -154,6 +169,10 @@ func TestSessionOwnerPinPruneBoundsEachSweep(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(directory, "pb"), []byte(body), 0755); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-2 * pinStagingWindow)
+		if err := os.Chtimes(directory, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
