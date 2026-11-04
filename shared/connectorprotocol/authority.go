@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -282,6 +283,10 @@ type Snapshot struct {
 	Generation        uint64          `json:"generation"`
 	ContentHash       string          `json:"content_hash"`
 	Payload           json.RawMessage `json:"payload"`
+
+	// validated is set by Consumer.HandleFrame for a snapshot taken from a
+	// fully validated frame, so ApplySnapshot does not validate it again.
+	validated bool
 }
 
 func NewSnapshot(tunnelID string, generation uint64, payload []byte) (Snapshot, error) {
@@ -299,7 +304,11 @@ func NewSnapshot(tunnelID string, generation uint64, payload []byte) (Snapshot, 
 	return Snapshot{TunnelID: tunnelID, Generation: generation, ContentHash: "sha256:" + hex.EncodeToString(digest[:]), Payload: canonical}, nil
 }
 
+// snapshotValidations counts full snapshot validations, for the validated-once test.
+var snapshotValidations atomic.Uint64
+
 func (s Snapshot) Validate() error {
+	snapshotValidations.Add(1)
 	if ValidateIdentifier(s.TunnelID) != nil || s.AccountID != "" && ValidateIdentifier(s.AccountID) != nil || s.SessionID != "" && ValidateIdentifier(s.SessionID) != nil || s.Generation == 0 || !ValidContentHash(s.ContentHash) || len(s.Payload) == 0 || len(s.Payload) > MaxSnapshotBytes {
 		return ErrInvalidInput
 	}
@@ -502,10 +511,20 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 // messages. NewSnapshot and server-side sources intentionally remain able to
 // construct an unbound value until the authenticated session binds it.
 func (s Snapshot) ValidateBound() error {
+	if s.validated {
+		return nil
+	}
+	if err := s.validateBinding(); err != nil {
+		return err
+	}
+	return s.Validate()
+}
+
+func (s Snapshot) validateBinding() error {
 	if ValidateIdentifier(s.AccountID) != nil || ValidateIdentifier(s.ConnectorID) != nil || ValidateIdentifier(s.SessionID) != nil || s.ProcessGeneration == 0 {
 		return ErrInvalidInput
 	}
-	return s.Validate()
+	return nil
 }
 
 type Delta struct {

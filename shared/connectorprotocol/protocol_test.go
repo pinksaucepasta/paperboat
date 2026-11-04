@@ -233,3 +233,57 @@ func TestPublicStreamSnapshotAccessBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestReadFrameChecksTypeBeforeAllocating(t *testing.T) {
+	frameOf := func(body string, length int) *bytes.Reader {
+		var prefix [4]byte
+		binary.BigEndian.PutUint32(prefix[:], uint32(length))
+		return bytes.NewReader(append(prefix[:], body+strings.Repeat(" ", frameTypeProbe)...))
+	}
+	// Claims 3 MiB but is a heartbeat: refused from the first bytes, body unread.
+	reader := frameOf(`{"type":"heartbeat","version":"1.0"`, 3<<20)
+	if _, err := ReadFrame(reader); !errors.Is(err, ErrFrameTooLarge) {
+		t.Fatalf("oversized non-snapshot frame: %v", err)
+	}
+	// Unauthorized type is refused before the body is read.
+	reader = frameOf(`{"type":"snapshot","version":"1.0"`, 3<<20)
+	allowed := func(m MessageType) bool { return m == MessageHello }
+	if _, err := ReadFrameAllowed(reader, allowed); CodeOf(err) == "" || !errors.Is(err, ErrUnsupportedMessage) {
+		t.Fatalf("unauthorized frame: %v", err)
+	}
+	if reader.Len() == 0 {
+		t.Fatal("body of an unauthorized frame was read")
+	}
+	if _, err := ReadFrame(frameOf(`{"version":"1.0","type":"hello"}`, 40)); !errors.Is(err, ErrMalformedFrame) {
+		t.Fatalf("type not first: %v", err)
+	}
+}
+
+func TestSnapshotFrameIsValidatedOnce(t *testing.T) {
+	// valid wire snapshot via the existing helper
+	snap, err := NewSnapshot("tunnel_1", 1, testConfigPayload(1, "preview.example.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.AccountID, snap.ConnectorID, snap.SessionID, snap.ProcessGeneration = "acct_1", "connector_1", "sess_1", 1
+	frame, err := NewFrame(MessageSnapshot, "req_1", snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire bytes.Buffer
+	if err := WriteFrame(&wire, frame); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotValidations.Load()
+	read, err := ReadFrame(&wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot Snapshot
+	if err := read.DecodePayload(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if n := snapshotValidations.Load() - before; n != 1 {
+		t.Fatalf("snapshot validated %d times on read+decode, want 1", n)
+	}
+}

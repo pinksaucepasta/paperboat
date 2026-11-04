@@ -482,6 +482,10 @@ type Frame struct {
 	Version   string          `json:"version"`
 	RequestID string          `json:"request_id"`
 	Payload   json.RawMessage `json:"payload"`
+
+	// validated is set only by NewFrame and ReadFrame after a full validation,
+	// so Validate, DecodePayload and HandleFrame do not repeat it.
+	validated bool
 }
 
 func NewFrame(messageType MessageType, requestID string, payload any) (Frame, error) {
@@ -504,7 +508,7 @@ func NewFrame(messageType MessageType, requestID string, payload any) (Frame, er
 	if err := validateMessagePayload(messageType, encoded); err != nil {
 		return Frame{}, err
 	}
-	return Frame{Type: messageType, Version: ProtocolVersion, RequestID: requestID, Payload: encoded}, nil
+	return Frame{Type: messageType, Version: ProtocolVersion, RequestID: requestID, Payload: encoded, validated: true}, nil
 }
 
 func payloadTooLarge(messageType MessageType, payload any) bool {
@@ -522,6 +526,9 @@ func payloadTooLarge(messageType MessageType, payload any) bool {
 }
 
 func (f Frame) Validate() error {
+	if f.validated {
+		return nil
+	}
 	if _, ok := allowedMessageTypes[f.Type]; !ok {
 		return CodeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
 	}
@@ -674,7 +681,18 @@ type ClientFrameDecodeFailure struct{ cause error }
 func (*ClientFrameDecodeFailure) Error() string   { return "client frame could not be decoded" }
 func (e *ClientFrameDecodeFailure) Unwrap() error { return e.cause }
 
-func ReadFrame(reader io.Reader) (Frame, error) {
+func ReadFrame(reader io.Reader) (Frame, error) { return ReadFrameAllowed(reader, nil) }
+
+// frameTypeProbe is how many leading bytes must show the frame type.
+const frameTypeProbe = 256
+
+// frameEnvelopeBytes covers type, version and request_id around the payload.
+const frameEnvelopeBytes = 1 << 10
+
+// ReadFrameAllowed reads the type from the first bytes of a frame and asks
+// allowed (nil allows every type) before it allocates, then bounds the frame by
+// that type's payload limit. Only an allowed snapshot may reach the 4 MiB bound.
+func ReadFrameAllowed(reader io.Reader, allowed func(MessageType) bool) (Frame, error) {
 	if reader == nil {
 		return Frame{}, ErrInvalidInput
 	}
@@ -689,8 +707,23 @@ func ReadFrame(reader io.Reader) (Frame, error) {
 	if length > MaxFrameBytes {
 		return Frame{}, ErrFrameTooLarge
 	}
+	head := make([]byte, min(int(length), frameTypeProbe))
+	if _, err := io.ReadFull(reader, head); err != nil {
+		return Frame{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
+	}
+	messageType, ok := leadingFrameType(head)
+	if !ok {
+		return Frame{}, ErrMalformedFrame
+	}
+	if _, known := allowedMessageTypes[messageType]; !known || allowed != nil && !allowed(messageType) {
+		return Frame{}, CodeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
+	}
+	if int(length) > maxPayloadBytes(messageType)+frameEnvelopeBytes {
+		return Frame{}, ErrFrameTooLarge
+	}
 	body := make([]byte, int(length))
-	if _, err := io.ReadFull(reader, body); err != nil {
+	copy(body, head)
+	if _, err := io.ReadFull(reader, body[len(head):]); err != nil {
 		return Frame{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if !json.Valid(body) || rejectDuplicateKeys(body) != nil {
@@ -706,7 +739,21 @@ func ReadFrame(reader io.Reader) (Frame, error) {
 		}
 		return Frame{}, ErrMalformedFrame
 	}
+	frame.validated = true
 	return frame, nil
+}
+
+// leadingFrameType reads {"type":"<t>" from the start of a frame body.
+func leadingFrameType(head []byte) (MessageType, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(head))
+	for _, want := range []any{json.Delim('{'), "type"} {
+		if token, err := decoder.Token(); err != nil || token != want {
+			return "", false
+		}
+	}
+	token, err := decoder.Token()
+	value, isString := token.(string)
+	return MessageType(value), err == nil && isString
 }
 
 func WriteFrame(writer io.Writer, frame Frame) error {

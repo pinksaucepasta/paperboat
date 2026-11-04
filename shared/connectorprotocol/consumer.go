@@ -128,6 +128,7 @@ func (c *Consumer) HandleFrame(ctx context.Context, frame Frame) (Frame, error) 
 		if err := frame.DecodePayload(&snapshot); err != nil {
 			return Frame{}, err
 		}
+		snapshot.validated = frame.validated
 		ack, applyErr := c.session.ApplySnapshot(ctx, snapshot)
 		return c.applyAck(frame.RequestID, AckSnapshot, snapshot.Generation, snapshot.ContentHash, ack, applyErr)
 	case MessageDelta:
