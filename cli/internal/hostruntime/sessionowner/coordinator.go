@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -163,7 +164,7 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 	}
 	var result error
 	for _, d := range all {
-		if d.Generation == c.Active.Generation {
+		if d.Generation == c.Active.Generation || c.Catalog.staging(d) {
 			continue
 		}
 		status, err := c.nativeState(ctx, d)
@@ -230,6 +231,23 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 		result = errors.Join(result, err)
 	}
 	return result
+}
+
+// stagingWindow bounds how long a newly published generation is treated as an
+// update's staged candidate. Like nginx's new workers starting before the old
+// ones drain (~/ref/nginx/src/os/unix/ngx_process_cycle.c), the candidate must
+// not be retired by the still-active updater while the installer prepares it
+// (pbvm4 run1: retiring it stopped its carrier mid-move). A crashed install's
+// orphan is retired once the window passes.
+const stagingWindow = 10 * time.Minute
+
+func (c Catalog) staging(d Descriptor) bool {
+	path, err := Find(c.Root, d.Generation)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(path)
+	return err == nil && time.Since(info.ModTime()) < stagingWindow
 }
 
 func (c Coordinator) recordRetired(ctx context.Context, d Descriptor, retained uint64) error {

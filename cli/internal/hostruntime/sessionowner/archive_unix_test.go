@@ -72,6 +72,7 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+	backdate(t, catalog, old)
 	durable, e := store.Open(ctx, store.Config{Root: old.StoreRoot()})
 	if e != nil {
 		t.Fatal(e)
@@ -233,6 +234,15 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 	if e = catalog.Publish(ctx, empty); e != nil {
 		t.Fatal(e)
 	}
+	// A just-published generation is an update's staged candidate: the
+	// active updater must not retire it (pbvm4 run1 lost its carrier).
+	if e = coordinator.Reconcile(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if path, _ := Find(catalog.Root, empty.Generation); func() bool { _, err := os.Lstat(path); return err != nil }() {
+		t.Fatal("reconcile retired a freshly staged candidate generation")
+	}
+	backdate(t, catalog, empty)
 	emptyStore, err := store.Open(ctx, store.Config{Root: empty.StoreRoot()})
 	if err != nil {
 		t.Fatal(err)
@@ -357,4 +367,17 @@ func (r *absentOwnerRunner) Output(_ context.Context, name string, args ...strin
 		return "", errors.New("unexpected native start")
 	}
 	return "LoadState=not-found\n", nil
+}
+
+// backdate ages a published descriptor past the staging window.
+func backdate(t *testing.T, catalog Catalog, d Descriptor) {
+	t.Helper()
+	path, err := Find(catalog.Root, d.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * stagingWindow)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
 }
