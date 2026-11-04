@@ -39,7 +39,7 @@ func TestPublicationReplacesWithdrawnProducts(t *testing.T) {
 			before := readTestMetadata(t, path)
 			verifyErr := verifyPublished(repo)
 			artifacts := t.TempDir()
-			for _, name := range []string{"pb-linux-amd64", "pb-linux-arm64"} {
+			for _, name := range []string{"pb-darwin-arm64", "pb-linux-amd64", "pb-linux-arm64"} {
 				if err := os.WriteFile(filepath.Join(artifacts, name), []byte(name), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -62,19 +62,19 @@ func TestPublicationReplacesWithdrawnProducts(t *testing.T) {
 				return
 			}
 			if verifyErr != nil || err != nil {
-				t.Fatalf("three-product prior set to Linux publication: verify=%v publish=%v", verifyErr, err)
+				t.Fatalf("three-product prior set to three-product publication: verify=%v publish=%v", verifyErr, err)
 			}
 			if err := verifyPublished(repo); err != nil {
 				t.Fatal(err)
 			}
 			_, after, _, _, err := loadSet(repo)
-			if err != nil || len(after.Signed.Targets) != 2 {
-				t.Fatalf("new release must contain exactly two Linux products: %v", err)
+			if err != nil || len(after.Signed.Targets) != 3 {
+				t.Fatalf("new release must contain exactly the three products: %v", err)
 			}
-			for _, name := range []string{"pb-linux-amd64", "pb-linux-arm64"} {
+			for _, name := range []string{"pb-darwin-arm64", "pb-linux-amd64", "pb-linux-arm64"} {
 				info := after.Signed.Targets[name]
 				if info == nil || info.Custom == nil {
-					t.Fatalf("missing new Linux target %s", name)
+					t.Fatalf("missing new target %s", name)
 				}
 				custom, err := decodeAndValidateAssetTargetCustom(*info.Custom, time.Now().UTC())
 				if err != nil || custom.Version != "2026.08.22.16" {
