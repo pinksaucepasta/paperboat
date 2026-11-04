@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
+import { fetchAllPages } from "@/lib/machine-pages"
 
 /*
  * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
@@ -46,12 +47,21 @@ export const networkKeys = {
   pool: (capability: Capability, scope: string) => ["selfhost", "pool", capability, scope] as const,
 }
 
+/** Every installation in the scope, page by page (the server caps a page at 200). */
+export async function fetchInstallations(scope: ReturnType<typeof scopeOf>): Promise<Installation[]> {
+  const pages = await fetchAllPages(async (params) => {
+    const page = await api<{ installations: Installation[]; pagination: { total: number } }>(
+      `selfhost/installations?${scopeQuery(scope)}&${new URLSearchParams(params)}`,
+    )
+    return { items: page.installations, pagination: page.pagination }
+  }, {})
+  return pages?.items ?? []
+}
+
 export const installationsQuery = (scope: ReturnType<typeof scopeOf>) =>
   queryOptions({
     queryKey: networkKeys.installations(`${scope.kind}:${scope.id ?? ""}`),
-    queryFn: async () =>
-      (await api<{ installations: Installation[] }>(`selfhost/installations?${scopeQuery(scope)}&limit=200`))
-        .installations,
+    queryFn: () => fetchInstallations(scope),
     // Readiness follows the node's own registration and health reports.
     refetchInterval: 10_000,
   })

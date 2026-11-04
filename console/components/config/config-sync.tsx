@@ -2,7 +2,10 @@
 
 import { ArrowsClockwiseIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import Link from "next/link"
+import { useState } from "react"
 import { useApiQuery, type Machine } from "@/lib/api"
+import { cursorPageSize } from "@/lib/cursor-pages"
+import { ListPager } from "@/components/list-pager"
 import {
   configStatusQuery,
   directionLabels,
@@ -90,6 +93,7 @@ function NotSetUp({ name }: { name?: string }) {
 }
 
 function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
+  const [page, setPage] = useState(1)
   const conflicted = environments.filter((entry) => entry.conflicts?.length)
   const sorted = [...environments].sort(
     (a, b) => Number(syncState(b).attention) - Number(syncState(a).attention) || a.alias.localeCompare(b.alias),
@@ -131,7 +135,7 @@ function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
-          {sorted.map((environment) => {
+          {sorted.slice((page - 1) * cursorPageSize, page * cursorPageSize).map((environment) => {
             const state = syncState(environment)
             return (
               <tr
@@ -177,6 +181,7 @@ function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
           })}
         </tbody>
       </table>
+      <ListPager page={page} size={cursorPageSize} total={sorted.length} go={setPage} />
     </section>
   )
 }

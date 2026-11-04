@@ -291,7 +291,7 @@ async function fetchMachines(params: Record<string, string>): Promise<MachinePag
 export const machinesQuery = (workspace: string) =>
   queryOptions({
     queryKey: queryKeys.machines(workspace),
-    queryFn: async () => (await fetchAllPages(machinePage, workspace))!,
+    queryFn: async () => (await fetchAllPages(machinePage, { workspace }))!,
     refetchInterval: 15_000,
   })
 

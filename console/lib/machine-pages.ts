@@ -1,5 +1,5 @@
 /**
- * The workspace's machines, page by page (the server caps a page at 200), so lists and pickers
+ * The workspace's machines (or any offset-paged inventory), page by page (the server caps a page at 200), so lists and pickers
  * never silently miss machines past the first page. Bounded: at most `maxMachines` are loaded, and
  * `complete` says whether that was all of them. Shared by the browser query and the server prefetch.
  */
@@ -9,13 +9,15 @@ export const maxMachines = 2000
 export type MachinePages<T> = { items: T[]; total: number; complete: boolean }
 
 export async function fetchAllPages<T>(
-  fetchPage: (params: Record<string, string>) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
-  workspace: string,
+  fetchPage: (
+    params: Record<string, string>,
+  ) => Promise<{ items: T[] | null; pagination: { total: number } } | null | undefined>,
+  extra: Record<string, string>,
 ): Promise<MachinePages<T> | null> {
   const items: T[] = []
   let total = 0
   for (let offset = 0; offset < maxMachines; offset += pageSize) {
-    const page = await fetchPage({ limit: String(pageSize), offset: String(offset), workspace })
+    const page = await fetchPage({ limit: String(pageSize), offset: String(offset), ...extra })
     if (!page) return offset === 0 ? null : { items, total, complete: false }
     // An empty list can arrive as null (a Go nil slice); it means no items, not a broken page.
     const got = page.items ?? []

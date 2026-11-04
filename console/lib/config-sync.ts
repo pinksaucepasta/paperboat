@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { fetchAllPages } from "@/lib/machine-pages"
 
 /*
  * Config sync keeps chosen files on each machine (dotfiles and the like) in a Git repository. The
@@ -35,9 +36,22 @@ export type ConfigEnvironment = {
 
 export type ConfigAccountStatus = { state: string; environments: ConfigEnvironment[] }
 
+/** Every machine's sync, page by page (the server caps a page at 200), so none past the first is missed. */
+export async function fetchConfigStatus(): Promise<ConfigAccountStatus> {
+  let state = ""
+  const pages = await fetchAllPages(async (params) => {
+    const page = await api<ConfigAccountStatus & { pagination: { total: number } }>(
+      `config-sync/status?${new URLSearchParams(params)}`,
+    )
+    state ||= page.state
+    return { items: page.environments, pagination: page.pagination }
+  }, {})
+  return { state, environments: pages?.items ?? [] }
+}
+
 export const configStatusQuery = queryOptions({
   queryKey: ["config-sync"],
-  queryFn: () => api<ConfigAccountStatus>("config-sync/status?limit=200"),
+  queryFn: fetchConfigStatus,
   refetchInterval: 15_000,
 })
 
