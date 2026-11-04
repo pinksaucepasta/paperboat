@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 )
 
 func (c *Client) ClientConfiguration(ctx context.Context) (clientapi.ClientConfiguration, error) {

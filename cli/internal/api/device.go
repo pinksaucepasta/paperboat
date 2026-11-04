@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"

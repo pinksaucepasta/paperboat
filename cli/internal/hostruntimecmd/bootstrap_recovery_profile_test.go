@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"

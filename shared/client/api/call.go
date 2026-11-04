@@ -1,5 +1,5 @@
-// Package clientapi owns host-independent control-plane request mechanics.
-package clientapi
+// Package api owns host-independent control-plane request mechanics.
+package api
 
 import (
 	"bytes"

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"io"
 	"net/http"
 	"net/http/httptest"

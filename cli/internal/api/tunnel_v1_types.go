@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"regexp"
 	"time"
 )
