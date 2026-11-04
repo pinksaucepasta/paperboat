@@ -126,13 +126,17 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 
 func testSDKRevocationFeedBounds(t *testing.T, f workspaceMachineFixture, session string, edge *controlplane.EdgeService, live []string) {
 	ctx := f.ctx
-	// A bounded feed must fail closed rather than silently omit a revoked operation.
-	if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions
+	// Seed expiry directly; bulk expiry updates also rebuild unrelated peer authority.
+	seed := func(expires time.Time) {
+		t.Helper()
+		if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions
  (credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,state,revoked_at,helper_terminal_session_id,capabilities,operation_id)
- SELECT 'control_plane_signed','overflow_'||$1||'_'||g,$2,$3,$4,$5,'',now()+interval '1 minute','revoked',now(),'overflow_jti_'||$1||'_'||g,ARRAY['exec'],'operation_overflow'
- FROM generate_series(1,10001) g`, f.suffix, f.machine, f.account, "env_"+f.suffix, session); err != nil {
-		t.Fatal(err)
+ SELECT 'control_plane_signed','overflow_'||$1||'_'||g,$2,$3,$4,$5,'',$6,'revoked',now(),'overflow_jti_'||$1||'_'||g,ARRAY['exec'],'operation_overflow'
+ FROM generate_series(1,10001) g`, f.suffix, f.machine, f.account, "env_"+f.suffix, session, expires); err != nil {
+			t.Fatal(err)
+		}
 	}
+	seed(time.Now().Add(time.Minute))
 	if _, err := edge.Revocations(ctx); err == nil {
 		t.Fatal("global revocation feed silently truncated credentials")
 	}
@@ -140,9 +144,10 @@ func testSDKRevocationFeedBounds(t *testing.T, f workspaceMachineFixture, sessio
 		t.Fatal("revocation feed silently truncated live-operation revocations")
 	}
 
-	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=now()-interval '1 minute' WHERE id LIKE $1`, "overflow_"+f.suffix+"_%"); err != nil {
+	if _, err := f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machine_access_sessions WHERE id LIKE $1`, "overflow_"+f.suffix+"_%"); err != nil {
 		t.Fatal(err)
 	}
+	seed(time.Now().Add(-time.Minute))
 	if current, err := edge.OperationRevocations(ctx, "env_"+f.suffix, live); err != nil || len(current) != 2 {
 		t.Fatal("completed credential history filled the live host revocation feed")
 	}

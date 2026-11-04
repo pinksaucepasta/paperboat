@@ -3410,6 +3410,9 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-04 | SDK F24-09 | Revocation capacity/history fixture now seeds expired history directly, avoiding the bulk expiry update's peer-authority rebuild; all 10,001-row overflow/pruning assertions retained. | Focused isolated-PG PASS 3.0s; affected server CI before push.
+
+
 2026-11-04 | SDK F24-09 | Lane R: POST /v1/helper-trust/revocations now requires {"active_jtis":[]} (up to 1024 live watched credential IDs, including expired admissions); proof signs body, server filters exact environment and refuses overflow; report sdk_operation_ended to release reservations and enforce one active operation per signed operation/session.
 SDK lane: token-backed descriptors omit source_machine_id and select the token workspace; 429 code sdk_limit_reached carries Retry-After and details.outcome=not_started; TestSDKRetryAfterDoesNotRestartExec remains yours. Server tests cover rates/counts for exec, files and private access.
 
