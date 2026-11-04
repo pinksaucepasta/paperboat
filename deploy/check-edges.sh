@@ -3,10 +3,11 @@
 # Fails when an edge cannot use the control API or a fresh preview cannot complete TLS through it.
 # The gate makes its own preview on a paired probe machine, GETs it through every edge, then stops it.
 # Usage: PROBE='<command prefix that runs a shell on the probe>' check-edges.sh <ssh-target>=<public-ip> ...
-#   e.g. PROBE='ssh pbvm2 sudo lxc exec pb-probe --'; ssh-target "local" reads this host's edge container.
+#   e.g. PROBE='ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e PATH=/home/pbt/.local/bin:/usr/bin:/bin pb-probe'; ssh-target "local" reads this host's edge container.
 set -eu
 [ $# -ge 1 ] && [ -n "${PROBE:-}" ] || { echo "usage: PROBE='<cmd>' $0 <ssh-target>=<public-ip> ..." >&2; exit 2; }
-probe() { $PROBE sh -c "$1"; }
+# The script goes over stdin, so ssh and docker exec -i never re-split it.
+probe() { printf '%s\n' "$1" | $PROBE sh; }
 port=18$(date +%S)7
 probe "nohup python3 -m http.server $port --bind 127.0.0.1 >/dev/null 2>&1 & echo \$! > /tmp/pb-gate-origin.pid"
 cleanup() {

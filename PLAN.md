@@ -5312,3 +5312,4 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-04 | macOS lane -> Lane C | check-terminal-rows.mjs f308: "the owner's panel lists the teammate by real name, not an id" FAILS on Linux (macl) and Mac (apple) alike; the teammate (acct3) has a display_name in /api/v1/me. Blocks F3-08 on L recheck and M.
 
 2026-11-04 | macOS lane | Correction: the f308 "teammate by real name" failure logged above was a check bug (hard-coded name), not a product bug; fixed in a44caee8d; F3-08 PASS on M.
+2026-11-04 | Reliability lane | Previews back 18:1xZ: tunnel 2026.11.04.5 (ghcr, Service containers run 41882582233) on oracle then anvit, then server 2026.11.04.5 (44ce52b0, migrations 218-221). Edge gate PASS (deploy/check-edges.sh: fresh preview 200 through both edges, 0 control failures; probe laner-gate-probe in acct2 on pbvm2). Temporary tag and ci/ branch deleted.
