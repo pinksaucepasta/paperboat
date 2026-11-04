@@ -63,8 +63,11 @@ func execute(ctx context.Context, reporter *reporting.Reporter, args []string, o
 		fault := reporter.CaptureFailure(ctx, "selfhost_command", err)
 		message := "operation failed; state retained for retry"
 		var owned commandError
+		var operator selfhost.OperatorError
 		if errors.As(err, &owned) {
 			message = owned.Error()
+		} else if errors.As(err, &operator) {
+			message = operator.Error()
 		}
 		fmt.Fprintf(diagnostic, "pbh: %s (%s); support reference %s\n", message, fault.Cause, fault.SupportReference)
 		return 1

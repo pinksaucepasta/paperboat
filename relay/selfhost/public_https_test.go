@@ -8,9 +8,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,6 +103,11 @@ func TestConfigurePublicHTTPSPreservesClaimAndRecoversInvalidReplacement(t *test
 	}
 	wrongCert, wrongKey := makePair("wrong.customer.test", false)
 	expiredCert, expiredKey := makePair(c.EndpointHost, true)
+	// pbh shows OperatorError text; an expired certificate must say so and how to fix it.
+	var operator OperatorError
+	if _, err := ConfigurePublicHTTPS(dir, expiredCert, expiredKey); !errors.As(err, &operator) || !strings.Contains(operator.Error(), "renew") {
+		t.Fatalf("expired certificate error = %v, want an operator message naming renewal", err)
+	}
 	for _, pair := range [][2]string{{wrongCert, wrongKey}, {expiredCert, expiredKey}, {certPath, wrongKey}, {certPath, ""}} {
 		if _, err := ConfigurePublicHTTPS(dir, pair[0], pair[1]); err == nil {
 			t.Fatal("invalid replacement accepted")

@@ -11,23 +11,29 @@ import (
 	"time"
 )
 
+// OperatorError is a fixed, private-data-free message an operator can act on;
+// pbh prints it instead of the generic failure line.
+type OperatorError string
+
+func (e OperatorError) Error() string { return string(e) }
+
 func validatePublicHTTPS(host, certPath, keyPath string, now time.Time) error {
 	if certPath == "" && keyPath == "" {
 		return nil
 	}
 	if certPath == "" || keyPath == "" {
-		return errors.New("browser HTTPS requires both --https-cert and --https-key")
+		return OperatorError("browser HTTPS requires both --https-cert and --https-key")
 	}
 	for _, path := range []string{certPath, keyPath} {
 		if !filepath.IsAbs(path) || len(path) > 4096 {
-			return errors.New("browser HTTPS certificate paths must be bounded and absolute")
+			return OperatorError("browser HTTPS certificate paths must be bounded and absolute")
 		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return fmt.Errorf("cannot read browser HTTPS certificate files: %w", err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > 1<<20 {
-			return errors.New("browser HTTPS certificate files must be bounded regular files")
+			return OperatorError("browser HTTPS certificate files must be bounded regular files")
 		}
 	}
 	info, err := os.Stat(keyPath)
@@ -35,7 +41,7 @@ func validatePublicHTTPS(host, certPath, keyPath string, now time.Time) error {
 		return err
 	}
 	if info.Mode().Perm()&0077 != 0 {
-		return errors.New("browser HTTPS private key must have owner-only permissions (0600)")
+		return OperatorError("browser HTTPS private key must have owner-only permissions (0600)")
 	}
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -46,10 +52,10 @@ func validatePublicHTTPS(host, certPath, keyPath string, now time.Time) error {
 		return err
 	}
 	if err = leaf.VerifyHostname(host); err != nil {
-		return errors.New("browser HTTPS certificate does not cover the enrolled endpoint hostname")
+		return OperatorError("browser HTTPS certificate does not cover the enrolled endpoint hostname")
 	}
 	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
-		return errors.New("browser HTTPS certificate is not currently valid")
+		return OperatorError(fmt.Sprintf("browser HTTPS certificate is valid only from %s to %s; renew it (paperboat-edge-certificate.service needs TCP 80 free) and rerun pbh install", leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339)))
 	}
 	if len(leaf.ExtKeyUsage) > 0 {
 		allowed := false
@@ -57,7 +63,7 @@ func validatePublicHTTPS(host, certPath, keyPath string, now time.Time) error {
 			allowed = allowed || usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny
 		}
 		if !allowed {
-			return errors.New("browser HTTPS certificate does not permit server authentication")
+			return OperatorError("browser HTTPS certificate does not permit server authentication")
 		}
 	}
 	return nil
