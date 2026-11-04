@@ -7,8 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,7 +119,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	}
 	temporary := target.Name()
 	defer os.Remove(temporary)
-	if _, err = io.Copy(target, source); err == nil {
+	if _, err = atomicfile.SyncedCopy(target, source); err == nil {
 		err = target.Chmod(0755)
 	}
 	if err == nil {

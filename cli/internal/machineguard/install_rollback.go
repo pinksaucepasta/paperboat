@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
@@ -65,7 +66,10 @@ func snapshotGuardFilesValidated(validate func(string, string, os.FileInfo) erro
 		item.backup = file.Name()
 		item.original = info
 		item.current = info
-		_, err = io.CopyN(file, source, info.Size())
+		copied, err := atomicfile.SyncedCopy(file, io.LimitReader(source, info.Size()))
+		if err == nil && copied != info.Size() {
+			err = io.ErrUnexpectedEOF
+		}
 		err = errors.Join(err, source.Close())
 		if err == nil {
 			err = file.Chmod(info.Mode().Perm())
