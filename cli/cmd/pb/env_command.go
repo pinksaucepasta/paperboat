@@ -679,7 +679,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 		}
 		teamState, getErr := data.GetVaultTeam(command.Context(), scope.owner)
 		if api.IsNotFound(getErr) {
-			team, err := client.GetTeam(command.Context(), scope.owner)
+			team, err := client.GetTeamDetails(command.Context(), scope.owner)
 			if err != nil {
 				return friendlyCommandError(err)
 			}

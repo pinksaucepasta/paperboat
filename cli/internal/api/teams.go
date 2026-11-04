@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"time"
@@ -30,10 +31,15 @@ type Team struct {
 	OwnerAccount          string                     `json:"owner_account"`
 	Generation            uint64                     `json:"generation"`
 	Deleted               bool                       `json:"deleted"`
-	Members               []TeamMember               `json:"members"`
-	Grants                []TeamGrant                `json:"grants"`
-	Machines              []TeamMachineBinding       `json:"machines"`
-	MachineGrants         []TeamMachineGrant         `json:"machine_grants"`
+	// The server sends only the counts; Members, Grants and Machines are filled by GetTeamDetails.
+	MemberCount   int                  `json:"member_count"`
+	GrantCount    int                  `json:"grant_count"`
+	MachineCount  int                  `json:"machine_count"`
+	MyRole        string               `json:"my_role,omitempty"`
+	Members       []TeamMember         `json:"members,omitempty"`
+	Grants        []TeamGrant          `json:"grants,omitempty"`
+	Machines      []TeamMachineBinding `json:"machines,omitempty"`
+	MachineGrants []TeamMachineGrant   `json:"machine_grants"`
 	// ApproveNewMachines: machines that members add wait for an owner or admin.
 	ApproveNewMachines bool                   `json:"approve_new_machines"`
 	MachineRequests    []TeamMachineAdmission `json:"machine_requests"`
@@ -129,6 +135,64 @@ func (c *Client) GetTeam(ctx context.Context, id string) (Team, error) {
 	var out Team
 	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(id), nil, &out)
 	return out, err
+}
+
+// TeamPage is one keyset page of a team's members, grants or machines.
+type TeamPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	Total      int    `json:"total"`
+}
+
+// teamPagesMax bounds a walk through one list (200 rows a page).
+const teamPagesMax = 50
+
+func allTeamRows[T any](ctx context.Context, c *Client, id, list string) ([]T, error) {
+	var rows []T
+	cursor := ""
+	for range teamPagesMax {
+		query := url.Values{"limit": {"200"}}
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		var page TeamPage[T]
+		if err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(id)+"/"+list+"?"+query.Encode(), nil, &page); err != nil {
+			return nil, err
+		}
+		rows = append(rows, page.Items...)
+		if page.NextCursor == "" {
+			return rows, nil
+		}
+		cursor = page.NextCursor
+	}
+	return nil, errors.New("the team list is too long to read; narrow it with the console")
+}
+
+// ListTeamMembers, ListTeamGrants and ListTeamMachines read every row of the list, page by page.
+func (c *Client) ListTeamMembers(ctx context.Context, id string) ([]TeamMember, error) {
+	return allTeamRows[TeamMember](ctx, c, id, "members")
+}
+func (c *Client) ListTeamGrants(ctx context.Context, id string) ([]TeamGrant, error) {
+	return allTeamRows[TeamGrant](ctx, c, id, "grants")
+}
+func (c *Client) ListTeamMachines(ctx context.Context, id string) ([]TeamMachineBinding, error) {
+	return allTeamRows[TeamMachineBinding](ctx, c, id, "machines")
+}
+
+// GetTeamDetails is GetTeam with its member, grant and machine rows read from the paged lists.
+func (c *Client) GetTeamDetails(ctx context.Context, id string) (Team, error) {
+	team, err := c.GetTeam(ctx, id)
+	if err != nil {
+		return team, err
+	}
+	if team.Members, err = c.ListTeamMembers(ctx, id); err != nil {
+		return team, err
+	}
+	if team.Grants, err = c.ListTeamGrants(ctx, id); err != nil {
+		return team, err
+	}
+	team.Machines, err = c.ListTeamMachines(ctx, id)
+	return team, err
 }
 func (c *Client) CreateTeam(ctx context.Context, in TeamCreateRequest) (TeamCheckout, error) {
 	var out TeamCheckout

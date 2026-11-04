@@ -7,8 +7,14 @@ import type { components } from "@/lib/api-schema"
 type Schemas = components["schemas"]
 /** F19 adds `directory_managed` and `sso_exempt` (until the OpenAPI document carries them). */
 export type TeamMember = Schemas["TeamMember"] & { directory_managed?: boolean; sso_exempt?: boolean }
-/** The server sends `suspended` but OpenAPI omits it (NOTES.md). */
-export type Team = Schemas["TeamTeam"] & { suspended?: boolean }
+/** What the server sends for a team: counts, never the member, grant and machine rows (they are paged). */
+export type TeamSummary = Schemas["TeamTeam"] & { suspended?: boolean }
+/** A team with its rows read from the paged lists (`teamQuery`). */
+export type Team = TeamSummary & {
+  members: TeamMember[]
+  grants: Schemas["TeamGrant"][]
+  machines: Schemas["TeamMachine"][]
+}
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type MachineAdmission = Schemas["TeamMachineAdmission"]
 export type TeamAction =
@@ -68,12 +74,34 @@ const teamPath = (team: string) => `teams/${encodeURIComponent(team)}`
  * Team changes are fenced by the team's generation. The page's copy can be a moment behind its own
  * previous change, so a change reads the generation just before it is sent.
  */
-const freshGeneration = async (team: Team) => (await api<Team>(teamPath(team.team_id))).generation
+const freshGeneration = async (team: TeamSummary) => (await api<TeamSummary>(teamPath(team.team_id))).generation
+
+/** Every row of a team list (`members`, `grants`, `machines`), 200 per page, bounded at 50 pages. */
+async function teamRows<T>(team: string, list: string, signal: AbortSignal): Promise<T[]> {
+  const rows: T[] = []
+  let cursor = ""
+  for (let page = 0; page < 50; page++) {
+    const query = new URLSearchParams({ limit: "200", ...(cursor && { cursor }) })
+    const next = await api<{ items: T[]; next_cursor?: string }>(`${teamPath(team)}/${list}?${query}`, { signal })
+    rows.push(...next.items)
+    if (!next.next_cursor) return rows
+    cursor = next.next_cursor
+  }
+  throw new Error(`The team's ${list} list is too long to load.`)
+}
 
 export const teamQuery = (team: string) =>
   queryOptions({
     queryKey: ["team", team],
-    queryFn: ({ signal }) => api<Team>(teamPath(team), { signal }),
+    queryFn: async ({ signal }): Promise<Team> => {
+      const [summary, members, grants, machines] = await Promise.all([
+        api<TeamSummary>(teamPath(team), { signal }),
+        teamRows<TeamMember>(team, "members", signal),
+        teamRows<Schemas["TeamGrant"]>(team, "grants", signal),
+        teamRows<Schemas["TeamMachine"]>(team, "machines", signal),
+      ])
+      return { ...summary, members, grants, machines }
+    },
     staleTime: minute,
   })
 
@@ -96,7 +124,7 @@ export const myInvitationsQuery = queryOptions({
 })
 
 export function createTeam(teamId: string) {
-  return api<Team>("teams", {
+  return api<TeamSummary>("teams", {
     method: "POST",
     headers: json,
     body: JSON.stringify({ operation_id: idempotencyKey(), team_id: teamId }),
@@ -127,7 +155,7 @@ export async function createPaidTeam(teamId: string, seats: number, interval: "m
 }
 
 /** Invites by email; the person can accept after signing up with that address. */
-export function inviteMember(team: Team, email: string, role: TeamRole = "member") {
+export function inviteMember(team: TeamSummary, email: string, role: TeamRole = "member") {
   return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations`, {
     method: "POST",
     headers: json,
@@ -140,7 +168,7 @@ export function inviteMember(team: Team, email: string, role: TeamRole = "member
   })
 }
 
-export async function cancelInvitation(team: Team, invitation: string) {
+export async function cancelInvitation(team: TeamSummary, invitation: string) {
   const expected_generation = await freshGeneration(team)
   return api<unknown>(`${teamPath(team.team_id)}/invitations/${encodeURIComponent(invitation)}/cancel`, {
     method: "POST",
@@ -150,7 +178,7 @@ export async function cancelInvitation(team: Team, invitation: string) {
 }
 
 /** Sends the email again and gives the invitation a fresh 30 days; the server allows one a minute. */
-export function resendInvitation(team: Team, invitation: string) {
+export function resendInvitation(team: TeamSummary, invitation: string) {
   return api<TeamInvitation>(`${teamPath(team.team_id)}/invitations/${encodeURIComponent(invitation)}/resend`, {
     method: "POST",
     headers: json,
@@ -168,7 +196,7 @@ export function answerInvitation(invitation: string, answer: "accept" | "decline
 
 /** Role change, remove, leave, transfer ownership and delete: one endpoint, fenced by generation. */
 export async function teamAction(
-  team: Team,
+  team: TeamSummary,
   action: TeamAction,
   fields: {
     account_id?: string
@@ -180,7 +208,7 @@ export async function teamAction(
   } = {},
 ) {
   const expected_generation = await freshGeneration(team)
-  return api<Team>(`${teamPath(team.team_id)}/actions`, {
+  return api<TeamSummary>(`${teamPath(team.team_id)}/actions`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({ operation_id: idempotencyKey(), expected_generation, action, ...fields }),
@@ -191,9 +219,9 @@ export async function teamAction(
  * An owner or admin answers a machine a member asked to add ("approve", "decline"); its owner can
  * withdraw the request ("unshare").
  */
-export async function answerMachine(team: Team, machineId: string, action: "approve" | "decline" | "unshare") {
+export async function answerMachine(team: TeamSummary, machineId: string, action: "approve" | "decline" | "unshare") {
   const expected_generation = await freshGeneration(team)
-  return api<Team>(`${teamPath(team.team_id)}/machines`, {
+  return api<TeamSummary>(`${teamPath(team.team_id)}/machines`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({
@@ -227,14 +255,14 @@ export type MachineCapability = (typeof machineCapabilities)[number]["id"]
  * is the complete set; turning access off sends the previous set with `active: false`.
  */
 export async function grantMachine(
-  team: Team,
+  team: TeamSummary,
   machineId: string,
   audience: { account?: string },
   capabilities: string[],
   active: boolean,
 ) {
   const expected_generation = await freshGeneration(team)
-  return api<Team>(`${teamPath(team.team_id)}/machine-grants`, {
+  return api<TeamSummary>(`${teamPath(team.team_id)}/machine-grants`, {
     method: "POST",
     headers: json,
     body: JSON.stringify({

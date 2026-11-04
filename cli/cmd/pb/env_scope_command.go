@@ -497,7 +497,7 @@ func runVaultTeamCreate(command *cobra.Command, teamID string) error {
 	}
 	expectedGeneration := uint64(0)
 	membershipGeneration := uint64(1)
-	team, getErr := client.GetTeam(command.Context(), teamID)
+	team, getErr := client.GetTeamDetails(command.Context(), teamID)
 	if getErr == nil {
 		expectedGeneration = team.Generation
 		membershipGeneration = 0

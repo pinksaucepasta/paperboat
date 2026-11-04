@@ -19,7 +19,7 @@ func TestTeamMachineAdmissionCommands(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		team := map[string]any{"team_id": "team_1", "owner_account": "owner_1", "generation": 7, "members": []any{}, "grants": []any{}, "machines": []any{}, "machine_grants": []any{}, "terminal_session_grants": []any{}, "approve_new_machines": true,
+		team := map[string]any{"team_id": "team_1", "owner_account": "owner_1", "generation": 7, "member_count": 0, "grant_count": 0, "machine_count": 0, "machine_grants": []any{}, "terminal_session_grants": []any{}, "approve_new_machines": true,
 			"machine_requests": []map[string]any{{"machine_id": "machine_9", "alias": "studio", "requested_by": "member_1", "state": "pending", "requested_at": "2026-10-19T00:00:00Z"}}}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/teams/team_1":

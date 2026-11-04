@@ -84,7 +84,7 @@ func teamReadCommand(action string) *cobra.Command {
 			if !validTeamCLIIdentifier(values[0]) {
 				return localArgumentError("team must be a valid identifier")
 			}
-			team, err := client.GetTeam(c.Context(), values[0])
+			team, err := client.GetTeamDetails(c.Context(), values[0])
 			if err != nil {
 				return err
 			}

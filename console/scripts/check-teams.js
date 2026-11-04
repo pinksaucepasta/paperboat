@@ -87,6 +87,7 @@
       pass("team page opens", Boolean(header))
       if (!header) return steps
       const team = await get(`teams/${encodeURIComponent(teamId)}`)
+      team.members = (await get(`teams/${encodeURIComponent(teamId)}/members?limit=200`)).items
       Object.assign(saved, {
         id: teamId,
         name: team.display_name || team.name,

@@ -2446,7 +2446,7 @@ export interface paths {
         };
         /**
          * Count the selected workspace's machines (dashboard totals)
-         * @description Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; revoked and disconnected machines are counted only in by_state.revoked.
+         * @description Counts every machine of the workspace that GET /v1/machines would list, not one page. total and by_platform count machines in use; removed machines are in neither.
          */
         get: operations["get_v1_user_machines_summary"];
         put?: never;
@@ -3713,7 +3713,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List bounded incoming and outgoing Team Inbox requests */
+        /**
+         * List bounded incoming and outgoing Team Inbox requests
+         * @description Responses include source_machine_name and destination_machine_name captured at request creation. Request history and pending receipt delivery survive machine removal.
+         */
         get: operations["list_team_inbox_requests"];
         put?: never;
         /**
@@ -3736,7 +3739,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Read exact Team Inbox request status */
+        /**
+         * Read exact Team Inbox request status
+         * @description Responses include source_machine_name and destination_machine_name captured at request creation. Request history and pending receipt delivery survive machine removal.
+         */
         get: operations["get_team_inbox_request"];
         put?: never;
         post?: never;
@@ -3975,7 +3981,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List team grants
+         * @description Keyset page for a current team member; Stored grants ordered by resource kind, resource id and account, then the policy's grants. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).
+         */
+        get: operations["team_grants_list"];
         put?: never;
         /**
          * Team grant
@@ -7563,6 +7573,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List team members
+         * @description Keyset page for a current team member; Members ordered by account id. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).
+         */
+        get: operations["team_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List machines shared into the team
+         * @description Keyset page for a current team member; Machines ordered by machine id. Rechecks authorization on every page. The team object carries only the totals (member_count, grant_count, machine_count).
+         */
+        get: operations["team_machines_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9563,8 +9613,6 @@ export interface components {
             owner_account: string;
             generation: number;
             deleted: boolean;
-            members: components["schemas"]["TeamMember"][];
-            grants: components["schemas"]["TeamGrant"][];
             display_name: string;
             suspended: boolean;
             /** @description Machines that members add wait for an owner or admin to accept them. */
@@ -9573,11 +9621,18 @@ export interface components {
             allow_private_access?: boolean;
             /** @description Owners and admins see every request; other members see their own. */
             machine_requests?: components["schemas"]["TeamMachineAdmission"][];
-            machines?: components["schemas"]["TeamMachine"][];
             machine_grants?: components["schemas"]["TeamMachineGrant"][];
             sso_required?: boolean;
             /** @description For the viewer: whether their SSO sign-in satisfies the team. Without it the team lists only its name. */
             sso_signed_in?: boolean;
+            /** @description Page the rows with GET /v1/teams/{team_id}/members. */
+            member_count: number;
+            /** @description Page the rows with GET /v1/teams/{team_id}/grants. */
+            grant_count: number;
+            /** @description Page the rows with GET /v1/teams/{team_id}/machines. */
+            machine_count: number;
+            /** @description The viewer's role in the team. */
+            my_role?: string;
         };
         TeamActivityItem: {
             id: string;
@@ -11405,6 +11460,27 @@ export interface components {
             counts?: {
                 [key: string]: number;
             };
+        };
+        TeamMemberPage: {
+            items: components["schemas"]["TeamMember"][];
+            /** @description Opaque team-scoped cursor; absent when no later page exists. */
+            next_cursor?: string;
+            /** @description Every member row of the team (active or not). */
+            total: number;
+        };
+        TeamGrantPage: {
+            items: components["schemas"]["TeamGrant"][];
+            /** @description Opaque team-scoped cursor; absent when no later page exists. */
+            next_cursor?: string;
+            /** @description Stored grants plus the policy's grants. */
+            total: number;
+        };
+        TeamMachinePage: {
+            items: components["schemas"]["TeamMachine"][];
+            /** @description Opaque team-scoped cursor; absent when no later page exists. */
+            next_cursor?: string;
+            /** @description Every machine shared into the team. */
+            total: number;
         };
     };
     responses: {
@@ -16077,8 +16153,8 @@ export interface operations {
                 offset?: number;
                 /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. Matches alias, machine id and local address; a hostname matches by its first label (the alias). */
                 q?: string;
-                /** @description revoked lists revoked and disconnected machines (what the summary counts as revoked); without state the list is the machines in use. */
-                state?: "online" | "offline" | "disconnected" | "revoked" | "pending";
+                /** @description Filters the machines in use by state; removed machines are never listed. */
+                state?: "online" | "offline" | "pending";
                 /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
                 /** @description Keyset position from next_cursor: the page after it in alias order. Not with offset. */
@@ -16266,14 +16342,13 @@ export interface operations {
                 content: {
                     "application/json": {
                         data?: {
-                            /** @description Machines in use (revoked and disconnected excluded). */
+                            /** @description Machines in use. */
                             total: number;
-                            /** @description Machines in use by state; revoked counts revoked and disconnected machines, which total leaves out. */
+                            /** @description Machines in use by state. */
                             by_state: {
                                 online: number;
                                 offline: number;
                                 pending: number;
-                                revoked: number;
                             } & {
                                 [key: string]: number;
                             };
@@ -19729,6 +19804,39 @@ export interface operations {
                 };
             };
             412: components["responses"]["Error"];
+        };
+    };
+    team_grants_list: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor returned by the preceding page. */
+                cursor?: string;
+                /** @description Defaults to 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded page with the total. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamGrantPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     team_grant: {
@@ -27935,6 +28043,72 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    team_members: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor returned by the preceding page. */
+                cursor?: string;
+                /** @description Defaults to 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded page with the total. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamMemberPage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    team_machines_list: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor returned by the preceding page. */
+                cursor?: string;
+                /** @description Defaults to 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded page with the total. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamMachinePage"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

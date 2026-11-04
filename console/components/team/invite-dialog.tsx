@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { api, ApiError } from "@/lib/api"
 import { billingKey, notLiveTitle } from "@/lib/billing"
-import { inviteMember, teamInvitationsQuery, teamLive, teamQuery, type Team, type TeamRole } from "@/lib/teams"
+import { inviteMember, teamInvitationsQuery, teamLive, teamQuery, type Team, type TeamRole, type TeamSummary } from "@/lib/teams"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -82,7 +82,7 @@ function InviteForm({
       const results: Outcome[] = []
       for (const email of emails) {
         try {
-          const current = await api<Team>(`teams/${encodeURIComponent(team.team_id)}`)
+          const current = await api<TeamSummary>(`teams/${encodeURIComponent(team.team_id)}`)
           await inviteMember(current, email, role)
           results.push({ email })
         } catch (error) {

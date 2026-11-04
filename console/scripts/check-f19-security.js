@@ -110,7 +110,7 @@
       }
 
       // Members: directory-managed people are marked; held invitations keep their role.
-      const members = (await (await fetch(`/api/v1/teams/${teamId}`)).json()).data?.members ?? []
+      const members = (await (await fetch(`/api/v1/teams/${teamId}/members?limit=200`)).json()).data?.items ?? []
       window.next.router.push(`/team?team=${teamId}`)
       await until(() => /Invitations/.test(text()) && /Joined/.test(text()) && text())
       const rowOf = (needle) =>

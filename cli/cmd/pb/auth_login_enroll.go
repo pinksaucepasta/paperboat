@@ -173,7 +173,11 @@ func machineWorkspaceSummary(ctx context.Context, store config.ProfileStore, iss
 	}
 	for _, team := range teams {
 		name := firstNonEmpty(team.Name, team.TeamID)
-		for _, binding := range team.Machines {
+		bindings, err := client.ListTeamMachines(ctx, team.TeamID)
+		if err != nil {
+			return strings.Join(parts, ", ")
+		}
+		for _, binding := range bindings {
 			if binding.MachineID == machineID && (binding.Active || binding.OwnerTeamID == team.TeamID) {
 				parts = append(parts, name)
 			}

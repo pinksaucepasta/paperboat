@@ -50,8 +50,8 @@
     await useWorkspace(teamId)
 
     // Members: the owner's role menu offers the four roles with their descriptions.
-    const team = (await get(`teams/${teamId}`)).data
-    const target = team?.members?.find((m) => m.active && m.role !== "owner")
+    const members = (await get(`teams/${teamId}/members?limit=200`)).data?.items
+    const target = members?.find((m) => m.active && m.role !== "owner")
     const page = await open("/team", () => /Your role/.test(text()))
     pass("team page opens", Boolean(page))
     if (target) {

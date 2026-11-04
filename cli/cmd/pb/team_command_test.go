@@ -308,8 +308,10 @@ func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
 				case "/v1/teams/team_1":
 					json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 						"env_status": "rotation_pending", "team_id": "team_1", "owner_account": "acct_1", "generation": 4,
-						"deleted": false, "members": []any{}, "grants": []any{}, "machines": []any{}, "machine_grants": []any{},
+						"deleted": false, "member_count": 0, "grant_count": 0, "machine_count": 0, "machine_grants": []any{},
 					}})
+				case "/v1/teams/team_1/members", "/v1/teams/team_1/grants", "/v1/teams/team_1/machines":
+					json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"items": []any{}, "total": 0}})
 				default:
 					http.NotFound(w, r)
 				}
@@ -337,26 +339,35 @@ func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) 
 		if teamFixtureUpdatePolicy(w, r) {
 			return
 		}
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/teams/team_1" {
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{
-   "team_id":"team_1", "name":"Research crew", "owner_account":"acct_owner",
-   "generation":7, "suspended":true,
-   "members":[
-    {"account_id":"acct_member","role":"admin","active":true},
-    {"account_id":"acct_removed","role":"member","active":false}
-   ],
-   "grants":[
+		switch r.URL.Path {
+		case "/v1/teams/team_1/members":
+			// Two pages: the client follows next_cursor.
+			if r.URL.Query().Get("cursor") == "" {
+				_, _ = w.Write([]byte(`{"data":{"items":[{"account_id":"acct_member","role":"admin","active":true}],"next_cursor":"c2","total":2}}`))
+			} else if r.URL.Query().Get("cursor") == "c2" {
+				_, _ = w.Write([]byte(`{"data":{"items":[{"account_id":"acct_removed","role":"member","active":false}],"total":2}}`))
+			} else {
+				http.NotFound(w, r)
+			}
+		case "/v1/teams/team_1/grants":
+			_, _ = w.Write([]byte(`{"data":{"items":[
     {"account_id":"acct_member","resource_kind":"preview","resource_id":"preview_1","permission":"use","active":true},
     {"account_id":"acct_member","resource_kind":"tunnel","resource_id":"tunnel_revoked","permission":"manage","active":false}
-   ],
+   ],"total":2}}`))
+		case "/v1/teams/team_1/machines":
+			_, _ = w.Write([]byte(`{"data":{"items":[],"total":0}}`))
+		case "/v1/teams/team_1":
+			_, _ = w.Write([]byte(`{"data":{
+   "team_id":"team_1", "name":"Research crew", "owner_account":"acct_owner",
+   "generation":7, "suspended":true, "member_count":2, "grant_count":2, "machine_count":0,
    "terminal_session_grants":[
     {"terminal_session_id":"terminal_1","audience":"all_members","role":"viewer","generation":2,"active":true}
    ]
   }}`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
 	dir := t.TempDir()
