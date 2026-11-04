@@ -10,6 +10,7 @@ import uuid
 from install_lifecycle import registration
 
 PB = Path.home() / '.local/bin/pb'
+AUTOMATIC_LIMIT = 2_000_000_000  # api.AutomaticTransferLimit in cli/internal/api/api_terminal.go
 
 
 def send(*paths, target):
@@ -39,11 +40,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix=prefix) as directory:
         big = Path(directory) / 'too-big.bin'
         with big.open('wb') as handle:
-            handle.truncate(51 << 20)  # a sparse 51 MiB file: one byte over the 50 MiB limit
+            handle.truncate(AUTOMATIC_LIMIT + 1)  # sparse, one byte over the Automatic limit
         code, error, _ = send(big, target=args.target)
         if code == 0 or error.get('code') != 'file_transfer_limit_exceeded' or error.get('state_changed') is not False:
             raise RuntimeError('over-limit file was not refused as file_transfer_limit_exceeded with nothing sent: %r' % (error.get('code'),))
-        if '50 MiB' not in error.get('message', '') or 'Nothing was sent' not in error.get('message', ''):
+        if '2 GB' not in error.get('message', '') or 'Nothing was sent' not in error.get('message', ''):
             raise RuntimeError('over-limit message does not state the limit and that nothing was sent')
         many = []
         for index in range(12):
