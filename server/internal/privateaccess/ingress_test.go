@@ -66,7 +66,7 @@ func testNativeIngress(t *testing.T, preview bool) {
 		t.Fatal(err)
 	}
 	resolver := &fakeResolver{binding: b}
-	service, err := NewService(resolver, nil, Config{Now: func() time.Time { return now }, GrantVerifier: grants, MachineState: state, IngressSource: source})
+	service, err := NewService(resolver, nil, Config{Idempotency: newTestIdempotency(), Now: func() time.Time { return now }, GrantVerifier: grants, MachineState: state, IngressSource: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func newNativeIngressErrorFixture(t *testing.T, sourceErr error) nativeIngressEr
 	resolver := &fakeResolver{binding: b}
 	audit := &privateAccessAuditRecorder{}
 	source := &nativeRouteSource{decision: d, err: sourceErr}
-	service, err := NewService(resolver, audit, Config{Now: func() time.Time { return now }, GrantVerifier: grants, MachineState: state, IngressSource: source})
+	service, err := NewService(resolver, audit, Config{Idempotency: newTestIdempotency(), Now: func() time.Time { return now }, GrantVerifier: grants, MachineState: state, IngressSource: source})
 	if err != nil {
 		t.Fatal(err)
 	}

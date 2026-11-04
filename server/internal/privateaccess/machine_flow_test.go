@@ -127,7 +127,7 @@ func TestMachineGrantThenEdgeAuthorize(t *testing.T) {
 	}}
 	grants := &fakeGrant{}
 	state := &fakeMachineState{}
-	service, err := NewService(resolver, nil, Config{Now: testClock, GrantMinter: grants, GrantVerifier: grants, MachineState: state, IngressSource: ingress})
+	service, err := NewService(resolver, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantMinter: grants, GrantVerifier: grants, MachineState: state, IngressSource: ingress})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestEdgeAuthorizeRejectsRequestThatDoesNotMatchSignedGrant(t *testing.T) {
 	now := testClock()
 	signed := testRequest(now)
 	grants := &fakeGrant{request: signed, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: testBinding(now)}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(&fakeResolver{binding: testBinding(now)}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestAuthorizeStatusMapping(t *testing.T) {
 		want        int
 	}{{"revoked", newDenied(ReasonMachineRevoked), nil, http.StatusUnauthorized}, {"denied", nil, newDenied(ReasonWrongRoute), http.StatusForbidden}, {"unavailable", ErrIdentityUnavailable, nil, http.StatusServiceUnavailable}} {
 		t.Run(tc.name, func(t *testing.T) {
-			service, _ := NewService(&fakeResolver{binding: testBinding(now), err: tc.resolverErr}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{err: tc.stateErr}})
+			service, _ := NewService(&fakeResolver{binding: testBinding(now), err: tc.resolverErr}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{err: tc.stateErr}})
 			h, _ := NewHTTPHandler(service, fakeEdge{identity: EdgeIdentity{NodeID: "edge_1", ProcessEpoch: "epoch_001"}})
 			req := httptest.NewRequest(http.MethodPost, AuthorizePath, bytes.NewReader(mustJSON(t, r)))
 			req.Header.Set("Content-Type", "application/json")

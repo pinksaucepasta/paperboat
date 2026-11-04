@@ -39,7 +39,12 @@ func NewProduction(database *db.DB, provider *mint.Provider, issuer string, mach
 	if err != nil {
 		return nil, err
 	}
+	idempotency, err := NewSQLIdempotencyStore(database)
+	if err != nil {
+		return nil, err
+	}
 	service, err := NewService(resolver, auditSink, Config{
+		Idempotency:   idempotency,
 		IngressSource: &ingressprojection.SQLIngressSource{DB: database, Quota: quota},
 		GrantVerifier: grantIssuer,
 		GrantMinter:   grantIssuer,

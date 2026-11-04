@@ -38,6 +38,8 @@ type IngressSource interface {
 // resolver remains authoritative on every call so revocation and route changes
 // take effect promptly even when a caller retries the same idempotency key.
 type Config struct {
+	// Idempotency binds each idempotency key to one request across every server instance.
+	Idempotency   IdempotencyStore
 	IngressSource IngressSource
 	Now           func() time.Time
 	DecisionTTL   time.Duration
@@ -60,13 +62,15 @@ type Service struct {
 	minter   GrantMinter
 	machine  MachineStateVerifier
 
+	idempotency IdempotencyStore
+
 	mu    sync.Mutex
 	cache map[string]cachedDecision
 }
 
 func NewService(resolver ResourceResolver, audit AuditSink, cfg Config) (*Service, error) {
-	if resolver == nil {
-		return nil, fmt.Errorf("%w: resource resolver is required", ErrInvalid)
+	if resolver == nil || cfg.Idempotency == nil {
+		return nil, fmt.Errorf("%w: resource resolver and idempotency store are required", ErrInvalid)
 	}
 	now := cfg.Now
 	if now == nil {
@@ -86,7 +90,7 @@ func NewService(resolver ResourceResolver, audit AuditSink, cfg Config) (*Servic
 	if maxCache < 1 || maxCache > 16384 {
 		return nil, fmt.Errorf("%w: decision cache bound is invalid", ErrInvalid)
 	}
-	return &Service{ingress: cfg.IngressSource, resolver: resolver, audit: audit, clock: now, ttl: ttl, maxCache: maxCache, grant: cfg.GrantVerifier, minter: cfg.GrantMinter, machine: cfg.MachineState, cache: make(map[string]cachedDecision)}, nil
+	return &Service{ingress: cfg.IngressSource, resolver: resolver, audit: audit, clock: now, ttl: ttl, maxCache: maxCache, grant: cfg.GrantVerifier, minter: cfg.GrantMinter, machine: cfg.MachineState, idempotency: cfg.Idempotency, cache: make(map[string]cachedDecision)}, nil
 }
 
 // IssueGrant validates the current identity and route before signing one
@@ -257,7 +261,9 @@ func (s *Service) Authorize(ctx context.Context, input AuthorizeInput) (Decision
 		return s.deny(ctx, input, ReasonIdentityInvalid, now, "admitted_decision")
 	}
 	cacheKey := input.Identity.AccountID + "\x00" + input.Identity.SessionID + "\x00" + input.Request.IdempotencyKey
-	if s.cachedConflict(cacheKey, fingerprint, now) {
+	if same, err := s.idempotency.Bind(ctx, input.Identity.AccountID, input.Identity.SessionID, input.Request.IdempotencyKey, fingerprint, now.Add(s.ttl)); err != nil {
+		return Decision{}, fmt.Errorf("%w: bind idempotency key: %w", ErrIdentityUnavailable, err)
+	} else if !same {
 		return Decision{}, ErrIdempotencyConflict
 	}
 	binding, err := s.resolver.ResolvePrivate(ctx, Lookup{AccountID: input.Identity.AccountID, Request: input.Request, Edge: input.Edge, Now: now})
@@ -377,19 +383,6 @@ func (s *Service) replay(key, fingerprint string, now time.Time) (Decision, bool
 		return Decision{}, false
 	}
 	return value.decision, true
-}
-
-func (s *Service) cachedConflict(key, fingerprint string, now time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	value, ok := s.cache[key]
-	if !ok || !value.expiresAt.After(now) {
-		if ok {
-			delete(s.cache, key)
-		}
-		return false
-	}
-	return value.fingerprint != fingerprint
 }
 
 func (s *Service) store(key string, value cachedDecision) error {

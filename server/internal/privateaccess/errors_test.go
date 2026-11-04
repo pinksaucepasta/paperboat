@@ -106,7 +106,7 @@ func TestPrivateAccessAuthorityOutagePreservesCauseAndRecovers(t *testing.T) {
 	resolver := &fakeResolver{binding: binding, err: errors.Join(ErrRouteUnavailable, syscall.ECONNREFUSED, errors.New("PRIVATE_AUTHORITY_DETAIL"))}
 	grants := &fakeGrant{request: request, token: "signed_grant"}
 	audit := &privateAccessAuditRecorder{}
-	service, err := NewService(resolver, audit, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(resolver, audit, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestPrivateAccessMixedMissingAndOperationalCauseRemainsUnavailable(t *testi
 	private := errors.New("PRIVATE_MISSING_AUTHORITY_DETAIL")
 	resolver := &fakeResolver{binding: binding, err: errors.Join(ErrResourceNotFound, syscall.EIO, private)}
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(resolver, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(resolver, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestPrivateAccessMixedMachineDenialAndIORemainsOperational(t *testing.T) {
 	private := errors.New("PRIVATE_MACHINE_STATE_DETAIL")
 	state := &fakeMachineState{err: errors.Join(newDenied(ReasonMachineRevoked), syscall.EIO, private)}
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: state})
+	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: state})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestPrivateAccessRequestReadFailureIsUnavailableAndActionable(t *testing.T)
 	now := testClock()
 	request, binding := testPrivateTunnelTCP(now)
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestPrivateAccessSuccessWriteFailureIsReported(t *testing.T) {
 	now := testClock()
 	request, binding := testPrivateTunnelTCP(now)
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestPrivateAccessErrorResponseWriteFailureIsReported(t *testing.T) {
 	now := testClock()
 	request, binding := testPrivateTunnelTCP(now)
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestGrantHTTPMixedIdempotencyConflictRemainsOperationalAndRecovers(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			minter := &fakeGrant{token: "signed_grant", mintErr: tc.err}
-			service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock, GrantMinter: minter, MachineState: &fakeMachineState{}})
+			service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantMinter: minter, MachineState: &fakeMachineState{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -457,7 +457,7 @@ func TestGrantHTTPMixedIdempotencyConflictRemainsOperationalAndRecovers(t *testi
 func TestPrivateAccessVerifierDistinguishesRejectionFromOutage(t *testing.T) {
 	now := testClock()
 	request, binding := testPrivateTunnelTCP(now)
-	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Now: testClock})
+	service, err := NewService(&fakeResolver{binding: binding}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestPrivateAccessAuditFailureKeepsOriginalCause(t *testing.T) {
 	private := errors.New("PRIVATE_AUDIT_DATABASE_DETAIL")
 	audit := &privateAccessAuditRecorder{err: errors.Join(syscall.ECONNREFUSED, private)}
 	grants := &fakeGrant{request: request, token: "signed_grant"}
-	service, err := NewService(&fakeResolver{binding: binding}, audit, Config{Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
+	service, err := NewService(&fakeResolver{binding: binding}, audit, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantVerifier: grants, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestGrantIssueVerifierOutageIsActionableAndInvalidProofStaysRejected(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(&fakeResolver{}, nil, Config{Now: testClock})
+	service, err := NewService(&fakeResolver{}, nil, Config{Idempotency: newTestIdempotency(), Now: testClock})
 	if err != nil {
 		t.Fatal(err)
 	}

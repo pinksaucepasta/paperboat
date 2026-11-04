@@ -857,7 +857,7 @@ func New(opts Options) (*App, error) {
 		}
 		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
 		// Secrets held for API token create retries never outlive their window (F21-12).
-		err = errors.Join(err, retentionErr, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext))
+		err = errors.Join(err, retentionErr, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

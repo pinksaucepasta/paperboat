@@ -79,7 +79,7 @@ func TestPreviewAttachmentIssuesWireValidGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(resolver, nil, Config{Now: testClock, GrantMinter: issuer, GrantVerifier: issuer, MachineState: &fakeMachineState{}})
+	service, err := NewService(resolver, nil, Config{Idempotency: newTestIdempotency(), Now: testClock, GrantMinter: issuer, GrantVerifier: issuer, MachineState: &fakeMachineState{}})
 	if err != nil {
 		t.Fatal(err)
 	}
