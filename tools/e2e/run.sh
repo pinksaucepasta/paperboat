@@ -10,6 +10,8 @@ host=e2e-server.example.test port=8443
 gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
 diagnose() { # on failure: what the server answered and what the daemons said
   echo "--- server last requests"; { grep -hE "request method|panic" "$work"/proxy.log "$work/server.log" | tail -60 | cut -c1-300; } || true
+  echo "--- leader log"; grep -H "leader" "$work"/server?.log 2>&1 | cut -c1-260 | tail -30 || true
+  echo "--- advisory locks"; psql "$PAPERBOAT_TEST_DATABASE_DSN" -c "select l.pid,l.granted,a.state,a.backend_start,now() from pg_locks l left join pg_stat_activity a using(pid) where l.locktype='advisory'" 2>&1 || true
   echo "--- machines"; psql "$PAPERBOAT_TEST_DATABASE_DSN" -c "select alias,state,online,seat_state,configured_capabilities,observed_capabilities,last_seen_at,now() from paperboat.user_machines" 2>&1 || true
   for c in e2e-a e2e-b e2e-c; do echo "--- $c daemon"; docker exec -u pbt -e XDG_RUNTIME_DIR=/run/user/1000 $c journalctl --user --no-pager -n 25 2>&1 | cut -c1-300 || true; done
 }
