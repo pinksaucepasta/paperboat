@@ -14,6 +14,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -132,6 +135,32 @@ func TestProcessLoggerRetainsOnlyAuthoredReconnectMetadata(t *testing.T) {
 	}
 	if events := recorder.Recent(); len(events) != 3 || events[2].Code != "unclassified_log" {
 		t.Fatal("untrusted producer retained metadata")
+	}
+}
+
+// pbvm4 feat8: the handover admission refusals arrived without their reason codes.
+func TestProcessLoggerRetainsHandoverAdmissionReasons(t *testing.T) {
+	recorder := diagnostics.NewMemoryRecorder()
+	handler := processDiagnosticHandler{recorder: recorder, component: "pb"}
+	for _, test := range []struct {
+		message string
+		pc      uintptr
+	}{
+		{"native worker admission refused", reflect.ValueOf((*server.NativeDispatchHandler).ServeHTTP).Pointer()},
+		{"native dispatch admission refused", reflect.ValueOf((*server.NativeDispatchClient).Authorize).Pointer()},
+		{"native owner admission refused", reflect.ValueOf((*workloadbridge.Server).Run).Pointer()},
+		{"data carrier closed", reflect.ValueOf((*connector.DataCarrier).ID).Pointer()},
+	} {
+		record := slog.NewRecord(time.Now(), slog.LevelWarn, test.message, test.pc)
+		record.Add("stage", "worker_fence", "reason", "maintenance_busy", "credential", "PRIVATE")
+		if err := handler.Handle(t.Context(), record); err != nil {
+			t.Fatal(err)
+		}
+		events := recorder.Recent()
+		fields := events[len(events)-1].Fields
+		if events[len(events)-1].Code != "reconnect_transport" || fields["reason"] != "maintenance_busy" || fields["stage"] != "worker_fence" || fields["credential"] != "" {
+			t.Fatalf("%s: reason code dropped or private attribute retained: %#v", test.message, fields)
+		}
 	}
 }
 
