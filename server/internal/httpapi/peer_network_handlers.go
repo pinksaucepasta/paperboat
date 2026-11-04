@@ -151,6 +151,7 @@ func machineCarrierOffer(s peerNetworkService, v machineEndpointProofVerifier, l
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: struct{}{}})
 	}
 }
+
 // verifyMachinePeerNetwork reads a machine-proof request body and verifies it: the per-credential limiter first
 // (before any proof or database work), then the proof over the exact body and its operation id.
 func verifyMachinePeerNetwork(w http.ResponseWriter, r *http.Request, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) (controlplane.MachineRequestClaims, []byte, bool) {
