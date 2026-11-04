@@ -114,7 +114,7 @@ if has multi; then
   sleep 20
   kill -9 "${pids[2]}"; killed=$(date +%s); echo "killed instance 2 at $killed"
   sleep 3
-  code=$(pbx e2e-a machine revoke e2e-c 2>&1 | grep -o -- '--confirm [A-Za-z0-9]\{6\}' | head -1 | cut -d' ' -f2)
+  code=$( (pbx e2e-a machine revoke e2e-c 2>&1 || true) | grep -o -- '--confirm [A-Za-z0-9]\{6\}' | head -1 | cut -d' ' -f2)
   [ -n "$code" ] || { echo "no revoke confirmation code" >&2; exit 1; }
   pbx e2e-a machine revoke e2e-c --confirm "$code"
   revoked=$(psql -At "$PAPERBOAT_TEST_DATABASE_DSN" -c "select count(*) from paperboat.user_machines where alias='e2e-c' and (revoked_at is not null or state in ('revoked','disconnected'))")
