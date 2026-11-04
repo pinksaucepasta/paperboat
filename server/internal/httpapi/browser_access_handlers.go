@@ -305,9 +305,14 @@ func (h *BrowserAccessHandlers) MachineRequest(w http.ResponseWriter, r *http.Re
 		writeJSON(w, 200, SuccessResponse{Data: current})
 		return
 	}
-	kind, id := "tunnel", d.Binding.TunnelID
-	if d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral {
-		kind, id = "preview", d.Binding.PublicationID
+	kind, id := "preview", d.Binding.PublicationID
+	if d.Binding.Lifecycle != connectorprotocol.TunnelEphemeral {
+		// The binding's tunnel_id can name the runtime carrier a tunnel rides; the grant is bound to the tunnel.
+		kind = "tunnel"
+		if id, err = h.Access.TunnelForRoute(r.Context(), d.Binding.RouteID); err != nil {
+			browserAccessError(w, r, err)
+			return
+		}
 	}
 	a, err := h.Access.AuthorizeGrant(r.Context(), d.GrantID, d.Binding.Hostname, kind, id, d.Binding.RouteID)
 	if err != nil {

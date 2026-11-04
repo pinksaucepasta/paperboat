@@ -191,6 +191,18 @@ func TestTunnelOwnerSessionSurvivesAnOrdinaryTunnelEditPostgres(t *testing.T) {
 	if _, otherIssue := issue(otherSession, other); !otherIssue.Denied {
 		t.Fatal("another account was let into a private tunnel")
 	}
+	// The machine re-checks the edge's decision by grant (/v1/browser-access/ingress/authorize). An engine
+	// tunnel's decision names its runtime carrier as tunnel_id; the tunnel comes from the route instead
+	// (production 2026-11-05: the owner got 502 when the carrier id was compared with the tunnel).
+	if got, err := s.TunnelForRoute(ctx, route); err != nil || got != tunnel {
+		t.Fatalf("TunnelForRoute = %q %v, want %q", got, err, tunnel)
+	}
+	if _, err := s.AuthorizeGrant(ctx, a.GrantID, host, "tunnel", tunnel, route); err != nil {
+		t.Fatalf("the owner's grant was refused for its own tunnel: %v", err)
+	}
+	if _, err := s.AuthorizeGrant(ctx, a.GrantID, host, "tunnel", "route_runtime_carrier_"+suffix, route); err == nil {
+		t.Fatal("a grant was accepted for a resource it is not bound to")
+	}
 	exec(`UPDATE paperboat.tunnels SET access_mode='public' WHERE id=$1`, tunnel)
 	if _, err := authorize(); err == nil {
 		t.Fatal("an access-mode change did not revoke the browser session")

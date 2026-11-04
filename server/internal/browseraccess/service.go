@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -890,4 +891,16 @@ func refusedAuthorize(ctx context.Context, err error, step, kind, id, route, sto
 		slog.WarnContext(ctx, "browser authorize refused", "step", step, "kind", kind, "resource_id", id, "route_id", route, "stored_kind", storedKind, "stored_resource_id", storedID, "stored_route_id", storedRoute)
 	}
 	return err
+}
+
+// TunnelForRoute names the tunnel a route belongs to. A tunnel on the endpoint engine rides the machine's
+// runtime carrier, so its ingress binding's tunnel_id names that carrier; the route is exact and
+// server-owned, and browser grants are bound to the tunnel.
+func (s *Service) TunnelForRoute(ctx context.Context, routeID string) (string, error) {
+	var tunnel string
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT tunnel_id FROM paperboat.tunnel_routes WHERE id=$1 AND deleted_at IS NULL`, routeID).Scan(&tunnel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotAuthorized
+	}
+	return tunnel, err
 }
