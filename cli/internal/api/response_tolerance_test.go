@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/clientapi"
+	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
 	"os"
 	"path/filepath"
 	"reflect"
