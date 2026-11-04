@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main/error paths for C127–C138, C169/C172/C177/C179–C181 on an enrolled Linux fixture.
+"""Main/error paths for C127–C138, C169/C172/C177/C179–C181 on an enrolled Linux or macOS fixture.
 
 Requires a signed-in pb account (also used by config_sync_lifecycle.py to delete the exact test repository),
 an unassigned machine without config-sync.toml, Git, and sudo access (password on stdin if needed).
@@ -245,7 +245,11 @@ class Suite:
                     self.rows[row]['failures'].append({'phase': 'main', 'reason': str(error), 'command': self.last})
         if set(self.args.rows or ROWS) & REPOSITORIES:
             # Retain fixture files if cleanup fails, rather than leave an active assignment pointing at deleted data.
-            root = Path(tempfile.mkdtemp(prefix='pb-config-commands-'))
+            cache = None
+            if sync.DARWIN:  # $TMPDIR is under the /var symlink; keep the fixture in the home tree like config_sync_lifecycle.py
+                cache = Path.home() / '.cache'
+                cache.mkdir(exist_ok=True)
+            root = Path(tempfile.mkdtemp(prefix='pb-config-commands-', dir=cache))
             try:
                 self.repositories(root)
             except Exception as error:
@@ -269,6 +273,7 @@ class Suite:
 
 
 def main():
+    sync.use_platform_paths()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rows', nargs='+', choices=ROWS)
     parser.add_argument('--output')

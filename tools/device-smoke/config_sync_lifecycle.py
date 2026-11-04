@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F11 on one Linux machine: repositories, credentials, sync, approval, conflicts, force, unassign.
+"""F11 on one Linux or macOS machine: repositories, credentials, sync, approval, conflicts, force, unassign.
 
 Runs ON the paired machine (copy tools/device-smoke there, `python3 config_sync_lifecycle.py ALIAS`).
 Everything it creates lives under ~/.cache/pb-cfg-lifecycle and is removed at the end; the machine's own
@@ -19,6 +19,7 @@ import base64
 import getpass
 import json
 import os
+import platform
 import shlex
 import shutil
 import stat
@@ -33,14 +34,29 @@ from pathlib import Path
 
 HOME = Path.home()
 ROOT = HOME / '.cache' / 'pb-cfg-lifecycle'
-MACHINE_FILE = HOME / '.config' / 'paperboat' / 'config-sync.toml'
+CONFIG_DIR = HOME / '.config' / 'paperboat'
+MACHINE_FILE = CONFIG_DIR / 'config-sync.toml'
+RUNTIME_ROOT = HOME / '.local/state/paperboat/runtime'
 UNIT = 'paperboat-runtime-config.service'
+DARWIN = platform.system() == 'Darwin'
+LAUNCHD_LABEL = 'com.pinksaucepasta.paperboat.runtime-config'  # cli/internal/hostruntime/service ConfigLabel, a LaunchAgent
 SYNC_WAIT = 240
 results = {}
 
 
 def pb(*args, stdin=None, timeout=180):
     return subprocess.run(['pb', *args], capture_output=True, text=True, timeout=timeout, input=stdin)
+
+
+def use_platform_paths():
+    """macOS keeps pb's config, machine file and runtime state elsewhere; ask pb for them. Linux keeps the defaults above."""
+    global CONFIG_DIR, MACHINE_FILE, RUNTIME_ROOT
+    if not DARWIN:
+        return
+    os.environ['PATH'] = str(HOME / '.local/bin') + os.pathsep + os.environ['PATH']
+    CONFIG_DIR = Path(pb('config', 'path').stdout.strip()).parent
+    MACHINE_FILE = Path(pb('config', 'sync', 'path').stdout.strip())
+    RUNTIME_ROOT = HOME / 'Library/Application Support/Paperboat/runtime'
 
 
 def pb_json(*args, stdin=None, ok=True):
@@ -215,9 +231,9 @@ class Fixture:
 
 
 def api_token_request(path, method='GET'):
-    secrets = glob.glob(str(HOME / '.config/paperboat/credentials/secrets/profile-*-access.secret'))
+    secrets = glob.glob(str(CONFIG_DIR / 'credentials/secrets/profile-*-access.secret'))
     token = Path(secrets[0]).read_text().strip()
-    server = json.loads((HOME / '.config/paperboat/config.json').read_text())['server_url']
+    server = json.loads((CONFIG_DIR / 'config.json').read_text())['server_url']
     request = urllib.request.Request(server + path, method=method, headers={'Authorization': 'Bearer ' + token, 'X-Paperboat-Workspace': 'personal'})
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.status
@@ -242,11 +258,44 @@ def my_status(alias):
 
 
 def systemctl(*args):
+    if DARWIN:
+        return launchctl(*args)
     return subprocess.run(['systemctl', '--user', *args], capture_output=True, text=True)
+
+
+def launchctl(action, unit):
+    """The systemctl verbs this script uses, on the config worker LaunchAgent (KeepAlive, so stop is a bootout)."""
+    domain = 'gui/%d' % os.getuid()
+    target = domain + '/' + LAUNCHD_LABEL
+
+    def run(*words):
+        return subprocess.run(['launchctl', *words], capture_output=True, text=True)
+    if action == 'stop':
+        result = run('bootout', target)
+        for _ in range(50):  # bootout returns before launchd has reaped the job
+            if run('print', target).returncode != 0:
+                break
+            time.sleep(0.2)
+        return result
+    if action == 'start':
+        for _ in range(25):
+            result = run('bootstrap', domain, str(HOME / 'Library/LaunchAgents' / (LAUNCHD_LABEL + '.plist')))
+            if result.returncode == 0:
+                break
+            time.sleep(0.4)
+        return result
+    raise ValueError('unsupported verb ' + action)
+
+
+def worker_gone():
+    if DARWIN:
+        return subprocess.run(['launchctl', 'print', 'gui/%d/%s' % (os.getuid(), LAUNCHD_LABEL)], capture_output=True).returncode != 0
+    return systemctl('is-enabled', UNIT).returncode != 0 or systemctl('is-active', UNIT).stdout.strip() != 'active'
 
 
 def main():
     alias = sys.argv[1]
+    use_platform_paths()
     shutil.rmtree(ROOT, ignore_errors=True)  # a killed earlier run leaves its key and repositories
     ROOT.mkdir(parents=True)
     backup = MACHINE_FILE.read_text() if MACHINE_FILE.exists() else None
@@ -282,7 +331,7 @@ def main():
         def credentials():
             saved = pb_json('config', 'repository', 'credentials', 'set', repositories['http'], '--file', '-', stdin=profile)
             assert saved['state'] == 'saved', saved
-            files = glob.glob(str(HOME / '.local/state/paperboat/runtime/config-sync/repository-credentials/*'))
+            files = glob.glob(str(RUNTIME_ROOT / 'config-sync/repository-credentials/*'))
             assert files and all(stat.S_IMODE(os.stat(f).st_mode) == 0o600 for f in files), 'credential profile files are not owner-only'
             assert fixture.password not in json.dumps(saved) and fixture.password not in pb('config', 'repository', 'list').stdout
             if ssh_error is None:
@@ -409,7 +458,7 @@ def main():
             confirmed('config', 'unassign', alias)
             assert my_status(alias)['state'] == 'disabled'
             assert not [c for c in pb_json('config', 'conflict', 'list')['conflicts'] if c['environment_name'] == alias], 'conflict left behind'
-            wait('worker removed', lambda: systemctl('is-enabled', UNIT).returncode != 0 or systemctl('is-active', UNIT).stdout.strip() != 'active', 60, 3)
+            wait('worker removed', worker_gone, 60, 3)
             return 'disabled, no conflict, worker gone'
         check('F11-04 unassign', unassign)
 

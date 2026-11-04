@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""F11 across two paired Linux machines that share one config repository.
+"""F11 across two paired Linux or macOS machines that share one config repository.
 
 Runs on the controller:
   config_sync_pair.py REPO_SHELL REPO_ADDR SHELL_A ALIAS_A SHELL_B ALIAS_B [--machine-sections]
 REPO_SHELL runs a shell on the host that serves the repository ("ssh pbvm3"); REPO_ADDR is that host's
 address as both machines reach it (172.17.0.1 for containers on it). SHELL_X runs a shell on machine X
 ("ssh pbvm3 sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lanel-a").
+On a Mac use its own ssh ("ssh admin@mac"); the pb machine file, config and os.<platform> section are found per machine.
 
 A Git smart-HTTP server with a token on the repository host serves one bare repository, so the account
 registers it once and both machines use the same URL. Checks:
@@ -24,6 +25,7 @@ import shlex
 import subprocess
 import sys
 import time
+from functools import cached_property
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -39,8 +41,9 @@ DELETE_REPOSITORY = r'''
 import glob, json, sys, urllib.request
 from pathlib import Path
 home = Path.home()
-token = Path(glob.glob(str(home / '.config/paperboat/credentials/secrets/profile-*-access.secret'))[0]).read_text().strip()
-server = json.loads((home / '.config/paperboat/config.json').read_text())['server_url']
+config = home / ('Library/Application Support/paperboat' if sys.platform == 'darwin' else '.config/paperboat')
+token = Path(glob.glob(str(config / 'credentials/secrets/profile-*-access.secret'))[0]).read_text().strip()
+server = json.loads((config / 'config.json').read_text())['server_url']
 request = urllib.request.Request(server + '/v1/config-repositories/' + sys.argv[1], method='DELETE',
                                  headers={'Authorization': 'Bearer ' + token, 'X-Paperboat-Workspace': 'personal'})
 print(urllib.request.urlopen(request, timeout=30).status)
@@ -84,6 +87,15 @@ class Machine(Shell):
 
     def write(self, name, text):
         self.sh('mkdir -p "$HOME/%s" && cat > "$HOME/%s/%s"' % (DIR, DIR, name), stdin=text, check=True)
+
+    @cached_property
+    def os(self):
+        return 'darwin' if self.sh('uname -s').stdout.strip() == 'Darwin' else 'linux'
+
+    @property
+    def sync_file(self):
+        """Shell expression for this machine's config-sync.toml."""
+        return '"$(pb config sync path)"' if self.os == 'darwin' else '~/.config/paperboat/config-sync.toml'
 
     def apply(self):
         preview = self.pb('config', 'sync', 'apply', ok=False)
@@ -144,10 +156,11 @@ def check(name, action):
         raise
 
 
-def shared_file(a_alias, sections):
+def shared_file(a_alias, sections, platforms=('linux',)):
     text = 'version = 1\n[paths."cfg/value.txt"]\nkind = "file"\nlocal_path = "~/%s/value.txt"\n' % DIR
     if sections:
-        text += '[os.linux.paths."cfg/value.txt"]\nlocal_path = "~/%s/value-linux.txt"\n' % DIR
+        for platform in platforms:
+            text += '[os.%s.paths."cfg/value.txt"]\nlocal_path = "~/%s/value-%s.txt"\n' % (platform, DIR, platform)
         text += '[machine.%s.paths."cfg/value.txt"]\nlocal_path = "~/%s/value-%s.txt"\n' % (a_alias, DIR, a_alias)
     return text
 
@@ -158,13 +171,16 @@ def machine_file(repository_id, extra=''):
 
 
 def write_machine_file(machine, text):
-    machine.sh('mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.toml && chmod 600 ~/.config/paperboat/config-sync.toml',
-               stdin=text, check=True)
+    if machine.os == 'darwin':
+        script = 'mkdir -p "$(dirname {0})" && cat > {0} && chmod 600 {0}'.format(machine.sync_file)
+    else:
+        script = 'mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.toml && chmod 600 ~/.config/paperboat/config-sync.toml'
+    machine.sh(script, stdin=text, check=True)
 
 
 def run_checks(repo, a, b, url, profile, password, sections, repository):
     a_name = 'value-%s.txt' % a.alias if sections else 'value.txt'
-    b_name = 'value-linux.txt' if sections else 'value.txt'
+    b_name = 'value-%s.txt' % b.os if sections else 'value.txt'
 
     def connect():
         for stale in [r for r in a.pb('config', 'repository', 'list')['repositories'] if r['display_name'] == NAME]:
@@ -220,7 +236,7 @@ def cleanup(machine, repository):
             machine.pb('config', 'repository', 'credentials', 'remove', repository['id'], ok=False)
     except Exception as error:  # noqa: BLE001
         print('cleanup %s: %s' % (machine.alias, error), flush=True)
-    machine.sh('rm -f ~/.config/paperboat/config-sync.toml; rm -rf "$HOME/%s"' % DIR)
+    machine.sh('rm -f %s; rm -rf "$HOME/%s"' % (machine.sync_file, DIR))
 
 
 def main():
@@ -232,7 +248,7 @@ def main():
     profile = json.dumps({'transport': 'http', 'auth': 'token', 'username': 'cfguser', 'password': password, 'allow_insecure_http': True})
     repository = {}
     try:
-        repo.seed({'.paperboat/config-sync.toml': shared_file(a.alias, sections), 'cfg/value.txt': 'seed\n'})
+        repo.seed({'.paperboat/config-sync.toml': shared_file(a.alias, sections, sorted({a.os, b.os})), 'cfg/value.txt': 'seed\n'})
         url = 'http://%s:%d/pair.git' % (args[1], repo.serve(password))
         run_checks(repo, a, b, url, profile, password, sections, repository)
     except Exception:  # noqa: BLE001
