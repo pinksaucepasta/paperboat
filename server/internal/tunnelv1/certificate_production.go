@@ -91,7 +91,7 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 		if lookupErr != nil {
 			return nil, fmt.Errorf("%w: edge identity lookup: %w", ErrCertificateRuntimeUnavailable, lookupErr)
 		}
-		identity, err = tunnelcert.NewSignedDistributionNodeIdentityResolver(keyLookup, config.Now)
+		identity, err = tunnelcert.NewSignedDistributionNodeIdentityResolver(keyLookup, config.Database, config.Now)
 		if err != nil {
 			return nil, fmt.Errorf("%w: edge identity lookup: %w", ErrCertificateRuntimeUnavailable, err)
 		}

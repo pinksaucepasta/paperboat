@@ -3,6 +3,8 @@ package tunnelcert
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -95,5 +97,54 @@ func stagedOnOneInstanceAckedOnAnother(t *testing.T, store DistributionActionSto
 	defer cancel()
 	if err := first.wait(ctx, distributionKey("stage", request)); err != nil {
 		t.Fatalf("the staging instance did not see the other instance's ack: %v", err)
+	}
+}
+
+// F21-53: a distribution proof accepted by one server instance is a replay on every other one.
+// Before, each resolver kept its own in-memory nonce map, so a replay passed on another instance.
+func TestDistributionProofReplayIsRefusedOnAnotherInstance(t *testing.T) {
+	replayRefusedOnAnotherInstance(t, newTestNonces())
+}
+
+func TestDistributionProofReplayIsRefusedOnAnotherInstanceOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run proof nonces on PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	replayRefusedOnAnotherInstance(t, database)
+}
+
+func replayRefusedOnAnotherInstance(t *testing.T, nonces ProofNonceReserver) {
+	t.Helper()
+	now := time.Now().UTC()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := fmt.Sprintf("epoch_%d", now.UnixNano())
+	lookup := distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00" + epoch: public}}
+	first, err := NewSignedDistributionNodeIdentityResolver(lookup, nonces, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := NewSignedDistributionNodeIdentityResolver(lookup, nonces, func() time.Time { return now })
+	body := []byte(`{"edge_node_id":"edge_01","edge_process_epoch":"` + epoch + `","limit":1}`)
+	nonce := distributionTestNonce(9)
+	if _, err := first.ResolveDistributionNode(context.Background(), signedDistributionRequest(t, CertificateDistributionPullPath, "edge_01", epoch, now.Add(-time.Second), nonce, body, private)); err != nil {
+		t.Fatalf("first use refused: %v", err)
+	}
+	if _, err := second.ResolveDistributionNode(context.Background(), signedDistributionRequest(t, CertificateDistributionPullPath, "edge_01", epoch, now.Add(-time.Second), nonce, body, private)); err == nil {
+		t.Fatal("a replayed proof was accepted by another instance")
 	}
 }

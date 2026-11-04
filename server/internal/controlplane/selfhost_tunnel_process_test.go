@@ -71,7 +71,7 @@ func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	identity, e := tunnelcert.NewSignedDistributionNodeIdentityResolver(keys, time.Now)
+	identity, e := tunnelcert.NewSignedDistributionNodeIdentityResolver(keys, selfhostTestNonces{}, time.Now)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -443,4 +443,10 @@ type selfhostTestKeys struct{}
 
 func (selfhostTestKeys) Resolve(context.Context, string) ([]byte, error) {
 	return bytes.Repeat([]byte{7}, 32), nil
+}
+
+type selfhostTestNonces struct{}
+
+func (selfhostTestNonces) ReserveProofNonce(context.Context, string, string, string, time.Time) (bool, error) {
+	return true, nil
 }

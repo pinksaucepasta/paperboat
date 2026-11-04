@@ -16,7 +16,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -30,7 +29,6 @@ const (
 	// A process-local replay ledger is deliberately bounded. If all entries are
 	// still live, fail closed until their proof windows expire instead of
 	// evicting a valid nonce and reopening replay.
-	maxDistributionProofReplayEntries = 8192
 )
 
 var ErrDistributionIdentityInvalid = errors.New("invalid certificate distribution node proof")
@@ -54,20 +52,23 @@ func (f DistributionNodePublicKeyLookupFunc) LookupDistributionNodePublicKey(ctx
 // decoder sees the exact bytes that were signed.
 type SignedDistributionNodeIdentityResolver struct {
 	lookup DistributionNodePublicKeyLookup
+	nonces ProofNonceReserver
 	now    func() time.Time
-
-	mu   sync.Mutex
-	seen map[string]time.Time
 }
 
-func NewSignedDistributionNodeIdentityResolver(lookup DistributionNodePublicKeyLookup, now func() time.Time) (*SignedDistributionNodeIdentityResolver, error) {
-	if lookup == nil {
+// ProofNonceReserver records a proof nonce once across every server instance (db.DB.ReserveProofNonce, F21-53).
+type ProofNonceReserver interface {
+	ReserveProofNonce(ctx context.Context, signer, nonce, method string, expires time.Time) (bool, error)
+}
+
+func NewSignedDistributionNodeIdentityResolver(lookup DistributionNodePublicKeyLookup, nonces ProofNonceReserver, now func() time.Time) (*SignedDistributionNodeIdentityResolver, error) {
+	if lookup == nil || nonces == nil {
 		return nil, ErrDistributionIdentityInvalid
 	}
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &SignedDistributionNodeIdentityResolver{lookup: lookup, now: now, seen: make(map[string]time.Time)}, nil
+	return &SignedDistributionNodeIdentityResolver{lookup: lookup, nonces: nonces, now: now}, nil
 }
 
 func (r *SignedDistributionNodeIdentityResolver) ResolveDistributionNode(ctx context.Context, request *http.Request) (DistributionNodeIdentity, error) {
@@ -121,25 +122,12 @@ func (r *SignedDistributionNodeIdentityResolver) ResolveDistributionNode(ctx con
 	if !ed25519.Verify(key, []byte(transcript), signature) {
 		return DistributionNodeIdentity{}, ErrDistributionIdentityInvalid
 	}
-	// Only a successfully verified proof consumes its nonce. Purge old entries
-	// while holding the same lock so concurrent replays cannot both pass.
-	seenKey := nodeID + "\x00" + processEpoch + "\x00" + nonce
-	r.mu.Lock()
-	for key, expiry := range r.seen {
-		if !expiry.After(now) {
-			delete(r.seen, key)
-		}
+	// Only a successfully verified proof consumes its nonce, once across every server instance.
+	fresh, err := r.nonces.ReserveProofNonce(ctx, "edge:"+nodeID+":"+processEpoch, nonce, request.Method, issuedAt.Add(distributionProofMaxAge))
+	if err != nil {
+		return DistributionNodeIdentity{}, err
 	}
-	_, replayed := r.seen[seenKey]
-	if !replayed && len(r.seen) >= maxDistributionProofReplayEntries {
-		r.mu.Unlock()
-		return DistributionNodeIdentity{}, ErrDistributionIdentityInvalid
-	}
-	if !replayed {
-		r.seen[seenKey] = issuedAt.Add(distributionProofMaxAge)
-	}
-	r.mu.Unlock()
-	if replayed {
+	if !fresh {
 		return DistributionNodeIdentity{}, ErrDistributionIdentityInvalid
 	}
 	return DistributionNodeIdentity{NodeID: nodeID, ProcessEpoch: processEpoch}, nil

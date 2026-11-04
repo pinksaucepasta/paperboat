@@ -16,6 +16,24 @@ import (
 	"time"
 )
 
+// testNonces stands in for db.DB.ReserveProofNonce; one instance is one shared database.
+type testNonces struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func newTestNonces() *testNonces { return &testNonces{seen: map[string]bool{}} }
+
+func (n *testNonces) ReserveProofNonce(_ context.Context, signer, nonce, _ string, _ time.Time) (bool, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.seen[signer+"\x00"+nonce] {
+		return false, nil
+	}
+	n.seen[signer+"\x00"+nonce] = true
+	return true, nil
+}
+
 type distributionTestKeyLookup struct {
 	keys map[string]ed25519.PublicKey
 }
@@ -42,7 +60,7 @@ func TestSignedDistributionNodeIdentityResolverFencesNodeEpochBodyAndReplay(t *t
 		"edge_01\x00epoch_0001": publicOne,
 		"edge_02\x00epoch_0002": publicTwo,
 	}}
-	resolver, err := NewSignedDistributionNodeIdentityResolver(lookup, func() time.Time { return now })
+	resolver, err := NewSignedDistributionNodeIdentityResolver(lookup, newTestNonces(), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +110,7 @@ func TestSignedDistributionNodeIdentityResolverConsumesNonceOnceConcurrently(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, func() time.Time { return now })
+	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, newTestNonces(), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +150,7 @@ func TestDistributionHubUsesSignedNodeIdentityNotHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, func() time.Time { return now })
+	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, newTestNonces(), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}

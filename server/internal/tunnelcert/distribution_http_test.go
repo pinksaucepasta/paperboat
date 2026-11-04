@@ -147,7 +147,7 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, func() time.Time { return now })
+	resolver, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{"edge_01\x00epoch_0001": publicKey}}, newTestNonces(), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
