@@ -109,9 +109,9 @@ func NewProductionOwner(ctx context.Context, version string, environ func(string
 	owner.status.executions = executions
 	return owner, nil
 }
-func (o *ProcessOwner) BindLifecycle(endpoint string, token []byte, fence func() hostdproto.Status, acquire func(string, uint64) (func(), error)) {
+func (o *ProcessOwner) BindLifecycle(endpoint string, token []byte, fence func() hostdproto.Status, acquire func(string, uint64) (func(), error), stream func(string, uint64) (func(), <-chan struct{}, error)) {
 	o.token = append([]byte(nil), token...)
-	o.bridge = &workloadbridge.Server{Endpoint: endpoint, Token: o.token, Sessions: o.sessions, Executions: &execprocess.RemoteServer{Manager: o.executions, MaximumReaders: 4096}, Fence: fence, AcquireActive: acquire, Ready: make(chan error, 1), MaximumConcurrent: 256}
+	o.bridge = &workloadbridge.Server{Endpoint: endpoint, Token: o.token, Sessions: o.sessions, Executions: &execprocess.RemoteServer{Manager: o.executions, MaximumReaders: 4096}, Fence: fence, AcquireActive: acquire, AcquireStream: stream, Ready: make(chan error, 1), MaximumConcurrent: 256}
 }
 func (o *ProcessOwner) StartHostd(ctx context.Context) error { return nil }
 func (o *ProcessOwner) StartBridge(ctx context.Context) error {

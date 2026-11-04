@@ -111,7 +111,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		defer stopCompletion()
 	}
 	if owner, ok := host.(*hostruntime.ProcessOwner); ok {
-		owner.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
+		owner.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive, server.AcquireStream)
 		if err := owner.StartBridge(ctx); err != nil {
 			return err
 		}

@@ -568,6 +568,10 @@ func (s *Server) AcquireActive(workerID string, epoch uint64) (func(), error) {
 	return s.controller.AcquireActive(workerID, epoch)
 }
 
+func (s *Server) AcquireStream(workerID string, epoch uint64) (func(), <-chan struct{}, error) {
+	return s.controller.AcquireStream(workerID, epoch)
+}
+
 func (c *Client) StopActive(ctx context.Context) error {
 	_, err := ControlWorker(ctx, c, WorkerControlRequest{Operation: "stop_active"})
 	return err

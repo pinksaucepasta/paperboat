@@ -357,6 +357,9 @@ func validErrorCode(value string) bool {
 type Controller struct {
 	mu                         sync.Mutex
 	mutations                  uint64
+	streams                    uint64
+	streamsDone                chan struct{}
+	streamRevoke               chan struct{}
 	replacing                  bool
 	mutationDone               chan struct{}
 	maintenanceUntil           time.Time
@@ -654,6 +657,77 @@ func (c *Controller) AcquireActive(workerID string, epoch uint64) (func(), error
 	}, nil
 }
 
+// AcquireStream admits one long-lived feature stream (exec, SSH, transfer)
+// for the active worker. Unlike a mutation it does not hold maintenance off
+// indefinitely: maintenance waits StreamDrainBound for streams to end, then
+// closes revoked; the holder releases and its client recovers through the
+// existing resume/reconnect paths. pbvm4 feat3: a running exec/SSH/send held
+// a mutation and refused every update ("hostd owner maintenance is busy").
+func (c *Controller) AcquireStream(workerID string, epoch uint64) (func(), <-chan struct{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active.workerID != workerID || c.active.epoch != epoch || epoch == 0 {
+		return nil, nil, ErrFenced
+	}
+	if c.replacing || c.maintenanceActiveLocked() {
+		return nil, nil, ErrMaintenanceBusy
+	}
+	if c.streams == 0 {
+		c.streamsDone = make(chan struct{})
+	}
+	if c.streamRevoke == nil {
+		c.streamRevoke = make(chan struct{})
+	}
+	c.streams++
+	revoked := c.streamRevoke
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.streams--
+			if c.streams == 0 {
+				close(c.streamsDone)
+			}
+		})
+	}, revoked, nil
+}
+
+// StreamDrainBound is how long maintenance lets admitted feature streams
+// finish on their own before revoking them.
+const StreamDrainBound = 5 * time.Second
+
+// drainStreams waits for streams to end, revoking them after StreamDrainBound.
+func (c *Controller) drainStreams(ctx context.Context) error {
+	c.mu.Lock()
+	pending, done := c.streams != 0, c.streamsDone
+	c.mu.Unlock()
+	if !pending {
+		return nil
+	}
+	bound := time.NewTimer(StreamDrainBound)
+	defer bound.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ErrMaintenanceBusy
+	case <-bound.C:
+	}
+	c.mu.Lock()
+	if c.streamRevoke != nil {
+		close(c.streamRevoke)
+		c.streamRevoke = nil
+	}
+	c.mu.Unlock()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ErrMaintenanceBusy
+	}
+}
+
 const OwnerMaintenanceLease = 5 * time.Minute
 
 func (c *Controller) maintenanceActiveLocked() bool {
@@ -723,6 +797,9 @@ func (c *Controller) PrepareMaintenanceWithDrain(ctx context.Context, force bool
 	}
 	if err := prepareCtx.Err(); err != nil {
 		return Status{}, ErrMaintenanceBusy
+	}
+	if err := c.drainStreams(prepareCtx); err != nil {
+		return Status{}, err
 	}
 	if drain != nil {
 		if err := drain(prepareCtx); err != nil {
