@@ -8,19 +8,44 @@ import { api, ApiError } from "@/lib/api"
 import { BrandScreen, Heading, Outcome, brandPrimary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
 
-/** POST /v1/browser-access/issue: a one-use handoff for the preview or tunnel host. */
-type Issue = { transaction_id: string; handoff: string; callback_origin: string; expires_at: string }
+/**
+ * POST /v1/browser-access/issue: a one-use handoff for the preview or tunnel host. `denied`: the account
+ * has no access; the handoff is posted all the same and the edge answers 403 with its own page.
+ */
+type Issue = { transaction_id: string; handoff: string; callback_origin: string; expires_at: string; denied?: boolean }
 
 /**
  * Sign-in for a private or team preview or tunnel in the browser (F7-03). The edge sends a
  * signed-out browser here (/.paperboat/access/login?transaction_id=…, rewritten to this page); the
  * console session gate signs in first and returns here. The page asks the server for a handoff
  * and posts it to the preview host as a top-level form, so the edge can check the console's Origin
- * and its own cookie, then set its session. The handoff is never shown or logged.
+ * and its own cookie, then set its session. The handoff is never shown or logged. `switch=1` (the
+ * edge's "Use a different account") signs this console session out first; the next sign-in returns to
+ * this same address without `switch`.
  */
 export function AccessLogin() {
-  const transaction = useSearchParams().get("transaction_id") ?? ""
+  const params = useSearchParams()
+  const transaction = params.get("transaction_id") ?? ""
+  if (params.get("switch") === "1") {
+    const rest = new URLSearchParams(params)
+    rest.delete("switch")
+    return <BrandScreen><SwitchAccount returnTo={`/.paperboat/access/login?${rest}`} /></BrandScreen>
+  }
   return <BrandScreen>{transaction ? <Handoff transaction={transaction} /> : <Expired />}</BrandScreen>
+}
+
+function SwitchAccount({ returnTo }: { returnTo: string }) {
+  const form = useRef<HTMLFormElement>(null)
+  useEffect(() => form.current?.submit(), [])
+  return (
+    <form ref={form} method="post" action="/auth/sign-out" className="flex flex-col gap-6">
+      <input type="hidden" name="return_to" value={returnTo} />
+      <Heading title="Switching account…" text="Sign in with the account that should open this page." />
+      <Button type="submit" size="lg" className={brandPrimary}>
+        Continue
+      </Button>
+    </form>
+  )
 }
 
 function Handoff({ transaction }: { transaction: string }) {
@@ -73,10 +98,8 @@ function Problem({ error }: { error: Error }) {
   const status = error instanceof ApiError ? error.status : 0
   if (status === 404 || status === 410 || (error instanceof ApiError && /expired/.test(error.code))) return <Expired />
   return (
-    <Outcome icon={<XCircleIcon className="size-8 text-white" />} title={status === 403 ? "No access" : "Couldn’t sign you in"}>
-      {status === 403
-        ? "You don’t have access to this preview or tunnel. Ask its owner to share it with you."
-        : "Paperboat couldn’t sign you in right now. Try again."}
+    <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Couldn’t sign you in">
+      Paperboat couldn’t sign you in right now. Try again.
     </Outcome>
   )
 }

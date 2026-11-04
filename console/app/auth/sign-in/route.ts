@@ -32,12 +32,8 @@ export async function GET(request: Request): Promise<Response> {
     const response = new Response(null, { status: 302, headers: { location: authorize.toString() } })
     relayCookies(stateResponse, response)
     const returnTo = safeReturnPath(new URL(request.url).searchParams.get("return_to"))
-    response.headers.append(
-      "set-cookie",
-      returnTo
-        ? `pb-return=${encodeURIComponent(returnTo)}; ${cookieAttributes("/auth", 600)}`
-        : `pb-return=; ${cookieAttributes("/auth", 0)}`,
-    )
+    // No return_to keeps a pb-return set by sign-out (account switch); the callback clears it after use.
+    if (returnTo) response.headers.append("set-cookie", `pb-return=${encodeURIComponent(returnTo)}; ${cookieAttributes("/auth", 600)}`)
     response.headers.set("cache-control", "no-store")
     return response
   } catch {

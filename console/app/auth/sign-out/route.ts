@@ -3,7 +3,9 @@ import {
   controlPlaneFetch,
   csrfCredentials,
   isSameOrigin,
+  cookieAttributes,
   relayCookies,
+  safeReturnPath,
 } from "@/lib/server/control-plane"
 
 const workosLogout = { origin: "https://api.workos.com", pathname: "/user_management/sessions/logout" }
@@ -11,10 +13,17 @@ const workosLogout = { origin: "https://api.workos.com", pathname: "/user_manage
 export async function POST(request: Request): Promise<Response> {
   if (!isSameOrigin(request)) return new Response("Invalid request origin.", { status: 403 })
   const home = new URL("/", consoleOrigin()).toString()
+  // return_to (a console path): the next sign-in lands there; used to switch accounts on the edge's login page.
+  const returnTo = safeReturnPath(((await request.formData().catch(() => null))?.get("return_to") as string | null))
+  const withReturn = (response: Response) => {
+    if (returnTo)
+      response.headers.append("set-cookie", `pb-return=${encodeURIComponent(returnTo)}; ${cookieAttributes("/auth", 600)}`)
+    return response
+  }
   try {
     const csrf = await csrfCredentials(request.headers.get("cookie") ?? "")
     // Without a CSRF token the session is already gone; there is nothing left to revoke.
-    if (!csrf) return new Response(null, { status: 303, headers: { location: home } })
+    if (!csrf) return withReturn(new Response(null, { status: 303, headers: { location: home } }))
     const logout = await controlPlaneFetch("/v1/auth/logout", {
       method: "POST",
       headers: { cookie: csrf.cookie, origin: consoleOrigin(), "x-csrf-token": csrf.token },
@@ -28,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
         : home
     const response = new Response(null, { status: 303, headers: { location, "cache-control": "no-store" } })
     relayCookies(logout, response)
-    return response
+    return withReturn(response)
   } catch {
     return new Response("Sign-out is temporarily unavailable.", { status: 503 })
   }
