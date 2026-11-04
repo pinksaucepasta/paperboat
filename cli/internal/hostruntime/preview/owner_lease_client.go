@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -334,6 +335,26 @@ func ownerSessionLeaseHTTPError(status int, data []byte) error {
 	}
 }
 
+// leaseStepFailed records why a foreground preview or tunnel lost or could not
+// regain its owner lease (pbvm4 feat4: both exited with only a generic error).
+func leaseStepFailed(stage string, err error) {
+	kind := fmt.Sprintf("%T", err)
+	var transport *ownerSessionLeaseTransportError
+	for _, known := range []struct {
+		err  error
+		name string
+	}{{ErrOwnerSessionLeaseUnauthorized, "unauthorized"}, {ErrOwnerSessionLeaseLost, "lost"}, {ErrOwnerSessionLeaseConflict, "conflict"}, {ErrOwnerSessionLeaseLimit, "limit"}, {ErrOwnerSessionLeaseInvalid, "invalid"}} {
+		if errors.Is(err, known.err) {
+			kind = known.name
+			break
+		}
+	}
+	if errors.As(err, &transport) {
+		kind = "transport"
+	}
+	diagnosticlog.TryWarn("preview owner lease", "stage", stage, "failed", true, "error_type", kind)
+}
+
 // ownerSessionReattachLimit bounds how long a foreground preview waits for a
 // restarted worker (pb update replaces it in seconds) before it gives up.
 const ownerSessionReattachLimit = 90 * time.Second
@@ -355,6 +376,7 @@ func KeepAliveReattaching(ctx context.Context, client *LocalOwnerSessionClient, 
 		if err == nil || ctx.Err() != nil {
 			return nil
 		}
+		leaseStepFailed("keepalive", err)
 		var transport *ownerSessionLeaseTransportError
 		if !errors.Is(err, ErrOwnerSessionLeaseUnauthorized) && !errors.As(err, &transport) {
 			return err
@@ -385,6 +407,7 @@ func KeepAliveReattaching(ctx context.Context, client *LocalOwnerSessionClient, 
 					break
 				}
 			}
+			leaseStepFailed("reattach", connectErr)
 			if ctx.Err() != nil {
 				return nil
 			}
