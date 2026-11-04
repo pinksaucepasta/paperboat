@@ -165,7 +165,7 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 // the listeners from whoever serves it, then serves it itself; an absent or refused socket (first
 // start, reboot) means it binds fresh.
 func HostdHandoverSocket(layout Layout) string {
-	return filepath.Join(filepath.Dir(layout.HostdSocket), "handover.sock")
+	return layout.HostdSocket + ".handover" // must equal hostdproto.HandoverPath
 }
 
 func validEnrolledIdentity(user, group string, uid, gid int) bool {
