@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """F3-03: a held terminal survives a network drop: same shell, no lost or duplicated input.
 
-Blocks all outbound non-loopback traffic of the CLI user for a bounded time with iptables
-(rule removed on every exit path and by a root failsafe timer), typing before, during and after.
+Blocks all outbound non-loopback traffic of the CLI user for a bounded time with iptables (macOS: a pf
+anchor under com.apple), rule removed on every exit path and by a root failsafe timer, typing before,
+during and after.
 Usage: network_drop.py TARGET [--drop-seconds N]   (needs passwordless or cached sudo)
 """
 import argparse
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import datetime
 import glob
+import re
 import subprocess
 import time
 import uuid
@@ -20,15 +22,42 @@ from terminal_lifecycle import Terminal
 
 PB = Path.home() / '.local/bin/pb'
 RULE = ['OUTPUT', '-m', 'owner', '--uid-owner', str(os.getuid()), '!', '-o', 'lo', '-j', 'DROP']
+DARWIN = os.uname().sysname == 'Darwin'
+DIAGNOSTICS = Path.home() / ('Library/Application Support/Paperboat/state/diagnostics' if DARWIN
+                             else '.local/state/paperboat/diagnostics')
+# The stock macOS pf.conf evaluates com.apple/* anchors, so no change to the main ruleset is needed.
+ANCHOR = 'com.apple/pbsmoke'
+PF_RULE = 'block drop out quick on ! lo0 proto { tcp udp } all user %d\n' % os.getuid()
 
 
-def sudo(*args):
-    return subprocess.run(['sudo', '-n', *args], capture_output=True, text=True, timeout=30)
+def sudo(*args, input=None):
+    return subprocess.run(['sudo', '-n', *args], capture_output=True, text=True, timeout=30, input=input)
+
+
+def pf_block(rules, failsafe_seconds):
+    """macOS: load rules into the anchor, enable pf, cut existing states. Returns (enable token, root failsafe)."""
+    failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; /sbin/pfctl -a %s -F all' % (failsafe_seconds, ANCHOR)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    if sudo('pfctl', '-a', ANCHOR, '-f', '-', input=rules).returncode:
+        failsafe.terminate()
+        raise RuntimeError('pfctl could not load the drop rule into ' + ANCHOR)
+    token = re.search(r'Token : (\d+)', sudo('pfctl', '-E').stderr)
+    sudo('pfctl', '-F', 'states')  # an established connection keeps passing on its state until flushed
+    return token.group(1) if token else None, failsafe
+
+
+def pf_release(block):
+    token, failsafe = block
+    sudo('pfctl', '-a', ANCHOR, '-F', 'all')
+    if token:
+        sudo('pfctl', '-X', token)
+    if failsafe.poll() is None:
+        failsafe.terminate()
 
 
 def failures_since(moment):
     count = 0
-    for path in glob.glob(str(Path.home() / '.local/state/paperboat/diagnostics/*.ndjson')):
+    for path in glob.glob(str(DIAGNOSTICS / '*.ndjson')):
         for line in open(path, errors='replace'):
             try:
                 event = json.loads(line)
@@ -45,13 +74,13 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--drop-seconds', type=int, default=20)
     args = parser.parse_args()
-    if sudo('iptables', '-S', 'OUTPUT').returncode:
-        raise RuntimeError('needs sudo without a prompt for iptables')
+    if sudo(*(['pfctl', '-s', 'info'] if DARWIN else ['iptables', '-S', 'OUTPUT'])).returncode:
+        raise RuntimeError('needs sudo without a prompt for ' + ('pfctl' if DARWIN else 'iptables'))
     name = 'smoke-drop-' + uuid.uuid4().hex[:10]
     log = Path.home() / ('.' + name + '.log')
     terminal = None
     blocked = False
-    failsafe = None
+    failsafe = block = None
     try:
         terminal = Terminal([PB, 'connect', args.target, '--name', name, '--status-bar', 'off'])
         terminal.expect(b'\x1b[?2004h')
@@ -67,17 +96,21 @@ def main():
             type_line(number)
             terminal.expect('PB_ACK_%d' % number)
         # Root failsafe removes the rule even if this process dies.
-        failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (args.drop_seconds + 60, ' '.join(RULE))],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        if not DARWIN:
+            failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (args.drop_seconds + 60, ' '.join(RULE))],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         started = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-        sudo('iptables', '-I', *RULE)
+        if DARWIN:
+            block = pf_block(PF_RULE, args.drop_seconds + 60)
+        else:
+            sudo('iptables', '-I', *RULE)
         blocked = True
         time.sleep(4)
         for number in (4, 5, 6):  # typed while the network is down
             type_line(number)
             time.sleep(1)
         time.sleep(max(0, args.drop_seconds - 7))
-        sudo('iptables', '-D', *RULE)
+        pf_release(block) if DARWIN else sudo('iptables', '-D', *RULE)
         blocked = False
         for number in (4, 5, 6):
             terminal.expect('PB_ACK_%d' % number, timeout=150)
@@ -94,7 +127,7 @@ def main():
             raise RuntimeError('input lost, duplicated or reordered: %d lines' % len(lines))
     finally:
         if blocked:
-            sudo('iptables', '-D', *RULE)
+            pf_release(block) if DARWIN else sudo('iptables', '-D', *RULE)
         if failsafe is not None and failsafe.poll() is None:
             failsafe.terminate()
         if terminal is not None:

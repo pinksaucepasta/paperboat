@@ -6,6 +6,7 @@ bugreport is uploaded, and neither the bundle nor the diagnostics directory may 
 of those values. The printed receipt never includes a secret.
 """
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -16,8 +17,13 @@ import zipfile
 
 HOME = Path.home()
 PB = HOME / '.local/bin/pb'
-CONFIG = HOME / '.config/paperboat'
-STATE = HOME / '.local/state/paperboat'
+DARWIN = os.uname().sysname == 'Darwin'
+if DARWIN:
+    SUPPORT = HOME / 'Library/Application Support'
+    CONFIG, STATE, RUNTIME = SUPPORT / 'paperboat', SUPPORT / 'Paperboat/state', SUPPORT / 'Paperboat/runtime'
+else:
+    CONFIG, STATE = HOME / '.config/paperboat', HOME / '.local/state/paperboat'
+    RUNTIME = STATE / 'runtime'
 MARKER = 'pbsmoke-env-' + os.urandom(8).hex()
 
 
@@ -38,9 +44,34 @@ def leaves(value, path=''):
         yield path, value
 
 
+def keychain_tokens():
+    """macOS keeps the CLI tokens in the login keychain (go-keyring, service paperboat), not in files."""
+    tokens = {}
+    for path in (CONFIG / 'credentials/profiles').glob('*.json'):
+        profile = json.loads(path.read_text())
+        for kind in ('access', 'refresh'):
+            ref = profile[kind + '_secret_ref']
+            if (CONFIG / 'credentials/secrets' / (ref + '.secret')).exists():
+                continue  # the file fallback holds it; secrets() reads it
+            out = subprocess.run(['/usr/bin/security', 'find-generic-password', '-s', 'paperboat', '-wa', ref],
+                                 capture_output=True, text=True, timeout=30)
+            if out.returncode:
+                raise RuntimeError('cannot read the CLI %s token from the keychain (exit %d); unlock the login keychain'
+                                   % (kind, out.returncode))
+            value = out.stdout.strip()
+            if value.startswith('go-keyring-base64:'):
+                value = base64.b64decode(value[len('go-keyring-base64:'):]).decode(errors='replace')
+            elif value.startswith('go-keyring-encoded:'):
+                value = bytes.fromhex(value[len('go-keyring-encoded:'):]).decode(errors='replace')
+            tokens['keychain-%s-%s' % (kind, path.stem[:8])] = value
+    return tokens
+
+
 def secrets():
     """Credential material that must never appear: tokens, private keys, ENV marker."""
     found = {MARKER: 'env-value'}
+    if DARWIN:
+        found.update({value: label for label, value in keychain_tokens().items()})
     for path in (CONFIG / 'credentials/secrets').glob('*.secret'):
         label = re.sub(r'[0-9a-f]{16,}', '*', path.name)
         text = path.read_text(errors='replace').strip()
@@ -52,7 +83,7 @@ def secrets():
             found[text] = label
     for name in ('machine-control.json', 'runtime-identity.json'):
         try:
-            for key, value in leaves(json.loads((STATE / 'runtime' / name).read_text())):
+            for key, value in leaves(json.loads((RUNTIME / name).read_text())):
                 if key == '/credential':
                     found[value] = name + key
         except (OSError, ValueError):
@@ -67,6 +98,9 @@ def leaked(blob, values):
 def access_token():
     for path in (CONFIG / 'credentials/secrets').glob('profile-*-access.secret'):
         return path.read_text().strip()
+    for label, value in keychain_tokens().items() if DARWIN else ():
+        if label.startswith('keychain-access'):
+            return value
     raise RuntimeError('no CLI access credential to resolve the support reference')
 
 

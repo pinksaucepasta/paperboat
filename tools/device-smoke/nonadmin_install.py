@@ -25,7 +25,8 @@ def check(user, binary):
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
     if permission.returncode == 0:
         raise RuntimeError('selected account has administrator rights')
-    with tempfile.TemporaryDirectory(prefix='pb-refusal-') as directory:
+    # macOS root's TMPDIR is a private 0700 tree the test account cannot traverse.
+    with tempfile.TemporaryDirectory(prefix='pb-refusal-', dir='/tmp' if platform == 'Darwin' else None) as directory:
         root = Path(directory)
         executable = root / 'pb'
         shutil.copyfile(binary, executable)

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 PB = Path.home() / '.local/bin/pb'
@@ -39,11 +40,15 @@ def main():
             fish.write_text(scripts['fish'])
             if subprocess.run(['fish', '-c', 'source ' + str(fish)], capture_output=True, timeout=30).returncode:
                 raise RuntimeError('fish rejected the completion script')
+        else:
+            print('SKIP fish syntax check: fish is not installed', file=sys.stderr)
         if shutil.which('zsh'):
             zsh = Path(directory) / '_pb'
             zsh.write_text(scripts['zsh'])
             if subprocess.run(['zsh', '-n', str(zsh)], capture_output=True, timeout=30).returncode:
                 raise RuntimeError('zsh rejected the completion script')
+        else:
+            print('SKIP zsh syntax check: zsh is not installed', file=sys.stderr)
     commands = run('__complete', '')[1]
     if not all(name in commands for name in ('exec', 'doctor', 'machine')):
         raise RuntimeError('root completion does not offer the main commands')

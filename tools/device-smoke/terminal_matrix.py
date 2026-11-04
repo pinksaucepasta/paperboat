@@ -4,7 +4,7 @@
 Runs on a signed-in client machine (the owner) against TARGET, another machine of the same
 account. Every client is a real `pb connect` / `pb session attach` process under its own PTY.
 Faults are injected locally: SIGKILL (a client leaves), SIGSTOP/SIGCONT (laptop sleep),
-iptables (network loss, control plane unreachable), resize storms, 50 MB of output and a
+iptables (network loss, control plane unreachable; macOS: a pf anchor), resize storms, 50 MB of output and a
 large paste. Each row prints PASS/FAIL/SKIP with a short reason; output content is never
 printed. Only sessions named smoke-matrix-* are created, and all are closed and deleted.
 
@@ -27,8 +27,16 @@ sys.path.insert(0, Path(__file__).resolve().parent.as_posix())
 from session_cleanup import cleanup  # noqa: E402
 from session_lifecycle import selected  # noqa: E402
 from terminal_lifecycle import Terminal  # noqa: E402
+from network_drop import pf_block, pf_release  # noqa: E402
 
 PB = Path.home() / '.local/bin/pb'
+DARWIN = os.uname().sysname == 'Darwin'
+if DARWIN:
+    RUNTIME = Path.home() / 'Library/Application Support/Paperboat/runtime'
+    DIAGNOSTICS = Path.home() / 'Library/Application Support/Paperboat/state/diagnostics'
+else:
+    RUNTIME = Path.home() / '.local/state/paperboat/runtime'
+    DIAGNOSTICS = Path.home() / '.local/state/paperboat/diagnostics'
 RESULTS = []
 
 
@@ -128,11 +136,33 @@ def exactly_once(out, prefix, first, last):
 
 
 def has_iptables():
-    return subprocess.run(['sudo', '-n', 'iptables', '-S'], capture_output=True).returncode == 0
+    return subprocess.run(['sudo', '-n', 'pfctl', '-s', 'info'] if DARWIN else ['sudo', '-n', 'iptables', '-S'],
+                          capture_output=True).returncode == 0
+
+
+NO_FIREWALL = 'no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine'
 
 
 def iptables(*rule):
     subprocess.run(['sudo', '-n', 'iptables', *rule], check=True, capture_output=True)
+
+
+def drop_all(seconds):
+    """Silently drop every non-loopback packet in both directions; drop_restore undoes it."""
+    if DARWIN:
+        return pf_block('block drop quick on ! lo0 all\n', seconds + 60)
+    iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
+    iptables('-I', 'OUTPUT', '2', '-j', 'DROP')
+    iptables('-I', 'INPUT', '-i', 'lo', '-j', 'ACCEPT')
+    iptables('-I', 'INPUT', '2', '-j', 'DROP')
+
+
+def drop_restore(block):
+    if DARWIN:
+        return pf_release(block)
+    for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
+        iptables('-D', chain, '-j', 'DROP')
+        iptables('-D', chain, iface, 'lo', '-j', 'ACCEPT')
 
 
 # Rows. Each takes (args, sessions) and records its own result; sessions collects names to clean up.
@@ -275,23 +305,18 @@ def sleep_wake(a, sessions):
 def network_drop(a, sessions):
     """W6/W8: the client's network drops for 45 s while output continues on the host."""
     if not has_iptables():
-        row('N4 network drop: session resumes, nothing lost or doubled', None, 'no iptables on this machine')
+        row('N4 network drop: session resumes, nothing lost or doubled', None, NO_FIREWALL)
         return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
         c1.send("for i in $(seq 1 60); do echo ND$i; sleep 1; done\r")
         time.sleep(5)
-        iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
-        iptables('-I', 'OUTPUT', '2', '-j', 'DROP')
-        iptables('-I', 'INPUT', '-i', 'lo', '-j', 'ACCEPT')
-        iptables('-I', 'INPUT', '2', '-j', 'DROP')
+        block = drop_all(45)
         try:
             time.sleep(45)
         finally:
-            for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
-                iptables('-D', chain, '-j', 'DROP')
-                iptables('-D', chain, iface, 'lo', '-j', 'ACCEPT')
+            drop_restore(block)
         t0 = time.monotonic()
         try:
             c1.expect('ND60', 120)
@@ -309,19 +334,21 @@ def network_drop(a, sessions):
 def control_plane_down(a, sessions):
     """W7: the server is unreachable (deploy, outage) mid-session; the open terminal keeps working."""
     if not has_iptables():
-        row('N5 server unreachable: open terminal keeps working', None, 'no iptables on this machine')
+        row('N5 server unreachable: open terminal keeps working', None, NO_FIREWALL)
         return
     import json
     import socket
     from urllib.parse import urlparse
-    runtime = Path.home() / '.local/state/paperboat/runtime/machine-registration.json'
-    host = urlparse(json.loads(runtime.read_text())['server_url']).hostname
+    host = urlparse(json.loads((RUNTIME / 'machine-registration.json').read_text())['server_url']).hostname
     addrs = sorted({ai[4][0] for ai in socket.getaddrinfo(host, 443, socket.AF_INET)})
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        for ip in addrs:
-            iptables('-I', 'OUTPUT', '-d', ip, '-j', 'DROP')
+        if DARWIN:
+            block = pf_block('block drop out quick to { %s }\n' % ' '.join(addrs), 240)
+        else:
+            for ip in addrs:
+                iptables('-I', 'OUTPUT', '-d', ip, '-j', 'DROP')
         try:
             ok = True
             for i in range(4):
@@ -333,8 +360,11 @@ def control_plane_down(a, sessions):
                     break
             row('N5 server unreachable 2 min: open terminal keeps working', ok, f'{(i + 1) * 30} s')
         finally:
-            for ip in addrs:
-                iptables('-D', 'OUTPUT', '-d', ip, '-j', 'DROP')
+            if DARWIN:
+                pf_release(block)
+            else:
+                for ip in addrs:
+                    iptables('-D', 'OUTPUT', '-d', ip, '-j', 'DROP')
     finally:
         c1.close()
 
@@ -343,17 +373,14 @@ def black_hole(a, sessions):
     """N13 (F3-15): the network silently drops every packet for 60 s (no reset, no link-down). Output continues on
     the host and a command is typed meanwhile: it resumes on its own, nothing lost or doubled, the keys run once."""
     if not has_iptables():
-        row('N13 black hole: session resumes, nothing lost or doubled', None, 'no iptables on this machine')
+        row('N13 black hole: session resumes, nothing lost or doubled', None, NO_FIREWALL)
         return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
         c1.send("for i in $(seq 1 90); do echo BH$i; sleep 1; done\r")
         time.sleep(5)
-        iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
-        iptables('-I', 'OUTPUT', '2', '-j', 'DROP')
-        iptables('-I', 'INPUT', '-i', 'lo', '-j', 'ACCEPT')
-        iptables('-I', 'INPUT', '2', '-j', 'DROP')
+        block = drop_all(60)
         key = uuid.uuid4().hex
         dropped, seen, detected, typed = time.monotonic(), len(c1.output), None, False
         try:
@@ -365,9 +392,7 @@ def black_hole(a, sessions):
                     c1.send("printf '\\nPB_KEY_%s\\n' '" + key + "'\r")  # typed into the black hole
                     typed = True
         finally:
-            for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
-                iptables('-D', chain, '-j', 'DROP')
-                iptables('-D', chain, iface, 'lo', '-j', 'ACCEPT')
+            drop_restore(block)
         row('N13 black hole 60 s: the client shows it is reconnecting within 30 s', detected is not None and detected < 30,
             f'{detected:.1f} s' if detected is not None else 'never shown while the network was down')
         t0 = time.monotonic()
@@ -539,7 +564,7 @@ def keystrokes(a, sessions):
     import glob
 
     def opens():
-        files = glob.glob(str(Path.home() / '.local/state/paperboat/diagnostics/events-*.ndjson'))
+        files = glob.glob(str(DIAGNOSTICS / 'events-*.ndjson'))
         return sum(open(f).read().count('peer_stream_opened') for f in files)
 
     name = fresh_name(); sessions.append(name)

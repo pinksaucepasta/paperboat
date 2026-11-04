@@ -12,12 +12,15 @@
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
 
 PB = Path.home() / '.local/bin/pb'
 SIGNED_OUT = 'no longer valid'
+DIAGNOSTICS = Path.home() / ('Library/Application Support/Paperboat/state/diagnostics' if os.uname().sysname == 'Darwin'
+                             else '.local/state/paperboat/diagnostics')
 
 
 def run(*args, timeout=60):
@@ -27,7 +30,7 @@ def run(*args, timeout=60):
 
 def events():
     total = 0
-    for path in (Path.home() / '.local/state/paperboat/diagnostics').glob('events-*.ndjson'):
+    for path in DIAGNOSTICS.glob('events-*.ndjson'):
         total += sum(1 for _ in path.open('rb'))
     return total
 
