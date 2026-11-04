@@ -54,7 +54,7 @@ type nativeCleanupUncomparableError struct{ detail []byte }
 func (nativeCleanupUncomparableError) Error() string { return "private cleanup failure" }
 
 func TestIssuePreservesOperationalResolverCauseAndPureDenial(t *testing.T) {
-	request := Request{AccountID: "usr_1", UserID: "usr_1", CLIClientSessionID: "cli_1", OperationID: "op_1", ResourceKind: "machine_service", ResourceID: "mch_1", RouteID: "tcp:22", Protocol: "tcp"}
+	request := Request{AccountID: "usr_1", UserID: "usr_1", CLIClientSessionID: "cli_1", OperationID: "operation_1", ResourceKind: "machine_service", ResourceID: "mch_1", RouteID: "tcp:22", Protocol: "tcp"}
 	signer, err := mint.NewEphemeral(time.Minute)
 	if err != nil {
 		t.Fatal(err)

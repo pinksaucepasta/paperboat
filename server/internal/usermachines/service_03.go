@@ -21,7 +21,24 @@ import (
 	"time"
 )
 
-func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
+func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (descriptor FileTransferDescriptor, returnErr error) {
+	operationID := sessionID
+	if _, token := auth.APITokenFromContext(ctx); token {
+		operationID = newID("operation")
+	}
+	if requestID != "" {
+		operationID = requestID
+	}
+	defer func() {
+		auditErr := s.recordSDKAuthorization(ctx, userID, cliClientSessionID, destinationMachineID, operationID, "files", returnErr)
+		if auditErr != nil {
+			if returnErr == nil {
+				descriptor = FileTransferDescriptor{}
+			}
+			returnErr = errors.Join(returnErr, auditErr)
+		}
+	}()
+
 	if destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
@@ -109,13 +126,6 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	expiresAt := admission.Expiry(s.controlSigner, s.now())
 	jti := newID("token")
 	accessSessionID := newID("session")
-	operationID := sessionID
-	if tokenSource {
-		operationID = newID("operation")
-	}
-	if requestID != "" {
-		operationID = requestID
-	}
 	credentialInput := mint.CredentialInput{
 		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: jti,
 		IssuedAt: s.now().UTC(), ExpiresAt: expiresAt, CredentialClass: "file_transfer", Scopes: []string{"file:transfer"},

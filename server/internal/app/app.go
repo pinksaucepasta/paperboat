@@ -454,7 +454,7 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure native private target resolver: %w", err)
 	}
 	nativePrivateResolver.AdmissionLifetime = opts.Config.CLIAuth.MintProofLifetime
-	nativePrivateService := &nativeprivateaccess.Service{Resolver: nativePrivateResolver, Signer: mintKeys, Issuer: config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)}
+	nativePrivateService := &nativeprivateaccess.Service{Audit: auditWriter, Resolver: nativePrivateResolver, Signer: mintKeys, Issuer: config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)}
 	managedSSHRepository, err := managedssh.NewSQLRepository(store, auditWriter)
 	if err != nil {
 		return nil, err

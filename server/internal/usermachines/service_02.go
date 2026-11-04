@@ -772,7 +772,17 @@ type ExecDescriptor struct {
 // instead of machine_not_ready. Released clients do not send it and keep the old answer.
 // Prior art: Tailscale SSH authorizes per connection from the netmap, independent of DERP reachability
 // (ssh/tailssh/tailssh.go).
-func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (ExecDescriptor, error) {
+func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, userMachineID, cliClientSessionID, operationID string, nativeOnly bool) (descriptor ExecDescriptor, returnErr error) {
+	defer func() {
+		auditErr := s.recordSDKAuthorization(ctx, userID, cliClientSessionID, userMachineID, operationID, "exec", returnErr)
+		if auditErr != nil {
+			if returnErr == nil {
+				descriptor = ExecDescriptor{}
+			}
+			returnErr = errors.Join(returnErr, auditErr)
+		}
+	}()
+
 	if !execOperationIDPattern.MatchString(operationID) {
 		return ExecDescriptor{}, ErrExecOperationInvalid
 	}

@@ -784,7 +784,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		claims["route_binding"] = input.RouteBinding
 		claims["file_transfer_policy"] = input.FileTransferPolicy
 	case "config_compare":
-		if input.EnvironmentID == "" || input.MachineID == "" || input.InstallationGeneration < 1 || input.AccountID == "" || input.UserID != input.AccountID || input.AssignmentID == "" || input.AssignmentVersion < 1 || input.ConfigPath == "" || input.ConflictRevision == "" || input.ExpectedRemoteRevision == "" || !validOperationID(input.OperationID) {
+		if input.EnvironmentID == "" || input.MachineID == "" || input.InstallationGeneration < 1 || input.AccountID == "" || input.UserID != input.AccountID || input.AssignmentID == "" || input.AssignmentVersion < 1 || input.ConfigPath == "" || input.ConflictRevision == "" || input.ExpectedRemoteRevision == "" || !ValidOperationID(input.OperationID) {
 			return "", errors.New("config compare bindings are required")
 		}
 		if input.SourceMachineID == "" || input.CLIClientSessionID == "" || input.BrowserPublicKeySHA256 != "" {
@@ -832,7 +832,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		claims["machine_id"], claims["user_id"], claims["account_id"] = input.MachineID, input.UserID, input.AccountID
 		claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
 	case "exec_operation":
-		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validOperationID(input.OperationID) {
+		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !ValidOperationID(input.OperationID) {
 			return "", errors.New("exec operation bindings are required")
 		}
 		claims["machine_id"], claims["source_machine_id"], claims["user_id"], claims["cli_client_session_id"], claims["operation_id"] = input.MachineID, input.SourceMachineID, input.UserID, input.CLIClientSessionID, input.OperationID
@@ -840,7 +840,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 			claims["assignment_id"] = input.AssignmentID
 		}
 	case "ssh_operation":
-		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validOperationID(input.OperationID) {
+		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !ValidOperationID(input.OperationID) {
 			return "", errors.New("ssh operation bindings are required")
 		}
 		claims["machine_id"], claims["source_machine_id"], claims["user_id"], claims["cli_client_session_id"], claims["operation_id"] = input.MachineID, input.SourceMachineID, input.UserID, input.CLIClientSessionID, input.OperationID
@@ -1035,7 +1035,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "config_compare":
-		if claims.EnvironmentID == "" || claims.MachineID == "" || claims.InstallationGeneration < 1 || claims.AccountID == "" || claims.UserID != claims.AccountID || claims.AssignmentID == "" || claims.AssignmentVersion < 1 || claims.ConfigPath == "" || claims.ConflictRevision == "" || claims.ExpectedRemoteRevision == "" || !validOperationID(claims.OperationID) {
+		if claims.EnvironmentID == "" || claims.MachineID == "" || claims.InstallationGeneration < 1 || claims.AccountID == "" || claims.UserID != claims.AccountID || claims.AssignmentID == "" || claims.AssignmentVersion < 1 || claims.ConfigPath == "" || claims.ConflictRevision == "" || claims.ExpectedRemoteRevision == "" || !ValidOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 		if claims.SourceMachineID == "" || claims.CLIClientSessionID == "" || claims.BrowserPublicKeySHA256 != "" {
@@ -1059,11 +1059,11 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "exec_operation":
-		if claims.MachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
+		if claims.MachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !ValidOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "ssh_operation":
-		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validOperationID(claims.OperationID) {
+		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !ValidOperationID(claims.OperationID) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "inbox_read", "inbox_delete", "inbox_list":
@@ -1137,7 +1137,7 @@ func validFileTransferID(value string, maximum int) bool {
 }
 
 func validatePreviewLaunchInput(input CredentialInput) error {
-	if input.AccountID == "" || input.MachineID == "" || input.UserID == "" || input.ActorID == "" || input.PreviewID == "" || input.OwnerSessionID == "" || !validPreviewOwnerSessionKind(input.OwnerSessionKind) || !validOperationID(input.OperationID) {
+	if input.AccountID == "" || input.MachineID == "" || input.UserID == "" || input.ActorID == "" || input.PreviewID == "" || input.OwnerSessionID == "" || !validPreviewOwnerSessionKind(input.OwnerSessionKind) || !ValidOperationID(input.OperationID) {
 		return errors.New("identity bindings are incomplete")
 	}
 	if input.Subject != input.UserID || !validCredentialBindingID(input.AccountID) || !validCredentialBindingID(input.ActorID) || !validCredentialBindingID(input.MachineID) || !validCredentialBindingID(input.PreviewID) || !validCredentialBindingID(input.OwnerSessionID) {
@@ -1188,7 +1188,7 @@ func validateInboxInput(class, accountID, machineID, userID, actorID, subject, o
 	if class == "inbox_list" {
 		wantKind = InboxListResourceKind
 	}
-	if accountID == "" || machineID == "" || userID == "" || actorID == "" || !validOperationID(operationID) || resourceKind != wantKind || resourceID == "" || class == "inbox_list" && resourceID != machineID {
+	if accountID == "" || machineID == "" || userID == "" || actorID == "" || !ValidOperationID(operationID) || resourceKind != wantKind || resourceID == "" || class == "inbox_list" && resourceID != machineID {
 		return errors.New("identity bindings are incomplete")
 	}
 	if subject != userID || !validCredentialBindingID(accountID) || !validCredentialBindingID(actorID) || !validCredentialBindingID(machineID) || !validCredentialBindingID(resourceID) {
@@ -1204,7 +1204,7 @@ func validateInboxInput(class, accountID, machineID, userID, actorID, subject, o
 }
 
 func validatePreviewLaunchClaims(claims CredentialClaims) error {
-	if claims.AccountID == "" || claims.MachineID == "" || claims.UserID == "" || claims.ActorID == "" || claims.PreviewID == "" || claims.OwnerSessionID == "" || !validPreviewOwnerSessionKind(claims.OwnerSessionKind) || !validOperationID(claims.OperationID) {
+	if claims.AccountID == "" || claims.MachineID == "" || claims.UserID == "" || claims.ActorID == "" || claims.PreviewID == "" || claims.OwnerSessionID == "" || !validPreviewOwnerSessionKind(claims.OwnerSessionKind) || !ValidOperationID(claims.OperationID) {
 		return errors.New("identity bindings are incomplete")
 	}
 	if claims.Subject != claims.UserID || !validCredentialBindingID(claims.AccountID) || !validCredentialBindingID(claims.ActorID) || !validCredentialBindingID(claims.MachineID) || !validCredentialBindingID(claims.PreviewID) || !validCredentialBindingID(claims.OwnerSessionID) {
@@ -1244,7 +1244,7 @@ func validatePrivateAccessInput(input CredentialInput) error {
 	if input.Protocol != "http" && input.Protocol != "tcp" {
 		return errors.New("private access protocol is invalid")
 	}
-	if input.ResourceKind == "preview" && !validOperationID(input.OperationID) {
+	if input.ResourceKind == "preview" && !ValidOperationID(input.OperationID) {
 		return errors.New("private preview operation binding is invalid")
 	}
 	if input.ResourceKind == "tunnel" && !validCredentialBindingID(input.ConnectorID) {
@@ -1279,7 +1279,7 @@ func validatePrivateAccessClaims(claims CredentialClaims) error {
 	if claims.Protocol != "http" && claims.Protocol != "tcp" {
 		return errors.New("private access protocol is invalid")
 	}
-	if claims.ResourceKind == "preview" && !validOperationID(claims.OperationID) {
+	if claims.ResourceKind == "preview" && !ValidOperationID(claims.OperationID) {
 		return errors.New("private preview operation binding is invalid")
 	}
 	if claims.ResourceKind == "tunnel" && !validCredentialBindingID(claims.ConnectorID) {
@@ -1328,7 +1328,7 @@ func validateNativePrivateValues(account, machine, user, operation, resourceKind
 	host, port, err := net.SplitHostPort(address)
 	parsedPort, portErr := strconv.ParseUint(port, 10, 16)
 	validScheme := protocol == "http" && (scheme == "http" || scheme == "https" || scheme == "h2c") || protocol == "tcp" && scheme == "tcp"
-	if account == "" || machine == "" || user == "" || !validOperationID(operation) || resourceKind != "machine_service" || protocol != "tcp" || resourceID == "" || routeID == "" || resourceGeneration < 1 || routeGeneration < 1 || targetGeneration < 1 || !validScheme || err != nil || portErr != nil || parsedPort == 0 || strconv.FormatUint(parsedPort, 10) != port || host != "127.0.0.1" && host != "::1" {
+	if account == "" || machine == "" || user == "" || !ValidOperationID(operation) || resourceKind != "machine_service" || protocol != "tcp" || resourceID == "" || routeID == "" || resourceGeneration < 1 || routeGeneration < 1 || targetGeneration < 1 || !validScheme || err != nil || portErr != nil || parsedPort == 0 || strconv.FormatUint(parsedPort, 10) != port || host != "127.0.0.1" && host != "::1" {
 		return errors.New("native private target is invalid")
 	}
 	return nil
@@ -1404,7 +1404,8 @@ func validPreviewLaunchState(state, allocation, edge, origin string) bool {
 	return validState && validAllocation && validEdge && validOrigin
 }
 
-func validOperationID(value string) bool {
+// ValidOperationID bounds opaque operation identifiers shared by descriptor issuers.
+func ValidOperationID(value string) bool {
 	if len(value) < 8 || len(value) > 128 {
 		return false
 	}
@@ -1551,5 +1552,5 @@ func validFileSource(machine, direction, mode, operation string, maxBytes int64)
 	if direction != "" && direction != "send" {
 		return false
 	}
-	return machine != "" || direction == "send" && validOperationID(operation) && validTransferMode(mode, maxBytes)
+	return machine != "" || direction == "send" && ValidOperationID(operation) && validTransferMode(mode, maxBytes)
 }

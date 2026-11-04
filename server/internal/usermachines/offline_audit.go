@@ -91,6 +91,9 @@ func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
 	if isSSHKind(e.Kind) {
 		return validSSHAuditEvent(e)
 	}
+	if e.Kind == "sdk_operation_ended" {
+		return validSDKOperationEnd(e)
+	}
 	if _, ok := offlinePolicyCapability[e.Capability]; !ok || !offlineAuditIdentifier.MatchString(e.OperationID) || e.Origin != "" {
 		return false
 	}
@@ -142,6 +145,14 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 			key := "offline:" + e.EventID
 			if existing[key] {
 				receipt.Duplicates++
+				continue
+			}
+			if e.Kind == "sdk_operation_ended" {
+				if err := s.recordSDKOperationEndTx(ctx, tx, machineID, e); err != nil {
+					return err
+				}
+				existing[key] = true
+				receipt.Accepted++
 				continue
 			}
 			eventType, result, metadata := auditEventFor(e, installationGeneration)

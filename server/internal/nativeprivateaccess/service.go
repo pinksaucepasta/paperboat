@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"net"
@@ -53,6 +55,7 @@ type Signer interface {
 	SignCredential(mint.CredentialInput) (string, error)
 }
 type Service struct {
+	Audit    *audit.Writer
 	Resolver Resolver
 	Signer   Signer
 	Issuer   string
@@ -65,8 +68,30 @@ type Grant struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
-func (s Service) Issue(ctx context.Context, request Request) (Grant, error) {
-	if ctx == nil || s.Resolver == nil || s.Signer == nil || s.Issuer == "" || request.OperationID == "" || request.ResourceKind != "machine_service" || request.Protocol != "tcp" {
+func (s Service) Issue(ctx context.Context, request Request) (grant Grant, returnErr error) {
+	defer func() {
+		if ctx == nil {
+			return
+		}
+		outcome := "authorized"
+		if returnErr != nil {
+			outcome = "uncertain"
+			if errors.Is(returnErr, ErrDenied) || errors.Is(returnErr, ErrInvalid) || errors.Is(returnErr, machineservices.ErrTeamPrivateAccessOff) {
+				outcome = "denied"
+			}
+		}
+		write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		auditErr := auth.RecordSDKAuthorization(write, s.Audit, request.UserID, request.CLIClientSessionID, request.ResourceID, request.OperationID, "private_access", outcome)
+		if auditErr != nil {
+			if returnErr == nil {
+				grant = Grant{}
+			}
+			returnErr = errors.Join(returnErr, auditErr)
+		}
+	}()
+
+	if ctx == nil || s.Resolver == nil || s.Signer == nil || s.Issuer == "" || !mint.ValidOperationID(request.OperationID) || request.ResourceKind != "machine_service" || request.Protocol != "tcp" {
 		return Grant{}, ErrInvalid
 	}
 	target, err := s.Resolver.ResolveNativePrivate(ctx, request)

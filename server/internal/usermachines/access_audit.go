@@ -47,7 +47,14 @@ func (s *Service) recordAccessStartedTx(ctx context.Context, tx *db.Tx, in dbsql
 	}
 	metadata["capabilities"] = in.Capabilities
 	metadata["access_session_id"] = in.ID
-	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: in.UserID, ActorType: audit.ActorUser, EventType: accessStartedEvent,
+	metadata["cli_client_session_id"] = in.CLIClientSessionID
+	metadata["operation_id"] = in.OperationID
+	metadata["workspace"] = "personal"
+	if in.TeamID.Valid {
+		metadata["workspace"] = in.TeamID.String
+	}
+	token, _ := auth.APITokenFromContext(ctx)
+	return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: in.UserID, ActorTokenID: token, ActorType: audit.ActorUser, EventType: accessStartedEvent,
 		ResourceType: accessResource, ResourceID: in.UserMachineID, IdempotencyKey: in.ID, Metadata: metadata})
 }
 
