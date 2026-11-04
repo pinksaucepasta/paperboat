@@ -44,7 +44,12 @@ func apiTokenLogin(c *command.Context, path string) error {
 		return err
 	}
 	label := "API token on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)
-	t, err := api.StartAPITokenSession(c.Context, issuer, token, label, apiTokenDeviceType(), runtime.GOOS, loginHTTPClient())
+	// On a paired machine the session becomes that machine's login, as a browser login there (F18-06).
+	machineID, err := loginLocalMachineID(cfg)
+	if err != nil {
+		return err
+	}
+	t, err := api.StartAPITokenSession(c.Context, issuer, token, label, apiTokenDeviceType(), runtime.GOOS, machineID, loginHTTPClient())
 	if err != nil {
 		return fmt.Errorf("sign in with the API token: %w", friendlyCommandError(err))
 	}

@@ -37,7 +37,7 @@ func (s *Source) Login(ctx context.Context, token, label, osName string) error {
 	if current.ID != "" {
 		return errors.New("Paperboat session already exists")
 	}
-	tokens, err := s.API.StartAPITokenSession(ctx, token, label, "server", osName)
+	tokens, err := s.API.StartAPITokenSession(ctx, token, label, "server", osName, "")
 	if err != nil {
 		return err
 	}

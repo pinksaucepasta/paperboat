@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"strings"
@@ -24,6 +25,9 @@ var (
 // APITokenSessionRequest describes the computer that signs in with an API token.
 type APITokenSessionRequest struct {
 	TokenID, Account, Label, DeviceType, OS string
+	// EnrolledMachineID names the paired machine the CLI runs on; the session becomes that machine's login
+	// (as a browser login there), so it may name the machine as the source of an exec. Empty for an SDK.
+	EnrolledMachineID string
 }
 
 // StartAPITokenSession turns a live API token into an ordinary CLI session of its creator that
@@ -60,6 +64,12 @@ func (s *DeviceService) StartAPITokenSession(ctx context.Context, in APITokenSes
 		}
 		if _, err := tx.Exec(ctx, `UPDATE cli_client_sessions SET api_token_id=$2 WHERE id=$1`, sessionID, in.TokenID); err != nil {
 			return err
+		}
+		// Same rule as a browser login on a paired machine: a stale or foreign machine id leaves an account login.
+		if in.EnrolledMachineID != "" {
+			if _, err := tx.Queries().BindCLIClientSessionToUserMachine(ctx, dbsqlc.BindCLIClientSessionToUserMachineParams{TargetMachineID: sql.NullString{String: in.EnrolledMachineID, Valid: true}, TargetCLISessionID: sessionID, TargetUserID: in.Account}); err != nil {
+				return err
+			}
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: in.Account, ActorType: audit.ActorUser, EventType: "auth.client.api_token", ResourceType: "client_session", ResourceID: sessionID,
 			IdempotencyKey: "auth.client.api_token:" + sessionID, Metadata: map[string]any{"api_token_id": in.TokenID, "token_expires_at": expires}})

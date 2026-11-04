@@ -79,6 +79,18 @@ func TestSDKSessionExecSourceAuthorization(t *testing.T) {
 			}
 		})
 	}
+	// F18-06: a token session that signed in on a paired machine is that machine's login and may name it as
+	// the source; it still may not name another machine (production 2026-11-05: every token pb exec on a
+	// paired machine was refused).
+	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET user_machine_id=$2 WHERE id=$1`, session, source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ExecDescriptor(ctx, f.account, source, f.machine, session, "operation_token_paired", true); err != nil {
+		t.Fatalf("a token session on its paired machine was refused: %v", err)
+	}
+	if _, err := f.service.ExecDescriptor(ctx, f.account, f.machine, f.machine, session, "operation_token_other_source", true); !errors.Is(err, auth.ErrOutsideTokenScope) {
+		t.Fatalf("a token session named a machine it is not bound to: %v", err)
+	}
 	if _, err := f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.api_token_scope_rules WHERE token_id=$1`, token); err != nil {
 		t.Fatal(err)
 	}

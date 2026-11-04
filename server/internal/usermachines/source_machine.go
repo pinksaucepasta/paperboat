@@ -31,10 +31,18 @@ func (s *Service) descriptorSourceAllowed(ctx context.Context, user, source, ses
 		if err := planlimits.AllowSDKRequest(user, tokenID, "descriptors"); err != nil {
 			return err
 		}
-		if source != "" {
+		if source == "" {
+			return auth.AuthorizeAPITokenSession(ctx, s.db.SQL(), user, session, target, capability, 0)
+		}
+		// A token session names a source only from the paired machine it signed in on (F18-06); an SDK
+		// session is bound to no machine, so a claimed source stays refused (F24-04).
+		var bound bool
+		if err := s.db.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cli_client_sessions WHERE id=$1 AND user_id=$2 AND state='active' AND user_machine_id=$3)`, session, user, source).Scan(&bound); err != nil {
+			return err
+		}
+		if !bound {
 			return auth.ErrOutsideTokenScope
 		}
-		return auth.AuthorizeAPITokenSession(ctx, s.db.SQL(), user, session, target, capability, 0)
 	}
 	if source == "" || session == "" {
 		return ErrNotFound

@@ -105,6 +105,6 @@ func CancelDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http
 
 // StartAPITokenSession exchanges an API token for a CLI session of its creator that carries the
 // token (PLAN F18-06): the token is the request's bearer and is not stored by the caller.
-func StartAPITokenSession(ctx context.Context, baseURL, apiToken, label, deviceType, osName string, hc *http.Client) (clientapi.TokenSet, error) {
-	return (&clientapi.Client{BaseURL: baseURL, Options: publicCallOptions(hc)}).StartAPITokenSession(ctx, apiToken, label, deviceType, osName)
+func StartAPITokenSession(ctx context.Context, baseURL, apiToken, label, deviceType, osName, machineID string, hc *http.Client) (clientapi.TokenSet, error) {
+	return (&clientapi.Client{BaseURL: baseURL, Options: publicCallOptions(hc)}).StartAPITokenSession(ctx, apiToken, label, deviceType, osName, machineID)
 }

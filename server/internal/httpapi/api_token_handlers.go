@@ -267,14 +267,15 @@ func apiTokenSessionCreate(machines *auth.DeviceService) http.HandlerFunc {
 			return
 		}
 		var in struct {
-			ClientLabel string `json:"client_label"`
-			DeviceType  string `json:"device_type"`
-			OS          string `json:"os"`
+			ClientLabel       string `json:"client_label"`
+			DeviceType        string `json:"device_type"`
+			OS                string `json:"os"`
+			EnrolledMachineID string `json:"enrolled_machine_id,omitempty"`
 		}
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		out, err := machines.StartAPITokenSession(r.Context(), auth.APITokenSessionRequest{TokenID: p.APIToken.TokenID, Account: p.User.ID, Label: in.ClientLabel, DeviceType: in.DeviceType, OS: in.OS})
+		out, err := machines.StartAPITokenSession(r.Context(), auth.APITokenSessionRequest{TokenID: p.APIToken.TokenID, Account: p.User.ID, Label: in.ClientLabel, DeviceType: in.DeviceType, OS: in.OS, EnrolledMachineID: strings.TrimSpace(in.EnrolledMachineID)})
 		if writeSDKLimitError(w, r, err) {
 			return
 		}
