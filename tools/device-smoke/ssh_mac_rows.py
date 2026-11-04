@@ -36,7 +36,8 @@ def cl(script, timeout=300):
 
 
 def msudo(script, bg=False, timeout=120):
-    c = "sudo -S -p '' sh -c %s < \"$SUDO_PW_FILE\"" % shlex.quote(script)
+    # SUDO_PW_FILE is a path on the Mac, set here on the controller: expand it before the command leaves
+    c = "sudo -S -p '' sh -c %s < %s" % (shlex.quote(script), shlex.quote(os.environ['SUDO_PW_FILE']))
     return mac(('nohup ' + c + ' >/dev/null 2>&1 &') if bg else c, timeout)
 
 
@@ -176,7 +177,10 @@ ssh-agent -k >/dev/null 2>&1; unset SSH_AUTH_SOCK
 if command -v sshpass >/dev/null; then export SSHPASS; SSHPASS=$(cat ~/bob_pw)
 check bob-password-plain ok-bob-password sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive $B@$HN echo ok-bob-password
 check bob-password-pb ok-bob-password sshpass -e $PB ssh $B@$A -- echo ok-bob-password
-SSHPASS=wrong-password-1; check bob-wrong-password-is-sshd "Permission denied" sshpass -e ssh -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 $B@$HN echo no
+# macOS sshd re-prompts after a wrong password, so sshpass stops with exit 5 (incorrect password) and
+# prints nothing; either sshd's text or that exit means sshd itself refused the password
+SSHPASS=wrong-password-1; o=$(sshpass -e ssh -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 $B@$HN echo no 2>&1 </dev/null); rc=$?
+if grep -q "Permission denied" <<<"$o" || [ $rc = 5 ]; then ok="$ok bob-wrong-password-is-sshd"; else fail="$fail bob-wrong-password-is-sshd(rc=$rc $(tr '\n' ' ' <<<"$o" | cut -c1-120))"; fi
 else skip=" password-checks(no sshpass on the client)"; fi
 echo "RESULT ok:[$ok ] fail:[$fail ] skip:[$skip ]"'''
 
@@ -193,7 +197,7 @@ def otheruser():
         if not pub.startswith('ssh-ed25519'):
             return report(row, 'FAIL', "could not make bob's key on the client")
         cl('umask 077; printf %%s %s > ~/bob_pw' % pw)
-        msudo('sysadminctl -addUser {b} -fullName {b} -password {p} -home /Users/{b} && createhomedir -c -u {b}; '
+        msudo('sysadminctl -addUser {b} -fullName {b} -password {p} -home /Users/{b} && (createhomedir -c -u {b} >/dev/null 2>&1; mkdir -p /Users/{b}; chown {b}:staff /Users/{b}; chmod 750 /Users/{b}); '
               '(dscl . -read /Groups/com.apple.access_ssh >/dev/null 2>&1 && dseditgroup -o edit -a {b} -t user com.apple.access_ssh); '
               'install -d -m 700 -o {b} /Users/{b}/.ssh && printf "%s\\n" {k} > /Users/{b}/.ssh/authorized_keys '
               '&& chown {b} /Users/{b}/.ssh/authorized_keys && chmod 600 /Users/{b}/.ssh/authorized_keys'.format(b=bob, p=pw, k=shlex.quote(pub)))
