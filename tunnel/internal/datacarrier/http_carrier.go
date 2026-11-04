@@ -91,7 +91,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 			return nil, err
 		}
 		go func() {
-			if err := s.h2.Serve(tlsConfigListener(listener, tlsConfig)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
+			if err := s.h2.Serve(newHandshakeListener(listener, tlsConfig, carrier.StreamOpenLimit, maximum, s.observeFailure)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
 				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}
 		}()
@@ -130,11 +130,6 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		}
 	}()
 	return s, nil
-}
-
-// tlsConfigListener avoids importing TLS ownership into the HTTP link.
-func tlsConfigListener(listener net.Listener, config *tls.Config) net.Listener {
-	return tls.NewListener(listener, config.Clone())
 }
 
 func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler {
