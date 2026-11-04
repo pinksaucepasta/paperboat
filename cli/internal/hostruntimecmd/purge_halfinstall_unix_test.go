@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	documentation "github.com/pinksaucepasta/paperboat/docs"
 )
 
 // F1-09 (pbmac, dev-6b9ea3ba3): a failed re-pair left a half-installed Mac that
@@ -70,8 +72,19 @@ func TestDarwinPurgeClearsAHalfInstallAndIsIdempotent(t *testing.T) {
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/pb"
 	fake := newPurgeFake(unixProcess{pid: 900, ppid: 1, exe: pin}, unixProcess{pid: 901, ppid: 1, exe: "/usr/sbin/foreign"})
 	fake.termExits[900] = true
+	manuals := filepath.Join(root, "usr/local/share/man")
+	if err := documentation.Install(manuals); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := filepath.Glob(filepath.Join(manuals, "man1", "pb*.1"))
+	if err != nil || len(pages) == 0 {
+		t.Fatal("manual fixture missing", err)
+	}
 	if err := testSweep(root, plan, fake).purgeAccount(context.Background()); err != nil {
 		t.Fatalf("half-install purge failed:\n%s", errorChainText(err))
+	}
+	if left, _ := filepath.Glob(filepath.Join(manuals, "man1", "pb*.1")); len(left) != 0 {
+		t.Fatalf("%d of %d manual pages survived the last account", len(left), len(pages))
 	}
 	for _, path := range planted {
 		assertGone(t, root, path)

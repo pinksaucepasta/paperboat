@@ -478,6 +478,7 @@ func (s unixSweep) removeUnneededSharedManuals() error {
 		return nil
 	}
 	// Check every parent without creating or repairing shared filesystem paths.
+	// Purge runs as root, so the effective uid is root here; tests run it unprivileged.
 	// The root prefix is the existing sweep's isolated filesystem fixture.
 	current := s.at("/")
 	for _, component := range []string{"", "usr", "local", "share", "man", "man1"} {
@@ -487,7 +488,7 @@ func (s unixSweep) removeUnneededSharedManuals() error {
 			return err
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 || !ok || stat.Uid != 0 {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 || !ok || int(stat.Uid) != os.Geteuid() {
 			return errors.New("shared manual directory custody is unsafe")
 		}
 	}
@@ -505,7 +506,7 @@ func (s unixSweep) removeUnneededSharedManuals() error {
 			return err
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || stat.Uid != 0 || info.Mode().Perm()&0022 != 0 {
+		if !ok || int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0022 != 0 {
 			return errors.New("shared manual file custody is unsafe")
 		}
 	}
