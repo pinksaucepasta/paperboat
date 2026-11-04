@@ -1,14 +1,17 @@
 package runtime
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,4 +75,32 @@ func TestCertificateSelectorCompletesTLSForUnavailableRoute(t *testing.T) {
 	if err := handshake(t, selector.TLSConfig(), pool, "other.example.test"); err == nil {
 		t.Fatal("a name outside the wildcard completed TLS")
 	}
+}
+
+// 2026-11-05: the not-found page used the full selector, so every handshake to a stopped or unknown name
+// asked the server for an on-demand certificate (5xx flood at /v1/edge/certificates/distributions/request).
+// The wildcard-only config completes TLS for covered names without one on-demand request.
+func TestWildcardTLSConfigNeverRequestsOnDemandCertificates(t *testing.T) {
+	cert, pool := wildcardTestCertificate(t, "*.preview.example.test")
+	requests := &countingOnDemand{}
+	selector, err := NewCertificateSelector(CertificateSelectorConfig{Source: missingSource{}, Wildcard: wildcardOnly{cert}, OnDemandRequester: requests, HandshakeTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handshake(t, selector.WildcardTLSConfig(), pool, "stopped.preview.example.test"); err != nil {
+		t.Fatalf("handshake for a stopped name: %v", err)
+	}
+	if err := handshake(t, selector.WildcardTLSConfig(), pool, "other.example.test"); err == nil {
+		t.Fatal("a name outside the wildcard completed TLS")
+	}
+	if n := requests.count.Load(); n != 0 {
+		t.Fatalf("on-demand certificate requests = %d, want 0", n)
+	}
+}
+
+type countingOnDemand struct{ count atomic.Int32 }
+
+func (c *countingOnDemand) RequestCertificate(context.Context, string) error {
+	c.count.Add(1)
+	return errors.New("refused")
 }

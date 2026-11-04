@@ -88,6 +88,26 @@ func (s *CertificateSelector) TLSConfig() *tls.Config {
 	}}
 }
 
+// WildcardTLSConfig serves only the platform wildcard for a covered name and never asks the server for an
+// on-demand certificate: the edge's not-found page for stopped or unknown names must not turn every
+// handshake (scanners included) into a control request.
+func (s *CertificateSelector) WildcardTLSConfig() *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if hello == nil || s.wildcard == nil {
+			return nil, tlscert.ErrCertificateMissing
+		}
+		canonical, wildcard, err := tlscert.NormalizeHostname(hello.ServerName)
+		if err != nil || wildcard {
+			return nil, tlscert.ErrCertificateMissing
+		}
+		certificate, err := s.wildcard.WildcardCertificate(canonical)
+		if err != nil || !certificateCoversHost(certificate, canonical) {
+			return nil, tlscert.ErrCertificateMissing
+		}
+		return certificate, nil
+	}}
+}
+
 func (s *CertificateSelector) lookup(ctx context.Context, hostname string) (*tls.Certificate, error) {
 	certificate, err := s.lookupExact(ctx, hostname)
 	if err == nil || s.wildcard == nil {
