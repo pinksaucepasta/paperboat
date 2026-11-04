@@ -118,7 +118,24 @@ func lockDirectory(path string) (func() error, error) {
 		return errors.Join(windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &region), file.Close())
 	}, nil
 }
-func syncDirectory(string) error { return nil } // Windows file Sync precedes the atomic replacement.
+func replaceState(from, to string) error {
+	source, err := windows.UTF16PtrFromString(from)
+	if err != nil {
+		return err
+	}
+	target, err := windows.UTF16PtrFromString(to)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(source, target, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+}
+func removeState(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
 
 func privateSDDL(sid string) string { return "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid + ")" }
 func daclSDDL(text string) string {

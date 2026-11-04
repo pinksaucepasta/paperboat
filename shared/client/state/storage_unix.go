@@ -5,6 +5,7 @@ package state
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -63,4 +64,17 @@ func syncDirectory(path string) error {
 		return err
 	}
 	return errors.Join(dir.Sync(), dir.Close())
+}
+
+func replaceState(from, to string) error {
+	if err := os.Rename(from, to); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(to))
+}
+func removeState(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }

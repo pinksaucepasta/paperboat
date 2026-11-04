@@ -2,11 +2,13 @@ package state
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -85,6 +87,15 @@ func (s *Directory) Load() (Session, error) {
 	if decoder.Decode(new(any)) != io.EOF {
 		return Session{}, errors.New("SDK session state contains trailing data")
 	}
+	if value.ID == "" || value.Issuer == "" || value.AccessToken == "" || value.RefreshToken == "" || !strings.EqualFold(value.TokenType, "Bearer") || value.ExpiresAt.IsZero() {
+		return Session{}, errors.New("SDK session state is incomplete; choose another StateDir")
+	}
+	if value.RefreshAttempt != "" {
+		decoded, err := hex.DecodeString(value.RefreshAttempt)
+		if err != nil || len(decoded) != 32 || strings.ToLower(value.RefreshAttempt) != value.RefreshAttempt {
+			return Session{}, errors.New("SDK refresh attempt state is invalid")
+		}
+	}
 	return value, nil
 }
 
@@ -119,15 +130,7 @@ func (s *Directory) Save(v Session) (resultErr error) {
 	if err = file.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(name, filepath.Join(s.path, "sdk-session.json")); err != nil {
-		return err
-	}
-	return syncDirectory(s.path)
+	return replaceState(name, filepath.Join(s.path, "sdk-session.json"))
 }
-func (s *Directory) Clear() error {
-	if err := os.Remove(filepath.Join(s.path, "sdk-session.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return syncDirectory(s.path)
-}
+func (s *Directory) Clear() error { return removeState(filepath.Join(s.path, "sdk-session.json")) }
 func (s *Directory) Close() error { s.once.Do(func() { s.closeErr = s.unlock() }); return s.closeErr }
