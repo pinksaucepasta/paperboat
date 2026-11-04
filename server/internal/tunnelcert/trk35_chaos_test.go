@@ -1,6 +1,7 @@
 package tunnelcert
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -203,11 +204,10 @@ func TestTRK35CertificateRevocationEdgeFailureLeavesDurableRetryMarker(t *testin
 func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
 	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
 	identity := DistributionNodeIdentity{NodeID: "edge_trk35", ProcessEpoch: "epoch_trk35_001"}
-	hub, err := NewDistributionHub(DistributionHubConfig{
-		Credential:          []byte("distribution-credential-trk35-012345678901234567890123456789"),
-		MaximumPending:      2,
-		MaximumPendingBytes: 1024,
-		Now:                 func() time.Time { return now },
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+		Credential:     []byte("distribution-credential-trk35-012345678901234567890123456789"),
+		MaximumPending: 2,
+		Now:            func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return identity, nil
 		}),
@@ -227,11 +227,8 @@ func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
 	if _, err := hub.enqueue(context.Background(), "stage", trk35DistributionRequest(3, now, identity)); !errors.Is(err, ErrDistributionTransportFailed) {
 		t.Fatalf("overload error = %v, want ErrDistributionTransportFailed", err)
 	}
-	hub.mu.Lock()
-	pending, pendingBytes := len(hub.pending), hub.pendingBytes
-	hub.mu.Unlock()
-	if pending != 2 || pendingBytes <= 0 || pendingBytes > hub.maximumBytes {
-		t.Fatalf("overload queue = pending %d bytes %d, want bounded two entries", pending, pendingBytes)
+	if pending, _ := hub.store.CountPending(context.Background(), now); pending != 2 {
+		t.Fatalf("overload queue = pending %d, want bounded two entries", pending)
 	}
 
 	// A mismatched transcript is rejected without consuming the pending entry,
@@ -263,18 +260,12 @@ func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
 		if status := trk35HandleDistributionAck(t, hub, identity, trk35DistributionAck(message)); status != http.StatusNoContent {
 			t.Fatalf("refill ACK %d status = %d", index, status)
 		}
-		hub.mu.Lock()
-		pending, pendingBytes, results := len(hub.pending), hub.pendingBytes, len(hub.results)
-		hub.mu.Unlock()
-		if pending > hub.maximum || pendingBytes > hub.maximumBytes || results > hub.maximum*2 {
-			t.Fatalf("bounded queue exceeded at %d: pending=%d bytes=%d results=%d", index, pending, pendingBytes, results)
+		if pending, _ := hub.store.CountPending(context.Background(), now); pending > hub.maximum {
+			t.Fatalf("bounded queue exceeded at %d: pending=%d", index, pending)
 		}
 	}
-	hub.mu.Lock()
-	pending, pendingBytes, results := len(hub.pending), hub.pendingBytes, len(hub.results)
-	hub.mu.Unlock()
-	if pending != 0 || pendingBytes != 0 || results > hub.maximum*2 {
-		t.Fatalf("final bounded queue = pending %d bytes %d results %d", pending, pendingBytes, results)
+	if pending, _ := hub.store.CountPending(context.Background(), now); pending != 0 {
+		t.Fatalf("final bounded queue = pending %d", pending)
 	}
 }
 

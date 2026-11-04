@@ -136,7 +136,7 @@ func TestDistributionHubUsesSignedNodeIdentityNotHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub, err := NewDistributionHub(DistributionHubConfig{Credential: []byte("distribution-credential-012345678901234567890123456789"), Now: func() time.Time { return now }, Identity: resolver})
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte("distribution-credential-012345678901234567890123456789"), Now: func() time.Time { return now }, Identity: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}

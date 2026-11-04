@@ -54,13 +54,9 @@ func (distributionFaultStore) Lookup(context.Context, string, string, string, bo
 func (distributionFaultStore) Cleanup(context.Context) error { return nil }
 
 func TestDistributionHubWaitExpiresWithoutAnotherEdgeRequest(t *testing.T) {
-	hub := &DistributionHub{
-		now: func() time.Time { return time.Now().UTC() },
-		pending: map[string]*distributionEntry{
-			"stale-process": {message: DistributionMessage{ExpiresAt: time.Now().UTC().Add(25 * time.Millisecond)}, done: make(chan struct{})},
-		},
-		results: make(map[string]distributionResult),
-	}
+	store := NewMemoryDistributionActionStore()
+	_, _ = store.Put(context.Background(), DistributionAction{Key: distributionStoreKey("stale-process"), Message: DistributionMessage{ExpiresAt: time.Now().UTC().Add(25 * time.Millisecond)}})
+	hub := &DistributionHub{now: func() time.Time { return time.Now().UTC() }, store: store}
 	done := make(chan error, 1)
 	go func() { done <- hub.waitStatus(context.Background(), "stale-process", "active") }()
 	select {
@@ -87,7 +83,7 @@ func TestDistributionIdentityOutageIsCapturedAndPureRejectionRemainsUnauthorized
 	defer func() { cancel(); <-done }()
 
 	identityFailure := errors.Join(ErrDistributionIdentityInvalid, syscall.ECONNRESET)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{}, identityFailure
@@ -156,7 +152,7 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 		t.Fatal(err)
 	}
 	const credential = "distribution-credential-012345678901234567890123456789"
-	hub, err := NewDistributionHub(DistributionHubConfig{Credential: []byte(credential), Now: func() time.Time { return now }, Identity: resolver})
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte(credential), Now: func() time.Time { return now }, Identity: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +187,7 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 
 func TestDistributionHubBindsPullToAuthenticatedNode(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
@@ -255,7 +251,7 @@ func TestDistributionHubRequestsExactLeafThroughAuthenticatedNode(t *testing.T) 
 	credential := "distribution-credential-012345678901234567890123456789"
 	var got DistributionNodeIdentity
 	var gotHostname string
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte(credential),
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: request.Header.Get("X-Paperboat-Edge-Process-Epoch")}, nil
@@ -315,7 +311,7 @@ func TestDistributionHubOnDemandMixedFailureIsReportedOnceAsUnavailable(t *testi
 
 	const credential = "distribution-credential-012345678901234567890123456789"
 	callbackErr := error(ErrGenerationConflict)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte(credential),
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: request.Header.Get("X-Paperboat-Edge-Process-Epoch")}, nil
@@ -376,7 +372,7 @@ func TestDistributionHubOnDemandMixedFailureIsReportedOnceAsUnavailable(t *testi
 
 func TestDistributionMessageTTLIsIndependentFromCertificateExpiry(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, _ *http.Request) (DistributionNodeIdentity, error) {
@@ -419,7 +415,7 @@ func TestDistributionMessageTTLIsIndependentFromCertificateExpiry(t *testing.T) 
 
 func TestDistributionHubExpiresWipesAndReclaimsPendingCapacity(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential:     []byte("distribution-credential-012345678901234567890123456789"),
 		MaximumPending: 1,
 		Now:            func() time.Time { return now },
@@ -437,12 +433,13 @@ func TestDistributionHubExpiresWipesAndReclaimsPendingCapacity(t *testing.T) {
 	if _, err := hub.enqueue(context.Background(), "stage", request); err != nil {
 		t.Fatal(err)
 	}
-	key := distributionKey("stage", request)
-	hub.mu.Lock()
-	entry := hub.pending[key]
-	certificatePEM := entry.message.CertificatePEM
-	privateKeyPEM := entry.message.PrivateKeyPEM
-	hub.mu.Unlock()
+	stored, found, err := hub.store.Get(context.Background(), distributionStoreKey(distributionKey("stage", request)))
+	if err != nil || !found {
+		t.Fatalf("staged action not stored: found=%v err=%v", found, err)
+	}
+	if stored.Message.CertificatePEM != nil || stored.Message.PrivateKeyPEM != nil || bytes.Contains(stored.SealedPrivateKey, []byte("private-key-secret")) || len(stored.SealedPrivateKey) == 0 {
+		t.Fatal("the stored action holds plaintext key material")
+	}
 	now = now.Add(maxDistributionLifetime + time.Second)
 	replacement := request
 	replacement.Certificate.ID = "certificate_02"
@@ -450,31 +447,6 @@ func TestDistributionHubExpiresWipesAndReclaimsPendingCapacity(t *testing.T) {
 	replacement.Bundle.PrivateKeyPEM = []byte("replacement-private-key")
 	if _, err := hub.enqueue(context.Background(), "stage", replacement); err != nil {
 		t.Fatalf("expired pending capacity was not reclaimed: %v", err)
-	}
-	if len(certificatePEM) == 0 || len(privateKeyPEM) == 0 || !allZeroBytes(certificatePEM) || !allZeroBytes(privateKeyPEM) {
-		t.Fatalf("expired key buffers were not wiped: certificate=%q private=%q", certificatePEM, privateKeyPEM)
-	}
-}
-
-func TestDistributionHubBoundsAggregatePendingSecretBytes(t *testing.T) {
-	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
-		Credential:          []byte("distribution-credential-012345678901234567890123456789"),
-		MaximumPendingBytes: 32,
-		Now:                 func() time.Time { return now },
-		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
-			return DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, nil
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := DistributionRequest{Certificate: StoredCertificate{
-		ID: "certificate_01", AccountID: "account_01", TunnelID: "tunnel_01", DomainID: "domain_01", Hostname: "preview.example.test",
-		DomainGeneration: 1, CertificateGeneration: 1, Fingerprint: [32]byte{1}, Issuer: "test", NotBefore: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
-	}, Bundle: CertificateBundle{CertificatePEM: []byte("certificate-secret"), PrivateKeyPEM: []byte("private-key-secret")}, Target: DistributionTarget{NodeID: "edge_01", ProcessEpoch: "epoch_0001", Generation: 1}}
-	if _, err := hub.enqueue(context.Background(), "stage", request); !errors.Is(err, ErrDistributionTransportFailed) {
-		t.Fatalf("oversized aggregate secret material was accepted: %v", err)
 	}
 }
 
@@ -489,7 +461,7 @@ func allZeroBytes(value []byte) bool {
 
 func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -546,7 +518,7 @@ func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
 
 func TestDistributionHubRejectsActionsWithoutExactStageAndCloseWakesWaiters(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -585,14 +557,14 @@ func TestDistributionHubRejectsActionsWithoutExactStageAndCloseWakesWaiters(t *t
 }
 
 func TestDistributionHubRequiresAuthenticatedNodeResolver(t *testing.T) {
-	if _, err := NewDistributionHub(DistributionHubConfig{Credential: []byte("distribution-credential-012345678901234567890123456789")}); err == nil {
+	if _, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte("distribution-credential-012345678901234567890123456789")}); err == nil {
 		t.Fatal("hub accepted body-only node identity")
 	}
 }
 
 func TestDistributionHubCloseWipesOwnedCredential(t *testing.T) {
 	credential := []byte("distribution-credential-012345678901234567890123456789")
-	hub, err := NewDistributionHub(DistributionHubConfig{
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: credential,
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, nil

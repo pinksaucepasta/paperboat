@@ -75,7 +75,7 @@ func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	distribution, e := tunnelcert.NewDistributionHub(tunnelcert.DistributionHubConfig{Credential: []byte(managed), NodeCredentials: s, Identity: identity})
+	distribution, e := tunnelcert.NewDistributionHub(tunnelcert.DistributionHubConfig{Store: tunnelcert.NewMemoryDistributionActionStore(), Keys: selfhostTestKeys{}, KeyReference: "distribution-test", Credential: []byte(managed), NodeCredentials: s, Identity: identity})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -437,4 +437,10 @@ func fixturePort(t *testing.T, address string) int {
 		t.Fatal(err)
 	}
 	return value
+}
+
+type selfhostTestKeys struct{}
+
+func (selfhostTestKeys) Resolve(context.Context, string) ([]byte, error) {
+	return bytes.Repeat([]byte{7}, 32), nil
 }

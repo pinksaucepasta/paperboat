@@ -96,8 +96,15 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 			return nil, fmt.Errorf("%w: edge identity lookup: %w", ErrCertificateRuntimeUnavailable, err)
 		}
 	}
+	actions, err := tunnelcert.NewSQLDistributionActionStore(config.Database)
+	if err != nil {
+		return nil, fmt.Errorf("%w: distribution action store: %w", ErrCertificateRuntimeUnavailable, err)
+	}
 	var worker *CertificateWorker
 	hub, err := tunnelcert.NewDistributionHub(tunnelcert.DistributionHubConfig{
+		Store:           actions,
+		Keys:            config.Keys,
+		KeyReference:    config.MasterKeyReference,
 		NodeCredentials: config.NodeCredentials,
 		Credential:      config.DistributionCredential,
 		Now:             config.Now,

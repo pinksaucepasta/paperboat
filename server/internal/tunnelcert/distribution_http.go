@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +35,6 @@ const (
 	maxDistributionBody                = 16 << 20
 	maxDistributionMessages            = 128
 	maxDistributionLifetime            = 10 * time.Minute
-	maxDistributionPendingBytes        = 64 << 20
 )
 
 var (
@@ -128,16 +126,6 @@ type distributionRequest struct {
 	Hostname string `json:"hostname"`
 }
 
-type distributionResult struct {
-	status string
-	code   string
-}
-
-type distributionEntry struct {
-	message DistributionMessage
-	done    chan struct{}
-}
-
 // DistributionHub is both the CertificateDistributor transport used by the
 // server coordinator and the authenticated pull/ack endpoint consumed by an
 // edge.  A pending action is retained until the exact node, process epoch,
@@ -149,27 +137,26 @@ type DistributionHub struct {
 	credentialMu    sync.RWMutex
 	now             func() time.Time
 	maximum         int
-	maximumBytes    int64
 	identity        DistributionNodeIdentityResolver
 	onDemand        func(context.Context, DistributionNodeIdentity, string) error
+	store           DistributionActionStore
+	keys            MasterKeySource
+	keyReference    string
 
-	mu           sync.Mutex
-	closed       bool
-	pending      map[string]*distributionEntry
-	pendingBytes int64
-	results      map[string]distributionResult
+	mu       sync.Mutex
+	closed   bool
+	closedCh chan struct{} // closed by Close, wakes waiters
 }
 
 type DistributionHubConfig struct {
 	NodeCredentials nodeauth.Resolver
 	Credential      []byte
 	MaximumPending  int
-	// MaximumPendingBytes bounds the aggregate plaintext certificate and key
-	// material retained by the hub. It is deliberately independent of the
-	// action count because a small number of large wildcard bundles must not
-	// exhaust process memory.
-	MaximumPendingBytes int64
-	Now                 func() time.Time
+	// Store holds pending actions and results for every server instance; Keys seals a staged bundle in it.
+	Store        DistributionActionStore
+	Keys         MasterKeySource
+	KeyReference string
+	Now          func() time.Time
 	// Identity authenticates the edge process independently of the shared
 	// control bearer.  Pull/ACK bodies are compared to this result and are
 	// never used as an identity source.
@@ -205,8 +192,8 @@ func NewDistributionHub(config DistributionHubConfig) (*DistributionHub, error) 
 	if config.MaximumPending <= 0 || config.MaximumPending > 4096 {
 		config.MaximumPending = 1024
 	}
-	if config.MaximumPendingBytes <= 0 || config.MaximumPendingBytes > 512<<20 {
-		config.MaximumPendingBytes = maxDistributionPendingBytes
+	if config.Store == nil || config.Keys == nil || !validKeyReference(config.KeyReference) {
+		return nil, fmt.Errorf("%w: action store and master keys are required", ErrDistributionTransportInvalid)
 	}
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
@@ -214,7 +201,7 @@ func NewDistributionHub(config DistributionHubConfig) (*DistributionHub, error) 
 	if config.Identity == nil {
 		return nil, fmt.Errorf("%w: node identity resolver is required", ErrDistributionTransportInvalid)
 	}
-	return &DistributionHub{nodeCredentials: config.NodeCredentials, credential: append([]byte(nil), config.Credential...), now: config.Now, maximum: config.MaximumPending, maximumBytes: config.MaximumPendingBytes, identity: config.Identity, onDemand: config.OnDemand, pending: make(map[string]*distributionEntry), results: make(map[string]distributionResult)}, nil
+	return &DistributionHub{nodeCredentials: config.NodeCredentials, credential: append([]byte(nil), config.Credential...), now: config.Now, maximum: config.MaximumPending, identity: config.Identity, onDemand: config.OnDemand, store: config.Store, keys: config.Keys, keyReference: config.KeyReference, closedCh: make(chan struct{})}, nil
 }
 
 // Close invalidates all outstanding distribution actions and wipes every
@@ -231,17 +218,13 @@ func (h *DistributionHub) Close() error {
 		return nil
 	}
 	h.closed = true
-	for key, entry := range h.pending {
-		wipeDistributionMessage(&entry.message)
-		close(entry.done)
-		delete(h.pending, key)
+	if h.closedCh != nil {
+		close(h.closedCh)
 	}
 	h.credentialMu.Lock()
 	clear(h.credential)
 	h.credential = nil
 	h.credentialMu.Unlock()
-	h.pendingBytes = 0
-	clear(h.results)
 	h.mu.Unlock()
 	return nil
 }
@@ -389,53 +372,58 @@ func (h *DistributionHub) enqueue(ctx context.Context, action string, request Di
 		clear(message.PrivateKeyPEM)
 		return DistributionMessage{}, signErr
 	}
-	key := distributionMessageKey(message)
 	if action == "stage" && !distributionMessageFitsResponse(message) {
+		clear(message.PrivateKeyPEM)
 		return DistributionMessage{}, ErrDistributionTransportFailed
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closed {
-		return DistributionMessage{}, ErrDistributionTransportInvalid
+	key := distributionStoreKey(distributionMessageKey(message))
+	if err := h.store.Purge(ctx, now); err != nil {
+		return DistributionMessage{}, distributionOperationFailure{cause: err}
 	}
-	h.purgeExpiredLocked(now)
 	if action != "stage" {
-		// Activate/retire/revoke are meaningful only for the exact staged
-		// certificate target. Never queue an action that an edge could accept
-		// without a corresponding stage record after a restart or replay-ledger
-		// eviction.
-		stageKey := distributionKey("stage", request)
-		if _, staged := h.pending[stageKey]; !staged {
-			result, completed := h.results[stageKey]
-			if !completed || result.status != "ready" && result.status != "active" {
-				return DistributionMessage{}, ErrDistributionTransportStale
-			}
+		// Activate/retire/revoke are meaningful only for the exact staged certificate target. Never queue an
+		// action an edge could accept without a corresponding stage record after a restart or ledger expiry.
+		stage, staged, err := h.store.Get(ctx, distributionStoreKey(distributionKey("stage", request)))
+		if err != nil {
+			return DistributionMessage{}, distributionOperationFailure{cause: err}
+		}
+		if !staged || stage.Status != "" && stage.Status != "ready" && stage.Status != "active" {
+			return DistributionMessage{}, ErrDistributionTransportStale
 		}
 	}
-	if existing, ok := h.pending[key]; ok {
-		return cloneDistributionMessage(existing.message), nil
+	if existing, found, err := h.store.Get(ctx, key); err != nil {
+		return DistributionMessage{}, distributionOperationFailure{cause: err}
+	} else if found && existing.Status != "failed" && (existing.Status != "" || existing.Message.ExpiresAt.After(now)) {
+		clear(message.PrivateKeyPEM)
+		return existing.Message, nil
 	}
-	if existing, ok := h.results[key]; ok {
-		if existing.status == "ready" || existing.status == "active" || existing.status == "retired" || existing.status == "revoked" {
-			return message, nil
+	if pending, err := h.store.CountPending(ctx, now); err != nil {
+		return DistributionMessage{}, distributionOperationFailure{cause: err}
+	} else if pending >= h.maximum {
+		return DistributionMessage{}, ErrDistributionTransportFailed
+	}
+	row := DistributionAction{Key: key, Message: message}
+	if action == "stage" && (len(message.CertificatePEM) > 0 || len(message.PrivateKeyPEM) > 0) {
+		sealedCertificate, sealedKey, err := SealParts(ctx, h.keys, h.keyReference, CertificateBundle{CertificatePEM: message.CertificatePEM, PrivateKeyPEM: message.PrivateKeyPEM, Issuer: request.Certificate.Issuer, NotBefore: request.Certificate.NotBefore, NotAfter: request.Certificate.ExpiresAt})
+		if err != nil {
+			wipeDistributionMessage(&message)
+			return DistributionMessage{}, distributionOperationFailure{cause: err}
 		}
+		row.MasterKeyReference, row.SealedCertificate, row.SealedPrivateKey = h.keyReference, sealedCertificate, sealedKey
 	}
-	if len(h.pending) >= h.maximum {
-		return DistributionMessage{}, ErrDistributionTransportFailed
+	row.Message.CertificatePEM, row.Message.PrivateKeyPEM = nil, nil
+	if _, err := h.store.Put(ctx, row); err != nil {
+		wipeDistributionMessage(&message)
+		return DistributionMessage{}, distributionOperationFailure{cause: err}
 	}
-	secretBytes := distributionMessageSecretBytes(message)
-	if h.pendingBytes > h.maximumBytes-secretBytes {
-		return DistributionMessage{}, ErrDistributionTransportFailed
-	}
-	h.pending[key] = &distributionEntry{message: message, done: make(chan struct{})}
-	h.pendingBytes += secretBytes
-	return cloneDistributionMessage(message), nil
+	return message, nil
 }
 
 func (h *DistributionHub) wait(ctx context.Context, key string) error {
 	return h.waitStatus(ctx, key, "ready")
 }
 
+// waitStatus polls the shared store until an edge answers on any instance, the action expires or ctx ends.
 func (h *DistributionHub) waitStatus(ctx context.Context, key, want string) error {
 	if h == nil {
 		return ErrDistributionTransportInvalid
@@ -443,39 +431,35 @@ func (h *DistributionHub) waitStatus(ctx context.Context, key, want string) erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	key = distributionStoreKey(key)
+	delay := 50 * time.Millisecond
 	for {
-		h.mu.Lock()
-		h.purgeExpiredLocked(h.now().UTC())
-		if result, ok := h.results[key]; ok {
-			h.mu.Unlock()
-			if result.status == want {
-				return nil
-			}
-			if result.status == "failed" {
-				return fmt.Errorf("%w: %s", ErrDistributionTransportFailed, result.code)
-			}
+		action, found, err := h.store.Get(ctx, key)
+		switch {
+		case err != nil:
+			return distributionOperationFailure{cause: err}
+		case !found:
+			return ErrDistributionTransportStale
+		case action.Status == want:
+			return nil
+		case action.Status == "failed":
+			return fmt.Errorf("%w: %s", ErrDistributionTransportFailed, action.Code)
+		case action.Status != "":
+			return ErrDistributionTransportStale
+		case !action.Message.ExpiresAt.After(h.now().UTC()):
 			return ErrDistributionTransportStale
 		}
-		entry, ok := h.pending[key]
-		if !ok {
-			h.mu.Unlock()
-			return ErrDistributionTransportStale
-		}
-		done := entry.done
-		expires := entry.message.ExpiresAt
-		h.mu.Unlock()
-		if !expires.After(h.now().UTC()) {
-			return ErrDistributionTransportStale
-		}
-		timer := time.NewTimer(expires.Sub(h.now().UTC()))
+		timer := time.NewTimer(min(delay, action.Message.ExpiresAt.Sub(h.now().UTC())))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
-		case <-done:
+		case <-h.closedCh:
 			timer.Stop()
+			return ErrDistributionTransportStale
 		case <-timer.C:
 		}
+		delay = min(2*delay, time.Second)
 	}
 }
 
@@ -503,20 +487,13 @@ func (h *DistributionHub) handlePull(w http.ResponseWriter, r *http.Request) {
 		limit = maxDistributionMessages
 	}
 	now := h.now().UTC()
-	h.mu.Lock()
-	h.purgeExpiredLocked(now)
-	// Sort only lightweight keys while holding the mutex. Cloning certificate
-	// and private-key buffers for every matching row before applying the page
-	// limit can otherwise multiply the plaintext memory footprint.
-	matching := make([]string, 0, len(h.pending))
-	for key, entry := range h.pending {
-		if entry == nil || entry.message.EdgeNodeID != input.EdgeNodeID || entry.message.EdgeProcessEpoch != input.EdgeProcessEpoch || key <= cursor {
-			continue
-		}
-		matching = append(matching, key)
+	// One row past the limit tells whether the page is complete.
+	actions, err := h.store.Pending(r.Context(), input.EdgeNodeID, input.EdgeProcessEpoch, cursor, limit+1, now)
+	if err != nil {
+		writeDistributionError(w, http.StatusServiceUnavailable)
+		return
 	}
-	sort.Strings(matching)
-	messages := make([]DistributionMessage, 0, minInt(limit, len(matching)))
+	messages := make([]DistributionMessage, 0, minInt(limit, len(actions)))
 	defer func() {
 		for index := range messages {
 			wipeDistributionMessage(&messages[index])
@@ -524,46 +501,45 @@ func (h *DistributionHub) handlePull(w http.ResponseWriter, r *http.Request) {
 	}()
 	selectedKeys := make([]string, 0, cap(messages))
 	encodedBytes := 256
-	for _, key := range matching {
+	for _, action := range actions {
 		if len(selectedKeys) >= limit {
 			break
 		}
-		entry := h.pending[key]
-		if entry == nil {
-			continue
+		candidate := action.Message
+		if action.SealedCertificate != nil {
+			bundle, openErr := OpenParts(r.Context(), h.keys, action.MasterKeyReference, action.SealedCertificate, action.SealedPrivateKey)
+			if openErr != nil {
+				writeDistributionError(w, http.StatusServiceUnavailable)
+				return
+			}
+			candidate.CertificatePEM, candidate.PrivateKeyPEM = bundle.CertificatePEM, bundle.PrivateKeyPEM
 		}
-		candidate := cloneDistributionMessage(entry.message)
 		candidateJSON, marshalErr := json.Marshal(candidate)
 		clear(candidateJSON)
 		if marshalErr != nil {
 			wipeDistributionMessage(&candidate)
-			h.mu.Unlock()
 			writeDistributionError(w, http.StatusServiceUnavailable)
 			return
 		}
-		// Reserve a conservative envelope margin for version, cursor, commas,
-		// JSON escaping, and the Encoder newline. A candidate that cannot fit
-		// alone is rejected at enqueue, so this always makes progress.
-		if encodedBytes+len(candidateJSON)+1 > maxDistributionBody-4096 && len(messages) > 0 {
-			wipeDistributionMessage(&candidate)
-			break
-		}
+		// Reserve a conservative envelope margin for version, cursor, commas, JSON escaping, and the Encoder
+		// newline. A candidate that cannot fit alone is rejected at enqueue, so this always makes progress.
 		if encodedBytes+len(candidateJSON)+1 > maxDistributionBody-4096 {
 			wipeDistributionMessage(&candidate)
-			h.mu.Unlock()
+			if len(messages) > 0 {
+				break
+			}
 			writeDistributionError(w, http.StatusServiceUnavailable)
 			return
 		}
 		encodedBytes += len(candidateJSON) + 1
 		messages = append(messages, candidate)
-		selectedKeys = append(selectedKeys, key)
+		selectedKeys = append(selectedKeys, action.Key)
 	}
-	complete := len(selectedKeys) == len(matching)
+	complete := len(selectedKeys) == len(actions)
 	nextCursor := ""
 	if !complete && len(messages) > 0 {
 		nextCursor = encodeDistributionCursor(selectedKeys[len(selectedKeys)-1])
 	}
-	h.mu.Unlock()
 	writeDistributionJSON(w, http.StatusOK, distributionPage{Version: 1, Complete: complete, NextCursor: nextCursor, Messages: messages})
 }
 
@@ -627,49 +603,42 @@ func (h *DistributionHub) handleAck(w http.ResponseWriter, r *http.Request) {
 		writeDistributionError(w, http.StatusBadRequest)
 		return
 	}
-	key := distributionAckKey(input)
-	h.mu.Lock()
-	entry, pending := h.pending[key]
-	if !pending {
-		if result, ok := h.results[key]; ok && result.status == input.Status {
-			h.mu.Unlock()
-			writeDistributionJSON(w, http.StatusNoContent, nil)
-			return
-		}
-		h.mu.Unlock()
-		writeDistributionError(w, http.StatusConflict)
-		return
-	}
-	if !ackMatchesMessage(input, entry.message) {
-		h.mu.Unlock()
-		writeDistributionError(w, http.StatusConflict)
-		return
-	}
 	if input.Status == "failed" && (input.Code == "" || len(input.Code) > 128 || strings.ContainsAny(input.Code, "\r\n\x00")) || input.Status != "failed" && input.Code != "" {
-		h.mu.Unlock()
 		writeDistributionError(w, http.StatusBadRequest)
 		return
 	}
-	result := distributionResult{status: input.Status, code: input.Code}
-	h.results[key] = result
-	delete(h.pending, key)
-	h.pendingBytes -= distributionMessageSecretBytes(entry.message)
-	if h.pendingBytes < 0 {
-		h.pendingBytes = 0
+	key := distributionStoreKey(distributionAckKey(input))
+	action, found, err := h.store.Get(r.Context(), key)
+	if err != nil {
+		writeDistributionError(w, http.StatusServiceUnavailable)
+		return
 	}
-	close(entry.done)
-	wipeDistributionMessage(&entry.message)
-	// Bound the replay ledger. Results are metadata only and can be rebuilt by
-	// a subsequent coordinator retry; never retain key bytes after ACK.
-	if len(h.results) > h.maximum*2 {
-		for resultKey := range h.results {
-			delete(h.results, resultKey)
-			if len(h.results) <= h.maximum {
-				break
-			}
+	if !found || action.Status != "" {
+		if found && action.Status == input.Status {
+			writeDistributionJSON(w, http.StatusNoContent, nil)
+			return
 		}
+		writeDistributionError(w, http.StatusConflict)
+		return
 	}
-	h.mu.Unlock()
+	if !ackMatchesMessage(input, action.Message) {
+		writeDistributionError(w, http.StatusConflict)
+		return
+	}
+	completed, err := h.store.Complete(r.Context(), key, input.Status, input.Code, h.now().UTC())
+	if err != nil {
+		writeDistributionError(w, http.StatusServiceUnavailable)
+		return
+	}
+	if !completed {
+		// Another instance recorded a result first, or the action expired: same answer as a replay.
+		if again, ok, getErr := h.store.Get(r.Context(), key); getErr == nil && ok && again.Status == input.Status {
+			writeDistributionJSON(w, http.StatusNoContent, nil)
+			return
+		}
+		writeDistributionError(w, http.StatusConflict)
+		return
+	}
 	writeDistributionJSON(w, http.StatusNoContent, nil)
 }
 
@@ -852,29 +821,6 @@ func wipeDistributionMessage(message *DistributionMessage) {
 	clear(message.PrivateKeyPEM)
 	message.CertificatePEM = nil
 	message.PrivateKeyPEM = nil
-}
-
-func (h *DistributionHub) purgeExpiredLocked(now time.Time) {
-	for key, entry := range h.pending {
-		if entry == nil {
-			delete(h.pending, key)
-			continue
-		}
-		if entry.message.ExpiresAt.After(now) {
-			continue
-		}
-		h.pendingBytes -= distributionMessageSecretBytes(entry.message)
-		wipeDistributionMessage(&entry.message)
-		close(entry.done)
-		delete(h.pending, key)
-	}
-	if h.pendingBytes < 0 {
-		h.pendingBytes = 0
-	}
-}
-
-func distributionMessageSecretBytes(message DistributionMessage) int64 {
-	return int64(len(message.CertificatePEM) + len(message.PrivateKeyPEM))
 }
 
 func distributionMessageFitsResponse(message DistributionMessage) bool {
