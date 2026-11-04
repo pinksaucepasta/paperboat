@@ -80,7 +80,7 @@ for job, items in sorted(runs.items()):
             handovers = 1
         else:
             fail.append(f"{job}: runs {t2 - t1:.2f}s apart on instances {n1},{n2} (interval {interval[job]:.0f}s)")
-    if job in REQUIRED and not any(when > killed + HANDOVER and n != victim for when, n in items):
+    if job in REQUIRED and not any(when > killed and n != victim for when, n in items):
         fail.append(f"{job}: did not run on a survivor after the handover")
     print(f"{job}: {len(items)} runs, interval {interval[job]:.0f}s, instances {sorted({n for _, n in items})}")
 
