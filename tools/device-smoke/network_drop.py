@@ -77,7 +77,7 @@ def main():
     if sudo(*(['pfctl', '-s', 'info'] if DARWIN else ['iptables', '-S', 'OUTPUT'])).returncode:
         raise RuntimeError('needs sudo without a prompt for ' + ('pfctl' if DARWIN else 'iptables'))
     name = 'smoke-drop-' + uuid.uuid4().hex[:10]
-    log = Path.home() / ('.' + name + '.log')
+    log = '~/.' + name + '.log'  # expanded by the target's shell: the terminal and pb exec share its home, not /tmp
     terminal = None
     blocked = False
     failsafe = block = None
@@ -122,7 +122,8 @@ def main():
             raise RuntimeError('terminal came back in a different shell')
         if not failures_since(started):
             raise RuntimeError('the network block never produced a connection failure; the drop was not exercised')
-        lines = log.read_text().split()
+        # the shell that wrote the log runs on the target: read it there
+        lines = subprocess.run([PB, 'exec', args.target, '--', 'sh', '-c', 'cat ' + log], capture_output=True, text=True, timeout=60).stdout.split()
         if lines != ['IN_%d' % n for n in range(1, 8)]:
             raise RuntimeError('input lost, duplicated or reordered: %d lines' % len(lines))
     finally:
@@ -132,7 +133,7 @@ def main():
             failsafe.terminate()
         if terminal is not None:
             terminal.close()
-        log.unlink(missing_ok=True)
+        subprocess.run([PB, 'exec', args.target, '--', 'sh', '-c', 'rm -f ' + log], capture_output=True, timeout=60)
         try:
             cleanup(str(PB), args.target, name)
         except Exception:
