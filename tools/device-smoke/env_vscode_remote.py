@@ -45,6 +45,10 @@ nohup {DIR}/bin/code-server --start-server --host=127.0.0.1 --port=0 --without-c
 echo PID $!
 '''
 
+# The darwin server archive carries no exec bits: mark the launcher and node executable after unpacking.
+LAUNCH_MAC = LAUNCH.replace(SERVER_URL, SERVER_URL_MAC).replace(
+    '--strip-components 1\n', '--strip-components 1\n  chmod +x {DIR}/bin/code-server {DIR}/node\n'.replace('{DIR}', DIR))
+
 # Hash of the probe in the server's own environment (or "absent").
 READ = f'''pid=$1
 for i in $(seq 50); do [ -r /proc/$pid/environ ] && grep -q "listening\\|Extension host agent" {DIR}/server.log && break; sleep 0.2; done
@@ -99,7 +103,7 @@ def main():
     want = hashlib.sha256(value.encode()).hexdigest()
     report = {'host': host}
     mac = host_is_mac(host)
-    shell, launch, read, sha = (('zsh', LAUNCH.replace(SERVER_URL, SERVER_URL_MAC), READ_MAC, 'shasum -a 256') if mac
+    shell, launch, read, sha = (('zsh', LAUNCH_MAC, READ_MAC, 'shasum -a 256') if mac
                                 else ('bash', LAUNCH, READ, 'sha256sum'))
     try:
         must(account(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
