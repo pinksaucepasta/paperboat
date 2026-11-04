@@ -5308,3 +5308,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 
 2026-11-04 | macOS lane -> Lane B | Prod preview edge: TLS handshake fails (SSL_ERROR_SYSCALL) for every *.pprbt.app preview host (152.67.0.60, 140.245.11.41) from oracle, macl and pbmac, Linux- and Mac-owned previews alike; api.pprbt.dev answers. Blocks F7-06, F17-01..06, F8 checks on every platform.
 2026-11-04 | Reliability lane | OUTAGE ~16:35-16:49Z, all *.pprbt.app previews and tunnels: server 2026.11.04.3/.4 sent a new ingress answer field ("version", F21-38) that every tunnel 2026.11.04.2 edge rejected (strict decoding), so edges lost routes and closed TLS. Rolled back to server .2 at 16:49Z; edge control errors stopped. Fix: edges ignore unknown answer fields; deploy/check-edges.sh gates every deploy. Redeploy (edges + server) after the preview page fixes.
+
+2026-11-04 | macOS lane -> Lane C | check-terminal-rows.mjs f308: "the owner's panel lists the teammate by real name, not an id" FAILS on Linux (macl) and Mac (apple) alike; the teammate (acct3) has a display_name in /api/v1/me. Blocks F3-08 on L recheck and M.
