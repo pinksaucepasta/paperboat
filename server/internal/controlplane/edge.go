@@ -306,10 +306,14 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 }
 
 func (s *EdgeService) Revocations(ctx context.Context) (RevocationDocument, error) {
-	jtis, err := s.store.Queries().ListRevokedControlCredentialJTIs(ctx, dbsqlc.ListRevokedControlCredentialJTIsParams{Now: s.clock().UTC(), RowLimit: 10000})
+	jtis, err := s.store.Queries().ListRevokedControlCredentialJTIs(ctx, dbsqlc.ListRevokedControlCredentialJTIsParams{Now: s.clock().UTC(), RowLimit: 10001})
 	if err != nil {
 		return RevocationDocument{}, err
 	}
+	if len(jtis) > 10000 {
+		return RevocationDocument{}, errors.New("credential revocation feed capacity exceeded")
+	}
+
 	environments, err := s.store.Queries().ListRevokedControlEnvironments(ctx, 10000)
 	if err != nil {
 		return RevocationDocument{}, err

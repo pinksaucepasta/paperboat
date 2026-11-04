@@ -259,7 +259,8 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	// no host wake, and waking per exec would put a register and a config refresh on the host for each one. Team access
 	// can come from an account new to the host's signed peer network, and every other capability still needs a
 	// per-session scope: those wake both refreshes now instead of leaving the connection to wait for the periodic ones.
-	if !wakePeers && onlyStandingRuleCapabilities(in.Capabilities) {
+	_, tokenSource := auth.APITokenFromContext(ctx)
+	if !wakePeers && !tokenSource && onlyStandingRuleCapabilities(in.Capabilities) {
 		return nil
 	}
 	return s.publishAccessSession(ctx, []string{in.UserMachineID}, wakePeers)

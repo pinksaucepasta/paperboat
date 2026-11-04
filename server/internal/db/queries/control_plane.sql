@@ -295,10 +295,10 @@ SELECT revoked.jti FROM (
   WHERE c.revoked_at IS NOT NULL AND c.expires_at > sqlc.arg(now)
   UNION ALL
   SELECT m.helper_terminal_session_id AS jti, m.revoked_at FROM user_machine_access_sessions m
-  WHERE m.revoked_at IS NOT NULL AND m.expires_at > sqlc.arg(now) AND m.helper_terminal_session_id IS NOT NULL
+  WHERE m.revoked_at IS NOT NULL AND m.helper_terminal_session_id IS NOT NULL
   UNION ALL
   SELECT m.helper_file_session_id AS jti, m.revoked_at FROM user_machine_access_sessions m
-  WHERE m.revoked_at IS NOT NULL AND m.expires_at > sqlc.arg(now) AND m.helper_file_session_id IS NOT NULL
+  WHERE m.revoked_at IS NOT NULL AND m.helper_file_session_id IS NOT NULL
 ) revoked
 ORDER BY revoked.revoked_at, revoked.jti
 LIMIT sqlc.arg(row_limit);

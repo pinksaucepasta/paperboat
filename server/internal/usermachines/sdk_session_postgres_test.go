@@ -3,6 +3,7 @@ package usermachines
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -15,6 +16,14 @@ func sdkSession(t *testing.T, f workspaceMachineFixture, capability string) (con
 	t.Helper()
 	token, session := "sdk_token_"+f.suffix, "sdk_session_"+f.suffix
 	hash := sha256.Sum256([]byte(token))
+	entry := map[string]any{"dst": []string{"machine:" + f.machine}, "allow": []string{capability}}
+	if capability == "private_access" {
+		entry["ports"] = []int{5432}
+	}
+	scope, err := json.Marshal([]map[string]any{entry})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		for _, q := range []string{
 			`DELETE FROM paperboat.cli_client_sessions WHERE api_token_id=$1`,
@@ -30,7 +39,7 @@ func sdkSession(t *testing.T, f workspaceMachineFixture, capability string) (con
 		q    string
 		args []any
 	}{
-		{`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,scope,expires_at) VALUES($1,$2,$1,$3,'[]',now()+interval '1 hour')`, []any{token, f.account, hash[:]}},
+		{`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,scope,expires_at) VALUES($1,$2,$1,$3,$4,now()+interval '1 hour')`, []any{token, f.account, hash[:], scope}},
 		{`INSERT INTO paperboat.api_token_scope_rules(token_id,entry,target_kind,target_id,action,ports) VALUES($1,0,'machine',$2,$3,'[5432,5433)')`, []any{token, f.machine, capability}},
 		{`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,api_token_id) VALUES($1,$2,'sdk','sdk','container','linux','{machines:connect}','active',now(),now(),$3)`, []any{session, f.account, token}},
 	} {

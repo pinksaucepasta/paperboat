@@ -57,7 +57,7 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  JOIN accounts a ON a.account_id=c.user_id
  JOIN paperboat.users actor ON actor.id=c.user_id AND actor.status='active'
  JOIN paperboat.peer_network_identities n ON n.endpoint_id=c.id AND n.user_id=c.user_id AND n.role='cli' AND n.revoked_at IS NULL
- WHERE c.state='active' AND c.revoked_at IS NULL
+ WHERE c.state='active' AND c.revoked_at IS NULL AND c.api_token_id IS NULL
  GROUP BY c.id,c.user_id,c.last_used_at
  ORDER BY c.last_used_at DESC NULLS LAST,c.id LIMIT $3
 )

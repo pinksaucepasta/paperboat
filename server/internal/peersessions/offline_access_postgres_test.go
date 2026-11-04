@@ -295,6 +295,19 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_unknown_" + suffix, UserID: owner, EndpointID: host, Authority: "until_revoked_v9"}); err != ErrInvalid {
 		t.Errorf("unknown authority: %v, want ErrInvalid", err)
 	}
+	// API-token endpoints require online, scoped operation descriptors; they never inherit
+	// the creator's persistent offline machine rights.
+	token := "offline_sdk_token_" + suffix
+	ownerCLI := "offline_cli_" + owner
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `UPDATE paperboat.cli_client_sessions SET api_token_id=NULL WHERE id=$1`, ownerCLI)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.api_tokens WHERE id=$1`, token)
+	})
+	exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,scope,expires_at) VALUES($1,$2,'sdk',decode(md5($1)||md5($1),'hex'),'[{"dst":["machine:*"],"allow":["exec"]}]',now()+interval '1 hour')`, token, owner)
+	exec(`UPDATE paperboat.cli_client_sessions SET api_token_id=$2 WHERE id=$1`, ownerCLI, token)
+	if tokenRights, _ := read(AuthorityUntilRevoked); len(tokenRights[ownerCLI]) != 0 {
+		t.Fatal("token-backed endpoint inherited persistent offline rights")
+	}
 	// A host whose environment is revoked gets no document at all, so no offline rights.
 	exec(`UPDATE paperboat.control_environments SET revoked_at=now() WHERE id=$1`, "env_"+host)
 	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_revoked_env_" + suffix, UserID: owner, EndpointID: host, Authority: AuthorityUntilRevoked}); !errors.Is(err, ErrDenied) {
