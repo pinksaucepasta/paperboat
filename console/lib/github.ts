@@ -35,7 +35,7 @@ export type GitHubLinkReview = {
 
 export const githubStatusQuery = queryOptions({
   queryKey: ["github-status"],
-  queryFn: () => api<GitHubStatus>("github/status"),
+  queryFn: ({ signal }) => api<GitHubStatus>("github/status", { signal }),
   enabled: githubLive,
   staleTime: 30_000,
 })

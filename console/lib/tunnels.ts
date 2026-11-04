@@ -100,14 +100,14 @@ export const tunnelsPageQuery = (options: { workspace: string; q: string; page: 
 export const tunnelQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.tunnel(id),
-    queryFn: () => api<Tunnel>(tunnelPath(id)),
+    queryFn: ({ signal }) => api<Tunnel>(tunnelPath(id), { signal }),
     refetchInterval: 10_000,
   })
 
 export const tunnelHealthQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.health(id),
-    queryFn: () => api<TunnelHealth>(`${tunnelPath(id)}/status`),
+    queryFn: ({ signal }) => api<TunnelHealth>(`${tunnelPath(id)}/status`, { signal }),
     refetchInterval: 10_000,
   })
 
@@ -129,7 +129,7 @@ export const domainsQuery = (id: string) =>
 export const instructionsQuery = (id: string, domainId: string) =>
   queryOptions({
     queryKey: tunnelKeys.instructions(id, domainId),
-    queryFn: () => api<DnsInstructions>(`${tunnelPath(id)}/domains/${encodeURIComponent(domainId)}/instructions`),
+    queryFn: ({ signal }) => api<DnsInstructions>(`${tunnelPath(id)}/domains/${encodeURIComponent(domainId)}/instructions`, { signal }),
   })
 
 /**
@@ -166,7 +166,7 @@ export async function stopPreview(id: string) {
 export const previewQuery = (id: string) =>
   queryOptions({
     queryKey: ["preview", id] as const,
-    queryFn: () => api<Preview>(previewPath(id)),
+    queryFn: ({ signal }) => api<Preview>(previewPath(id), { signal }),
   })
 
 /**

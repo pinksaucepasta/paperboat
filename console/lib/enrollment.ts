@@ -99,6 +99,6 @@ export function cancelEnrollment(id: string): Promise<unknown> {
 export const enrollmentQuery = (id: string) =>
   queryOptions({
     queryKey: ["enrollments", id],
-    queryFn: () => api<Enrollment>(`machine-enrollments/${encodeURIComponent(id)}`),
+    queryFn: ({ signal }) => api<Enrollment>(`machine-enrollments/${encodeURIComponent(id)}`, { signal }),
     refetchInterval: (query) => (query.state.data && finishedStates.has(query.state.data.state) ? false : 2000),
   })

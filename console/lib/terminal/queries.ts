@@ -78,7 +78,7 @@ export const terminalCountsQuery = (machine?: string) =>
 export const terminalQuery = (id: string, pushed = false) =>
   queryOptions({
     queryKey: terminalKeys.session(id),
-    queryFn: () => api<TerminalSession>(`${sessionPath(id)}/sharing`),
+    queryFn: ({ signal }) => api<TerminalSession>(`${sessionPath(id)}/sharing`, { signal }),
     refetchInterval: pushed ? 60_000 : 4_000,
   })
 
@@ -86,14 +86,14 @@ export const terminalQuery = (id: string, pushed = false) =>
 export const policyQuery = (id: string) =>
   queryOptions({
     queryKey: terminalKeys.policy(id),
-    queryFn: () => api<AccessPolicy>(`${sessionPath(id)}/browser-access-policy`),
+    queryFn: ({ signal }) => api<AccessPolicy>(`${sessionPath(id)}/browser-access-policy`, { signal }),
   })
 
 /** Owner only: the join code for people without an account. */
 export const codeAccessQuery = (id: string) =>
   queryOptions({
     queryKey: terminalKeys.code(id),
-    queryFn: () => api<CodeAccess>(`${sessionPath(id)}/code-access`),
+    queryFn: ({ signal }) => api<CodeAccess>(`${sessionPath(id)}/code-access`, { signal }),
   })
 
 export function savePolicy(

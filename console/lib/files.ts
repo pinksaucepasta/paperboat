@@ -63,7 +63,7 @@ export const fileKeys = {
 export const inboxQuery = (machineId: string, workspace: string) =>
   queryOptions({
     queryKey: [...fileKeys.inboxes, machineId],
-    queryFn: () => api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`),
+    queryFn: ({ signal }) => api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`, { signal }),
     // The machine answers live, so poll gently and let a 409 machine_offline stand.
     refetchInterval: 30_000,
     retry: false,

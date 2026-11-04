@@ -64,7 +64,7 @@ function Request({ code }: { code: string }) {
   const key = ["cli-authorize", code]
   const request = useQuery({
     queryKey: key,
-    queryFn: () => api<DeviceRequest>(requestPath(code)),
+    queryFn: ({ signal }) => api<DeviceRequest>(requestPath(code), { signal }),
     retry: false,
   })
   const workspaces = useApiQuery(workspacesQuery)

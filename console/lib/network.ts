@@ -71,7 +71,7 @@ export const poolQuery = (capability: Capability, scope: ReturnType<typeof scope
   const effective = capability === "relay" ? scopeOf(undefined) : scope
   return queryOptions({
     queryKey: networkKeys.pool(capability, `${effective.kind}:${effective.id ?? ""}`),
-    queryFn: () => api<Pool>(`selfhost/pools/${capability}?${scopeQuery(effective)}`),
+    queryFn: ({ signal }) => api<Pool>(`selfhost/pools/${capability}?${scopeQuery(effective)}`, { signal }),
   })
 }
 

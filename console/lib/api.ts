@@ -243,7 +243,7 @@ const minute = 60_000
 
 export const meQuery = queryOptions({
   queryKey: queryKeys.me,
-  queryFn: () => api<Me>("me"),
+  queryFn: ({ signal }) => api<Me>("me", { signal }),
   staleTime: 5 * minute,
 })
 
@@ -252,7 +252,7 @@ export type ClientConfiguration = Data<"/v1/client-configuration">
 
 export const clientConfigQuery = queryOptions({
   queryKey: ["client-configuration"],
-  queryFn: () => api<ClientConfiguration>("client-configuration"),
+  queryFn: ({ signal }) => api<ClientConfiguration>("client-configuration", { signal }),
   staleTime: Infinity,
 })
 
@@ -307,7 +307,7 @@ export type MachineSummary = {
 export const machineSummaryQuery = (workspace: string) =>
   queryOptions({
     queryKey: ["machines", workspace, "summary"],
-    queryFn: () => api<MachineSummary>(`machines/summary?${new URLSearchParams({ workspace })}`),
+    queryFn: ({ signal }) => api<MachineSummary>(`machines/summary?${new URLSearchParams({ workspace })}`, { signal }),
     refetchInterval: 15_000,
   })
 
@@ -322,20 +322,20 @@ export const machineSearchQuery = (workspace: string, q: string) =>
 export const machineQuery = (id: string) =>
   queryOptions({
     queryKey: ["machines", "one", id],
-    queryFn: () => api<Machine>(`machines/${encodeURIComponent(id)}`),
+    queryFn: ({ signal }) => api<Machine>(`machines/${encodeURIComponent(id)}`, { signal }),
     refetchInterval: 15_000,
   })
 
 /** Seat limits and the install command exist for the personal workspace only. */
 export const machineOverviewQuery = queryOptions({
   queryKey: ["machines", "overview"],
-  queryFn: () => api<MachineOverview>("machines/overview"),
+  queryFn: ({ signal }) => api<MachineOverview>("machines/overview", { signal }),
 })
 
 export const usageQuery = (workspace: string, period: UsagePeriod) =>
   queryOptions({
     queryKey: queryKeys.usage(workspace, period),
-    queryFn: () => api<Usage>(`usage?${usageParams(workspace, period)}`),
+    queryFn: ({ signal }) => api<Usage>(`usage?${usageParams(workspace, period)}`, { signal }),
     staleTime: 5 * minute,
   })
 

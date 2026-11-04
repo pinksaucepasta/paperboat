@@ -35,7 +35,7 @@ type Preferences = { file_transfer_mode: TransferMode }
 /** The account's preferences (GET /v1/me/preferences); the CLI's transfers.mode is the same field. */
 export const preferencesQuery = queryOptions({
   queryKey: ["me", "preferences"],
-  queryFn: () => api<Preferences>("me/preferences"),
+  queryFn: ({ signal }) => api<Preferences>("me/preferences", { signal }),
   enabled: transferModesLive.preference,
 })
 

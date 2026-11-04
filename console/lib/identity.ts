@@ -54,7 +54,7 @@ const json = { "content-type": "application/json" }
 export const identityQuery = (team: string) =>
   queryOptions({
     queryKey: ["team", team, "identity"],
-    queryFn: () => api<TeamIdentity>(path(team)),
+    queryFn: ({ signal }) => api<TeamIdentity>(path(team), { signal }),
     staleTime: 30_000,
   })
 

@@ -73,7 +73,7 @@ const freshGeneration = async (team: Team) => (await api<Team>(teamPath(team.tea
 export const teamQuery = (team: string) =>
   queryOptions({
     queryKey: ["team", team],
-    queryFn: () => api<Team>(teamPath(team)),
+    queryFn: ({ signal }) => api<Team>(teamPath(team), { signal }),
     staleTime: minute,
   })
 

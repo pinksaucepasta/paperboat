@@ -60,7 +60,7 @@ export function teamTrialDays(billing: BillingWorkspace | undefined): number | u
 export const billingQuery = (workspace: Workspace | undefined) =>
   queryOptions({
     queryKey: billingKey(workspace?.id ?? ""),
-    queryFn: () => api<BillingWorkspace>(billingPath(workspace!)),
+    queryFn: ({ signal }) => api<BillingWorkspace>(billingPath(workspace!), { signal }),
     enabled: Boolean(workspace),
     staleTime: minute,
   })
@@ -137,7 +137,7 @@ const post = (path: string, body: object, key = idempotencyKey()) =>
 export const seatPreviewQuery = (workspace: Workspace, quantity: number) =>
   queryOptions({
     queryKey: ["billing-seats-preview", workspace.id, quantity],
-    queryFn: () => api<ChangePreview>(`${billingPath(workspace)}/seats/preview?quantity=${quantity}`),
+    queryFn: ({ signal }) => api<ChangePreview>(`${billingPath(workspace)}/seats/preview?quantity=${quantity}`, { signal }),
     enabled: billingLive.seats,
   })
 

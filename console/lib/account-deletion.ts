@@ -30,7 +30,7 @@ export type DeletionPreview = {
 
 export const deletionPreviewQuery = queryOptions({
   queryKey: ["account", "deletion-preview"],
-  queryFn: () => api<DeletionPreview>("account/deletion-preview"),
+  queryFn: ({ signal }) => api<DeletionPreview>("account/deletion-preview", { signal }),
   enabled: accountDeletionLive,
 })
 

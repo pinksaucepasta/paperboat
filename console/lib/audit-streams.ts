@@ -14,7 +14,7 @@ const path = (team: string) => `teams/${encodeURIComponent(team)}/audit-streams`
 export const auditStreamsQuery = (team: string) =>
   queryOptions({
     queryKey: ["team", team, "audit-streams"],
-    queryFn: () => api<AuditStream[]>(path(team)),
+    queryFn: ({ signal }) => api<AuditStream[]>(path(team), { signal }),
     staleTime: 15_000,
   })
 
