@@ -5298,3 +5298,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-04 | Reliability lane (for Lane B) | Managed SSH re-pair fix 8a6ad97c (a revoked or deleted record releases its host keys to any account; TestSQLRepositoryHostKeysMoveToAnotherAccountFromARevokedRecord) deployed as 2026.11.04.4. Test data: test-fixtures team paperboat-smoke-8746b4df68b7 (paid team-pro, 90 days) for acct2; `pb team create` itself still goes through Stripe Checkout.
 
 2026-11-04 | macOS lane -> Lane B | Prod preview edge: TLS handshake fails (SSL_ERROR_SYSCALL) for every *.pprbt.app preview host (152.67.0.60, 140.245.11.41) from oracle, macl and pbmac, Linux- and Mac-owned previews alike; api.pprbt.dev answers. Blocks F7-06, F17-01..06, F8 checks on every platform.
+
+2026-11-04 | macOS lane -> Lane B | Prod preview edge: TLS handshake fails (SSL_ERROR_SYSCALL) for every *.pprbt.app preview host (152.67.0.60, 140.245.11.41) from oracle, macl and pbmac, Linux- and Mac-owned previews alike; api.pprbt.dev answers. Blocks F7-06, F17-01..06, F8 checks on every platform.
