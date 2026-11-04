@@ -332,3 +332,80 @@ func TestIngressAuthorityAsksForAVersionAndIdleBytesStaySmall(t *testing.T) {
 		t.Fatalf("changed set: %d decisions, %d full answers, %v", len(got), fulls.Load(), err)
 	}
 }
+
+// F21-17: with the background loop running, an accept never waits on the control plane. While it
+// hangs, the last decisions are served past their expiry (public renewed locally, restricted
+// lapsed), and only a newer snapshot revokes one.
+func TestIngressAuthorityAcceptNeverWaitsOnAHangingControlPlane(t *testing.T) {
+	var hang, withdrawn atomic.Bool
+	release := make(chan struct{})
+	public := ingressAuthorityTestDecision(time.Now().UTC())
+	restricted := public
+	restricted.DecisionID, restricted.Binding.Hostname, restricted.Binding.Audience = "decision_02", "team.customer.test", "team"
+	restricted.PrincipalID, restricted.GrantID, restricted.GrantGeneration, restricted.MembershipGeneration = "principal_01", "grant_01", 1, 1
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hang.Load() {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		now := time.Now().UTC()
+		p, q := public, restricted
+		p.IssuedAt, p.ExpiresAt = now, now.Add(300*time.Millisecond)
+		q.IssuedAt, q.ExpiresAt = now, now.Add(300*time.Millisecond)
+		decisions := []connectorprotocol.IngressDecision{p, q}
+		if withdrawn.Load() {
+			decisions = nil
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions})
+	}))
+	defer server.Close()
+	defer close(release)
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: public.EdgeNodeID, ProcessEpoch: public.EdgeProcessEpoch}
+	if err := authority.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer authority.Shutdown(context.Background())
+	until := time.Now().Add(3 * time.Second)
+	for {
+		if got, err := authority.Snapshot(t.Context()); err == nil && len(got) == 2 {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("background loop never fetched")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	hang.Store(true)
+	time.Sleep(400 * time.Millisecond) // both decisions are past their expiry
+	for i := 0; i < 20; i++ {
+		started := time.Now()
+		got, err := authority.Snapshot(t.Context())
+		if took := time.Since(started); took > 100*time.Millisecond {
+			t.Fatalf("accept waited %s on the control plane", took)
+		}
+		if err != nil || len(got) != 1 || got[0].Binding.Audience != "public" || got[0].Validate(time.Now().UTC()) != nil {
+			t.Fatalf("expired set: %d decisions, %v; want the public one served", len(got), err)
+		}
+	}
+	// A newer snapshot is the only thing that revokes it.
+	hang.Store(false)
+	withdrawn.Store(true)
+	until = time.Now().Add(8 * time.Second)
+	for {
+		got, _ := authority.Snapshot(t.Context())
+		if len(got) == 0 {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("withdrawn decision still served after the control plane recovered")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

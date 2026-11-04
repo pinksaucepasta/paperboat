@@ -108,6 +108,7 @@ func (a *IngressAuthority) Start(ctx context.Context) error {
 		defer close(done)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		_, _ = a.refresh(runCtx, false)
 		for {
 			select {
 			case <-runCtx.Done():
@@ -118,7 +119,7 @@ func (a *IngressAuthority) Start(ctx context.Context) error {
 			a.mu.Lock()
 			stale := !a.fetched.IsZero() && time.Since(a.fetched) >= connectorprotocol.IngressRefreshInterval
 			a.mu.Unlock()
-			_, _ = a.snapshot(runCtx, stale)
+			_, _ = a.refresh(runCtx, stale)
 		}
 	}()
 	return nil
@@ -140,9 +141,40 @@ func (a *IngressAuthority) Shutdown(ctx context.Context) error {
 	}
 }
 
-// snapshot returns the current decisions, refreshing first when the set is missing, invalidated,
-// forced, or holds an expired decision, unless refreshes are backing off after a failure.
+// snapshot is the accept path. With the background loop running it never fetches while the control
+// plane is unhealthy (out of sync or backing off): it serves the last decisions, public ones
+// renewed locally past their expiry, restricted ones lapsing, and kicks the loop. Only a healthy
+// edge meeting a route it has not heard of (force) or one fenced by Invalidate waits for one
+// bounded refresh, so a route just made ready is not refused. Without a loop (tests) it fetches inline.
 func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connectorprotocol.IngressDecision, error) {
+	a.mu.Lock()
+	if a.stop == nil {
+		a.mu.Unlock()
+		return a.refresh(ctx, force)
+	}
+	now := time.Now().UTC()
+	healthy := a.outOfSync.IsZero() && !now.Before(a.retryAt) && !a.fetched.IsZero()
+	if (force || a.invalidated) && healthy {
+		a.mu.Unlock()
+		return a.refresh(ctx, force)
+	}
+	stale := a.invalidated || a.fetched.IsZero() || now.Sub(a.fetched) >= connectorprotocol.IngressRefreshInterval
+	if stale {
+		a.kickLocked()
+	}
+	defer a.mu.Unlock()
+	if a.fetched.IsZero() {
+		if a.lastErr != nil {
+			return nil, a.lastErr
+		}
+		return nil, ErrControlUnavailable
+	}
+	return a.servedLocked(now), nil
+}
+
+// refresh returns the current decisions, fetching first when the set is missing, invalidated,
+// forced, or holds an expired decision, unless refreshes are backing off after a failure.
+func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connectorprotocol.IngressDecision, error) {
 	for {
 		a.mu.Lock()
 		now := time.Now().UTC()
@@ -275,12 +307,14 @@ func (a *IngressAuthority) HTTP01KeyAuthorization(host, token string) (string, b
 	return response.KeyAuthorization, true
 }
 
-// servedLocked copies the decisions. Out of sync, a public decision near its expiry is renewed
-// locally for one authority lifetime and an expired restricted one is left out.
+// servedLocked copies the decisions. A public decision near its expiry is renewed locally for one
+// authority lifetime when refreshes fail or are overdue (it ends only with a newer snapshot); an
+// expired restricted one is left out.
 func (a *IngressAuthority) servedLocked(now time.Time) []connectorprotocol.IngressDecision {
 	out := make([]connectorprotocol.IngressDecision, 0, len(a.decisions))
 	for i, d := range a.decisions {
-		if !a.outOfSync.IsZero() && now.Add(connectorprotocol.IngressRefreshInterval).After(d.ExpiresAt) {
+		overdue := !a.outOfSync.IsZero() || !now.Before(d.ExpiresAt)
+		if overdue && now.Add(connectorprotocol.IngressRefreshInterval).After(d.ExpiresAt) {
 			if d.Binding.Audience != "public" {
 				continue
 			}
