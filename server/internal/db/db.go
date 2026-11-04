@@ -76,6 +76,12 @@ func Open(cfg config.Database) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres dsn: %w", err)
 	}
+	if !cfg.SendsStartupParams() {
+		// Behind a transaction-pooling PgBouncer a named prepared statement lives on one server connection and the
+		// next query may run on another (prepared statement "stmtcache_..." does not exist). Cache only the
+		// described column types; each execution is an unnamed statement, which any backend accepts.
+		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+	}
 	poolConfig.ConnConfig.Tracer = boundedAcquire{queryObserver: observer, timeout: cmp.Or(cfg.AcquireTimeout, 3*time.Second)}
 	directConfig, err := newPoolConfig(cfg, cmp.Or(strings.TrimSpace(cfg.DirectDSN), cfg.DSN), directMaxConns, observer)
 	if err != nil {

@@ -141,9 +141,10 @@ type Database struct {
 	// across statements, LISTEN) and migrations use that direct pool, because a transaction-pooled connection can
 	// hand the next statement of a session to another backend.
 	DirectDSN string `json:"direct_dsn"`
-	// StartupParams sends search_path, jit and the timeouts as connection startup parameters. Unset means true.
+	// StartupParams sends search_path, jit and the timeouts as connection startup parameters. Unset means true. False is
+	// the PgBouncer setting: the role defaults carry them (db-role-defaults) and the pooled pool uses unnamed statements.
 	// Set it false behind a pooler that rejects startup parameters, after `paperboat-server db-role-defaults` has
-	// stored the same values as role defaults.
+	// stored the same values as role defaults; the pooled pool then also uses unnamed statements, not cached named ones.
 	StartupParams *bool `json:"startup_params"`
 	// MaxConns bounds the request pool (0: 20). Statement, lock and idle-in-transaction timeouts bound every
 	// connection of it (0: 30 s, 10 s, 60 s), so a stuck query or a lock queue cannot hold a connection forever;

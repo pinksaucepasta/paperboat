@@ -3,6 +3,8 @@ package db
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
@@ -34,5 +36,28 @@ func TestOpenWithoutDirectDSNUsesPooledDSN(t *testing.T) {
 	defer store.Close()
 	if got := store.Direct().Config().ConnConfig; got.Host != "db.example.test" || got.Port != 5432 {
 		t.Fatalf("direct pool = %s:%d, want the pooled DSN", got.Host, got.Port)
+	}
+}
+
+// startup_params=false is the pooler setting: no startup parameters and no named prepared statements on the pooled
+// pool, which PgBouncer in transaction mode cannot honour (F21-15). The direct pool and the default keep both.
+func TestPoolerModeSendsNoStartupParamsAndUsesUnnamedStatements(t *testing.T) {
+	off := false
+	for _, tc := range []struct {
+		name       string
+		params     *bool
+		wantMode   pgx.QueryExecMode
+		wantParams bool
+	}{{"default", nil, pgx.QueryExecModeCacheStatement, true}, {"pooler", &off, pgx.QueryExecModeCacheDescribe, false}} {
+		store, err := Open(config.Database{Driver: "postgres", DSN: "postgres://app:secret@pooler.example.test:6432/paperboat", StartupParams: tc.params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := store.Pool().Config().ConnConfig
+		_, hasParams := got.RuntimeParams["search_path"]
+		if got.DefaultQueryExecMode != tc.wantMode || hasParams != tc.wantParams {
+			t.Errorf("%s: exec mode %v, search_path startup param %v; want %v, %v", tc.name, got.DefaultQueryExecMode, hasParams, tc.wantMode, tc.wantParams)
+		}
+		store.Close()
 	}
 }
