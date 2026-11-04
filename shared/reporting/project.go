@@ -42,7 +42,7 @@ const (
 
 // Project is the one error-tree traversal and cause ranking every binary uses.
 // It visits at most sixteen nodes (joined errors included, cycles cut) and
-// ranks causes: the highest rank names the failure, a 4xx status that is not
+// ranks causes (a native errno outranks a synthesized HTTP status): the highest rank names the failure, a 4xx status that is not
 // the only terminal branch yields to the best operational cause, and
 // cancellation only counts when every terminal branch is canceled.
 func Project(err error, opts Options) (p Projection) {
@@ -152,7 +152,7 @@ func nodeCause(err error, extra []NodeClassifier) (string, int, int) {
 	}
 	if status, ok := err.(interface{ DiagnosticStatus() int }); ok {
 		if code := status.DiagnosticStatus(); code >= http.StatusBadRequest && code <= 599 {
-			return StatusCause(code), 0, 88
+			return StatusCause(code), 0, 63
 		}
 	}
 	if cause, rank := domainCause(err); rank > 0 {

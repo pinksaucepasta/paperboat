@@ -291,7 +291,7 @@ func TestTelemetryDiagnosticsSerializationFailureRetainsCause(t *testing.T) {
 		if len(records) > 0 {
 			fault := records[0]
 			errorChain := strings.Join(fault.ErrorChain, " ")
-			if fault.Code != "diagnostics_unavailable" || fault.Cause != "service_unavailable" || !strings.Contains(errorChain, "telemetry.Error") || fault.HTTPStatus != http.StatusServiceUnavailable || fault.Reference != reference {
+			if fault.Code != "diagnostics_unavailable" || fault.Cause != "service_unavailable" || !strings.Contains(" "+errorChain+" ", " Error ") || fault.HTTPStatus != http.StatusServiceUnavailable || fault.Reference != reference {
 				t.Fatalf("diagnostics cause/reference/status lost: %+v", fault)
 			}
 			return

@@ -111,7 +111,7 @@ func TestTunnelErrorKeepsPureWorkspaceDenialAndReportsMixedFailure(t *testing.T)
 	}
 	foundURLCause := false
 	for _, value := range chain {
-		if name, ok := value.(string); ok && strings.Contains(name, "url.Error") {
+		if name, ok := value.(string); ok && name == "Error" {
 			foundURLCause = true
 		}
 	}

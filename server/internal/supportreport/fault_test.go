@@ -80,7 +80,7 @@ func TestProjectFaultSuppressesOnlyExplicitExpectedRetryableStatus(t *testing.T)
 
 func TestProjectFaultKeepsUpstreamCauseStatusSeparateFromAPIStatus(t *testing.T) {
 	fault := ProjectFault(context.Background(), "paperboat-server", "http_billing", "http_handler", "provider_unavailable", WithDiagnosticStatus(503, diagnosticStatusError{status: 502, cause: syscall.ECONNREFUSED}))
-	if fault.Cause != "upstream_failure" || fault.HTTPStatus != 503 || fault.Severity != "error" {
+	if fault.Cause != "connection_refused" || fault.HTTPStatus != 503 || fault.Severity != "error" {
 		t.Fatalf("upstream causal status/cause was obscured by the API status: %+v", fault)
 	}
 	statusOnly := ProjectFault(context.Background(), "paperboat-server", "http_billing", "http_handler", "provider_unavailable", WithDiagnosticStatus(501, errors.New("private")))
