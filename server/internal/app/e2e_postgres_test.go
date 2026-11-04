@@ -142,18 +142,25 @@ func logRequests(t *testing.T, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(recorder, r)
-		t.Logf("request method=%s path=%s status=%d", r.Method, r.URL.Path, recorder.status)
+		t.Logf("request method=%s path=%s status=%d %s", r.Method, r.URL.Path, recorder.status, recorder.failure.String())
 	})
 }
 
 // statusRecorder keeps flushing and connection upgrades working through ResponseController.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status  int
+	failure bytes.Buffer // the first bytes of an error body: its code names the refusal
 }
 
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if r.status >= 400 && r.failure.Len() < 300 {
+		r.failure.Write(b[:min(len(b), 300)])
+	}
+	return r.ResponseWriter.Write(b)
 }
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

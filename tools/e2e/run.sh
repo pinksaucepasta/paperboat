@@ -9,7 +9,7 @@ root=$PWD work=$(mktemp -d) stages=${E2E_STAGES:-pair}
 host=e2e-server.example.test port=8443
 gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
 diagnose() { # on failure: what the server answered and what the daemons said
-  echo "--- server last requests"; { grep -E "request method|panic" "$work/server.log" | tail -40 | cut -c1-300; } || true
+  echo "--- server last requests"; { grep -E "request method|panic" "$work/server.log" | tail -60 | cut -c1-300; } || true
   for c in e2e-a e2e-b; do echo "--- $c daemon"; docker exec -u pbt -e XDG_RUNTIME_DIR=/run/user/1000 $c journalctl --user --no-pager -n 25 2>&1 | cut -c1-300 || true; done
 }
 trap 'rc=$?; [ $rc -eq 0 ] || diagnose; touch "$work/stop"; sleep 3; docker rm -f e2e-a e2e-b >/dev/null 2>&1 || true; kill $(jobs -p) 2>/dev/null || true' EXIT
