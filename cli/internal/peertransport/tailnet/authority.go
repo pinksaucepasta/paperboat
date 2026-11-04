@@ -76,6 +76,10 @@ type NetworkPeer struct {
 	// port-mapped addresses), so the engine can reach it directly with no relay (PLAN 3b "Direct paths
 	// without a relay"). Absent while the server does not send them.
 	Endpoints []string `json:"endpoints,omitempty"`
+	// CarrierOffer is the machine-signed offer of the peer's active carrier generation (native.CarrierOffer
+	// bytes), carried unchanged so a client that was not connected when the machine moved reaches it
+	// directly. The server checks only its binding; native verifies it (carrier_offer.go).
+	CarrierOffer []byte `json:"carrier_offer,omitempty"`
 }
 
 // MaxPeerEndpoints bounds the candidate addresses one peer entry may carry.
@@ -168,6 +172,7 @@ type Authority struct {
 	reported         *[]string // the last endpoint set the server accepted; nil before the first
 	clients          map[string]authorizedClient
 	withdrawing      map[string]withdrawnPeer // withdrawal.go
+	declinedOffers   map[string][32]byte      // carrier_offer.go
 	clientSlots      chan struct{}
 	regional         *RegionalCandidates
 	relay            relayAuthority
@@ -339,7 +344,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 	scopes := 0
 	for _, p := range cfg.Peers {
 		b := p.Identity
-		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !validPeerEndpoints(p.Endpoints) {
+		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !validPeerEndpoints(p.Endpoints) || len(p.CarrierOffer) > MaxCarrierOfferBytes {
 			return cfg, "", ErrAuthority
 		}
 		ids[b.EndpointID] = true

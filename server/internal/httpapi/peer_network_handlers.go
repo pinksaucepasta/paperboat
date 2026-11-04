@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 )
@@ -40,6 +41,7 @@ type peerNetworkConfigBody struct {
 type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
 	Configuration(context.Context, peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error)
+	ReportCarrierOffer(context.Context, peersessions.CarrierOfferReport) error
 }
 
 func decodePeerNetworkRegister(body peerNetworkRegisterBody) ([]byte, []byte, []byte, bool) {
@@ -120,40 +122,79 @@ func machinePeerNetworkRegister(s peerNetworkService, v machineEndpointProofVeri
 func machinePeerNetworkConfig(s peerNetworkService, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) http.HandlerFunc {
 	return machinePeerNetwork(s, v, false, limiter)
 }
+
+type machineCarrierOfferBody struct {
+	OperationID string `json:"operation_id"`
+	// Offer is the machine's active carrier generation offer (native.CarrierOffer bytes); empty withdraws it.
+	Offer []byte `json:"offer"`
+}
+
+// machineCarrierOffer stores a machine's carrier generation offer for its peers' configurations. It has its own
+// limiter: a report is rare (one per generation and renewal) and must not wait behind configuration refreshes.
+func machineCarrierOffer(s peerNetworkService, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, raw, ok := verifyMachinePeerNetwork(w, r, v, limiter)
+		if !ok {
+			return
+		}
+		var body machineCarrierOfferBody
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&body) != nil || len(body.Offer) > peersessions.MaxCarrierOfferBytes {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Carrier offer report is invalid.")
+			return
+		}
+		if err := s.ReportCarrierOffer(r.Context(), peersessions.CarrierOfferReport{UserID: claims.UserID, MachineID: claims.MachineID, MachineGeneration: claims.InstallationGeneration, Offer: body.Offer}); err != nil {
+			peerNetworkError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: struct{}{}})
+	}
+}
+// verifyMachinePeerNetwork reads a machine-proof request body and verifies it: the per-credential limiter first
+// (before any proof or database work), then the proof over the exact body and its operation id.
+func verifyMachinePeerNetwork(w http.ResponseWriter, r *http.Request, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) (controlplane.MachineRequestClaims, []byte, bool) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxMachineControlRequest+1))
+	if err != nil || len(raw) > maxMachineControlRequest {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	var operation struct {
+		OperationID string `json:"operation_id"`
+	}
+	if json.Unmarshal(raw, &operation) != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	proof, e1 := base64.RawURLEncoding.Strict().DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
+	scheme, credential, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
+	if e1 != nil || len(proof) == 0 || !found || !strings.EqualFold(scheme, "Bearer") {
+		writeError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "Machine identity proof was rejected.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(credential)))
+	if allowed, wait := limiter.Allow(hex.EncodeToString(sum[:])); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+		writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Peer network requests are sent too often. Retry after the delay.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	claims, e2 := v.VerifyMachineRequest(r.Context(), strings.TrimSpace(credential), proof, r.Method, r.URL.Path, raw)
+	if e2 != nil {
+		writeMachineProofFailure(w, r, e2, "machine_identity_invalid", "Machine identity proof was rejected.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	if claims.OperationID != operation.OperationID {
+		logHTTPRejection(r, http.StatusUnauthorized, "machine_identity_invalid", nil)
+		writeError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "Machine identity proof was rejected.")
+		return controlplane.MachineRequestClaims{}, nil, false
+	}
+	return claims, raw, true
+}
+
 func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, register bool, limiter *ratelimit.Limiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		raw, err := io.ReadAll(io.LimitReader(r.Body, maxMachineControlRequest+1))
-		if err != nil || len(raw) > maxMachineControlRequest {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
-			return
-		}
-		var operation struct {
-			OperationID string `json:"operation_id"`
-		}
-		if json.Unmarshal(raw, &operation) != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
-			return
-		}
-		proof, e1 := base64.RawURLEncoding.Strict().DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
-		scheme, credential, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-		if e1 != nil || len(proof) == 0 || !found || !strings.EqualFold(scheme, "Bearer") {
-			writeError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "Machine identity proof was rejected.")
-			return
-		}
-		sum := sha256.Sum256([]byte(strings.TrimSpace(credential)))
-		if allowed, wait := limiter.Allow(hex.EncodeToString(sum[:])); !allowed {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
-			writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Peer network configuration is requested too often. Retry after the delay.")
-			return
-		}
-		claims, e2 := v.VerifyMachineRequest(r.Context(), strings.TrimSpace(credential), proof, r.Method, r.URL.Path, raw)
-		if e2 != nil {
-			writeMachineProofFailure(w, r, e2, "machine_identity_invalid", "Machine identity proof was rejected.")
-			return
-		}
-		if claims.OperationID != operation.OperationID {
-			logHTTPRejection(r, http.StatusUnauthorized, "machine_identity_invalid", nil)
-			writeError(w, r, http.StatusUnauthorized, "machine_identity_invalid", "Machine identity proof was rejected.")
+		claims, raw, ok := verifyMachinePeerNetwork(w, r, v, limiter)
+		if !ok {
 			return
 		}
 		if register {

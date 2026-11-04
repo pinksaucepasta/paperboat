@@ -29207,6 +29207,121 @@
         "operationId": "post_machine_peer_network_config"
       }
     },
+    "/v1/machine-peer-network/carrier": {
+      "post": {
+        "summary": "Report the machine's active carrier generation offer",
+        "description": "Requires machine-control bearer credential and an identity proof covering the exact HTTP method, path, body and operation ID. Stores the machine-signed carrier generation offer (at most 8 KiB, bound to this machine's account, installation generation and QUIC key, expiring within 5 minutes) and delivers it unchanged as carrier_offer on the machine's entry in every peer's signed configuration until it expires; an empty offer withdraws it. Peers are told at once (peer_network topic).",
+        "security": [
+          {
+            "bearerMachineControl": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operation_id",
+                  "offer"
+                ],
+                "properties": {
+                  "operation_id": {
+                    "type": "string"
+                  },
+                  "offer": {
+                    "type": "string",
+                    "format": "byte",
+                    "description": "Standard base64 of the native carrier offer JSON; empty withdraws it."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Offer stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Endpoint authentication or signed machine proof rejected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The offer is not bound to this machine's current identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authority temporarily unavailable; retry before current authority expires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Reported too often; retry after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-Paperboat-Machine-Proof",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Unpadded base64url signed machine request proof."
+          }
+        ],
+        "operationId": "post_machine_peer_network_carrier"
+      }
+    },
     "/v1/relay/nodes/start": {
       "post": {
         "summary": "Start a preprovisioned native relay incarnation",

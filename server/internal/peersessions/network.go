@@ -231,6 +231,10 @@ type networkBinding struct {
 	// Endpoints are the identity's delivered endpoints (N5) while it is loaded and in the mesh log; on the way
 	// out they move to the peer entry (deliverEndpoints) and are never part of a signed identity.
 	Endpoints []string `json:"endpoints,omitempty"`
+	// CarrierOffer is the identity's unexpired carrier offer with its expiry (Unix seconds), kept like Endpoints
+	// and moved to the peer entry on the way out (deliverCarrierOffer).
+	CarrierOffer        []byte `json:"carrier_offer,omitempty"`
+	CarrierOfferExpires int64  `json:"carrier_offer_expires,omitempty"`
 }
 type networkScope struct {
 	ResourceKind       string `json:"resource_kind"`
@@ -245,6 +249,8 @@ type networkPeer struct {
 	Identity  networkBinding `json:"identity"`
 	Scopes    []networkScope `json:"scopes"`
 	Endpoints []string       `json:"endpoints,omitempty"`
+	// CarrierOffer is the peer machine's active carrier generation offer, machine-signed bytes passed unchanged.
+	CarrierOffer []byte `json:"carrier_offer,omitempty"`
 }
 
 func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
@@ -570,7 +576,16 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		})
 		peers = append(peers, *p)
 	}
-	token, err := s.signer.SignNetworkConfiguration(configurationClaims(s.issuer, now, expiry, generation, self, peers, endpointsCapable))
+	claims := configurationClaims(s.issuer, now, expiry, generation, self, peers, endpointsCapable)
+	token, err := s.signer.SignNetworkConfiguration(claims)
+	if err == nil && len(token) > networkConfigLimit {
+		// Offers live only while a machine moves; when many move at once they must not cost the whole
+		// configuration, so it is signed again without them (clients then dial each primary). claims shares peers.
+		for i := range peers {
+			peers[i].CarrierOffer = nil
+		}
+		token, err = s.signer.SignNetworkConfiguration(claims)
+	}
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}

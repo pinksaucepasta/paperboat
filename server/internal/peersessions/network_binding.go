@@ -15,7 +15,7 @@ func loadNetworkBinding(ctx context.Context, tx *sql.Tx, userID, endpointID stri
 	var b networkBinding
 	var key, disco, fingerprint, quicPublic, delivered []byte
 	var expiry time.Time
-	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at,array_to_json(n.published_endpoints) FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
+	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at,array_to_json(n.published_endpoints),CASE WHEN n.carrier_offer_expires_at>$3 THEN n.carrier_offer END,CASE WHEN n.carrier_offer_expires_at>$3 THEN extract(epoch FROM n.carrier_offer_expires_at)::bigint ELSE 0 END FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
 AND (c.revoked_at IS NULL OR ($4 AND c.revocation_reason='certificate_superseded'
  AND EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificates replacement
  WHERE replacement.user_id=c.user_id AND replacement.endpoint_id=c.endpoint_id
@@ -23,7 +23,7 @@ AND (c.revoked_at IS NULL OR ($4 AND c.revocation_reason='certificate_superseded
  AND replacement.quic_public_key=c.quic_public_key AND replacement.signer_public_key=c.signer_public_key
  AND replacement.revoked_at IS NULL AND replacement.issued_at<=$3 AND replacement.serial>c.serial)))
 AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=c.user_id AND r.certificate_fingerprint=c.fingerprint)
-AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry, &delivered)
+AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry, &delivered, &b.CarrierOffer, &b.CarrierOfferExpires)
 	if err != nil {
 		return b, time.Time{}, err
 	}

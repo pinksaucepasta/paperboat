@@ -20,12 +20,17 @@ import (
 type peerNetworkStub struct {
 	register peersessions.NetworkRegistration
 	config   peersessions.NetworkConfigRequest
+	carrier  peersessions.CarrierOfferReport
 	err      error
 }
 
 func (s *peerNetworkStub) Register(_ context.Context, in peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error) {
 	s.register = in
 	return peersessions.NetworkRegistrationResult{KeyGeneration: 1, VirtualAddress: "fd7a:115c:a1e0::1"}, s.err
+}
+func (s *peerNetworkStub) ReportCarrierOffer(_ context.Context, in peersessions.CarrierOfferReport) error {
+	s.carrier = in
+	return s.err
 }
 func (s *peerNetworkStub) Configuration(_ context.Context, in peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error) {
 	s.config = in
@@ -134,5 +139,37 @@ func TestMachinePeerNetworkConfigIsRateLimitedPerMachineCredential(t *testing.T)
 	}
 	if w := request("machine-b"); w.Code != http.StatusOK {
 		t.Fatalf("another machine was limited: status %d", w.Code)
+	}
+}
+
+// A carrier offer report takes the machine identity from the verified proof, never from the body, and refuses
+// unknown fields and offers over the size bound before the store sees them.
+func TestMachineCarrierOfferDerivesIdentityFromTheProof(t *testing.T) {
+	report := func(body string) (*httptest.ResponseRecorder, *peerNetworkStub) {
+		stub := &peerNetworkStub{}
+		verifier := machineProofVerifierFunc(func(_ context.Context, _ string, _ []byte, method, path string, exact []byte) (controlplane.MachineRequestClaims, error) {
+			if method != http.MethodPost || path != "/v1/machine-peer-network/carrier" || string(exact) != body {
+				t.Fatal("proof boundary changed")
+			}
+			return controlplane.MachineRequestClaims{UserID: "account_1", MachineID: "machine_1", InstallationGeneration: 3, OperationID: "operation_123"}, nil
+		})
+		r := httptest.NewRequest(http.MethodPost, "/v1/machine-peer-network/carrier", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer machine-token")
+		r.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+		w := httptest.NewRecorder()
+		machineCarrierOffer(stub, verifier, nil).ServeHTTP(w, r)
+		return w, stub
+	}
+	w, stub := report(`{"operation_id":"operation_123","offer":"` + base64.StdEncoding.EncodeToString([]byte(`{"Claims":{}}`)) + `"}`)
+	if w.Code != http.StatusOK || stub.carrier.UserID != "account_1" || stub.carrier.MachineID != "machine_1" || stub.carrier.MachineGeneration != 3 || string(stub.carrier.Offer) != `{"Claims":{}}` {
+		t.Fatalf("status=%d report=%+v body=%s", w.Code, stub.carrier, w.Body.String())
+	}
+	for name, body := range map[string]string{
+		"unknown field": `{"operation_id":"operation_123","offer":"","machine_id":"machine_2"}`,
+		"oversize":      `{"operation_id":"operation_123","offer":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, peersessions.MaxCarrierOfferBytes+1)) + `"}`,
+	} {
+		if w, stub := report(body); w.Code != http.StatusBadRequest || stub.carrier.MachineID != "" {
+			t.Fatalf("%s: status=%d report=%+v", name, w.Code, stub.carrier)
+		}
 	}
 }

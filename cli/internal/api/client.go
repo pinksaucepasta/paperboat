@@ -99,7 +99,7 @@ func (c *Client) reportMachineCredential(status int, token string) {
 func machineAuthorizedRequest(method, path string) bool {
 	if method == http.MethodPost {
 		switch path {
-		case "/v1/previews", "/v1/tunnels", "/v1/usage/native", "/v1/machine-peer-network/register", "/v1/machine-peer-network/config":
+		case "/v1/previews", "/v1/tunnels", "/v1/usage/native", "/v1/machine-peer-network/register", "/v1/machine-peer-network/config", "/v1/machine-peer-network/carrier":
 			return true
 		}
 	}

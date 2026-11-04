@@ -35,7 +35,8 @@ type meshChange struct {
 // certificate on the server, and a 1,000-machine build passed the 30 s statement timeout on CI.
 const meshEntriesQuery = `SELECT n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,
  n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at,
- array_to_json(n.published_endpoints)
+ array_to_json(n.published_endpoints),
+ CASE WHEN n.carrier_offer_expires_at>$2 THEN n.carrier_offer END,CASE WHEN n.carrier_offer_expires_at>$2 THEN extract(epoch FROM n.carrier_offer_expires_at)::bigint ELSE 0 END
 FROM paperboat.peer_network_identities n
 JOIN LATERAL (SELECT * FROM paperboat.peer_endpoint_certificates c WHERE c.fingerprint=n.quic_certificate_fingerprint LIMIT 1) c ON true
 LEFT JOIN LATERAL (SELECT * FROM paperboat.user_machines m WHERE m.id=n.endpoint_id LIMIT 1) m ON n.role='machine'
@@ -66,7 +67,7 @@ func buildMesh(ctx context.Context, tx *sql.Tx, account string, now time.Time) (
 		var key, disco, fingerprint, quicPublic, delivered []byte
 		var expiry time.Time
 		if err := rows.Scan(&b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration,
-			&key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry, &delivered); err != nil {
+			&key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry, &delivered, &b.CarrierOffer, &b.CarrierOfferExpires); err != nil {
 			return nil, time.Time{}, err
 		}
 		var err error

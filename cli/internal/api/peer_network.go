@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 )
 
@@ -82,4 +83,20 @@ func (c *Client) peerNetworkPath(action string) string {
 		return "/v1/machine-peer-network/" + action
 	}
 	return "/v1/peer-network/" + action
+}
+
+// CarrierOfferReport is a machine's active carrier generation offer (native.CarrierOffer bytes, signed by the
+// machine); an empty Offer withdraws it.
+type CarrierOfferReport struct {
+	OperationID string `json:"operation_id"`
+	Offer       []byte `json:"offer"`
+}
+
+// ReportCarrierOffer gives the server the machine's carrier generation offer, which it delivers unchanged on the
+// machine's entry of every peer's signed configuration. Machine-authenticated only.
+func (c *Client) ReportCarrierOffer(ctx context.Context, report CarrierOfferReport) error {
+	if c.machineAuth == nil {
+		return errors.New("report carrier offer: machine authentication is not configured")
+	}
+	return c.doRequest(ctx, http.MethodPost, "/v1/machine-peer-network/carrier", report, nil, http.Header{"Idempotency-Key": {report.OperationID}}, true)
 }
