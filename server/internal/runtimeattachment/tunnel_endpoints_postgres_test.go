@@ -1,6 +1,7 @@
 package runtimeattachment
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/base64"
@@ -320,6 +321,22 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		decision.ProcessGeneration != b.ProcessGeneration || decision.ConfigGeneration != b.ConfigGeneration || decision.AssignmentGeneration != uint64(row.AssignmentGeneration) ||
 		decision.Binding.Hostname != endpointID+".tunnels.example.test" || decision.Binding.OriginAddress != "127.0.0.1:3000" || decision.Binding.Audience != "public" {
 		t.Fatalf("engine ingress decision = %+v (of %d)", decision, len(decisions))
+	}
+	// F21-38: with nothing changed between two pulls the ingress and route answers keep the same
+	// version (decision ids and times are outside it), so an edge holding it gets "unchanged".
+	again, err := ingressprojection.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, second := wire.IngressVersion(decisions, nil, nil), wire.IngressVersion(again, nil, nil); len(decisions) == 0 || first != second {
+		t.Fatalf("ingress version moved between idle pulls: %d decisions, %s then %s", len(decisions), first, second)
+	}
+	routesA, errA := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)
+	routesB, errB := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)
+	encodedA, _ := json.Marshal(routesA)
+	encodedB, _ := json.Marshal(routesB)
+	if errA != nil || errB != nil || len(routesA) == 0 || !bytes.Equal(encodedA, encodedB) {
+		t.Fatalf("route answer moved between idle pulls: %v %v\n%s\n%s", errA, errB, encodedA, encodedB)
 	}
 	// Tunnel routes reach the edge with its route snapshot, never as preview admissions.
 	values, err := f.service.Pull(f.ctx, f.edge, both)

@@ -427,7 +427,8 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 // server answers "unchanged", so an idle edge does not re-receive its whole route set.
 func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
 	var sent []string
-	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+	var client *HTTPClient
+	client = controlClient(t, func(r *http.Request) (*http.Response, error) {
 		var in struct {
 			Version string `json:"version"`
 		}
@@ -438,13 +439,30 @@ func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
 		}
 		return response(http.StatusOK, `{"complete":true,"version":"v1","routes":[{"assignment_id":"assignment_1","route_id":"route_1","kind":"tunnel_http_wss"}]}`), nil
 	})
+	client.routesGap = time.Hour
 	for i := 0; i < 3; i++ {
 		snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1")
 		if err != nil || !snapshot.Canonical || len(snapshot.Routes) != 1 || snapshot.Routes[0].RouteID != "route_1" {
 			t.Fatalf("pull %d: %+v, %v", i, snapshot, err)
 		}
+		if i == 1 { // the quiet gap passes: the next pull asks the server again
+			client.routesGap = time.Nanosecond
+		}
 	}
+	// pull 0 full; pull 1 asks and is unchanged; pull 2 asks again after the gap. Within the gap
+	// (pulls inside it) no request is made: a minute of 5 s pulls is 6 requests, not 12.
 	if strings.Join(sent, ",") != ",v1,v1" {
 		t.Fatalf("versions sent = %q", sent)
+	}
+	client.routesGap = time.Hour
+	client.routesQuiet = time.Now()
+	before := len(sent)
+	for i := 0; i < 12; i++ {
+		if _, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sent) != before {
+		t.Fatalf("%d route requests inside the quiet gap, want none", len(sent)-before)
 	}
 }

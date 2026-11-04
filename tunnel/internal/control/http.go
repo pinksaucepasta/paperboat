@@ -52,6 +52,19 @@ type HTTPClient struct {
 	routesMu      sync.Mutex
 	routesVersion string
 	routesHeld    RouteSnapshot
+	routesQuiet   time.Time // when the server last answered "unchanged"; zero after a changed answer
+	routesGap     time.Duration
+}
+
+// routeQuietGap is how long an unchanged route set is served from memory before the edge asks
+// again, so an idle edge makes at most one route request per gap whatever its control interval.
+const routeQuietGap = 10 * time.Second
+
+func (c *HTTPClient) routeQuietGap() time.Duration {
+	if c.routesGap > 0 {
+		return c.routesGap
+	}
+	return routeQuietGap
 }
 
 func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
@@ -246,6 +259,12 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 	if processEpoch != "" {
 		c.routesMu.Lock()
 		request.Version = c.routesVersion
+		if request.Version != "" && !c.routesQuiet.IsZero() && time.Since(c.routesQuiet) < c.routeQuietGap() {
+			held := c.routesHeld
+			held.Routes = append([]RouteAssignment(nil), held.Routes...)
+			c.routesMu.Unlock()
+			return held, nil
+		}
 		c.routesMu.Unlock()
 	}
 	if err := c.post(ctx, "/v1/edge/routes/desired-state", request, &result); err != nil {
@@ -257,6 +276,7 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		if request.Version == "" || result.Version != request.Version {
 			return RouteSnapshot{}, ErrControlUnavailable
 		}
+		c.routesQuiet = time.Now()
 		held := c.routesHeld
 		held.Routes = append([]RouteAssignment(nil), held.Routes...)
 		return held, nil
@@ -324,7 +344,7 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 	snapshot := RouteSnapshot{Routes: routes, Complete: complete, Canonical: canonical}
 	if processEpoch != "" {
 		c.routesMu.Lock()
-		c.routesVersion, c.routesHeld = result.Version, snapshot
+		c.routesVersion, c.routesHeld, c.routesQuiet = result.Version, snapshot, time.Time{}
 		c.routesMu.Unlock()
 	}
 	return snapshot, nil
