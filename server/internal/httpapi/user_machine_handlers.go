@@ -753,7 +753,7 @@ func userMachineExecDescriptor(service *usermachines.Service) http.HandlerFunc {
 		}
 
 		if errors.Is(err, auth.ErrOutsideTokenScope) {
-			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or machine action.")
+			writeError(w, r, http.StatusForbidden, "outside_token_scope", "The API token does not allow this session, workspace or machine action.")
 			return
 		}
 
@@ -807,7 +807,7 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 		}
 
 		if errors.Is(err, auth.ErrOutsideTokenScope) {
-			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or file transfer.")
+			writeError(w, r, http.StatusForbidden, "outside_token_scope", "The API token does not allow this session, workspace or file transfer.")
 			return
 		}
 
