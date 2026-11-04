@@ -101,3 +101,26 @@ func TestOfflineHeaderCarriesNoCredentialAndOnlySessionConsumers(t *testing.T) {
 		t.Fatal("an online header without a credential was accepted")
 	}
 }
+
+func TestResumeHeaderIsTerminalOnlyAndCarriesNoCredential(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	header, err := NewResume("ses_1", "stream_1", "access_1", now.Add(time.Minute), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := header.MarshalBinary()
+	if parsed, err := Parse(encoded, now); err != nil || parsed != header {
+		t.Fatalf("parsed=%+v err=%v", parsed, err)
+	}
+	for _, invalid := range []func(*Header){
+		func(h *Header) { h.Credential = "credential" },
+		func(h *Header) { h.Consumer = "exec" },
+		func(h *Header) { h.Offline = true },
+	} {
+		value := header
+		invalid(&value)
+		if value.Validate(now) == nil {
+			t.Fatalf("accepted %+v", value)
+		}
+	}
+}

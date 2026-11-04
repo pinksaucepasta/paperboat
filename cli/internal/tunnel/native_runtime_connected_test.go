@@ -289,7 +289,11 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	machineBinding.DiscoPublicKey, _ = machineAuthority.DiscoveryPublicKey()
 	var terminal *connectedTerminalMove
 	if mode == "terminal_move" {
-		terminal = newConnectedTerminalMove(t, ctx, issuer, machineID, cliID, signerPublic, signerPrivate)
+		lifetime := 5 * time.Minute
+		if len(fault) != 0 && fault[0] == "expired_credential" {
+			lifetime = 2 * time.Second
+		}
+		terminal = newConnectedTerminalMove(t, ctx, issuer, machineID, cliID, signerPublic, signerPrivate, lifetime)
 		if len(fault) != 0 {
 			terminal.crashPhase = fault[0]
 		}

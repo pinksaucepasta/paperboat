@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,8 @@ type terminalOutputStream struct {
 	// received is the end of the last output this stream returned; WaitNext frees output only up to it, so a reply
 	// lost to a poll deadline is delivered again instead of skipped.
 	received uint64
+	// resumeSecret is handed once to the attach response, never kept by the stream.
+	resumeSecret []byte
 }
 
 // participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.
@@ -166,7 +169,33 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 			return nil, false, err
 		}
 	}
+	if !isGenerationBoundTerminal(authorization) && authorization.ResourceID != "" {
+		// A native owner attachment gets a fresh (rotated) resume secret each time it attaches. Without
+		// one, a carrier move falls back to the operation credential.
+		stream.resumeSecret, _ = d.config.Sessions.IssueResume(request.SessionID, response.AttachmentID, response.AttachmentLease, authorization.ResourceID)
+	}
 	return stream, true, nil
+}
+
+// resumeTerminal is the only request a resume connection may make before it proves the attachment's
+// secret. Every refusal looks the same, so a caller learns nothing about which check failed.
+func (d *Dispatcher) resumeTerminal(authorization Authorization, request terminalRequest) operation.Outcome {
+	if request.Action != "attach" || request.SessionID != authorization.SessionID || request.AttachmentID == "" || len(request.ResumeSecret) != session.ResumeSecretSize {
+		return failure("not_found_or_forbidden")
+	}
+	value, err := d.config.Sessions.ResumeAttachment(request.SessionID, session.ResumeRequest{AttachmentID: request.AttachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Resource: authorization.Resume.Resource, Standing: authorization.Resume.Standing, Secret: request.ResumeSecret, FromSequence: request.FromSequence})
+	if errors.Is(err, session.ErrInvalidInput) {
+		return failure("not_found_or_forbidden")
+	}
+	if err != nil {
+		return domainResult(nil, err)
+	}
+	authorization.Resume.resumed.Store(true)
+	response := newTerminalAttachResponse(request.AttachmentID, value)
+	if response.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, request.AttachmentID, value.Snapshot.Generation); err != nil {
+		return domainResult(nil, err)
+	}
+	return result(response)
 }
 
 // Fresh native attachments and browsers use the same coherent VT checkpoint.

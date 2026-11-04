@@ -134,6 +134,8 @@ type cliNativeStreamGroup struct {
 	application peerApplication
 	consumer    string
 	now         func() time.Time
+	// resume opens terminal streams that move an attachment with its resume secret, not a credential.
+	resume bool
 }
 
 type cliNativeTransferLease struct {
@@ -277,7 +279,14 @@ func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, er
 	if g.consumer == "terminal" && g.target != nil {
 		fallbackOperation = g.target.SessionID
 	}
-	header, err := g.application.authorizationHeader(g.target, g.consumer, fallbackOperation, streamID, g.now().UTC())
+	var header streamauth.Header
+	var err error
+	if g.resume {
+		// The deadline bounds only this stream's admission.
+		header, err = streamauth.NewResume(g.target.SessionID, streamID, g.target.Auth.ResourceID, g.now().Add(time.Minute), 1<<40)
+	} else {
+		header, err = g.application.authorizationHeader(g.target, g.consumer, fallbackOperation, streamID, g.now().UTC())
+	}
 	if err != nil {
 		return nil, err
 	}

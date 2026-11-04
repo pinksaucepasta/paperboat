@@ -110,8 +110,18 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 	if err != nil {
 		return err
 	}
-	group := &cliNativeStreamGroup{session: next, target: &target, application: c.application, consumer: "terminal", now: c.now}
-	message, err := authenticateNativeStreamGroup(ctx, group, &target, "native")
+	// A held attachment moves with the host's resume secret (EternalTerminal passkey,
+	// ~/ref/EternalTerminal/src/base/ServerClientConnection.cpp:93): its operation credential
+	// expires minutes after the attach, the attachment does not. Its streams carry no credential.
+	secret := oldHelper.resumeSecret
+	authTarget := target
+	attachCtx := ctx
+	if secret != nil {
+		authTarget.Auth.Token = ""
+		attachCtx = context.WithValue(ctx, terminalResumeKey{}, secret)
+	}
+	group := &cliNativeStreamGroup{session: next, target: &authTarget, application: c.application, consumer: "terminal", now: c.now, resume: secret != nil}
+	message, err := authenticateNativeStreamGroup(ctx, group, &authTarget, "native")
 	if err != nil {
 		next.Close()
 		return err
@@ -147,7 +157,7 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 	target.AfterSequence = int(c.sequence.Load())
 	target.RestartIfNotRunning = false
 	target.ReplayHistory = false
-	conn, err := c.application.helper(ctx, message, &target)
+	conn, err := c.application.helper(attachCtx, message, &target)
 	// A failed initializer returns a nil *helperTerminalConn through Conn.
 	helper, isHelper := conn.(*helperTerminalConn)
 	if !isHelper && conn != nil {

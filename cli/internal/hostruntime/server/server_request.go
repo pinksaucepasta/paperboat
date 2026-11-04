@@ -98,8 +98,9 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		}
 		var outcome operation.Outcome
 		var replay bool
-		// Inspector results carry captured traffic: they are never journaled.
-		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || terminalCleanupRequest(frame) {
+		// Inspector results carry captured traffic and a resume attach carries its secret: neither is journaled.
+		resuming := authorization.Resume != nil && !authorization.Resume.resumed.Load()
+		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || terminalCleanupRequest(frame) || resuming {
 			outcome = execute(opCtx)
 		} else {
 			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)
@@ -130,7 +131,11 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 				_ = respond(errorFrame(frame.RequestID, "invalid_request", "terminal stream could not be bound", false))
 				return
 			}
-			outcome.Result, streamErr = addStreamID(outcome.Result, streamID)
+			var resumeSecret []byte
+			if issued, ok := stream.(*terminalOutputStream); ok {
+				resumeSecret, issued.resumeSecret = issued.resumeSecret, nil
+			}
+			outcome.Result, streamErr = addStreamID(outcome.Result, streamID, resumeSecret)
 			if streamErr != nil {
 				terminalState.remove(streamID)
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
@@ -213,7 +218,7 @@ func (s *Server) stream(ctx context.Context, writer *lockedWriter, conn Connecti
 			var streamEnd *StreamEnd
 			if errors.As(err, &streamEnd) {
 				if capability == "config.compare.v1" {
-					streamEnd.Payload, _ = addStreamID(streamEnd.Payload, streamID)
+					streamEnd.Payload, _ = addStreamID(streamEnd.Payload, streamID, nil)
 				}
 				_ = writer.write(protocol.Frame{Type: "event", RequestID: "stream", Version: protocol.ProtocolVersion, Capability: capability, Payload: streamEnd.Payload})
 				return

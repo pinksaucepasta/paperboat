@@ -588,6 +588,9 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 	if authorization.ClientID == "" {
 		return failure("not_found_or_forbidden")
 	}
+	if authorization.Resume != nil && !authorization.Resume.resumed.Load() {
+		return d.resumeTerminal(authorization, request)
+	}
 	if authorization.SessionID != "" && request.SessionID != "" && authorization.SessionID != request.SessionID {
 		return failure("not_found_or_forbidden")
 	}

@@ -49,7 +49,13 @@ duplicates, incorrect roles or bindings, and incomplete sets are rejected. Contr
 closes the attachment, and uncertain input is never replayed.
 
 Structured lifecycle frames are UTF-8 JSON. Attach returns a nonzero connection-local
-`uint32 stream_id`.
+`uint32 stream_id`. A native owner attach also returns `resume_secret`, 32 random bytes held
+only by the PTY owner and the client and replaced on every attach. A carrier move opens its
+native streams with a `resume` header (the access session, no credential); the host admits
+it only while its current authority gives the peer terminal access there or by a standing
+rule. The first request must then be `attach` of that attachment with `resume_secret`,
+which the PTY owner compares in constant time against the same account and client; a
+match is single use and three mismatches end the secret.
 Terminal input, output, cumulative ACK and resize are fixed-header binary messages defined
 by `fixtures/helper/terminal-v1.json`; they carry the stream ID rather than string session
 or attachment identifiers. Input and resize sequences start at one for each attached stream

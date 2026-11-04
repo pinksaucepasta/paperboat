@@ -92,6 +92,8 @@ type Authorization struct {
 	Revoked             *atomic.Bool
 	RevokedSignal       <-chan struct{}
 	Value               any
+	// Resume is set on a connection admitted to move an attachment without a credential.
+	Resume *TerminalResume
 }
 
 type TerminalRole string

@@ -1,7 +1,10 @@
 package tunnel
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 )
@@ -31,4 +34,19 @@ func (c *helperTerminalConn) closeForCarrierMove() error {
 	})
 	c.finish(1, errors.Join(ErrTransportLost, net.ErrClosed))
 	return nil
+}
+
+// terminalResumeKey carries a carrier move's resume secret to the attachment it moves.
+type terminalResumeKey struct{}
+
+// resume takes this connection's attachment over with the host's resume secret instead of an
+// operation credential, from the delivered cursor; the response carries the rotated secret.
+func (c *helperTerminalConn) resume(ctx context.Context, secret []byte) error {
+	fromSequence := uint64(max(0, c.target.AfterSequence))
+	payload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": c.target.SessionID, "attachment_id": c.target.InputAttachmentID, "from_sequence": fromSequence, "resume_secret": secret})
+	frame, err := c.requestSync(ctx, "terminal.v1", payload)
+	if err != nil {
+		return fmt.Errorf("resume helper terminal attachment: %w", err)
+	}
+	return c.finishAttachment(frame, false, 0, fromSequence)
 }

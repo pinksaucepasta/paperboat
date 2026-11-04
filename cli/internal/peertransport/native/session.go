@@ -271,6 +271,13 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		}
 		return admitted, header, nil
 	}
+	if header.Resume != "" {
+		admitted, err := s.acceptResume(ctx, connection, header)
+		if err != nil {
+			return rejectAuthorizedStream(connection, err)
+		}
+		return admitted, header, nil
+	}
 	var accessSessionID string
 	scopeResource, err := s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
 		var authorizeErr error

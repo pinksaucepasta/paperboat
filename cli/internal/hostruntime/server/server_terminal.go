@@ -397,12 +397,17 @@ func (s *terminalConnectionState) remove(streamID uint32) {
 	s.mu.Unlock()
 }
 
-func addStreamID(result json.RawMessage, streamID uint32) (json.RawMessage, error) {
+// addStreamID adds the connection-local stream ID and, for a resumable attachment, its fresh resume
+// secret. Both are added after the operation journal, so the secret is never journaled or replayed.
+func addStreamID(result json.RawMessage, streamID uint32, resumeSecret []byte) (json.RawMessage, error) {
 	var value map[string]any
 	if streamID == 0 || json.Unmarshal(result, &value) != nil || value == nil {
 		return nil, errors.New("invalid terminal attachment response")
 	}
 	value["stream_id"] = streamID
+	if resumeSecret != nil {
+		value["resume_secret"] = resumeSecret
+	}
 	return json.Marshal(value)
 }
 

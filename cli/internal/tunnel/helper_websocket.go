@@ -180,6 +180,7 @@ type helperTerminalConn struct {
 	responses map[string]chan helperFrame
 
 	attachmentID              string
+	resumeSecret              []byte // the host's current resume secret for this attachment; never logged
 	streamID                  uint32
 	generation                uint64
 	inputSeq                  atomic.Uint64
@@ -279,6 +280,9 @@ func helperCapabilities() []string {
 // an already-running one, so the common fresh-session startup needs two round
 // trips (create, attach) instead of three (snapshot, create, attach).
 func (c *helperTerminalConn) initialize(ctx context.Context) error {
+	if secret, ok := ctx.Value(terminalResumeKey{}).([]byte); ok {
+		return c.resume(ctx, secret)
+	}
 	if c.target.Shared() {
 		return c.initializeShared(ctx)
 	}
@@ -371,6 +375,7 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) error {
 	var response struct {
 		Result struct {
+			ResumeSecret  []byte `json:"resume_secret"`
 			StreamID      uint32 `json:"stream_id"`
 			AttachmentID  string `json:"attachment_id"`
 			InputSequence uint64 `json:"input_sequence"`
@@ -391,6 +396,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	}
 	c.attachmentID = response.Result.AttachmentID
 	c.target.InputAttachmentID = response.Result.AttachmentID
+	c.resumeSecret = response.Result.ResumeSecret
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
 	decided, resend, unconfirmed := c.inputQueue.Reconcile(response.Result.InputSequence)

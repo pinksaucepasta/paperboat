@@ -42,6 +42,15 @@ func TestTerminalMovesAcrossRealCarriersWithoutReplayingInputOrOutput(t *testing
 	connectedProductionRuntime(t, "terminal_move")
 }
 
+// A terminal held past its operation credential's lifetime still moves to a new carrier
+// generation: the host resumes the attachment from its resume secret, without a reconnect.
+func TestTerminalMovesAfterItsCredentialExpires(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("requires a Unix PTY")
+	}
+	connectedProductionRuntime(t, "terminal_move", "expired_credential")
+}
+
 type connectedTerminalMove struct {
 	crashPhase       string
 	candidateStop    context.CancelFunc
@@ -61,7 +70,7 @@ type connectedTerminalMove struct {
 	deliveredCursor  atomic.Int64
 }
 
-func newConnectedTerminalMove(t *testing.T, ctx context.Context, issuer, machine, client string, public ed25519.PublicKey, private ed25519.PrivateKey) *connectedTerminalMove {
+func newConnectedTerminalMove(t *testing.T, ctx context.Context, issuer, machine, client string, public ed25519.PublicKey, private ed25519.PrivateKey, lifetime time.Duration) *connectedTerminalMove {
 	t.Helper()
 	root := shorttemp.Dir(t)
 	adapter, err := pty.NewAdapter(root)
@@ -86,7 +95,7 @@ func newConnectedTerminalMove(t *testing.T, ctx context.Context, issuer, machine
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := auth.Claims{Issuer: issuer, Audience: "paperboat-machine", Subject: "account_connected", JTI: "jti_carrier", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(5 * time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_connected", AccountID: "account_connected", MachineID: machine, UserID: "account_connected", CLIClientSessionID: client, SourceMachineID: "machine_controller", SessionID: snapshot.ID, ExpectedGeneration: int64(snapshot.Generation), AssignmentID: "access_connected"}
+	claims := auth.Claims{Issuer: issuer, Audience: "paperboat-machine", Subject: "account_connected", JTI: "jti_carrier", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(lifetime).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_connected", AccountID: "account_connected", MachineID: machine, UserID: "account_connected", CLIClientSessionID: client, SourceMachineID: "machine_controller", SessionID: snapshot.ID, ExpectedGeneration: int64(snapshot.Generation), AssignmentID: "access_connected"}
 	token := connectedSignedJWT(t, private, "paperboat-credential+jwt", claims)
 	journal, err := operation.NewJournal(1024)
 	if err != nil {
@@ -168,7 +177,8 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 		f.exerciseOutputDuringAttach(t, ctx, runtime, old, authority, store, leaf, public)
 		return
 	}
-	if f.crashPhase != "" {
+	expired := f.crashPhase == "expired_credential"
+	if f.crashPhase != "" && !expired {
 		f.exerciseFailure(t, ctx, runtime, old, authority, store, leaf, public)
 		return
 	}
@@ -222,6 +232,26 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 	}
 
 	offer := f.parallelCarrier(t, ctx, authority, store, leaf, public)
+	carrier.mu.Lock()
+	issued := carrier.helper.resumeSecret
+	carrier.mu.Unlock()
+	if len(issued) != 32 {
+		t.Fatal("the host issued no resume secret for an owner attachment")
+	}
+	if expired {
+		expiry, err := time.Parse(time.RFC3339, f.target.Auth.ExpiresAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-time.After(time.Until(expiry) + time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if _, err := (peerApplication{}).authorizationHeader(f.target, "terminal", f.target.SessionID, "stream_expired", time.Now()); err == nil {
+			t.Fatal("the operation credential has not expired")
+		}
+	}
 	var expected []byte
 	for i := 0; i < 64; i++ {
 		expected = append(expected, []byte(fmt.Sprintf("%04d:%s\n", i, bytes.Repeat([]byte("x"), 250)))...)
@@ -229,6 +259,11 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 	written := make(chan error, 1)
 	go func() {
 		for i := 0; i < len(expected); i += 256 {
+			if expired {
+				// Paced input keeps echo output flowing through the whole move (~3 s of carrier
+				// preparation here), so the longest gap between reads is the cutover's.
+				time.Sleep(80 * time.Millisecond)
+			}
 			if _, err := conn.Write(expected[i : i+256]); err != nil {
 				written <- err
 				return
@@ -237,11 +272,22 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 		written <- nil
 	}()
 	received := make(chan []byte, 1)
+	var outputGap atomic.Int64
 	go func() {
-		data := make([]byte, len(expected))
-		if _, err := io.ReadFull(conn, data); err != nil {
-			received <- nil
-			return
+		data := make([]byte, 0, len(expected))
+		chunk := make([]byte, 4096)
+		last := time.Now()
+		for len(data) < len(expected) {
+			n, err := conn.Read(chunk[:min(len(chunk), len(expected)-len(data))])
+			if n > 0 {
+				outputGap.Store(max(outputGap.Load(), int64(time.Since(last))))
+				last = time.Now()
+				data = append(data, chunk[:n]...)
+			}
+			if err != nil {
+				received <- nil
+				return
+			}
 		}
 		received <- data
 	}()
@@ -264,6 +310,18 @@ func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runt
 			first++
 		}
 		t.Fatalf("terminal output mismatch: first_offset=%d received_bytes=%d expected_bytes=%d", first, len(data), len(expected))
+	}
+	if expired {
+		if gap := time.Duration(outputGap.Load()); gap > time.Second {
+			t.Fatalf("longest output gap across the move %s; want <= 1s", gap)
+		}
+		t.Logf("longest output gap across the move: %s", time.Duration(outputGap.Load()))
+		carrier.mu.Lock()
+		rotated := carrier.helper.resumeSecret
+		carrier.mu.Unlock()
+		if len(rotated) != 32 || bytes.Equal(rotated, issued) {
+			t.Fatal("the resume secret was not rotated by the move")
+		}
 	}
 	tail := []byte("FINAL001")
 	if _, err := conn.Write(tail); err != nil {
