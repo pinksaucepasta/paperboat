@@ -144,6 +144,12 @@ func ensureSharedUserParents(paths installPaths) error {
 func ensureManagedDirectories(paths installPaths, request Request) error {
 	// hostd runs as the enrolled account and must be able to create its
 	// authenticated socket and fence state. The updater remains root-owned.
+	if request.Platform == "darwin" {
+		// The parent of hostd's socket directory survives a reboot only when root made it (see service.DefaultLayout).
+		if err := secureRootDirectory(filepath.Dir(filepath.Dir(paths.hostdSocket)), 0o755); err != nil {
+			return err
+		}
+	}
 	for _, directory := range []string{filepath.Dir(paths.hostdSocket), filepath.Join(paths.runtimeState, "hostd")} {
 		if err := secureManagedUserDirectory(directory, 0o700, request.UID, request.GID); err != nil {
 			return err

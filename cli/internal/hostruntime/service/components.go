@@ -178,7 +178,7 @@ func updaterControlSocket(platform, instance string) string {
 		suffix = "-" + instance
 	}
 	if platform == "darwin" {
-		return filepath.Join("/var/run/paperboat-updated"+suffix, "control.sock")
+		return filepath.Join(darwinRunRoot, "paperboat-updated"+suffix, "control.sock")
 	}
 	return filepath.Join("/run/paperboat-updated"+suffix, "control.sock")
 }

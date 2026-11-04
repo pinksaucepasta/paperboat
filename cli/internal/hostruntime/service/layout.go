@@ -84,11 +84,16 @@ func UserLayout(platform string, uid int) (Layout, error) {
 	layout.HostdSocket = filepath.Join(filepath.Dir(layout.HostdSocket)+"-"+instance, "hostd.sock")
 	runtimeRoot := "/run"
 	if platform == "darwin" {
-		runtimeRoot = "/var/run"
+		runtimeRoot = darwinRunRoot
 	}
 	layout.UpdaterSocket = filepath.Join(runtimeRoot, "paperboat-updated-"+instance, "control.sock")
 	return layout, layout.Validate()
 }
+
+// darwinRunRoot holds the daemons' socket directories on macOS. It is not /var/run: boot clears that, launchd cannot
+// recreate directories as systemd's RuntimeDirectory= does, and hostd (the enrolled account) cannot create one there.
+// The installer makes it once, as root, and it survives reboots.
+const darwinRunRoot = "/Library/Application Support/Paperboat/run"
 
 // DefaultLayout returns the fixed, supported native host layout. Windows uses
 // a named pipe rather than pretending a filesystem socket is secure there.
@@ -102,7 +107,9 @@ func DefaultLayout(platform string) (Layout, error) {
 	case "darwin":
 		installRoot = "/Library/PrivilegedHelperTools/Paperboat"
 		updateStateRoot = "/Library/Application Support/Paperboat/updated"
-		socketRoot = "/var/run/paperboat-hostd"
+		// Not /var/run: boot clears it, and hostd runs as the enrolled account, which cannot recreate its
+		// socket directory there (root:daemon 0775). The installer creates this parent once, as root.
+		socketRoot = darwinRunRoot + "/paperboat-hostd"
 	case "windows":
 		installRoot = `C:\Program Files\Paperboat`
 		updateStateRoot = `C:\ProgramData\Paperboat\updated`

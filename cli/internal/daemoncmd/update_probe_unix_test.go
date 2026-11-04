@@ -14,7 +14,7 @@ func TestUpdateProbeUpdaterOwnerNamespace(t *testing.T) {
 		uid      int
 		socket   string
 	}{
-		{"darwin", 501, "/var/run/paperboat-updated-u501/control.sock"},
+		{"darwin", 501, "/Library/Application Support/Paperboat/run/paperboat-updated-u501/control.sock"},
 		{"linux", 1000, "/run/paperboat-updated-u1000/control.sock"},
 	} {
 		t.Run(tc.platform, func(t *testing.T) {

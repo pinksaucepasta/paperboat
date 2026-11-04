@@ -157,15 +157,16 @@ func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
 				filepath.Join("/Library/PrivilegedHelperTools/Paperboat/users", instance),
 				filepath.Join("/Library/Application Support/Paperboat/users", instance),
 				"/Library/Application Support/Paperboat/updated-" + instance,
-				"/var/run/paperboat-hostd-" + instance,
-				"/var/run/paperboat-updated-" + instance,
+				"/Library/Application Support/Paperboat/run/paperboat-hostd-" + instance,
+				"/Library/Application Support/Paperboat/run/paperboat-updated-" + instance,
 			},
 			payloadGlobs: []string{
-				"/var/run/paperboat-*-" + instance + "*",
+				"/Library/Application Support/Paperboat/run/paperboat-*-" + instance + "*",
 				"/Library/Application Support/Paperboat/ipc/" + instance + "-*",
 				"/private/var/log/com.pinksaucepasta.paperboat.*." + instance + "*.log",
 			},
-			accountRecords: "/Library/Application Support/Paperboat/users",
+			sharedRuntimeDirs: []string{"/Library/Application Support/Paperboat/run"},
+			accountRecords:    "/Library/Application Support/Paperboat/users",
 		}, nil
 	default:
 		return unixPurgePlan{}, errors.New("unsupported purge platform")
