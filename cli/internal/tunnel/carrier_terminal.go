@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,11 +37,11 @@ type carrierTerminal struct {
 }
 
 type preparedTerminalMove struct {
-	ctx     context.Context
 	session *native.Session
-	message *nativeMessageConnection
+	helper  *helperTerminalConn
 	target  *resolver.TerminalTarget
 	result  chan error
+	taken   bool // guarded by carrierTerminal.mu
 }
 
 func newCarrierTerminal(ctx context.Context, helper *helperTerminalConn, session *native.Session, application peerApplication, target *resolver.TerminalTarget, now func() time.Time, sequence *atomic.Int64, sink func(int)) (*carrierTerminal, error) {
@@ -115,9 +116,20 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 		next.Close()
 		return err
 	}
-	committed := false
+	var helper *helperTerminalConn
+	move := &preparedTerminalMove{session: next, target: &target, result: make(chan error, 1)}
 	defer func() {
-		if !committed {
+		// attachPrepared owns the move once it took it; otherwise release it.
+		c.mu.Lock()
+		owned := move.taken
+		if c.prepared == move {
+			c.prepared = nil
+		}
+		c.mu.Unlock()
+		if !owned {
+			if helper != nil {
+				helper.Close()
+			}
 			message.Close()
 			next.Close()
 		}
@@ -127,19 +139,42 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 	if err := target.InputQueue.WaitEmpty(ctx); err != nil {
 		return err
 	}
-	move := &preparedTerminalMove{ctx: ctx, session: next, message: message, target: &target, result: make(chan error, 1)}
+	// Attach on the new carrier before cutting the old one: the old reader keeps
+	// delivering output until the host hands the attachment over (dadape direct2d
+	// stalled 4.85 s on an attach made after the cut; inbound1d lost the terminal
+	// when the new path failed after the cut). Magicsock likewise keeps its best
+	// path until a new one has answered (~/ref/tailscale/wgengine/magicsock/endpoint.go:2005).
+	target.AfterSequence = int(c.sequence.Load())
+	target.RestartIfNotRunning = false
+	target.ReplayHistory = false
+	conn, err := c.application.helper(ctx, message, &target)
+	// A failed initializer returns a nil *helperTerminalConn through Conn.
+	helper, isHelper := conn.(*helperTerminalConn)
+	if !isHelper && conn != nil {
+		conn.Close()
+	}
+	if err == nil && helper == nil {
+		err = ErrPeerTerminalInvalid
+	}
+	if err == nil {
+		err = next.OnCarrierMove(c.move)
+	}
+	if err != nil {
+		return err
+	}
+	move.helper = helper
 	c.mu.Lock()
 	c.prepared = move
 	c.mu.Unlock()
 	// Mark redial before stopping the old reader. Close is suppressed during a
 	// move so it cannot enqueue a detach or close the QUIC offer/ACK connection.
+	// An old link that is already ending reaches attachPrepared on its own.
 	c.redial.Store(true)
-	if err := oldHelper.closeForCarrierMove(); err != nil {
+	if err := oldHelper.closeForCarrierMove(); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	select {
 	case err := <-move.result:
-		committed = err == nil
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -148,53 +183,24 @@ func (c *carrierTerminal) move(ctx context.Context, offer native.CarrierOffer) e
 
 func (c *carrierTerminal) attachPrepared(ctx context.Context) (Conn, error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	move := c.prepared
 	c.prepared = nil
-	c.mu.Unlock()
 	if move == nil {
 		return nil, StopReconnect(ErrTransportLost)
 	}
-	// ET keeps the reader/writer sequence through recovery (~/ref/EternalTerminal/src/base/Connection.cpp:119).
-	// supervise joined the old reader before entering this function. Its output
-	// queue survives the move, and the cursor now includes every byte in it.
-	move.target.AfterSequence = int(c.sequence.Load())
-	move.target.RestartIfNotRunning = false
-	move.target.ReplayHistory = false
-	conn, err := c.application.helper(move.ctx, move.message, move.target)
-	if err == nil {
-		helper, ok := conn.(*helperTerminalConn)
-		if !ok || helper == nil {
-			err = ErrPeerTerminalInvalid
-		} else {
-			err = move.session.OnCarrierMove(c.move)
-			if err == nil {
-				c.mu.Lock()
-				c.completedCompression = addTerminalCompression(c.completedCompression, c.helper.TerminalCompressionTelemetry())
-				c.helper = helper
-				c.session = move.session
-				c.target = move.target
-				c.mu.Unlock()
-			}
-		}
-	}
-	if err != nil {
-		// A failed initializer returns a nil *helperTerminalConn through Conn.
-		// Preserve the initialization error without calling Close on that pointer.
-		if helper, ok := conn.(*helperTerminalConn); ok {
-			if helper != nil {
-				helper.Close()
-			}
-		} else if conn != nil {
-			conn.Close()
-		}
-		move.message.Close()
-		move.session.Close()
-	}
-	move.result <- err
-	if err != nil {
-		return nil, StopReconnect(errors.Join(ErrTransportLost, err))
-	}
-	return &carrierTerminalSource{helperTerminalConn: conn.(*helperTerminalConn), owner: c}, nil
+	// supervise joined the old reader before entering this function, so every
+	// byte through this cursor is already queued locally; the replacement replays
+	// from the cursor at its attach and skips what the old link delivered since
+	// (ET keeps the reader sequence through recovery, ~/ref/EternalTerminal/src/base/Connection.cpp:119).
+	move.taken = true
+	move.helper.skipThrough = uint64(max(c.sequence.Load(), 0))
+	c.completedCompression = addTerminalCompression(c.completedCompression, c.helper.TerminalCompressionTelemetry())
+	c.helper = move.helper
+	c.session = move.session
+	c.target = move.target
+	move.result <- nil
+	return &carrierTerminalSource{helperTerminalConn: move.helper, owner: c}, nil
 }
 
 func addTerminalCompression(a, b TerminalCompressionTelemetry) TerminalCompressionTelemetry {

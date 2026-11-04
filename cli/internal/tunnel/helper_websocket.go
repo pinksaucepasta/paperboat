@@ -167,6 +167,7 @@ type helperTerminalConn struct {
 	readMu             sync.Mutex
 	readSequence       uint64
 	readLinear         bool
+	skipThrough        uint64 // written by attachPrepared before the first Read after a carrier move
 	current            *helperOutput
 	out                chan helperOutput
 	done               chan struct{}
@@ -665,7 +666,9 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 			}
 			return 0, io.EOF
 		}
-		c.current = &output
+		if !c.skipDelivered(&output) {
+			c.current = &output
+		}
 	}
 	start := uint64(0)
 	if c.current.endSequence >= uint64(len(c.current.data)) {
@@ -691,6 +694,26 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// skipDelivered trims output a carrier move's old link already delivered. It
+// reports whether nothing of the chunk is left. A non-linear chunk that only
+// partly overlaps is kept whole: its bytes cannot be split by sequence.
+func (c *helperTerminalConn) skipDelivered(output *helperOutput) bool {
+	skip := c.skipThrough
+	if skip == 0 || output.endSequence == 0 {
+		return false
+	}
+	if output.endSequence <= skip {
+		return true
+	}
+	c.skipThrough = 0
+	if output.byteCursor && output.endSequence >= uint64(len(output.data)) {
+		if start := output.endSequence - uint64(len(output.data)); start < skip {
+			output.data = output.data[skip-start:]
+		}
+	}
+	return false
 }
 
 func (c *helperTerminalConn) queueAck(sequence uint64) {

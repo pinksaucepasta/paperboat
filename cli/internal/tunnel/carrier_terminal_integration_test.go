@@ -162,6 +162,10 @@ func (f *connectedTerminalMove) serve(ctx context.Context, s *native.Session) er
 
 func (f *connectedTerminalMove) exercise(t *testing.T, ctx context.Context, runtime *cliNativeRuntime, old *native.Owner, authority *tailnet.Authority, store config.ProfileStore, leaf tls.Certificate, public ed25519.PublicKey) {
 	t.Helper()
+	if f.crashPhase == "output_during_attach" {
+		f.exerciseOutputDuringAttach(t, ctx, runtime, old, authority, store, leaf, public)
+		return
+	}
 	if f.crashPhase != "" {
 		f.exerciseFailure(t, ctx, runtime, old, authority, store, leaf, public)
 		return
