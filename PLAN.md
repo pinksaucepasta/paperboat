@@ -3337,6 +3337,9 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-04 | SDK F24-08 | Lane R: POST /v1/machines/{id}/audit-backlog with sdk_operation_ended, capability exec/private_access/file_transfer, peer account/session, operation_id, session_id=access_session_id, outcome succeeded/failed/canceled/uncertain and occurred_at; destination proof, exact persisted binding and event idempotency required, no payloads. | This releases the operation reservation and records its token/workspace attribution.
+
+
 2026-11-04 | SDK F24-07 | Token revoke reuses CLI-session cascade and peer_network/machine_access publication; expired-admission exec/file JTIs stay in revoke feed. | Lane R: verify live exec/private/file teardown within the configured bound and fail closed at authorization lease expiry during feed outage; token sessions now require per-operation scopes, no persistent offline rights.
 
 
