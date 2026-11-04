@@ -929,6 +929,7 @@ func productionTransport(caPath string, environ func(string) string) (http.Round
 	}
 	transportConfig := httptransport.DevelopmentConfig()
 	transportConfig.TLSConfig = tlsConfig
+	transportConfig.DialContext = newControlDialer(environ("PAPERBOAT_RUNTIME_STATE_ROOT")).DialContext
 	administrator := httptransport.ProxySnapshot{
 		HTTPProxy:  strings.TrimSpace(environ("PAPERBOAT_HTTP_PROXY")),
 		HTTPSProxy: strings.TrimSpace(environ("PAPERBOAT_HTTPS_PROXY")),
