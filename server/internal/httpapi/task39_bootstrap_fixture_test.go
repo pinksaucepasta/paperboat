@@ -182,7 +182,11 @@ func task39Stack(t *testing.T, database *db.DB, base string) (router http.Handle
 	clear(key)
 	cfg := config.Default()
 	cfg.HTTP.PublicBaseURL = base
-	cfg.LocalAccessBaseDomain = "local.example.test"
+	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain, cfg.ReleaseBaseURL = "local.example.test", "runtime.example.test", base
+	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
+	if err := cfg.ValidateClientDiscovery(); err != nil {
+		t.Fatal(err)
+	}
 	writer := audit.NewWriter(database)
 	signer, err := mint.NewEphemeral(time.Minute)
 	if err != nil {
