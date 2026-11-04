@@ -243,6 +243,18 @@ func (r *RuntimeOwnerSessionRegistry) RegisterMachineOwnerSession(machineID, own
 	return session.done, ownerSessionID, nil
 }
 
+// LocalOwnerAcquired reports whether a local CLI holds this owner session. A
+// restarted runtime resumes a foreground preview only once its CLI reattaches.
+func (r *RuntimeOwnerSessionRegistry) LocalOwnerAcquired(ownerSessionID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session := r.unbound[ownerSessionID]
+	return session != nil && !session.closed
+}
+
 // CloseMachineOwnerSession signals process loss immediately while retaining a
 // bounded registry reference until the local lease manager releases it. This
 // fences a delayed server dispatch without creating permanent tombstones.

@@ -168,18 +168,49 @@ func TestBackgroundPreviewResumesWithTheSameLeaseAfterAHostRuntimeRestart(t *tes
 	}
 }
 
-func TestForegroundPreviewStillStopsItsLeaseWhenTheHostRuntimeShutsDown(t *testing.T) {
+// pbvm4 feat5: pb update restarted the host runtime and both foreground
+// units (pb preview, pb tunnel) died 30 s later: nothing in the new runtime
+// renewed their leases, so the server marked them owner_lost. A foreground
+// preview now keeps its lease across the restart and resumes as soon as its
+// CLI reattaches with the same owner session, never before.
+func TestForegroundPreviewResumesWhenItsCLIReattachesAfterAHostRuntimeRestart(t *testing.T) {
 	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
 	store := NewBackgroundStore(filepath.Join(t.TempDir(), "background.json"))
-	run := startRuntimeRun(t, store, "boot_1", now, nil)
-	run.dispatchLocal(t, now, false)
-	<-run.resolver.started
-	run.stop()
-	if run.stoppedLeases() != 1 {
-		t.Fatalf("foreground lease stop calls=%d", run.stoppedLeases())
+	first := startRuntimeRun(t, store, "boot_1", now, nil)
+	request := first.dispatchLocal(t, now, false)
+	<-first.resolver.started
+	first.stop()
+	if first.stoppedLeases() != 0 {
+		t.Fatalf("runtime restart stopped the foreground lease %d times", first.stoppedLeases())
 	}
-	if records, _ := store.Load(); len(records) != 0 {
-		t.Fatalf("foreground preview was recorded: %+v", records)
+	records, err := store.Load()
+	if err != nil || len(records) != 1 || !records[0].Foreground {
+		t.Fatalf("foreground preview not recorded for resume: %+v err=%v", records, err)
+	}
+
+	second := startRuntimeRun(t, store, "boot_1", now, serverLease(request, 4, "ready"))
+	restored := make(chan struct{})
+	go func() { second.manager.RestoreBackground(context.Background()); close(restored) }()
+	select {
+	case <-second.resolver.started:
+		t.Fatal("foreground preview resumed before its CLI reattached")
+	case <-time.After(400 * time.Millisecond):
+	}
+	// The CLI's reattach acquires the same owner session on the new runtime.
+	if _, err := second.owners.Acquire(OwnerSessionLeaseRequest{OwnerSessionID: request.OwnerSessionID, Target: request.Target}, "local_reacquire"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-second.resolver.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("foreground preview did not resume after its CLI reattached")
+	}
+	<-restored
+	second.resolver.mu.Lock()
+	resumed := second.resolver.requests[0]
+	second.resolver.mu.Unlock()
+	if resumed.PreviewID != request.PreviewID || resumed.Endpoint != request.Endpoint || resumed.ExpectedGeneration != 4 {
+		t.Fatalf("resumed %+v from %+v", resumed, request)
 	}
 }
 

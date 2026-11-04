@@ -16,6 +16,10 @@ const (
 	backgroundRestoreFirstDelay = time.Second
 	backgroundRestoreMaxDelay   = 15 * time.Second
 	backgroundDispatchValidity  = time.Minute
+
+	foregroundRestoreWindow     = 30 * time.Second
+	foregroundRestoreFirstDelay = 250 * time.Millisecond
+	foregroundRestoreMaxDelay   = time.Second
 )
 
 // BackgroundResume lets background previews outlive a restart of the host
@@ -37,20 +41,31 @@ type BackgroundResume struct {
 type backgroundOwnerRegistry interface {
 	RegisterMachineOwnerSession(machineID, ownerSessionID string, target LeaseTarget) (<-chan struct{}, string, error)
 	ReleaseMachineOwnerSession(machineID, ownerSessionID string) error
+	LocalOwnerAcquired(ownerSessionID string) bool
 }
 
-func (m *DispatchManager) isBackground(request DispatchRequest, resumed bool) bool {
+// resumeRecord says whether a local-lease dispatch is recorded so a restarted
+// host runtime resumes it, and whether it is a foreground one. Background
+// previews resume on their own; foreground ones once their CLI reattaches
+// (pbvm4 feat5: pb update ended both foreground units 30 s after the worker
+// that renewed them went away).
+func (m *DispatchManager) resumeRecord(request DispatchRequest, resumed *BackgroundRecord) (BackgroundRecord, bool) {
 	resume := m.config.Background
-	if resume == nil || resume.Store == nil || request.OwnerSessionKind != OwnerSessionLocalLease || request.UserDeadline == nil {
-		return false
+	if resume == nil || resume.Store == nil || request.OwnerSessionKind != OwnerSessionLocalLease {
+		return BackgroundRecord{}, false
 	}
-	return resumed || resume.IsBackground != nil && resume.IsBackground(request.OwnerSessionID)
+	record := BackgroundRecord{OSBootID: resume.OSBootID, Request: request, Foreground: true}
+	if resumed != nil {
+		record.Foreground = resumed.Foreground
+	} else if request.UserDeadline != nil && resume.IsBackground != nil && resume.IsBackground(request.OwnerSessionID) {
+		record.Foreground = false
+	}
+	return record, true
 }
 
-func (m *DispatchManager) rememberBackground(request DispatchRequest) {
-	resume := m.config.Background
-	if err := resume.Store.Save(BackgroundRecord{OSBootID: resume.OSBootID, Request: request}); err != nil {
-		slog.Warn("background preview will not survive a host runtime restart", "preview", request.PreviewID, "error", err)
+func (m *DispatchManager) rememberBackground(record BackgroundRecord) {
+	if err := m.config.Background.Store.Save(record); err != nil {
+		slog.Warn("preview will not survive a host runtime restart", "preview", record.Request.PreviewID, "error", err)
 	}
 }
 
@@ -78,16 +93,20 @@ func (m *DispatchManager) RestoreBackground(ctx context.Context) {
 			m.forgetBackground(record.Request.OperationID)
 			continue
 		}
-		if err := m.restoreOne(ctx, record.Request); err != nil {
+		if err := m.restoreOne(ctx, record); err != nil {
 			slog.Warn("background preview was not resumed", "preview", record.Request.PreviewID, "error", err)
 			m.forgetBackground(record.Request.OperationID)
 		}
 	}
 }
 
-func (m *DispatchManager) restoreOne(ctx context.Context, stored DispatchRequest) error {
-	deadline := m.config.Now().Add(BackgroundRestoreWindow)
-	delay := backgroundRestoreFirstDelay
+func (m *DispatchManager) restoreOne(ctx context.Context, stored BackgroundRecord) error {
+	window, delay, maxDelay := BackgroundRestoreWindow, backgroundRestoreFirstDelay, backgroundRestoreMaxDelay
+	if stored.Foreground {
+		// The server ends a foreground preview after its 30 s owner grace.
+		window, delay, maxDelay = foregroundRestoreWindow, foregroundRestoreFirstDelay, foregroundRestoreMaxDelay
+	}
+	deadline := m.config.Now().Add(window)
 	var last error
 	for {
 		last = m.restoreAttempt(ctx, stored)
@@ -102,26 +121,33 @@ func (m *DispatchManager) restoreOne(ctx context.Context, stored DispatchRequest
 			return ctx.Err()
 		case <-time.After(delay):
 		}
-		if delay *= 2; delay > backgroundRestoreMaxDelay {
-			delay = backgroundRestoreMaxDelay
+		if delay *= 2; delay > maxDelay {
+			delay = maxDelay
 		}
 	}
 }
 
 // restoreAttempt dispatches the stored preview once. ErrDispatchUnavailable
 // means "try again"; any other error means the preview cannot be resumed.
-func (m *DispatchManager) restoreAttempt(ctx context.Context, stored DispatchRequest) error {
+func (m *DispatchManager) restoreAttempt(ctx context.Context, record BackgroundRecord) error {
 	resume := m.config.Background
+	stored := record.Request
 	registry, ok := m.config.Owners.(backgroundOwnerRegistry)
 	if !ok {
 		return ErrDispatchInvalid
+	}
+	if record.Foreground && !registry.LocalOwnerAcquired(stored.OwnerSessionID) {
+		return ErrDispatchUnavailable
 	}
 	current, err := resume.Current(ctx, stored.Lease())
 	if err != nil {
 		return err
 	}
 	now := m.config.Now()
-	if !validActiveLeaseState(current.State) || !current.LeaseDeadline.After(now) || current.UserDeadline == nil || !current.UserDeadline.After(now) {
+	if !validActiveLeaseState(current.State) || !current.LeaseDeadline.After(now) {
+		return ErrLeaseExpired
+	}
+	if !record.Foreground && (current.UserDeadline == nil || !current.UserDeadline.After(now)) {
 		return ErrLeaseExpired
 	}
 	request := refreshedDispatch(stored, current)
@@ -137,12 +163,14 @@ func (m *DispatchManager) restoreAttempt(ctx context.Context, stored DispatchReq
 		IdempotencyKey: request.IdempotencyKey, RequestID: request.RequestID, CorrelationID: request.CorrelationID,
 		RequestHash: hash, ExpiresAt: now.Add(backgroundDispatchValidity),
 	}
-	if _, _, err := registry.RegisterMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID, request.Target); err != nil {
-		return errors.Join(ErrDispatchInvalid, err)
+	if !record.Foreground {
+		if _, _, err := registry.RegisterMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID, request.Target); err != nil {
+			return errors.Join(ErrDispatchInvalid, err)
+		}
+		// The dispatch takes its own owner reference; this one only bridges the registration.
+		defer registry.ReleaseMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID)
 	}
-	// The dispatch takes its own owner reference; this one only bridges the registration.
-	defer registry.ReleaseMachineOwnerSession(request.OwnerMachineID, request.OwnerSessionID)
-	_, err = m.dispatch(ctx, authorization, request, true)
+	_, err = m.dispatch(ctx, authorization, request, &record)
 	return err
 }
 

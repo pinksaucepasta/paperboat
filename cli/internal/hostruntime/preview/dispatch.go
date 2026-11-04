@@ -243,10 +243,10 @@ func NewDispatchManager(config DispatchManagerConfig) (*DispatchManager, error) 
 // readiness; the wrapped carrier records readiness asynchronously and only
 // then lets Session publish the lease as ready.
 func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAuthorization, request DispatchRequest) (DispatchOutcome, error) {
-	return m.dispatch(ctx, authorization, request, false)
+	return m.dispatch(ctx, authorization, request, nil)
 }
 
-func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAuthorization, request DispatchRequest, resumed bool) (DispatchOutcome, error) {
+func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAuthorization, request DispatchRequest, resumed *BackgroundRecord) (DispatchOutcome, error) {
 	if m == nil || ctx == nil {
 		return DispatchOutcome{}, ErrDispatchInvalid
 	}
@@ -345,7 +345,8 @@ func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAu
 	baseSessionConfig.Carrier = wrapped
 	baseSessionConfig.OwnerDone = ownerDone
 	session, err := StartExisting(m.ctx, baseSessionConfig, lease)
-	background := err == nil && m.isBackground(request, resumed)
+	record, background := m.resumeRecord(request, resumed)
+	background = background && err == nil
 	if background {
 		session.survivesRestart.Store(true)
 	}
@@ -389,7 +390,7 @@ func (m *DispatchManager) dispatch(ctx context.Context, authorization DispatchAu
 	m.operations[request.OperationID] = current
 	m.mu.Unlock()
 	if background {
-		m.rememberBackground(request)
+		m.rememberBackground(record)
 	}
 	go m.observeSession(request.OperationID, hash, session, !lazy)
 	return dispatchOutcome(request, current), nil

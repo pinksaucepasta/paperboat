@@ -19,6 +19,9 @@ const backgroundStoreSchema = "paperboat.background-previews/v1"
 type BackgroundRecord struct {
 	OSBootID string          `json:"os_boot_id"`
 	Request  DispatchRequest `json:"request"`
+	// Foreground previews belong to a running pb preview/tunnel; they resume
+	// when that CLI reattaches to the restarted runtime.
+	Foreground bool `json:"foreground,omitempty"`
 }
 
 // BackgroundStore keeps the background previews of this machine in one small
