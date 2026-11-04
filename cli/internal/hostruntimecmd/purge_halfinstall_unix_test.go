@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,5 +103,46 @@ func TestDarwinPurgeClearsAHalfInstallAndIsIdempotent(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(root, "Library", "LaunchDaemons"))
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("launch daemons left: %v %v", entries, err)
+	}
+}
+
+// F1-09: reset after a failed pair returned before its sweep when the account
+// CLI could not be proven, so it removed nothing and the Mac stayed stuck.
+func TestResetPurgeNeverStopsAtAnUnprovableCLI(t *testing.T) {
+	keep := "/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb"
+	for _, proven := range []bool{true, false} {
+		root := t.TempDir()
+		planted := plantDarwinHalfInstall(t, root)
+		plan, err := newUnixPurgePlan("darwin", 501)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := newPurgeFake()
+		var uninstalledKeeping []string
+		prove := func() (string, error) { return keep, nil }
+		if !proven {
+			prove = func() (string, error) { return "", errors.New("not a Paperboat executable") }
+		}
+		err = testSweep(root, plan, fake).purgeForReset(context.Background(), prove, func(_ context.Context, kept string) error {
+			uninstalledKeeping = append(uninstalledKeeping, kept)
+			return nil
+		})
+		for _, path := range planted {
+			if proven && path == keep {
+				assertPresent(t, root, keep)
+				continue
+			}
+			assertGone(t, root, path)
+		}
+		if proven {
+			if err != nil || len(uninstalledKeeping) != 1 || uninstalledKeeping[0] != keep {
+				t.Fatalf("proven reset: err=%v uninstall=%v", err, uninstalledKeeping)
+			}
+			continue
+		}
+		var staged purgeStageFailure
+		if !errors.As(err, &staged) || staged.stage != "reset_cli" || fake.uninstalls != 1 || fake.guards != 1 {
+			t.Fatalf("unprovable CLI: err=%v uninstalls=%d guards=%d", err, fake.uninstalls, fake.guards)
+		}
 	}
 }

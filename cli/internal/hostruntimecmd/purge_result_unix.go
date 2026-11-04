@@ -116,7 +116,7 @@ func readPurgeResult(data []byte, processErr error) error {
 }
 func validPurgeStage(stage string) bool {
 	switch stage {
-	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_policy", "shared_manuals", "shared_payload_parents", "final_inventory", "command":
+	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_policy", "shared_manuals", "shared_payload_parents", "final_inventory", "reset_cli", "command":
 		return true
 	}
 	return false

@@ -67,14 +67,22 @@ func purgeSystemInstallationScoped(ctx context.Context, preserveCLI bool) error 
 	}
 	sweep := newHostUnixSweep(plan)
 	if preserveCLI {
-		keep, err := hostinstall.ResetCLIForCurrentAccount()
-		if err != nil {
-			return err
-		}
-		sweep.keepCLI = keep
-		sweep.uninstall = hostinstall.UninstallPersistedPreservingCLI
+		return sweep.purgeForReset(ctx, hostinstall.ResetCLIForCurrentAccount, hostinstall.UninstallPersistedPreservingCLI)
 	}
 	return sweep.purgeAccount(ctx)
+}
+
+// purgeForReset keeps the account CLI that prove accepts. A CLI it cannot
+// prove never stops the rest of the reset: it is removed with everything else
+// and named as the reset_cli failure, so reset cannot leave a stuck machine.
+func (s unixSweep) purgeForReset(ctx context.Context, prove func() (string, error), uninstall func(context.Context, string) error) error {
+	keep, err := prove()
+	if err != nil {
+		return errors.Join(withPurgeStage("reset_cli", err), s.purgeAccount(ctx))
+	}
+	s.keepCLI = keep
+	s.uninstall = func(ctx context.Context) error { return uninstall(ctx, keep) }
+	return s.purgeAccount(ctx)
 }
 
 // unixPurgePlan is the Paperboat-owned inventory for one enrolled account on a

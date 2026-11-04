@@ -61,18 +61,13 @@ func ResetCLIForCurrentAccount() (string, error) {
 		}
 	}
 	request, err := loadInstallMetadata(paths.metadata, invokingUID())
-	if installNotExistOnly(err) {
-		// Reset removed metadata but retained the protected canonical CLI.
-		_, err = installsource.Inspect(paths.worker, "reset", installsource.Custom)
-		if err != nil {
-			return "", err
-		}
+	if err == nil && request.Source.Verify(paths.worker) == nil {
 		return paths.worker, nil
 	}
-	if err != nil {
-		return "", err
-	}
-	if err := request.Source.Verify(paths.worker); err != nil {
+	// No usable record: an earlier reset removed it, or a half-install (failed
+	// pair or update) left one that is unreadable or names another build. The
+	// protected slot's own Paperboat identity decides, as when it is absent.
+	if _, err := installsource.Inspect(paths.worker, "reset", installsource.Custom); err != nil {
 		return "", err
 	}
 	return paths.worker, nil
@@ -80,12 +75,9 @@ func ResetCLIForCurrentAccount() (string, error) {
 
 type resetCLIContextKey struct{}
 
-// UninstallPersistedPreservingCLI keeps only the source-verified canonical CLI.
-func UninstallPersistedPreservingCLI(ctx context.Context) error {
-	keep, err := ResetCLIForCurrentAccount()
-	if err != nil {
-		return err
-	}
+// UninstallPersistedPreservingCLI keeps only keep, the CLI that
+// ResetCLIForCurrentAccount proved.
+func UninstallPersistedPreservingCLI(ctx context.Context, keep string) error {
 	return UninstallPersisted(context.WithValue(ctx, resetCLIContextKey{}, keep))
 }
 
