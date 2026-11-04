@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
 	"net/http"
@@ -338,10 +339,16 @@ func (c *Client) callWorker(ctx context.Context, operation string) error {
 	return err
 }
 
-func (c *Client) do(ctx context.Context, req request) (response, error) {
+func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	if c == nil || ctx == nil {
 		return response{}, ErrInvalid
 	}
+	// Every control call is timed: an update must not wait on any of them
+	// for long, and a slow one has to be visible in the field.
+	started := time.Now()
+	defer func() {
+		diagnosticlog.TryInfo("carrier control call", "stage", req.Operation, "failed", err != nil, "duration_ms", time.Since(started).Milliseconds())
+	}()
 	if !req.valid() {
 		return response{}, ErrInvalid
 	}
