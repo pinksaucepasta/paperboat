@@ -4,7 +4,11 @@
 	# config (relay grants) and long polls stay uncompressed.
 	@compressible expression `(method('GET') && path('/v1/machines', '/v1/machines/*/terminal-sessions', '/v1/terminal-sessions', '/v1/previews', '/v1/tunnels', '/v1/machine-services')) || (method('POST') && path('/v1/machine-peer-identity/status'))`
 	encode @compressible zstd gzip
-	reverse_proxy server:8080
+	# Long-lived edge control and event streams outlive a rollout's Caddy reload; without this Caddy
+	# closes them the moment the old config unloads (edges saw end_of_stream at every server rollout).
+	reverse_proxy server:8080 {
+		stream_close_delay 10m
+	}
 }
 {$PAPERBOAT_DOWNLOAD_HOST} {
 	@targets path /tuf/targets/*
@@ -14,7 +18,9 @@
 		file_server
 	}
 	handle {
-		reverse_proxy server:8080
+		reverse_proxy server:8080 {
+			stream_close_delay 10m
+		}
 	}
 }
 {$PAPERBOAT_DIAGNOSTICS_HOST} {

@@ -106,6 +106,17 @@ class ServerRolloutTest(unittest.TestCase):
         self.assertEqual(state['retired'], [])
         self.assertIn(['docker', 'stop', '--time', '30', 'paperboat-server-1'], self.operations)
 
+    def test_switch_keeps_the_stream_close_delay_block(self):
+        # The upstreams carry stream_close_delay so a reload does not cut long-lived edge streams.
+        block = 'api.example.test {\n reverse_proxy server:8080 {\n  stream_close_delay 10m\n }\n}\n'
+        (self.root / 'Caddyfile').write_text(block + block.replace('api.', 'get.'))
+        self.live = True
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image')
+        caddy = (self.root / 'Caddyfile').read_text()
+        self.assertEqual(caddy.count('reverse_proxy ' + self.candidate + ':8080 {'), 2)
+        self.assertEqual(caddy.count('stream_close_delay 10m'), 2)
+
     def test_retired_server_drains_workers_after_the_switch(self):
         with patch.object(self.rollout, 'run', side_effect=self.docker):
             self.rollout.deploy('new-image')
