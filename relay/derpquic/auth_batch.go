@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -66,7 +67,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 			continue
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("verify grant: %w", err)
 		}
 		if expired {
 			continue
@@ -77,7 +78,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 			continue
 		}
 		if !sameGrantIdentity(merged, grant) {
-			return ErrAdmission
+			return fmt.Errorf("grant part identity: %w", ErrAdmission)
 		}
 		merged, err = mergeGrants(merged, grant)
 		if err != nil {
@@ -90,5 +91,8 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	if count > 1 {
 		copy(merged.signedHash[:], digest.Sum(nil))
 	}
-	return s.admit(p, merged, now)
+	if err := s.admit(p, merged, now); err != nil {
+		return fmt.Errorf("admit: %w", err)
+	}
+	return nil
 }

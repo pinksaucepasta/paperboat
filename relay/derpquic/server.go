@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
+	"log/slog"
 	"net"
 	"sort"
 	"sync"
@@ -50,6 +52,7 @@ type Server struct {
 	transport                            *quic.Transport
 	workers                              sync.WaitGroup
 	accepted, denied, forwarded, dropped atomic.Uint64
+	lastRefusalLog                       atomic.Int64
 }
 type queued struct {
 	packet
@@ -337,6 +340,10 @@ func (s *Server) reject(p *peerConn, err error) {
 	if !errors.As(err, &e) {
 		e = ErrAdmission
 	}
+	// A refusal is never silent: one bounded line per second names its typed code.
+	if now := time.Now().UnixNano(); now-s.lastRefusalLog.Load() >= int64(time.Second) && s.lastRefusalLog.CompareAndSwap(s.lastRefusalLog.Load(), now) {
+		slog.Info("relay admission refused", "code", e.Code, "reason", err.Error(), "refused_total", s.denied.Load())
+	}
 	p.close(e.Code, e.Message)
 }
 func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
@@ -365,10 +372,10 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	// revocation's fence (no signed grant) holds min_generation and refuses only below it. A reissue of
 	// the same authority (a staged carrier generation refreshing its own copy) is not a conflict.
 	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && previous.AccountID != "" && g.Generation == previous.Generation && g.signedHash != previous.signedHash && !sameGrantAuthority(previous.Grant, g)) {
-		return ErrAdmission
+		return fmt.Errorf("fence (generation %d, held %d): %w", g.Generation, previous.Generation, ErrAdmission)
 	}
 	if !p.key.IsZero() && (p.key != k || p.grant.AccountID != g.AccountID || p.grant.EndpointID != g.EndpointID) {
-		return ErrAdmission
+		return fmt.Errorf("connection identity changed: %w", ErrAdmission)
 	}
 	count := 0
 	for _, q := range s.peers {
@@ -379,7 +386,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	old := s.peers[routeKey(k, p.namespace)]
 	if old != nil && old != p {
 		if old.grant.AccountID != g.AccountID || old.grant.EndpointID != g.EndpointID || g.Generation < old.grant.Generation {
-			return ErrAdmission
+			return fmt.Errorf("route owned by another grant: %w", ErrAdmission)
 		}
 		count--
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go4.org/mem"
 	"hash/maphash"
 	"io"
@@ -203,8 +204,24 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
 	quicPublic, publicErr := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
 	presented, isEd25519 := leaf.PublicKey.(ed25519.PublicKey)
-	if g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay" || g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch || fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey || !isEd25519 || !bytes.Equal(presented, quicPublic) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil || g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60 || g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers {
-		return Grant{}, ErrAdmission
+	// Each refusal names its check (never the grant's content) for the relay log.
+	switch {
+	case g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay":
+		return Grant{}, fmt.Errorf("grant issuer: %w", ErrAdmission)
+	case g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration:
+		return Grant{}, fmt.Errorf("grant relay node: %w", ErrAdmission)
+	case g.ProcessEpoch != v.ProcessEpoch:
+		return Grant{}, fmt.Errorf("grant relay process epoch: %w", ErrAdmission)
+	case fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey:
+		return Grant{}, fmt.Errorf("grant key encoding: %w", ErrAdmission)
+	case !isEd25519 || !bytes.Equal(presented, quicPublic):
+		return Grant{}, fmt.Errorf("client certificate key differs from grant: %w", ErrAdmission)
+	case now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil:
+		return Grant{}, fmt.Errorf("client certificate validity: %w", ErrAdmission)
+	case g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60:
+		return Grant{}, fmt.Errorf("grant lifetime: %w", ErrAdmission)
+	case g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers:
+		return Grant{}, fmt.Errorf("grant identity: %w", ErrAdmission)
 	}
 	if _, err := ParseKey(g.WireGuardPublicKey); err != nil {
 		return Grant{}, err
