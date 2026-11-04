@@ -190,6 +190,7 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 | `private_access` | Private access to machine ports: grants, allowed, denied. |
 | `release_authority` | Paperboat operations: release signing authority. |
 | `route` | Tunnel routes and their intents. |
+| `sdk` | SDK operations that ran while Paperboat was offline, reported after reconnect. |
 | `support` | Support references looked up. |
 | `team` | Team membership, invitations, roles, sharing, grants, policy, SSO, directory sync, audit export and streaming. |
 | `terminal` | Terminal browser access and access codes. |
