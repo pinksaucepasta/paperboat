@@ -32,7 +32,8 @@ type CarrierNetwork struct {
 	mu        sync.Mutex
 	bindings  map[string]NetworkBinding
 	contacts  map[key.NodePublic]mesh.PeerContact
-	changed   chan struct{}
+	changedMu sync.Mutex
+	changed   chan struct{} // closed and replaced on each endpoint change
 	closed    bool
 	sealed    atomic.Bool
 	cancel    context.CancelFunc
@@ -60,7 +61,7 @@ func (a *Authority) NewCarrierNetwork(ctx context.Context, namespace [32]byte, i
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
 	disco := mesh.DiscoPrivateForGeneration(private, namespace)
-	c := &CarrierNetwork{authority: a, self: self, namespace: namespace, disco: disco.Public(), bindings: make(map[string]NetworkBinding), contacts: make(map[key.NodePublic]mesh.PeerContact), changed: make(chan struct{}, 1)}
+	c := &CarrierNetwork{authority: a, self: self, namespace: namespace, disco: disco.Public(), bindings: make(map[string]NetworkBinding), contacts: make(map[key.NodePublic]mesh.PeerContact), changed: make(chan struct{})}
 	c.server = &mesh.Server{
 		Key: private, DiscoPrivate: disco, LocalAddr: netip.MustParseAddr(self.VirtualAddress),
 		AllowedPeers: peers, PeerContacts: make(map[key.NodePublic]mesh.PeerContact),
@@ -68,10 +69,10 @@ func (a *Authority) NewCarrierNetwork(ctx context.Context, namespace [32]byte, i
 
 		TestOnlyPacketListener: a.options.TestOnlyPacketListener,
 		OnLocalEndpoints: func() {
-			select {
-			case c.changed <- struct{}{}:
-			default:
-			}
+			c.changedMu.Lock()
+			close(c.changed)
+			c.changed = make(chan struct{})
+			c.changedMu.Unlock()
 		},
 	}
 	if len(regions) != 0 {
@@ -139,9 +140,27 @@ func (c *CarrierNetwork) AddPeer(endpointID, discoPublic string, endpoints []str
 	return c.server.SetPeerContacts(c.contacts)
 }
 
-func (c *CarrierNetwork) DiscoPublic() string               { return derpquic.DiscoKeyString(c.disco) }
-func (c *CarrierNetwork) Endpoints() []netip.AddrPort       { return c.server.LocalEndpoints() }
-func (c *CarrierNetwork) EndpointsChanged() <-chan struct{} { return c.changed }
+func (c *CarrierNetwork) DiscoPublic() string         { return derpquic.DiscoKeyString(c.disco) }
+func (c *CarrierNetwork) Endpoints() []netip.AddrPort { return c.server.LocalEndpoints() }
+
+// WaitEndpoints returns once the network knows a local endpoint. Every waiter
+// wakes: two connections of one client moving at once both wait here (dadape
+// direct1f: a one-slot signal woke one and left the other the whole budget).
+func (c *CarrierNetwork) WaitEndpoints(ctx context.Context) error {
+	for {
+		c.changedMu.Lock()
+		changed := c.changed
+		c.changedMu.Unlock()
+		if len(c.Endpoints()) != 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+	}
+}
 
 func (c *CarrierNetwork) Dial(ctx context.Context, endpointID string) (mesh.ConnPacketConn, error) {
 	binding, err := c.authority.Peer(endpointID)

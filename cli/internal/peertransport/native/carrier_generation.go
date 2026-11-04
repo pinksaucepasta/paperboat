@@ -53,12 +53,8 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 			release()
 		}
 	}()
-	for len(network.Endpoints()) == 0 {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-network.EndpointsChanged():
-		}
+	if err := network.WaitEndpoints(ctx); err != nil {
+		return nil, err
 	}
 	if err := network.AddPeer(s.peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
 		return nil, err

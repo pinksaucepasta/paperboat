@@ -77,6 +77,16 @@ func TestCarrierGenerationTakesEveryNewConnection(t *testing.T) {
 	oldStream := openConsumer(t, ctx, old, "exec")
 	defer oldStream.Close()
 	carrierEcho(t, oldStream)
+	// dadape direct1f: the client held two connections; both took the offer at
+	// once, one moved in 0.35 s and the other waited out the 25 s budget.
+	second, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	secondStream := openConsumer(t, ctx, second, "ssh")
+	defer secondStream.Close()
+	carrierEcho(t, secondStream)
 
 	identity, err = mo.PrepareCarrierIdentity()
 	if err != nil {
@@ -104,6 +114,7 @@ func TestCarrierGenerationTakesEveryNewConnection(t *testing.T) {
 		t.Fatal("a connection without a terminal declined the generation", err)
 	}
 	carrierEcho(t, oldStream)
+	carrierEcho(t, secondStream)
 	for _, consumer := range []string{"exec", "ssh", "exec"} {
 		dialGeneration(t, ctx, co, address, consumer)
 	}

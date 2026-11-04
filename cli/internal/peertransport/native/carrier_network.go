@@ -136,13 +136,9 @@ func (o *Owner) StartCarrierNetwork(ctx context.Context, identity *CarrierIdenti
 	if err != nil {
 		return nil, err
 	}
-	for len(network.Endpoints()) == 0 {
-		select {
-		case <-ctx.Done():
-			network.Close()
-			return nil, ctx.Err()
-		case <-network.EndpointsChanged():
-		}
+	if err := network.WaitEndpoints(ctx); err != nil {
+		network.Close()
+		return nil, err
 	}
 	if err := o.SignCarrierCandidates(identity, instance, network.DiscoPublic(), network.Endpoints(), network.RelayNodeIDs()); err != nil {
 		network.Close()
