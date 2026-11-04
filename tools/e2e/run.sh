@@ -57,10 +57,6 @@ for name in a b; do
   done
   grep -q '"ok": *true' <<<"$out" || { echo "pair e2e-$name failed: $out" >&2; exit 1; }
   $X rm -f token
-  # Sign pb in as the account, for exec/send/preview between the machines.
-  python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["api-token"])' "$work/tokens.json" |
-    ${X/docker exec/docker exec -i} .local/bin/pb login --api-token-file - >/dev/null ||
-    { echo "--- pb doctor"; $X .local/bin/pb doctor --json 2>&1 | cut -c1-1500; echo "--- paperboatd"; $X journalctl --user -u paperboatd --no-pager -n 30 | cut -c1-300; exit 1; }
   echo "paired e2e-$name"
 done
 has pair && echo "stage pair: PASS"

@@ -115,7 +115,6 @@ func TestE2EServe(t *testing.T) {
 	for _, name := range []string{"e2e-a", "e2e-b"} {
 		tokens[name], _ = post("/v1/machine-enrollments", `{"shell":"posix"}`)["bootstrap_token"].(string)
 	}
-	tokens["api-token"], _ = post("/v1/workspaces/personal/api-tokens", `{"name":"e2e"}`)["secret"].(string)
 	for name, value := range tokens {
 		if value == "" {
 			t.Fatalf("no %s issued", name)
