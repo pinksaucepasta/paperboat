@@ -1,6 +1,6 @@
 name: Cross-platform
 
-# Build and test the cli and shared modules on macOS (Linux has its own lanes). Windows is post-launch (PLAN 1.1).
+# Build and test the cli, shared and Go SDK modules on macOS (Linux has its own lanes). Windows is post-launch (PLAN 1.1).
 on:
   push:
     branches: [main]
@@ -37,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest]
-        module: [shared, cli]
+        module: [shared, cli, sdk/go]
     defaults:
       run:
         shell: bash
@@ -51,6 +51,7 @@ jobs:
           cache-dependency-path: |
             cli/go.sum
             shared/go.sum
+            sdk/go/go.sum
             go.work.sum
       - run: go build ./...
       - run: go vet ./...

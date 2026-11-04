@@ -13,11 +13,14 @@ cd "$(dirname "$0")/.." || exit 1
 fail=0
 step() { printf '\n== %s\n' "$1"; }
 
-for m in shared cli relay tunnel server helper; do
+for m in shared cli relay tunnel server helper sdk/go; do
   [ -d "$m" ] || continue
   step "go vet + test: $m"
   (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
 done
+
+step "shared import boundary"
+tools/check-shared-imports.sh || { echo "FAIL: shared import boundary"; fail=1; }
 
 step "server performance budgets on the seeded PostgreSQL (internal/perf/budgets.json)"
 if [ -n "${PAPERBOAT_PERF_DATABASE_DSN:-}" ]; then

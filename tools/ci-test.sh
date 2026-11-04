@@ -5,7 +5,7 @@
 #   tools/ci-test.sh server -run 'TestTeams'   # server incl. its PostgreSQL suites, narrowed
 #   tools/ci-test.sh cli -run TestX -count 5   # repeat each matching test 5 times (flake check)
 #   tools/ci-test.sh                           # every module and the console
-# Modules: shared cli relay tunnel helper server console. server and tunnel also run their PostgreSQL
+# Modules: shared cli relay tunnel helper server console sdk/go. server and tunnel also run their PostgreSQL
 # suites against a throwaway postgres:17 service container. Only committed work is tested.
 # The script pushes HEAD to a throwaway branch ci/<worktree>-<sha>-<time> (never main, with no
 # build here and "[skip ci]" so only the dispatched run starts), waits, prints a pass/fail line and
@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
     -run | --run) [ $# -ge 2 ] || usage; run=$2; shift 2 ;;
     -count | --count) [ $# -ge 2 ] || usage; count=$2; shift 2 ;;
     -h | --help) usage ;;
-    shared | cli | relay | tunnel | helper | server | console) modules+=("$1"); shift ;;
+    shared | cli | relay | tunnel | helper | server | console | sdk/go) modules+=("$1"); shift ;;
     *) echo "ci-test: unknown argument '$1'" >&2; usage ;;
   esac
 done

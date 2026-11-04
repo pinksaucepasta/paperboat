@@ -5,6 +5,7 @@ use (
 	./helper
 	./relay
 	./shared
+	./sdk/go
 	./server
 	./tunnel
 )

@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       modules:
-        description: 'Modules to test: shared cli relay tunnel helper server console (empty = all)'
+        description: 'Modules to test: shared cli relay tunnel helper server console sdk/go (empty = all)'
         default: ''
       run:
         description: 'go test -run pattern (empty = all tests)'
@@ -43,7 +43,7 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          all="shared cli relay tunnel helper server console"
+          all="shared cli relay tunnel helper server console sdk/go"
           want="${MODULES:-$all}"
           for m in $want; do
             case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
@@ -100,9 +100,12 @@ jobs:
             ${{ steps.paths.outputs.mod }}
           # One entry per module and dependency set: the Go build cache is content addressed, so an
           # entry from an older commit still serves everything that did not change.
-          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}
+          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum', 'sdk/go/go.sum') }}
           restore-keys: |
             lane-test-go-${{ matrix.module }}-
+      - name: Check shared import boundary
+        if: matrix.module == 'shared'
+        run: ../tools/check-shared-imports.sh
       - run: go vet ./...
       - name: go test -race
         run: |
@@ -163,3 +166,27 @@ jobs:
           bun-version-file: console/package.json
       - run: bun install --frozen-lockfile
       - run: bun run check
+
+  sdk-macos:
+    name: SDK macOS
+    timeout-minutes: 15
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.go).*.module, 'sdk/go')
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    env:
+      RUN: ${{ inputs.run }}
+      COUNT: ${{ inputs.count || '1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache: false
+      - run: go vet ./...
+      - name: go test -race
+        run: |
+          run=(); [ -z "$RUN" ] || run=(-run "$RUN")
+          go test -race -count="$COUNT" -timeout 10m "${run[@]}" ./...
