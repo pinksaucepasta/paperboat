@@ -852,6 +852,7 @@ type FileTransferDescriptor struct {
 // summed). Only a sender that declares it gets the mode checks and claims (PLAN 3b step 1); an
 // undeclared send keeps today's credential exactly.
 type TransferIntent struct {
+	Direction     string
 	Mode          string
 	DeclaredBytes int64
 }

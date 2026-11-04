@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
@@ -21,7 +22,7 @@ import (
 )
 
 func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMachineID, destinationMachineID, cliClientSessionID, sessionID, requestID, manifestDigest string, intent TransferIntent) (FileTransferDescriptor, error) {
-	if sourceMachineID == "" || destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
+	if destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
 	// Every supported pb declares its mode and batch total (PLAN 3b step 3); an undeclared send is
@@ -32,10 +33,12 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if err := s.checkTransferIntent(intent); err != nil {
 		return FileTransferDescriptor{}, err
 	}
-	if allowed, err := s.sourceMachineAllowed(ctx, userID, sourceMachineID); err != nil {
+	if err := s.descriptorSourceAllowed(ctx, userID, sourceMachineID, cliClientSessionID, destinationMachineID, "files"); err != nil {
 		return FileTransferDescriptor{}, err
-	} else if !allowed {
-		return FileTransferDescriptor{}, ErrNotFound
+	}
+	_, tokenSource := auth.APITokenFromContext(ctx)
+	if tokenSource && (sessionID != "" || intent.Direction != "" && intent.Direction != "send") {
+		return FileTransferDescriptor{}, ErrInvalidTransferIntent
 	}
 	if sessionID != "" {
 		owned, err := s.db.Queries().UserOwnsTerminalSession(ctx, dbsqlc.UserOwnsTerminalSessionParams{SessionID: sessionID, UserID: userID})
@@ -107,6 +110,9 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	jti := newID("token")
 	accessSessionID := newID("session")
 	operationID := sessionID
+	if tokenSource {
+		operationID = newID("operation")
+	}
 	if requestID != "" {
 		operationID = requestID
 	}
@@ -116,7 +122,13 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		EnvironmentID: routeMachine.EnvironmentID, MachineID: routeMachine.ID, SourceMachineID: sourceMachineID,
 		UserID: userID, CLIClientSessionID: cliClientSessionID, SessionID: sessionID, OperationID: operationID, AssignmentID: accessSessionID,
 	}
-	signed, err := s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
+	signed := intent
+	if !tokenSource {
+		signed, err = s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
+	} else {
+		credentialInput.TransferDirection = "send"
+	}
+
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}
@@ -124,7 +136,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest
 	}
-	token, err := admission.Sign(s.controlSigner, credentialInput)
+	token, err := s.signProcessCredential(ctx, credentialInput)
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}

@@ -63,7 +63,7 @@ func (s *Service) signProcessCredential(ctx context.Context, input mint.Credenti
 			return "", ErrTerminalSessionNotFound
 		}
 		return s.signTerminalCredential(ctx, input, selected, s.validateWorkspace(ctx))
-	case "exec_operation", "ssh_operation":
+	case "exec_operation", "ssh_operation", "file_transfer":
 		scope, selected := workspace.FromContext(ctx)
 		if selected {
 			if err := workspace.Validate(ctx, s.db, input.UserID, scope); err != nil {

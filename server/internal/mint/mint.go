@@ -294,6 +294,7 @@ type CredentialInput struct {
 	HelperID               string
 	MachineID              string
 	SourceMachineID        string
+	TransferDirection      string
 	UserID                 string
 	ActorID                string
 	CLIClientSessionID     string
@@ -399,6 +400,7 @@ type CredentialClaims struct {
 	HelperID               string              `json:"helper_id,omitempty"`
 	MachineID              string              `json:"machine_id,omitempty"`
 	SourceMachineID        string              `json:"source_machine_id,omitempty"`
+	TransferDirection      string              `json:"transfer_direction,omitempty"`
 	UserID                 string              `json:"user_id,omitempty"`
 	ActorID                string              `json:"actor_id,omitempty"`
 	CLIClientSessionID     string              `json:"cli_client_session_id,omitempty"`
@@ -748,7 +750,7 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		return "", errors.New("credential claims are invalid")
 	}
 	claims := map[string]any{"iss": input.Issuer, "aud": input.Audience, "sub": input.Subject, "jti": input.JTI, "iat": issuedAt.Unix(), "exp": expiresAt.Unix(), "scope": input.Scopes, "credential_class": input.CredentialClass, "environment_id": input.EnvironmentID}
-	if processCredentialClass(input.CredentialClass) || input.CredentialClass == "native_private" {
+	if processCredentialClass(input.CredentialClass) || input.CredentialClass == "native_private" || input.CredentialClass == "file_transfer" && input.SourceMachineID == "" {
 		if !validProcessContext(input.CredentialClass, input.Scopes, input.WorkspaceID, input.ActorAccountID, input.UserID) {
 			return "", errors.New("verified process workspace and actor are required")
 		}
@@ -904,8 +906,15 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		if input.RequestID != "" {
 			claims["request_id"], claims["idempotency_key"], claims["request_hash"] = input.RequestID, input.IdempotencyKey, input.RequestHash
 		}
-		if input.MachineID == "" || input.SourceMachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" {
+		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !validFileSource(input.SourceMachineID, input.TransferDirection, input.TransferMode, input.OperationID, input.MaxBytes) {
 			return "", errors.New("machine transfer bindings are required")
+		}
+		if input.TransferDirection != "" {
+			if input.TransferDirection != "send" {
+				return "", errors.New("file transfer direction is invalid")
+			}
+			claims["transfer_direction"] = input.TransferDirection
+			claims["operation_id"] = input.OperationID
 		}
 		// No mode is today's credential (an undeclared send, or a destination that predates modes).
 		if input.TransferMode != "" || input.MaxBytes != 0 {
@@ -1004,7 +1013,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 	case time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > policy.maxTTL:
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialTTLInvalid}
 	}
-	if (processCredentialClass(expectedClass) || expectedClass == "native_private") && !validProcessContext(expectedClass, claims.Scopes, claims.WorkspaceID, claims.ActorAccountID, claims.UserID) {
+	if (processCredentialClass(expectedClass) || expectedClass == "native_private" || expectedClass == "file_transfer" && claims.SourceMachineID == "") && !validProcessContext(expectedClass, claims.Scopes, claims.WorkspaceID, claims.ActorAccountID, claims.UserID) {
 		return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 	}
 	switch expectedClass {
@@ -1077,7 +1086,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		if !validFileTransferApproval(claims.RequestID, claims.IdempotencyKey, claims.RequestHash) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
-		if claims.MachineID == "" || claims.SourceMachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" {
+		if claims.MachineID == "" || claims.UserID == "" || claims.CLIClientSessionID == "" || !validFileSource(claims.SourceMachineID, claims.TransferDirection, claims.TransferMode, claims.OperationID, claims.MaxBytes) {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 		if (claims.TransferMode != "" || claims.MaxBytes != 0) && !validTransferMode(claims.TransferMode, claims.MaxBytes) {
@@ -1535,4 +1544,12 @@ func validProcessContext(class string, scopes []string, workspaceID, actorAccoun
 		return class == "browser_terminal_operation" && len(scopes) == 1 && (scopes[0] == "terminal:view" || scopes[0] == "terminal:control")
 	}
 	return actorAccountID == userID
+}
+
+// Session-sourced file credentials are send-only and bind an explicit operation and byte policy.
+func validFileSource(machine, direction, mode, operation string, maxBytes int64) bool {
+	if direction != "" && direction != "send" {
+		return false
+	}
+	return machine != "" || direction == "send" && validOperationID(operation) && validTransferMode(mode, maxBytes)
 }

@@ -785,18 +785,24 @@ func userMachineFileTransferDescriptor(service *usermachines.Service) http.Handl
 			return
 		}
 		var body struct {
-			SourceMachineID string `json:"source_machine_id"`
-			SessionID       string `json:"session_id"`
-			RequestID       string `json:"request_id"`
-			ManifestDigest  string `json:"manifest_digest"`
-			TransferMode    string `json:"transfer_mode"`
-			DeclaredBytes   int64  `json:"declared_bytes"`
+			SourceMachineID   string `json:"source_machine_id"`
+			SessionID         string `json:"session_id"`
+			RequestID         string `json:"request_id"`
+			ManifestDigest    string `json:"manifest_digest"`
+			TransferMode      string `json:"transfer_mode"`
+			TransferDirection string `json:"transfer_direction"`
+			DeclaredBytes     int64  `json:"declared_bytes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
 		}
-		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest, usermachines.TransferIntent{Mode: body.TransferMode, DeclaredBytes: body.DeclaredBytes})
+		response, err := service.FileTransferDescriptorForRequest(r.Context(), p.User.ID, body.SourceMachineID, r.PathValue("machine_id"), p.Client.SessionID, body.SessionID, body.RequestID, body.ManifestDigest, usermachines.TransferIntent{Direction: body.TransferDirection, Mode: body.TransferMode, DeclaredBytes: body.DeclaredBytes})
+		if errors.Is(err, auth.ErrOutsideTokenScope) {
+			writeError(w, r, http.StatusForbidden, "token_scope_denied", "The API token does not allow this session, workspace or file transfer.")
+			return
+		}
+
 		var tooLarge *usermachines.TransferTooLargeError
 		if errors.As(err, &tooLarge) {
 			writeErrorDetails(w, r, http.StatusConflict, "transfer_too_large", fmt.Sprintf("This transfer is %d bytes. Automatic sends up to %d bytes. Use --unlimited to send directly or through your own relay.", tooLarge.TotalBytes, tooLarge.MaxBytes), map[string]any{"total_bytes": tooLarge.TotalBytes, "max_bytes": tooLarge.MaxBytes})
