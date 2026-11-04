@@ -273,8 +273,9 @@ func (q *Queries) CreateManagedSSHOperation(ctx context.Context, arg CreateManag
 const deleteRetiredMachineSSHHostKeyOwner = `-- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
 DELETE FROM machine_ssh_host_key_owners o
 USING user_machines m
-WHERE o.fingerprint = $1 AND m.id = o.user_machine_id AND m.user_id = $2
-  AND (m.state IN ('revoked', 'disconnected', 'deleted') OR (m.state = 'offline' AND NOT m.online))
+WHERE o.fingerprint = $1 AND m.id = o.user_machine_id
+  AND (m.state IN ('revoked', 'deleted')
+    OR (m.user_id = $2 AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))))
 `
 
 type DeleteRetiredMachineSSHHostKeyOwnerParams struct {
@@ -293,8 +294,9 @@ func (q *Queries) DeleteRetiredMachineSSHHostKeyOwner(ctx context.Context, arg D
 const deleteRetiredMachineSSHHostKeys = `-- name: DeleteRetiredMachineSSHHostKeys :exec
 DELETE FROM machine_ssh_host_keys k
 USING user_machines m
-WHERE k.fingerprint = $1 AND m.id = k.user_machine_id AND m.user_id = $2
-  AND (m.state IN ('revoked', 'disconnected', 'deleted') OR (m.state = 'offline' AND NOT m.online))
+WHERE k.fingerprint = $1 AND m.id = k.user_machine_id
+  AND (m.state IN ('revoked', 'deleted')
+    OR (m.user_id = $2 AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))))
 `
 
 type DeleteRetiredMachineSSHHostKeysParams struct {

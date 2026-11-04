@@ -24,6 +24,12 @@ func TestSQLRepositoryHostKeysMoveFromAnOfflineRecordOfTheSameAccount(t *testing
 	hostKeysMoveToTheReplacement(t, "offline")
 }
 
+// The computer paired into another account: its own revoked record in the old account must not keep
+// managed SSH degraded ("host keys identical to another machine's") in the new one.
+func TestSQLRepositoryHostKeysMoveToAnotherAccountFromARevokedRecord(t *testing.T) {
+	hostKeysMoveToTheReplacement(t, "revoked")
+}
+
 func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -86,6 +92,12 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
+	}
+	if retiredState == "revoked" {
+		if err := observe("operation_reenroll_foreign", other, otherID, hostKey); err != nil {
+			t.Fatalf("another account could not record the host key of a revoked record: %v", err)
+		}
+		return
 	}
 	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); !errors.As(err, &inUse) || inUse.MachineName != "" {
 		t.Fatalf("another account took a retired record's host key, or its owner was named to it: %v", err)

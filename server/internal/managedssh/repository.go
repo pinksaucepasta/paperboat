@@ -787,8 +787,9 @@ func nullTime(value sql.NullTime) time.Time {
 	return value.Time
 }
 
-// releaseRetiredHostKeyOwner removes the claim a revoked, disconnected or deleted machine of the
-// same account holds on a host key, so the machine that now has that key can record it.
+// releaseRetiredHostKeyOwner removes the claim a retired record holds on a host key, so the machine that
+// now has that key can record it: a revoked or deleted record of any account (the computer was paired
+// into another account), a disconnected or unreachable offline record only of the same account.
 func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID string, fingerprint []byte) (bool, error) {
 	if err := q.DeleteRetiredMachineSSHHostKeys(ctx, dbsqlc.DeleteRetiredMachineSSHHostKeysParams{Fingerprint: fingerprint, UserID: userID}); err != nil {
 		return false, err
