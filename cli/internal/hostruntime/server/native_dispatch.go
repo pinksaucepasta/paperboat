@@ -35,18 +35,19 @@ type NativeDispatchConfig struct {
 	Token             string
 	MaximumConcurrent int
 	HandshakeTimeout  time.Duration
-	Fence             func(context.Context, string, uint64) (func(), <-chan struct{}, error)
-	Authorize         func(context.Context, streamauth.Header) (string, error)
-	ServeStream       func(context.Context, streamauth.Header, net.Conn) error
-	Current           NativePrivateTCPCurrent
-	DialPrivate       func(context.Context, nativeprivate.Binding) (net.Conn, error)
-	SSHTarget         func(context.Context) (managedssh.HostTarget, error)
+	// Fence admits one dispatch under the accepting worker's own hostd lease.
+	// During a handover both generations accept on the shared listener; each
+	// admits only while its own hostd keeps it active.
+	Fence       func(context.Context) (func(), <-chan struct{}, error)
+	Authorize   func(context.Context, streamauth.Header) (string, error)
+	ServeStream func(context.Context, streamauth.Header, net.Conn) error
+	Current     NativePrivateTCPCurrent
+	DialPrivate func(context.Context, nativeprivate.Binding) (net.Conn, error)
+	SSHTarget   func(context.Context) (managedssh.HostTarget, error)
 }
 type nativeDispatchEnvelope struct {
-	WorkerID string                 `json:"worker_id"`
-	Epoch    uint64                 `json:"epoch"`
-	Header   json.RawMessage        `json:"header,omitempty"`
-	Binding  *nativeprivate.Binding `json:"binding,omitempty"`
+	Header  json.RawMessage        `json:"header,omitempty"`
+	Binding *nativeprivate.Binding `json:"binding,omitempty"`
 }
 type nativeDispatchResponse struct {
 	AccessSessionID string                 `json:"access_session_id,omitempty"`
@@ -137,12 +138,12 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		decoder.DisallowUnknownFields()
 		var envelope nativeDispatchEnvelope
 		var extra any
-		if decoder.Decode(&envelope) != nil || decoder.Decode(&extra) != io.EOF || envelope.WorkerID == "" || len(envelope.WorkerID) > 128 || envelope.Epoch == 0 {
+		if decoder.Decode(&envelope) != nil || decoder.Decode(&extra) != io.EOF {
 			http.Error(w, "invalid dispatch identity", http.StatusBadRequest)
 			return
 		}
 		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
-		release, lost, err := config.Fence(r.Context(), envelope.WorkerID, envelope.Epoch)
+		release, lost, err := config.Fence(r.Context())
 		if err != nil || release == nil {
 			recordNativeAdmissionFailure("worker_fence", err)
 			http.Error(w, "dispatch worker fenced", http.StatusConflict)
@@ -227,10 +228,8 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				defer cancel()
 				if header.Consumer == "file_transfer" {
 					// The authenticated association can remain idle. Each HTTP
-					// exchange must independently admit this exact worker epoch.
-					lifetime = context.WithValue(lifetime, nativeHTTPAdmissionKey{}, nativeHTTPAdmission(func(ctx context.Context) (func(), <-chan struct{}, error) {
-						return config.Fence(ctx, envelope.WorkerID, envelope.Epoch)
-					}))
+					// exchange must independently admit under this worker's lease.
+					lifetime = context.WithValue(lifetime, nativeHTTPAdmissionKey{}, nativeHTTPAdmission(config.Fence))
 				}
 				stop := context.AfterFunc(lifetime, func() { _ = connection.Close() })
 				defer stop()

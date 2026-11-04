@@ -16,7 +16,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -72,11 +71,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 		return err
 	}
 	defer clear(hostdToken)
-	control, err := hostdproto.NewClient(config.HostdEndpoint, hostdToken, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	dispatch, err := server.NewNativeDispatchClient(server.NativeDispatchClientConfig{Address: config.WorkerAddress, Token: base64.RawURLEncoding.EncodeToString(capability), Active: control.Active, DialTimeout: 5 * time.Second})
+	dispatch, err := server.NewNativeDispatchClient(server.NativeDispatchClientConfig{Address: config.WorkerAddress, Token: base64.RawURLEncoding.EncodeToString(capability), DialTimeout: 5 * time.Second})
 	if err != nil {
 		return err
 	}

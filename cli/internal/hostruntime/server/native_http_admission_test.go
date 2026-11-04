@@ -128,12 +128,7 @@ func TestFileTransferAdmissionEndsAtResponseAndFencesIdleAssociation(t *testing.
 		_, _ = io.WriteString(w, "ok")
 	})
 	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
-		Fence: func(c context.Context, id string, epoch uint64) (func(), <-chan struct{}, error) {
-			if id != active.WorkerID || epoch != active.Epoch {
-				return nil, nil, hostdproto.ErrFenced
-			}
-			return bridge.AcquireAdmission(c)
-		},
+		Fence: bridge.AcquireAdmission,
 		Authorize: func(_ context.Context, h streamauth.Header) (string, error) {
 			if h.Credential != "allowed" {
 				return "", ErrStreamAuthorization
@@ -152,7 +147,7 @@ func TestFileTransferAdmissionEndsAtResponseAndFencesIdleAssociation(t *testing.
 	defer handler.Close(ctx)
 	worker := httptest.NewServer(handler)
 	defer worker.Close()
-	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) { return active, nil }})
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

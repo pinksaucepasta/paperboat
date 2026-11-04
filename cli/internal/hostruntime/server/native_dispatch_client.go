@@ -25,7 +25,6 @@ import (
 
 type NativeDispatchClientConfig struct {
 	Address, Token string
-	Active         func(context.Context) (hostdproto.Status, error)
 	DialTimeout    time.Duration
 }
 type NativeDispatchClient struct{ config NativeDispatchClientConfig }
@@ -33,7 +32,7 @@ type NativeDispatchClient struct{ config NativeDispatchClientConfig }
 func NewNativeDispatchClient(config NativeDispatchClientConfig) (*NativeDispatchClient, error) {
 	host, _, err := net.SplitHostPort(config.Address)
 	ip := net.ParseIP(host)
-	if err != nil || ip == nil || !ip.IsLoopback() || len(config.Token) < 32 || len(config.Token) > 128 || config.Active == nil || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
+	if err != nil || ip == nil || !ip.IsLoopback() || len(config.Token) < 32 || len(config.Token) > 128 || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
 		return nil, ErrStreamAuthorization
 	}
 	return &NativeDispatchClient{config: config}, nil
@@ -165,14 +164,8 @@ func (c *NativeDispatchClient) callOnce(
 	}
 	setupCtx, cancel := context.WithDeadline(ctx, attemptDeadline)
 	defer cancel()
-	active, err := c.config.Active(setupCtx)
-	if err != nil {
-		return nil, result, err
-	}
-	if active.State != hostdproto.StateActive || active.WorkerID == "" || active.Epoch == 0 {
-		return nil, result, hostdproto.ErrFenced
-	}
-	envelope := nativeDispatchEnvelope{WorkerID: active.WorkerID, Epoch: active.Epoch, Binding: binding}
+	envelope := nativeDispatchEnvelope{Binding: binding}
+	var err error
 	if header != nil {
 		envelope.Header, err = header.MarshalBinary()
 		if err != nil {

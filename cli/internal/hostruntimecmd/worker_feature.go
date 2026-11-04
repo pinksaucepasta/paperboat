@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -54,7 +53,7 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 	if err != nil {
 		return nil, err
 	}
-	dispatch, err := featureNativeDispatch(ctx, bridge, worker, epoch)
+	dispatch, err := featureNativeDispatch(ctx, bridge)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +108,7 @@ func reconcileFeatureCarrierSSH(ctx context.Context, worker string, epoch uint64
 	return bound.DisableSSH(ctx)
 }
 
-func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client, worker string, epoch uint64) (*server.NativeDispatchConfig, error) {
+func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client) (*server.NativeDispatchConfig, error) {
 	instance, err := featureCarrierInstance()
 	if err != nil {
 		return nil, err
@@ -136,10 +135,7 @@ func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client, w
 		return nil, err
 	}
 	defer clear(capability)
-	return &server.NativeDispatchConfig{Token: base64.RawURLEncoding.EncodeToString(capability), HandshakeTimeout: 15 * time.Second, Fence: func(ctx context.Context, requestedWorker string, requestedEpoch uint64) (func(), <-chan struct{}, error) {
-		if requestedWorker != worker || requestedEpoch != epoch {
-			return nil, nil, hostdproto.ErrFenced
-		}
-		return bridge.AcquireAdmission(ctx)
-	}}, nil
+	// The bridge is bound to this worker's epoch at its own hostd, so a worker
+	// that hostd fenced refuses whatever the carrier last saw as active.
+	return &server.NativeDispatchConfig{Token: base64.RawURLEncoding.EncodeToString(capability), HandshakeTimeout: 15 * time.Second, Fence: bridge.AcquireAdmission}, nil
 }

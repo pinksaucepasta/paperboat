@@ -46,9 +46,10 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	var opened atomic.Int32
 	lost := make(chan struct{})
 	released := make(chan struct{}, 4)
+	var fenced atomic.Bool
 	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
-		Fence: func(_ context.Context, worker string, epoch uint64) (func(), <-chan struct{}, error) {
-			if worker != "worker" || epoch != 7 {
+		Fence: func(context.Context) (func(), <-chan struct{}, error) {
+			if fenced.Load() {
 				return nil, nil, hostdproto.ErrFenced
 			}
 			return func() { released <- struct{}{} }, lost, nil
@@ -75,9 +76,7 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	defer handler.Close(ctx)
 	worker := httptest.NewServer(handler)
 	defer worker.Close()
-	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) {
-		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "worker", Epoch: 7}, nil
-	}})
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,16 +128,11 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	if opened.Load() != 1 {
 		t.Fatalf("handler calls=%d", opened.Load())
 	}
-	// Isolate the stale epoch from the expired-credential check above.
+	// Isolate the fenced worker from the expired-credential check above.
 	allowed.DeadlineUnix = time.Now().Add(2 * time.Second).Unix()
-	stale, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) {
-		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "old", Epoch: 6}, nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	fenced.Store(true)
 	staleCtx, stopStale := context.WithTimeout(ctx, 300*time.Millisecond)
-	staleConnection, staleErr := stale.Open(staleCtx, allowed)
+	staleConnection, staleErr := client.Open(staleCtx, allowed)
 	stopStale()
 	if staleConnection != nil {
 		staleConnection.Close()
@@ -146,7 +140,7 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	if !errors.Is(staleErr, hostdproto.ErrFenced) {
 		t.Fatalf("stale=%v", staleErr)
 	}
-	wrong, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("b", 43), DialTimeout: time.Second, Active: client.config.Active})
+	wrong, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("b", 43), DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +155,7 @@ func TestNativeDispatchClosesStreamWhenNativeAdmissionIsLost(t *testing.T) {
 	lost := make(chan struct{})
 	stopped := make(chan struct{})
 	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 1, HandshakeTimeout: time.Second,
-		Fence: func(context.Context, string, uint64) (func(), <-chan struct{}, error) { return func() {}, lost, nil }, Authorize: func(context.Context, streamauth.Header) (string, error) { return "access", nil },
+		Fence: func(context.Context) (func(), <-chan struct{}, error) { return func() {}, lost, nil }, Authorize: func(context.Context, streamauth.Header) (string, error) { return "access", nil },
 		ServeStream: func(ctx context.Context, _ streamauth.Header, _ net.Conn) error {
 			<-ctx.Done()
 			close(stopped)
@@ -174,9 +168,7 @@ func TestNativeDispatchClosesStreamWhenNativeAdmissionIsLost(t *testing.T) {
 	defer handler.Close(ctx)
 	worker := httptest.NewServer(handler)
 	defer worker.Close()
-	client, _ := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) {
-		return hostdproto.Status{State: hostdproto.StateActive, WorkerID: "worker", Epoch: 1}, nil
-	}})
+	client, _ := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
 	header, _ := streamauth.New("operation", "config_compare", "stream", "allowed", time.Now().Add(time.Minute), 1<<20)
 	conn, err := client.Open(ctx, header)
 	if err != nil {
@@ -214,8 +206,8 @@ func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
 	var opened atomic.Int32
 	lost := make(chan struct{})
 	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
-		Fence: func(_ context.Context, worker string, epoch uint64) (func(), <-chan struct{}, error) {
-			release, err := controller.AcquireActive(worker, epoch)
+		Fence: func(context.Context) (func(), <-chan struct{}, error) {
+			release, err := controller.AcquireActive(welcome.WorkerID, welcome.Epoch)
 			return release, lost, err
 		},
 		Authorize: func(_ context.Context, h streamauth.Header) (string, error) {
@@ -236,7 +228,7 @@ func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
 	defer handler.Close(ctx)
 	worker := httptest.NewServer(handler)
 	defer worker.Close()
-	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second, Active: func(context.Context) (hostdproto.Status, error) { return controller.Status(), nil }})
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
