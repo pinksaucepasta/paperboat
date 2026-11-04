@@ -1015,6 +1015,8 @@ elif sys.argv[2]=="config-survival":
  assert all(r[k] for k in ("config_set_survives_update", "customization_survives_update", "reset_restores"))
 elif sys.argv[2]=="approve-refusals":
  assert r["refusals"] == ["machine_not_found", "approval_not_pending"]
+elif sys.argv[2]=="update-observation":
+ assert r["observation"]["state"] in ("healthy", "idle") and r["observation"]["error_code"] is None
 elif sys.argv[2]=="tunnel-manage":
  assert all(r[k] for k in ("create_show_list_delete", "route_add_update_remove", "rename"))
 elif sys.argv[2]=="tunnel-public-protocols":
