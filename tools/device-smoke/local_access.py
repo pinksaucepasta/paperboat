@@ -10,6 +10,7 @@ user reaches it. Prints one PASS/FAIL line per check id and exits non-zero on an
 --controller local runs the controller's commands on this machine (the final re-check runs it inside container A).
 """
 import argparse
+import os
 import base64
 import json
 import shlex
@@ -187,14 +188,31 @@ CHECKS = [
 BLOCK = 'OUTPUT ! -o lo -p udp ! --dport 53 -j REJECT'
 
 
+PF_ANCHOR = 'com.apple/pblocalaccess'  # evaluated by the stock macOS pf.conf (anchor "com.apple/*")
+
+
+def sudo(command):
+    # Linux controllers have passwordless sudo; a Mac controller gets its password from SUDO_PW_FILE (a path on it).
+    pw = os.environ.get('SUDO_PW_FILE')
+    return ("sudo -S -p '' sh -c %s < %s" % (shlex.quote(command), shlex.quote(pw))) if pw else 'sudo -n sh -c ' + shlex.quote(command)
+
+
 def block_udp(controller):
     # A timer removes the rules even if this runner dies; the finally path removes them first.
-    script = ('for t in iptables ip6tables; do sudo -n $t -I %s; done; '
-              '(sleep 420; for t in iptables ip6tables; do sudo -n $t -D %s; done) >/dev/null 2>&1 &' % (BLOCK, BLOCK))
+    if is_mac(controller):
+        rule = 'block drop out quick proto udp from any to any port != 53'
+        script = sudo('printf "%s\\n" | pfctl -a %s -f - 2>/dev/null; pfctl -E >/dev/null 2>&1; pfctl -F states >/dev/null 2>&1; '
+                      '(sleep 420; pfctl -a %s -F all) >/dev/null 2>&1 &' % (rule, PF_ANCHOR, PF_ANCHOR))
+    else:
+        script = ('for t in iptables ip6tables; do sudo -n $t -I %s; done; '
+                  '(sleep 420; for t in iptables ip6tables; do sudo -n $t -D %s; done) >/dev/null 2>&1 &' % (BLOCK, BLOCK))
     assert ssh(controller, script).returncode == 0, 'could not block UDP on the controller'
 
 
 def unblock_udp(controller):
+    if is_mac(controller):
+        ssh(controller, sudo('pfctl -a %s -F all >/dev/null 2>&1; true' % PF_ANCHOR))
+        return
     ssh(controller, 'for t in iptables ip6tables; do sudo -n $t -D %s 2>/dev/null; done; true' % BLOCK)
 
 
@@ -217,10 +235,6 @@ def main():
                 continue
             started = time.time()
             port = origin.ports[kind]
-            if name == 'path-relay' and is_mac(args.controller):
-                # shortcut: the UDP block is iptables; block from a Linux controller (apple as --target) instead.
-                print(f'SKIP local-access:{name}:{args.controller}->{args.target}  needs a Linux controller to block UDP', flush=True)
-                continue
             if name == 'path-relay':
                 block_udp(args.controller)
             command = ['python3', '-I', '-c', PROBE, name, machine['assigned_ip'], str(port), machine['alias'], machine['id'], origin.marker]
