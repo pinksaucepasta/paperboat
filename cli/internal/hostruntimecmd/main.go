@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/causetext"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"io"
 	"os"
 
@@ -176,6 +177,8 @@ func runtimeFailureMessage(err error) string {
 		return "The enrollment token was revoked or invalid. Create a new enrollment with Add machine and retry."
 	case errors.Is(err, bootstrap.ErrPairingPlatformUnsupported):
 		return "This enrollment command does not support this operating system. Create a new enrollment with Add machine and choose its command for this operating system."
+	case errors.Is(err, config.ErrCredentialStoreUnavailable):
+		return "Paperboat could not use this account's credential store. On macOS over SSH the login keychain is locked: run `security unlock-keychain` first, or run this in the Mac's own Terminal, then retry."
 	case errors.Is(err, bootstrap.ErrPairingExpired):
 		return "The machine pairing expired. Create a new enrollment with Add machine and retry."
 	case errors.Is(err, bootstrap.ErrInstallationUnavailable):

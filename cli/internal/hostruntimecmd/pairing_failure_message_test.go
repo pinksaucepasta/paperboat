@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
@@ -61,5 +62,12 @@ func TestPairEnvironmentStageFailureNamesENVWithoutPrivateCause(t *testing.T) {
 	message := runtimeFailureMessage(err)
 	if !strings.Contains(message, "managed environment variables") || strings.Contains(message, "internal installation step") || strings.Contains(message, "private ENV") {
 		t.Fatalf("ENV failure=%q", message)
+	}
+}
+
+func TestRuntimeFailureMessageNamesLockedCredentialStore(t *testing.T) {
+	err := fmt.Errorf("initialize Paperboat CLI session: %w", errors.Join(config.ErrCredentialStoreUnavailable, errors.New("exit status 36")))
+	if got := runtimeFailureMessage(err); !strings.Contains(got, "security unlock-keychain") {
+		t.Fatalf("message = %q", got)
 	}
 }
