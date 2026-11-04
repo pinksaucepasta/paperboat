@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/clientapi"
 	"regexp"
 	"time"
 )
@@ -23,7 +24,7 @@ const (
 	// The v1 resource projections are deliberately bounded. Keep enough room
 	// for a full page and nested safe metadata while refusing accidental or
 	// hostile multi-megabyte responses.
-	maxTunnelResponseBytes = 2 << 20
+	maxTunnelResponseBytes = clientapi.MaxResponseBytes
 	maxTunnelRequestBytes  = 1 << 20
 )
 
