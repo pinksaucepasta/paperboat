@@ -1,5 +1,5 @@
-// Package clientdiscovery resolves exact authorized inventory identities.
-package clientdiscovery
+// Package discovery resolves exact authorized inventory identities.
+package discovery
 
 import (
 	"context"
