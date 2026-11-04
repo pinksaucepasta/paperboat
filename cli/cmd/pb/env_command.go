@@ -279,6 +279,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	addVaultScopeCommands(root)
 	addPasswordVaultCommands(root)
 	addEnvironmentHookCommand(root)
+	addEnvironmentRunCommands(root)
 	return root
 }
 

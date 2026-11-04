@@ -97,8 +97,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env host](pb_env_host.md) | Inspect automatic workspace ENV delivery |
 | [pb env host show](pb_env_host_show.md) | Show published ENV delivery and observed application on a host |
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |
+| [pb env load](pb_env_load.md) | Load your workspace ENV into the current shell |
 | [pb env rotate](pb_env_rotate.md) | Rotate personal ENV scope keys while preserving values |
 | [pb env rotate cancel](pb_env_rotate_cancel.md) | Cancel an uncommitted personal ENV key rotation |
+| [pb env run](pb_env_run.md) | Run a command with your workspace ENV in its environment |
 | [pb env set](pb_env_set.md) | Set one environment variable through a hidden prompt or bounded stdin |
 | [pb env team](pb_env_team.md) | Manage encrypted ENV team scopes |
 | [pb env team create](pb_env_team_create.md) | Create an encrypted ENV team scope |

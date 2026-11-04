@@ -38,7 +38,7 @@ func addEnvironmentHookCommand(root *cobra.Command) {
 		Use:   "hook [bash|zsh|fish]",
 		Short: "Load ENV in plain ssh and VS Code shells through a shell startup hook",
 		Long: "Without flags, print the hook line for a shell. --install adds that line to the shell's startup file " +
-			"(~/.bashrc, ~/.zshenv or ~/.config/fish/config.fish) for the account logged in here and the active workspace; " +
+			"(~/.bashrc, ~/.zshenv or ~/.config/fish/config.fish) for the account logged in here and the active workspace, and defines a pb shell function so `pb env load` loads ENV into the current shell; " +
 			"--uninstall removes it. VS Code Remote-SSH: after installing, run \"Remote-SSH: Kill VS Code Server on Host\" and reconnect.",
 		Args: commandArgs(cobra.MaximumNArgs(1)),
 		RunE: runEnvironmentHook,
@@ -107,13 +107,19 @@ func envHookShell(args []string) (string, error) {
 
 // envHookLine is the whole hook. It runs pb by absolute path because
 // non-interactive ssh shells often lack pb on PATH, and does nothing when pb
-// is gone.
+// is gone. It also defines a pb function (the nvm/conda way) that handles
+// only `pb env load`, loading into the current shell, and passes every other
+// call to the real pb unchanged.
 func envHookLine(shell, pb string) string {
 	quoted := shellSingleQuote(pb)
 	if shell == "fish" {
-		return fmt.Sprintf("test -x %s; and %s env hook --emit fish 2>/dev/null | source %s", quoted, quoted, envHookMarker)
+		return fmt.Sprintf("test -x %s; and %s env hook --emit fish 2>/dev/null | source; "+
+			"function pb; if test (count $argv) -eq 2; and test \"$argv[1]\" = env; and test \"$argv[2]\" = load; "+
+			"command pb env hook --emit fish | source; else; command pb $argv; end; end %s", quoted, quoted, envHookMarker)
 	}
-	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s 2>/dev/null)\" %s", quoted, quoted, shell, envHookMarker)
+	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s 2>/dev/null)\"; "+
+		"pb() { if [ $# -eq 2 ] && [ \"$1\" = env ] && [ \"$2\" = load ]; then eval \"$(command pb env hook --emit %s)\"; "+
+		"else command pb \"$@\"; fi; } %s", quoted, quoted, shell, shell, envHookMarker)
 }
 
 // envHookExecutable prefers the stable pb on PATH over this process's

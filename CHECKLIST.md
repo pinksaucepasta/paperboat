@@ -645,6 +645,8 @@ that use them; say which in Evidence.
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
 | C243 | `pb env hook` | Print or install the shell hook that loads ENV in plain SSH shells | [x] | [ ] | [ ] | Rerun 2026-10-23 dev-a798537a, lanej-f16b: env_ssh_hook.py + env_vscode_remote.py PASS. Lane J 2026-10-23 dev-8d8670e2, pbvm3 container lanej-f16: print, --install (idempotent), --status, --uninstall and the hidden --emit exercised by tools/device-smoke/env_ssh_hook.py PASS and env_vscode_remote.py PASS (see F16-01..04). Windows after launch. |
+| C264 | `pb env load` | Load ENV into the current shell through the pb function `pb env hook` installs | [ ] | [ ] | [ ] | Unit 2026-11-04: TestEnvLoadFunctionLoadsIntoTheCurrentShellInEveryShell (real bash, zsh, fish: value visible in the same shell, other pb calls pass through), TestEnvHookUninstallRemovesThePbFunctionInEveryShell, TestEnvLoadWithoutTheHookExplainsSetupInOneLine. Waits for Lane A: device smoke with a real runtime (extend env_ssh_hook.py). |
+| C265 | `pb env run` | Run one command with the workspace ENV injected (scripts, CI) | [ ] | [ ] | [ ] | Unit 2026-11-04: TestEnvRunInjectsValuesAndPassesStdioThrough, TestEnvRunPassesExitCodesAndSignalsThrough, TestEnvRunDoesNotRunTheCommandWhenEnvCannotLoad. Waits for Lane A: device smoke with a real runtime. |
 
 ---
 

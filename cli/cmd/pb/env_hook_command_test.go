@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,14 +20,108 @@ import (
 )
 
 func TestEnvHookLineRunsPbByAbsolutePathForEachShell(t *testing.T) {
-	for shell, want := range map[string]string{
-		"bash": `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit bash 2>/dev/null)" # paperboat-env-hook`,
-		"zsh":  `[ -x '/opt/p b/pb' ] && eval "$('/opt/p b/pb' env hook --emit zsh 2>/dev/null)" # paperboat-env-hook`,
-		"fish": `test -x '/opt/p b/pb'; and '/opt/p b/pb' env hook --emit fish 2>/dev/null | source # paperboat-env-hook`,
-	} {
-		if got := envHookLine(shell, "/opt/p b/pb"); got != want {
-			t.Fatalf("%s line = %q, want %q", shell, got, want)
+	for _, shell := range envHookShells {
+		line := envHookLine(shell, "/opt/p b/pb")
+		start := fmt.Sprintf("env hook --emit %s 2>/dev/null", shell)
+		if !strings.Contains(line, "'/opt/p b/pb' ") && !strings.Contains(line, "$('/opt/p b/pb' ") || !strings.Contains(line, start) ||
+			!strings.HasSuffix(line, envHookMarker) || strings.Contains(line, "\n") {
+			t.Fatalf("%s line = %q", shell, line)
 		}
+	}
+}
+
+// hostileLoadValue is what the fake pb emits through the real quoting.
+const hostileLoadValue = "it's $HOME `x` \"q\" \\n\nsecond line"
+
+// fakeLoadPB is a pb whose `env hook --emit` prints the hostile value and a
+// counter that grows on every call; anything else prints "passthrough: args".
+func fakeLoadPB(t *testing.T) (dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1 $2 $3\" = 'env hook --emit' ]; then\n" +
+		"  n=$(cat \"$FAKE_COUNTER\" 2>/dev/null || echo 0); n=$((n+1)); echo $n > \"$FAKE_COUNTER\"\n" +
+		"  exec \"$FAKE_PRINTER\" \"$4\" \"$n\"\n" +
+		"fi\necho \"passthrough: $*\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "pb"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestEnvLoadFunctionLoadsIntoTheCurrentShellInEveryShell(t *testing.T) {
+	for _, shell := range envHookShells {
+		t.Run(shell, func(t *testing.T) {
+			path, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s not installed", shell)
+			}
+			dir := fakeLoadPB(t)
+			printer := filepath.Join(dir, "printer")
+			printerScript := "#!/bin/sh\nq=" + shellSingleQuote(hostileLoadValue) + "\n"
+			if shell == "fish" {
+				printerScript += "printf 'set -gx PB_LOADED %s\\n' \"$2\"\nprintf 'set -gx PB_HOSTILE %s\\n' " + shellSingleQuote(fishSingleQuote(hostileLoadValue)) + "\n"
+			} else {
+				printerScript += "printf 'export PB_LOADED=%s\\n' \"$2\"\nprintf 'export PB_HOSTILE=%s\\n' " + shellSingleQuote(shellSingleQuote(hostileLoadValue)) + "\n"
+			}
+			if err := os.WriteFile(printer, []byte(printerScript), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			echo := "printf '<%s>' \"$PB_LOADED\"; printf '[%s]' \"$PB_HOSTILE\"; "
+			if shell == "fish" {
+				echo = "printf '<%s>' $PB_LOADED; printf '[%s]' $PB_HOSTILE; "
+			}
+			script := envHookLine(shell, filepath.Join(dir, "pb")) + "\n" +
+				echo + "pb env load; " + echo + "pb status --x; pb env load extra; pb env"
+			command := exec.Command(path, "-c", script)
+			command.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FAKE_COUNTER="+filepath.Join(dir, "count"), "FAKE_PRINTER="+printer)
+			out, err := command.CombinedOutput()
+			want := "<1>[" + hostileLoadValue + "]<2>[" + hostileLoadValue + "]" +
+				"passthrough: status --x\npassthrough: env load extra\npassthrough: env\n"
+			if err != nil || string(out) != want {
+				t.Fatalf("%s: out = %q err = %v\nwant %q", shell, out, err, want)
+			}
+		})
+	}
+}
+
+func TestEnvHookUninstallRemovesThePbFunctionInEveryShell(t *testing.T) {
+	for _, shell := range envHookShells {
+		t.Run(shell, func(t *testing.T) {
+			path, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s not installed", shell)
+			}
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			dir := fakeLoadPB(t)
+			rc := envHookRCFile(home, shell)
+			if _, err := writeEnvHookLine(rc, envHookLine(shell, filepath.Join(dir, "pb")), shell == "bash"); err != nil {
+				t.Fatal(err)
+			}
+			probe := "type -t pb"
+			if shell == "zsh" {
+				probe = "whence -w pb"
+			}
+			check := func() string {
+				command := exec.Command(path, "-c", "source "+rc+"; "+probe)
+				command.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "HOME="+home, "FAKE_COUNTER="+filepath.Join(dir, "c"), "FAKE_PRINTER=/bin/true")
+				out, _ := command.CombinedOutput()
+				return strings.TrimSpace(string(out))
+			}
+			if got := check(); !strings.HasSuffix(got, "function") {
+				t.Fatalf("installed hook should define a pb function, probe = %q", got)
+			}
+			root := newRootCommand()
+			root.SetOut(&bytes.Buffer{})
+			root.SetArgs([]string{"env", "hook", "--uninstall"})
+			if err := root.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if got := check(); !strings.HasSuffix(got, "file") && !strings.HasSuffix(got, "command") {
+				t.Fatalf("after --uninstall pb must be the plain command again, probe = %q", got)
+			}
+		})
 	}
 }
 

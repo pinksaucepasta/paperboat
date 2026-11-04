@@ -1,0 +1,53 @@
+.nh
+.TH "PB-ENV-LOAD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-load - Load your workspace ENV into the current shell
+
+
+.SH SYNOPSIS
+\fBpb env load [flags]\fP
+
+
+.SH DESCRIPTION
+Load the ENV recorded by \fBpb env hook --install\fR into the current shell, like sourcing a file. This works only through the pb shell function the hook defines in new shells; without the hook this command only says how to set it up. Scripts and CI can use \fBpb env run -- <command>\fR instead.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for load
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb env hook --install   # once; then open a new shell
+  pb env load
+.EE
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP
