@@ -197,7 +197,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 
 			// Admission pauses existing terminal acknowledgements too. Keep it open
 			// through staging, then drain immediately before the native cutover.
-			if suppliedForce != nil && !coldCarrier {
+			// A new hostd generation takes the listeners over while the serving
+			// one finishes its accepted work, so nothing pauses for it.
+			if suppliedForce != nil && !coldCarrier && !hostdHandover(paths, request) {
 				timeout := 35 * time.Second
 				if intent == unixPreparedUpdate {
 					timeout = hooks.DrainTimeout + 5*time.Second
@@ -215,7 +217,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			}
 			return nil
 		}
-		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, carrierUpgrade.component(), prepareCutover); err != nil {
+		if err := stageAndStopUnixRuntimeRoles(ctx, request, paths, legacyHost, hostd, updater, prepareCutover); err != nil {
 			if intent == unixPreparedUpdate {
 				return err
 			}
@@ -233,7 +235,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := carrierUpgrade.activate(); err != nil {
 			return err
 		}
-		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux", carrierUpgrade.component()); err != nil {
+		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux"); err != nil {
 			return err
 		}
 
@@ -261,4 +263,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		return finalizePreparedUpdateLocked(ctx, request.UID)
 	}
 	return nil
+}
+
+// hostdHandover reports an update to another hostd generation: the candidate
+// imports the serving generation's listeners instead of replacing a stopped one.
+func hostdHandover(paths installPaths, request Request) bool {
+	installed, err := loadInstallMetadata(paths.metadata, request.UID)
+	return err == nil && installed.Source.SHA256[:32] != request.Source.SHA256[:32]
 }

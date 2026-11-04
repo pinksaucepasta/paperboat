@@ -22,6 +22,7 @@ import (
 
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 )
@@ -180,12 +181,17 @@ func collectDoctor(ctx context.Context, stateRoot string) doctorReport {
 
 // systemServiceScope checks the native services owned by the unified runtime.
 func systemServiceScope(ctx context.Context) (string, error) {
-	return systemServiceScopeWithRunner(ctx, runtime.GOOS, os.Getuid(), runSystemServiceCommand)
+	// hostd runs one unit per generation; the active carrier names the installed one.
+	generation, err := hostinstall.ActiveCarrierGeneration(ctx, "u"+strconv.Itoa(os.Getuid()))
+	if err != nil {
+		return "system", runtimeFailure("host service is inactive", err)
+	}
+	return systemServiceScopeWithRunner(ctx, runtime.GOOS, os.Getuid(), generation, runSystemServiceCommand)
 }
 
 type systemServiceCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int, run systemServiceCommandRunner) (string, error) {
+func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int, generation string, run systemServiceCommandRunner) (string, error) {
 	if ctx == nil || run == nil || uid < 0 {
 		return "system", errors.New("inactive")
 	}
@@ -194,13 +200,13 @@ func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int,
 	switch platform {
 	case "linux":
 		commands = append(commands,
-			[]string{"/usr/bin/systemctl", "is-active", "paperboat-hostd-" + instance + ".service"},
+			[]string{"/usr/bin/systemctl", "is-active", "paperboat-hostd-" + instance + "-" + generation + ".service"},
 			[]string{"/usr/bin/systemctl", "is-active", "paperboat-updated-" + instance + ".service"},
 		)
 		commands = append(commands, []string{"/usr/bin/systemctl", "is-active", "paperboat-runtime-privileged-" + instance + ".service"})
 	case "darwin":
 		commands = append(commands,
-			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd." + instance},
+			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd." + instance + "." + generation},
 			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.updated." + instance},
 		)
 

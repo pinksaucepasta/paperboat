@@ -25,7 +25,7 @@ func runNativeCarrier(ctx context.Context, config hostinstall.CarrierConfig) err
 		return err
 	}
 	if sid == config.OwnerSID {
-		return runCarrierProcess(ctx, config, func() error { return nil }, func() error { return nil }, 0)
+		return runCarrierProcess(ctx, config, func() error { return nil }, func() error { return nil }, 0, nil)
 	}
 	if sid != "S-1-5-18" {
 		return hostinstall.ErrInvalidRequest

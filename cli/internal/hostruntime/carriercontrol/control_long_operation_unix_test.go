@@ -16,7 +16,7 @@ import (
 
 // pbvm4 feat2: pb update failed with `Post "http://carrier/v1/carrier/control":
 // EOF` because the control server's 5 s write timeout cut off a legitimately
-// longer operation (SSH drain up to 35 s, terminal move up to 15 s).
+// longer operation (terminal move up to 15 s).
 func TestCarrierControlAnswersOperationsLongerThanFiveSeconds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("waits past the former write timeout")

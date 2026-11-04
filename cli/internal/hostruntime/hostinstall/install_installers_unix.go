@@ -34,21 +34,25 @@ func installersWithMaintenance(request Request, paths installPaths, allowMissing
 	if err != nil {
 		return nil, nil, err
 	}
-	hostdController, err := service.ComponentController(request.Platform, service.HostdKind, request.UID, service.ExecRunner{})
+	// Each source runs its own hostd unit, so an update starts the candidate while
+	// the serving generation keeps running until it hands its listeners over.
+	if request.Source.Validate() != nil {
+		return nil, nil, ErrInvalidRequest
+	}
+	generation := request.Source.SHA256[:32]
+	hostdController, err := service.HostdController(request.Platform, generation, request.UID, service.ExecRunner{})
 	if err != nil {
 		return nil, nil, err
 	}
 	hostdConfig := service.ComponentConfig{
-		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID,
+		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID, Generation: generation,
 		HostdTokenFile: paths.hostdToken, Environment: workerEnvironment(request), Controller: hostdController,
 	}
-	if request.Source.Validate() == nil {
-		sourceBody, err := json.Marshal(request.Source)
-		if err != nil {
-			return nil, nil, err
-		}
-		hostdConfig.Environment["PAPERBOAT_INSTALL_SOURCE"] = base64.RawStdEncoding.EncodeToString(sourceBody)
+	sourceBody, err := json.Marshal(request.Source)
+	if err != nil {
+		return nil, nil, err
 	}
+	hostdConfig.Environment["PAPERBOAT_INSTALL_SOURCE"] = base64.RawStdEncoding.EncodeToString(sourceBody)
 	if maintenancePending {
 		hostdConfig.Environment["PAPERBOAT_NATIVE_UPDATE_PENDING"] = "true"
 	}

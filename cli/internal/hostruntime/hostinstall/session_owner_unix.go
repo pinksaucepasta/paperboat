@@ -238,7 +238,7 @@ func preflightUnixCarrier(ctx context.Context, request Request, paths installPat
 	for _, check := range checks {
 		var controller service.Controller
 		if check.kind == service.HostdKind {
-			controller, err = service.ComponentController(request.Platform, check.kind, request.UID, service.ExecRunner{})
+			controller, err = service.HostdController(request.Platform, request.Source.SHA256[:32], request.UID, service.ExecRunner{})
 		} else if runtime.GOOS == "linux" {
 			controller = service.SystemdController{Runner: service.ExecRunner{}, Unit: filepath.Base(check.installer.DefinitionPath())}
 		} else {
@@ -297,23 +297,8 @@ func replaceUnservingUnixCarrier(ctx context.Context, request Request, paths ins
 	if err != nil {
 		return err
 	}
-	installer, err := carrierInstaller(retained)
-	if err != nil {
+	if err := removeCarrierGeneration(ctx, retained); err != nil {
 		return err
-	}
-	native, ok := installerController(retained).(service.NativeLifecycleController)
-	if !ok {
-		return service.ErrInvalidDefinition
-	}
-	if err := installer.Uninstall(ctx); err != nil {
-		return err
-	}
-	status, err := native.Inspect(ctx, installer.DefinitionPath())
-	if err != nil {
-		return err
-	}
-	if status.Registered || status.Running {
-		return service.ErrLifecycleUncertain
 	}
 	if err := os.Remove(carrierConfigPath(paths.instance)); err != nil && !installNotExistOnly(err) {
 		return err

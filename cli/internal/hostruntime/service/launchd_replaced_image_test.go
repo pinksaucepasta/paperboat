@@ -23,7 +23,7 @@ func TestLaunchdDefinitionsNameTheReplacedExecutableOnlyForWorkerRoles(t *testin
 		{CarrierKind, pinned, false},
 		{SessionOwnerKind, pinned, false},
 	} {
-		definition, err := renderLaunchd(Config{Platform: "darwin", Kind: test.kind, Executable: test.executable, Arguments: []string{"daemon", "__runtime-" + test.kind}, User: "tester", Group: "staff", SessionOwnerGeneration: "g1"})
+		definition, err := renderLaunchd(Config{Platform: "darwin", Kind: test.kind, Executable: test.executable, Arguments: []string{"daemon", "__runtime-" + test.kind}, User: "tester", Group: "staff", Generation: "g1"})
 		if err != nil {
 			t.Fatalf("%s: %v", test.kind, err)
 		}

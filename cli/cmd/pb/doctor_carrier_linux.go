@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,15 +13,22 @@ import (
 	"time"
 
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 )
 
 // doctorCarrierProbes reports a native carrier that keeps failing to start. The carrier holds every private
 // connection to this computer, so while it restarts in a loop every ping and exec to it fails, and the
 // local daemon still reports itself ready.
 func doctorCarrierProbes() []doctorpkg.Probe {
-	unit := "paperboat-carrier-u" + strconv.Itoa(os.Getuid()) + ".service"
+	instance := "u" + strconv.Itoa(os.Getuid())
 	return []doctorpkg.Probe{{Code: "native_carrier", Run: func(ctx context.Context) doctorpkg.Check {
-		return doctorCarrierCheck(ctx, doctorSystemdRuntime, unit, systemdUnitProperties)
+		// Each carrier generation has its own unit; check the active one. With no
+		// carrier installed the unit name is unknown to systemd, which passes.
+		generation, err := hostinstall.ActiveCarrierGeneration(ctx, instance)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return doctorpkg.Check{Category: "local", Code: "native_carrier", Status: doctorpkg.StatusUnavailable, Summary: "Whether the native carrier is running could not be checked.", Recovery: "Run pb doctor again."}
+		}
+		return doctorCarrierCheck(ctx, doctorSystemdRuntime, "paperboat-carrier-"+instance+"-"+generation+".service", systemdUnitProperties)
 	}}}
 }
 

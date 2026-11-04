@@ -13,13 +13,15 @@ import (
 // install root and all binaries come from Layout, so callers cannot redirect a
 // privileged service to a user-controlled executable.
 type ComponentConfig struct {
-	Source               installsource.Source
-	Layout               Layout
-	User                 string
-	Group                string
-	UID                  int
-	GID                  int
-	HostdTokenFile       string
+	Source         installsource.Source
+	Layout         Layout
+	User           string
+	Group          string
+	UID            int
+	GID            int
+	HostdTokenFile string
+	// Generation names hostd's per-generation unit on Linux and macOS (see generationalUnit).
+	Generation           string
 	ReleaseRepository    string
 	MachineID            string
 	HealthURL            string
@@ -30,27 +32,20 @@ type ComponentConfig struct {
 
 // ComponentController returns the one service-manager controller permitted for
 // a service role. Durable roles invoke the installed pb executable through its
-// explicit daemon entry point.
+// explicit daemon entry point. hostd on Linux and macOS has one unit per
+// generation: use HostdController.
 func ComponentController(platform, kind string, enrolledUID int, runner Runner) (Controller, error) {
 	if runner == nil || enrolledUID < 0 {
 		return nil, ErrInvalidDefinition
 	}
 	switch platform {
 	case "linux":
-		instance := "u" + strconv.Itoa(enrolledUID)
-		switch kind {
-		case HostdKind:
-			return SystemdController{Runner: runner, Unit: "paperboat-hostd-" + instance + ".service"}, nil
-		case UpdaterKind:
-			return SystemdController{Runner: runner, Unit: "paperboat-updated-" + instance + ".service"}, nil
+		if kind == UpdaterKind {
+			return SystemdController{Runner: runner, Unit: "paperboat-updated-u" + strconv.Itoa(enrolledUID) + ".service"}, nil
 		}
 	case "darwin":
-		instance := ".u" + strconv.Itoa(enrolledUID)
-		switch kind {
-		case HostdKind:
-			return LaunchdController{Runner: runner, UID: enrolledUID, Label: HostdLabel + instance}, nil
-		case UpdaterKind:
-			return LaunchdController{Runner: runner, UID: enrolledUID, Label: UpdaterLabel + instance}, nil
+		if kind == UpdaterKind {
+			return LaunchdController{Runner: runner, UID: enrolledUID, Label: UpdaterLabel + ".u" + strconv.Itoa(enrolledUID)}, nil
 		}
 	case "windows":
 		switch kind {
@@ -94,8 +89,11 @@ func newHostdInstaller(config ComponentConfig, allowMissingExecutable bool) (*In
 	environment["PAPERBOAT_BINARY_STAGED"] = config.Layout.BinaryStaged
 	environment["PAPERBOAT_HOSTD_SOCKET"] = config.Layout.HostdSocket
 	environment["PAPERBOAT_HOSTD_TOKEN_FILE"] = config.HostdTokenFile
+	if config.Layout.Platform != "windows" {
+		environment["PAPERBOAT_HOSTD_HANDOVER_SOCKET"] = HostdHandoverSocket(config.Layout)
+	}
 	serviceConfig := Config{
-		Platform: config.Layout.Platform, Kind: HostdKind, Instance: config.Layout.Instance, ConfigRoot: "/", Executable: binary,
+		Platform: config.Layout.Platform, Kind: HostdKind, Instance: config.Layout.Instance, Generation: config.Generation, ConfigRoot: "/", Executable: binary,
 		User: config.User, Group: config.Group, Arguments: []string{"daemon", "__runtime-hostd"}, Environment: environment,
 		EncryptedCredentials: config.EncryptedCredentials,
 		UpgradeMode:          UpgradeReload, Controller: config.Controller,
@@ -160,6 +158,14 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 		return newInstaller(serviceConfig, true)
 	}
 	return New(serviceConfig)
+}
+
+// HostdHandoverSocket is the fixed account-private socket on which the serving hostd generation hands
+// its listeners to the next one. Every generation's unit names the same path: a starting hostd imports
+// the listeners from whoever serves it, then serves it itself; an absent or refused socket (first
+// start, reboot) means it binds fresh.
+func HostdHandoverSocket(layout Layout) string {
+	return filepath.Join(filepath.Dir(layout.HostdSocket), "handover.sock")
 }
 
 func validEnrolledIdentity(user, group string, uid, gid int) bool {

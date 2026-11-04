@@ -6,27 +6,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
+	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
-	"golang.org/x/sys/unix"
 )
 
-// A source upgrade retains account custody and accepted SSH bridges. When SSH
-// can retire, its carrier joins the same native cutover as hostd, rather than
-// causing a second maintenance window after the installation commits.
+// A source upgrade starts the new carrier generation in its own unit and waits
+// until it serves while the old generation keeps serving everything. The update
+// then marks the new generation active and, once it commits, retires the old
+// one, which finishes its open streams and exits (make-before-break). Prior art:
+// Teleport graceful restart (lib/service/signals.go) and nginx binary upgrade
+// (~/ref/nginx/src/os/unix/ngx_process_cycle.c). Nothing is refused meanwhile.
 type unixCarrierUpgrade struct {
-	stagedConfig string
-	capability   []byte
-	previous     *carriercontrol.Client
-	native       *service.NativeTransactionalComponent
-	terminals    *terminalHandover
+	candidate, previous CarrierConfig
+	terminals           *terminalHandover
 }
 
 func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths installPaths) (_ *unixCarrierUpgrade, resultErr error) {
@@ -41,114 +36,103 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 	if err != nil {
 		return nil, err
 	}
+	defer clear(capability)
+	candidate, err := prepareCarrierConfig(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	// Endpoint and account custody cannot change during a source upgrade.
+	candidate.Environment = retained.Environment
+	stable := candidate
+	stable.Source, stable.Generation, stable.Executable = retained.Source, retained.Generation, retained.Executable
+	stable.ControlEndpoint, stable.LockPath = retained.ControlEndpoint, retained.LockPath
+	want, _ := json.Marshal(stable)
+	have, _ := json.Marshal(retained)
+	if !bytes.Equal(want, have) {
+		return nil, ErrInvalidRequest
+	}
+	// Failures past this point are undone by the lifecycle rollback, which
+	// removes the candidate generation (unixCarrierInstallation.Restore).
+	if err := publishCarrierFiles(candidate, "", capability); err != nil {
+		return nil, err
+	}
+	next, err := carrierInstaller(candidate)
+	if err != nil {
+		return nil, err
+	}
+	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_start")
+	if err := next.Install(ctx); err != nil {
+		return nil, err
+	}
+	if err := waitCarrierReady(ctx, candidate); err != nil {
+		return nil, err
+	}
+	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_ready")
 	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
 	if err != nil {
-		clear(capability)
 		return nil, err
 	}
 	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
 	if moveErr != nil {
 		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
 	}
-	defer func() {
-		if resultErr != nil {
-			recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			defer cancel()
-			resultErr = errors.Join(resultErr, terminals.finish(recovery, true), client.ResumeSSH(recovery))
-			clear(capability)
-		}
-	}()
-	if err := client.DrainSSH(ctx); err != nil {
-		return nil, err
-	}
-
-	candidate, err := prepareCarrierConfig(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	candidate.Environment = retained.Environment
-	stable := candidate
-	stable.Source, stable.Executable = retained.Source, retained.Executable
-	want, _ := json.Marshal(stable)
-	have, _ := json.Marshal(retained)
-	if !bytes.Equal(want, have) {
-		return nil, ErrInvalidRequest
-	}
-	next, err := carrierInstaller(candidate)
-	if err != nil {
-		return nil, err
-	}
-	native, err := next.NativeComponent(func(ctx context.Context) error { return waitCarrierReady(ctx, candidate) })
-	if err != nil {
-		return nil, err
-	}
-	// Like Tailscale clientupdate.go:updateLinuxBinary, finish durable publication
-	// to a separate file; current source-bound control requests still see the old descriptor.
-	// Both native managers leave an already running job on its current image.
-	if err := native.Install(ctx); err != nil {
-		return nil, err
-	}
-	if err := publishCarrierFiles(candidate, carrierConfigPath(candidate.Instance)+".next", capability); err != nil {
-		return nil, err
-	}
-	return &unixCarrierUpgrade{stagedConfig: carrierConfigPath(candidate.Instance) + ".next", capability: capability, previous: client, native: native, terminals: terminals}, nil
+	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals}, nil
 }
 
-// Promote only the already durable descriptor after the old carrier stopped.
-// The protected install lock and root-owned directory exclude other writers.
+// activate marks the already serving candidate generation active: readers of
+// the account's carrier descriptor address it from now on.
 func (u *unixCarrierUpgrade) activate() error {
 	if u == nil {
 		return nil
 	}
-	diagnosticlog.TryInfo("carrier cutover", "stage", "descriptor_promote_start")
-	err := promoteCarrierConfig(u.stagedConfig)
-	diagnosticlog.TryInfo("carrier cutover", "stage", "descriptor_promote_end", "failed", err != nil)
+	err := publishCarrierDescriptor(u.candidate)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_active", "failed", err != nil)
 	return err
 }
-func promoteCarrierConfig(staged string) error {
-	if !strings.HasSuffix(staged, ".next") {
-		return ErrInvalidRequest
-	}
-	parent, err := openProtectedPinDirectory(filepath.Dir(staged))
-	if err != nil {
-		return err
-	}
-	defer unix.Close(parent)
-	info, err := os.Lstat(staged)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || ownerUID(info) != 0 || info.Mode().Perm() != 0640 {
-		return ErrInvalidRequest
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=staged-carrier-descriptor-activation
-	if err := os.Rename(staged, strings.TrimSuffix(staged, ".next")); err != nil {
-		return err
-	}
-	return unix.Fsync(parent)
-}
 
-func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) (resultErr error) {
+// finish retires the previous generation once the update committed. A failed
+// update was already rolled back to it, so it keeps serving untouched.
+func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
 	if u == nil {
 		return nil
 	}
-	defer clear(u.capability)
-	defer func() { resultErr = errors.Join(resultErr, u.terminals.finish(ctx, failed)) }()
-	cleanupErr := os.Remove(u.stagedConfig)
-	if installNotExistOnly(cleanupErr) {
-		cleanupErr = nil
+	err := u.terminals.finish(ctx, failed)
+	if failed {
+		return err
 	}
-	if !failed {
-		return cleanupErr
+	// The update is committed; reconciliation retries a retirement that fails here.
+	if _, retireErr := retireCarrierGeneration(context.WithoutCancel(ctx), u.previous); retireErr != nil {
+		diagnosticlog.TryWarn("carrier retirement deferred", "stage", "retire_previous")
 	}
-	recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancel()
-	return errors.Join(cleanupErr, u.previous.ResumeSSH(recovery))
+	return err
 }
 
-func (u *unixCarrierUpgrade) component() *service.NativeTransactionalComponent {
-	if u == nil {
-		return nil
+// retireCarrierGeneration stops a non-active generation from starting at boot and
+// asks its running process to finish its open streams and exit (service.QuitCarrier).
+// It reports whether the process still runs. Repeating it is harmless.
+func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error) {
+	installer, err := carrierInstallerPending(c)
+	if err != nil {
+		return false, err
 	}
-	return u.native
+	controller := installerController(c)
+	native, ok := controller.(service.NativeLifecycleController)
+	if !ok {
+		return false, service.ErrInvalidDefinition
+	}
+	status, err := native.Inspect(ctx, installer.DefinitionPath())
+	if err != nil {
+		return false, err
+	}
+	// launchd's disable is a bootout, which would cut open streams; a retired
+	// generation started at boot exits on the next reconciliation's signal.
+	if status.Enabled && runtime.GOOS == "linux" {
+		if err := native.Disable(ctx, installer.DefinitionPath()); err != nil {
+			return status.Running, err
+		}
+	}
+	if !status.Running {
+		return false, nil
+	}
+	return true, service.QuitCarrier(ctx, controller)
 }

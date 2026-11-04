@@ -8,15 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
-	"time"
 )
 
 // unixCarrierInstallation belongs to the host installation lifecycle journal.
@@ -40,10 +37,11 @@ func deriveUnixCarrierConfig(r Request, paths installPaths) (CarrierConfig, erro
 		return CarrierConfig{}, ErrInvalidRequest
 	}
 	root := filepath.Dir(carrierConfigPath(paths.instance))
-	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source,
+	generation := r.Source.SHA256[:32]
+	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source, Generation: generation,
 		Executable: filepath.Join(filepath.Dir(paths.workerRollback), "pins", r.Source.SHA256, "pb"), UID: r.UID, GID: r.GID, User: r.User, Group: r.Group, RuntimeRoot: r.StateRoot,
-		Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: paths.hostdSocket + ".carrier", HostdTokenFile: paths.hostdToken,
-		DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner.lock")}
+		Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: carrierControlEndpoint(paths.hostdSocket, generation), HostdTokenFile: paths.hostdToken,
+		DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }
 
@@ -110,8 +108,17 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	if err := decodeInstallJSON(bytes.NewReader(body), &baseline, 256<<10); err != nil {
 		return err
 	}
-	// A changed carrier must cease owning Tailcat before its old descriptor is
-	// republished. An unchanged retained carrier keeps all accepted SSH bridges.
+	// The candidate generation is removed; the baseline generation never stopped
+	// serving and keeps all accepted streams. Only its descriptor is put back.
+	canonical, err := deriveUnixCarrierConfig(s.request, s.paths)
+	if err != nil {
+		return err
+	}
+	if baseline.Carrier == nil || baseline.Carrier.Generation != canonical.Generation {
+		if err := removeCarrierGeneration(ctx, canonical); err != nil {
+			return err
+		}
+	}
 	current, err := readCarrierConfigFile(ctx, s.paths.instance)
 	if err != nil && !installNotExistOnly(err) {
 		return err
@@ -124,25 +131,6 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		return nil
 	}())
 	if !bytes.Equal(before, now) {
-		canonical, deriveErr := deriveUnixCarrierConfig(s.request, s.paths)
-		if deriveErr != nil {
-			return deriveErr
-		}
-		installer, deriveErr := carrierInstallerPending(canonical)
-		if deriveErr != nil {
-			return deriveErr
-		}
-		native := installerController(canonical).(service.NativeLifecycleController)
-		if err := installer.Uninstall(ctx); err != nil {
-			return err
-		}
-		status, err := native.Inspect(ctx, installer.DefinitionPath())
-		if err != nil {
-			return err
-		}
-		if status.Registered || status.Running {
-			return service.ErrLifecycleUncertain
-		}
 		if baseline.Carrier != nil {
 			c := *baseline.Carrier
 			if c.Validate() != nil {
@@ -151,11 +139,7 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 			if err := c.Source.Verify(c.Executable); err != nil {
 				return err
 			}
-			value, err := jsonCarrier(c)
-			if err != nil {
-				return err
-			}
-			if err := atomicfile.Write(carrierConfigPath(c.Instance), value, atomicfile.Options{Mode: 0640, OwnerUID: 0, OwnerGID: c.GID}); err != nil {
+			if err := publishCarrierDescriptor(c); err != nil {
 				return err
 			}
 		} else if err := os.Remove(carrierConfigPath(s.paths.instance)); err != nil && !installNotExistOnly(err) {
@@ -182,15 +166,17 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	if baseline.CarrierOnly {
 		return service.ErrLifecycleUncertain
 	}
+	// The candidate hostd generation may hold the handed-over listeners: stop it
+	// before the baseline generation restarts on the restored executable below.
 	hostd, _, err := pendingInstallers(s.request, s.paths)
 	if err != nil {
 		return err
 	}
-	controller, err := service.ComponentController(s.request.Platform, service.HostdKind, s.request.UID, service.ExecRunner{})
+	candidateHostd, err := hostd.NativeComponent(nil)
 	if err != nil {
 		return err
 	}
-	if err := controller.(service.NativeLifecycleController).Stop(ctx, hostd.DefinitionPath()); err != nil {
+	if err := candidateHostd.Stop(ctx); err != nil {
 		return err
 	}
 	if baseline.Worker != nil {
@@ -221,12 +207,34 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	if err := s.restoreLegacy(ctx, baseline.Legacy); err != nil {
 		return err
 	}
+	if err := startBaselineHostd(ctx, s.request, baseline.Worker); err != nil {
+		return err
+	}
 	return errors.Join(removeInstallFile(s.paths.workerNext), removeJournal(s.paths.journal), updated.RollbackUnixNativeInstall(s.paths.updateState))
+}
+
+// startBaselineHostd restarts the previous hostd generation if it handed its
+// listeners over and exited; a still serving one is left alone.
+func startBaselineHostd(ctx context.Context, request Request, source *installsource.Source) error {
+	if source == nil || source.SHA256[:32] == request.Source.SHA256[:32] {
+		return nil
+	}
+	controller, err := service.HostdController(request.Platform, source.SHA256[:32], request.UID, service.ExecRunner{})
+	if err != nil {
+		return err
+	}
+	native := controller.(service.NativeLifecycleController)
+	definition := hostdGenerationDefinition(request.Platform, request.UID, source.SHA256[:32])
+	status, err := native.Inspect(ctx, definition)
+	if err != nil || !status.Registered || status.Running {
+		return err
+	}
+	return native.Start(ctx, definition)
 }
 
 // Stage the verified replacement while the current runtime can still serve.
 // Only promotion and service activation belong in the stopped interval.
-func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent, prepare func(context.Context) error) error {
+func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths installPaths, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
 	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
 		return err
 	}
@@ -235,11 +243,11 @@ func stageAndStopUnixRuntimeRoles(ctx context.Context, request Request, paths in
 			return err
 		}
 	}
-	return prepareUnixRuntimeCutover(ctx, host, hostd, updater, carrier, prepare)
+	return prepareUnixRuntimeCutover(ctx, host, hostd, updater, prepare)
 }
 
 // prepareUnixRuntimeCutover owns native service work at the admission boundary.
-func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent, prepare func(context.Context) error) error {
+func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *service.Installer, prepare func(context.Context) error) error {
 	if host != nil {
 		if err := host.Install(ctx); err != nil {
 			return err
@@ -265,16 +273,15 @@ func prepareUnixRuntimeCutover(ctx context.Context, host, hostd, updater *servic
 	if err := prepare(ctx); err != nil {
 		return err
 	}
-	return stopUnixRuntimeRoles(ctx, nil, hostd, updater, carrier)
+	return stopUnixRuntimeRoles(ctx, nil, hostd, updater)
 }
 
-// Stop independent native roles together, so replacement pays one shutdown
-// window. Resolve every component before stopping any serving process.
-func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer, carrier *service.NativeTransactionalComponent) error {
-	components := make([]*service.NativeTransactionalComponent, 0, 4)
-	if carrier != nil {
-		components = append(components, carrier)
-	}
+// stopUnixRuntimeRoles stops roles in dependency order. hostd is a generation's
+// own unit: on an update it names the candidate, which is not running, so the
+// serving generation keeps running until it hands its listeners over.
+// Resolve every component before stopping any serving process.
+func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Installer) error {
+	components := make([]*service.NativeTransactionalComponent, 0, 3)
 	for _, installer := range []*service.Installer{updater, hostd, host} {
 		if installer == nil {
 			continue
@@ -285,43 +292,21 @@ func stopUnixRuntimeRoles(ctx context.Context, host, hostd, updater *service.Ins
 		}
 		components = append(components, component)
 	}
-	// Repair/uninstall and an update retaining a busy SSH carrier keep their
-	// original ordered shutdown. Only coordinated carrier replacement overlaps.
-	if carrier == nil {
-		for _, component := range components {
-			if err := component.Stop(ctx); err != nil {
-				return err
-			}
+	for _, component := range components {
+		if err := component.Stop(ctx); err != nil {
+			return err
 		}
-		return nil
 	}
-	failures := make([]error, len(components))
-	var stopped sync.WaitGroup
-	for i, component := range components {
-		stopped.Add(1)
-		go func() { defer stopped.Done(); failures[i] = component.Stop(ctx) }()
-	}
-	stopped.Wait()
-	return errors.Join(failures...)
+	return nil
 }
 func applyUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string) error {
-	return activateUnixNativeRoles(ctx, host, hostd, updater, address, true, nil)
+	return activateUnixNativeRoles(ctx, host, hostd, updater, address, true)
 }
 
-func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string, publish bool, carrier *service.NativeTransactionalComponent) (resultErr error) {
-	if carrier != nil {
-		done := make(chan error, 1)
-		go func() {
-			if err := carrier.Start(ctx); err != nil {
-				done <- err
-				return
-			}
-			done <- carrier.CheckReadiness(ctx)
-		}()
-		// Join before rollback can touch declarations or custody.
-		defer func() { resultErr = errors.Join(resultErr, <-done) }()
-	}
-
+// activateUnixNativeRoles starts the roles. A new hostd generation imports the
+// serving generation's listeners (PAPERBOAT_HOSTD_HANDOVER_SOCKET) and reports
+// ready to systemd only once it serves them.
+func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.Installer, address string, publish bool) error {
 	// Terminal recovery must not wait for the independent power-policy service.
 	for _, installer := range []*service.Installer{hostd, host, updater} {
 		if installer == nil {
@@ -354,8 +339,8 @@ func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.
 	return nil
 }
 
-// reconcileInstalledCarrier advances only the independently owned carrier; the
-// protected installation source already represents the desired runtime.
+// reconcileInstalledCarrier keeps the active carrier generation running and
+// retires and removes every other carrier and hostd generation (sweepGenerations).
 func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(context.Context, string) ([]string, error)) (resultErr error) {
 	uid, err := carrierUID(instance)
 	if err != nil {
@@ -392,91 +377,14 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 	if err := lifecycle.RequireRecovered(ctx); err != nil {
 		return hostInstallFailure("native installation recovery is required before carrier reconciliation", err)
 	}
-	request, err = LoadEnrolledOwner(uid)
+	active, err := ReadCarrierConfig(ctx, instance)
 	if err != nil {
 		return err
 	}
-	if err := request.Source.Verify(paths.worker); err != nil {
+	if err := EnsureExistingCarrier(ctx, active); err != nil {
 		return err
 	}
-	retained, err := ReadCarrierConfig(ctx, instance)
-	if err != nil {
-		return err
-	}
-	if retained.Source == request.Source {
-		return EnsureExistingCarrier(ctx, retained)
-	}
-	capability, err := ReadCarrierCapability(ctx, retained)
-	if err != nil {
-		return err
-	}
-	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
-	if err != nil {
-		return err
-	}
-	if err := client.RetireSSH(ctx); errors.Is(err, carriercontrol.ErrBusy) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			defer cancel()
-			resultErr = errors.Join(resultErr, client.ResumeSSH(recovery))
-		}
-	}()
-	abort, err := PrepareSuppliedMaintenance(ctx, paths.hostdSocket, paths.hostdToken, false)
-	if err != nil {
-		return err
-	}
-	defer abort()
-	request.Executable = paths.worker
-	candidate, err := prepareCarrierConfig(ctx, request)
-	if err != nil {
-		return err
-	}
-	// Stable endpoint and account custody cannot change during a source upgrade.
-	candidate.Environment = retained.Environment
-	stable := candidate
-	stable.Source = retained.Source
-	stable.Executable = retained.Executable
-	want, _ := json.Marshal(stable)
-	have, _ := json.Marshal(retained)
-	if !bytes.Equal(want, have) {
-		return ErrInvalidRequest
-	}
-	resultErr = lifecycle.Replace(ctx, func(ctx context.Context) error {
-		previous, err := carrierInstaller(retained)
-		if err != nil {
-			return err
-		}
-		if err := previous.Uninstall(ctx); err != nil {
-			return err
-		}
-		native := installerController(retained).(service.NativeLifecycleController)
-		state, err := native.Inspect(ctx, previous.DefinitionPath())
-		if err != nil {
-			return err
-		}
-		if state.Registered || state.Running {
-			return service.ErrLifecycleUncertain
-		}
-		if err := publishCarrierFiles(candidate, carrierConfigPath(instance), capability); err != nil {
-			return err
-		}
-		next, err := carrierInstaller(candidate)
-		if err != nil {
-			return err
-		}
-		if err := next.Install(ctx); err != nil {
-			return err
-		}
-		return waitCarrierReady(ctx, candidate)
-	})
-	committed = resultErr == nil
-	return resultErr
+	return sweepGenerations(ctx, request, active.Generation, false)
 }
 
 func (s unixCarrierInstallation) legacyComponents() ([]*service.NativeTransactionalComponent, error) {

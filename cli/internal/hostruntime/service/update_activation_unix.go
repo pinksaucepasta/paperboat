@@ -168,7 +168,7 @@ func unixUpdateActivatorDefinition(platform string, uid int, binary string, envi
 		return nil, ErrUnsupportedPlatform
 	}
 	var body strings.Builder
-	body.WriteString("[Unit]\nDescription=Paperboat verified update activation\nAfter=paperboat-hostd-u" + strconv.Itoa(uid) + ".service\n[Service]\nType=simple\nExecStart=")
+	body.WriteString("[Unit]\nDescription=Paperboat verified update activation\n[Service]\nType=simple\nExecStart=")
 	for i, value := range arguments {
 		if i > 0 {
 			body.WriteByte(' ')

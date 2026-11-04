@@ -183,7 +183,7 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 	hostdControl := &fakeNativeController{status: NativeControllerStatus{Registered: true, Enabled: true, Running: true, Ready: true}}
 	updaterControl := &fakeNativeController{status: NativeControllerStatus{Registered: true, Enabled: true, Running: true, Ready: true}}
 	hostd, err := New(Config{
-		Platform: "linux", Kind: HostdKind, ConfigRoot: root, Executable: layout.Binary,
+		Platform: "linux", Kind: HostdKind, Generation: testGeneration(HostdKind), ConfigRoot: root, Executable: layout.Binary,
 		User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: hostdControl,
 	})
 	if err != nil {
@@ -257,7 +257,7 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostd, err := New(Config{Platform: "linux", Kind: HostdKind, ConfigRoot: root, Executable: layout.Binary, User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: hostdControl})
+	hostd, err := New(Config{Platform: "linux", Kind: HostdKind, Generation: testGeneration(HostdKind), ConfigRoot: root, Executable: layout.Binary, User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: hostdControl})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *
 		UpdaterKind: {status: NativeControllerStatus{Registered: true, Enabled: true, Running: true, Ready: true}},
 	}
 	newInstaller := func(kind, user, group, argument string) *Installer {
-		installer, err := New(Config{Platform: "linux", Kind: kind, ConfigRoot: root, Executable: layout.Binary, User: user, Group: group, Arguments: []string{argument}, Controller: controls[kind]})
+		installer, err := New(Config{Platform: "linux", Kind: kind, Generation: testGeneration(kind), ConfigRoot: root, Executable: layout.Binary, User: user, Group: group, Arguments: []string{argument}, Controller: controls[kind]})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,7 +357,7 @@ func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
 	components := make([]TransactionalComponent, 0, len(kinds))
 	var updaterDefinition string
 	for index, kind := range kinds {
-		installer, err := New(Config{Platform: "linux", Kind: kind, ConfigRoot: root, Executable: binary, User: "root", Group: "root", Arguments: []string{arguments[index]}, Controller: controls[index]})
+		installer, err := New(Config{Platform: "linux", Kind: kind, Generation: testGeneration(kind), ConfigRoot: root, Executable: binary, User: "root", Group: "root", Arguments: []string{arguments[index]}, Controller: controls[index]})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,7 +405,7 @@ func TestLifecycleManagerRollsBackFirstTwoAfterThirdComponentFailure(t *testing.
 	components := make([]TransactionalComponent, 0, len(kinds))
 	installers := make([]*Installer, 0, len(kinds))
 	for index, kind := range kinds {
-		installer, err := New(Config{Platform: "linux", Kind: kind, ConfigRoot: root, Executable: binary, User: "root", Group: "root", Arguments: []string{arguments[index]}, Controller: controls[index]})
+		installer, err := New(Config{Platform: "linux", Kind: kind, Generation: testGeneration(kind), ConfigRoot: root, Executable: binary, User: "root", Group: "root", Arguments: []string{arguments[index]}, Controller: controls[index]})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,7 +456,11 @@ func TestHostLifecycleCanceledDefinitionPublicationRestoresRunningCarrier(t *tes
 	originals := make([][]byte, 0, 3)
 	for _, kind := range []string{CarrierKind, HostdKind, UpdaterKind} {
 		controller := &fakeNativeController{status: NativeControllerStatus{Registered: true, Enabled: true, Running: true, Ready: true}}
-		i, err := New(Config{Platform: "linux", Kind: kind, Instance: "u501", ConfigRoot: root, Executable: executable(t), User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-" + map[string]string{CarrierKind: "carrier", HostdKind: "hostd", UpdaterKind: "updated"}[kind]}, Controller: controller})
+		arguments := []string{"daemon", "__runtime-" + map[string]string{CarrierKind: "carrier", HostdKind: "hostd", UpdaterKind: "updated"}[kind]}
+		if kind == CarrierKind {
+			arguments = append(arguments, "--generation", testGeneration(kind))
+		}
+		i, err := New(Config{Platform: "linux", Kind: kind, Instance: "u501", Generation: testGeneration(kind), ConfigRoot: root, Executable: executable(t), User: "alice", Group: "staff", Arguments: arguments, Controller: controller})
 		if err != nil {
 			t.Fatal(err)
 		}

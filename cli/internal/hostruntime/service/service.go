@@ -51,19 +51,19 @@ type Controller interface {
 	Remove(context.Context, string) error
 }
 type Config struct {
-	Platform               string
-	Kind                   string
-	Instance               string
-	SessionOwnerGeneration string
-	ConfigRoot             string
-	ExecutableSHA256       string
-	ExecutableLength       int64
-	Executable             string
-	User                   string
-	Group                  string
-	Arguments              []string
-	Environment            map[string]string
-	EncryptedCredentials   map[string]string
+	Platform             string
+	Kind                 string
+	Instance             string
+	Generation           string
+	ConfigRoot           string
+	ExecutableSHA256     string
+	ExecutableLength     int64
+	Executable           string
+	User                 string
+	Group                string
+	Arguments            []string
+	Environment          map[string]string
+	EncryptedCredentials map[string]string
 	// AccountReadableDefinition permits the native carrier to verify its
 	// nonsecret declaration while retaining root-only publication authority.
 	AccountReadableDefinition bool
@@ -168,8 +168,8 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		if config.Kind == ConfigKind || config.Kind == DaemonKind {
 			directory = "LaunchAgents"
 		}
-		if config.Kind == SessionOwnerKind {
-			label += "." + config.SessionOwnerGeneration
+		if config.Generation != "" {
+			label += "." + config.Generation
 		}
 		path = filepath.Join(config.ConfigRoot, "Library", directory, label+".plist")
 	case "linux":
@@ -196,8 +196,8 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 				return nil, ErrInvalidDefinition
 			}
 			unit = strings.TrimSuffix(unit, ".service") + "-" + config.Instance + ".service"
-			if config.Kind == SessionOwnerKind {
-				unit = strings.TrimSuffix(unit, ".service") + "-" + config.SessionOwnerGeneration + ".service"
+			if config.Generation != "" {
+				unit = strings.TrimSuffix(unit, ".service") + "-" + config.Generation + ".service"
 			}
 			path = filepath.Join(config.ConfigRoot, "etc", "systemd", "system", unit)
 		}
@@ -451,8 +451,14 @@ func renderLaunchd(config Config) ([]byte, error) {
 	if config.Instance != "" {
 		label += "." + config.Instance
 	}
-	if config.Kind == SessionOwnerKind {
-		label += "." + config.SessionOwnerGeneration
+	if config.Generation != "" {
+		label += "." + config.Generation
+	}
+	// A retired carrier or hostd generation exits 0 once its work is done and must stay down;
+	// any failure still restarts it.
+	var keepAlive any = true
+	if generationalUnit(config) {
+		keepAlive = map[string]bool{"SuccessfulExit": false}
 	}
 	definition := struct {
 		Label                string            `plist:"Label"`
@@ -462,14 +468,14 @@ func renderLaunchd(config Config) ([]byte, error) {
 		ProgramArguments     []string          `plist:"ProgramArguments"`
 		EnvironmentVariables map[string]string `plist:"EnvironmentVariables"`
 		RunAtLoad            bool              `plist:"RunAtLoad"`
-		KeepAlive            bool              `plist:"KeepAlive"`
+		KeepAlive            any               `plist:"KeepAlive"`
 		Umask                uint64            `plist:"Umask"`
 		StandardOutPath      string            `plist:"StandardOutPath,omitempty"`
 		StandardErrorPath    string            `plist:"StandardErrorPath,omitempty"`
 	}{
 		Label: label, ProcessType: "Background",
 		ProgramArguments:     append([]string{config.Executable}, config.Arguments...),
-		EnvironmentVariables: config.Environment, RunAtLoad: true, KeepAlive: true, Umask: 0o77,
+		EnvironmentVariables: config.Environment, RunAtLoad: true, KeepAlive: keepAlive, Umask: 0o77,
 	}
 	if config.Kind == WorkerKind || config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind {
 		definition.StandardOutPath = "/var/log/" + label + ".log"
@@ -547,8 +553,13 @@ func renderSystemd(config Config) ([]byte, error) {
 	if len(config.EncryptedCredentials) > 0 {
 		options = append(options, unit.NewUnitOption("Service", "PrivateMounts", "true"))
 	}
+	restart := "always"
+	if generationalUnit(config) {
+		// A retired generation exits 0 after its last connection or hand-over; it must stay down.
+		restart = "on-failure"
+	}
 	options = append(options,
-		unit.NewUnitOption("Service", "Restart", "always"),
+		unit.NewUnitOption("Service", "Restart", restart),
 		unit.NewUnitOption("Service", "RestartSec", "5s"),
 		unit.NewUnitOption("Service", "TimeoutStopSec", "60s"),
 		unit.NewUnitOption("Service", "KillMode", "mixed"),
@@ -566,7 +577,7 @@ func renderSystemd(config Config) ([]byte, error) {
 		if config.Instance != "" {
 			directory += "-" + config.Instance
 			if config.Kind == SessionOwnerKind {
-				directory += "-" + config.SessionOwnerGeneration
+				directory += "-" + config.Generation
 			}
 		}
 		runtimeDirectory := directory

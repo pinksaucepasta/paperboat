@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"golang.org/x/sys/unix"
 )
@@ -36,6 +37,12 @@ func carrierConfigPath(instance string) string {
 	}
 	return filepath.Join(platformPaths(uid).root, "carrier", "config.json")
 }
+
+// carrierGenerationPath is one generation's own descriptor, which its carrier
+// process reads. config.json is a copy of the active generation's descriptor.
+func carrierGenerationPath(instance, generation string) string {
+	return filepath.Join(filepath.Dir(carrierConfigPath(instance)), "generation-"+generation+".json")
+}
 func carrierServiceRoot(CarrierConfig) string { return "/" }
 func validateCarrierPaths(c CarrierConfig) error {
 	uid, err := carrierUID(c.Instance)
@@ -44,7 +51,7 @@ func validateCarrierPaths(c CarrierConfig) error {
 	}
 	paths := platformPaths(uid)
 	root := filepath.Dir(carrierConfigPath(c.Instance))
-	if c.Executable != filepath.Join(filepath.Dir(paths.workerRollback), "pins", c.Source.SHA256, "pb") || c.HostdEndpoint != paths.hostdSocket || c.HostdTokenFile != paths.hostdToken || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner.lock") {
+	if c.Executable != filepath.Join(filepath.Dir(paths.workerRollback), "pins", c.Source.SHA256, "pb") || c.HostdEndpoint != paths.hostdSocket || c.HostdTokenFile != paths.hostdToken || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner-"+c.Generation+".lock") {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -77,10 +84,27 @@ func prepareCarrierConfig(ctx context.Context, r Request) (CarrierConfig, error)
 	if err := r.Source.Verify(pin); err != nil {
 		return CarrierConfig{}, err
 	}
-	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source, Executable: pin, UID: r.UID, GID: r.GID, User: r.User, Group: r.Group, RuntimeRoot: r.StateRoot, Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: paths.hostdSocket + ".carrier", HostdTokenFile: paths.hostdToken, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner.lock")}
+	generation := r.Source.SHA256[:32]
+	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, User: r.User, Group: r.Group, RuntimeRoot: r.StateRoot, Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: carrierControlEndpoint(paths.hostdSocket, generation), HostdTokenFile: paths.hostdToken, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }
 func readCarrierConfigFile(ctx context.Context, instance string) (CarrierConfig, error) {
+	return readCarrierFile(ctx, instance, carrierConfigPath(instance))
+}
+
+// readCarrierGenerationFile reads one generation's own descriptor.
+func readCarrierGenerationFile(ctx context.Context, instance, generation string) (CarrierConfig, error) {
+	if !sessionowner.ValidGeneration(generation) {
+		return CarrierConfig{}, ErrInvalidRequest
+	}
+	c, err := readCarrierFile(ctx, instance, carrierGenerationPath(instance, generation))
+	if err == nil && c.Generation != generation {
+		return c, ErrInvalidRequest
+	}
+	return c, err
+}
+
+func readCarrierFile(ctx context.Context, instance, path string) (CarrierConfig, error) {
 	if ctx == nil {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
@@ -94,7 +118,6 @@ func readCarrierConfigFile(ctx context.Context, instance string) (CarrierConfig,
 	if os.Geteuid() != 0 && os.Geteuid() != uid {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
-	path := carrierConfigPath(instance)
 	f, err := openCarrierProtectedFile(CarrierConfig{UID: uid, GID: -1}, path, false)
 	if err != nil {
 		return CarrierConfig{}, err
@@ -129,7 +152,7 @@ func openCarrierProtectedFile(c CarrierConfig, path string, writable bool) (*os.
 	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	mode := uint32(0600)
 	owner := c.UID
-	if filepath.Base(path) == "config.json" {
+	if strings.HasSuffix(path, ".json") {
 		mode = 0640
 		owner = 0
 	}
@@ -152,8 +175,12 @@ func openCarrierProtectedFile(c CarrierConfig, path string, writable bool) (*os.
 	}
 	return f, nil
 }
+
+// publishCarrierFiles writes the account's capability and the generation's lock
+// and own descriptor; with path (the account's config.json) it also marks the
+// generation active.
 func publishCarrierFiles(c CarrierConfig, path string, capability []byte) error {
-	root := filepath.Dir(path)
+	root := filepath.Dir(carrierConfigPath(c.Instance))
 	parent, err := openProtectedPinDirectory(filepath.Dir(root))
 	if err != nil {
 		return err
@@ -186,11 +213,29 @@ func publishCarrierFiles(c CarrierConfig, path string, capability []byte) error 
 			return err
 		}
 	}
+	if path == "" {
+		return writeCarrierDescriptors(c, false)
+	}
+	if path != carrierConfigPath(c.Instance) {
+		return ErrInvalidRequest
+	}
+	return writeCarrierDescriptors(c, true)
+}
+
+// publishCarrierDescriptor marks a generation active: config.json becomes its
+// descriptor, next to the generation's own one.
+func publishCarrierDescriptor(c CarrierConfig) error { return writeCarrierDescriptors(c, true) }
+
+func writeCarrierDescriptors(c CarrierConfig, active bool) error {
 	body, err := jsonCarrier(c)
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0640, OwnerUID: 0, OwnerGID: c.GID})
+	options := atomicfile.Options{Mode: 0640, OwnerUID: 0, OwnerGID: c.GID}
+	if err := atomicfile.Write(carrierGenerationPath(c.Instance, c.Generation), body, options); err != nil || !active {
+		return err
+	}
+	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
 func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 	if err := verifyCarrierNativeCustody(c, i); err != nil {

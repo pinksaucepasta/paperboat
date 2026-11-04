@@ -16,15 +16,15 @@ func validSessionOwnerGeneration(value string) bool {
 
 func validateSessionOwnerConfig(config Config) error {
 	if config.Kind != SessionOwnerKind {
-		if config.SessionOwnerGeneration != "" {
+		if generationalUnit(config) != (config.Generation != "") || config.Generation != "" && !validSessionOwnerGeneration(config.Generation) {
 			return ErrInvalidDefinition
 		}
 		return nil
 	}
-	if !safeInstance(config.Instance) || !validSessionOwnerGeneration(config.SessionOwnerGeneration) {
+	if !safeInstance(config.Instance) || !validSessionOwnerGeneration(config.Generation) {
 		return ErrInvalidDefinition
 	}
-	want := []string{"daemon", "__runtime-session-owner", "--generation", config.SessionOwnerGeneration}
+	want := []string{"daemon", "__runtime-session-owner", "--generation", config.Generation}
 	if config.Platform == "windows" {
 		want = append(want, "--instance", config.Instance)
 	}

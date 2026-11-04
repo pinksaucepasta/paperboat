@@ -19,6 +19,14 @@ import (
 	"time"
 )
 
+// Windows keeps one carrier per account; it has no generation descriptors.
+func readCarrierGenerationFile(ctx context.Context, instance, generation string) (CarrierConfig, error) {
+	if generation != "" {
+		return CarrierConfig{}, ErrInvalidRequest
+	}
+	return readCarrierConfigFile(ctx, instance)
+}
+
 func carrierConfigPath(instance string) string {
 	root, err := WindowsInstanceRoot(instance)
 	if err != nil {

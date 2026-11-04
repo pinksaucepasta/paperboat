@@ -16,7 +16,7 @@ func TestWindowsSessionOwnerDeclarationBindsGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"daemon", "__runtime-session-owner", "--generation", generation, "--instance", instance}
-	cfg := Config{Kind: SessionOwnerKind, Instance: instance, SessionOwnerGeneration: generation, Executable: `C:\Program Files\Paperboat\users\` + instance + `\releases\versions\2026.10.12.1\pb.exe`, User: "Paperboat", Arguments: args}
+	cfg := Config{Kind: SessionOwnerKind, Instance: instance, Generation: generation, Executable: `C:\Program Files\Paperboat\users\` + instance + `\releases\versions\2026.10.12.1\pb.exe`, User: "Paperboat", Arguments: args}
 	body, err := renderWindowsService(cfg)
 	if err != nil {
 		t.Fatal(err)

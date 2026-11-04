@@ -22,23 +22,26 @@ import (
 const carrierSchema = "paperboat.native-carrier/v1"
 
 type CarrierConfig struct {
-	Schema                 string               `json:"schema"`
-	Instance               string               `json:"instance"`
-	Source                 installsource.Source `json:"source"`
-	Executable             string               `json:"executable"`
-	UID                    int                  `json:"uid"`
-	GID                    int                  `json:"gid"`
-	OwnerSID               string               `json:"owner_sid,omitempty"`
-	User                   string               `json:"user"`
-	Group                  string               `json:"group"`
-	RuntimeRoot            string               `json:"runtime_root"`
-	Environment            map[string]string    `json:"environment"`
-	WorkerAddress          string               `json:"worker_address"`
-	HostdEndpoint          string               `json:"hostd_endpoint"`
-	ControlEndpoint        string               `json:"control_endpoint"`
-	HostdTokenFile         string               `json:"hostd_token_file"`
-	DispatchCapabilityFile string               `json:"dispatch_capability_file"`
-	LockPath               string               `json:"lock_path"`
+	Schema   string               `json:"schema"`
+	Instance string               `json:"instance"`
+	Source   installsource.Source `json:"source"`
+	// Generation names this carrier's own native unit, lock and control socket on
+	// Linux and macOS (the source SHA-256 prefix, like session owners); empty on Windows.
+	Generation             string            `json:"generation,omitempty"`
+	Executable             string            `json:"executable"`
+	UID                    int               `json:"uid"`
+	GID                    int               `json:"gid"`
+	OwnerSID               string            `json:"owner_sid,omitempty"`
+	User                   string            `json:"user"`
+	Group                  string            `json:"group"`
+	RuntimeRoot            string            `json:"runtime_root"`
+	Environment            map[string]string `json:"environment"`
+	WorkerAddress          string            `json:"worker_address"`
+	HostdEndpoint          string            `json:"hostd_endpoint"`
+	ControlEndpoint        string            `json:"control_endpoint"`
+	HostdTokenFile         string            `json:"hostd_token_file"`
+	DispatchCapabilityFile string            `json:"dispatch_capability_file"`
+	LockPath               string            `json:"lock_path"`
 }
 
 func (c CarrierConfig) Validate() error {
@@ -57,10 +60,19 @@ func (c CarrierConfig) Validate() error {
 			return ErrInvalidRequest
 		}
 	}
-	if c.ControlEndpoint != c.HostdEndpoint+".carrier" {
+	if (runtime.GOOS == "windows") != (c.Generation == "") || c.Generation != "" && c.Generation != c.Source.SHA256[:32] || c.ControlEndpoint != carrierControlEndpoint(c.HostdEndpoint, c.Generation) {
 		return ErrInvalidRequest
 	}
 	return validateCarrierPaths(c)
+}
+
+// carrierControlEndpoint is the account-private control socket of one carrier
+// generation; two generations serve side by side during an update.
+func carrierControlEndpoint(hostdEndpoint, generation string) string {
+	if generation == "" {
+		return hostdEndpoint + ".carrier"
+	}
+	return hostdEndpoint + ".carrier-" + generation
 }
 
 func carrierInstaller(c CarrierConfig) (*service.Installer, error) {
@@ -70,15 +82,15 @@ func carrierInstallerPending(c CarrierConfig) (*service.Installer, error) {
 	return carrierInstallerWithPending(c, true)
 }
 func carrierInstallerWithPending(c CarrierConfig, pending bool) (*service.Installer, error) {
-	controller, err := service.CarrierController(c.Source.Platform, c.Instance, c.UID, service.ExecRunner{})
+	controller, err := service.CarrierController(c.Source.Platform, c.Instance, c.Generation, c.UID, service.ExecRunner{})
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"daemon", "__runtime-carrier"}
+	args := []string{"daemon", "__runtime-carrier", "--generation", c.Generation}
 	if runtime.GOOS == "windows" {
-		args = append(args, "--instance", c.Instance)
+		args = []string{"daemon", "__runtime-carrier", "--instance", c.Instance}
 	}
-	config := service.Config{Platform: c.Source.Platform, Kind: service.CarrierKind, Instance: c.Instance, ConfigRoot: carrierServiceRoot(c), Executable: c.Executable, ExecutableSHA256: c.Source.SHA256, ExecutableLength: c.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: c.Environment, UpgradeMode: service.UpgradeReload, Controller: controller, AccountReadableDefinition: c.Source.Platform != "windows"}
+	config := service.Config{Platform: c.Source.Platform, Kind: service.CarrierKind, Instance: c.Instance, Generation: c.Generation, ConfigRoot: carrierServiceRoot(c), Executable: c.Executable, ExecutableSHA256: c.Source.SHA256, ExecutableLength: c.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: c.Environment, UpgradeMode: service.UpgradeReload, Controller: controller, AccountReadableDefinition: c.Source.Platform != "windows"}
 	if pending {
 		return service.NewPending(config)
 	}
@@ -187,7 +199,7 @@ func prepareCarrierLocked(ctx context.Context, request Request) error {
 }
 
 func installerController(c CarrierConfig) service.Controller {
-	controller, _ := service.CarrierController(c.Source.Platform, c.Instance, c.UID, service.ExecRunner{})
+	controller, _ := service.CarrierController(c.Source.Platform, c.Instance, c.Generation, c.UID, service.ExecRunner{})
 	return controller
 }
 
@@ -243,7 +255,10 @@ func EnsureExistingCarrier(ctx context.Context, c CarrierConfig) error {
 // does not require the still-serving primary's native declaration to match a
 // candidate that the installer may already have staged.
 func ReadCarrierDescriptor(ctx context.Context, instance string) (CarrierConfig, error) {
-	c, err := readCarrierConfigFile(ctx, instance)
+	return verifyCarrierDescriptor(readCarrierConfigFile(ctx, instance))
+}
+
+func verifyCarrierDescriptor(c CarrierConfig, err error) (CarrierConfig, error) {
 	if err != nil {
 		return c, err
 	}
@@ -256,8 +271,25 @@ func ReadCarrierDescriptor(ctx context.Context, instance string) (CarrierConfig,
 	return c, nil
 }
 
+// ReadCarrierConfig reads the active carrier generation.
 func ReadCarrierConfig(ctx context.Context, instance string) (CarrierConfig, error) {
+	return verifyCarrierNativeConfig(ReadCarrierDescriptor(ctx, instance))
+}
+
+// ActiveCarrierGeneration names the account's active carrier generation; the
+// account itself may read it. Its units are named after it (service.CarrierController).
+func ActiveCarrierGeneration(ctx context.Context, instance string) (string, error) {
 	c, err := ReadCarrierDescriptor(ctx, instance)
+	return c.Generation, err
+}
+
+// ReadCarrierGeneration reads one generation's own descriptor, active or not: a
+// carrier process serves the generation it was started as.
+func ReadCarrierGeneration(ctx context.Context, instance, generation string) (CarrierConfig, error) {
+	return verifyCarrierNativeConfig(verifyCarrierDescriptor(readCarrierGenerationFile(ctx, instance, generation)))
+}
+
+func verifyCarrierNativeConfig(c CarrierConfig, err error) (CarrierConfig, error) {
 	if err != nil {
 		return c, err
 	}

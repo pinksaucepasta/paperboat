@@ -115,7 +115,7 @@ func (c Catalog) installer(d Descriptor, pending bool) (*service.Installer, erro
 	if runtime.GOOS == "windows" {
 		args = append(args, "--instance", d.Instance)
 	}
-	config := service.Config{Platform: d.Source.Platform, Kind: service.SessionOwnerKind, Instance: d.Instance, SessionOwnerGeneration: d.Generation, ConfigRoot: c.ConfigRoot, Executable: d.Executable, ExecutableSHA256: d.Source.SHA256, ExecutableLength: d.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: map[string]string{"PAPERBOAT_SESSION_OWNER_CATALOG": c.Root, "PAPERBOAT_RUNTIME_STATE_ROOT": d.RuntimeRoot, "PAPERBOAT_WORKSPACE_ROOT": d.Workspace, "PAPERBOAT_SHELL": d.Shell}, Controller: controller}
+	config := service.Config{Platform: d.Source.Platform, Kind: service.SessionOwnerKind, Instance: d.Instance, Generation: d.Generation, ConfigRoot: c.ConfigRoot, Executable: d.Executable, ExecutableSHA256: d.Source.SHA256, ExecutableLength: d.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: map[string]string{"PAPERBOAT_SESSION_OWNER_CATALOG": c.Root, "PAPERBOAT_RUNTIME_STATE_ROOT": d.RuntimeRoot, "PAPERBOAT_WORKSPACE_ROOT": d.Workspace, "PAPERBOAT_SHELL": d.Shell}, Controller: controller}
 	if pending {
 		return service.NewPending(config)
 	}

@@ -181,15 +181,11 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 				return err
 			}
 		} else {
-			controller, err := service.ComponentController(request.Platform, service.HostdKind, request.UID, service.ExecRunner{})
+			component, err := hostd.NativeComponent(nil)
 			if err != nil {
 				return err
 			}
-			native, ok := controller.(service.NativeLifecycleController)
-			if !ok {
-				return service.ErrInvalidDefinition
-			}
-			status, err := native.Inspect(ctx, hostd.DefinitionPath())
+			status, err := component.Inspect(ctx)
 			if err != nil {
 				return err
 			}
@@ -200,7 +196,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 				}
 				defer abort()
 			}
-			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil); err != nil {
+			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater); err != nil {
 				return err
 			}
 		}
@@ -208,7 +204,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 			// A running systemd service cannot gain a newly declared credential
 			// without a process restart. Repair is the explicit user-authorized
 			// maintenance path for this one-time cutover.
-			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil); err != nil {
+			if err := stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater); err != nil {
 				return err
 			}
 		}

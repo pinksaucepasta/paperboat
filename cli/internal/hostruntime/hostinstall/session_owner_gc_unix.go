@@ -41,14 +41,23 @@ func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordin
 		}
 		keep[d.Executable] = true
 	}
-	carrier, err := readCarrierConfigFile(ctx, coordinator.Active.Instance)
-	if err == nil {
+	// A retired carrier generation still serves from its pin until it exits.
+	carriers, err := filepath.Glob(carrierGenerationPath(coordinator.Active.Instance, "*"))
+	if err != nil {
+		return err
+	}
+	for _, path := range append(carriers, carrierConfigPath(coordinator.Active.Instance)) {
+		carrier, err := readCarrierFile(ctx, coordinator.Active.Instance, path)
+		if installNotExistOnly(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
 		if carrier.UID != coordinator.Active.UID || carrier.Executable != filepath.Join(root, carrier.Source.SHA256, "pb") {
 			return ErrInvalidRequest
 		}
 		keep[carrier.Executable] = true
-	} else if !installNotExistOnly(err) {
-		return err
 	}
 	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(coordinator.Catalog))
 }
@@ -58,9 +67,9 @@ func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordin
 const pinStagingWindow = 10 * time.Minute
 
 // pinSweepBound is how many pin directories one sweep reads: every
-// session-owner reference, one stable carrier, and one unreferenced candidate,
-// so repeated sweeps make bounded progress.
-func pinSweepBound(c sessionowner.Catalog) int { return c.Maximum + 2 }
+// session-owner reference, the active and one retiring carrier, and one
+// unreferenced candidate, so repeated sweeps make bounded progress.
+func pinSweepBound(c sessionowner.Catalog) int { return c.Maximum + 3 }
 
 // Open each ancestor without following links and validate privileged custody.
 // All subsequent deletion uses directory descriptors, never recursive paths.

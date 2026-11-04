@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -29,5 +31,9 @@ func runNativeCarrier(ctx context.Context, config hostinstall.CarrierConfig) (re
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, notifier.Stopping()) }()
-	return runCarrierProcess(ctx, config, notifier.Ready, notifier.Watchdog, notifier.WatchdogInterval())
+	// SIGQUIT retires this generation gracefully, as in nginx and Teleport.
+	retire := make(chan os.Signal, 1)
+	signal.Notify(retire, syscall.SIGQUIT)
+	defer signal.Stop(retire)
+	return runCarrierProcess(ctx, config, notifier.Ready, notifier.Watchdog, notifier.WatchdogInterval(), retire)
 }

@@ -130,7 +130,7 @@ func Stop(ctx context.Context, request Request) (resultErr error) {
 	if err := lifecycle.Recover(ctx); err != nil {
 		return err
 	}
-	return lifecycle.Replace(ctx, func(ctx context.Context) error { return stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater, nil) })
+	return lifecycle.Replace(ctx, func(ctx context.Context) error { return stopUnixRuntimeRoles(ctx, legacyHost, hostd, updater) })
 }
 
 func uninstallValidated(ctx context.Context, request Request, paths installPaths) (resultErr error) {
@@ -191,7 +191,11 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 			return withUninstallStage("uninstall_sessions", err)
 		}
 		controller := service.UnixUpdateActivator{Platform: request.Platform, UID: request.UID, Runner: service.ExecRunner{}}
-		return uninstallWithActivation(ctx, controller.RemoveForUninstall, lifecycle.Uninstall)
+		if err := uninstallWithActivation(ctx, controller.RemoveForUninstall, lifecycle.Uninstall); err != nil {
+			return err
+		}
+		// Generations still retiring after an update are not lifecycle components.
+		return withUninstallStage("uninstall_generations", sweepGenerations(ctx, request, "", true))
 	}, restorePower)
 }
 

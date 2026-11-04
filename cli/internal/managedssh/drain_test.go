@@ -103,11 +103,12 @@ func TestCancelledCarrierDrainPreservesBridgeForRollback(t *testing.T) {
 }
 func TestCarrierDrainCapClosesLongLivedBridge(t *testing.T) {
 	host, _, bridge := openDrainBridge(t)
+	const cap = 200 * time.Millisecond
 	start := time.Now()
-	if err := host.Drain(t.Context()); err != nil {
+	if err := host.drain(t.Context(), cap); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed < CarrierDrainTimeout || elapsed > CarrierDrainTimeout+carrierDrainCloseTimeout+time.Second {
+	if elapsed := time.Since(start); elapsed < cap || elapsed > cap+carrierDrainCloseTimeout+time.Second {
 		t.Fatal("carrier did not honor its bounded drain", elapsed)
 	}
 	if err := <-bridge; !errors.Is(err, context.Canceled) {

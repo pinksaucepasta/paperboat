@@ -15,7 +15,7 @@ func WindowsSessionOwnerName(instance, generation string) (string, error) {
 
 func windowsConfiguredServiceName(config Config) string {
 	if config.Kind == SessionOwnerKind {
-		name, _ := WindowsSessionOwnerName(config.Instance, config.SessionOwnerGeneration)
+		name, _ := WindowsSessionOwnerName(config.Instance, config.Generation)
 		return name
 	}
 	return windowsServiceName(config.Kind, config.Instance)

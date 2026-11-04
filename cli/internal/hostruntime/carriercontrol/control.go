@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
@@ -29,7 +28,6 @@ const path = "/v1/carrier/control"
 var ErrInvalid = errors.New("invalid native carrier control")
 var ErrUnavailable = errors.New("native carrier control unavailable")
 var ErrBusy = errors.New("native carrier has active SSH connections")
-var ErrDrainBlocked = fmt.Errorf("native carrier SSH drain exceeded %s; close the active SSH/rsync streams and retry the update: %w", managedssh.CarrierDrainLimit, ErrBusy)
 var ErrFenced = errors.New("native carrier identity or SSH target is fenced")
 
 type request struct {
@@ -68,7 +66,7 @@ func (r request) valid() bool {
 	switch r.Operation {
 	case "move-terminals":
 		return r.SourceSHA256 == "" && len(r.Offer) > 0 && len(r.Offer) <= 8<<10
-	case "health", "retire-ssh", "drain-ssh", "resume-ssh", "open-ssh":
+	case "health", "retire-ssh", "resume-ssh", "open-ssh":
 		return r.SourceSHA256 == ""
 	case "retire-source":
 		return validHash(r.SourceSHA256)
@@ -157,8 +155,6 @@ func (s *Server) handler() http.Handler {
 			case "open-ssh":
 				open := s.SSH.OpenStreams()
 				result.SSHStreams = &open
-			case "drain-ssh":
-				operationErr = s.SSH.Drain(r.Context())
 			case "retire-ssh":
 				operationErr = s.SSH.Retire()
 			case "resume-ssh":
@@ -185,9 +181,6 @@ func (s *Server) handler() http.Handler {
 			switch {
 			case errors.Is(operationErr, managedssh.ErrSSHSessionsOpen):
 				result.Error = "busy"
-				if req.Operation == "drain-ssh" {
-					result.Error = "drain_blocked"
-				}
 			case errors.Is(operationErr, managedssh.ErrSSHHostStale), errors.Is(operationErr, hostdproto.ErrFenced):
 				result.Error = "fenced"
 			case operationErr != nil:
@@ -279,7 +272,7 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 		return errors.Join(ErrUnavailable, err)
 	}
 	// The write deadline covers the whole handler: it must outlast the longest
-	// operation (SSH drain, terminal move) or the client only sees EOF and the
+	// operation (terminal move) or the client only sees EOF and the
 	// update rolls back (pbvm4 feat2). Each operation bounds itself.
 	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: controlWriteTimeout, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
 	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
@@ -360,9 +353,6 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	if req.Operation == "move-terminals" {
 		timeout = 15 * time.Second
 	}
-	if req.Operation == "drain-ssh" {
-		timeout = managedssh.CarrierDrainLimit + 5*time.Second
-	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -393,8 +383,6 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 		return result, nil
 	case "busy":
 		return response{}, ErrBusy
-	case "drain_blocked":
-		return response{}, ErrDrainBlocked
 	case "fenced":
 		return response{}, ErrFenced
 	default:
@@ -431,8 +419,5 @@ func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
 	return err
 }
 
-// controlWriteTimeout exceeds every client-side operation bound (drain-ssh is
-// CarrierDrainLimit + 5 s; move-terminals 15 s).
-const controlWriteTimeout = managedssh.CarrierDrainLimit + 10*time.Second
-
-func (c *Client) DrainSSH(ctx context.Context) error { return c.call(ctx, "drain-ssh", "") }
+// controlWriteTimeout exceeds every client-side operation bound (move-terminals 15 s).
+const controlWriteTimeout = 20 * time.Second

@@ -113,7 +113,7 @@ func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
 		t.Run(platform, func(t *testing.T) {
 			layout := canonicalLayout(t, platform)
 			control := &controller{}
-			config := ComponentConfig{Source: installsource.Source{Version: "custom-build", Platform: platform, Architecture: "arm64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, Layout: layout, User: "alice", Group: "staff", UID: 501, GID: 20, HostdTokenFile: filepath.Join(t.TempDir(), "hostd.token"), ReleaseRepository: "", MachineID: "machine_1", HealthURL: "http://127.0.0.1:38080/healthz", Controller: control}
+			config := ComponentConfig{Source: installsource.Source{Version: "custom-build", Platform: platform, Architecture: "arm64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, Layout: layout, User: "alice", Group: "staff", UID: 501, GID: 20, HostdTokenFile: filepath.Join(t.TempDir(), "hostd.token"), Generation: testGeneration(HostdKind), ReleaseRepository: "", MachineID: "machine_1", HealthURL: "http://127.0.0.1:38080/healthz", Controller: control}
 			hostd, err := NewHostdInstaller(config)
 			if err != nil {
 				t.Fatal(err)
@@ -158,11 +158,11 @@ func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
 					}
 				}
 			} else {
-				if !strings.HasSuffix(hostd.DefinitionPath(), "/Library/LaunchDaemons/"+HostdLabel+".plist") || !strings.HasSuffix(updater.DefinitionPath(), "/Library/LaunchDaemons/"+UpdaterLabel+".plist") {
+				if !strings.HasSuffix(hostd.DefinitionPath(), "/Library/LaunchDaemons/"+HostdLabel+"."+testGeneration(HostdKind)+".plist") || !strings.HasSuffix(updater.DefinitionPath(), "/Library/LaunchDaemons/"+UpdaterLabel+".plist") {
 					t.Fatalf("paths hostd=%q updater=%q", hostd.DefinitionPath(), updater.DefinitionPath())
 				}
 				body, err := hostd.render()
-				if err != nil || !strings.Contains(string(body), "<string>alice</string>") || !strings.Contains(string(body), "<string>"+HostdLabel+"</string>") {
+				if err != nil || !strings.Contains(string(body), "<string>alice</string>") || !strings.Contains(string(body), "<string>"+HostdLabel+"."+testGeneration(HostdKind)+"</string>") {
 					t.Fatalf("hostd plist err=%v body=%s", err, body)
 				}
 				body, err = updater.render()
@@ -178,7 +178,7 @@ func TestServiceDefinitionUpgradeDoesNotRestartStableBinary(t *testing.T) {
 	layout := canonicalLayout(t, "linux")
 	control := &controller{}
 	installer, err := New(Config{
-		Platform: "linux", Kind: HostdKind, ConfigRoot: t.TempDir(), Executable: layout.Binary,
+		Platform: "linux", Kind: HostdKind, Generation: testGeneration(HostdKind), ConfigRoot: t.TempDir(), Executable: layout.Binary,
 		User: "alice", Group: "staff", Arguments: []string{"serve"}, UpgradeMode: UpgradeReload, Controller: control,
 	})
 	if err != nil {
@@ -216,14 +216,14 @@ func TestConfigApplyRestartsUnchangedDeclaration(t *testing.T) {
 }
 
 func TestHostdInstallerAcceptsOnlyExactRootEnrollment(t *testing.T) {
-	if _, err := NewHostdInstaller(ComponentConfig{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}}); err != nil {
+	if _, err := NewHostdInstaller(ComponentConfig{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Generation: testGeneration(HostdKind), Controller: &controller{}}); err != nil {
 		t.Fatalf("root hostd err=%v", err)
 	}
 	for _, config := range []ComponentConfig{
-		{Layout: canonicalLayout(t, "linux"), User: "alice", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}},
-		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 1000, HostdTokenFile: "/tmp/token", Controller: &controller{}},
-		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}},
-		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 1000, GID: 1000, HostdTokenFile: "/tmp/token", Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "alice", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Generation: testGeneration(HostdKind), Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 1000, HostdTokenFile: "/tmp/token", Generation: testGeneration(HostdKind), Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Generation: testGeneration(HostdKind), Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 1000, GID: 1000, HostdTokenFile: "/tmp/token", Generation: testGeneration(HostdKind), Controller: &controller{}},
 	} {
 		if _, err := NewHostdInstaller(config); !errors.Is(err, ErrInvalidDefinition) {
 			t.Fatalf("invalid identity %+v err=%v", config, err)
@@ -237,13 +237,19 @@ func TestComponentControllerUsesStableRoleServiceNames(t *testing.T) {
 		kind     string
 		want     string
 	}{
-		{platform: "linux", kind: HostdKind, want: "paperboat-hostd-u501.service"},
+		{platform: "linux", kind: HostdKind, want: "paperboat-hostd-u501-" + testGeneration(HostdKind) + ".service"},
 		{platform: "linux", kind: UpdaterKind, want: "paperboat-updated-u501.service"},
-		{platform: "darwin", kind: HostdKind, want: HostdLabel + ".u501"},
+		{platform: "darwin", kind: HostdKind, want: HostdLabel + ".u501." + testGeneration(HostdKind)},
 		{platform: "darwin", kind: UpdaterKind, want: UpdaterLabel + ".u501"},
 	} {
 		t.Run(test.platform+"_"+test.kind, func(t *testing.T) {
 			controller, err := ComponentController(test.platform, test.kind, 501, ExecRunner{})
+			if test.kind == HostdKind {
+				if _, fixed := ComponentController(test.platform, test.kind, 501, ExecRunner{}); fixed == nil {
+					t.Fatal("hostd has a fixed unit beside its generations")
+				}
+				controller, err = HostdController(test.platform, testGeneration(HostdKind), 501, ExecRunner{})
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

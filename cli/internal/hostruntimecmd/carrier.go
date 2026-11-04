@@ -21,20 +21,22 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("carrier", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	instanceFlag := flags.String("instance", "", "enrolled account instance")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || (runtime.GOOS == "windows") != (*instanceFlag != "") {
+	generationFlag := flags.String("generation", "", "carrier generation")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || (runtime.GOOS == "windows") != (*instanceFlag != "") || (runtime.GOOS == "windows") == (*generationFlag != "") {
 		return hostinstall.ErrInvalidRequest
 	}
 	instance, err := carrierInstance(*instanceFlag)
 	if err != nil {
 		return err
 	}
-	config, err := hostinstall.ReadCarrierConfig(ctx, instance)
+	config, err := hostinstall.ReadCarrierGeneration(ctx, instance, *generationFlag)
 	if err != nil {
 		return err
 	}
@@ -45,7 +47,10 @@ func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	return runNativeCarrier(ctx, config)
 }
 
-func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, ready, watchdog func() error, interval time.Duration) (resultErr error) {
+// runCarrierProcess serves one carrier generation. retire (SIGQUIT) means a newer
+// generation took over: stop admitting SSH, keep serving open bridges up to
+// managedssh.CarrierDrainTimeout, then exit 0 so the unit stays down.
+func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, ready, watchdog func() error, interval time.Duration, retire <-chan os.Signal) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -138,9 +143,20 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 		defer ticker.Stop()
 		ticks = ticker.C
 	}
+	var drained chan error
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-retire:
+			if drained == nil {
+				drained = make(chan error, 1)
+				go func() { drained <- ssh.Drain(runCtx) }()
+			}
+		case err := <-drained:
+			if err != nil {
+				diagnosticlog.TryWarn("carrier retirement closed open SSH bridges", "stage", "retire_drain")
+			}
 			return nil
 		case err := <-done:
 			finished = true

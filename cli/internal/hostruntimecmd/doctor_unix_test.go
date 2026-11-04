@@ -12,10 +12,10 @@ import (
 
 func TestSystemServiceScopeUsesUnifiedOSServices(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
-		units := []string{"paperboat-hostd-u1001.service", "paperboat-updated-u1001.service", "paperboat-runtime-privileged-u1001.service"}
+		units := []string{"paperboat-hostd-u1001-0123456789abcdef0123456789abcdef.service", "paperboat-updated-u1001.service", "paperboat-runtime-privileged-u1001.service"}
 		tool, verb, output := "/usr/bin/systemctl", "is-active", "active\n"
 		if platform == "darwin" {
-			units = []string{"system/com.pinksaucepasta.paperboat.hostd.u1001", "system/com.pinksaucepasta.paperboat.updated.u1001"}
+			units = []string{"system/com.pinksaucepasta.paperboat.hostd.u1001.0123456789abcdef0123456789abcdef", "system/com.pinksaucepasta.paperboat.updated.u1001"}
 			tool, verb, output = "/bin/launchctl", "print", "state = running\n"
 		}
 		for missing := -1; missing < len(units); missing++ {
@@ -27,7 +27,7 @@ func TestSystemServiceScopeUsesUnifiedOSServices(t *testing.T) {
 				}
 				return []byte(output), nil
 			}
-			scope, err := systemServiceScopeWithRunner(context.Background(), platform, 1001, run)
+			scope, err := systemServiceScopeWithRunner(context.Background(), platform, 1001, "0123456789abcdef0123456789abcdef", run)
 			if scope != "system" || (err != nil) != (missing >= 0) {
 				t.Fatalf("%s missing=%d scope=%s err=%v", platform, missing, scope, err)
 			}
@@ -53,10 +53,10 @@ func TestSystemServiceScopeRejectsLegacyOnlyAndMissingPlatformServices(t *testin
 		}
 		return nil, errors.New("unit missing")
 	}
-	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, legacyOnly); err == nil {
+	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, "0123456789abcdef0123456789abcdef", legacyOnly); err == nil {
 		t.Fatal("legacy runtime-host service satisfied host readiness")
 	}
-	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, func(context.Context, string, ...string) ([]byte, error) {
+	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, "0123456789abcdef0123456789abcdef", func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("unit missing")
 	}); err == nil {
 		t.Fatal("missing current unit satisfied host readiness")

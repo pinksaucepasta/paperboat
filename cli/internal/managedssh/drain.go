@@ -6,16 +6,22 @@ import (
 	"time"
 )
 
-// CarrierDrainTimeout bounds how long accepted SSH/rsync bridges may retain a
-// retiring transport. At the cap they are closed; clients reconnect normally.
-const CarrierDrainTimeout = 30 * time.Second
+// CarrierDrainTimeout bounds how long a retired carrier generation keeps serving
+// its accepted SSH/rsync bridges after the new generation took over new ones. At
+// the cap they are closed; clients reconnect to the new generation. Like Teleport,
+// whose old process drains existing connections for up to the maximum
+// certificate lifetime (lib/service/signals.go), the bound is long: an update
+// must never cut a working session.
+const CarrierDrainTimeout = 12 * time.Hour
 
 const carrierDrainCloseTimeout = 5 * time.Second
 
-// CarrierDrainLimit includes forced bridge closure after the courteous drain.
-const CarrierDrainLimit = CarrierDrainTimeout + carrierDrainCloseTimeout
+// Drain fences new bridges at once, then waits for every accepted one to end,
+// closing those still open at CarrierDrainTimeout. A cancelled ctx returns
+// without closing anything.
+func (h *Host) Drain(ctx context.Context) error { return h.drain(ctx, CarrierDrainTimeout) }
 
-func (h *Host) Drain(ctx context.Context) error {
+func (h *Host) drain(ctx context.Context, timeout time.Duration) error {
 	if h == nil || ctx == nil {
 		return ErrSSHHostInvalid
 	}
@@ -25,13 +31,13 @@ func (h *Host) Drain(ctx context.Context) error {
 		h.changed = make(chan struct{})
 	}
 	h.mu.Unlock()
-	drain, cancel := context.WithTimeout(ctx, CarrierDrainTimeout)
+	drain, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if err := h.waitDrained(drain); err == nil {
 		return nil
 	}
-	// An aborted update must not terminate accepted sessions. The caller
-	// resumes this same primary's admission through the existing rollback.
+	// A stopped carrier must not terminate accepted sessions itself; its exit
+	// does, and an aborted retirement may still resume admission.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

@@ -6,7 +6,7 @@ func windowsSessionOwnerController() (Controller, error) { return nil, ErrUnsupp
 
 func windowsConfiguredServiceName(config Config) string {
 	if config.Kind == SessionOwnerKind {
-		return "PaperboatSessionOwner-" + config.Instance + "-" + config.SessionOwnerGeneration
+		return "PaperboatSessionOwner-" + config.Instance + "-" + config.Generation
 	}
 	return windowsServiceName(config.Kind, config.Instance)
 }
