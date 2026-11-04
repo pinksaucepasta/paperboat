@@ -22,6 +22,12 @@ func TestPostgresTeamPagesEqualTheFullRead(t *testing.T) {
 	})
 	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) SELECT $1,k,k||'_'||r,$2 FROM unnest(ARRAY['preview','tunnel']) k, generate_series(1,2) r`, f.team, f.owner)
 	f.exec(`INSERT INTO paperboat.team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) SELECT $1,a,k,k||'_'||r,'use',1,true FROM unnest($2::text[]) a, unnest(ARRAY['preview','tunnel']) k, generate_series(1,2) r`, f.team, []string{f.member, f.other, f.admin})
+	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'env',$1,$2)`, f.team, f.owner)
+	f.exec(`INSERT INTO paperboat.environment_vault_teams(team_id,key_epoch) VALUES($1,1)`, f.team)
+	f.exec(`INSERT INTO paperboat.environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, f.team, f.owner)
+	if _, err := f.service.Policy(f.ctx, f.owner, f.team, 0); err != nil {
+		t.Fatal(err)
+	}
 	var generation uint64
 	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, f.team).Scan(&generation); err != nil {
 		t.Fatal(err)
