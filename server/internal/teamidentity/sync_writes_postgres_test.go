@@ -60,9 +60,10 @@ func TestPostgresIdentitySyncWritesOncePerChange(t *testing.T) {
 	if dirty != teams || distinct != 1 {
 		t.Fatalf("%d teams dirty written by %d statements, want %d in 1", dirty, distinct, teams)
 	}
-	// Tick twice: the first records each failure, the second must write nothing.
-	_ = s.syncTick(ctx)
-	_ = s.syncTick(ctx)
+	// Three ticks (5 teams each) record every team's failure once.
+	for range 3 {
+		_ = s.syncTick(ctx)
+	}
 	rowVersions := func() string {
 		var v string
 		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(string_agg(team_id||xmin::text, ',' ORDER BY team_id),'') FROM paperboat.team_identity_state WHERE team_id LIKE $1`, "sw-"+x+"-%").Scan(&v); err != nil {
@@ -73,7 +74,7 @@ func TestPostgresIdentitySyncWritesOncePerChange(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state SET synced_at=now()-interval '2 days' WHERE team_id LIKE $1`, "sw-"+x+"-%"); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.syncTick(ctx) // stale teams are marked dirty once
+	_ = s.syncTick(ctx) // stale teams are marked dirty once, their failures are unchanged
 	before := rowVersions()
 	_ = s.syncTick(ctx)
 	if after := rowVersions(); after != before {
