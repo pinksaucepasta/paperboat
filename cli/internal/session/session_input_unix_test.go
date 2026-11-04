@@ -1,10 +1,11 @@
-//go:build !windows
+//go:build linux || darwin
 
 package session
 
 import (
 	"bytes"
 	"context"
+	"golang.org/x/sys/unix"
 	"os"
 	"sync"
 	"testing"
@@ -70,7 +71,25 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 		close(s.release)
 		t.Fatal("stdin was not read while the sink was blocked; Ctrl-C never reached the client")
 	}
-	time.Sleep(50 * time.Millisecond)
+	// A pipe write returns once buffered, not once read: release the sink only
+	// after Run has read the Ctrl-C, or the last chunk can arrive after the sink
+	// unblocked, when the paste rightly goes with it (CI flake, c74bfb329).
+	unread := func() int {
+		n := -1
+		raw, err := inR.SyscallConn()
+		if err == nil {
+			_ = raw.Control(func(fd uintptr) { n, _ = unix.IoctlGetInt(int(fd), fionread) })
+		}
+		return n
+	}
+	for drained := time.After(5 * time.Second); unread() != 0; {
+		select {
+		case <-drained:
+			close(s.release)
+			t.Fatal("stdin still held unread input while the sink was blocked")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	close(s.release)
 	deadline := time.After(5 * time.Second)
 	for {
