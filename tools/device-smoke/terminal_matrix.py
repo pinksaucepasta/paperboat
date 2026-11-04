@@ -167,9 +167,20 @@ def drop_restore(block):
 
 # Rows. Each takes (args, sessions) and records its own result; sessions collects names to clean up.
 
+_TARGET_OS = {}
+
+
+def target_darwin(target):
+    """True when the machine the sessions run on is a Mac (its tools are BSD: stty -f, shasum)."""
+    if target not in _TARGET_OS:
+        out = subprocess.run([str(PB), 'exec', target, '--', 'uname', '-s'], capture_output=True, text=True, timeout=60).stdout
+        _TARGET_OS[target] = 'Darwin' in out
+    return _TARGET_OS[target]
+
+
 def pty_size(target, tty):
     """The session's PTY size read from outside it (pb exec), so measuring never counts as activity."""
-    out = subprocess.run([str(PB), 'exec', target, '--', 'stty', '-F', tty, 'size'], capture_output=True, text=True, timeout=60).stdout
+    out = subprocess.run([str(PB), 'exec', target, '--', 'stty', '-f' if target_darwin(target) else '-F', tty, 'size'], capture_output=True, text=True, timeout=60).stdout
     found = re.findall(r'(\d+) (\d+)', out)
     return tuple(map(int, found[-1])) if found else None
 
@@ -658,7 +669,8 @@ def large_paste(a, sessions):
         c1.send('stty raw -echo; head -c ' + str(len(body)) + ' > ' + path + '; stty sane -echo\r')
         time.sleep(1)
         c1.send(body)
-        out = c1.run('sha256sum ' + path + '; rm -f ' + path, 120)
+        digest = 'shasum -a 256 ' if target_darwin(a.target) else 'sha256sum '
+        out = c1.run(digest + path + '; rm -f ' + path, 120)
         row('N8 256 KiB paste arrives byte for byte', want.encode() in out)
         c1.send('stty echo\r')
         c1.settle(1)

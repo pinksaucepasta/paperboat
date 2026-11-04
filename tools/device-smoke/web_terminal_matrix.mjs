@@ -333,7 +333,7 @@ const rows = {
       const target = document.querySelector(".terminal-host textarea") ?? document.activeElement
       target.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }))
     }, body)
-    const out = (await run(page, `sha256sum ${path}; rm -f ${path}`, 120_000)) ?? ""
+    const out = (await run(page, `{ command -v sha256sum >/dev/null && sha256sum ${path} || shasum -a 256 ${path}; }; rm -f ${path}`, 120_000)) ?? ""
     row("W11 64 KiB paste reaches the shell byte for byte", out.includes(want), id)
     await page.close()
     await closeTerminal(ctx, id)
