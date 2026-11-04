@@ -72,7 +72,83 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 	if err := db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}
-	router, machines := task39Stack(t, database, base)
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	secret := base64.RawURLEncoding.EncodeToString(key)
+	clear(key)
+	cfg := config.Default()
+	cfg.HTTP.PublicBaseURL = base
+	writer := audit.NewWriter(database)
+	signer, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := auth.NewService(database, writer, testauth.FakeWorkOSVerifier{}, []string{secret}, true, "https://login.example.test")
+	cliAuth := auth.NewDeviceService(database, writer, cfg.CLIAuth, []string{secret})
+	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
+	billingService := billing.NewWorkspaceService(database, nil, secret)
+	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	machines := usermachines.New(database, writer, usermachines.Policy{PairingLifetime: 30 * time.Minute, OfflineAfter: cfg.UserMachines.OfflineAfter, AllowedPlatforms: cfg.UserMachines.AllowedPlatforms}, billingService)
+	machines.ConfigureInstallationEncryption(secret)
+	machines.ConfigureAccess(nil, base)
+	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(cfg.Access.FileTransfer.Published()))
+	machines.ConfigureCLIAuth(cfg.CLIAuth.ClientID, cfg.CLIAuth.AllowedScopes, cfg.CLIAuth.AccessTokenLifetime, cfg.CLIAuth.RefreshTokenLifetime, secret)
+	machines.ConfigureMachineControl(signer, base)
+	helperPort := int64(38080)
+	if raw := strings.TrimSpace(os.Getenv("PAPERBOAT_TASK39_HELPER_PORT")); raw != "" {
+		var err error
+		helperPort, err = strconv.ParseInt(raw, 10, 32)
+		if err != nil {
+			t.Fatal("invalid helper port")
+		}
+	}
+	if err := machines.ConfigureRuntimeRoute("task39.invalid", int32(helperPort)); err != nil {
+		t.Fatal(err)
+	}
+
+	enrollment := controlplane.NewEnrollmentService(database, signer, writer, base, secret)
+	machines.ConfigureHelperEnrollment(func(ctx context.Context, actor, operation, environment string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
+		grant, err := enrollment.Issue(ctx, actor, operation, environment, lifetime)
+		return usermachines.HelperEnrollmentGrant{EnrollmentID: grant.EnrollmentID, HelperID: grant.HelperID, Credential: grant.Credential, ExpiresAt: grant.ExpiresAt}, err
+	})
+	machines.ConfigureHelperRecovery(func(ctx context.Context, actor, operation, environment, helper string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
+		grant, err := enrollment.RecoverHelper(ctx, actor, operation, environment, helper, lifetime)
+		return usermachines.HelperEnrollmentGrant{EnrollmentID: grant.EnrollmentID, HelperID: grant.HelperID, Credential: grant.Credential, ExpiresAt: grant.ExpiresAt}, err
+	})
+	identityRepo, err := peeridentity.NewSQLRepository(database, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := peeridentity.NewService(identityRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	network, err := peersessions.NewNetworkService(database, signer, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshRepository, err := managedssh.NewSQLRepository(database, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshService, err := managedssh.NewService(sshRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machineVerifier, err := NewPreviewAttachmentMachineProofVerifier(enrollment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edgeVerifier, err := previewattachment.NewDBPreviewEdgeRequestVerifier(database, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeCarrier := &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: database}, Machine: machineVerifier, Edge: edgeVerifier}
+	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, ManagedSSH: sshService, MachineServices: machineservices.New(database, "local.example.test"), RuntimeCarrierAttachment: runtimeCarrier, LazyActivation: &lazyaccess.Activator{DB: database}, MeteringRepo: metering.NewRuntimeRepository(database, cfg.UserMachines.OfflineAfter/2, cfg.ConfigSync.StaleHeartbeatAfter)})}
 	type user struct {
 		Name         string `json:"name"`
 		AccountID    string `json:"account_id"`
@@ -169,95 +245,6 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 			}
 		}
 	}
-}
-
-// task39Stack wires the private fixture router (real services, fake identity provider only).
-func task39Stack(t *testing.T, database *db.DB, base string) (router http.Handler, machines *usermachines.Service) {
-	t.Helper()
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatal(err)
-	}
-	secret := base64.RawURLEncoding.EncodeToString(key)
-	clear(key)
-	cfg := config.Default()
-	cfg.HTTP.PublicBaseURL = base
-	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain, cfg.ReleaseBaseURL = "local.example.test", "runtime.example.test", base
-	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
-	cfg.HTTP.BrowserLoginOrigin, cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base, base+"/cli/authorize", base+"/dashboard/machines"
-	if err := cfg.ValidateClientDiscovery(); err != nil {
-		t.Fatal(err)
-	}
-	writer := audit.NewWriter(database)
-	signer, err := mint.NewEphemeral(time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	accounts := auth.NewService(database, writer, testauth.FakeWorkOSVerifier{}, []string{secret}, true, "https://login.example.test")
-	cliAuth := auth.NewDeviceService(database, writer, cfg.CLIAuth, []string{secret})
-	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
-	billingService := billing.NewWorkspaceService(database, nil, secret)
-	if err := billingService.InitializeAllowancePolicy(context.Background(), nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	machines = usermachines.New(database, writer, usermachines.Policy{PairingLifetime: 30 * time.Minute, OfflineAfter: cfg.UserMachines.OfflineAfter, AllowedPlatforms: cfg.UserMachines.AllowedPlatforms}, billingService)
-	machines.ConfigureInstallationEncryption(secret)
-	machines.ConfigureAccess(nil, base)
-	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy(cfg.Access.FileTransfer.Published()))
-	machines.ConfigureCLIAuth(cfg.CLIAuth.ClientID, cfg.CLIAuth.AllowedScopes, cfg.CLIAuth.AccessTokenLifetime, cfg.CLIAuth.RefreshTokenLifetime, secret)
-	machines.ConfigureMachineControl(signer, base)
-	helperPort := int64(38080)
-	if raw := strings.TrimSpace(os.Getenv("PAPERBOAT_TASK39_HELPER_PORT")); raw != "" {
-		var err error
-		helperPort, err = strconv.ParseInt(raw, 10, 32)
-		if err != nil {
-			t.Fatal("invalid helper port")
-		}
-	}
-	if err := machines.ConfigureRuntimeRoute("task39.invalid", int32(helperPort)); err != nil {
-		t.Fatal(err)
-	}
-
-	enrollment := controlplane.NewEnrollmentService(database, signer, writer, base, secret)
-	machines.ConfigureHelperEnrollment(func(ctx context.Context, actor, operation, environment string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
-		grant, err := enrollment.Issue(ctx, actor, operation, environment, lifetime)
-		return usermachines.HelperEnrollmentGrant{EnrollmentID: grant.EnrollmentID, HelperID: grant.HelperID, Credential: grant.Credential, ExpiresAt: grant.ExpiresAt}, err
-	})
-	machines.ConfigureHelperRecovery(func(ctx context.Context, actor, operation, environment, helper string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
-		grant, err := enrollment.RecoverHelper(ctx, actor, operation, environment, helper, lifetime)
-		return usermachines.HelperEnrollmentGrant{EnrollmentID: grant.EnrollmentID, HelperID: grant.HelperID, Credential: grant.Credential, ExpiresAt: grant.ExpiresAt}, err
-	})
-	identityRepo, err := peeridentity.NewSQLRepository(database, writer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	identities, err := peeridentity.NewService(identityRepo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	network, err := peersessions.NewNetworkService(database, signer, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sshRepository, err := managedssh.NewSQLRepository(database, writer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sshService, err := managedssh.NewService(sshRepository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	machineVerifier, err := NewPreviewAttachmentMachineProofVerifier(enrollment)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edgeVerifier, err := previewattachment.NewDBPreviewEdgeRequestVerifier(database, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtimeCarrier := &runtimeattachment.Handler{Service: &runtimeattachment.Service{DB: database}, Machine: machineVerifier, Edge: edgeVerifier}
-	router = authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, ManagedSSH: sshService, MachineServices: machineservices.New(database, "local.example.test"), RuntimeCarrierAttachment: runtimeCarrier, LazyActivation: &lazyaccess.Activator{DB: database}, MeteringRepo: metering.NewRuntimeRepository(database, cfg.UserMachines.OfflineAfter/2, cfg.ConfigSync.StaleHeartbeatAfter)})}
-	return router, machines
 }
 
 // An installed runtime always sends the bounded machine-services snapshot,

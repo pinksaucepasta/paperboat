@@ -8,7 +8,11 @@ cd "$(dirname "$0")/../.."
 root=$PWD work=$(mktemp -d) stages=${E2E_STAGES:-pair}
 host=e2e-server.example.test port=8443
 gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
-trap 'touch "$work/stop"; sleep 3; docker rm -f e2e-a e2e-b >/dev/null 2>&1 || true; kill $(jobs -p) 2>/dev/null || true' EXIT
+diagnose() { # on failure: what the server answered and what the daemons said
+  echo "--- server last requests"; { grep -E "request method|panic" "$work/server.log" | tail -40 | cut -c1-300; } || true
+  for c in e2e-a e2e-b; do echo "--- $c daemon"; docker exec -u pbt -e XDG_RUNTIME_DIR=/run/user/1000 $c journalctl --user --no-pager -n 25 2>&1 | cut -c1-300 || true; done
+}
+trap 'rc=$?; [ $rc -eq 0 ] || diagnose; touch "$work/stop"; sleep 3; docker rm -f e2e-a e2e-b >/dev/null 2>&1 || true; kill $(jobs -p) 2>/dev/null || true' EXIT
 step() { printf '\n== %s\n' "$*"; }
 has() { [[ " $stages " == *" $1 "* ]]; }
 
@@ -25,7 +29,7 @@ v=dev-e2e; p=github.com/pinksaucepasta/paperboat/internal/buildinfo
 step "server"
 (cd server && PAPERBOAT_E2E_DIR=$work PAPERBOAT_E2E_LISTEN=0.0.0.0:$port PAPERBOAT_E2E_URL=https://$host:$port \
   PAPERBOAT_E2E_TLS_CERT=$work/tls.pem PAPERBOAT_E2E_TLS_KEY=$work/tls.key \
-  go test -count=1 -timeout 30m -run '^TestE2EServe$' ./internal/httpapi >"$work/server.log" 2>&1) &
+  go test -v -count=1 -timeout 30m -run "^TestE2EServe\$" ./internal/app >"$work/server.log" 2>&1) &
 for _ in $(seq 120); do [ -s "$work/tokens.json" ] && break; sleep 1; done
 [ -s "$work/tokens.json" ] || { tail -30 "$work/server.log"; echo "server did not start" >&2; exit 1; }
 
@@ -53,6 +57,10 @@ for name in a b; do
   done
   grep -q '"ok": *true' <<<"$out" || { echo "pair e2e-$name failed: $out" >&2; exit 1; }
   $X rm -f token
+  # Sign pb in as the account, for exec/send/preview between the machines.
+  python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["api-token"])' "$work/tokens.json" |
+    ${X/docker exec/docker exec -i} .local/bin/pb login --api-token-file - >/dev/null ||
+    { echo "--- pb doctor"; $X .local/bin/pb doctor --json 2>&1 | cut -c1-1500; echo "--- paperboatd"; $X journalctl --user -u paperboatd --no-pager -n 30 | cut -c1-300; exit 1; }
   echo "paired e2e-$name"
 done
 has pair && echo "stage pair: PASS"

@@ -27,7 +27,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
-      E2E_STAGES: pair
+      E2E_STAGES: pair exec
       # The branch r21-e2e-break proves the job goes red: its enrollment token is wrong.
       E2E_BREAK: ${{ endsWith(github.ref_name, '-break') && 'token' || '' }}
     steps:
