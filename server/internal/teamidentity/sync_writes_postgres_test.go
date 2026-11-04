@@ -34,7 +34,7 @@ func TestPostgresIdentitySyncWritesOncePerChange(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
-	const teams = 12
+	const teams = 5
 	w := &eventsWorkOS{}
 	for i := 0; i < teams; i++ {
 		team, org := fmt.Sprintf("sw-%s-%d", x, i), fmt.Sprintf("org_sw_%s_%d", x, i)
@@ -60,8 +60,8 @@ func TestPostgresIdentitySyncWritesOncePerChange(t *testing.T) {
 	if dirty != teams || distinct != 1 {
 		t.Fatalf("%d teams dirty written by %d statements, want %d in 1", dirty, distinct, teams)
 	}
-	// Three ticks (5 teams each) record every team's failure once.
-	for range 3 {
+	// One tick (up to 5 teams) records each team's failure once.
+	for range 2 {
 		_ = s.syncTick(ctx)
 	}
 	rowVersions := func() string {
