@@ -219,12 +219,15 @@ async function f308() {
     })
     log(shared.ok(), "the owner shares the terminal with the teammate's email")
     const memberCtx = await browser.newContext({ storageState: MEMBER_STATE, viewport: { width: 1100, height: 700 } })
+    // The name the panel must show is the teammate's own display name, whoever the second account is.
+    const memberName = (await (await memberCtx.request.get(`${origin}/api/v1/me`)).json()).data?.display_name
+    log(!!memberName, "the teammate account has a display name")
     const member = await memberCtx.newPage()
     await member.goto(`${origin}/terminals/${id}`, { timeout: 120000 })
     log(await phaseIs(member, "attached"), "the teammate joins from their own account")
-    log(await peopleHave(p, "Lane Terminal"), "the owner's panel lists the teammate by real name, not an id", (await people(p)).join(" | "))
+    log(await peopleHave(p, memberName ?? ""), "the owner's panel lists the teammate by real name, not an id", (await people(p)).join(" | "))
     await member.close()
-    log(await peopleLack(p, "Lane Terminal", 15000), "presence: the teammate leaves the panel when their tab closes")
+    log(await peopleLack(p, memberName ?? "", 15000), "presence: the teammate leaves the panel when their tab closes")
     await memberCtx.close()
   } else console.log("SKIP  teammate steps: set MEMBER_STATE and MEMBER_EMAIL")
   return id
