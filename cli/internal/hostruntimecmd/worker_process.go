@@ -4,6 +4,8 @@ package hostruntimecmd
 
 import (
 	"context"
+	"os"
+
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 )
 
@@ -20,6 +22,9 @@ type workerStartRequest struct {
 	HostdEndpoint     string
 	Capability        []byte
 	MutationsDisabled bool
+	// Listener is the loopback runtime listener hostd owns; every worker
+	// inherits it so the port never closes while workers or hostd change.
+	Listener *os.File
 }
 
 type workerProcess interface {
@@ -34,4 +39,10 @@ type exitWatcher interface {
 	Exited() <-chan struct{}
 	// ExitReason is a bounded, non-secret description of how the process ended.
 	ExitReason() string
+}
+
+// drainer is implemented by worker processes that can finish in-flight
+// requests before exiting, used when a new hostd generation took over.
+type drainer interface {
+	Drain(context.Context) error
 }

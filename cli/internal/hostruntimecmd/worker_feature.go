@@ -26,7 +26,8 @@ type activeFeature struct {
 	bridge *workloadbridge.Client
 }
 
-func (f *activeFeature) Health(ctx context.Context) error { return f.bridge.Health(ctx) }
+func (f *activeFeature) Health(ctx context.Context) error     { return f.bridge.Health(ctx) }
+func (f *activeFeature) DrainLocal(ctx context.Context) error { return f.host.DrainLocal(ctx) }
 func (f *activeFeature) Shutdown(ctx context.Context) error {
 	defer f.bridge.Close()
 	return f.host.Shutdown(ctx)

@@ -48,6 +48,10 @@ func (nativeWorkerStarter) Start(ctx context.Context, request workerStartRequest
 		"--api-min", strconv.FormatUint(uint64(request.APIMin), 10),
 		"--api-max", strconv.FormatUint(uint64(request.APIMax), 10), "--wait-activation")
 	command.ExtraFiles = []*os.File{reader}
+	if request.Listener != nil {
+		command.ExtraFiles = append(command.ExtraFiles, request.Listener)
+		command.Env = append(os.Environ(), "PAPERBOAT_RUNTIME_LISTEN_FD=4")
+	}
 	command.Stdin = controlReader
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -189,10 +193,21 @@ func (w *execWorker) Activate(ctx context.Context) (hostdproto.Status, error) {
 	return status, nil
 }
 func (w *execWorker) Stop(ctx context.Context) error {
+	return w.signalAndWait(ctx, os.Interrupt, 5*time.Second)
+}
+
+// Drain asks the worker to stop accepting and finish in-flight requests
+// (nginx's graceful QUIT, src/core/ngx_config.h NGX_SHUTDOWN_SIGNAL), killing
+// it when ctx ends or after HandoverDrainLimit.
+func (w *execWorker) Drain(ctx context.Context) error {
+	return w.signalAndWait(ctx, syscall.SIGQUIT, hostdproto.HandoverDrainLimit)
+}
+
+func (w *execWorker) signalAndWait(ctx context.Context, signal os.Signal, grace time.Duration) error {
 	if w.command == nil || w.command.Process == nil {
 		return nil
 	}
-	_ = w.command.Process.Signal(os.Interrupt)
+	_ = w.command.Process.Signal(signal)
 	select {
 	case <-ctx.Done():
 		_ = w.command.Process.Kill()
@@ -204,7 +219,7 @@ func (w *execWorker) Stop(ctx context.Context) error {
 			return w.waitErr
 		}
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(grace):
 		_ = w.command.Process.Kill()
 		<-w.exited
 		return nil

@@ -868,6 +868,11 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	return errors.Join(h.workers.Shutdown(ctx), h.hostd.Shutdown(ctx))
 }
 
+// DrainLocal stops accepting on the loopback listener and waits, until ctx
+// ends, for in-flight local requests. A retiring worker generation calls it
+// before Shutdown while the next generation already serves the same socket.
+func (h *Host) DrainLocal(ctx context.Context) error { return h.http.Shutdown(ctx) }
+
 // ShutdownHostd drains the stable daemon after the external runtime worker has
 // stopped. It deliberately does not touch the in-process Runtime, which was
 // never started by StartHostd.

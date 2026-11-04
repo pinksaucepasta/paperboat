@@ -8,9 +8,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -66,6 +70,16 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 	if err := notifier.Starting(); err != nil {
 		return err
 	}
+	listeners := &hostdListeners{socket: socket}
+	defer func() { resultErr = errors.Join(resultErr, listeners.close()) }()
+	handover, err := listeners.dialHandover(ctx, token)
+	if err != nil {
+		return runtimeFailure("hostd could not take over from the running generation", err, notifier.Degraded("hostd handover failed"))
+	}
+	if handover != nil {
+		// Closing before commit leaves the old generation serving.
+		defer handover.Close()
+	}
 	host, err := newHost(ctx, buildinfo.Version, os.Getenv)
 	if err != nil {
 		return runtimeFailure("hostd initialization failed", err, notifier.Degraded("hostd initialization failed"))
@@ -73,11 +87,17 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 	if err := host.StartHostd(ctx); err != nil {
 		return runtimeFailure("hostd startup failed", err, notifier.Degraded("hostd startup failed"))
 	}
-	template := workerStartRequest{Executable: executable, Version: buildinfo.Version, APIMin: 1, APIMax: 1, WorkerID: "runtime-" + strings.ReplaceAll(buildinfo.Version, " ", "-"), UID: os.Geteuid(), GID: os.Getegid(), HostdEndpoint: socket, Capability: token, MutationsDisabled: true}
+	if err := listeners.bindRuntime(host); err != nil {
+		return err
+	}
+	// Workers use this generation's own lifecycle socket, so an old worker still
+	// finishing requests never reaches the new hostd, nor the new worker the old.
+	private := socket + "." + strconv.Itoa(os.Getpid())
+	template := workerStartRequest{Executable: executable, Version: buildinfo.Version, APIMin: 1, APIMax: 1, WorkerID: "runtime-" + strings.ReplaceAll(buildinfo.Version, " ", "-"), UID: os.Geteuid(), GID: os.Getegid(), HostdEndpoint: private, Capability: token, MutationsDisabled: true, Listener: listeners.runtime}
 	owned := newOwnedWorkers(ctx, template, startWorker)
 
 	var stopServer context.CancelFunc
-	var serverDone chan error
+	var serving []chan error
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancel()
@@ -85,10 +105,13 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		var serverErr error
 		if stopServer != nil {
 			stopServer()
-			select {
-			case serverErr = <-serverDone:
-			case <-shutdownCtx.Done():
-				serverErr = runtimeContextFailure(shutdownCtx)
+			for _, done := range serving {
+				select {
+				case err := <-done:
+					serverErr = errors.Join(serverErr, err)
+				case <-shutdownCtx.Done():
+					serverErr = errors.Join(serverErr, runtimeContextFailure(shutdownCtx))
+				}
 			}
 		}
 		resultErr = withCleanup("hostd failed or its cleanup did not finish", resultErr, workerErr, serverErr, notifier.Stopping(), host.ShutdownHostd(shutdownCtx))
@@ -106,19 +129,29 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		stopCompletion := startMaintenanceCompletion(ctx, server)
 		defer stopCompletion()
 	}
-	if owner, ok := host.(*hostruntime.ProcessOwner); ok {
-		owner.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
+	if err := listeners.bindPrivate(server, private, handover == nil); err != nil {
+		return err
+	}
+	owner, _ := host.(*hostruntime.ProcessOwner)
+	if owner != nil {
+		owner.BindLifecycle(private+".workloads", token, server.Status, server.AcquireActive)
 		if err := owner.StartBridge(ctx); err != nil {
 			return err
 		}
 	}
 	serverCtx, serverCancel := context.WithCancel(ctx)
 	stopServer = serverCancel
-	serverDone = make(chan error, 1)
-	go func() { defer close(serverDone); serverDone <- server.Run(serverCtx) }()
-	if err := waitForHostdSocket(ctx, socket, serverDone); err != nil {
-		stopServer()
-		return err
+	serve := func(listener *net.UnixListener) chan error {
+		done := make(chan error, 1)
+		// Closed after the result, so the shutdown wait never blocks on a
+		// result the run loop already took.
+		go func() { defer close(done); done <- server.Serve(serverCtx, listener) }()
+		serving = append(serving, done)
+		return done
+	}
+	serverDone := serve(listeners.private)
+	if handover == nil {
+		listeners.serveFixed(serve, owner)
 	}
 	_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "start", WorkerID: template.WorkerID, Executable: executable, Version: template.Version, APIMin: 1, APIMax: 1})
 	if err == nil {
@@ -127,80 +160,63 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 	if err == nil {
 		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
 	}
+	if err == nil && handover != nil {
+		// The new worker already serves the shared runtime listener. The fixed
+		// paths move last, so the old generation answers them until now.
+		if err = listeners.commit(handover); err == nil {
+			listeners.serveFixed(serve, owner)
+		}
+	}
 	if err != nil {
-		stopServer()
 		return err
 	}
 	if err := notifier.Ready(); err != nil {
-		stopServer()
 		return err
 	}
 	if _, err := fmt.Fprintln(output, "pb daemon hostd ready"); err != nil {
 		return runtimeFailure("hostd readiness could not be written", err)
 	}
+	handedOver := make(chan error, 1)
+	go func() {
+		handedOver <- hostdproto.ServeHandover(serverCtx, listeners.handover, hostdproto.HandoverConfig{UID: os.Geteuid(), Token: token, Start: listeners.startFiles(), Commit: listeners.commitFiles()})
+	}()
 	watchdogInterval := notifier.WatchdogInterval()
 	var watchdog <-chan time.Time
-	var watchdogTicker *time.Ticker
 	if watchdogInterval > 0 {
-		watchdogTicker = time.NewTicker(watchdogInterval)
+		watchdogTicker := time.NewTicker(watchdogInterval)
 		defer watchdogTicker.Stop()
 		watchdog = watchdogTicker.C
 	}
-	var runErr error
-run:
 	for {
 		select {
 		case serverErr := <-serverDone:
 			if ctx.Err() != nil && serverErr == nil {
-				runErr = runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
-			} else {
-				runErr = runtimeFailure("hostd lifecycle listener stopped", serverErr)
+				return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
 			}
-			break run
+			return runtimeFailure("hostd lifecycle listener stopped", serverErr)
+		case err := <-handedOver:
+			if ctx.Err() != nil {
+				return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
+			}
+			if err != nil {
+				return runtimeFailure("hostd handover listener stopped", err)
+			}
+			// Teleport's parent Shutdown once the child signalled readiness
+			// (lib/service/signals.go): stop accepting, drain, exit 0.
+			listeners.stopAccepting()
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostdproto.HandoverDrainLimit)
+			defer cancel()
+			return errors.Join(notifier.Draining(), owned.drain(drainCtx))
 		case lost := <-owned.lost:
 			// Without its worker the machine is not serving; Restart=always brings
 			// hostd and a fresh worker back instead of waiting for an updater.
-			runErr = errors.Join(lost, notifier.Degraded("runtime worker exited"))
-			break run
+			return errors.Join(lost, notifier.Degraded("runtime worker exited"))
 		case <-ctx.Done():
-			runErr = runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
-			break run
+			return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
 		case <-watchdog:
 			if err := notifier.Watchdog(); err != nil {
-				runErr = errors.Join(err, notifier.Degraded("watchdog notification failed"))
-				break run
+				return errors.Join(err, notifier.Degraded("watchdog notification failed"))
 			}
-		}
-	}
-	return runErr
-}
-
-func waitForHostdSocket(ctx context.Context, socket string, done <-chan error) error {
-	deadline := time.NewTimer(15 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	var lastErr error
-	for {
-		info, err := os.Lstat(socket)
-		if err == nil && info.Mode()&os.ModeSocket != 0 {
-			return nil
-		}
-		if err != nil && !runtimeCausesOnly(err, os.ErrNotExist) {
-			lastErr = err
-		}
-		if err == nil {
-			lastErr = runtimeFailure("hostd lifecycle socket has an invalid type")
-		}
-
-		select {
-		case err := <-done:
-			return runtimeFailure("hostd lifecycle listener exited before readiness", err, lastErr)
-		case <-ctx.Done():
-			return runtimeFailure("hostd lifecycle readiness canceled", runtimeContextFailure(ctx), lastErr)
-		case <-deadline.C:
-			return runtimeFailure("hostd lifecycle socket did not become ready", context.DeadlineExceeded, lastErr)
-		case <-tick.C:
 		}
 	}
 }
@@ -223,6 +239,10 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	if flags.Parse(args) != nil || flags.NArg() != 0 || !filepath.IsAbs(*socket) || (*tokenPath == "" && *tokenFD < 0) || (*tokenPath != "" && *tokenFD >= 0) || (*tokenPath != "" && !filepath.IsAbs(*tokenPath)) || *workerID == "" || *version == "" || *apiMin == 0 || *apiMin > 1024 || *apiMax < *apiMin || *apiMax > 1024 || *heartbeat < time.Second || *heartbeat > time.Minute {
 		return errors.New("invalid worker invocation")
 	}
+	// SIGQUIT is hostd's graceful drain after a handover (nginx's QUIT).
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGQUIT)
+	defer signal.Stop(quit)
 	var token []byte
 	var err error
 	if *tokenPath != "" {
@@ -288,6 +308,15 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 		select {
 		case <-ctx.Done():
 			return runtimeShutdownCause(ctx)
+		case <-quit:
+			// A new hostd generation serves the shared runtime listener now:
+			// stop accepting, finish in-flight requests, then shut down.
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostdproto.HandoverDrainLimit)
+			defer cancel()
+			if draining, ok := feature.(interface{ DrainLocal(context.Context) error }); ok {
+				return draining.DrainLocal(drainCtx)
+			}
+			return nil
 		case <-ticker.C:
 			if err := feature.Health(ctx); err != nil {
 				return err

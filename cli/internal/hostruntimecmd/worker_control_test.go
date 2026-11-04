@@ -135,3 +135,34 @@ func TestOwnedWorkersReportAnActiveWorkerThatExitsUnstopped(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+type drainingWorker struct {
+	registryWorker
+	drainCalls int
+}
+
+func (w *drainingWorker) Drain(context.Context) error { w.drainCalls++; return nil }
+
+// TestOwnedWorkersDrainLetsActiveWorkerFinish: after a handover the active
+// worker drains instead of the fast stop; it is no longer owned afterwards.
+func TestOwnedWorkersDrainLetsActiveWorkerFinish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pb")
+	if err := os.WriteFile(path, []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	worker := &drainingWorker{}
+	registry := newOwnedWorkers(context.Background(), workerStartRequest{Executable: path, MutationsDisabled: true}, func(context.Context, workerStartRequest) (workerProcess, error) {
+		return worker, nil
+	})
+	for _, op := range []string{"start", "ready", "activate"} {
+		if _, err := registry.HandleWorkerControl(context.Background(), hostdproto.WorkerControlRequest{Operation: op, WorkerID: "runtime-test", Executable: path, Version: "test", APIMin: 1, APIMax: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := registry.drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if worker.drainCalls != 1 || worker.stopCalls != 0 || len(registry.workers) != 0 || registry.active != "" {
+		t.Fatalf("drain=%d stop=%d workers=%d active=%q", worker.drainCalls, worker.stopCalls, len(registry.workers), registry.active)
+	}
+}

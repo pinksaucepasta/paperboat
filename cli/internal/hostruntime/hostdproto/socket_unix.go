@@ -119,10 +119,17 @@ func (s *Server) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	listener, err := s.listen()
+	listener, err := s.Listen(s.config.SocketPath)
 	if err != nil {
 		return causedFailure{message: "hostd lifecycle socket could not start", cause: err}
 	}
+	return s.serve(ctx, listener)
+}
+
+// Serve answers on an already-bound listener: a generation-private socket or a
+// fixed one inherited from the previous generation. Closing listener while ctx
+// is live stops accepting and lets in-flight requests finish.
+func (s *Server) Serve(ctx context.Context, listener *net.UnixListener) error {
 	return s.serve(ctx, listener)
 }
 
@@ -171,6 +178,8 @@ func (s *Server) serve(ctx context.Context, listener *net.UnixListener) (result 
 		connection, err := listener.AcceptUnix()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
+				// A handover closed this copy: finish what was accepted.
+				workers.Wait()
 				return nil
 			}
 			return causedFailure{message: "hostd lifecycle socket accept failed", cause: errors.Join(ctx.Err(), err)}
@@ -353,30 +362,35 @@ func (s *Server) writeError(ctx context.Context, connection *net.UnixConn, err e
 	return nil
 }
 
-func (s *Server) listen() (*net.UnixListener, error) {
-	directory := filepath.Dir(s.config.SocketPath)
+// Listen binds an owner-only socket at path, replacing a stale one, in the
+// lifecycle socket's secured directory.
+func (s *Server) Listen(path string) (*net.UnixListener, error) {
+	directory := filepath.Dir(path)
+	if !filepath.IsAbs(path) || directory != filepath.Dir(s.config.SocketPath) {
+		return nil, ErrSocketConfig
+	}
 	if err := secureSocketDirectory(directory, s.config.UID); err != nil {
 		return nil, err
 	}
-	if info, err := os.Lstat(s.config.SocketPath); err == nil {
+	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 {
 			return nil, ErrSocketConfig
 		}
-		if err := os.Remove(s.config.SocketPath); err != nil {
+		if err := os.Remove(path); err != nil {
 			return nil, causedFailure{message: "hostd lifecycle socket could not replace its stale endpoint", cause: err}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, causedFailure{message: "hostd lifecycle socket path could not be inspected", cause: err}
 	}
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: s.config.SocketPath, Net: "unix"})
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return nil, causedFailure{message: "hostd lifecycle socket could not bind", cause: err}
 	}
 	listener.SetUnlinkOnClose(true)
-	if err := os.Chown(s.config.SocketPath, s.config.UID, s.config.GID); err != nil {
+	if err := os.Chown(path, s.config.UID, s.config.GID); err != nil {
 		return nil, errors.Join(causedFailure{message: "hostd lifecycle socket ownership could not be set", cause: err}, closeUnixListener(listener))
 	}
-	if err := os.Chmod(s.config.SocketPath, 0o600); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, errors.Join(causedFailure{message: "hostd lifecycle socket permissions could not be set", cause: err}, closeUnixListener(listener))
 	}
 	return listener, nil

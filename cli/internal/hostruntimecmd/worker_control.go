@@ -160,6 +160,26 @@ func (o *ownedWorkers) shutdown(ctx context.Context) error {
 	return result
 }
 
+// drain retires this generation's workers after a handover: the active one
+// finishes in-flight requests (bounded by ctx), any candidate just stops.
+func (o *ownedWorkers) drain(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var result error
+	for id, worker := range o.workers {
+		drainable, ok := worker.process.(drainer)
+		if !ok || id != o.active {
+			result = errors.Join(result, o.stopLocked(ctx, id))
+			continue
+		}
+		worker.stopping = true
+		result = errors.Join(result, drainable.Drain(ctx))
+		delete(o.workers, id)
+		o.active = ""
+	}
+	return result
+}
+
 // watchExit reports the active worker dying without having been stopped, so
 // hostd can exit and let its service manager start it with a fresh worker. A
 // candidate or deliberately stopped worker is not a failure.

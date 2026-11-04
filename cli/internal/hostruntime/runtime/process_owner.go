@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -105,7 +106,14 @@ func (o *ProcessOwner) BindLifecycle(endpoint string, token []byte, fence func()
 	o.token = append([]byte(nil), token...)
 	o.bridge = &workloadbridge.Server{Endpoint: endpoint, Token: o.token, Sessions: o.sessions, Executions: &execprocess.RemoteServer{Manager: o.executions, MaximumReaders: 4096}, Fence: fence, AcquireActive: acquire, Ready: make(chan error, 1), MaximumConcurrent: 256}
 }
-func (o *ProcessOwner) StartHostd(ctx context.Context) error { return nil }
+
+// ServeSharedWorkloads answers the bridge on a fixed, already-bound listener
+// as well (the path the carrier dials); call it after StartBridge.
+func (o *ProcessOwner) ServeSharedWorkloads(listener net.Listener) { o.bridge.ServeShared(listener) }
+func (o *ProcessOwner) StartHostd(ctx context.Context) error       { return nil }
+
+// RuntimeAddress is the loopback address hostd binds for its workers.
+func (o *ProcessOwner) RuntimeAddress() string { return o.listen }
 func (o *ProcessOwner) StartBridge(ctx context.Context) error {
 	if o.bridge == nil {
 		return ErrHostInvalid

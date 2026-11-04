@@ -67,6 +67,8 @@ type Server struct {
 	worker            string
 	epoch             uint64
 	workerDone        chan struct{} // custody cleanup in progress; guarded by workerMu
+	serverMu          sync.Mutex
+	server            *http.Server
 }
 
 func (s *Server) Run(ctx context.Context) (resultErr error) {
@@ -77,13 +79,16 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		err = ownerTransportFailure{cause: err}
 	}
+	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
+	s.serverMu.Lock()
+	s.server = server
+	s.serverMu.Unlock()
 	if s.Ready != nil {
 		s.Ready <- err
 	}
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
 	done := make(chan struct{})
 	closed := make(chan error, 1)
 	go func() {
@@ -116,6 +121,21 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 	}
 	return err
 }
+
+// ServeShared also answers on an already-bound listener, the fixed path the
+// carrier dials, until that listener is closed or Run ends. Closing it keeps
+// the connections it accepted. Call it after Ready.
+func (s *Server) ServeShared(listener net.Listener) {
+	s.serverMu.Lock()
+	server := s.server
+	s.serverMu.Unlock()
+	if server == nil {
+		_ = listener.Close()
+		return
+	}
+	go func() { _ = server.Serve(listener) }()
+}
+
 func (s *Server) handler() http.Handler {
 	semaphore := make(chan struct{}, s.MaximumConcurrent)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

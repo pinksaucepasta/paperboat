@@ -367,6 +367,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
 	}, AuthorizationService: authorizationRefresh, NetworkMonitor: networkChanges, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
+	if descriptor := environ("PAPERBOAT_RUNTIME_LISTEN_FD"); descriptor != "" {
+		dependencies.Listener = inheritedRuntimeListener(descriptor, listen)
+	}
 	var engineTunnels *runtimeattachment.EngineTunnels
 	{
 		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
@@ -428,6 +431,28 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		capabilityController.SetReconciler(result.reconcileMachineCapabilities)
 	}
 	return result, err
+}
+
+// inheritedRuntimeListener adopts the loopback listener hostd binds and passes
+// to every worker it starts, so neither a worker swap nor a hostd generation
+// handover closes the port (connections queue instead of being refused).
+func inheritedRuntimeListener(descriptor, listen string) ListenerFactory {
+	return func() (net.Listener, error) {
+		fd, err := strconv.Atoi(descriptor)
+		if err != nil || fd < 3 || fd > 16 {
+			return nil, errors.Join(ErrProductionInvalid, errors.New("invalid inherited runtime listener descriptor"))
+		}
+		file := os.NewFile(uintptr(fd), "runtime-listener")
+		listener, err := net.FileListener(file)
+		closeErr := file.Close()
+		if err != nil {
+			return nil, errors.Join(ErrProductionInvalid, errors.New("inherited runtime listener is not a listening socket"), err, closeErr)
+		}
+		if listener.Addr().String() != listen {
+			return nil, errors.Join(ErrProductionInvalid, errors.New("inherited runtime listener is not bound to the runtime address"), listener.Close())
+		}
+		return listener, nil
+	}
 }
 
 func environmentInjectionEligible(registration runtimeidentity.Registration) bool {

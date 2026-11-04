@@ -12,7 +12,7 @@ import (
 // Workload payloads have their own typed protocol and never enter lifecycle frames.
 func ListenWorkloads(path string) (net.Listener, error) {
 	s := &Server{config: SocketConfig{SocketPath: path, UID: os.Geteuid(), GID: os.Getegid()}}
-	return s.listen()
+	return s.Listen(path)
 }
 func DialWorkloads(ctx context.Context, path string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, "unix", path)
