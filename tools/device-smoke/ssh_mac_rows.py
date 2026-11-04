@@ -42,7 +42,9 @@ def msudo(script, bg=False, timeout=120):
 
 def prelude(wait_ssh=True):
     s = ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null'
-         ' | head -1 | sed "s/Host \\*\\.//"); [ -n "$D" ] && break; sleep 2; done; H=$A.$D; echo domain=$D; ' % shlex.quote(ARGS.alias))
+         ' | head -1 | sed "s/Host \\*\\.//"); [ -n "$D" ] && break; sleep 2; done; HN=$A.$D; H=%s@$HN; echo domain=$D; '
+         # the client's unix user (pbt) is not an account on the Mac: plain ssh logs in as the Mac setup user
+         % (shlex.quote(ARGS.alias), shlex.quote(ARGS.mac_user)))
     if wait_ssh:
         s += ('for i in $(seq 1 60); do $PB machine list 2>/dev/null | grep -q "$A " && break; sleep 2; done; '
               'for i in $(seq 1 30); do ssh -o BatchMode=yes $H true </dev/null >/dev/null 2>&1 && break; sleep 2; done; ')
@@ -165,16 +167,16 @@ OTHER_USER = r'''B=%s; U=%s
 fail=; ok=; skip=
 check() { n=$1; w=$2; shift 2; o=$("$@" 2>&1 </dev/null); if grep -q -- "$w" <<<"$o"; then ok="$ok $n"; else fail="$fail $n($(tr '\n' ' ' <<<"$o" | cut -c1-160))"; fi; }
 check setup-user-pb ok-managed $PB ssh $A -- echo ok-managed
-check setup-user-plain ok-managed ssh $U@$H echo ok-managed
-check bob-key-plain ok-bob-key ssh -i ~/bob_key -o IdentitiesOnly=yes -o BatchMode=yes $B@$H echo ok-bob-key
+check setup-user-plain ok-managed ssh $U@$HN echo ok-managed
+check bob-key-plain ok-bob-key ssh -i ~/bob_key -o IdentitiesOnly=yes -o BatchMode=yes $B@$HN echo ok-bob-key
 eval "$(ssh-agent -s)" >/dev/null; ssh-add -q ~/bob_key
 check bob-agent-pb ok-bob-agent $PB ssh $B@$A -- echo ok-bob-agent
-check bob-agent-plain ok-bob-agent ssh -o BatchMode=yes $B@$H echo ok-bob-agent
+check bob-agent-plain ok-bob-agent ssh -o BatchMode=yes $B@$HN echo ok-bob-agent
 ssh-agent -k >/dev/null 2>&1; unset SSH_AUTH_SOCK
 if command -v sshpass >/dev/null; then export SSHPASS; SSHPASS=$(cat ~/bob_pw)
-check bob-password-plain ok-bob-password sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive $B@$H echo ok-bob-password
+check bob-password-plain ok-bob-password sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive $B@$HN echo ok-bob-password
 check bob-password-pb ok-bob-password sshpass -e $PB ssh $B@$A -- echo ok-bob-password
-SSHPASS=wrong-password-1; check bob-wrong-password-is-sshd "Permission denied" sshpass -e ssh -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 $B@$H echo no
+SSHPASS=wrong-password-1; check bob-wrong-password-is-sshd "Permission denied" sshpass -e ssh -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 $B@$HN echo no
 else skip=" password-checks(no sshpass on the client)"; fi
 echo "RESULT ok:[$ok ] fail:[$fail ] skip:[$skip ]"'''
 
@@ -211,7 +213,7 @@ def otheruser():
 
 def find_machine_id(node):
     if isinstance(node, dict):
-        if node.get('name') == ARGS.alias:
+        if ARGS.alias in (node.get('alias'), node.get('name')):
             for k in ('id', 'machine_id'):
                 if str(node.get(k, '')).startswith('machine_'):
                     return node[k]
@@ -241,7 +243,7 @@ def audit():
     query = ("SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), "
              "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='%s' "
              "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
-             "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - began) + 600))
+             "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - began) + 10))
     rows = ''
     for _ in range(30):  # the host uploads within its 30 s cadence
         rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
@@ -255,7 +257,8 @@ def audit():
     ids = {s[7].removeprefix('offline:') for s in starts}
     ok = bool(starts and ends) and all(e[1] == 'online' and e[3] == 'closed' and int(e[4]) > 0 and int(e[5]) > 0 and e[2] in ids for e in ends) \
         and all(s[1] == 'online' and s[6].startswith('session_') for s in starts)
-    report(row, 'PASS' if ok else 'FAIL', rows.replace('\n', ' ')[:300])
+    detail = ' '.join('%s:%s:%s:%s:%s' % (r[0][8:], r[2][:8], r[3], r[4], r[5]) for r in recs)
+    report(row, 'PASS' if ok else 'FAIL', detail[:600])
 
 
 FORWARDING = r'''fail=; ok=
