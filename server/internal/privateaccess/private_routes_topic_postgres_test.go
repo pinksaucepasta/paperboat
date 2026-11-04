@@ -91,7 +91,7 @@ func TestPrivateRoutesTopicMovesOnRouteChangesOnPostgres(t *testing.T) {
 		"edge serves it again":   `UPDATE paperboat.endpoint_edge_assignments SET observed_ready=true WHERE endpoint_id=$1`,
 		"audience changes":       `UPDATE paperboat.endpoints SET access_mode='public' WHERE id=$1`,
 		"route hostname changes": `UPDATE paperboat.endpoint_routes SET hostname='moved-'||hostname, revision=revision+1 WHERE endpoint_id=$1`,
-		"preview stops":          `UPDATE paperboat.preview_leases SET terminal_state='stopped' WHERE id=$1`,
+		"preview stops":          `UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`,
 	} {
 		before := generation(f.accountID)
 		waiting := wait()

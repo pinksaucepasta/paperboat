@@ -74,7 +74,6 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	wait := func(machineID string, known map[string]int64, maxWait time.Duration) <-chan result {
 		out := make(chan result, 1)
-		// Creating the machines published their inventory; the host in this test has seen that already.
 		seen := map[string]int64{}
 		for _, topic := range topics { // a host waits on the topics it lists; this one lists them all
 			seen[topic] = 0
@@ -82,12 +81,17 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 		for topic, generation := range known {
 			seen[topic] = generation
 		}
-		if _, ok := known[TopicInventory]; !ok {
-			var inventory int64
-			if err := database.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='inventory'),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic='inventory'),0))`, machineID).Scan(&inventory); err != nil {
+		// Creating the machines published their inventory and the preview writes below move private_routes; the
+		// host in this test only consumes the topics it passes in known.
+		for _, topic := range []string{TopicInventory, TopicPrivateRoutes} {
+			if _, ok := known[topic]; ok {
+				continue
+			}
+			var current int64
+			if err := database.SQL().QueryRowContext(ctx, `SELECT (coalesce((SELECT generation FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic=$2::text),0)+coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=(SELECT user_id FROM paperboat.user_machines WHERE id=$1) AND topic=$2::text),0))`, machineID, topic).Scan(&current); err != nil {
 				t.Error(err)
 			}
-			seen[TopicInventory] = inventory
+			seen[topic] = current
 		}
 		started := time.Now()
 		go func() {
