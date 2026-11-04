@@ -46,9 +46,10 @@ type backgroundOwnerRegistry interface {
 
 // resumeRecord says whether a local-lease dispatch is recorded so a restarted
 // host runtime resumes it, and whether it is a foreground one. Background
-// previews resume on their own; foreground ones once their CLI reattaches
-// (pbvm4 feat5: pb update ended both foreground units 30 s after the worker
-// that renewed them went away).
+// previews resume on their own; foreground ones once their local lease is
+// held here: taken over from the previous generation at start
+// (owner_lease_handover.go) or reacquired by the CLI (pbvm4 feat5: pb update
+// ended both foreground units 30 s after the worker that renewed them went away).
 func (m *DispatchManager) resumeRecord(request DispatchRequest, resumed *BackgroundRecord) (BackgroundRecord, bool) {
 	resume := m.config.Background
 	if resume == nil || resume.Store == nil || request.OwnerSessionKind != OwnerSessionLocalLease {

@@ -145,7 +145,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 	}
 	ownerLeases, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{
 		MachineID: config.MachineID, ControlToken: config.LocalControlToken, Registry: owners,
-		RunContext: ctx,
+		RunContext: ctx, HandoverDir: filepath.Join(config.StateRoot, "preview", "foreground-leases"),
 	})
 	if err != nil {
 		_ = owners.Shutdown(context.WithoutCancel(config.RunContext))

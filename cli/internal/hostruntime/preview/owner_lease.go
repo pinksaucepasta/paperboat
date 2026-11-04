@@ -66,6 +66,9 @@ type OwnerSessionLeaseManagerConfig struct {
 	MaxLeases    int
 	Now          func() time.Time
 	Random       io.Reader
+	// HandoverDir keeps each foreground lease (token as SHA-256 only) so the
+	// next worker generation takes it over at start; empty disables it.
+	HandoverDir string
 }
 
 // OwnerSessionLeaseManager owns local process-lifetime leases. It is separate
@@ -80,6 +83,7 @@ type OwnerSessionLeaseManager struct {
 	now          func() time.Time
 	random       io.Reader
 	done         <-chan struct{}
+	handoverDir  string
 
 	mu          sync.Mutex
 	closed      bool
@@ -88,10 +92,11 @@ type OwnerSessionLeaseManager struct {
 }
 
 type ownerSessionLeaseEntry struct {
-	lease    OwnerSessionLease
-	closed   bool
-	attached bool
-	retireAt time.Time
+	lease     OwnerSessionLease
+	tokenHash [sha256.Size]byte
+	closed    bool
+	attached  bool
+	retireAt  time.Time
 }
 
 type ownerSessionLeaseReplay struct {
@@ -132,6 +137,10 @@ func NewOwnerSessionLeaseManager(config OwnerSessionLeaseManagerConfig) (*OwnerS
 			}
 			return config.RunContext.Done()
 		}(), leases: make(map[string]*ownerSessionLeaseEntry), idempotency: make(map[string]ownerSessionLeaseReplay),
+		handoverDir: config.HandoverDir,
+	}
+	if err := manager.takeOverForegroundLeases(); err != nil {
+		return nil, err
 	}
 	if config.RunContext != nil {
 		go manager.watchContext()
@@ -244,7 +253,9 @@ func (m *OwnerSessionLeaseManager) Acquire(request OwnerSessionLeaseRequest, ide
 		expiresAt = request.ExpiresAt.UTC()
 	}
 	lease := OwnerSessionLease{Schema: OwnerSessionLeaseSchema, ID: leaseID, MachineID: m.machineID, OwnerSessionID: ownerSessionID, Target: request.Target, ExpiresAt: expiresAt, Token: token, Background: request.Background, idempotencyKey: idempotencyKey}
-	m.leases[leaseID] = &ownerSessionLeaseEntry{lease: lease}
+	entry := &ownerSessionLeaseEntry{lease: lease, tokenHash: sha256.Sum256([]byte(token))}
+	m.leases[leaseID] = entry
+	m.handOverLocked(entry)
 	m.idempotency[idempotencyKey] = ownerSessionLeaseReplay{hash: hash, leaseID: leaseID}
 	return lease, nil
 }
@@ -260,7 +271,7 @@ func (m *OwnerSessionLeaseManager) TransferBackground(leaseID, token string, exp
 	defer m.mu.Unlock()
 	m.sweepLocked(now)
 	entry := m.leases[leaseID]
-	if entry == nil || !secureTokenEqual(entry.lease.Token, token) {
+	if entry == nil || !entry.tokenMatches(token) {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseUnauthorized
 	}
 	if m.closed || entry.closed {
@@ -282,6 +293,8 @@ func (m *OwnerSessionLeaseManager) TransferBackground(leaseID, token string, exp
 	entry.lease.Background = true
 	entry.lease.ExpiresAt = expiresAt.UTC()
 	entry.attached = true
+	// Background previews resume through BackgroundResume instead.
+	m.forgetHandoverLocked(entry, time.Time{})
 	return entry.lease, nil
 }
 
@@ -295,7 +308,7 @@ func (m *OwnerSessionLeaseManager) Heartbeat(leaseID, token string) (OwnerSessio
 	defer m.mu.Unlock()
 	m.sweepLocked(now)
 	entry := m.leases[leaseID]
-	if entry == nil || !secureTokenEqual(entry.lease.Token, token) {
+	if entry == nil || !entry.tokenMatches(token) {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseUnauthorized
 	}
 	if entry.closed {
@@ -309,6 +322,7 @@ func (m *OwnerSessionLeaseManager) Heartbeat(leaseID, token string) (OwnerSessio
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseLost
 	}
 	entry.lease.ExpiresAt = now.Add(m.ttl)
+	m.handOverLocked(entry)
 	return entry.lease, nil
 }
 
@@ -327,10 +341,11 @@ func (m *OwnerSessionLeaseManager) Release(leaseID, token string) error {
 	if entry == nil {
 		return nil
 	}
-	if !secureTokenEqual(entry.lease.Token, token) {
+	if !entry.tokenMatches(token) {
 		return ErrOwnerSessionLeaseUnauthorized
 	}
 	m.closeEntryLocked(entry, now)
+	m.forgetHandoverLocked(entry, time.Time{})
 	return nil
 }
 
@@ -355,8 +370,9 @@ func (m *OwnerSessionLeaseManager) sweepLocked(now time.Time) {
 				m.closeEntryLocked(entry, now)
 			}
 		}
-		if !entry.closed && !entry.lease.ExpiresAt.After(now) {
+		if !entry.closed && !entry.lease.ExpiresAt.After(now) && !m.refreshFromHandoverLocked(entry, now) {
 			m.closeEntryLocked(entry, now)
+			m.forgetHandoverLocked(entry, now)
 		}
 		if entry.closed && !entry.retireAt.After(now) {
 			_ = m.registry.ReleaseMachineOwnerSession(m.machineID, entry.lease.OwnerSessionID)
