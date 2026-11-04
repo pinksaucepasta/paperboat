@@ -6,6 +6,8 @@ Reads the CLI's own access credential in memory (never printed). Usage: free_pla
 import argparse
 import glob
 import json
+
+import cli_credential
 import os
 from pathlib import Path
 import subprocess
@@ -32,8 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    token = Path(glob.glob(str(HOME / '.config/paperboat/credentials/secrets/profile-*-access.secret'))[0]).read_text().strip()
-    server = json.loads((HOME / '.config/paperboat/config.json').read_text())['server_url']
+    token, server = cli_credential.access_token(), cli_credential.server_url()
     plan = api('/v1/billing/workspaces/personal', token, server)
     if plan['state'] != 'free' or plan['seats_bought'] != 0:
         raise RuntimeError('account is not a plain Free account: state=%s seats=%s' % (plan['state'], plan['seats_bought']))
@@ -52,7 +53,8 @@ def main():
         raise RuntimeError('exec failed on the Free plan: ' + out[-160:])
     # No subscription, trial or payment gate anywhere in what the CLI recorded locally.
     gate = 0
-    for path in glob.glob(str(HOME / '.local/state/paperboat/diagnostics/*.ndjson')):
+    state = HOME / ('Library/Application Support/Paperboat/state' if cli_credential.DARWIN else '.local/state/paperboat')
+    for path in glob.glob(str(state / 'diagnostics/*.ndjson')):
         for line in open(path, errors='replace'):
             lowered = line.lower()
             if 'machine_plan_inactive' in lowered or 'subscription_required' in lowered or '"http_status":"402"' in lowered.replace(' ', ''):
