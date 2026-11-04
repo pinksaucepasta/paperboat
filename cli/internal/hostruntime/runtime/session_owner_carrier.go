@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -13,7 +14,16 @@ import (
 	nativeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
+
+// relayReason says whether the candidate exchange named a relay (bounded).
+func relayReason(nodeID string) string {
+	if nodeID == "" {
+		return "no_relay"
+	}
+	return "relay"
+}
 
 func (o *IndependentSessionOwner) controlCarrier(ctx context.Context, request workloadbridge.CarrierRequest) (workloadbridge.CarrierResponse, error) {
 	o.carrierMu.Lock()
@@ -29,13 +39,15 @@ func (o *IndependentSessionOwner) controlCarrier(ctx context.Context, request wo
 			return result, ErrProductionInvalid
 		}
 		if err := o.carrier.network.AddPeer(request.PeerID, exchange.DiscoPublicKey, exchange.Endpoints); err != nil {
+			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_add", "failed", true, "error_type", fmt.Sprintf("%T", err))
 			return result, err
 		}
-
 		if err := o.carrier.network.PreparePeerRelay(ctx, request.PeerID, exchange.RelayNodeID); err != nil {
+			diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_relay", "failed", true, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
 			return result, err
 		}
 		socket, err := o.carrier.network.Dial(ctx, request.PeerID)
+		diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_dial", "failed", err != nil, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
 		if err != nil {
 			return result, err
 		}
