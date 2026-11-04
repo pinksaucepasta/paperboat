@@ -3364,6 +3364,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machine-peer-network/carrier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the machine's active carrier generation offer
+         * @description Requires machine-control bearer credential and an identity proof covering the exact HTTP method, path, body and operation ID. Stores the machine-signed carrier generation offer (at most 8 KiB, bound to this machine's account, installation generation and QUIC key, expiring within 5 minutes) and delivers it unchanged as carrier_offer on the machine's entry in every peer's signed configuration until it expires; an empty offer withdraws it. Peers are told at once (peer_network topic).
+         */
+        post: operations["post_machine_peer_network_carrier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/relay/nodes/start": {
         parameters: {
             query?: never;
@@ -7836,6 +7856,8 @@ export interface components {
             callback_origin: string;
             /** Format: date-time */
             expires_at: string;
+            /** @description The signed-in account may not open this resource. The handoff still completes; the edge answers 403 with its No access page. */
+            denied: boolean;
         };
         BrowserViewerPolicy: {
             /** @enum {string} */
@@ -15411,6 +15433,8 @@ export interface operations {
                 owner?: string;
                 /** @description Keyset position from pagination.next_cursor: the page after it in alias order. Not with offset. */
                 cursor?: string;
+                /** @description One machine's row only (exact machine id). */
+                machine_id?: string;
             };
             header?: never;
             path?: never;
@@ -18513,6 +18537,87 @@ export interface operations {
             };
             /** @description Current endpoint authority denied; remove installed peers and reauthorize. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Authority temporarily unavailable; retry before current authority expires. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_machine_peer_network_carrier: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unpadded base64url signed machine request proof. */
+                "X-Paperboat-Machine-Proof": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    operation_id: string;
+                    /**
+                     * Format: byte
+                     * @description Standard base64 of the native carrier offer JSON; empty withdraws it.
+                     */
+                    offer: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Offer stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: Record<string, never>;
+                    };
+                };
+            };
+            /** @description Invalid request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Endpoint authentication or signed machine proof rejected. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The offer is not bound to this machine's current identity. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reported too often; retry after Retry-After. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
