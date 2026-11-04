@@ -361,9 +361,10 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 			delete(s.fences, id)
 		}
 	}
-	// An admitted grant's fence refuses older grants and another grant of its generation; a revocation's
-	// fence (no signed grant) holds min_generation and refuses only below it.
-	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && previous.AccountID != "" && g.Generation == previous.Generation && g.signedHash != previous.signedHash) {
+	// An admitted grant's fence refuses older grants and a conflicting grant of its generation; a
+	// revocation's fence (no signed grant) holds min_generation and refuses only below it. A reissue of
+	// the same authority (a staged carrier generation refreshing its own copy) is not a conflict.
+	if previous, ok := s.fences[id]; ok && (g.Generation < previous.Generation || !merging && previous.AccountID != "" && g.Generation == previous.Generation && g.signedHash != previous.signedHash && !sameGrantAuthority(previous.Grant, g)) {
 		return ErrAdmission
 	}
 	if !p.key.IsZero() && (p.key != k || p.grant.AccountID != g.AccountID || p.grant.EndpointID != g.EndpointID) {

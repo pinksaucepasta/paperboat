@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"tailscale.com/types/key"
 )
@@ -172,4 +173,61 @@ func TestCachedMultipartGrantAdmitsGenerationWithoutNarrowingServingAuthority(t 
 	if len(server.AuthoritySubjects()) != 2 {
 		t.Fatal("multipart generation changed machine authority subjects")
 	}
+}
+
+// pbvm4 run3b/run8: a staged carrier refreshes its own copy of the machine's
+// grant. Same generation and authority, newer issue time, so a different
+// signature. The relay must admit it beside the serving generation; a
+// same-generation grant with different authority stays refused.
+func TestRelayGenerationAdmitsReissuedGrantOfSameAuthority(t *testing.T) {
+	f := newFixture(t)
+	_, address, _ := f.start("127.0.0.1:0")
+	ka, kb := key.NewNode().Public(), key.NewNode().Public()
+	certA, certB := certificate(t), certificate(t)
+	a, b := f.grant(ka, certA, "client"), f.grant(kb, certB, "machine")
+	pairScopes(&a, &b)
+	dial := func(cert tls.Certificate, grant Grant, namespace [32]byte) (*Client, error) {
+		client := NewClient(ClientConfig{Address: address, Namespace: namespace, GenerationDisco: key.NewDisco().Public(), TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return f.token(grant), nil }})
+		t.Cleanup(func() { client.Close() })
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := client.Connect(ctx); err != nil {
+			return nil, err
+		}
+		// Admission is asynchronous to Connect; a refusal closes the connection.
+		return client, client.SendControl(ka, []byte("probe"))
+	}
+	oldA, err := dial(certA, a, [32]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldB, err := dial(certB, b, [32]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = oldB
+	reissued := b
+	reissued.IssuedAt, reissued.ExpiresAt = b.IssuedAt+1, b.ExpiresAt+1
+	namespace := sha256.Sum256([]byte("staged-generation"))
+	newB, err := dial(certB, reissued, namespace)
+	if err != nil {
+		t.Fatal("staged generation's reissued grant refused:", err)
+	}
+	newA, err := dial(certA, a, namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := newA.Send(kb, []byte("staged")); err != nil {
+		t.Fatal(err)
+	}
+	receive(t, newB, ka, []byte("staged"))
+	if err := oldA.Send(kb, []byte("serving")); err != nil {
+		t.Fatal(err)
+	}
+	receive(t, oldB, ka, []byte("serving"))
+	widened := b
+	widened.IssuedAt = b.IssuedAt + 2
+	widened.Peers = append(append([]Peer(nil), b.Peers...), Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: b.Peers[0].Scopes})
+	other, _ := dial(certB, widened, sha256.Sum256([]byte("conflicting-generation")))
+	eventually(t, func() bool { return other == nil || other.Send(ka, []byte("x")) != nil })
 }
