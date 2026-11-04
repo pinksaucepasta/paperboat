@@ -47,7 +47,7 @@ func (s *Service) Sync(ctx context.Context) error {
 // syncTick is the work of one tick, run under the session lock.
 func (s *Service) syncTick(ctx context.Context) error {
 	errs := []error{s.readEvents(ctx)}
-	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day')`); err != nil {
+	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t WHERE t.team_id=s.team_id AND t.workos_organization_id IS NOT NULL AND (s.synced_at IS NULL OR s.synced_at < now()-interval '1 day') AND NOT s.dirty`); err != nil {
 		errs = append(errs, err)
 	}
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT s.team_id FROM paperboat.team_identity_state s JOIN paperboat.teams t USING(team_id) WHERE s.dirty AND t.workos_organization_id IS NOT NULL AND t.deleted_at IS NULL ORDER BY s.synced_at NULLS FIRST LIMIT 5`)
@@ -159,9 +159,14 @@ func (s *Service) readEvents(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// One statement per page: events only name teams, so the page marks them dirty together.
+		var orgs, dirs []string
 		for _, e := range events {
+			orgs, dirs = append(orgs, e.OrganizationID), append(dirs, e.DirectoryID)
+		}
+		if len(events) > 0 {
 			if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_identity_state s SET dirty=true FROM paperboat.teams t
- WHERE t.team_id=s.team_id AND (t.workos_organization_id=NULLIF($1,'') OR s.directory->>'id'=NULLIF($2,''))`, e.OrganizationID, e.DirectoryID); err != nil {
+ WHERE t.team_id=s.team_id AND NOT s.dirty AND (t.workos_organization_id = ANY($1::text[]) OR s.directory->>'id' = ANY($2::text[]))`, orgs, dirs); err != nil {
 				return err
 			}
 		}
@@ -215,7 +220,7 @@ func (s *Service) syncFailed(ctx context.Context, team string, cause error) {
 	if errors.Is(cause, ErrDirectoryTooLarge) {
 		message = ErrDirectoryTooLarge.Error()
 	}
-	_, _ = s.db.SQL().ExecContext(context.WithoutCancel(ctx), `UPDATE paperboat.team_identity_state SET sync_error=$2 WHERE team_id=$1`, team, message)
+	_, _ = s.db.SQL().ExecContext(context.WithoutCancel(ctx), `UPDATE paperboat.team_identity_state SET sync_error=$2 WHERE team_id=$1 AND sync_error IS DISTINCT FROM $2`, team, message)
 }
 
 func writeState(ctx context.Context, tx *db.Tx, team string, state OrganizationState) error {
