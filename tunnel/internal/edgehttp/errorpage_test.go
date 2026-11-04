@@ -25,7 +25,7 @@ func assertBrandedPage(t *testing.T, w *httptest.ResponseRecorder, status int, s
 
 type failingBeginAuthority struct{ browserAuthorityTest }
 
-func (failingBeginAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
+func (*failingBeginAuthority) Begin(context.Context, string, string) (control.BrowserBegin, error) {
 	return control.BrowserBegin{}, errors.New("server answered 503")
 }
 
