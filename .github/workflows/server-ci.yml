@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # Tracker and doc-only pushes start no CI (they queued behind each other, 2026-11-04).
+    paths-ignore: ['CHECKLIST.md', 'PLAN.md', 'WHITEBOARD.md', 'docs/**/*.md', '**/README.md']
   pull_request:
   workflow_dispatch:
 
