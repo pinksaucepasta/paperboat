@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/relay/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
 func TestRelayStartupRetainsFilesystemCause(t *testing.T) {

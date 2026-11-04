@@ -24,10 +24,11 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"github.com/pinksaucepasta/paperboat/relay/internal/reporting"
 	"github.com/pinksaucepasta/paperboat/relay/nodelifecycle"
 	"github.com/pinksaucepasta/paperboat/relay/peerrelay"
+	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"go4.org/mem"
 	"tailscale.com/net/stunserver"
 	"tailscale.com/types/key"

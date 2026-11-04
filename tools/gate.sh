@@ -29,6 +29,9 @@ fi
 step "no hardcoded domains (AGENTS.md)"
 python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains) || { echo "FAIL: hardcoded domains"; fail=1; }
 
+step "no byte-identical duplicate packages across modules (F21-33)"
+python3 tools/check_duplicate_packages.py && (cd tools && python3 -m unittest test_check_duplicate_packages) || { echo "FAIL: duplicate packages"; fail=1; }
+
 step "documentation links"
 python3 tools/check_doc_links.py && python3 tools/check_doc_envvars.py && (cd tools && python3 -m unittest test_check_doc_links test_check_doc_envvars) || { echo "FAIL: documentation links or environment variables"; fail=1; }
 

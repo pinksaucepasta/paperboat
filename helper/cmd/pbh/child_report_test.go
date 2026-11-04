@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat/helper/internal/reporting"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
 func TestReportChildExitLogsBoundedLastLineWithoutOtherOutput(t *testing.T) {

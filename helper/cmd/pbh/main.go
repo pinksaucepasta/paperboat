@@ -20,8 +20,9 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
-	"github.com/pinksaucepasta/paperboat/helper/internal/reporting"
+	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
 var version = "development"

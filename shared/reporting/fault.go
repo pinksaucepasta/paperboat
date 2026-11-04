@@ -18,8 +18,6 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"github.com/pinksaucepasta/paperboat/relay/nodelifecycle"
 )
 
 // Fault is a structured, privacy-safe projection of a service failure. Err
@@ -338,6 +336,15 @@ func safeErrorType(typ reflect.Type) string {
 	return name
 }
 
+// domainCause classifies a service's own typed errors; set once at startup by RegisterCause.
+var domainCause func(error) (string, int)
+
+// RegisterCause installs the service's classifier for its own typed errors (rank 0 means unknown).
+func RegisterCause(classify func(error) (string, int)) { domainCause = classify }
+
+// SameError reports whether err is exactly target (comparable types only), never by message.
+func SameError(err, target error) bool { return sameError(err, target) }
+
 func classifyCause(err error) (string, int) {
 	if _, ok := err.(interface{ processPanic() }); ok {
 		return "process_panic", 95
@@ -370,41 +377,13 @@ func classifyCause(err error) (string, int) {
 			}
 		}
 	}
-	if sameError(err, nodelifecycle.ErrFenced) {
-		return "authority_rejected", 85
-	}
-	if sameError(err, nodelifecycle.ErrControl) {
-		return "authority_unavailable", 40
-	}
-	if sameError(err, derpquic.ErrAdmission) {
-		return "authorization_rejected", 83
-	}
-	if sameError(err, derpquic.ErrProtocol) {
-		return "protocol_rejected", 83
-	}
-	if sameError(err, derpquic.ErrOverload) {
-		return "capacity_exhausted", 83
-	}
-	if sameError(err, derpquic.ErrExpired) {
-		return "authority_expired", 83
-	}
-	if sameError(err, derpquic.ErrClosed) {
-		return "relay_closed", 82
+	if domainCause != nil {
+		if cause, rank := domainCause(err); rank > 0 {
+			return cause, rank
+		}
 	}
 	if sameError(err, http.ErrServerClosed) {
 		return "server_closed", 81
-	}
-	if typed, ok := err.(*derpquic.Error); ok {
-		switch typed.Code {
-		case 1:
-			return "authorization_rejected", 83
-		case 2:
-			return "protocol_rejected", 83
-		case 3:
-			return "capacity_exhausted", 83
-		case 4:
-			return "authority_expired", 83
-		}
 	}
 	if sameError(err, os.ErrNotExist) {
 		return "not_found", 65
