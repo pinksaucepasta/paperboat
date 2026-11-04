@@ -39,7 +39,7 @@ type carrierOfferBinding struct {
 }
 
 // ReportCarrierOffer stores the machine's offer on its identity, replacing the last one, so every peer's next
-// configuration carries it (migration 218 publishes peer_network at once). An offer bound to another account,
+// configuration carries it (migration 222 publishes peer_network at once). An offer bound to another account,
 // machine, installation generation or QUIC key than the authenticated machine's current identity is refused.
 func (s *NetworkService) ReportCarrierOffer(ctx context.Context, in CarrierOfferReport) error {
 	if ctx == nil || !bounded(in.UserID, 1, 256) || !bounded(in.MachineID, 1, 128) || in.MachineGeneration < 1 || len(in.Offer) > MaxCarrierOfferBytes {
