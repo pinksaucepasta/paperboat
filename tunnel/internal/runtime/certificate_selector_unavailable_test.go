@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
 
@@ -58,16 +57,19 @@ func handshake(t *testing.T, config *tls.Config, pool *x509.CertPool, host strin
 // A route that is known but unavailable must still complete TLS (it was SSL_ERROR_SYSCALL).
 func TestCertificateSelectorCompletesTLSForUnavailableRoute(t *testing.T) {
 	cert, pool := wildcardTestCertificate(t, "*.preview.example.test")
-	unavailable := &route.UnavailableHosts{}
-	unavailable.Replace([]string{"down.preview.example.test"})
-	selector, err := NewCertificateSelector(CertificateSelectorConfig{Source: missingSource{}, Unavailable: unavailable, Wildcard: wildcardOnly{cert}, HandshakeTimeout: time.Second})
+	selector, err := NewCertificateSelector(CertificateSelectorConfig{Source: missingSource{}, Wildcard: wildcardOnly{cert}, HandshakeTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := handshake(t, selector.TLSConfig(), pool, "down.preview.example.test"); err != nil {
 		t.Fatalf("handshake for unavailable route: %v", err)
 	}
-	if err := handshake(t, selector.TLSConfig(), pool, "unknown.preview.example.test"); err == nil {
-		t.Fatal("unknown host must still be refused")
+	// A stopped or unknown preview also completes TLS and gets the branded page (2026-11-04: a stopped
+	// preview dropped the handshake with SSL_ERROR_SYSCALL); a name the wildcard does not cover is refused.
+	if err := handshake(t, selector.TLSConfig(), pool, "stopped.preview.example.test"); err != nil {
+		t.Fatalf("handshake for a stopped preview: %v", err)
+	}
+	if err := handshake(t, selector.TLSConfig(), pool, "other.example.test"); err == nil {
+		t.Fatal("a name outside the wildcard completed TLS")
 	}
 }

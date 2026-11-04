@@ -42,9 +42,9 @@ type CertificateSelectorConfig struct {
 	Source            CertificateSource
 	OnDemandRequester OnDemandCertificateRequester
 	OnDemandMatcher   OnDemandCertificateMatcher
-	// Unavailable and Wildcard together keep TLS up for a route that is known but unavailable.
-	Unavailable interface{ Has(string) bool }
-	Wildcard    interface {
+	// Wildcard keeps TLS up for any name it covers that has no certificate of its own (a stopped,
+	// unavailable or unknown preview), so the edge can answer with its branded error page.
+	Wildcard interface {
 		WildcardCertificate(string) (*tls.Certificate, error)
 	}
 	HandshakeTimeout time.Duration
@@ -56,11 +56,10 @@ type certificateDemandCall struct {
 	finishedAt time.Time
 }
 type CertificateSelector struct {
-	source      CertificateSource
-	onDemand    OnDemandCertificateRequester
-	matcher     OnDemandCertificateMatcher
-	unavailable interface{ Has(string) bool }
-	wildcard    interface {
+	source   CertificateSource
+	onDemand OnDemandCertificateRequester
+	matcher  OnDemandCertificateMatcher
+	wildcard interface {
 		WildcardCertificate(string) (*tls.Certificate, error)
 	}
 	timeout time.Duration
@@ -75,7 +74,7 @@ func NewCertificateSelector(config CertificateSelectorConfig) (*CertificateSelec
 	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 2 * time.Second
 	}
-	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, unavailable: config.Unavailable, wildcard: config.Wildcard, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall)}, nil
+	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, wildcard: config.Wildcard, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall)}, nil
 }
 
 func (s *CertificateSelector) TLSConfig() *tls.Config {
@@ -90,17 +89,27 @@ func (s *CertificateSelector) TLSConfig() *tls.Config {
 }
 
 func (s *CertificateSelector) lookup(ctx context.Context, hostname string) (*tls.Certificate, error) {
+	certificate, err := s.lookupExact(ctx, hostname)
+	if err == nil || s.wildcard == nil {
+		return certificate, err
+	}
+	// A stopped, expired or unknown preview under the platform wildcard still completes TLS, so the edge can
+	// show its branded "stopped or does not exist" page instead of dropping the handshake (ngrok and Cloudflare
+	// answer such names with an error page too). The wildcard already covers the name; nothing new is exposed.
+	if canonical, wildcard, normalizeErr := tlscert.NormalizeHostname(hostname); normalizeErr == nil && !wildcard {
+		if fallback, fallbackErr := s.wildcard.WildcardCertificate(canonical); fallbackErr == nil && certificateCoversHost(fallback, canonical) {
+			return fallback, nil
+		}
+	}
+	return nil, err
+}
+
+func (s *CertificateSelector) lookupExact(ctx context.Context, hostname string) (*tls.Certificate, error) {
 	canonical, wildcard, err := tlscert.NormalizeHostname(hostname)
 	if err != nil || wildcard {
 		return nil, tlscert.ErrCertificateMissing
 	}
 	hostname = canonical
-	if s.unavailable != nil && s.wildcard != nil && s.unavailable.Has(hostname) {
-		// Complete TLS with the platform wildcard so the edge can show its "could not reach the app" page.
-		if certificate, err := s.wildcard.WildcardCertificate(hostname); err == nil && certificateCoversHost(certificate, hostname) {
-			return certificate, nil
-		}
-	}
 	exact := s.matcher != nil && s.matcher.RequiresExactCertificate(hostname)
 	certificate, sourceErr := s.source.GetCertificate(&tls.ClientHelloInfo{ServerName: hostname})
 	if sourceErr == nil && certificate != nil && ((!exact && certificateCoversHost(certificate, hostname)) || (exact && certificateCoversExactHost(certificate, hostname))) {

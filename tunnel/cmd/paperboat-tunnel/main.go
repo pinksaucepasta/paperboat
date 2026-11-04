@@ -261,7 +261,6 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	unavailableRoutes := &route.UnavailableHosts{}
 	certificateSelector, err := edgeruntime.NewCertificateSelector(edgeruntime.CertificateSelectorConfig{
-		Unavailable:       unavailableRoutes,
 		Wildcard:          certificateRegistry,
 		Source:            certificateRegistry,
 		OnDemandRequester: onDemandRequester,
