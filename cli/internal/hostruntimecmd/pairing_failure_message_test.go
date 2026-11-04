@@ -71,3 +71,19 @@ func TestRuntimeFailureMessageNamesLockedCredentialStore(t *testing.T) {
 		t.Fatalf("message = %q", got)
 	}
 }
+
+// pbvm4: `pb update` said "its reason is printed above" while the privileged
+// step printed only the generic line. An unclassified failure of that step
+// must print its cause; classified ones keep their own message.
+func TestPrivilegedInstallStepPrintsUnclassifiedCause(t *testing.T) {
+	var out bytes.Buffer
+	finishRuntimeCommand(t.Context(), "service", &out, errors.New("stage terminal handover: carrier stopped"), 1)
+	if !strings.Contains(out.String(), "pb: cause: stage terminal handover: carrier stopped") {
+		t.Fatalf("privileged step output=%q", out.String())
+	}
+	out.Reset()
+	finishRuntimeCommand(t.Context(), "doctor", &out, errors.New("private doctor detail"), 1)
+	if strings.Contains(out.String(), "private doctor detail") {
+		t.Fatalf("non-service command exposed its cause: %q", out.String())
+	}
+}

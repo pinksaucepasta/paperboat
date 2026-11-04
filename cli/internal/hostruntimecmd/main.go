@@ -203,8 +203,10 @@ func runtimeFailureMessage(err error) string {
 	if message, ok := hostinstall.FailureMessage(err); ok {
 		return "Paperboat installation failed: " + message + ". Run pb doctor, then retry."
 	}
-	return "Paperboat host runtime command failed; run pb doctor, then retry."
+	return genericRuntimeFailure
 }
+
+const genericRuntimeFailure = "Paperboat host runtime command failed; run pb doctor, then retry."
 
 // Integer-returning commands own their original failure before returning a
 // native status to the outer CLI. The outer owner must not invent an exception.
@@ -227,10 +229,11 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 	}
 	outputFailed := false
 	message := "pb: " + runtimeFailureMessage(err)
-	if longRunningRuntimeService(serviceOperation) {
-		// These run under the service manager with nobody to ask. The journal is
-		// the only place their real cause can be found, and support references
-		// alone do not carry it.
+	if longRunningRuntimeService(serviceOperation) || serviceOperation == "service" && runtimeFailureMessage(err) == genericRuntimeFailure {
+		// Services run under the service manager with nobody to ask; the journal
+		// is the only place their real cause can be found. The privileged install
+		// step's caller says "its reason is printed above", so an unclassified
+		// failure must print its cause there too (the same administrator).
 		message += "\npb: cause: " + causetext.Text(err)
 	}
 	if _, writeErr := fmt.Fprintln(output, message); writeErr != nil {
