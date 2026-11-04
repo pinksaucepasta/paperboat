@@ -21,7 +21,13 @@ def main():
     if not config.exists():
         device = ('Library/Application Support/paperboat' if os.uname().sysname == 'Darwin'
                   else '.config/paperboat')
-        prepare(root, json.loads((Path.home() / device / 'config.json').read_text()))
+        file = Path.home() / device / 'config.json'
+        if file.exists():
+            prepare(root, json.loads(file.read_text()))
+        else:  # pb writes config.json only once a setting changes: ask pb for the server and fallback it uses
+            shown = json.loads(subprocess.run([PB, 'config', 'show', '--json'], capture_output=True, text=True, timeout=30).stdout)
+            shown = shown.get('data', shown)
+            prepare(root, {'server_url': shown['server_url'], 'auth': {'allow_file_fallback': bool(shown.get('auth_file_fallback'))}})
     env = environment(root)
     for name in ('config', 'data', 'state', 'cache', 'home'):
         (root / name).mkdir(parents=True, exist_ok=True, mode=0o700)
