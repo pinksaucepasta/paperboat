@@ -43,6 +43,14 @@ def ssh(host, command, stdin=None, tty=False, timeout=120):
     return subprocess.run(args, input=stdin, capture_output=True, text=True, timeout=timeout)
 
 
+def account(host, command, stdin=None):
+    """Run an account command (env set/unset). A Mac's login keychain, which holds the CLI token, is
+    locked in every new ssh session, so a controller that is the Mac itself runs them locally."""
+    if host in ('localhost', '127.0.0.1'):
+        return subprocess.run(['/bin/sh', '-c', command], input=stdin, capture_output=True, text=True, timeout=120)
+    return ssh(host, command, stdin=stdin)
+
+
 def must(result, step):
     if result.returncode:
         raise RuntimeError(f'{step} failed (exit {result.returncode})')
@@ -70,7 +78,7 @@ def main():
     now, ms = ("perl -MTime::HiRes=time -e 'printf(\"%d\", time()*1000)'", '') if mac else ('date +%s%N', '/1000000')
     rc_before = must(ssh(host, f'cat {rc} 2>/dev/null; true'), 'read shell rc file')
     try:
-        must(ssh(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
+        must(account(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
         must(ssh(host, f'{PB} env hook {shell} --install && {PB} env hook {shell} --install'), 'hook install')
         count = int(must(ssh(host, f'grep -c -- "{MARKER}" {rc}'), 'count').strip())
         report['hook_lines'] = count
@@ -96,7 +104,8 @@ def main():
                         and report['quiet_output_bytes'] == 0 and quiet_ms < 3000
                         and report['uninstall_restores_rc'])
     finally:
-        ssh(host, f'{PB} env hook --uninstall >/dev/null 2>&1; {UNSET_MAC if mac else UNSET}')
+        ssh(host, f'{PB} env hook --uninstall >/dev/null 2>&1')
+        account(host, UNSET_MAC if mac else UNSET)
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get('ok') else 1
 

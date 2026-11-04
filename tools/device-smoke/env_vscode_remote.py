@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 
-from env_ssh_hook import UNSET_MAC, host_is_mac
+from env_ssh_hook import UNSET_MAC, account, host_is_mac
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
@@ -102,7 +102,7 @@ def main():
     shell, launch, read, sha = (('zsh', LAUNCH.replace(SERVER_URL, SERVER_URL_MAC), READ_MAC, 'shasum -a 256') if mac
                                 else ('bash', LAUNCH, READ, 'sha256sum'))
     try:
-        must(ssh(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
+        must(account(host, f'{PB} env set {PROBE} --value-stdin', stdin=value), 'env set')
         stale = start_server(host, launch)
         must(ssh(host, f'{PB} env hook {shell} --install'), 'hook install')
         wait_hook_sees_probe(host, want, sha=sha)
@@ -113,8 +113,8 @@ def main():
         stop_server(host, fresh)
         report['ok'] = report['server_after_reload_has_probe'] and not report['server_started_before_hook_has_probe']
     finally:
-        ssh(host, f'pkill -f "{DIR}"; rm -rf {DIR}; {PB} env hook --uninstall >/dev/null 2>&1;'
-                  f' {UNSET_MAC if mac else UNSET}; true')
+        ssh(host, f'pkill -f "{DIR}"; rm -rf {DIR}; {PB} env hook --uninstall >/dev/null 2>&1; true')
+        account(host, UNSET_MAC if mac else UNSET)
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get('ok') else 1
 
