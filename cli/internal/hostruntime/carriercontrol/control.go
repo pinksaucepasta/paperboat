@@ -277,7 +277,10 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return errors.Join(ErrUnavailable, err)
 	}
-	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
+	// The write deadline covers the whole handler: it must outlast the longest
+	// operation (SSH drain, terminal move) or the client only sees EOF and the
+	// update rolls back (pbvm4 feat2). Each operation bounds itself.
+	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: controlWriteTimeout, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
 	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
 	defer stop()
 	defer func() {
@@ -420,5 +423,9 @@ func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
 	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "move-terminals", Offer: offer})
 	return err
 }
+
+// controlWriteTimeout exceeds every client-side operation bound (drain-ssh is
+// CarrierDrainLimit + 5 s; move-terminals 15 s).
+const controlWriteTimeout = managedssh.CarrierDrainLimit + 10*time.Second
 
 func (c *Client) DrainSSH(ctx context.Context) error { return c.call(ctx, "drain-ssh", "") }
