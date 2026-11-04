@@ -386,6 +386,7 @@ type BrowserAccessTransaction struct {
 	ViewerPolicyTeamGeneration       sql.NullInt64
 	ViewerPolicyMembershipGeneration sql.NullInt64
 	ViewerPolicyBindingGeneration    sql.NullInt64
+	Denied                           bool
 }
 
 type BrowserMachineCredential struct {
@@ -1952,6 +1953,8 @@ type PeerNetworkIdentity struct {
 	PublishedEndpoints         []string
 	EndpointsPublishedAt       sql.NullTime
 	EndpointsDueAt             sql.NullTime
+	CarrierOffer               []byte
+	CarrierOfferExpiresAt      sql.NullTime
 }
 
 type PeerNetworkRegistrationOperation struct {
@@ -2081,6 +2084,14 @@ type PreviewRoute struct {
 	OriginReady                          interface{}
 	ExpiresAt                            time.Time
 	Endpoint                             bool
+}
+
+type PrivateAccessIdempotency struct {
+	AccountID      string
+	SessionID      string
+	IdempotencyKey string
+	Fingerprint    string
+	ExpiresAt      time.Time
 }
 
 type ProofNonce struct {
@@ -2348,6 +2359,7 @@ type TeamIdentityState struct {
 	SyncedAt        sql.NullTime
 	SyncError       sql.NullString
 	Dirty           bool
+	RetryAfter      sql.NullTime
 }
 
 type TeamInboxPolicy struct {
@@ -2635,6 +2647,20 @@ type Tunnel struct {
 	DeletedAt             sql.NullTime
 	AccessGeneration      int64
 	OwnerTeamID           sql.NullString
+}
+
+type TunnelCertificateDistributionAction struct {
+	ActionKey          string
+	EdgeNodeID         string
+	EdgeProcessEpoch   string
+	Message            []byte
+	MasterKeyReference string
+	SealedCertificate  []byte
+	SealedPrivateKey   []byte
+	Status             sql.NullString
+	Code               sql.NullString
+	ExpiresAt          time.Time
+	CompletedAt        sql.NullTime
 }
 
 type TunnelCertificateEdgeDistribution struct {

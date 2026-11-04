@@ -1695,41 +1695,6 @@ func (q *Queries) FailUserMachineTerminalSessionOperation(ctx context.Context, a
 	return err
 }
 
-const lockUserMachinesForFinalDeletion = `-- name: LockUserMachinesForFinalDeletion :many
-SELECT candidate.id,candidate.user_id,candidate.alias FROM user_machines candidate
-WHERE (candidate.deleted_at IS NOT NULL OR candidate.revoked_at IS NOT NULL) AND NOT EXISTS (
-  SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
-    AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
-)
-ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
-`
-
-type LockUserMachinesForFinalDeletionRow struct {
-	ID     string
-	UserID string
-	Alias  string
-}
-
-func (q *Queries) LockUserMachinesForFinalDeletion(ctx context.Context) ([]LockUserMachinesForFinalDeletionRow, error) {
-	rows, err := q.db.Query(ctx, lockUserMachinesForFinalDeletion)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LockUserMachinesForFinalDeletionRow
-	for rows.Next() {
-		var i LockUserMachinesForFinalDeletionRow
-		if err := rows.Scan(&i.ID, &i.UserID, &i.Alias); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getActiveUserMachineForControl = `-- name: GetActiveUserMachineForControl :one
 SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
 WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL
@@ -4710,6 +4675,41 @@ func (q *Queries) LockUserMachineTerminalSessionsInWorkspace(ctx context.Context
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const lockUserMachinesForFinalDeletion = `-- name: LockUserMachinesForFinalDeletion :many
+SELECT candidate.id,candidate.user_id,candidate.alias FROM user_machines candidate
+WHERE (candidate.deleted_at IS NOT NULL OR candidate.revoked_at IS NOT NULL) AND NOT EXISTS (
+  SELECT 1 FROM user_machine_access_sessions s WHERE s.user_machine_id=candidate.id
+    AND (s.state='active' OR (s.state='revoked' AND s.helper_revoked_at IS NULL))
+)
+ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 100 FOR UPDATE SKIP LOCKED
+`
+
+type LockUserMachinesForFinalDeletionRow struct {
+	ID     string
+	UserID string
+	Alias  string
+}
+
+func (q *Queries) LockUserMachinesForFinalDeletion(ctx context.Context) ([]LockUserMachinesForFinalDeletionRow, error) {
+	rows, err := q.db.Query(ctx, lockUserMachinesForFinalDeletion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockUserMachinesForFinalDeletionRow
+	for rows.Next() {
+		var i LockUserMachinesForFinalDeletionRow
+		if err := rows.Scan(&i.ID, &i.UserID, &i.Alias); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const machineAccessDecision = `-- name: MachineAccessDecision :one
