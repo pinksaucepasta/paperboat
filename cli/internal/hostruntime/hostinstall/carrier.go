@@ -60,10 +60,30 @@ func (c CarrierConfig) Validate() error {
 			return ErrInvalidRequest
 		}
 	}
-	if (runtime.GOOS == "windows") != (c.Generation == "") || c.Generation != "" && c.Generation != c.Source.SHA256[:32] || c.ControlEndpoint != carrierControlEndpoint(c.HostdEndpoint, c.Generation) {
+	if (runtime.GOOS == "windows") != (c.Generation == "") || c.Generation != "" && c.Generation != c.Source.SHA256[:32] || !validCarrierControlEndpoint(c) {
 		return ErrInvalidRequest
 	}
 	return validateCarrierPaths(c)
+}
+
+// unixSocketPathLimit is darwin's sun_path size (104 bytes with the NUL; Linux
+// 108): a longer path fails bind with EINVAL.
+const unixSocketPathLimit = 104
+
+// validCarrierControlEndpoint checks a descriptor's control socket by shape, not
+// by today's naming rule: the descriptor records the name the installing build
+// chose, so a newer build still reads a generation an older build installed
+// (pb install of dev-ee7b48ac8 over dev-232279b79 refused its retained carrier).
+func validCarrierControlEndpoint(c CarrierConfig) bool {
+	if c.Generation == "" {
+		return c.ControlEndpoint == carrierControlEndpoint(c.HostdEndpoint, "")
+	}
+	prefix := c.HostdEndpoint + "."
+	if !strings.HasPrefix(c.ControlEndpoint, prefix) || len(c.ControlEndpoint) >= unixSocketPathLimit {
+		return false
+	}
+	suffix := c.ControlEndpoint[len(prefix):]
+	return !strings.ContainsAny(suffix, "/\x00") && strings.Contains(suffix, c.Generation[:16])
 }
 
 // carrierControlEndpoint is the account-private control socket of one carrier

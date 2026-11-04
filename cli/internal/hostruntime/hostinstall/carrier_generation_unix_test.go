@@ -76,3 +76,35 @@ func TestHostdGenerationDefinitionsParseBack(t *testing.T) {
 		}
 	}
 }
+
+// pb install of dev-ee7b48ac8 over dev-232279b79 failed with "invalid privileged
+// installation request": the retained generation's descriptor named its control
+// socket the way its own build did (.carrier-<32 hex>), and the newer build
+// rejected every name but its own rule's.
+func TestRetainedGenerationKeepsTheControlSocketItsBuildChose(t *testing.T) {
+	paths := platformPaths(1001)
+	retained, err := deriveUnixCarrierConfig(generationRequest("a"), paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained.ControlEndpoint = retained.HostdEndpoint + ".carrier-" + retained.Generation
+	if err := retained.Validate(); err != nil {
+		t.Fatalf("descriptor from an earlier build refused: %v", err)
+	}
+	other, err := deriveUnixCarrierConfig(generationRequest("b"), paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, endpoint := range map[string]string{
+		"another directory":         "/tmp/x" + retained.Generation,
+		"another generation's name": other.ControlEndpoint,
+		"over sun_path":             retained.HostdEndpoint + "." + retained.Generation + strings.Repeat("x", 120),
+		"nested path":               retained.HostdEndpoint + ".d/" + retained.Generation,
+	} {
+		tampered := retained
+		tampered.ControlEndpoint = endpoint
+		if tampered.Validate() == nil {
+			t.Fatalf("control socket in %s accepted", name)
+		}
+	}
+}
