@@ -33,7 +33,8 @@ step "server"
 (cd server && go test -c -o "$work/server.test" ./internal/app)
 instance() { # n [extra env]: one server process; instance 1 seeds the account and writes tokens.json
   local n=$1; shift
-  (cd server/internal/app && env PAPERBOAT_E2E_DIR=$work PAPERBOAT_E2E_URL=https://$host:$port "$@" \
+  # exec: the background pid is the server process itself, so the SIGKILL below reaches it
+  (cd server/internal/app && exec env PAPERBOAT_E2E_DIR=$work PAPERBOAT_E2E_URL=https://$host:$port "$@" \
     "$work/server.test" -test.v -test.timeout 30m -test.run '^TestE2EServe$' >"$work/server$n.log" 2>&1) &
   pids[$n]=$!
 }
