@@ -89,29 +89,21 @@ func TestTLSHandshakeRetryTransportDoesNotRetryAmbiguousError(t *testing.T) {
 	}
 }
 
-func TestTLSHandshakeRetryTransportRetriesGETHeaderTimeout(t *testing.T) {
+func TestTLSHandshakeRetryTransportDoesNotRetryGETHeaderTimeout(t *testing.T) {
 	var calls int
 	transport := &tlsHandshakeRetryTransport{
 		attempts: 2,
 		base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			calls++
-			if calls == 1 {
-				return nil, timeoutError("context deadline exceeded (Client.Timeout exceeded while awaiting headers)")
-			}
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
+			return nil, timeoutError("context deadline exceeded (Client.Timeout exceeded while awaiting headers)")
 		}),
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://paperboat.example/v1/machines", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
+	if _, err = transport.RoundTrip(req); err == nil || calls != 1 {
+		t.Fatalf("err = %v, calls = %d; want one attempt", err, calls)
 	}
 }
 

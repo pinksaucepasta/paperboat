@@ -61,7 +61,7 @@ func (t *tlsHandshakeRetryTransport) RoundTrip(req *http.Request) (*http.Respons
 		}
 		request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 		resp, err := t.base.RoundTrip(request)
-		if err == nil || !retryableTransportError(request, err, tlsFailed.Load(), wroteHeaders.Load()) || attempt == attempts-1 {
+		if err == nil || !retryableTransportError(err, tlsFailed.Load(), wroteHeaders.Load()) || attempt == attempts-1 {
 			return resp, err
 		}
 		select {
@@ -89,7 +89,7 @@ func requestForAttempt(req *http.Request, attempt int) (*http.Request, error) {
 	return clone, nil
 }
 
-func retryableTransportError(req *http.Request, err error, tlsFailed, wroteHeaders bool) bool {
+func retryableTransportError(err error, tlsFailed, wroteHeaders bool) bool {
 	var timeout net.Error
 	if !errors.As(err, &timeout) || !timeout.Timeout() {
 		return false
@@ -99,6 +99,7 @@ func retryableTransportError(req *http.Request, err error, tlsFailed, wroteHeade
 	if tlsFailed && !wroteHeaders {
 		return true
 	}
-	// Read-only requests may safely retry timeouts at any transport phase.
-	return req.Method == http.MethodGet || req.Method == http.MethodHead
+	// A timeout after the headers were sent is never retried here: the caller's one bound covers it, and
+	// retrying stacked 3 transport x 3 read attempts against a blackholed server (F21-40).
+	return false
 }

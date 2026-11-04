@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 )
@@ -103,5 +105,34 @@ func TestAReadThatWasNeverSentIsNotRetriedHere(t *testing.T) {
 	var out map[string]any
 	if err := client.do(context.Background(), http.MethodGet, "/v1/machines", nil, &out); err == nil || failing.calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d", err, failing.calls.Load())
+	}
+}
+
+// A server that accepts and never answers costs one client timeout and one connection, not 3x3 attempts
+// (F21-40, Lane X audit A3).
+func TestAReadAgainstABlackholedServerGivesUpWithinOneBound(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var accepted atomic.Int32
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			defer conn.Close()
+		}
+	}()
+	const bound = 300 * time.Millisecond
+	httpClient := &http.Client{Timeout: bound, Transport: &tlsHandshakeRetryTransport{base: http.DefaultTransport.(*http.Transport).Clone(), attempts: tlsHandshakeAttempts}}
+	client := New("http://"+listener.Addr().String(), config.Credential{AccessToken: "token"}, httpClient)
+	start := time.Now()
+	err = client.do(context.Background(), http.MethodGet, "/v1/machines", nil, &map[string]any{})
+	if elapsed := time.Since(start); err == nil || elapsed > 2*bound || accepted.Load() != 1 {
+		t.Fatalf("err=%v elapsed=%v connections=%d; want one attempt within %v", err, elapsed, accepted.Load(), bound)
 	}
 }

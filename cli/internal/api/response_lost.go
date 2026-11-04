@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"sync/atomic"
@@ -46,7 +47,7 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 			var written atomic.Bool
 			trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { written.Store(true) }}
 			resp, err = c.sendReconnectRequest(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
-			if err == nil || req.Context().Err() != nil || !written.Load() {
+			if err == nil || req.Context().Err() != nil || !written.Load() || isTimeout(err) {
 				return resp, err
 			}
 		}
@@ -59,6 +60,12 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 		return nil, &ResponseLostError{Method: req.Method, Path: req.URL.Path, Err: err}
 	}
 	return resp, err
+}
+
+// isTimeout: a server that accepts and never answers is given up on after one http.Client.Timeout.
+func isTimeout(err error) bool {
+	var timeout net.Error
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 func readRetryDelay(attempt int) time.Duration {
