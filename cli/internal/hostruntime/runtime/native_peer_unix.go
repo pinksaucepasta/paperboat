@@ -79,6 +79,10 @@ type productionNativePeerService struct {
 	startGeneration func(context.Context) (*productionNativePeerGeneration, error)
 	// streams counts application streams being served; a retired generation drains them.
 	streams atomic.Int64
+	// promote asks the supervisor to make the delegated generation primary (becomePrimary).
+	promote chan struct{}
+	// retired stops the supervisor from starting another generation: a retired carrier only drains.
+	retired atomic.Bool
 }
 
 type productionNativePeerGeneration struct {
@@ -91,11 +95,17 @@ type productionNativePeerGeneration struct {
 	// requestRefresh renews the signed network now; nil in generations built without an authority.
 	requestRefresh func()
 	control        tailnet.NetworkAPI
-	// carrier and network serve a delegated generation (carrierGeneration).
-	carrier *native.CarrierIdentity
-	network *tailnet.CarrierNetwork
-	done    sync.WaitGroup
-	once    sync.Once
+	// run, serve and region start the machine's primary listener (listenPrimary).
+	run    context.Context
+	serve  func(context.Context, *native.Session) error
+	region *tailcfg.DERPRegion
+	// carrier and network serve a delegated generation (carrierGeneration);
+	// stopRenew ends its renewal and offer reports once it is primary.
+	carrier   *native.CarrierIdentity
+	network   *tailnet.CarrierNetwork
+	stopRenew context.CancelFunc
+	done      sync.WaitGroup
+	once      sync.Once
 }
 
 const productionNativePeerRestartDelay = time.Second
@@ -192,7 +202,7 @@ func newProductionNativePeerService(config productionNativePeerConfig) (*product
 	if config.controlURL == "" || config.issuer == "" || config.stateRoot == "" || config.machineID == "" || config.generation == 0 || config.transport == nil || config.identity == nil || config.keys == nil || (config.dispatch == nil && (config.authorizer == nil || config.serve == nil || config.transfer == nil)) {
 		return nil, ErrProductionInvalid
 	}
-	service := &productionNativePeerService{config: config}
+	service := &productionNativePeerService{config: config, promote: make(chan struct{}, 1)}
 	service.startGeneration = service.buildGeneration
 	return service, nil
 }
@@ -266,10 +276,13 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	api := clientapi.New(s.config.controlURL, clientconfig.Credential{}, &http.Client{Transport: s.config.transport, Timeout: 15 * time.Second})
 	api.SetMachineAuth(s.config.identity)
+	s.mu.Lock()
+	delegated := s.config.carrierGeneration
+	s.mu.Unlock()
 	var control tailnet.NetworkAPI = api
-	if s.config.carrierGeneration != "" {
+	if delegated != "" {
 		// Only the primary registers the machine's network and reports endpoints.
-		control = terminalCarrierNetwork{api}
+		control = &generationNetwork{NetworkAPI: api}
 		// The generation publishes its signed offer with this machine-authenticated client.
 		nativegen.Use(api)
 	}
@@ -348,34 +361,45 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(err, owner.Close())
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: self.QUICCertificateFingerprint, authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
-	if s.config.carrierGeneration != "" {
-		if err := s.startDelegatedGeneration(runCtx, ctx, generation); err != nil {
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 3), identityFingerprint: self.QUICCertificateFingerprint, authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
+	if len(regions) != 0 {
+		generation.region = regions[0]
+	}
+	if delegated != "" {
+		if err := s.startDelegatedGeneration(runCtx, ctx, generation, delegated); err != nil {
 			cancel()
 			return nil, errors.Join(err, generation.stop())
 		}
 		return generation, nil
 	}
-	var firstRegion *tailcfg.DERPRegion
-	if len(regions) != 0 {
-		firstRegion = regions[0]
+	generation.run = runCtx
+	generation.serve = func(serveCtx context.Context, session *native.Session) error {
+		return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
 	}
-	if _, err := authority.Listen(firstRegion); err != nil {
+	if err := generation.listenPrimary(); err != nil {
 		cancel()
-		return nil, nativePeerListenerError{cause: errors.Join(err, owner.Close())}
+		return nil, errors.Join(err, owner.Close())
 	}
-	generation.done.Add(2)
+	generation.done.Add(1)
 	go func() {
 		defer generation.done.Done()
 		generation.errors <- authority.Run(runCtx, control, nil)
 	}()
-	go func() {
-		defer generation.done.Done()
-		generation.errors <- owner.Listen(runCtx, firstRegion, func(serveCtx context.Context, session *native.Session) error {
-			return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
-		})
-	}()
 	return generation, nil
+}
+
+// listenPrimary serves the machine's primary network: the enrolled identity's
+// listener that registration, endpoint reports and peers without an offer reach.
+func (g *productionNativePeerGeneration) listenPrimary() error {
+	if _, err := g.authority.Listen(g.region); err != nil {
+		return nativePeerListenerError{cause: err}
+	}
+	g.done.Add(1)
+	go func() {
+		defer g.done.Done()
+		g.errors <- g.owner.Listen(g.run, g.region, g.serve)
+	}()
+	return nil
 }
 
 // The native owner supplies its own cancellation lifetime. Lend the daemon's
@@ -447,6 +471,9 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 				return
 			case <-timer.C:
 			}
+			if s.retired.Load() {
+				return
+			}
 			next, err := s.startGeneration(ctx)
 			s.recordPeerState(ctx, next, err)
 			if err == nil {
@@ -461,6 +488,17 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.promote:
+			err := s.promoteGeneration(ctx, generation)
+			if err == nil {
+				continue
+			}
+			// The restart below builds a primary generation: open streams end, the machine is reachable again.
+			s.recordPeerState(ctx, nil, err)
+			stopErr := generation.stop()
+			s.mu.Lock()
+			s.lastErr = errors.Join(s.lastErr, stopErr)
+			s.mu.Unlock()
 		case err := <-generation.errors:
 			if ctx.Err() != nil {
 				return
@@ -504,6 +542,10 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			s.mu.Lock()
 			s.lastErr = errors.Join(s.lastErr, stopErr)
 			s.mu.Unlock()
+		}
+		if s.retired.Load() {
+			// A retired carrier only drains what is open; it never starts primary work a newer generation takes over.
+			return
 		}
 		timer := time.NewTimer(productionNativePeerRestartDelay)
 		select {

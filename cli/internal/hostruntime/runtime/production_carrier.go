@@ -31,6 +31,14 @@ type ProductionCarrier struct {
 	usage         *hostBandwidthService
 	ssh           *managedssh.Host
 	unlock        func() error
+	// A delegated generation takes the primary role when the generation holding
+	// it exits (awaitPrimary); unlockPrimary then releases it at shutdown.
+	slot          int
+	primaryLock   string
+	active        func(context.Context) (bool, error)
+	stopTakeover  context.CancelFunc
+	takeoverDone  chan struct{}
+	unlockPrimary func() error
 }
 
 // CarrierGeneration places a carrier process among the account's carrier
@@ -38,9 +46,9 @@ type ProductionCarrier struct {
 type CarrierGeneration struct {
 	// Name is this generation (its source SHA-256 prefix).
 	Name string
-	// Active says the account's descriptor names this generation; an update's
-	// candidate is not active yet.
-	Active bool
+	// Active says whether the account's descriptor names this generation now;
+	// an update's candidate is not active until the update marks it.
+	Active func(context.Context) (bool, error)
 	// PreparePeer readies another generation for a client of this one moving to it.
 	PreparePeer func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)
 }
@@ -77,8 +85,14 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 		}
 	}()
 	delegated := ""
-	if generation.Name != "" && (!generation.Active || slot != 0) {
-		delegated = generation.Name
+	if generation.Name != "" {
+		active, err := generation.Active(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !active || slot != 0 {
+			delegated = generation.Name
+		}
 	}
 	name := fmt.Sprintf("carrier-%d", slot)
 	config, controlURL, transport := base.config, base.controlURL, base.transport
@@ -119,7 +133,53 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
-	return &ProductionCarrier{peer: peer, authorization: serviceGroup{events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh, unlock: unlock}, nil
+	carrier := &ProductionCarrier{peer: peer, authorization: serviceGroup{events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh, unlock: unlock}
+	if delegated != "" {
+		carrier.slot, carrier.active = slot, generation.Active
+		carrier.primaryLock = filepath.Join(config.StateRoot, "runtime", "carrier-0.lock")
+	}
+	return carrier, nil
+}
+
+// primaryTakeoverInterval is how often a delegated generation tries the primary
+// role, as netbird polls a non-blocking flock (~/ref/netbird/proxy/internal/flock/flock_unix.go:39).
+const primaryTakeoverInterval = time.Second
+
+// awaitPrimary takes the primary role (slot 0's lock) once the generation that
+// holds it exits, if this generation is the active one and not retired, then
+// promotes the peer service in place. Only the slot 0 holder serves the
+// primary network, so the role is never contested; a retired generation never
+// takes it.
+func (c *ProductionCarrier) awaitPrimary(ctx context.Context) {
+	defer close(c.takeoverDone)
+	ticker := time.NewTicker(primaryTakeoverInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if c.peer.retired.Load() {
+			return
+		}
+		unlock := func() error { return nil }
+		if c.slot != 0 {
+			var err error
+			if unlock, err = lockTerminalCarrier(c.primaryLock); err != nil {
+				continue
+			}
+		}
+		active, err := c.active(ctx)
+		if err != nil || !active || c.peer.retired.Load() {
+			_ = unlock()
+			continue
+		}
+		c.unlockPrimary = unlock
+		diagnosticlog.TryInfo("carrier generation", "stage", "primary_role_taken")
+		c.peer.becomePrimary()
+		return
+	}
 }
 
 // lockCarrierSlot takes the first free slot of carrierSlots.
@@ -165,6 +225,12 @@ func (c *ProductionCarrier) Start(ctx context.Context) error {
 		defer cancel()
 		return errors.Join(err, c.authorization.Shutdown(cleanupCtx), c.usage.Shutdown(cleanupCtx))
 	}
+	if c.primaryLock != "" {
+		var takeover context.Context
+		takeover, c.stopTakeover = context.WithCancel(ctx)
+		c.takeoverDone = make(chan struct{})
+		go c.awaitPrimary(takeover)
+	}
 	return nil
 }
 
@@ -184,15 +250,23 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	}
 	// Close listeners and bridges before their identity refresh and usage owner.
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
+	if c.stopTakeover != nil {
+		c.stopTakeover()
+		<-c.takeoverDone
+	}
 	peerErr := c.peer.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
 	authErr := c.authorization.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
 	usageErr := c.usage.checkpoint(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
+	// The primary role is released only after the primary listener closed.
 	var unlockErr error
+	if c.unlockPrimary != nil {
+		unlockErr = c.unlockPrimary()
+	}
 	if c.unlock != nil {
-		unlockErr = c.unlock()
+		unlockErr = errors.Join(unlockErr, c.unlock())
 	}
 	result := errors.Join(peerErr, authErr, usageErr, unlockErr)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
@@ -204,6 +278,7 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 // managedssh.CarrierDrainTimeout. Clients already open new connections on the
 // newer generation it offered (MoveTerminals).
 func (c *ProductionCarrier) Drain(ctx context.Context) error {
+	c.peer.retired.Store(true)
 	ssh := make(chan error, 1)
 	go func() { ssh <- c.ssh.Drain(ctx) }()
 	streams := c.peer.drainStreams(ctx, managedssh.CarrierDrainTimeout)

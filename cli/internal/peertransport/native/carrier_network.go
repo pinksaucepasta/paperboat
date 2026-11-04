@@ -64,6 +64,19 @@ func (o *Owner) closeCarrierNetworks() {
 	}
 }
 
+// CarrierSessions counts the sessions open on network.
+func (o *Owner) CarrierSessions(network *tailnet.CarrierNetwork) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	count := 0
+	for session := range o.sessions {
+		if session.carrierNetwork == network {
+			count++
+		}
+	}
+	return count
+}
+
 func (o *Owner) closeCarrierPeers(peers []string, network *tailnet.CarrierNetwork) {
 	o.mu.Lock()
 	var sessions []*Session

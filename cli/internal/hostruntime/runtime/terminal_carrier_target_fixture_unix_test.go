@@ -186,7 +186,12 @@ func (f *targetCarrierFixture) serve(t *testing.T, public ed25519.PublicKey, w h
 		json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]any{"kty": "OKP", "crv": "Ed25519", "kid": "target", "use": "sig", "alg": "EdDSA", "x": base64.RawURLEncoding.EncodeToString(public)}}})
 	case "/v1/machine-peer-network/config":
 		var request clientapi.PeerNetworkConfigurationRequest
-		if json.NewDecoder(r.Body).Decode(&request) != nil || request.Endpoints != nil || request.MembershipGrants {
+		decodeErr := json.NewDecoder(r.Body).Decode(&request)
+		f.mu.Lock()
+		primary := f.primaryTaken
+		f.endpointsReported = f.endpointsReported || request.Endpoints != nil
+		f.mu.Unlock()
+		if decodeErr != nil || !primary && (request.Endpoints != nil || request.MembershipGrants) {
 			t.Error("delegated authority modified primary endpoints or relay membership")
 			w.WriteHeader(400)
 			return

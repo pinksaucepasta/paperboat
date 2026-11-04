@@ -186,9 +186,9 @@ func carrierGeneration(ctx context.Context, config hostinstall.CarrierConfig, ca
 	if config.Generation == "" {
 		return hostruntime.CarrierGeneration{}, nil
 	}
-	active, err := hostinstall.ActiveCarrierGeneration(ctx, config.Instance)
-	if err != nil {
-		return hostruntime.CarrierGeneration{}, err
+	active := func(ctx context.Context) (bool, error) {
+		name, err := hostinstall.ActiveCarrierGeneration(ctx, config.Instance)
+		return name == config.Generation, err
 	}
 	prepare := func(ctx context.Context, peer string, exchange native.CarrierExchange) (native.CarrierOffer, error) {
 		next, err := hostinstall.ReadCarrierGeneration(ctx, config.Instance, exchange.Offer.Claims.OwnerInstance)
@@ -209,5 +209,5 @@ func carrierGeneration(ctx context.Context, config hostinstall.CarrierConfig, ca
 		}
 		return native.ParseCarrierOffer(offer)
 	}
-	return hostruntime.CarrierGeneration{Name: config.Generation, Active: active == config.Generation, PreparePeer: prepare}, nil
+	return hostruntime.CarrierGeneration{Name: config.Generation, Active: active, PreparePeer: prepare}, nil
 }

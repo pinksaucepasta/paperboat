@@ -175,16 +175,19 @@ type targetCarrierFixture struct {
 	extraTarget     *terminalCarrier
 	generation      *productionNativePeerService
 	unknownRelay    bool
-	issuer          string
-	signer          ed25519.PrivateKey
-	mu              sync.Mutex
-	network         tailnet.NetworkConfiguration
-	events          chan struct{}
-	eventsOnce      sync.Once
-	networkChanged  chan struct{}
-	eventRevision   int64
-	revoked         bool
-	requests        map[string]int
+	// primaryTaken lets the generation report the machine's endpoints once it took the primary role.
+	primaryTaken      bool
+	endpointsReported bool
+	issuer            string
+	signer            ed25519.PrivateKey
+	mu                sync.Mutex
+	network           tailnet.NetworkConfiguration
+	events            chan struct{}
+	eventsOnce        sync.Once
+	networkChanged    chan struct{}
+	eventRevision     int64
+	revoked           bool
+	requests          map[string]int
 }
 
 func newTargetCarrierFixture(t *testing.T) *targetCarrierFixture {

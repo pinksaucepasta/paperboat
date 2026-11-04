@@ -44,7 +44,7 @@ func TestDelegatedCarrierGenerationServesAfterThePrimaryRetires(t *testing.T) {
 	snapshot := session.Snapshot{ID: "ses_target", Generation: 1}
 	held := f.admit(t, ctx, old, snapshot)
 
-	s := f.startDelegatedGeneration(t, ctx)
+	s, _ := f.startDelegatedGeneration(t, ctx, nil)
 	offer, err := s.generationOffer()
 	if err != nil || !offer.Claims.AllApplications {
 		t.Fatal("delegated generation has no offer for every application", err)
@@ -77,13 +77,18 @@ func TestDelegatedCarrierGenerationServesAfterThePrimaryRetires(t *testing.T) {
 
 // startDelegatedGeneration starts a delegated generation from the fixture's
 // enrolled state, serving the staged terminal endpoint's applications.
-func (f *targetCarrierFixture) startDelegatedGeneration(t *testing.T, ctx context.Context) *productionNativePeerService {
+// ports, when set, records the generation's UDP binds.
+func (f *targetCarrierFixture) startDelegatedGeneration(t *testing.T, ctx context.Context, ports *udpPortRecorder) (*productionNativePeerService, *productionNativePeerGeneration) {
 	t.Helper()
 	tlsConfig, _, self, err := loadNativePeerTLS(f.root, "machine_target", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: filepath.Join(f.root, "peer-network"), Secrets: config.FileSecretStore{Dir: filepath.Join(f.root, "peer-network", "secrets")}}, Issuer: f.issuer, Self: self, Keys: targetCarrierKeys{f.signer.Public().(ed25519.PublicKey)}})
+	options := tailnet.AuthorityOptions{Store: config.ProfileStore{Path: filepath.Join(f.root, "peer-network"), Secrets: config.FileSecretStore{Dir: filepath.Join(f.root, "peer-network", "secrets")}}, Issuer: f.issuer, Self: self, Keys: targetCarrierKeys{f.signer.Public().(ed25519.PublicKey)}}
+	if ports != nil {
+		options.TestOnlyPacketListener = ports
+	}
+	authority, err := tailnet.NewAuthority(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +105,9 @@ func (f *targetCarrierFixture) startDelegatedGeneration(t *testing.T, ctx contex
 	}
 	run, cancel := context.WithCancel(t.Context())
 	s := &productionNativePeerService{config: productionNativePeerConfig{carrierGeneration: source.SHA256[:32]}}
-	g := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: f.owner.carrier.apps, errors: make(chan error, 2), authority: authority, control: f.owner.carrier.control}
-	if err := s.startDelegatedGeneration(run, ctx, g); err != nil {
+	control := &generationNetwork{NetworkAPI: f.owner.carrier.control.(terminalCarrierNetwork).NetworkAPI}
+	g := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: f.owner.carrier.apps, errors: make(chan error, 3), authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
+	if err := s.startDelegatedGeneration(run, ctx, g, s.config.carrierGeneration); err != nil {
 		cancel()
 		_ = owner.Close()
 		t.Fatal(err)
@@ -112,7 +118,7 @@ func (f *targetCarrierFixture) startDelegatedGeneration(t *testing.T, ctx contex
 	f.mu.Unlock()
 	// The applications are the staged endpoint's, which joins them itself.
 	t.Cleanup(func() { g.apps = nil; _ = g.stop() })
-	return s
+	return s, g
 }
 
 func assertOpen(t *testing.T, stream net.Conn) {

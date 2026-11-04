@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/nativegen"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -21,21 +23,25 @@ const carrierRenewInterval = 150 * time.Second
 // startDelegatedGeneration serves every application on the generation's own
 // network, as staged terminal carriers do (terminal_carrier_start.go), and
 // keeps its signed offer current for clients that dial it.
-func (s *productionNativePeerService) startDelegatedGeneration(run, daemon context.Context, g *productionNativePeerGeneration) error {
+func (s *productionNativePeerService) startDelegatedGeneration(run, daemon context.Context, g *productionNativePeerGeneration, name string) error {
 	identity, err := g.owner.PrepareCarrierIdentity()
 	if err != nil {
 		return err
 	}
 	identity.Offer.Claims.AllApplications = true
 	apps := g.apps
-	g.network, err = g.owner.StartCarrierNetwork(run, identity, s.config.carrierGeneration, func(serveCtx context.Context, session *native.Session) error {
+	g.run = run
+	g.serve = func(serveCtx context.Context, session *native.Session) error {
 		return apps.Serve(nativePeerApplicationContext(serveCtx, daemon), session)
-	})
+	}
+	g.network, err = g.owner.StartCarrierNetwork(run, identity, name, g.serve)
 	if err != nil {
 		return err
 	}
 	g.carrier = identity
 	reportCarrierGeneration(run, identity.Current())
+	renew, stopRenew := context.WithCancel(run)
+	g.stopRenew = stopRenew
 	g.done.Add(2)
 	go func() {
 		defer g.done.Done()
@@ -47,7 +53,7 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 		defer ticker.Stop()
 		for {
 			select {
-			case <-run.Done():
+			case <-renew.Done():
 				return
 			case <-ticker.C:
 			}
@@ -57,10 +63,91 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 				g.errors <- err
 				return
 			}
-			reportCarrierGeneration(run, offer)
+			reportCarrierGeneration(renew, offer)
 		}
 	}()
 	return nil
+}
+
+// generationNetwork is a delegated generation's control: read-only, as for
+// staged terminal carriers, until the generation takes the primary role.
+type generationNetwork struct {
+	tailnet.NetworkAPI
+	primary atomic.Bool
+}
+
+func (n *generationNetwork) RegisterPeerNetwork(ctx context.Context, r api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+	if n.primary.Load() {
+		return n.NetworkAPI.RegisterPeerNetwork(ctx, r)
+	}
+	return terminalCarrierNetwork{n.NetworkAPI}.RegisterPeerNetwork(ctx, r)
+}
+
+func (n *generationNetwork) PeerNetworkConfiguration(ctx context.Context, r api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error) {
+	if n.primary.Load() {
+		return n.NetworkAPI.PeerNetworkConfiguration(ctx, r)
+	}
+	return terminalCarrierNetwork{n.NetworkAPI}.PeerNetworkConfiguration(ctx, r)
+}
+
+// becomePrimary makes this delegated carrier the machine's primary once it holds
+// the primary role (ProductionCarrier.awaitPrimary): the running generation is
+// promoted in place, and every later start builds a primary generation.
+func (s *productionNativePeerService) becomePrimary() {
+	s.mu.Lock()
+	s.config.carrierGeneration = ""
+	s.mu.Unlock()
+	select {
+	case s.promote <- struct{}{}:
+	default:
+	}
+}
+
+// promoteGeneration starts the primary listener and endpoint reports on a
+// delegated generation's own authority. Its delegated network keeps serving the
+// clients on it: no new offer is published or renewed, so their routes end at
+// the last offer's expiry and new connections reach the primary; the network
+// closes once its last session ends.
+func (s *productionNativePeerService) promoteGeneration(ctx context.Context, g *productionNativePeerGeneration) error {
+	control, ok := g.control.(*generationNetwork)
+	if g.carrier == nil || !ok || !control.primary.CompareAndSwap(false, true) {
+		return nil
+	}
+	g.stopRenew()
+	if err := g.listenPrimary(); err != nil {
+		return err
+	}
+	if g.requestRefresh != nil {
+		g.requestRefresh()
+	}
+	reportCarrierGeneration(ctx, native.CarrierOffer{})
+	expires := time.Unix(g.carrier.Current().Claims.ExpiresUnix, 0)
+	g.done.Add(1)
+	go func() {
+		defer g.done.Done()
+		closeIdleCarrierNetwork(g.run, g.owner, g.network, expires)
+	}()
+	diagnosticlog.TryInfo("carrier generation", "stage", "primary_taken")
+	return nil
+}
+
+// closeIdleCarrierNetwork closes a promoted generation's delegated network once
+// no client can route to it (its last offer expired) and no session is open on it.
+func closeIdleCarrierNetwork(ctx context.Context, owner *native.Owner, network *tailnet.CarrierNetwork, expires time.Time) {
+	timer := time.NewTimer(time.Until(expires))
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		if owner.CarrierSessions(network) == 0 {
+			_ = network.Close()
+			return
+		}
+		timer.Reset(30 * time.Second)
+	}
 }
 
 func reportCarrierGeneration(ctx context.Context, offer native.CarrierOffer) {
