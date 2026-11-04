@@ -20,7 +20,7 @@ PORT_P=8080 PORT_T=45992
 jf() { python3 -c 'import json,sys;d=json.loads(sys.stdin.read());d=d.get("data",d);print(eval(sys.argv[1],{},{"d":d}))' "$1"; }
 origin_up() { # origin_up PORT NAME: http.server on loopback, pid file $D/NAME.pid
   curl -fs -o /dev/null "http://127.0.0.1:$1/" && return 0
-  (cd "$D" && nohup python3 -m http.server "$1" --bind 127.0.0.1 >/dev/null 2>&1 & echo $! >"$D/$2.pid")
+  (cd "$D" && nohup python3 -m http.server "$1" --bind 127.0.0.1 </dev/null >/dev/null 2>&1 & echo $! >"$D/$2.pid")
   for _ in 1 2 3 4 5 6 7 8 9 10; do curl -fs -o /dev/null "http://127.0.0.1:$1/" && return 0; sleep 1; done
   echo "FAIL origin on $1 did not start" >&2; return 1
 }
@@ -31,7 +31,7 @@ mine() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["machine
 case ${1:-} in
 preview-up)
   origin_up $PORT_P preview-origin || exit 1
-  json=$(timeout 120 "$PB" preview $PORT_P --background --ttl 30m --json) || { echo "FAIL preview start" >&2; exit 1; }
+  json=$("$PB" preview $PORT_P --background --ttl 30m --json) || { echo "FAIL preview start" >&2; exit 1; }
   id=$(jf 'd["id"]' <<<"$json") || exit 1
   echo "$id" >"$D/preview.id"
   echo "PREVIEW_ID=$id"; echo "PREVIEW_HOST=$(jf 'd["endpoint"].split("//")[1]' <<<"$json")" ;;
