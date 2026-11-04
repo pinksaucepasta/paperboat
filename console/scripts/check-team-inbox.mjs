@@ -5,7 +5,7 @@
 //   STATE=<owner's storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> TEAM=<team workspace slug>
 //   APPROVE_FILE=<file name to approve> DECLINE_FILE=<file name to decline> node check-team-inbox.mjs
 // Steps: both requests are pending in GET /v1/team-inbox/requests and listed under "Waiting for you"; Approve on one
-// and Decline on the other each remove their row; the API then says approved (or completed) and declined; the
+// and Decline on the other each remove their row; the API then says approved (or consumed/completed: the server's approved -> consumed -> completed lifecycle) and declined; the
 // other request is untouched until its own button is pressed. File names and tokens are the only things printed.
 import { chromium } from "playwright-core"
 
@@ -65,7 +65,7 @@ log((await rowOf(declineFile).count()) === 0, "Decline removes its row")
 
 const approved = await statusOf(approveFile)
 const declined = await statusOf(declineFile)
-log(approved.length > 0 && approved.every((s) => s === "approved" || s === "completed"), "the API says approved", approved.join(","))
+log(approved.length > 0 && approved.every((s) => ["approved", "consumed", "completed"].includes(s)), "the API says approved", approved.join(","))
 log(declined.length > 0 && declined.every((s) => s === "declined"), "the API says declined", declined.join(","))
 
 await page.reload({ waitUntil: "networkidle" })
