@@ -5,7 +5,9 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
@@ -58,16 +60,31 @@ func stageTerminalHandover(ctx context.Context, r Request, retained CarrierConfi
 	// Independent old primary and delegated clients prepare in parallel. A
 	// declined move leaves that client on today's reconnect path at cutover;
 	// already moved clients keep the new generation, even on a partial decline.
-	results := make(chan error, 2)
-	go func() { results <- primary.MoveTerminals(ctx, ready.Offer) }()
+	type legResult struct {
+		stage string
+		err   error
+	}
+	results := make(chan legResult, 2)
+	go func() { results <- legResult{"move_primary", primary.MoveTerminals(ctx, ready.Offer)} }()
 	go func() {
 		_, err := h.previous.TerminalCarrier(ctx, workloadbridge.CarrierRequest{Operation: "move", Offer: ready.Offer})
-		results <- err
+		results <- legResult{"move_previous", err}
 	}()
 	for range 2 {
-		if err := <-results; err != nil {
-			diagnosticlog.TryWarn("terminal handover declined", "fallback", "reconnect")
+		r := <-results
+		errorType := ""
+		switch {
+		case r.err == nil:
+		case errors.Is(r.err, carriercontrol.ErrUnavailable):
+			errorType = "unavailable"
+		case errors.Is(r.err, carriercontrol.ErrFenced), errors.Is(r.err, workloadbridge.ErrFenced):
+			errorType = "fenced"
+		case errors.Is(r.err, context.DeadlineExceeded):
+			errorType = "deadline"
+		default:
+			errorType = strings.TrimPrefix(fmt.Sprintf("%T", r.err), "*")
 		}
+		diagnosticlog.TryInfo("carrier cutover", "stage", r.stage, "failed", r.err != nil, "error_type", errorType)
 	}
 	return h, nil
 }

@@ -5,12 +5,31 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/quic-go/quic-go"
 )
+
+// moveErrorType names a move failure with bounded metadata only.
+func moveErrorType(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrStreamRejected):
+		return "rejected"
+	case errors.Is(err, ErrInvalid):
+		return "invalid"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	}
+	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
+}
 
 // OnCarrierMove installs the terminal's move handler on its authenticated old
 // connection. The reserved candidate stream never enters application output.
@@ -124,9 +143,14 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	move := s.moveCarrier
 	s.routerMu.Unlock()
 	result := byte(0)
-	if move != nil && move(ctx, offer) == nil {
+	moveErr := ErrInvalid
+	if move != nil {
+		moveErr = move(ctx, offer)
+	}
+	if moveErr == nil {
 		result = 1
 	}
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "offer_received", "failed", moveErr != nil, "error_type", moveErrorType(moveErr))
 	_, err = stream.Write([]byte{result})
 	return err
 }
@@ -145,11 +169,13 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 		}
 	}
 	o.mu.Unlock()
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "offer_start", "sessions", len(sessions))
 	results := make(chan error, len(sessions))
 	for _, session := range sessions {
 		go func() { results <- session.OfferCarrier(ctx, offer) }()
 	}
 	var result error
+wait:
 	for range sessions {
 		select {
 		case err := <-results:
@@ -157,9 +183,11 @@ func (o *Owner) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 				result = err
 			}
 		case <-ctx.Done():
-			return ctx.Err()
+			result = ctx.Err()
+			break wait
 		}
 	}
+	diagnosticlog.TryInfo("terminal carrier move", "stage", "offer_end", "failed", result != nil, "error_type", moveErrorType(result))
 	return result
 }
 

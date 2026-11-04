@@ -169,6 +169,16 @@ func testDelegatedCarrierGeneration(t *testing.T, behindNAT, lostInitials bool) 
 	}
 	defer otherStream.Close()
 	carrierEcho(t, otherStream)
+	// run24: a terminal connection the client already closed stays in the
+	// machine owner; it must not decline the move of the live terminal.
+	stale, err := co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleStream := openCarrierTerminal(t, ctx, stale, "stale")
+	carrierEcho(t, staleStream)
+	stale.Close()
+	time.Sleep(200 * time.Millisecond) // let the machine receive the CONNECTION_CLOSE
 	if err := mo.OfferCarrier(ctx, offer); err != nil {
 		t.Fatal(err)
 	}
