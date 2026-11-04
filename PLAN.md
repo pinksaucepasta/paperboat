@@ -2992,7 +2992,7 @@ OPEN, not final: one central writable database with regional read replicas. To d
 - primary failover, and what clients see during it.
 Rows: none yet; becomes an F21 row when the build is scheduled.
 
-Design proposal (2026-11-04, waits for user approval; node enrollment left out on purpose, direction pending):
+Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-writes):
 - **Region map.** Discovery gains `control_regions: [{id, api_origin, state: healthy|degraded|draining}]`, signed with
   the rest. One writer: each instance upserts `server_instances(id, region, started_at, last_seen, draining)` every
   10 s. A region is healthy when at least one non-draining instance was seen within 30 s. Clients rank regions by
@@ -3003,14 +3003,17 @@ Design proposal (2026-11-04, waits for user approval; node enrollment left out o
   Teleport runs many auth servers on one shared Postgres backend (lib/backend/pgbk/pgbk.go) and fans changes out
   through one change feed (pgbk/background.go, wal2json); we keep that shape: one database of record, no
   multi-writer. Headscale and NetBird management run a single control instance on one database and have no answer here.
-- **Replica-safe reads** (named per query, default primary): listings and history shown to people (machines, previews,
-  tunnels, activity, usage, audit export pages), discovery, release metadata. Everything else reads the primary.
-- **Never from a replica:** authentication (sessions, API tokens, machine credentials), authorization decisions,
-  grant and descriptor issuance, revocation checks, idempotency and nonce reservations, any read followed by a write
-  in the same request. So a revoke is never read as granted from a lagging replica; no generation floor is needed in
-  pass 1. If authz reads ever move to replicas, they carry a floor: the client sends the generation it last saw and
-  the replica serves only when `pg_last_wal_replay_lsn()` has passed the LSN recorded with that generation, else the
-  read goes to the primary.
+- **Read-your-writes on replicas** (Aurora/PlanetScale/CockroachDB follower-read model; Postgres
+  `pg_current_wal_lsn()` / `pg_last_wal_replay_lsn()`). Every write response carries the primary commit LSN in
+  `Paperboat-Commit-Position`. Clients (CLI, daemon, console) keep the highest position they have seen and send it on
+  each read. A replica serves the read only once `pg_last_wal_replay_lsn()` is at or past that position; otherwise the
+  read goes to the primary. Reads without a position may use any in-rotation replica.
+- **Never from a replica, whatever the position:** authentication (sessions, API tokens, machine credentials),
+  authorization decisions, grant and descriptor issuance, revocation and billing checks, idempotency and nonce
+  reservations, and any read followed by a write in the same request. These use the primary, or a replica with a
+  generation floor proven past the generation the decision depends on. So a revoke is never read as granted.
+- **Lag.** Each instance samples its replica's replay lag every 5 s. Above 2 s it drops the replica out of rotation
+  and reads the primary; it rejoins after 30 s under the bound.
 - **Pushes.** NOTIFY does not reach hot standbys, so every instance's machine-events hub LISTENs on the primary pool
   (one connection per instance).
 - **Write routing.** No forwarding layer: a far-region instance writes to the primary over the WAN. Keep a request
@@ -3019,9 +3022,48 @@ Design proposal (2026-11-04, waits for user approval; node enrollment left out o
 - **Primary failover.** The database provider promotes a replica (PlanetScale, F21-15). During it, writes return a
   typed 503 `control_plane_read_only` with Retry-After; replica reads keep serving; machines keep their last verified
   state (F21-01 offline-until-revoked). Instances reconnect the primary pool with backoff; no app-level election.
-- **Drain.** Setting `draining` on an instance makes its health check fail at the region load balancer; on a whole
-  region it marks the region draining in the map, clients move at their next discovery, and long-lived streams
-  (browser terminal, connector control) are closed with a reconnect hint after a bounded grace (60 s).
+- **Drain never cuts** (Envoy drain_listeners and HTTP/2 GOAWAY; Cloudflare graceful restarts). A draining node:
+  - leaves the region map and fails its load-balancer health check at once, so it gets no new clients;
+  - sends HTTP/2 GOAWAY on its connections, and WebSocket close 1012 (service restart) with a reconnect hint on its
+    long streams (browser terminal, connector control, event waits);
+  - lets clients reconnect transparently to the next node and resume their state: a terminal resumes at its replay
+    cursor, an event wait at its generation. Users see no error;
+  - exits only when its connections are gone, or after a long cap of 30 min.
+- **Server nodes are equal peers** (user rule 2026-11-04). There is no primary, main or central node. Any node's
+  operator panel can enroll, drain or remove another. Enrollment state lives only in the shared database; background
+  jobs stay on the F21-04 database lease, never a fixed node. Losing any one node breaks neither enrollment, discovery
+  nor the panel: every other node reads the same rows.
+- **Enrollment mirrors global edges** (selfhost/enrollment.go Enroll and reserve; POST /v1/admin/selfhost/enrollments).
+  1. The node starts from the server's own image in `unenrolled` mode, with no DB credentials. It generates a TLS key and
+     an enrollment key and prints a one-time claim code: its address, its SPKI pin, a secret and an expiry of 15 min.
+     This is the edge code format (parseCode, claimTarget).
+  2. An operator pastes the code into any node's panel (`POST /v1/admin/server-nodes/enrollments`, operatorRoute).
+     That node dials the new one pinned to the SPKI (pinnedTransport) and checks the signed inspection: version,
+     region, public address. It then writes `control_server_nodes(id, region, endpoint_host, tls_spki_sha256,
+     state=registered, ...)` in one transaction, as reserve does for control_tunnel_nodes.
+  3. The same request delivers the node's runtime bundle over the pinned channel: primary DSN, the region's replica
+     DSN, the shared signing and secret keys (F21-56 requires shared keys once N>1), and the edge and relay config. The
+     bundle is sealed to the node's enrollment public key (NaCl box), so the code alone reveals nothing. The node
+     stores it root-only and then restarts as a full node.
+  Prior art: Teleport nodes join with a one-time provision token, then receive their identity from auth
+  (~/ref/teleport/lib/auth/join/join.go:350 Register, lib/auth/register.go); auth servers are equal peers on one
+  shared backend (lib/backend/pgbk/pgbk.go). Headscale and NetBird management have no multi-node enrollment.
+- **Regional name, DNS and TLS.** The name is `<region>.<control domain>`, for example mumbai.<domain>; the control
+  domain comes from server configuration, never code. DNS goes through the existing edge DNS reconciler
+  (app/edge_dns.go, tunnelcert/cloudflare_dns.go), which publishes A/AAAA records only from verified address metadata.
+  TLS goes through tunnelcert: ACME DNS-01 for the regional name, delivered through the DB-backed DistributionHub
+  (F21-52). A node serves its regional name only after its certificate arrives; until then it is `registered` but
+  not in the map.
+- **Health and the map.** A node heartbeats its `control_server_nodes` row every 10 s with its state, version and
+  replica lag. Discovery lists the regions that have at least one healthy node. Clients pick the nearest healthy
+  region and fall back to the next (see the region map above).
+- **Drain and removal** from any node's panel: `draining` runs the graceful drain above. `remove` deletes the DNS record and revokes its certificate and
+  keys, then deletes the row once it has stopped heartbeating. Rotating the shared keys after a removal is a separate
+  operator action.
+- **Failover.** A dead node drops out of the map after 30 s without a heartbeat; clients move to the next region.
+  Database primary failover is as described above. No node holds a role that needs an election.
+- **Console:** an operator page listing server nodes (region, name, state, version, lag, last seen) with enroll,
+  drain and remove, like global edges. That is the console lane's work, requested in the Log once approved.
 
 #### Inspector: a fresh machine's first preview can miss its first requests (Lane I, open, 2026-10-24)
 
