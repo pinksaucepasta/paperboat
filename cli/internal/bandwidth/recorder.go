@@ -194,8 +194,21 @@ func (r *Recorder) add(binding Binding, path Path, n int64, upload bool, now tim
 	r.state.Counters[id] = value
 }
 
-func (r *Recorder) persistLocked() error {
-	value, err := json.Marshal(r.state)
+// Copy counters under the packet-path lock, then marshal and fsync outside it.
+// flushPermit serializes durable snapshots. Like Tailscale clientmetric.Metric.Add
+// (~/ref/tailscale/util/clientmetric/clientmetric.go), accounting never waits on
+// storage or control-plane delivery while holding the in-memory counter lock.
+func (r *Recorder) persistenceSnapshotLocked() State {
+	state := r.state
+	state.Counters = make(map[string]counter, len(r.state.Counters))
+	for id, value := range r.state.Counters {
+		state.Counters[id] = value
+	}
+	return state
+}
+
+func (r *Recorder) persist(state State) error {
+	value, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
@@ -233,21 +246,20 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 			delete(r.state.Counters, id)
 		}
 	}
-	if err := r.persistLocked(); err != nil {
-		r.mu.Unlock()
+	snapshot := r.persistenceSnapshotLocked()
+	r.mu.Unlock()
+	if err := r.persist(snapshot); err != nil {
 		return recorderFailure{"diagnostic_storage", err}
 	}
-	keys := make([]string, 0, len(r.state.Counters))
-	for id, c := range r.state.Counters {
+	keys := make([]string, 0, len(snapshot.Counters))
+	for id, c := range snapshot.Counters {
 		if c.Dirty {
 			keys = append(keys, id)
 		}
 	}
 	sort.Strings(keys)
-	r.mu.Unlock()
 	if len(keys) == 0 {
-		status := r.Snapshot()
-		if err := r.sink.ReportNativeUsage(ctx, []api.NativeUsageReport{}, status.UnrecordedBytes, status.ExpiredBytes, status.Incomplete); err != nil {
+		if err := r.sink.ReportNativeUsage(ctx, []api.NativeUsageReport{}, snapshot.UnrecordedBytes, snapshot.ExpiredBytes, snapshot.Incomplete); err != nil {
 			return recorderFailure{"control_request", err}
 		}
 		r.markReported(revision)
@@ -256,13 +268,10 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 	for len(keys) > 0 {
 		count := min(len(keys), 64)
 		batch := make([]api.NativeUsageReport, 0, count)
-		r.mu.Lock()
 		for _, id := range keys[:count] {
-			batch = append(batch, r.state.Counters[id].Report)
+			batch = append(batch, snapshot.Counters[id].Report)
 		}
-		r.mu.Unlock()
-		status := r.Snapshot()
-		if err := r.sink.ReportNativeUsage(ctx, batch, status.UnrecordedBytes, status.ExpiredBytes, status.Incomplete); err != nil {
+		if err := r.sink.ReportNativeUsage(ctx, batch, snapshot.UnrecordedBytes, snapshot.ExpiredBytes, snapshot.Incomplete); err != nil {
 			return recorderFailure{"control_request", err}
 		}
 		r.mu.Lock()
@@ -274,9 +283,9 @@ func (r *Recorder) flush(ctx context.Context, cleanShutdown bool) error {
 			}
 		}
 		r.state.LastDelivered = time.Now().UTC()
-		err := r.persistLocked()
+		acknowledged := r.persistenceSnapshotLocked()
 		r.mu.Unlock()
-		if err != nil {
+		if err := r.persist(acknowledged); err != nil {
 			return recorderFailure{"diagnostic_storage", err}
 		}
 		keys = keys[count:]
@@ -310,9 +319,10 @@ func (r *Recorder) CheckpointAndClose(ctx context.Context) error {
 		return ctx.Err()
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.state.CleanShutdown = true
-	if err := r.persistLocked(); err != nil {
+	snapshot := r.persistenceSnapshotLocked()
+	r.mu.Unlock()
+	if err := r.persist(snapshot); err != nil {
 		return recorderFailure{"diagnostic_storage", err}
 	}
 	return nil
