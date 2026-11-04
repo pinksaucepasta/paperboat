@@ -69,3 +69,37 @@ func TestExpectsNamesOnlyUnexpiredAdmittedHosts(t *testing.T) {
 		t.Fatal("Expects answered wrongly")
 	}
 }
+
+// F21-36: a carrier's lookup stays flat as the edge's total admissions grow from 10 to 4,096
+// (3 admissions per carrier); a scan of every admission would grow ~400x.
+func BenchmarkForIdentityWithManyAdmissions(b *testing.B) {
+	for _, total := range []int{10, 4096} {
+		b.Run(fmt.Sprintf("admissions=%d", total), func(b *testing.B) {
+			now := time.Now().UTC()
+			registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 4096})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer registry.Close()
+			var admissions []ExpectedAdmission
+			for i := 0; i < total; i++ {
+				a := testExpectedAdmissionForRegistry(now.Add(time.Hour))
+				a.Identity.SessionID = fmt.Sprintf("session_%d", i/3)
+				a.PreviewID, a.OperationID, a.RouteID = fmt.Sprintf("preview_%d", i), fmt.Sprintf("operation_%d", i), fmt.Sprintf("route_%d", i)
+				a.Hostname = fmt.Sprintf("p-%d.preview.example.test", i)
+				a.Endpoint = "https://" + a.Hostname
+				admissions = append(admissions, a)
+			}
+			if err := registry.Replace(admissions, now); err != nil {
+				b.Fatal(err)
+			}
+			identity := admissions[0].Identity
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if len(registry.ForIdentity(identity, now)) != 3 {
+					b.Fatal("wrong admissions")
+				}
+			}
+		})
+	}
+}
