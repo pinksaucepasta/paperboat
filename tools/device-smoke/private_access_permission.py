@@ -166,6 +166,11 @@ def main():
     machine = next(m for m in pb_json(owner, 'machine', 'list')['machines'] if m['alias'] == args.owner_alias)
     member = pb_json(accessor, 'auth', 'status')['account']['id']
     results = {}
+    mac = ssh(accessor, 'uname -s').stdout.strip() == 'Darwin'  # no setsid or timeout(1) on macOS
+    detach = '' if mac else 'setsid '
+
+    def bound(seconds):
+        return '' if mac else f'timeout {seconds} '
     log = '/tmp/pb-perm-' + uuid.uuid4().hex[:8]
 
     def exec_script(destination, script, *arguments):
@@ -189,9 +194,9 @@ def main():
         mode = 'hold' if hold else 'once'
         command = exec_script(accessor, HOLDER, args.owner_alias, port, team, log + '.hold', mode)
         if hold:
-            ssh(accessor, f'rm -f {log}.hold; (setsid nohup {command} > {log}.holder 2>&1 < /dev/null &)')
+            ssh(accessor, f'rm -f {log}.hold; ({detach}nohup {command} > {log}.holder 2>&1 < /dev/null &)')
             return True, ''
-        result = ssh(accessor, f'timeout {seconds} {command}', timeout=seconds + 30)
+        result = ssh(accessor, f'{bound(seconds)}{command}', timeout=seconds + 30)
         lines = result.stdout.strip().splitlines()
         first = lines[0] if lines else ''
         if first.startswith('LISTENER'):

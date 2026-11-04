@@ -149,13 +149,18 @@ def pb_json(controller, *arguments):
     return receipt.get('data', receipt)
 
 
+def is_mac(controller):
+    return ssh(controller, 'uname -s').stdout.strip() == 'Darwin'
+
+
 class Origin:
     def __init__(self, controller, target, seconds=900):
         self.controller, self.target, self.marker = controller, target, 'PB_LA_' + uuid.uuid4().hex
         self.log = f'/tmp/local-access-{uuid.uuid4().hex[:8]}'
         script = base64.b64encode(ORIGIN.encode()).decode()
         remote = f'import base64;exec(base64.b64decode("{script}").decode())'
-        command = (f'setsid nohup pb exec {shlex.quote(target)} --timeout {seconds + 60}s -- python3 -c {shlex.quote(remote)} '
+        detach = '' if is_mac(controller) else 'setsid '  # macOS has no setsid
+        command = (f'{detach}nohup pb exec {shlex.quote(target)} --timeout {seconds + 60}s -- python3 -c {shlex.quote(remote)} '
                    f'{self.marker} {seconds} > {self.log}.out 2>&1 < /dev/null & echo $! > {self.log}.pid')
         assert ssh(controller, command).returncode == 0
         for _ in range(60):
@@ -212,6 +217,10 @@ def main():
                 continue
             started = time.time()
             port = origin.ports[kind]
+            if name == 'path-relay' and is_mac(args.controller):
+                # shortcut: the UDP block is iptables; block from a Linux controller (apple as --target) instead.
+                print(f'SKIP local-access:{name}:{args.controller}->{args.target}  needs a Linux controller to block UDP', flush=True)
+                continue
             if name == 'path-relay':
                 block_udp(args.controller)
             command = ['python3', '-I', '-c', PROBE, name, machine['assigned_ip'], str(port), machine['alias'], machine['id'], origin.marker]

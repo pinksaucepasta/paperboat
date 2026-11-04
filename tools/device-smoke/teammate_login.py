@@ -5,6 +5,7 @@ An already signed-in profile prints 'signed-in' and reads nothing. Exits 0 only 
 Usage: teammate_login.py   (HOME of the enrolled device user; the profile lives under profile_root())
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,9 @@ def main():
     root = profile_root()
     config = root / 'config.json'
     if not config.exists():
-        prepare(root, json.loads((Path.home() / '.config/paperboat/config.json').read_text()))
+        device = ('Library/Application Support/paperboat' if os.uname().sysname == 'Darwin'
+                  else '.config/paperboat')
+        prepare(root, json.loads((Path.home() / device / 'config.json').read_text()))
     env = environment(root)
     for name in ('config', 'data', 'state', 'cache', 'home'):
         (root / name).mkdir(parents=True, exist_ok=True, mode=0o700)
