@@ -193,11 +193,9 @@ func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int, aut
 		return Request{}, nil, err
 	}
 	var host *service.Installer
-	if runtime.GOOS != "darwin" {
-		host, err = hostInstallerWithMissing(previous, paths, true)
-		if err != nil {
-			return Request{}, nil, err
-		}
+	host, err = hostInstallerWithMissing(previous, paths, true)
+	if err != nil {
+		return Request{}, nil, err
 	}
 	lifecycle, err := newLifecycleManagerWithRestorePolicy(previous, paths, host, hostd, updater, false, authorize)
 	if err != nil {
@@ -341,11 +339,9 @@ func finalizePreparedUpdateLocked(ctx context.Context, uid int) error {
 		return err
 	}
 	var host *service.Installer
-	if runtime.GOOS != "darwin" {
-		host, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return err
-		}
+	host, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return err
 	}
 	lifecycle, err := newLifecycleManager(request, paths, host, hostd, updater)
 	if err != nil {

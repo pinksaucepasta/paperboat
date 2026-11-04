@@ -15,7 +15,7 @@ func TestSystemServiceScopeUsesUnifiedOSServices(t *testing.T) {
 		units := []string{"paperboat-hostd-u1001-0123456789abcdef0123456789abcdef.service", "paperboat-updated-u1001.service", "paperboat-runtime-privileged-u1001.service"}
 		tool, verb, output := "/usr/bin/systemctl", "is-active", "active\n"
 		if platform == "darwin" {
-			units = []string{"system/com.pinksaucepasta.paperboat.hostd.u1001.0123456789abcdef0123456789abcdef", "system/com.pinksaucepasta.paperboat.updated.u1001"}
+			units = []string{"system/com.pinksaucepasta.paperboat.hostd.u1001.0123456789abcdef0123456789abcdef", "system/com.pinksaucepasta.paperboat.updated.u1001", "system/com.pinksaucepasta.paperboat.runtime-privileged.u1001"}
 			tool, verb, output = "/bin/launchctl", "print", "state = running\n"
 		}
 		for missing := -1; missing < len(units); missing++ {

@@ -198,7 +198,7 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 	instance := "u" + strconv.Itoa(request.UID)
 	hostController := service.Controller(service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboat-runtime-privileged-" + instance + ".service"})
 	rootGroup := "root"
-	if runtime.GOOS == "darwin" {
+	if request.Platform == "darwin" {
 		rootGroup = "wheel"
 		hostController = service.LaunchdController{Runner: service.ExecRunner{}, UID: request.UID, Label: service.HostLabel + "." + instance}
 	}

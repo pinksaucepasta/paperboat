@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
@@ -129,11 +128,9 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 		return errors.Join(ErrInvalidRequest, err)
 	}
 	var legacyHost *service.Installer
-	if runtime.GOOS != "darwin" {
-		legacyHost, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return errors.Join(ErrInvalidRequest, err)
-		}
+	legacyHost, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return errors.Join(ErrInvalidRequest, err)
 	}
 	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostd, updater)
 	if err != nil {

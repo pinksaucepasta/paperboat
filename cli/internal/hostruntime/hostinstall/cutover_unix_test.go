@@ -189,17 +189,27 @@ func TestPowerReplacementCompletesBeforeTerminalAdmissionPauses(t *testing.T) {
 	}
 }
 
+// pbmac 2026-11-05 (F2-06): macOS never installed the root host service, so availability was never applied.
+// Both platforms declare it as a boot-domain system service on the immutable candidate pin.
 func TestPowerServiceUsesTheImmutableCandidatePin(t *testing.T) {
-	root := t.TempDir()
-	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "releases", "pb.rollback")}
-	request := Request{Platform: runtime.GOOS, UID: 1001, GID: 1001, HelperListenAddress: "127.0.0.1:1234", Source: installsource.Source{SHA256: strings.Repeat("a", 64)}}
-	installer, err := hostInstallerWithMissing(request, paths, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(root, "releases", "pins", request.Source.SHA256, "pb")
-	if installer.ExecutablePath() != want {
-		t.Fatalf("power service depends on mutable worker slot: %s", installer.ExecutablePath())
+	for platform, definition := range map[string]string{
+		"linux":  "/etc/systemd/system/paperboat-runtime-privileged-u1001.service",
+		"darwin": "/Library/LaunchDaemons/com.pinksaucepasta.paperboat.runtime-privileged.u1001.plist",
+	} {
+		root := t.TempDir()
+		paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "releases", "pb.rollback")}
+		request := Request{Platform: platform, UID: 1001, GID: 1001, HelperListenAddress: "127.0.0.1:1234", Source: installsource.Source{SHA256: strings.Repeat("a", 64)}}
+		installer, err := hostInstallerWithMissing(request, paths, true)
+		if err != nil {
+			t.Fatal(platform, err)
+		}
+		want := filepath.Join(root, "releases", "pins", request.Source.SHA256, "pb")
+		if installer.ExecutablePath() != want {
+			t.Fatalf("%s power service depends on mutable worker slot: %s", platform, installer.ExecutablePath())
+		}
+		if installer.DefinitionPath() != definition {
+			t.Fatalf("%s power service definition = %s, want %s", platform, installer.DefinitionPath(), definition)
+		}
 	}
 }
 

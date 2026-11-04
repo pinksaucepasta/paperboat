@@ -364,11 +364,9 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 		return err
 	}
 	var host *service.Installer
-	if request.Platform != "darwin" {
-		host, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return err
-		}
+	host, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return err
 	}
 	lifecycle, err := newLifecycleManagerWithCarrierScope(request, paths, host, hostd, updater, true)
 	if err != nil {
@@ -396,19 +394,7 @@ func (s unixCarrierInstallation) legacyComponents() ([]*service.NativeTransactio
 	if err != nil {
 		return nil, err
 	}
-	result := []*service.NativeTransactionalComponent{component}
-	if s.request.Platform == "darwin" {
-		obsolete, err := hostInstallerWithMissing(s.request, s.paths, true)
-		if err != nil {
-			return nil, err
-		}
-		component, err := obsolete.NativeComponent(nil)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, component)
-	}
-	return result, nil
+	return []*service.NativeTransactionalComponent{component}, nil
 }
 
 // RestorePriorNativeRuntime restarts an exact protected pre-cutover baseline
@@ -439,11 +425,9 @@ func RestorePriorNativeRuntime(ctx context.Context, previous Request) error {
 		return err
 	}
 	var host *service.Installer
-	if installed.Platform != "darwin" {
-		host, err = hostInstallerWithMissing(installed, paths, true)
-		if err != nil {
-			return err
-		}
+	host, err = hostInstallerWithMissing(installed, paths, true)
+	if err != nil {
+		return err
 	}
 	// Terminal recovery must not wait for the independent power-policy service.
 	for _, installer := range []*service.Installer{hostd, host, updater} {

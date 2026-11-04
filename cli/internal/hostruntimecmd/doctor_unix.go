@@ -208,6 +208,7 @@ func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int,
 		commands = append(commands,
 			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd." + instance + "." + generation},
 			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.updated." + instance},
+			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.runtime-privileged." + instance},
 		)
 
 	default:
@@ -228,7 +229,7 @@ func runSystemServiceCommand(ctx context.Context, name string, args ...string) (
 
 func hostDiagnostics(ctx context.Context) (response hostservice.Response, resultErr error) {
 	dialer := net.Dialer{Timeout: 3 * time.Second}
-	connection, err := dialer.DialContext(ctx, "unix", "/var/run/paperboat/host-service.sock")
+	connection, err := dialer.DialContext(ctx, "unix", hostservice.DefaultSocketPath())
 	if err != nil {
 		return hostservice.Response{}, err
 	}

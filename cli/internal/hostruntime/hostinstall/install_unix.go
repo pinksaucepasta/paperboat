@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
 
@@ -38,16 +37,10 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		return err
 	}
 	paths := platformPaths(request.UID)
-	var err error
-	var legacyHost *service.Installer
-	// hostd now owns the runtime control plane. The separate privileged host
-	// service is retained only for power policy and must not bind the same
-	// loopback address as hostd.
-	if runtime.GOOS != "darwin" {
-		legacyHost, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return errors.Join(ErrInvalidRequest, err)
-		}
+	// hostd owns the runtime control plane; the root host service applies only the power policy.
+	legacyHost, err := hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return errors.Join(ErrInvalidRequest, err)
 	}
 	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall)
 	if err != nil {

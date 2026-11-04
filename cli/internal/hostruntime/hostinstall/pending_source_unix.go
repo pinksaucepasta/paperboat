@@ -148,11 +148,9 @@ func pendingSourceBaseline(ctx context.Context, paths installPaths, request Requ
 		return nil, err
 	}
 	var host *service.Installer
-	if runtime.GOOS != "darwin" {
-		host, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return nil, err
-		}
+	host, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return nil, err
 	}
 	lifecycle, err := newLifecycleManager(request, paths, host, hostd, updater)
 	if err != nil {

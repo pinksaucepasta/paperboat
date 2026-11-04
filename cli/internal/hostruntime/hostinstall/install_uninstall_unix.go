@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -117,11 +116,9 @@ func Stop(ctx context.Context, request Request) (resultErr error) {
 		return errors.Join(ErrInvalidRequest, err)
 	}
 	var legacyHost *service.Installer
-	if runtime.GOOS != "darwin" {
-		legacyHost, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return errors.Join(ErrInvalidRequest, err)
-		}
+	legacyHost, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return errors.Join(ErrInvalidRequest, err)
 	}
 	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostd, updater)
 	if err != nil {
@@ -151,11 +148,9 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		return withUninstallStage("uninstall_prepare", errors.Join(ErrInvalidRequest, err))
 	}
 	var legacyHost *service.Installer
-	if runtime.GOOS != "darwin" {
-		legacyHost, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return withUninstallStage("uninstall_prepare", errors.Join(ErrInvalidRequest, err))
-		}
+	legacyHost, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return withUninstallStage("uninstall_prepare", errors.Join(ErrInvalidRequest, err))
 	}
 	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostd, updater)
 	if err != nil {

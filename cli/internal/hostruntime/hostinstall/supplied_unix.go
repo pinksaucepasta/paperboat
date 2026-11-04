@@ -108,11 +108,9 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 			return e
 		}
 		var host *service.Installer
-		if runtime.GOOS != "darwin" {
-			host, e = hostInstallerWithMissing(previous, paths, true)
-			if e != nil {
-				return e
-			}
+		host, e = hostInstallerWithMissing(previous, paths, true)
+		if e != nil {
+			return e
 		}
 		lifecycle, e := newLifecycleManager(previous, paths, host, hostd, updater)
 		if e != nil {

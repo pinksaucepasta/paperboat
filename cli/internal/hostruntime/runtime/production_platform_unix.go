@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
@@ -23,7 +24,7 @@ func validatedMachineShell(path string) (string, error) { return validatedMachin
 func validateMachineWorkspace(path string) error        { return validateMachineWorkspaceUnix(path) }
 
 func newProductionAvailabilityHostClient(timeout time.Duration) (*availability.HostClient, error) {
-	return availability.NewHostClient("/var/run/paperboat/host-service.sock", timeout)
+	return availability.NewHostClient(hostservice.DefaultSocketPath(), timeout)
 }
 
 func cleanupProductionManagedSSH(ctx context.Context, registration runtimeidentity.Registration) error {

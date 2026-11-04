@@ -103,11 +103,9 @@ func PrepareUpdatedSessionOwner(ctx context.Context, uid int, source installsour
 		return err
 	}
 	var legacyHost *service.Installer
-	if runtime.GOOS != "darwin" {
-		legacyHost, err = hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return err
-		}
+	legacyHost, err = hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return err
 	}
 	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostdPending, updaterPending)
 	if err != nil {
@@ -225,16 +223,6 @@ func preflightUnixCarrier(ctx context.Context, request Request, paths installPat
 		kind      string
 		installer *service.Installer
 	}{{service.HostdKind, hostd}, {service.WorkerKind, worker}}
-	if runtime.GOOS == "darwin" {
-		obsolete, err := hostInstallerWithMissing(request, paths, true)
-		if err != nil {
-			return false, err
-		}
-		checks = append(checks, struct {
-			kind      string
-			installer *service.Installer
-		}{service.HostKind, obsolete})
-	}
 	for _, check := range checks {
 		var controller service.Controller
 		if check.kind == service.HostdKind {
