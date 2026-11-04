@@ -146,6 +146,7 @@ type ConfigAccountStatus struct {
 
 type ConfigStatusInventoryOptions struct {
 	EnvironmentID   string
+	MachineID       string // one machine's row; empty selects all
 	Limit, Offset   int
 	Q, State, Owner string
 	// After continues the list after this row (next_cursor); used instead of Offset.

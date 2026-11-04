@@ -1,8 +1,7 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
-import { api } from "@/lib/api"
-import { fetchAllPages } from "@/lib/machine-pages"
+import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { cursorPage } from "@/lib/cursor-pages"
 
 /*
  * Config sync keeps chosen files on each machine (dotfiles and the like) in a Git repository. The
@@ -34,31 +33,33 @@ export type ConfigEnvironment = {
   updated_at?: string
 }
 
-export type ConfigAccountStatus = { state: string; environments: ConfigEnvironment[] }
+type StatusPage = { environments: ConfigEnvironment[] | null; pagination: { total: number; next_cursor?: string } }
 
-/** Every machine's sync, page by page (the server caps a page at 200), so none past the first is missed. */
-export async function fetchConfigStatus(signal?: AbortSignal): Promise<ConfigAccountStatus> {
-  let state = ""
-  const pages = await fetchAllPages(
-    async (params, pageSignal) => {
-      const page = await api<ConfigAccountStatus & { pagination: { total: number } }>(
-        `config-sync/status?${new URLSearchParams(params)}`,
-        { signal: pageSignal },
-      )
-      state ||= page.state
-      return { items: page.environments, pagination: page.pagination }
-    },
-    {},
-    signal,
-  )
-  return { state, environments: pages?.items ?? [] }
-}
-
-export const configStatusQuery = queryOptions({
-  queryKey: ["config-sync"],
-  queryFn: ({ signal }) => fetchConfigStatus(signal),
-  refetchInterval: 15_000,
+const readStatus = (raw: StatusPage) => ({
+  items: raw.environments,
+  total: raw.pagination.total,
+  next_cursor: raw.pagination.next_cursor,
 })
+
+/** One page of machines' sync, searched and filtered by the server (`machine` is one machine's row). */
+export const configStatusQuery = (options: { q?: string; state?: string; machine?: string; page?: number }) =>
+  queryOptions({
+    queryKey: ["config-sync", options],
+    queryFn: ({ signal }) =>
+      cursorPage<ConfigEnvironment, StatusPage>(
+        "config-sync/status",
+        {
+          ...(options.q && { q: options.q }),
+          ...(options.state && { state: options.state }),
+          ...(options.machine && { machine_id: options.machine }),
+        },
+        options.page ?? 1,
+        signal,
+        readStatus,
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
+  })
 
 export const directionLabels: Record<string, string> = {
   bidirectional: "Two-way",

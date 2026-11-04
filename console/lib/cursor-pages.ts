@@ -14,7 +14,14 @@ export const cursorPageSize = 50
  */
 const starts = new Map<string, string[]>()
 
-export async function cursorPage<T>(path: string, params: Record<string, string>, page: number, signal?: AbortSignal) {
+export async function cursorPage<T, Raw = CursorPage<T>>(
+  path: string,
+  params: Record<string, string>,
+  page: number,
+  signal?: AbortSignal,
+  /** For a list that nests its rows and total (`environments`, `pagination`) instead of `items`. */
+  read: (raw: Raw) => CursorPage<T> = (raw) => raw as unknown as CursorPage<T>,
+) {
   const key = `${path}?${new URLSearchParams(params)}`
   const known = starts.get(key) ?? [""]
   let at = Math.min(page, known.length) - 1
@@ -24,7 +31,7 @@ export async function cursorPage<T>(path: string, params: Record<string, string>
       limit: String(cursorPageSize),
       ...(known[at] && { cursor: known[at] }),
     })
-    const result = await api<CursorPage<T>>(`${path}?${query}`, { signal })
+    const result = read(await api<Raw>(`${path}?${query}`, { signal }))
     if (result.next_cursor) known[at + 1] = result.next_cursor
     starts.set(key, known)
     // The page asked for, or the last one when the list is shorter than it.

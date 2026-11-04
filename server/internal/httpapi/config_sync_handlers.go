@@ -15,11 +15,11 @@ func configSyncStatus(service *controlplane.ConfigStatusService) http.Handler {
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		query, after, ok := readKeysetInventoryQuery(w, r, controlplane.ConfigStatusFilters)
+		query, after, ok := readKeysetInventoryQuery(w, r, controlplane.ConfigStatusFilters, "machine_id")
 		if !ok {
 			return
 		}
-		opts := controlplane.ConfigStatusInventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner}
+		opts := controlplane.ConfigStatusInventoryOptions{Limit: query.Limit, Offset: query.Offset, Q: query.Q, State: query.State, Owner: query.Owner, MachineID: r.URL.Query().Get("machine_id")}
 		if after != nil {
 			opts.After = &controlplane.ConfigStatusPosition{Alias: after[0], EnvironmentID: after[1]}
 		}

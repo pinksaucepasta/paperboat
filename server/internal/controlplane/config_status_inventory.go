@@ -131,12 +131,12 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
  SELECT * FROM projected WHERE (NOT $2::boolean OR ($3::text IS NULL AND adopted_team_id IS NULL) OR adopted_team_id=$3)
  AND ($4='' OR position(lower($4) in lower(alias||' '||environment_id||' '||coalesce(repository_name,'')))>0)
  AND ($5::text[] IS NULL OR inventory_state=ANY($5::text[]))
- AND ($6='' OR $6='mine' OR $6=$1) AND ($10='' OR environment_id=$10)`
+ AND ($6='' OR $6='mine' OR $6=$1) AND ($10='' OR environment_id=$10) AND ($11='' OR machine_id=$11)`
 	states, err := configStatusFilter(opts.State)
 	if err != nil {
 		return configStatusPage{}, err
 	}
-	args := []any{account, scoped, team, opts.Q, states, opts.Owner, s.policy.Mode == "disabled", int64(s.policy.StaleHeartbeatAfter), s.clock().Add(-s.policy.StaleHeartbeatAfter), opts.EnvironmentID}
+	args := []any{account, scoped, team, opts.Q, states, opts.Owner, s.policy.Mode == "disabled", int64(s.policy.StaleHeartbeatAfter), s.clock().Add(-s.policy.StaleHeartbeatAfter), opts.EnvironmentID, opts.MachineID}
 	summaryRows, err := s.store.SQL().QueryContext(ctx, "SELECT inventory_state,count(*) FROM ("+query+") states GROUP BY inventory_state", args...)
 	if err != nil {
 		return configStatusPage{}, err
@@ -167,8 +167,8 @@ func (s *ConfigStatusService) inventoryStatusRows(ctx context.Context, account s
 		afterKey, afterID = opts.After.Alias, opts.After.EnvironmentID
 	}
 	rows, err := s.store.SQL().QueryContext(ctx, "SELECT page.*,lower(page.alias) FROM ("+query+`) page
- WHERE $13::text IS NULL OR (lower(alias),environment_id)>($13::text,$14::text)
- ORDER BY lower(alias),environment_id LIMIT $11 OFFSET $12`, append(args, opts.Limit+1, opts.Offset, afterKey, afterID)...)
+ WHERE $14::text IS NULL OR (lower(alias),environment_id)>($14::text,$15::text)
+ ORDER BY lower(alias),environment_id LIMIT $12 OFFSET $13`, append(args, opts.Limit+1, opts.Offset, afterKey, afterID)...)
 	if err != nil {
 		return configStatusPage{}, err
 	}

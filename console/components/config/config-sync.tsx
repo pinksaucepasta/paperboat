@@ -2,9 +2,10 @@
 
 import { ArrowsClockwiseIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { useState } from "react"
+import { useDeferredValue, useState } from "react"
 import { useApiQuery, type Machine } from "@/lib/api"
 import { cursorPageSize } from "@/lib/cursor-pages"
+import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import {
   configStatusQuery,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/config-sync"
 import { formatBytes } from "@/lib/format"
 import { GitHubConnection } from "@/components/config/github-connection"
-import { useListScope } from "@/components/list-toolbar"
+import { SearchField, useListScope } from "@/components/list-toolbar"
 import { Detail } from "@/components/machine-overview"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
@@ -37,8 +38,12 @@ export function MachineConfigSync() {
  */
 export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
-  const status = useApiQuery(configStatusQuery)
-  const environments = status.data?.environments ?? []
+  const [search, setSearch] = useState("")
+  const q = useDeferredValue(search.trim())
+  const pages = usePageParam(`${q}|${scope ?? ""}`)
+  const status = useApiQuery(configStatusQuery({ q, machine: scope ?? undefined, page: pages.page }))
+  const conflicts = useApiQuery({ ...configStatusQuery({ state: "conflict" }), enabled: !scope })
+  const environments = status.data?.items ?? []
 
   if (status.isPending) {
     return (
@@ -60,9 +65,8 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   }
 
   if (scope) {
-    const environment = environments.find((entry) => entry.machine_id === scope)
-    return environment ? (
-      <MachineSync environment={environment} />
+    return environments[0] ? (
+      <MachineSync environment={environments[0]} />
     ) : (
       <NotSetUp name={machine?.alias ?? "This machine"} />
     )
@@ -70,7 +74,19 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   return (
     <div className="flex flex-col gap-10">
       <GitHubConnection />
-      {environments.length ? <AllMachines environments={environments} /> : <NotSetUp />}
+      {status.data.total || q ? (
+        <AllMachines
+          environments={environments}
+          total={status.data.total}
+          page={pages.page}
+          go={pages.go}
+          conflicted={conflicts.data?.total ?? 0}
+          search={search}
+          setSearch={setSearch}
+        />
+      ) : (
+        <NotSetUp />
+      )}
     </div>
   )
 }
@@ -92,22 +108,26 @@ function NotSetUp({ name }: { name?: string }) {
   )
 }
 
-function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
-  const [page, setPage] = useState(1)
-  const conflicted = environments.filter((entry) => entry.conflicts?.length)
-  const sorted = [...environments].sort(
-    (a, b) => Number(syncState(b).attention) - Number(syncState(a).attention) || a.alias.localeCompare(b.alias),
-  )
+function AllMachines(props: {
+  environments: ConfigEnvironment[]
+  total: number
+  page: number
+  go: (page: number) => void
+  conflicted: number
+  search: string
+  setSearch: (value: string) => void
+}) {
+  const { environments, total, page, go, conflicted, search, setSearch } = props
   return (
     <section className="flex flex-col gap-4">
-      {conflicted.length > 0 && (
+      {conflicted > 0 && (
         <div className="flex items-start gap-3 rounded-lg bg-surface p-4 text-sm">
           <WarningCircleIcon weight="fill" className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="flex min-w-0 flex-col gap-0.5">
             <p className="font-medium">
-              {conflicted.length === 1
-                ? `${conflicted[0].conflicts!.length === 1 ? "A file" : "Files"} on ${conflicted[0].alias} changed in two places`
-                : `Files on ${conflicted.length} machines changed in two places`}
+              {conflicted === 1
+                ? "Files on a machine changed in two places"
+                : `Files on ${conflicted} machines changed in two places`}
             </p>
             <p className="text-muted-foreground">
               Those files stop syncing until you choose which version to keep, on the machine with pb config conflict.
@@ -115,6 +135,7 @@ function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
           </div>
         </div>
       )}
+      <SearchField value={search} onChange={setSearch} placeholder="Search machines" />
       <table className="w-full table-fixed text-sm">
         <colgroup>
           <col className="w-[20%]" />
@@ -135,7 +156,7 @@ function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
-          {sorted.slice((page - 1) * cursorPageSize, page * cursorPageSize).map((environment) => {
+          {environments.map((environment) => {
             const state = syncState(environment)
             return (
               <tr
@@ -181,7 +202,7 @@ function AllMachines({ environments }: { environments: ConfigEnvironment[] }) {
           })}
         </tbody>
       </table>
-      <ListPager page={page} size={cursorPageSize} total={sorted.length} go={setPage} />
+      <ListPager page={page} size={cursorPageSize} total={total} go={go} />
     </section>
   )
 }

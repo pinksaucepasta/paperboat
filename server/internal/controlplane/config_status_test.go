@@ -225,6 +225,10 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 			t.Fatalf("exact status=%#v", page)
 		}
 	}
+	one, err := service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 10, MachineID: "machine_a_machine_" + suffix})
+	if err != nil || len(one.Environments) != 1 || one.Environments[0].EnvironmentID != machineAEnvironment || one.Pagination["total"] != 1 {
+		t.Fatalf("machine filter: %#v %v", one, err)
+	}
 	// Revoked, tombstoned and missing machines never appear; an unbound environment is not standalone.
 	unbound := "status_unbound_" + suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, unbound, user); err != nil {

@@ -22943,6 +22943,16 @@
               "maxLength": 512
             },
             "description": "Keyset position from pagination.next_cursor: the page after it in alias order. Not with offset."
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "One machine's row only (exact machine id)."
           }
         ]
       }
