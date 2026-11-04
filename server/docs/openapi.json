@@ -863,7 +863,8 @@
           "transaction_id",
           "handoff",
           "callback_origin",
-          "expires_at"
+          "expires_at",
+          "denied"
         ],
         "properties": {
           "transaction_id": {
@@ -883,6 +884,10 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "denied": {
+            "type": "boolean",
+            "description": "The signed-in account may not open this resource. The handoff still completes; the edge answers 403 with its No access page."
           }
         }
       },
