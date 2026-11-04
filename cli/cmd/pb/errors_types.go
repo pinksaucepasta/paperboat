@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/spf13/cobra"
 )
 
@@ -85,7 +86,21 @@ func (e uninstallCleanupError) Error() string {
 	if len(steps) == 0 {
 		return "Paperboat local removal was incomplete. Retry `pb uninstall`."
 	}
-	return "Paperboat local removal was incomplete after attempting every step. Failed: " + strings.Join(steps, ", ") + ". Retry `pb uninstall`."
+	return "Paperboat local removal was incomplete after attempting every step. Failed: " + strings.Join(steps, ", ") + "." + purgeIncompleteDetail(e.err) + " Retry `pb uninstall`."
+}
+
+// purgeIncompleteDetail names the privileged cleanup's failed stages and what it
+// found still present, so a failed removal says exactly what is left.
+func purgeIncompleteDetail(err error) string {
+	var incomplete hostruntimecmd.PurgeIncomplete
+	if !errors.As(err, &incomplete) {
+		return ""
+	}
+	detail := " System cleanup stages that failed: " + strings.Join(incomplete.Stages, ", ") + "."
+	if len(incomplete.Remaining) > 0 {
+		detail += " Still present: " + strings.Join(incomplete.Remaining, ", ") + "."
+	}
+	return detail
 }
 
 func (e uninstallCleanupError) Unwrap() error { return e.err }

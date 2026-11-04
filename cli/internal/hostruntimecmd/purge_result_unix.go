@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -27,7 +28,11 @@ type purgeResult struct {
 	Version string       `json:"version"`
 	OK      *bool        `json:"ok"`
 	Faults  []purgeFault `json:"faults,omitempty"`
+	// Remaining names the owned paths and processes the final inventory still found.
+	Remaining []string `json:"remaining,omitempty"`
 }
+
+const purgeRemainingLimit = 32
 
 func (f purgeFault) Error() string {
 	return "Paperboat privileged cleanup failed at " + f.Stage + ". Support reference: " + f.SupportReference
@@ -63,6 +68,14 @@ func writePurgeResult(ctx context.Context, output io.Writer, err error) error {
 			f := errorreport.ProjectFault(ctx, "paperboat-daemon", "uninstall", "command", "command_failed", err)
 			result.Faults = []purgeFault{{f.Stage, f.Code, f.Cause, f.Errno, f.ErrorType, f.SupportReference}}
 		}
+		var leftovers unixLeftoverError
+		if errors.As(err, &leftovers) {
+			for _, item := range leftovers.items {
+				if len(result.Remaining) < purgeRemainingLimit && validPurgeRemaining(item) {
+					result.Remaining = append(result.Remaining, item)
+				}
+			}
+		}
 	}
 	encoded, encodeErr := json.Marshal(result)
 	if encodeErr != nil || len(encoded)+1 > purgeResultLimit {
@@ -89,14 +102,20 @@ func readPurgeResult(data []byte, processErr error) error {
 		return invalid()
 	}
 	if *result.OK {
-		if result.Faults != nil {
+		if result.Faults != nil || result.Remaining != nil {
 			return invalid()
 		}
 		return nil
 	}
-	if len(result.Faults) == 0 {
+	if len(result.Faults) == 0 || len(result.Remaining) > purgeRemainingLimit {
 		return invalid()
 	}
+	for _, item := range result.Remaining {
+		if !validPurgeRemaining(item) {
+			return invalid()
+		}
+	}
+	incomplete := PurgeIncomplete{Remaining: result.Remaining}
 	var retained []error
 	for _, f := range result.Faults {
 		if !validPurgeStage(f.Stage) || f.Code != "purge_"+f.Stage+"_failed" && !(f.Stage == "command" && f.Code == "command_failed") || !errorreport.ValidCause(f.Cause) || f.Errno < 0 || f.Errno > 65535 || !supportref.Valid(f.SupportReference) || len(f.ErrorType) > 64 {
@@ -111,8 +130,23 @@ func readPurgeResult(data []byte, processErr error) error {
 			return invalid()
 		}
 		retained = append(retained, f)
+		incomplete.Stages = append(incomplete.Stages, f.Stage)
 	}
-	return errors.Join(append(retained, processErr)...)
+	return errors.Join(append(retained, incomplete, processErr)...)
+}
+
+// validPurgeRemaining accepts only what the final inventory names: an absolute
+// path or "process <pid> (<path>)", bounded and free of control characters.
+func validPurgeRemaining(item string) bool {
+	if len(item) == 0 || len(item) > 512 || !strings.HasPrefix(item, "/") && !strings.HasPrefix(item, "process ") {
+		return false
+	}
+	for _, c := range item {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 func validPurgeStage(stage string) bool {
 	switch stage {
@@ -145,4 +179,12 @@ func ExecutePurge(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer
 		return runtimeFailure("privileged cleanup invocation is invalid")
 	}
 	return runPurgeCommand(ctx, nil, stdin, stdout, stderr)
+}
+
+// ExecuteResetPurge is ExecutePurge for pb reset: it keeps the account CLI it can prove.
+func ExecuteResetPurge(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
+	if ctx == nil || stdin == nil || stdout == nil || stderr == nil {
+		return runtimeFailure("privileged cleanup invocation is invalid")
+	}
+	return runPurgeCommand(ctx, []string{"--preserve-cli"}, stdin, stdout, stderr)
 }

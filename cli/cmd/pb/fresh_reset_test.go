@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/spf13/cobra"
 )
 
@@ -276,6 +277,18 @@ func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
 	for _, want := range []string{`"resume":true`, `"reset":false`, `"executable":"/owned/pb"`} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("output %q missing %q", output.String(), want)
+		}
+	}
+}
+
+func TestIncompleteRemovalNamesFailedStagesAndWhatRemains(t *testing.T) {
+	report := hostruntimecmd.PurgeIncomplete{Stages: []string{"machine_guard"}, Remaining: []string{"/Library/LaunchDaemons/io.paperboat.machineguard.plist"}}
+	failure := uninstallStepFailure{name: "remove system Paperboat runtime", err: errors.Join(errors.New("exit status 1"), report)}
+	for _, message := range []string{uninstallCleanupError{err: failure}.Error(), freshResetCleanupError{err: failure}.Error()} {
+		for _, want := range []string{"remove system Paperboat runtime", "stages that failed: machine_guard", "Still present: /Library/LaunchDaemons/io.paperboat.machineguard.plist"} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("%q lacks %q", message, want)
+			}
 		}
 	}
 }

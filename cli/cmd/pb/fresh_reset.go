@@ -25,7 +25,7 @@ func (e freshResetCleanupError) Error() string {
 	if len(steps) == 0 {
 		return "Paperboat fresh enrollment reset was incomplete. Retry the installer."
 	}
-	return "Paperboat fresh enrollment reset was incomplete. Failed: " + strings.Join(steps, ", ") + ". Credentials and state were retained when service termination could not be confirmed; retry the installer."
+	return "Paperboat fresh enrollment reset was incomplete. Failed: " + strings.Join(steps, ", ") + "." + purgeIncompleteDetail(e.err) + " Credentials and state were retained when service termination could not be confirmed; retry the installer."
 }
 func (e freshResetCleanupError) Unwrap() error { return e.err }
 

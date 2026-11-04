@@ -102,3 +102,29 @@ func (f nativePurgeFaultFixture) Error() string           { return "private nati
 func (f nativePurgeFaultFixture) Unwrap() error           { return f.cause }
 func (f nativePurgeFaultFixture) DiagnosticStage() string { return "uninstall_power" }
 func (f nativePurgeFaultFixture) DiagnosticCode() string  { return "purge_uninstall_power_failed" }
+
+// F1-09: a failed uninstall must say what is left, not only which step failed.
+func TestPurgeResultCarriesWhatRemains(t *testing.T) {
+	items := []string{"/Library/LaunchDaemons/io.paperboat.machineguard.plist", "process 412 (/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb)"}
+	var output bytes.Buffer
+	_ = writePurgeResult(t.Context(), &output, errors.Join(withPurgeStage("machine_guard", syscall.EIO), withPurgeStage("final_inventory", unixLeftoverError{items: items})))
+	var incomplete PurgeIncomplete
+	if err := readPurgeResult(output.Bytes(), errors.New("exit 1")); !errors.As(err, &incomplete) {
+		t.Fatalf("no cleanup report: %v", err)
+	}
+	if strings.Join(incomplete.Stages, ",") != "machine_guard,final_inventory" || strings.Join(incomplete.Remaining, "|") != strings.Join(items, "|") {
+		t.Fatalf("report = %+v", incomplete)
+	}
+	for _, bad := range []string{`"relative/path"`, `"/a\u0007b"`, `""`} {
+		forged := bytes.Replace(output.Bytes(), []byte(`"remaining":[`), []byte(`"remaining":[`+bad+`,`), 1)
+		if readPurgeResult(forged, errors.New("exit 1")) == nil || errors.As(readPurgeResult(forged, errors.New("exit 1")), &incomplete) {
+			t.Fatalf("forged remaining item %s accepted", bad)
+		}
+	}
+	var good bytes.Buffer
+	_ = writePurgeResult(t.Context(), &good, nil)
+	success := bytes.Replace(good.Bytes(), []byte(`"ok":true`), []byte(`"ok":true,"remaining":["/x"]`), 1)
+	if readPurgeResult(success, nil) == nil {
+		t.Fatal("success with leftovers accepted")
+	}
+}

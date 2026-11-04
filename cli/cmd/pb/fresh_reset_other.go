@@ -14,10 +14,7 @@ import (
 )
 
 func freshEnrollmentRuntimePurge(command *cobra.Command) error {
-	if hostruntimecmd.Execute(command.Context(), []string{"purge", "--preserve-cli"}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr()) != 0 {
-		return errors.New("runtime reset purge failed")
-	}
-	return nil
+	return hostruntimecmd.ExecuteResetPurge(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 }
 
 func existingFreshEnrollmentExecutable() (string, error) {
