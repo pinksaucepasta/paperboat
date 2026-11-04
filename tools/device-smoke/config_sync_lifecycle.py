@@ -232,7 +232,11 @@ class Fixture:
 
 def api_token_request(path, method='GET'):
     secrets = glob.glob(str(CONFIG_DIR / 'credentials/secrets/profile-*-access.secret'))
-    token = Path(secrets[0]).read_text().strip()
+    if secrets:
+        token = Path(secrets[0]).read_text().strip()
+    else:  # macOS keeps the token in the login keychain
+        from bugreport_lifecycle import keychain_tokens
+        token = next(v for k, v in keychain_tokens().items() if k.startswith('keychain-access'))
     server = json.loads((CONFIG_DIR / 'config.json').read_text())['server_url']
     request = urllib.request.Request(server + path, method=method, headers={'Authorization': 'Bearer ' + token, 'X-Paperboat-Workspace': 'personal'})
     with urllib.request.urlopen(request, timeout=30) as response:
