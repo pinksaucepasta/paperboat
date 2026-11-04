@@ -8,10 +8,12 @@ import (
 	"testing"
 )
 
+// The shared projection (F21-39) reports the operational cause when a 4xx sits beside an independent
+// failure, and keeps the 401 as http_status; the private body and the request path never appear.
 func TestServiceDiagnosticExcludesPrivateErrorData(t *testing.T) {
 	err := &edgeruntime.StartError{Component: "*runtime.Assembly", Err: errors.Join(&edgeruntime.StartError{Component: "*runtime.NodeWorker", Err: &control.RequestFailure{Path: "/v1/nodes/register", Status: 401, Category: "http_status", Err: control.ErrControlUnavailable}}, errors.New("SECRET credential private body"))}
 	got := serviceDiagnostic(err)
-	if strings.Contains(got, "SECRET") || strings.Contains(got, "/v1/nodes/register") || !strings.Contains(got, "cause=permission_denied") || !strings.Contains(got, "error_type=StartError") || !strings.Contains(got, "http_status=401") {
+	if strings.Contains(got, "SECRET") || strings.Contains(got, "/v1/nodes/register") || !strings.Contains(got, "cause=control_unavailable") || !strings.Contains(got, "http_status=401") {
 		t.Fatalf("diagnostic = %q", got)
 	}
 }
