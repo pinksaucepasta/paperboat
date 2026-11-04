@@ -3,6 +3,7 @@ package errorreport
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"net/http"
 	"net/url"
 	"os"
@@ -356,7 +357,7 @@ func cleanAttributes(in map[string]attribute.Value, metric bool) map[string]attr
 				out[k] = v
 			}
 		case "error_type":
-			if !metric && validErrorType(s) {
+			if !metric && reporting.ValidErrorType(s) {
 				out[k] = v
 			}
 		case "error_chain":
@@ -372,7 +373,7 @@ func cleanAttributes(in map[string]attribute.Value, metric bool) map[string]attr
 				out[k] = v
 			}
 		case "source_function":
-			if !metric && s != "" && safeSourceFunction(s) == s {
+			if !metric && s != "" && reporting.SafeSourceFunction(s) == s {
 				out[k] = v
 			}
 		case "source_line":

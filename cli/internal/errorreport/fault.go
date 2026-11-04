@@ -2,6 +2,7 @@ package errorreport
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"io"
 	"io/fs"
 	"net"
@@ -91,7 +92,7 @@ func ProjectFault(ctx context.Context, component, operation, stage, code string,
 			}
 			seen[current] = true
 		}
-		name := faultType(t)
+		name := reporting.TypeName(t)
 		if len(f.ErrorChain) < 8 && (len(f.ErrorChain) == 0 || f.ErrorChain[len(f.ErrorChain)-1] != name) {
 			f.ErrorChain = append(f.ErrorChain, name)
 		}
@@ -250,22 +251,6 @@ func cancellationOnly(err error) bool {
 	return true
 }
 
-func faultType(t reflect.Type) string {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	name := t.Name()
-	if name == "" || len(name) > 64 {
-		return "error"
-	}
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
-			return "error"
-		}
-	}
-	return name
-}
-
 func nodeCause(err error) (string, int, int) {
 	if remote, ok := err.(interface {
 		DiagnosticCause() string
@@ -331,7 +316,6 @@ func nodeCause(err error) (string, int, int) {
 		}
 	}
 	if errno, ok := err.(syscall.Errno); ok {
-		cause := "system_error"
 		// Errno.Is understands native Windows file/path/ACL errors as well as
 		// Unix errno values. Comparing only POSIX constants loses that mapping.
 		switch {
@@ -342,28 +326,7 @@ func nodeCause(err error) (string, int, int) {
 		case errno.Is(fs.ErrExist):
 			return "conflict", int(errno), 60
 		}
-		switch errno {
-		case syscall.ENOENT:
-			cause = "not_found"
-		case syscall.EACCES, syscall.EPERM:
-			cause = "permission_denied"
-		case syscall.ECONNREFUSED:
-			cause = "connection_refused"
-		case syscall.ECONNRESET:
-			cause = "connection_reset"
-		case syscall.EPIPE:
-			cause = "broken_pipe"
-		case syscall.ENETUNREACH, syscall.EHOSTUNREACH:
-			cause = "network_unreachable"
-		case syscall.EADDRINUSE:
-			cause = "address_in_use"
-		case syscall.EINVAL:
-			cause = "invalid_argument"
-		case syscall.EMFILE, syscall.ENFILE, syscall.ENOSPC, syscall.ENOMEM:
-			cause = "resource_exhausted"
-		case syscall.ETIMEDOUT:
-			cause = "network_timeout"
-		}
+		cause := reporting.ErrnoCause(errno)
 		return cause, int(errno), 60
 	}
 	if dns, ok := err.(*net.DNSError); ok {
@@ -393,12 +356,6 @@ func ValidCause(cause string) bool {
 		return true
 	}
 	return false
-}
-
-func validErrorType(value string) bool {
-	return value != "" && len(value) <= 64 && strings.IndexFunc(value, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_')
-	}) == -1
 }
 
 // CaptureFailure preserves local evidence independently of export configuration
@@ -436,7 +393,7 @@ func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Faul
 	if pc, file, line, ok := runtime.Caller(2); ok {
 		f.SourceFile, f.SourceLine = filepath.Base(file), line
 		if function := runtime.FuncForPC(pc); function != nil {
-			f.SourceFunction = safeSourceFunction(function.Name())
+			f.SourceFunction = reporting.SafeSourceFunction(function.Name())
 		}
 	}
 	ctx = supportref.WithContext(ctx, f.SupportReference)
@@ -544,7 +501,7 @@ func validTypeChain(value string) bool {
 		return false
 	}
 	for _, name := range types {
-		if !validErrorType(name) {
+		if !reporting.ValidErrorType(name) {
 			return false
 		}
 	}
@@ -558,22 +515,6 @@ func validErrno(value string) bool {
 func validHTTPStatus(value string) bool {
 	number, err := strconv.Atoi(value)
 	return err == nil && number >= 400 && number <= 599 && strconv.Itoa(number) == value
-}
-
-func safeSourceFunction(value string) string {
-	if slash := strings.LastIndexByte(value, '/'); slash >= 0 {
-		value = value[slash+1:]
-	}
-	value = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '.' {
-			return r
-		}
-		return -1
-	}, value)
-	if len(value) > 64 {
-		value = value[:64]
-	}
-	return value
 }
 
 func validSourceFile(value string) bool {

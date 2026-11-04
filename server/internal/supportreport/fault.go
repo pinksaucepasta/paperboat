@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"io"
 	"net"
 	"os"
@@ -257,7 +258,7 @@ func sourceCaller(skip int) (string, string, int) {
 	if function := runtime.FuncForPC(pc); function != nil {
 		name = function.Name()
 	}
-	return safeSourceFile(filepath.Base(file)), safeSourceFunction(name), line
+	return safeSourceFile(filepath.Base(file)), reporting.SafeSourceFunction(name), line
 }
 
 func safeSourceFile(value string) string {
@@ -270,22 +271,6 @@ func safeSourceFile(value string) string {
 			out.WriteRune(r)
 		}
 		if out.Len() >= 128 {
-			break
-		}
-	}
-	return out.String()
-}
-
-func safeSourceFunction(value string) string {
-	if slash := strings.LastIndexByte(value, '/'); slash >= 0 {
-		value = value[slash+1:]
-	}
-	var out strings.Builder
-	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '.' {
-			out.WriteRune(r)
-		}
-		if out.Len() >= 64 {
 			break
 		}
 	}
@@ -346,7 +331,7 @@ func classifyCause(ctx context.Context, err error, status int) (string, int) {
 		case *tls.CertificateVerificationError:
 			return "tls_verification", 0
 		case syscall.Errno:
-			return errnoCause(value), boundedErrno(value)
+			return reporting.ErrnoCause(value), boundedErrno(value)
 		case net.Error:
 			if value.Timeout() {
 				return "network_timeout", 0
@@ -386,7 +371,7 @@ func classifyCause(ctx context.Context, err error, status int) (string, int) {
 		return "truncated_stream", 0
 	}
 	if status >= 400 && status <= 599 {
-		return causeForHTTPStatus(status), 0
+		return reporting.StatusCause(status), 0
 	}
 	if (matchesError(err, context.Canceled) || matchesError(ctx.Err(), context.Canceled)) && !hasNonWrapperErrorLeaf(err) {
 		return "context_canceled", 0
@@ -410,29 +395,6 @@ func hasNonWrapperErrorLeaf(err error) bool {
 		}
 	}
 	return false
-}
-
-func causeForHTTPStatus(status int) string {
-	switch status {
-	case 401, 403:
-		return "permission_denied"
-	case 404:
-		return "not_found"
-	case 409:
-		return "conflict"
-	case 429:
-		return "rate_limited"
-	case 503:
-		return "service_unavailable"
-	default:
-		if status >= 400 && status < 500 {
-			return "invalid_request"
-		}
-		if status >= 500 && status <= 599 {
-			return "upstream_failure"
-		}
-		return "internal"
-	}
 }
 
 func boundedHTTPStatus(status int) int {
@@ -466,35 +428,6 @@ func postgresCause(state string) string {
 		return ""
 	default:
 		return "postgres_error"
-	}
-}
-
-func errnoCause(value syscall.Errno) string {
-	switch value {
-	case syscall.ECONNREFUSED:
-		return "connection_refused"
-	case syscall.EHOSTUNREACH, syscall.ENETUNREACH:
-		return "network_unreachable"
-	case syscall.ECONNRESET:
-		return "connection_reset"
-	case syscall.ETIMEDOUT:
-		return "network_timeout"
-	case syscall.EPIPE:
-		return "broken_pipe"
-	case syscall.EADDRINUSE:
-		return "address_in_use"
-	case syscall.EINVAL:
-		return "invalid_argument"
-	case syscall.ENOENT:
-		return "not_found"
-	case syscall.EACCES, syscall.EPERM:
-		return "permission_denied"
-	case syscall.EEXIST:
-		return "conflict"
-	case syscall.ENOSPC, syscall.EMFILE, syscall.ENFILE, syscall.ENOMEM:
-		return "resource_exhausted"
-	default:
-		return "system_error"
 	}
 }
 

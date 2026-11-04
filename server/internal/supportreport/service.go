@@ -5,6 +5,7 @@ package supportreport
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -728,7 +729,7 @@ func cleanStack(stack *sentry.Stacktrace) *sentry.Stacktrace {
 		if line < 1 || line > 1_000_000 {
 			line = 0
 		}
-		out.Frames = append(out.Frames, sentry.Frame{Function: safeSourceFunction(f.Function), Module: safeSourceFunction(f.Module), Filename: safeSourceFile(frameFilename(f)), Lineno: line, InApp: f.InApp})
+		out.Frames = append(out.Frames, sentry.Frame{Function: reporting.SafeSourceFunction(f.Function), Module: reporting.SafeSourceFunction(f.Module), Filename: safeSourceFile(frameFilename(f)), Lineno: line, InApp: f.InApp})
 	}
 	return out
 }
@@ -743,7 +744,7 @@ func sanitize(e *sentry.Event) *sentry.Event {
 	if file := e.Tags["source_file"]; file != "" && safeSourceFile(file) != file {
 		return nil
 	}
-	if function := e.Tags["source_function"]; function != "" && safeSourceFunction(function) != function {
+	if function := e.Tags["source_function"]; function != "" && reporting.SafeSourceFunction(function) != function {
 		return nil
 	}
 	if line := e.Tags["source_line"]; line != "" {
@@ -846,11 +847,11 @@ func sourceLocation(stack *sentry.Stacktrace) (string, string, int) {
 		if !strings.HasPrefix(f.Module, "github.com/pinksaucepasta/paperboat/server/") || strings.Contains(f.Module, "/supportreport") {
 			continue
 		}
-		function := safeSourceFunction(f.Function)
+		function := reporting.SafeSourceFunction(f.Function)
 		if sourceWrapper(function) {
 			continue
 		}
-		return safeSourceFile(frameFilename(f)), safeSourceFunction(f.Function), safeSourceLine(f.Lineno)
+		return safeSourceFile(frameFilename(f)), reporting.SafeSourceFunction(f.Function), safeSourceLine(f.Lineno)
 	}
 	return "", "", 0
 }

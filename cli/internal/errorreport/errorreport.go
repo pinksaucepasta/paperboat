@@ -5,6 +5,7 @@ package errorreport
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"math"
 	"net/http"
 	"net/url"
@@ -335,7 +336,7 @@ func sanitize(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	}
 	for _, key := range []string{"operation", "stage", "code", "cause", "error_type"} {
 		value := event.Tags[key]
-		valid := key == "operation" && Operation(value) == value || key == "stage" && faultStage(value) == value || key == "code" && faultCode(value) == value || key == "cause" && ValidCause(value) || key == "error_type" && validErrorType(value)
+		valid := key == "operation" && Operation(value) == value || key == "stage" && faultStage(value) == value || key == "code" && faultCode(value) == value || key == "cause" && ValidCause(value) || key == "error_type" && reporting.ValidErrorType(value)
 		if valid && value != "" {
 			tags[key] = value
 		}
@@ -343,7 +344,7 @@ func sanitize(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	if value := event.Tags["source_file"]; validSourceFile(value) {
 		tags["source_file"] = value
 	}
-	if value := event.Tags["source_function"]; value != "" && safeSourceFunction(value) == value {
+	if value := event.Tags["source_function"]; value != "" && reporting.SafeSourceFunction(value) == value {
 		tags["source_function"] = value
 	}
 	if value := event.Tags["source_line"]; validErrno(value) {
@@ -361,7 +362,7 @@ func sanitize(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 		types := strings.Split(value, ",")
 		valid := len(types) <= 8
 		for _, name := range types {
-			valid = valid && validErrorType(name)
+			valid = valid && reporting.ValidErrorType(name)
 		}
 		if valid {
 			tags["error_chain"] = value

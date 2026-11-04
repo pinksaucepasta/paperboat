@@ -1,0 +1,13 @@
+package errorreport
+
+import (
+	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
+)
+
+func TestFaultCarriesSharedFields(t *testing.T) {
+	if missing := reporting.MissingFaultFields(Fault{}); len(missing) != 0 {
+		t.Fatalf("cli Fault lacks shared fields %v", missing)
+	}
+}

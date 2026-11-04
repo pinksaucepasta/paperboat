@@ -415,27 +415,8 @@ func classifyCause(err error) (string, int) {
 		return "truncated_stream", 65
 	}
 	if errno, ok := err.(syscall.Errno); ok {
-		switch errno {
-		case syscall.ENOENT:
-			return "not_found", 64
-		case syscall.EACCES, syscall.EPERM:
-			return "permission_denied", 64
-		case syscall.ECONNREFUSED:
-			return "connection_refused", 64
-		case syscall.ECONNRESET:
-			return "connection_reset", 64
-		case syscall.EPIPE:
-			return "broken_pipe", 64
-		case syscall.ENETUNREACH, syscall.EHOSTUNREACH:
-			return "network_unreachable", 64
-		case syscall.EADDRINUSE:
-			return "address_in_use", 64
-		case syscall.EINVAL:
-			return "invalid_argument", 64
-		case syscall.EMFILE, syscall.ENFILE, syscall.ENOSPC, syscall.ENOMEM:
-			return "resource_exhausted", 64
-		case syscall.ETIMEDOUT:
-			return "network_timeout", 64
+		if cause := ErrnoCause(errno); cause != "system_error" {
+			return cause, 64
 		}
 		return "system_error", 60
 	}
