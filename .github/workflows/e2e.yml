@@ -4,14 +4,9 @@ name: End-to-end
 # Stages (E2E_STAGES): pair exec send preview. Not yet a required check.
 on:
   pull_request:
+  push:
+    branches: ['r21-e2e*']
   workflow_dispatch:
-    inputs:
-      stages:
-        description: 'Stages to run'
-        default: 'pair'
-      break_step:
-        description: 'Deliberately fail (testing the job itself): any non-empty value'
-        default: ''
 
 permissions:
   contents: read
@@ -32,8 +27,9 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
-      E2E_STAGES: ${{ inputs.stages || 'pair' }}
-      E2E_BREAK: ${{ inputs.break_step }}
+      E2E_STAGES: pair
+      # The branch r21-e2e-break proves the job goes red: its enrollment token is wrong.
+      E2E_BREAK: ${{ endsWith(github.ref_name, '-break') && 'token' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5

@@ -43,7 +43,7 @@ for name in a b; do
   docker exec $c bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
   X="docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $c"
   $X ./pb install >/dev/null
-  python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["e2e-"+sys.argv[2]])' "$work/tokens.json" $name |
+  { [ -z "${E2E_BREAK:-}" ] || echo "bad-token"; python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["e2e-"+sys.argv[2]])' "$work/tokens.json" $name; } | tail -n1 |
     $X bash -c 'umask 077; cat >token'
   for try in 1 2 3 4 5 6; do
     out=$($X .local/bin/pb pair --enrollment-token-file token --name e2e-$name --json || true)
