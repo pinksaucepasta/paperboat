@@ -307,7 +307,8 @@ func TestPolicySimpleViewAndDepartures(t *testing.T) {
 	if !f.sqlAllowed(f.member, f.db1, "exec", 0) {
 		t.Fatal("simple view grant not enforced")
 	}
-	// The member leaves and comes back: no access is inherited.
+	// The member leaves and comes back: no access is inherited, and their team API tokens are revoked.
+	f.exec(`INSERT INTO paperboat.api_tokens(id,account_id,team_id,name,secret_hash,expires_at) VALUES('apitok_departing',$1,$2,'t',sha256('a'),now()+interval '1 day'),('apitok_personal',$1,NULL,'t',sha256('b'),now()+interval '1 day')`, f.member, f.team)
 	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := Lock(ctx, tx); err != nil {
 			return err
@@ -319,6 +320,11 @@ func TestPolicySimpleViewAndDepartures(t *testing.T) {
 	f.exec(`UPDATE paperboat.team_members SET active=true WHERE team_id=$1 AND account_id=$2`, f.team, f.member)
 	if f.sqlAllowed(f.member, f.db1, "exec", 0) {
 		t.Fatal("a member who left and rejoined kept access")
+	}
+	var revokedTeam, revokedPersonal bool
+	f.store.SQL().QueryRowContext(f.ctx, `SELECT bool_or(revoked_at IS NOT NULL) FILTER (WHERE team_id IS NOT NULL), bool_or(revoked_at IS NOT NULL) FILTER (WHERE team_id IS NULL) FROM paperboat.api_tokens WHERE account_id=$1`, f.member).Scan(&revokedTeam, &revokedPersonal)
+	if !revokedTeam || revokedPersonal {
+		t.Fatalf("departure revoked team token=%v personal token=%v, want true/false", revokedTeam, revokedPersonal)
 	}
 	f.store.SQL().QueryRowContext(f.ctx, `SELECT source FROM paperboat.workspace_policies WHERE team_id=$1`, f.team).Scan(&stored)
 	if strings.Contains(stored, f.member) {

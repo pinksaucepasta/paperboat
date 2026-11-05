@@ -23,6 +23,7 @@ WHERE team_id=$1 AND status IN ('pending','approved','consumed') AND ($2='' OR s
 OR NOT team_machine_capability_allowed(sender_account,team_id,destination_machine_id,'files'))`,
 		`UPDATE control_config_assignments a SET consent_state='revoked',revoked_at=now(),approved_pull_revision=NULL,approved_at=NULL,version=a.version+1,updated_at=now()
 FROM user_machines m WHERE a.machine_id=m.id AND a.adopted_team_id=$1 AND a.revoked_at IS NULL AND ($2='' OR m.user_id=$2)`,
+		`UPDATE api_tokens SET revoked_at=now(),revoked_by='team_departed' WHERE team_id=$1 AND revoked_at IS NULL AND ($2='' OR account_id=$2)`,
 		`DELETE FROM team_config_default_adoptions WHERE team_id=$1 AND ($2='' OR account_id=$2)`,
 		`DELETE FROM team_config_defaults WHERE team_id=$1 AND $2=''`,
 		`DELETE FROM team_receipt_smtp WHERE team_id=$1 AND $2=''`,
