@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -68,9 +69,10 @@ func TestAPITokenCreateServerErrors(t *testing.T) {
 
 func TestAPITokenListAndRevoke(t *testing.T) {
 	fake, url := newPolicyFake(t)
-	list := data(`{"api_tokens":[` + testTokenJSON + `,{"id":"apitok_2","name":"old","workspace":"acme","created_by":"user:ana@example.test","created_at":"2026-10-01T00:00:00Z","expires_at":"2026-10-02T00:00:00Z","revoked_at":"2026-10-01T01:00:00Z"}]}`)
-	for range 4 {
-		fake.on("GET "+tokensPath, 200, list)
+	list := data(`{"total":2,"api_tokens":[` + testTokenJSON + `,{"id":"apitok_2","name":"old","workspace":"acme","created_by":"user:ana@example.test","created_at":"2026-10-01T00:00:00Z","expires_at":"2026-10-02T00:00:00Z","revoked_at":"2026-10-01T01:00:00Z"}]}`)
+	for range 2 {
+		fake.on("GET "+tokensPath+"?limit=50", 200, list)
+		fake.on("GET "+tokensPath+"?limit=200", 200, list)
 	}
 	code, out, errOut := runPolicyCLI(t, url, "api-token", "list")
 	if code != 0 || !strings.Contains(out, "apitok_1") || !strings.Contains(out, "revoked") || strings.Contains(out, "pbat_") {
@@ -89,5 +91,35 @@ func TestAPITokenListAndRevoke(t *testing.T) {
 	fake.on("DELETE "+tokensPath+"/apitok_1", 200, data(`{"api_token":`+testTokenJSON+`}`))
 	if code, out, errOut := runPolicyCLI(t, url, "api-token", "revoke", "ci", "--yes"); code != 0 || !strings.Contains(out, "Revoked API token ci (apitok_1)") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+	}
+}
+
+// pb api-token list shows one page with the server's total; revoke finds a name on a later page.
+func TestAPITokenListPagesAndRevokeSearchesEveryPage(t *testing.T) {
+	fake, url := newPolicyFake(t)
+	token := func(n int) string {
+		return fmt.Sprintf(`{"id":"apitok_%d","name":"t%d","workspace":"acme","created_by":"user:ana@example.test","created_at":"2026-10-20T10:00:00Z","expires_at":"2099-01-01T00:00:00Z"}`, n, n)
+	}
+	page := func(from, to int, next string) string {
+		var items []string
+		for n := from; n < to; n++ {
+			items = append(items, token(n))
+		}
+		cursor := ""
+		if next != "" {
+			cursor = `,"next_cursor":"` + next + `"`
+		}
+		return data(`{"total":250,"api_tokens":[` + strings.Join(items, ",") + `]` + cursor + `}`)
+	}
+	fake.on("GET "+tokensPath+"?limit=50", 200, page(0, 50, "c1"))
+	code, out, errOut := runPolicyCLI(t, url, "api-token", "list")
+	if code != 0 || !strings.Contains(out, "apitok_49") || strings.Contains(out, "apitok_50") || !strings.Contains(out, "Showing 50 of 250 API tokens") {
+		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+	}
+	fake.on("GET "+tokensPath+"?limit=200", 200, page(0, 200, "c2"))
+	fake.on("GET "+tokensPath+"?cursor=c2&limit=200", 200, page(200, 250, ""))
+	fake.on("DELETE "+tokensPath+"/apitok_240", 200, data(`{"api_token":`+token(240)+`}`))
+	if code, out, errOut := runPolicyCLI(t, url, "api-token", "revoke", "t240", "--yes"); code != 0 || !strings.Contains(out, "apitok_240") {
+		t.Fatalf("revoke of a token on page 2: code=%d out=%s err=%s", code, out, errOut)
 	}
 }

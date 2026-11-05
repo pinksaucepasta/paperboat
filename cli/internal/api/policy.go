@@ -206,12 +206,22 @@ func (c *Client) ExplainPolicy(ctx context.Context, ws string, in PolicyExplainR
 	return out, err
 }
 
-func (c *Client) PolicyVersions(ctx context.Context, ws string) ([]PolicyVersion, error) {
-	var out struct {
-		Versions []PolicyVersion `json:"versions"`
+// PolicyVersionPage is one keyset page of a policy's saved versions, newest first; Total counts all of them.
+type PolicyVersionPage struct {
+	Versions   []PolicyVersion `json:"versions"`
+	Total      int             `json:"total"`
+	NextCursor string          `json:"next_cursor"`
+}
+
+// PolicyVersions reads one page of at most limit versions after cursor ("" for the first page).
+func (c *Client) PolicyVersions(ctx context.Context, ws string, limit int, cursor string) (PolicyVersionPage, error) {
+	var out PolicyVersionPage
+	query, err := pageQuery(cursor, limit)
+	if err != nil {
+		return out, err
 	}
-	err := c.do(ctx, http.MethodGet, workspacePath(ws, "/policy/versions"), nil, &out)
-	return out.Versions, err
+	err = c.do(ctx, http.MethodGet, workspacePath(ws, "/policy/versions")+query, nil, &out)
+	return out, err
 }
 
 // CreateAPIToken sends one Idempotency-Key with every attempt: a create whose response was lost,
@@ -237,12 +247,22 @@ func (c *Client) CreateAPIToken(ctx context.Context, ws string, in APITokenCreat
 	return out, err
 }
 
-func (c *Client) APITokens(ctx context.Context, ws string) ([]APIToken, error) {
-	var out struct {
-		APITokens []APIToken `json:"api_tokens"`
+// APITokenPage is one keyset page of a workspace's tokens, newest first; Total counts all of them.
+type APITokenPage struct {
+	APITokens  []APIToken `json:"api_tokens"`
+	Total      int        `json:"total"`
+	NextCursor string     `json:"next_cursor"`
+}
+
+// APITokens reads one page of at most limit tokens after cursor ("" for the first page).
+func (c *Client) APITokens(ctx context.Context, ws string, limit int, cursor string) (APITokenPage, error) {
+	var out APITokenPage
+	query, err := pageQuery(cursor, limit)
+	if err != nil {
+		return out, err
 	}
-	err := c.do(ctx, http.MethodGet, workspacePath(ws, "/api-tokens"), nil, &out)
-	return out.APITokens, err
+	err = c.do(ctx, http.MethodGet, workspacePath(ws, "/api-tokens")+query, nil, &out)
+	return out, err
 }
 
 func (c *Client) RevokeAPIToken(ctx context.Context, ws, id string) (APIToken, error) {

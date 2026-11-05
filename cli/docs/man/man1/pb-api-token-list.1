@@ -20,12 +20,20 @@ JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--all\fP[=false]
+	show every item, up to 10000
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for list
 
 .PP
 \fB--json\fP[=false]
 	print JSON
+
+.PP
+\fB--limit\fP=50
+	show at most this many items (1-200)
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -48,6 +56,7 @@ JSON output is supported with --json.
 .SH EXAMPLE
 .EX
   pb api-token list
+  pb api-token list --all
   pb api-token list --json
 .EE
 

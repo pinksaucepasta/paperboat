@@ -55,3 +55,28 @@ func writePageTotal(writer io.Writer, shown, total int, noun string) {
 		fmt.Fprintf(writer, "Showing %d of %d %s.\n", shown, total, noun)
 	}
 }
+
+// readCursorPages reads keyset pages (limit per page at most maxListLimit) until it holds max items or the server
+// has no next page, and returns them with the server's total.
+func readCursorPages[T any](max int, page func(limit int, cursor string) (items []T, total int, next string, err error)) ([]T, int, error) {
+	var out []T
+	total, cursor := 0, ""
+	for len(out) < max {
+		items, pageTotal, next, err := page(min(max-len(out), maxListLimit), cursor)
+		if err != nil {
+			return nil, 0, err
+		}
+		out, total, cursor = append(out, items...), pageTotal, next
+		if cursor == "" || len(items) == 0 {
+			break
+		}
+	}
+	return out, total, nil
+}
+
+// writeLimitFooter says when the list shown is not the whole list, for lists without a server search.
+func writeLimitFooter(writer io.Writer, shown, total int, noun string) {
+	if total > shown {
+		fmt.Fprintf(writer, "Showing %d of %d %s. Use --limit or --all for more.\n", shown, total, noun)
+	}
+}

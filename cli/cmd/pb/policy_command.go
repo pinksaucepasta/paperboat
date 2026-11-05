@@ -301,7 +301,8 @@ works offline and needs no sign-in; it matches the schema the server serves.`, E
 }
 
 func policyVersionsCommand() *cobra.Command {
-	command := &cobra.Command{Use: "versions", Short: "List saved policy versions", Long: `List every saved version of the workspace policy, newest first, with who
+	command := &cobra.Command{Use: "versions", Short: "List saved policy versions", Long: `List the saved versions of the workspace policy, newest first (the latest 50;
+--limit or --all for more), with who
 saved it, when, how (saved, restored, rewritten or migrated), how many access
 grants it added and removed, and its message. Print one with pb policy get
 --version N and go back to one with pb policy restore N.`, Example: "  pb policy versions\n  pb policy versions --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
@@ -309,13 +310,21 @@ grants it added and removed, and its message. Print one with pb policy get
 		if err != nil {
 			return err
 		}
-		versions, err := client.PolicyVersions(command.Context(), workspace)
+		max, err := listPagingMax(command)
+		if err != nil {
+			return err
+		}
+		versions, total, err := readCursorPages(max, func(limit int, cursor string) ([]api.PolicyVersion, int, string, error) {
+			page, err := client.PolicyVersions(command.Context(), workspace, limit, cursor)
+			return page.Versions, page.Total, page.NextCursor, err
+		})
 		if err != nil {
 			return err
 		}
 		if wantsJSON(command) {
-			return writeJSON(command.OutOrStdout(), map[string]any{"versions": versions})
+			return writeJSON(command.OutOrStdout(), map[string]any{"versions": versions, "total": total})
 		}
+		defer writeLimitFooter(command.OutOrStdout(), len(versions), total, "versions")
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(writer, "VERSION\tKIND\tSAVED\tAUTHOR\tCHANGES\tMESSAGE")
 		for _, v := range versions {
@@ -328,5 +337,6 @@ grants it added and removed, and its message. Print one with pb policy get
 		return writer.Flush()
 	}}
 	command.Flags().Bool("json", false, "print JSON")
+	addListPaging(command)
 	return command
 }

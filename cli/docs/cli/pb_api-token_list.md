@@ -19,14 +19,17 @@ pb api-token list [flags]
 
 ```
   pb api-token list
+  pb api-token list --all
   pb api-token list --json
 ```
 
 ### Options
 
 ```
-  -h, --help   help for list
-      --json   print JSON
+      --all         show every item, up to 10000
+  -h, --help        help for list
+      --json        print JSON
+      --limit int   show at most this many items (1-200) (default 50)
 ```
 
 ### Options inherited from parent commands

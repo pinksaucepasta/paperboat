@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,22 +118,39 @@ func apiTokenListCommand() *cobra.Command {
 	command := &cobra.Command{Use: "list", Short: "List API tokens", Long: `List the API tokens of the active workspace: your own, or every member's when
 you are an owner or admin. The table shows each token's name, id, creator,
 expiry, last use, state and whether a scope narrows it. Secrets are never
-shown again after creation.`, Example: "  pb api-token list\n  pb api-token list --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+shown again after creation.`, Example: "  pb api-token list\n  pb api-token list --all\n  pb api-token list --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		client, workspace, err := policyClient(command, args)
 		if err != nil {
 			return err
 		}
-		tokens, err := client.APITokens(command.Context(), workspace)
+		max, err := listPagingMax(command)
+		if err != nil {
+			return err
+		}
+		tokens, total, err := readAPITokens(command.Context(), client, workspace, max)
 		if err != nil {
 			return err
 		}
 		if wantsJSON(command) {
-			return writeJSON(command.OutOrStdout(), map[string]any{"api_tokens": tokens})
+			return writeJSON(command.OutOrStdout(), map[string]any{"api_tokens": tokens, "total": total})
 		}
-		return printAPITokens(command.OutOrStdout(), tokens)
+		if err := printAPITokens(command.OutOrStdout(), tokens); err != nil {
+			return err
+		}
+		writeLimitFooter(command.OutOrStdout(), len(tokens), total, "API tokens")
+		return nil
 	}}
 	command.Flags().Bool("json", false, "print JSON")
+	addListPaging(command)
 	return command
+}
+
+// readAPITokens reads up to max of the workspace's tokens, newest first, and the server's total.
+func readAPITokens(ctx context.Context, client *api.Client, workspace string, max int) ([]api.APIToken, int, error) {
+	return readCursorPages(max, func(limit int, cursor string) ([]api.APIToken, int, string, error) {
+		page, err := client.APITokens(ctx, workspace, limit, cursor)
+		return page.APITokens, page.Total, page.NextCursor, err
+	})
 }
 
 func printAPITokens(w io.Writer, tokens []api.APIToken) error {
@@ -185,7 +203,8 @@ A name shared by several members' tokens must be given as an id. Without
 		if err != nil {
 			return err
 		}
-		tokens, err := client.APITokens(command.Context(), workspace)
+		// A name is looked up in every token, not only the first page.
+		tokens, _, err := readAPITokens(command.Context(), client, workspace, maxListAll)
 		if err != nil {
 			return err
 		}

@@ -4,7 +4,8 @@ List saved policy versions
 
 ### Synopsis
 
-List every saved version of the workspace policy, newest first, with who
+List the saved versions of the workspace policy, newest first (the latest 50;
+--limit or --all for more), with who
 saved it, when, how (saved, restored, rewritten or migrated), how many access
 grants it added and removed, and its message. Print one with pb policy get
 --version N and go back to one with pb policy restore N.
@@ -25,8 +26,10 @@ pb policy versions [flags]
 ### Options
 
 ```
-  -h, --help   help for versions
-      --json   print JSON
+      --all         show every item, up to 10000
+  -h, --help        help for versions
+      --json        print JSON
+      --limit int   show at most this many items (1-200) (default 50)
 ```
 
 ### Options inherited from parent commands

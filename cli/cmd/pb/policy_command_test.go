@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -279,7 +280,7 @@ func TestPolicyExplainForbidden(t *testing.T) {
 
 func TestPolicyVersionsAndRestoreConfirmFlow(t *testing.T) {
 	fake, url := newPolicyFake(t)
-	fake.on("GET "+policyBase+"/versions", 200, data(`{"versions":[{"version":7,"digest":"sha256:ab","created_at":"2026-10-20T10:00:00Z","author":"user:ana@example.test","api_token":"ci","message":"tidy","gained":1,"lost":2,"kind":"saved"}]}`))
+	fake.on("GET "+policyBase+"/versions?limit=50", 200, data(`{"total":1,"versions":[{"version":7,"digest":"sha256:ab","created_at":"2026-10-20T10:00:00Z","author":"user:ana@example.test","api_token":"ci","message":"tidy","gained":1,"lost":2,"kind":"saved"}]}`))
 	code, out, errOut := runPolicyCLI(t, url, "policy", "versions")
 	if code != 0 || !strings.Contains(out, "+1 -2") || !strings.Contains(out, "(token ci)") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
@@ -322,5 +323,42 @@ func TestPolicyExplainSaysWhenTheTeamENVKeyIsNotDelivered(t *testing.T) {
 	code, out, errOut := runPolicyCLI(t, url, "policy", "explain", "--src", "user:ana@example.test", "--dst", "env:team", "--action", "env_read")
 	if code != 0 || !strings.Contains(out, "ALLOWED: rule") || !strings.Contains(out, "Key not delivered yet: a key holder runs `pb env grants sync`") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+	}
+}
+
+// pb policy versions shows the latest 50 with the server's total, and --all follows the cursor to the end.
+func TestPolicyVersionsPagesWithTheServersTotal(t *testing.T) {
+	fake, url := newPolicyFake(t)
+	version := func(n int) string {
+		return fmt.Sprintf(`{"version":%d,"digest":"sha256:ab","created_at":"2026-10-20T10:00:00Z","message":"v%d","kind":"saved"}`, n, n)
+	}
+	page := func(from, to int, next string) string {
+		var items []string
+		for n := from; n > to; n-- {
+			items = append(items, version(n))
+		}
+		cursor := ""
+		if next != "" {
+			cursor = `,"next_cursor":"` + next + `"`
+		}
+		return data(`{"total":260,"versions":[` + strings.Join(items, ",") + `]` + cursor + `}`)
+	}
+	fake.on("GET "+policyBase+"/versions?limit=50", 200, page(260, 210, "c1"))
+	code, out, errOut := runPolicyCLI(t, url, "policy", "versions")
+	if code != 0 || strings.Count(out, "\n") != 52 || !strings.Contains(out, "Showing 50 of 260 versions") {
+		t.Fatalf("code=%d lines=%d out=%s err=%s", code, strings.Count(out, "\n"), out, errOut)
+	}
+	fake.on("GET "+policyBase+"/versions?limit=200", 200, page(260, 60, "c2"))
+	fake.on("GET "+policyBase+"/versions?cursor=c2&limit=200", 200, page(60, 0, ""))
+	code, out, errOut = runPolicyCLI(t, url, "policy", "versions", "--all", "--json")
+	var got struct {
+		Versions []struct{ Version int }
+		Total    int
+	}
+	if err := json.Unmarshal([]byte(out), &got); code != 0 || err != nil || len(got.Versions) != 260 || got.Total != 260 || got.Versions[259].Version != 1 {
+		t.Fatalf("--all: code=%d n=%d err=%v %s", code, len(got.Versions), err, errOut)
+	}
+	if code, _, errOut := runPolicyCLI(t, url, "policy", "versions", "--limit", "201"); code == 0 || !strings.Contains(errOut, "--limit must be between 1 and 200") {
+		t.Fatalf("--limit 201: code=%d err=%s", code, errOut)
 	}
 }
