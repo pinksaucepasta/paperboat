@@ -680,6 +680,8 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 				return
 			}
 			writeAPIData(t, w, map[string]string{"id": "usr_browser", "email": "browser@example.test", "status": "active"})
+		case "/v1/auth/device/cancel": // a refused approval cancels its device grant
+			w.WriteHeader(204)
 		case "/v1/e2ee/bootstrap":
 			acceptBrowserPeerEnrollment(t, w, r, "usr_browser", "cls_browser")
 		case "/v1/machines":
