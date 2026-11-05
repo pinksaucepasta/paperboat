@@ -206,11 +206,32 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			return probeDoctorUDP(ctx, "udp6", "[::]:0", "udp_ipv6", "IPv6")
 		}},
 	}
+	probes = append(probes, doctorDaemonHealthProbes(snapshot.Health)...)
 	probes = append(probes, doctorLingerProbes()...)
 	probes = append(probes, doctorCarrierProbes()...)
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
+	}
+	return probes
+}
+
+// doctorDaemonHealthProbes turns every daemon health item at warning or error (a failing or retrying daemon
+// step, an outage, the network) into a check naming it, its cause and the user's action; a healthy daemon adds
+// none. Prior art: tailscale status prints every health warning (cmd/tailscale/cli/status.go).
+func doctorDaemonHealthProbes(items []localapi.HealthItem) []doctorpkg.Probe {
+	var probes []doctorpkg.Probe
+	for _, item := range items {
+		status := doctorpkg.StatusWarning
+		switch item.Severity {
+		case "error":
+			status = doctorpkg.StatusFail
+		case "warning":
+		default:
+			continue
+		}
+		check := doctorpkg.Check{Category: "daemon", Code: "daemon:" + item.Code, Status: status, Summary: item.Title, Recovery: item.Recovery}
+		probes = append(probes, doctorpkg.Probe{Code: check.Code, Run: func(context.Context) doctorpkg.Check { return check }})
 	}
 	return probes
 }
