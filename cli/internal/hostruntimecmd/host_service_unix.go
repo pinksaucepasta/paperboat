@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -42,7 +43,7 @@ func ExecuteHostService(ctx context.Context, args []string, stderr io.Writer) in
 	stateRoot := hostinstall.RuntimeStateDir(*uid)
 	applier := hostservice.NewPlatformApplier(filepath.Join(stateRoot, "power-baseline.json"))
 	server, err := hostservice.New(hostservice.Config{
-		SocketPath: hostservice.DefaultSocketPath(), StatePath: filepath.Join(stateRoot, "availability-policy.json"),
+		SocketPath: hostservice.SocketPath(runtime.GOOS, *uid), StatePath: filepath.Join(stateRoot, "availability-policy.json"),
 		UID: *uid, GID: *gid, Applier: applier, Version: buildinfo.Version,
 		Ready: notifier.Ready, Heartbeat: notifier.Watchdog, HeartbeatInterval: notifier.WatchdogInterval(),
 	})

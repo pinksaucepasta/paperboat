@@ -31,7 +31,7 @@ func TestEveryGenerationSocketFitsDarwinSunPath(t *testing.T) {
 			"hostd handover":         hostdproto.HandoverPath(hostd),
 			"worker private (pid 7)": hostd + ".4194304.workloads",
 			"updater control":        layout.UpdaterSocket,
-			"host service":           hostservice.SocketPath(platform),
+			"host service":           hostservice.SocketPath(platform, 2147483647),
 		} {
 			if len(path) >= darwinSunPath {
 				t.Errorf("%s %s socket is %d bytes, over sun_path: %s", platform, name, len(path), path)
@@ -47,10 +47,14 @@ func TestDarwinHostServiceSocketIsUnderTheRunRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	runRoot := filepath.Dir(filepath.Dir(layout.UpdaterSocket))
-	if got := hostservice.SocketPath("darwin"); filepath.Dir(filepath.Dir(got)) != runRoot {
-		t.Fatalf("darwin host service socket %s is not under %s", got, runRoot)
+	if got := hostservice.SocketPath("darwin", 501); filepath.Dir(filepath.Dir(got)) != runRoot || filepath.Base(filepath.Dir(got)) != "paperboat-host-u501" {
+		t.Fatalf("darwin host service socket %s is not the user's own under %s", got, runRoot)
 	}
-	if got := hostservice.SocketPath("linux"); got != "/var/run/paperboat/host-service.sock" {
-		t.Fatalf("linux host service socket changed: %s", got)
+	// Each OS user's host service has its own socket (pbmac C032: a shared one was taken over by the last user).
+	if hostservice.SocketPath("darwin", 501) == hostservice.SocketPath("darwin", 502) || hostservice.SocketPath("linux", 1000) == hostservice.SocketPath("linux", 1001) {
+		t.Fatal("two OS users share a host service socket")
+	}
+	if got := hostservice.SocketPath("linux", 1000); got != "/var/run/paperboat-u1000/host-service.sock" {
+		t.Fatalf("linux host service socket is not the unit's RuntimeDirectory: %s", got)
 	}
 }

@@ -49,7 +49,7 @@ func plantDarwinHalfInstall(t *testing.T, root string) []string {
 		support+"updated-u501/state.json",
 		support+"run/paperboat-hostd-u501/hostd.sock",
 		support+"run/paperboat-updated-u501/control.sock",
-		support+"run/paperboat-host/host-service.sock",
+		support+"run/paperboat-host-u501/host-service.sock",
 		support+"ipc/u501-"+generation+"/control.sock",
 		support+"users/u501/power-baseline.json",
 		support+"users/u501/availability-policy.json",
