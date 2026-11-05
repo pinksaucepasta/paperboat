@@ -111,6 +111,36 @@ type guardedRoute struct {
 	closeErr  error
 	mu        sync.Mutex
 	closing   bool
+	draining  bool // stopped accepting; its forwards keep running until they end or the route is closed
+	active    int  // forwards in flight
+}
+
+// stopAccepting closes only the listener: forwards already accepted keep running (a guard or name error
+// must not cut a user's established connections; only withdrawal, revocation or Stop does, via close).
+func (r *guardedRoute) stopAccepting() error {
+	r.mu.Lock()
+	r.draining = true
+	r.mu.Unlock()
+	return lifecycleCleanup(r.listener.Close())
+}
+
+func (r *guardedRoute) isDraining() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.draining
+}
+
+func (r *guardedRoute) idle() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.active == 0
+}
+
+func (r *guardedRoute) finishForward() {
+	r.mu.Lock()
+	r.active--
+	r.mu.Unlock()
+	r.wg.Done()
 }
 
 func (r *guardedRoute) close() error {
@@ -138,6 +168,7 @@ func (r *guardedRoute) startForward() bool {
 		return false
 	}
 	r.wg.Add(1)
+	r.active++
 	return true
 }
 

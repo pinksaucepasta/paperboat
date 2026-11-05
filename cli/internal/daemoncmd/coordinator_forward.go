@@ -19,6 +19,9 @@ func (c *Coordinator) serveRoute(route *guardedRoute) {
 	for {
 		local, err := route.listener.Accept()
 		if err != nil {
+			if route.isDraining() {
+				return // a reset closed the listener on purpose; the forwards stay
+			}
 			// While the daemon closes a route, the guard shuts the shared socket down when the
 			// lease is released, so a pending accept ends with EINVAL instead of "closed".
 			if route.ctx.Err() == nil || !(coordinatorExpected(err, false) || errors.Is(err, syscall.EINVAL)) {
@@ -38,7 +41,7 @@ func (c *Coordinator) serveRoute(route *guardedRoute) {
 			return
 		}
 		go func() {
-			defer route.wg.Done()
+			defer route.finishForward()
 			defer func() { <-c.connections }()
 			c.forward(route.ctx, local, route.machineID, route.port)
 		}()

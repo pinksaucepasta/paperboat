@@ -36,6 +36,7 @@ type Coordinator struct {
 	mu                sync.Mutex
 	running           bool
 	routes            map[string]*guardedRoute
+	draining          []*guardedRoute // routes a reset stopped accepting on; their forwards still run
 	webRoutes         map[string]guardedWebRoute
 	connections       chan struct{}
 	wg                sync.WaitGroup
@@ -530,19 +531,23 @@ func (c *Coordinator) Stop() error {
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false
 	routes, webRoutes, nameClient := c.routes, c.webRoutes, c.nameClient
-	c.nameClient = nil
+	draining := c.draining
+	c.nameClient, c.draining = nil, nil
 	c.routes = make(map[string]*guardedRoute)
 	c.webRoutes = make(map[string]guardedWebRoute)
 	if cancel != nil {
 		cancel()
 	}
-	if server != nil || listener != nil || nameClient != nil || len(routes) > 0 || len(webRoutes) > 0 {
+	if server != nil || listener != nil || nameClient != nil || len(routes) > 0 || len(webRoutes) > 0 || len(draining) > 0 {
 		c.launchCleanupLocked(func() error {
 			var causes []error
 			if nameClient != nil {
 				causes = append(causes, lifecycleCleanup(nameClient.Close()))
 			}
 			for _, route := range routes {
+				causes = append(causes, route.close())
+			}
+			for _, route := range draining {
 				causes = append(causes, route.close())
 			}
 			for _, route := range webRoutes {
