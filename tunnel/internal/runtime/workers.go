@@ -298,6 +298,8 @@ type RouteWorker struct {
 	}
 	Interval time.Duration
 	Pulse    <-chan time.Time
+	// Wake runs a reconcile now, at most one per routeWakeGap (a carrier connected).
+	Wake <-chan struct{}
 	// Ready must probe the complete candidate generation, including its edge
 	// and origin paths, before the generation is promoted. It is required for
 	// the canonical config-generation contract; legacy assignments continue to
@@ -400,29 +402,34 @@ func (w *RouteWorker) Start(ctx context.Context) error {
 	return nil
 }
 
+// routeWakeGap bounds wake reconciles (each pulls accessor admissions from
+// control) to four a second however fast carriers connect.
+const routeWakeGap = 250 * time.Millisecond
+
 func (w *RouteWorker) run(ctx context.Context) {
 	defer close(w.done)
-	if w.Pulse != nil {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case _, ok := <-w.Pulse:
-				if !ok {
-					return
-				}
-				w.recordReconcile(ctx, w.reconcile(ctx))
-			}
-		}
+	tick := w.Pulse
+	if tick == nil {
+		ticker := time.NewTicker(w.Interval)
+		defer ticker.Stop()
+		tick = ticker.C
 	}
-	ticker := time.NewTicker(w.Interval)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case _, ok := <-tick:
+			if !ok {
+				return
+			}
 			w.recordReconcile(ctx, w.reconcile(ctx))
+		case <-w.Wake:
+			w.recordReconcile(ctx, w.reconcile(ctx))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(routeWakeGap):
+			}
 		}
 	}
 }

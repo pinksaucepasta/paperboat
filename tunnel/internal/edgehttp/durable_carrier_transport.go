@@ -53,6 +53,7 @@ type DataCarrierRouteRegistry struct {
 	mu               sync.RWMutex
 	closed           bool
 	byKey            map[string]*dataCarrierRouteEntry
+	connected        chan struct{}
 }
 
 type dataCarrierRouteEntry struct {
@@ -115,7 +116,7 @@ func NewDataCarrierRouteRegistry(config DataCarrierRouteRegistryConfig) (*DataCa
 	if err != nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry)}, nil
+	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry), connected: make(chan struct{}, 1)}, nil
 }
 
 // Attach registers one already-authenticated server. The Server identity is
@@ -187,9 +188,18 @@ func (r *DataCarrierRouteRegistry) attachState(server *datacarrier.Server, machi
 	}
 	r.byKey[key] = entry
 	r.mu.Unlock()
+	select {
+	case r.connected <- struct{}{}:
+	default: // a wake is already pending; one reconcile covers every carrier connected so far
+	}
 	go r.watch(entry, key)
 	return nil
 }
+
+// Connected wakes the route worker when a carrier session attaches, so a route
+// pending on that carrier is published now instead of at the next control tick.
+// Wakes coalesce into one pending signal; the route worker is its only reader.
+func (r *DataCarrierRouteRegistry) Connected() <-chan struct{} { return r.connected }
 
 // UpdateReplicaState applies an observation only to the exact live session.
 // A delayed observation from an overlapping old session cannot mutate its
