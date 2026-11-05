@@ -126,7 +126,7 @@ func TestNativeBulkDoesNotStarveInteractiveAndControl(t *testing.T) {
 				t.Fatal(err)
 			}
 		case <-ctx.Done():
-			t.Fatalf("fairness workload exceeded its 30-second bound: %v", ctx.Err())
+			t.Fatalf("fairness workload exceeded its %s bound: %v", fairnessWorkloadBound, ctx.Err())
 		}
 	}
 	t.Logf("idle latency: p95=%s maximum=%s", idleP95, idleMaximum)
@@ -174,6 +174,10 @@ func runFairnessBulk(ctx context.Context, session *native.Session, ordinal int, 
 		return
 	}
 	defer connection.Close()
+	if err = boundByContext(ctx, connection); err != nil {
+		done <- err
+		return
+	}
 	chunk := make([]byte, 1<<20)
 	for i := range chunk {
 		chunk[i] = byte(ordinal + 1)
@@ -206,7 +210,17 @@ func openFairnessStream(t *testing.T, ctx context.Context, session *native.Sessi
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := boundByContext(ctx, connection); err != nil {
+		t.Fatal(err)
+	}
 	return connection
+}
+
+// boundByContext gives a stream the workload deadline, so a stalled transport
+// fails the test instead of hanging until the package timeout.
+func boundByContext(ctx context.Context, connection net.Conn) error {
+	deadline, _ := ctx.Deadline()
+	return connection.SetDeadline(deadline)
 }
 
 func sampleFairness(t *testing.T, connection net.Conn, samples int) []time.Duration {
@@ -217,11 +231,11 @@ func sampleFairness(t *testing.T, connection net.Conn, samples int) []time.Durat
 		binary.BigEndian.PutUint64(request[:], uint64(sample))
 		started := time.Now()
 		if _, err := connection.Write(request[:]); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sample %d request: %v", sample, err)
 		}
 		var response [8]byte
 		if _, err := io.ReadFull(connection, response[:]); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sample %d echo: %v", sample, err)
 		}
 		if response != request {
 			t.Fatalf("response %d was lost or reordered", sample)

@@ -210,7 +210,7 @@ func (s *Server) Start() error {
 		if h == nil {
 			return nil, true
 		}
-		return func(c nettype.ConnPacketConn) { h(newIdlePacketConn(c, s.udpIdleTimeout())) }, true
+		return func(c nettype.ConnPacketConn) { h(newIdlePacketConn(newStallBoundedConn(c), s.udpIdleTimeout())) }, true
 	}
 	lb.ns = ns
 	sys.Set(ns)
@@ -293,7 +293,11 @@ func (s *Server) DialAuthorizedUDP(ctx context.Context, peer key.NodePublic, dis
 	if err := s.prepareAuthorizedPeer(ctx, peer, disco); err != nil {
 		return nil, err
 	}
-	return s.lb.ns.DialContextUDPWithBind(ctx, s.lb.addr, ap)
+	conn, err := s.lb.ns.DialContextUDPWithBind(ctx, s.lb.addr, ap)
+	if err != nil {
+		return nil, err
+	}
+	return newStallBoundedConn(conn), nil
 }
 
 func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic, disco key.DiscoPublic) error {
