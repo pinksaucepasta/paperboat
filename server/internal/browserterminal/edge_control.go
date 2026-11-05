@@ -208,7 +208,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 			if active && checkErr == nil {
 				var current Decision
 				current, checkErr = g.resolveTicketRole(checkCtx, admission.Ticket)
-				active = checkErr == nil && sameDecision(admission.Decision, current)
+				active = checkErr == nil && sameAccess(admission.Decision, current)
 			}
 			cancel()
 			if checkErr != nil {

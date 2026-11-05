@@ -109,7 +109,7 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 	request, _ := json.Marshal(EdgeControlRequest{Ticket: "wrong-node-ticket", Origin: ticket.Origin, Host: "machine.runtime.example.test"})
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := first.Write(ctx, websocket.MessageText, request); err != nil {
 		t.Fatal(err)
@@ -148,6 +148,17 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	claims, err := signer.VerifyCredential(admitted.Credential, gateway.Issuer, "browser_terminal_operation", time.Now())
 	if err != nil || claims.BrowserPublicKeySHA256 != ticket.BrowserPublicKeySHA256 || claims.SessionID != ticket.TerminalSessionID || claims.Scopes[0] != "terminal:control" || claims.WorkspaceID != decision.WorkspaceID || claims.ActorAccountID != ticket.UserID {
 		t.Fatalf("credential binding: %v", err)
+	}
+	// pb update moves the machine's route to another edge (its new worker activates its own carrier there) while
+	// this attachment is held on edge_1, whose carrier the old worker keeps for it. That is routing, not access: the
+	// attachment stays through two live checks (pbvm1 2026-11-05: it was ended "revoked" mid-update, a 3.8 s pause).
+	authorizer.mu.Lock()
+	authorizer.decision.EdgeNodeID, authorizer.decision.EdgeProcessEpoch, authorizer.decision.EdgeEndpointHost = "edge_2", "epoch_2", "edge-2.example.test"
+	authorizer.mu.Unlock()
+	for range 2 {
+		if kind, heartbeat, err := connection.Read(ctx); err != nil || kind != websocket.MessageText || string(heartbeat) != "ok" {
+			t.Fatalf("the route moving to another edge ended the held attachment: %v", err)
+		}
 	}
 	// Removing the sharing grant disconnects an attachment already in progress.
 	authorizer.mu.Lock()

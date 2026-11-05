@@ -158,8 +158,18 @@ func validDecision(d Decision, userID, terminalSessionID string) bool {
 	return d.UserID == userID && d.TerminalSessionID == terminalSessionID && d.OwnerAccountID != "" && d.WorkspaceID != "" && d.MachineID != "" && d.EnvironmentID != "" && d.PolicyGeneration > 0 && d.TeamGeneration >= 0 && d.MembershipGeneration >= 0 && d.BindingGeneration >= 0 && validRole(d.Role)
 }
 
+// sameDecision is sameAccess on the same route: an admission must name the edge that serves the machine now.
 func sameDecision(a, b Decision) bool {
-	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.InspectorCredentialID == b.InspectorCredentialID && a.EnvironmentID == b.EnvironmentID && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch && a.EdgeEndpointHost == b.EdgeEndpointHost && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
+	return sameAccess(a, b) && a.HostWSSURL == b.HostWSSURL && a.EdgeNodeID == b.EdgeNodeID && a.EdgeProcessEpoch == b.EdgeProcessEpoch && a.EdgeEndpointHost == b.EdgeEndpointHost
+}
+
+// sameAccess reports whether b grants the access a did: who, which terminal, role and every generation that
+// fences it. An attached terminal is checked with it, not sameDecision: its route moving to another edge (a pb
+// update's new worker activates its own carrier) is routing, and the edge holding the terminal keeps serving it,
+// as Teleport's connection monitor ends a session for a lock or an expired certificate, never a proxy change
+// (lib/srv/monitor.go).
+func sameAccess(a, b Decision) bool {
+	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.InspectorCredentialID == b.InspectorCredentialID && a.EnvironmentID == b.EnvironmentID && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
 }
 
 func scopeForRole(role string) string {
