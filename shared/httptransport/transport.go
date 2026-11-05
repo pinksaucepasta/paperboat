@@ -62,11 +62,17 @@ type ProxySource interface {
 }
 
 type Config struct {
-	TLSConfig              *tls.Config
-	ProxySource            ProxySource
-	DialContext            func(context.Context, string, string) (net.Conn, error)
-	DialTLSContext         func(context.Context, string, string) (net.Conn, error)
-	ForceAttemptHTTP2      bool
+	TLSConfig   *tls.Config
+	ProxySource ProxySource
+	DialContext func(context.Context, string, string) (net.Conn, error)
+	// Resolver looks up host names for the default dialer; nil is the system resolver.
+	Resolver          *net.Resolver
+	DialTLSContext    func(context.Context, string, string) (net.Conn, error)
+	ForceAttemptHTTP2 bool
+	// DialTimeout bounds the DNS lookup and the TCP connect together, as in Go's DefaultTransport (30 s): a
+	// resolver retries a lost query after 5 s, so a shorter bound turns one dropped packet into a failure.
+	// Each request's own deadline still bounds the command. TLSHandshakeTimeout is Go's default (10 s) for the
+	// same reason: one lost handshake packet costs a retransmission of a second or more.
 	DialTimeout            time.Duration
 	KeepAlive              time.Duration
 	TLSHandshakeTimeout    time.Duration
@@ -86,7 +92,7 @@ type Config struct {
 }
 
 func DevelopmentConfig() Config {
-	return Config{ProxySource: DefaultProxySource(), ForceAttemptHTTP2: true, DialTimeout: 5 * time.Second, KeepAlive: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 30 * time.Second, ExpectContinueTimeout: time.Second, IdleConnTimeout: 90 * time.Second, MaxIdleConns: 32, MaxConnsPerHost: 16, MaxIdleConnsPerHost: 8, MaxResponseHeaderBytes: 32 << 10, HealthCheckInterval: 15 * time.Second, HealthCheckTimeout: 5 * time.Second}
+	return Config{ProxySource: DefaultProxySource(), ForceAttemptHTTP2: true, DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second, ExpectContinueTimeout: time.Second, IdleConnTimeout: 90 * time.Second, MaxIdleConns: 32, MaxConnsPerHost: 16, MaxIdleConnsPerHost: 8, MaxResponseHeaderBytes: 32 << 10, HealthCheckInterval: 15 * time.Second, HealthCheckTimeout: 5 * time.Second}
 }
 
 // Default returns an independently owned transport with development policy.
@@ -144,6 +150,17 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		base = longPoll
 	}
 	response, err := base.RoundTrip(request)
+	if err != nil && connectionNotMade(err) && replayable(request) && request.Context().Err() == nil {
+		// Nothing reached the server, so a replayable request is tried once more: a lost DNS answer or a
+		// refused connect during a restart must not fail a command on a working network.
+		retry := request.Clone(request.Context())
+		if request.GetBody != nil {
+			if retry.Body, err = request.GetBody(); err != nil {
+				return nil, err
+			}
+		}
+		response, err = base.RoundTrip(retry)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +170,25 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		return nil, &ProxyError{Failure: ProxyAuthenticationRequired, Cause: errors.Join(drainErr, closeErr)}
 	}
 	return response, nil
+}
+
+// connectionNotMade is a failure before any byte of the request was sent: the name lookup or the TCP connect.
+func connectionNotMade(err error) bool {
+	var dns *net.DNSError
+	var op *net.OpError
+	return errors.As(err, &dns) || errors.As(err, &op) && op.Op == "dial"
+}
+
+// replayable follows net/http: an idempotent method or an Idempotency-Key, and a body that can be read again.
+func replayable(request *http.Request) bool {
+	switch request.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+	default:
+		if request.Header.Get("Idempotency-Key") == "" && request.Header.Get("X-Idempotency-Key") == "" {
+			return false
+		}
+	}
+	return request.Body == nil || request.Body == http.NoBody || request.GetBody != nil
 }
 
 func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Transport, error) {
@@ -168,7 +204,7 @@ func (t *Transport) transport(snapshot ProxySnapshot) (*http.Transport, *http.Tr
 	}
 	dialContext := t.config.DialContext
 	if dialContext == nil {
-		dialContext = (&net.Dialer{Timeout: t.config.DialTimeout, KeepAlive: t.config.KeepAlive}).DialContext
+		dialContext = (&net.Dialer{Timeout: t.config.DialTimeout, KeepAlive: t.config.KeepAlive, Resolver: t.config.Resolver}).DialContext
 	}
 	base := &http.Transport{Proxy: proxy, DialContext: dialContext, DialTLSContext: t.config.DialTLSContext, ForceAttemptHTTP2: t.config.ForceAttemptHTTP2, TLSClientConfig: t.config.TLSConfig.Clone(), TLSHandshakeTimeout: t.config.TLSHandshakeTimeout, ResponseHeaderTimeout: t.config.ResponseHeaderTimeout, ExpectContinueTimeout: t.config.ExpectContinueTimeout, IdleConnTimeout: t.config.IdleConnTimeout, MaxIdleConns: t.config.MaxIdleConns, MaxConnsPerHost: t.config.MaxConnsPerHost, MaxIdleConnsPerHost: t.config.MaxIdleConnsPerHost, MaxResponseHeaderBytes: t.config.MaxResponseHeaderBytes,
 		HTTP2: &http.HTTP2Config{SendPingTimeout: t.config.HealthCheckInterval, PingTimeout: t.config.HealthCheckTimeout},
