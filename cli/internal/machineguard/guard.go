@@ -98,6 +98,8 @@ type RuntimeStatus struct {
 	ActiveLeases           int      `json:"active_leases"`
 	ActiveOwners           int      `json:"active_owners"`
 	ProtectedLoopbackCIDRs []string `json:"protected_loopback_cidrs,omitempty"`
+	// GatewayRefusals counts gateway connections not handed to a daemon, by reason (a fixed set).
+	GatewayRefusals map[string]uint64 `json:"gateway_refusals,omitempty"`
 	// Features names the protocol additions this guard understands; a client sends a request field only when
 	// its guard lists the feature, since an older guard decodes requests strictly.
 	Features []string `json:"features,omitempty"`

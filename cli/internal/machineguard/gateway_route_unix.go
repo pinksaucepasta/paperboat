@@ -135,6 +135,7 @@ func (s *sharedGateway) serve() {
 				s.handoff(accepted)
 			}()
 		default:
+			countGatewayRefusal(refusalBusy, s.port, nil)
 			accepted.Close()
 		}
 	}
@@ -145,6 +146,7 @@ func (s *sharedGateway) handoff(accepted net.Conn) {
 	defer accepted.Close()
 	_, route, err := attributeConnection(accepted, s.lookup, s.route)
 	if err != nil {
+		countGatewayRefusal(attributionRefusalReason(err), s.port, err)
 		if s.port == 80 {
 			refuseGatewayHTTP(accepted)
 		}
@@ -152,10 +154,12 @@ func (s *sharedGateway) handoff(accepted net.Conn) {
 	}
 	file, err := accepted.(*net.TCPConn).File()
 	if err != nil {
+		countGatewayRefusal(refusalHandoffFailed, s.port, err)
 		return
 	}
 	defer file.Close()
 	if err := route.pass(file); err != nil {
+		countGatewayRefusal(refusalHandoffFailed, s.port, err)
 		route.Close() // the daemon stopped reading its pair: it is gone
 	}
 }
