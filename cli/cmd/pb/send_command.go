@@ -130,7 +130,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	prepared, err := filetransfer.Prepare(preparedPaths, automaticTransferLimits)
 	if err != nil {
-		return err
+		return missingSendSource(err, preparedPaths)
 	}
 	defer prepared.Close()
 	batchID, err := filetransfer.NewBatchID()
@@ -338,4 +338,15 @@ func declaredTransferLimits(policy filetransfer.Limits, declared api.TransferDec
 		policy.MaxFileBytes, policy.MaxBatchBytes = max(policy.MaxFileBytes, declared.Bytes), max(policy.MaxBatchBytes, declared.Bytes)
 	}
 	return policy
+}
+
+// missingSendSource names a source the user gave that does not exist; other preparation errors pass through.
+// Only a path from the command line is echoed, never one Paperboat opened itself.
+func missingSendSource(err error, sources []string) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && errors.Is(err, os.ErrNotExist) && slices.Contains(sources, pathErr.Path) {
+		message := fmt.Sprintf("%s does not exist. Check the path, then retry `pb send`.", pathErr.Path)
+		return usageError{err: err, publicMessage: message, refusal: true}
+	}
+	return err
 }
