@@ -40,7 +40,7 @@ rc=0
 python3 -I "$here/features.py" "$QV_OUT/run" ~/gap5/candidate "$preview" "$tunnel" > "$QV_OUT/features.out" 2>&1 || rc=$?
 ~/gap5/pt.sh stop >/dev/null 2>&1 || true
 INV after_update
-if [ $rc -eq 0 ]; then { python3 -I "$here/table.py" "$QV_OUT/run"; echo; echo "no-leftovers check (install_inventory_check.sh on the target):"; cat "$QV_OUT/inv-rows"; } | tee "$QV_OUT/table.txt"
+if [ $rc -eq 0 ]; then { python3 -I "$here/table.py" "$QV_OUT/run"; echo; echo "no-leftovers check (install_inventory_check.sh on the target):"; cat "$QV_OUT/inv-rows"; echo; echo "browser terminal events (phases and errors only, no terminal content):"; head -6 "$QV_OUT/run/web-events.jsonl" 2>/dev/null | cut -c1-300; tail -3 "$QV_OUT/run/web.out" 2>/dev/null | cut -c1-300; } | tee "$QV_OUT/table.txt"
 else echo "run.sh: features.py failed rc=$rc" >&2; tail -5 "$QV_OUT/features.out" >&2; fi
 # The artifact is the table and the update output only: diagnostics stay private (the repository is public).
 cp "$QV_OUT/run/summary.json" "$QV_OUT/run/update.raw" "$QV_OUT/" 2>/dev/null || true
