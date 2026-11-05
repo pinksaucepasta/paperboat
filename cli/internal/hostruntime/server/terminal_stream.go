@@ -15,8 +15,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
+// terminalResumeGrace is how long a native owner attachment outlives its closed connection, so the client can move it
+// to a new connection with its resume secret. The host cannot tell a handover from a lost client; an attachment nobody
+// resumes is detached when the grace ends.
+var terminalResumeGrace = 10 * time.Second
+
 type terminalOutputStream struct {
 	attachmentLease    uint64
+	resumable          bool
 	manager            session.Service
 	sessionID          string
 	attachmentID       string
@@ -173,7 +179,9 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 	if !isGenerationBoundTerminal(authorization) && authorization.ResourceID != "" {
 		// A native owner attachment gets a fresh (rotated) resume secret each time it attaches. Without
 		// one, a carrier move falls back to the operation credential.
-		stream.resumeSecret, _ = d.config.Sessions.IssueResume(request.SessionID, response.AttachmentID, response.AttachmentLease, authorization.ResourceID)
+		var issueErr error
+		stream.resumeSecret, issueErr = d.config.Sessions.IssueResume(request.SessionID, response.AttachmentID, response.AttachmentLease, authorization.ResourceID)
+		stream.resumable = issueErr == nil
 	}
 	return stream, true, nil
 }
@@ -290,6 +298,11 @@ func (s *terminalOutputStream) Close() error {
 	if s.broadcast != nil {
 		s.broadcast.Leave(s.sessionID, s.attachmentID)
 	}
-	err := s.manager.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
-	return err
+	if s.resumable {
+		// A takeover by a resume changes the lease, which makes this later detach a no-op.
+		manager, sessionID, attachmentID, lease := s.manager, s.sessionID, s.attachmentID, s.attachmentLease
+		time.AfterFunc(terminalResumeGrace, func() { _ = manager.DetachAttachment(sessionID, attachmentID, lease) })
+		return nil
+	}
+	return s.manager.DetachAttachment(s.sessionID, s.attachmentID, s.attachmentLease)
 }
