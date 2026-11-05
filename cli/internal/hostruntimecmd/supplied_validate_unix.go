@@ -80,6 +80,7 @@ func awaitDaemon(ctx context.Context, participants updated.UnixParticipants, ver
 	defer cancel()
 	requireInventory := baseline.Machines > 0 || baseline.State == "ready"
 	var last error
+	var settle updated.DegradedSettle
 	wait := updated.ParticipantNotReady
 	delay := 250 * time.Millisecond
 	for {
@@ -90,7 +91,7 @@ func awaitDaemon(ctx context.Context, participants updated.UnixParticipants, ver
 			// with signed updates).
 			if wait, last = updated.ClassifyParticipant(probe, version, baseline, requireInventory); wait == updated.ParticipantReadyNow {
 				return nil
-			} else if wait == updated.ParticipantDegradedLocally {
+			} else if wait = settle.Wait(wait, time.Now()); wait == updated.ParticipantDegradedLocally {
 				return errors.Join(fmt.Errorf("the user's Paperboat daemon came up degraded on the new version (%s)", degradedSteps(probe.Health)), last)
 			}
 		} else {

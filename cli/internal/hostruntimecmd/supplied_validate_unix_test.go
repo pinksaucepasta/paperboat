@@ -147,11 +147,14 @@ func TestSuppliedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 		t.Fatalf("daemon still waiting for the server at the deadline: %v, want the control-plane error", err)
 	}
 
+	settle := updated.ParticipantSettle
+	updated.ParticipantSettle = 300 * time.Millisecond
+	t.Cleanup(func() { updated.ParticipantSettle = settle })
 	locallyBroken := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1, Health: []string{"local_access_unavailable"}}}}
 	started := time.Now()
 	err := restartAndAwaitDaemon(t.Context(), locallyBroken, "2", baseline)
 	if err == nil || errors.Is(err, updated.ErrParticipantControlPlaneTimeout) || time.Since(started) > time.Second {
-		t.Fatalf("locally degraded daemon: err=%v after %v, want an immediate non-control-plane failure", err, time.Since(started))
+		t.Fatalf("locally degraded daemon: err=%v after %v, want a non-control-plane failure once the settle window passed", err, time.Since(started))
 	}
 	// The rollback names the step that failed, not only that the service did not start.
 	if !strings.Contains(err.Error(), "local access unavailable") {
@@ -182,5 +185,21 @@ func TestSuppliedDaemonStartsBeforeCutoverAndValidationDoesNotRestartIt(t *testi
 	}
 	if p.restarts != 1 {
 		t.Fatal("validation restarted the already staged daemon")
+	}
+}
+
+// Under load (a busy host, the machine guard slow to answer) the new daemon's first local-access or
+// machine-services attempt can time out and its own retry then succeeds a few seconds later. The gate must
+// not roll the update back on that first degraded answer: it waits out the settle window.
+func TestSuppliedUpdateRidesOutTheNewDaemonsFirstTimedOutStep(t *testing.T) {
+	settle := updated.ParticipantSettle
+	updated.ParticipantSettle = 2 * time.Second
+	t.Cleanup(func() { updated.ParticipantSettle = settle })
+	baseline := updated.UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}
+	degraded := updated.UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", Machines: 1, Health: []string{"local_access_unavailable", "machine_services"}}
+	ready := updated.UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}
+	retries := &scriptedParticipants{probes: []updated.UnixParticipantProbe{degraded, degraded, degraded, ready}}
+	if err := restartAndAwaitDaemon(t.Context(), retries, "2", baseline); err != nil {
+		t.Fatalf("daemon whose first step attempt timed out and then recovered: %v", err)
 	}
 }

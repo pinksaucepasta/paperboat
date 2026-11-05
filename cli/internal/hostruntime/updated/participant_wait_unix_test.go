@@ -28,9 +28,13 @@ func (s *sequencedParticipants) OpenConnections(context.Context) (liveconnection
 
 // Signed updates follow the same rule as supplied ones (Lane F): a candidate daemon only waiting for the
 // control plane is waited for and commits once ready; still waiting at the deadline rolls back with
-// ErrParticipantControlPlaneTimeout; degraded for another reason fails at once. Recovery to the previous
-// version keeps waiting on any failure.
+// ErrParticipantControlPlaneTimeout; degraded for another reason fails once it lasted ParticipantSettle (a new
+// daemon retries its failing steps itself; a first timeout under load is not a verdict). Recovery to the
+// previous version keeps waiting on any failure.
 func TestSignedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
+	settle := ParticipantSettle
+	ParticipantSettle = 300 * time.Millisecond
+	t.Cleanup(func() { ParticipantSettle = settle })
 	handoff := &unixActivationHandoff{Baseline: UnixParticipantProbe{Running: true, Version: "1", UpdaterVersion: "1", State: "ready", Machines: 1}, RequireInventory: true}
 	waiting := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "degraded", ControlPlaneUnavailableOnly: true, Machines: 1}
 	ready := UnixParticipantProbe{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}
@@ -49,7 +53,10 @@ func TestSignedUpdateWaitsOnlyForTheControlPlane(t *testing.T) {
 		t.Fatalf("candidate still waiting for the server at the deadline: %v", err)
 	}
 	if err, took := wait([]UnixParticipantProbe{local}, true, 2*time.Second); err == nil || errors.Is(err, ErrParticipantControlPlaneTimeout) || took > time.Second {
-		t.Fatalf("locally degraded candidate: err=%v after %v, want an immediate failure", err, took)
+		t.Fatalf("locally degraded candidate: err=%v after %v, want a failure once the settle window passed", err, took)
+	}
+	if err, _ := wait([]UnixParticipantProbe{local, local, ready}, true, 2*time.Second); err != nil {
+		t.Fatalf("a candidate that recovers inside the settle window must commit: %v", err)
 	}
 	if err, _ := wait([]UnixParticipantProbe{local, local, ready}, false, 2*time.Second); err != nil {
 		t.Fatalf("recovery must keep waiting through a transient local degradation: %v", err)

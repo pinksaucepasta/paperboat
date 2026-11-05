@@ -777,6 +777,7 @@ func (g *unixParticipantReadiness) waitReady(ctx context.Context, version string
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var last error
+	var settle DegradedSettle
 	wait := ParticipantNotReady
 	for {
 		probe, err := g.participants.Probe(ctx)
@@ -784,7 +785,7 @@ func (g *unixParticipantReadiness) waitReady(ctx context.Context, version string
 			wait, last = ParticipantNotReady, participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
 		} else if wait, last = ClassifyParticipant(probe, version, g.handoff.Baseline, g.handoff.RequireInventory); wait == ParticipantReadyNow {
 			return nil
-		} else if candidate && wait == ParticipantDegradedLocally {
+		} else if wait = settle.Wait(wait, time.Now()); candidate && wait == ParticipantDegradedLocally {
 			return errors.Join(ErrParticipantReadiness, last)
 		}
 		select {
@@ -951,6 +952,30 @@ const (
 	// ParticipantDegradedLocally: the new version runs and is degraded for another reason.
 	ParticipantDegradedLocally
 )
+
+// ParticipantSettle is how long a new daemon may stay degraded locally before an update gives up on it. The
+// daemon retries its failing steps (local access through the machine guard, machine services) with backoff,
+// and under load the first attempt times out; a break that persists past the window still fails the update.
+// A variable only so tests can shorten it.
+var ParticipantSettle = 15 * time.Second
+
+// DegradedSettle holds back ParticipantDegradedLocally until it has lasted ParticipantSettle.
+type DegradedSettle struct{ since time.Time }
+
+// Wait returns wait, except that a degraded answer inside the settle window means keep waiting.
+func (s *DegradedSettle) Wait(wait ParticipantWait, now time.Time) ParticipantWait {
+	if wait != ParticipantDegradedLocally {
+		s.since = time.Time{}
+		return wait
+	}
+	if s.since.IsZero() {
+		s.since = now
+	}
+	if now.Sub(s.since) < ParticipantSettle {
+		return ParticipantNotReady
+	}
+	return wait
+}
 
 // ErrParticipantControlPlaneTimeout reports an update whose new daemon was still waiting for the
 // Paperboat server at the deadline: the previous version is restored and the update can be retried.
