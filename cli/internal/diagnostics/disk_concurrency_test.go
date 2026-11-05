@@ -257,16 +257,27 @@ func TestSaturatedDiskFlushDoesNotBlockProducersOrShutdown(t *testing.T) {
 	flushed := make(chan error, 1)
 	go func() { flushed <- ring.Flush(flushCtx) }()
 	time.Sleep(10 * time.Millisecond)
-	produced := make(chan error, 1)
+	// An empty queue does not prove the writer reached the held lock: until its batch drain sees an
+	// empty queue it also takes the queued record and the flush barrier. Produce until the writer is
+	// stuck and a record is dropped; no record may wait on the flush.
 	event := concurrencyEvent(t, "overflow")
-	go func() { produced <- ring.Record(event) }()
-	select {
-	case err := <-produced:
-		if err != nil || ring.Stats().DroppedRecords != 1 {
-			t.Fatalf("saturated producer err=%v stats=%+v", err, ring.Stats())
+	for attempt := 0; ring.Stats().DroppedRecords == 0; attempt++ {
+		if attempt == 100 {
+			t.Fatalf("a saturated queue never dropped a record: stats=%+v", ring.Stats())
 		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("flush blocked the producer")
+		produced := make(chan error, 1)
+		go func() { produced <- ring.Record(event) }()
+		select {
+		case err := <-produced:
+			if err != nil {
+				t.Fatalf("saturated producer err=%v stats=%+v", err, ring.Stats())
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("flush blocked the producer")
+		}
+	}
+	if dropped := ring.Stats().DroppedRecords; dropped != 1 {
+		t.Fatalf("dropped %d records, want exactly the one that met a full queue", dropped)
 	}
 	shutdown, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer stop()
