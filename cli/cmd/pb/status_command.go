@@ -44,6 +44,7 @@ func statusCommand() *cobra.Command {
 				return encoder.Encode(snapshot)
 			}
 			writeStatus(command.OutOrStdout(), snapshot)
+			writeDaemonGenerations(command.OutOrStdout())
 			return nil
 		},
 	}
