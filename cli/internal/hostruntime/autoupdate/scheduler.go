@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -252,18 +253,11 @@ func (s *Scheduler) jitteredInterval(ctx context.Context) time.Duration {
 	return half + jitter
 }
 
+// retryDelay is the wait after the failures-th failed check in a row: the shared control-plane schedule
+// (RetryFloor doubling, jittered over [d/2, 3d/2) so machines that failed together, such as during a release
+// outage, do not retry together), never above RetryLimit. Prior art: tailscale util/backoff/backoff.go.
 func (s *Scheduler) retryDelay(failures uint32) time.Duration {
-	delay := s.config.RetryFloor
-	for attempt := uint32(1); attempt < failures && delay < s.config.RetryLimit; attempt++ {
-		if delay > s.config.RetryLimit/2 {
-			return s.config.RetryLimit
-		}
-		delay *= 2
-	}
-	if delay > s.config.RetryLimit {
-		return s.config.RetryLimit
-	}
-	return delay
+	return min(backoff.Retry(int(min(failures, 32)), s.config.RetryFloor, s.config.RetryLimit), s.config.RetryLimit)
 }
 
 func secureDuration(limit time.Duration) (time.Duration, error) {

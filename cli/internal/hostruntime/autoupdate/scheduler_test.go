@@ -125,8 +125,8 @@ func TestSchedulerBackoffIsBoundedAndSuccessResetsFailures(t *testing.T) {
 		if _, err := scheduler.CheckNow(context.Background()); err == nil {
 			t.Fatal("failure was not returned")
 		}
-		if got := scheduler.Snapshot().NextCheckAt.Sub(now); got != want {
-			t.Fatalf("delay=%v want=%v", got, want)
+		if got := scheduler.Snapshot().NextCheckAt.Sub(now); got < want/2 || got >= want/2*3 {
+			t.Fatalf("delay=%v want %v jittered over [%v, %v)", got, want, want/2, want/2*3)
 		}
 	}
 	if _, err := scheduler.CheckNow(context.Background()); err != nil {
@@ -411,5 +411,38 @@ func TestSchedulerAutomaticFailureEpisodesRemainCorrelatedAndManualChecksStayOwn
 	second := nextFault()
 	if second.SupportReference != first.SupportReference || len(faults) != 0 {
 		t.Fatal("episode reset/correlation or duplicate observation failed")
+	}
+}
+
+// Machines whose checks fail together (a release outage) must not retry together: the failure backoff is
+// jittered, and it never exceeds RetryLimit however long the outage lasts.
+func TestSchedulerFailureRetriesAreJitteredAndCapped(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	failing := Config{Check: func(context.Context) (Result, error) { return Result{}, errors.New("offline") }, Now: func() time.Time { return now }}
+	first := map[time.Duration]bool{}
+	for range 200 {
+		scheduler, err := New(failing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = scheduler.CheckNow(context.Background())
+		delay := scheduler.Snapshot().NextCheckAt.Sub(now)
+		if delay < DefaultRetryFloor/2 || delay >= DefaultRetryFloor/2*3 {
+			t.Fatalf("first retry %v outside [%v, %v)", delay, DefaultRetryFloor/2, DefaultRetryFloor/2*3)
+		}
+		first[delay] = true
+	}
+	if len(first) < 50 {
+		t.Fatalf("200 machines failing together retry at only %d distinct times", len(first))
+	}
+	scheduler, err := New(failing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 60 {
+		_, _ = scheduler.CheckNow(context.Background())
+		if delay := scheduler.Snapshot().NextCheckAt.Sub(now); delay <= 0 || delay > DefaultRetryLimit {
+			t.Fatalf("retry after %d failures is %v, want within (0, %v]", scheduler.Snapshot().Failures, delay, DefaultRetryLimit)
+		}
 	}
 }
