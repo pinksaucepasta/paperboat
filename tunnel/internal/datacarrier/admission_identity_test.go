@@ -71,7 +71,7 @@ func TestExpectedAdmissionRegistryPeerBindingUsesCarrierURNSessionFence(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.PeerBinding(tls.ConnectionState{PeerCertificates: []*x509.Certificate{{PublicKey: public, URIs: []*url.URL{replacementEdgeURI}}}}); !errors.Is(err, ErrAdmissionNotExpected) {
+	if _, err := registry.PeerBinding(tls.ConnectionState{PeerCertificates: []*x509.Certificate{{PublicKey: public, URIs: []*url.URL{replacementEdgeURI}}}}); !errors.Is(err, ErrAdmissionNotExpected) || !errors.Is(err, RefusalStaleIdentity) {
 		t.Fatalf("replacement edge URI matched stale process: %v", err)
 	}
 
@@ -165,5 +165,37 @@ func testExpectedAdmissionForRegistry(expiresAt time.Time) ExpectedAdmission {
 		EdgeCarrierServerCertificateChainPEM: "test-public-certificate-chain",
 		MachineIdentityPublicKey:             base64.RawURLEncoding.EncodeToString(public),
 		MachineIdentityThumbprint:            "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), Admitted: true,
+	}
+}
+
+// A refused carrier names why: nothing pulled yet, a machine this edge has no admission for, or
+// only expired admissions for it (prod 2026-11-05 logged a bare "TLS handshake failed").
+func TestExpectedAdmissionRegistryPeerBindingNamesTheRefusal(t *testing.T) {
+	known := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	known[0] = 1
+	other := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	other[0] = 2
+	digest := sha256.Sum256(known)
+	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func(key ed25519.PublicKey) tls.ConnectionState {
+		return tls.ConnectionState{PeerCertificates: []*x509.Certificate{{PublicKey: key}}}
+	}
+	if _, err := registry.PeerBinding(state(known)); !errors.Is(err, RefusalNoAdmissions) {
+		t.Fatalf("empty registry: %v", err)
+	}
+	registry.byKey["a"] = ExpectedAdmission{Identity: Identity{AccountID: "account_1"}, EdgeProcessEpoch: "_epoch12", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(known), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), ExpiresAt: time.Now().Add(-time.Second), Admitted: true}
+	if _, err := registry.PeerBinding(state(other)); !errors.Is(err, RefusalUnknownMachine) {
+		t.Fatalf("unknown machine: %v", err)
+	}
+	if _, err := registry.PeerBinding(state(known)); !errors.Is(err, RefusalNoLiveAdmission) || !errors.Is(err, ErrAdmissionNotExpected) {
+		t.Fatalf("expired admission: %v", err)
+	}
+	both := AnyPeerBinding(registry.PeerBinding, func(tls.ConnectionState) (Identity, error) { return Identity{}, RefusalUnknownMachine })
+	var reason CarrierRefusal
+	if _, err := both(state(known)); !errors.As(err, &reason) || reason != RefusalNoLiveAdmission {
+		t.Fatalf("composed refusal = %v, want the most specific (no_live_admission)", err)
 	}
 }

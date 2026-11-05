@@ -2,6 +2,7 @@ package edgehttp
 
 import (
 	"html/template"
+	"log/slog"
 	"net/http"
 )
 
@@ -56,6 +57,10 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 	}
 	if message == "" {
 		message = retryMessage
+	}
+	if status >= http.StatusInternalServerError {
+		// Every 5xx the edge itself answers is a user-visible failure; the deploy gate counts these.
+		slog.Warn("edge_http_5xx", "status", status)
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")

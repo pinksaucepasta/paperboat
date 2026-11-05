@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -60,7 +61,12 @@ func (l *handshakeListener) handshake(raw net.Conn) {
 	if err != nil {
 		_ = raw.Close()
 		if counted.read.Load() > 0 {
-			l.observe(errCarrierTLSHandshake)
+			var reason CarrierRefusal
+			if errors.As(err, &reason) {
+				l.observe(fmt.Errorf("%w: %w", errCarrierTLSHandshake, reason))
+			} else {
+				l.observe(errCarrierTLSHandshake)
+			}
 		}
 		return
 	}

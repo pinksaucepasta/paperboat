@@ -15,6 +15,10 @@ import (
 	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
 )
 
+// admissionMissWait bounds how long a carrier handshake waits for an admission pull; the host
+// gives one carrier attempt (dial, TLS, ping) five seconds.
+const admissionMissWait = 3 * time.Second
+
 func newCarrierComponentWithTelemetry(
 	deployment config.Deployment,
 	serverCertificate tls.Certificate,
@@ -64,7 +68,20 @@ func newCarrierComponentWithTelemetry(
 		// exact public-key and CarrierIdentityURN checks below.
 		ClientAuth: tls.RequireAnyClientCert,
 		VerifyConnection: func(state tls.ConnectionState) error {
-			if _, err := peerBinding(state); err != nil {
+			_, err := peerBinding(state)
+			if err != nil && runtimeWorker != nil {
+				// A machine can hold its admission for this process before the edge's next pull
+				// brings it here: one shared, rate-limited pull closes that gap instead of
+				// refusing the carrier into the host's backoff.
+				timer := time.NewTimer(admissionMissWait)
+				select {
+				case <-runtimeWorker.RequestPull():
+					_, err = peerBinding(state)
+				case <-timer.C:
+				}
+				timer.Stop()
+			}
+			if err != nil {
 				return fmt.Errorf("carrier machine identity is not admitted: %w", err)
 			}
 			return nil
