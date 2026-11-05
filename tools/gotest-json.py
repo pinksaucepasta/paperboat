@@ -26,6 +26,11 @@ def main():
                 continue
             output, test = event.get('Output', ''), event.get('Test')
             if not test:
+                if event.get('Action') == 'fail':
+                    # A timeout or crash ends the package without a fail event for the running test: print the
+                    # output of every unfinished test, or the cause (the panic and its stack) would be hidden.
+                    for key in [key for key in buffers if key[0] == event.get('Package')]:
+                        sys.stdout.write(''.join(buffers.pop(key)))
                 sys.stdout.write(output)  # package lines: ok, FAIL, panics outside a test
             elif args.verbose:
                 sys.stdout.write(output)

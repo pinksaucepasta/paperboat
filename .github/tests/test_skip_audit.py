@@ -92,6 +92,20 @@ class SkipAuditTest(unittest.TestCase):
                                      capture_output=True, text=True, check=True).stdout
             self.assertIn("--- PASS: TestGood", verbose)
 
+    def test_a_timed_out_package_prints_the_test_that_was_still_running(self):
+        # go test -timeout: the running test never gets a fail event, only its package does.
+        rows = [{"Action": "run", "Package": "pkg", "Test": "TestHangs"},
+                {"Action": "output", "Package": "pkg", "Test": "TestHangs", "Output": "=== RUN   TestHangs\n"},
+                {"Action": "output", "Package": "pkg", "Test": "TestHangs", "Output": "panic: test timed out after 30m0s\n"},
+                {"Action": "output", "Package": "pkg", "Output": "FAIL\tpkg\t1800.1s\n"},
+                {"Action": "fail", "Package": "pkg"}]
+        with tempfile.TemporaryDirectory() as directory:
+            stdin = "".join(json.dumps(r) + "\n" for r in rows)
+            out = subprocess.run([sys.executable, str(REPORT), "--save", str(Path(directory) / "e.jsonl")], input=stdin,
+                                 capture_output=True, text=True, check=True).stdout
+        self.assertIn("panic: test timed out", out)
+        self.assertIn("=== RUN   TestHangs", out)
+
 
 if __name__ == "__main__":
     unittest.main()
