@@ -43,8 +43,10 @@ trap 'git push -q --no-verify origin --delete "$branch" >/dev/null 2>&1 || true'
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
 # is the only run, and it carries the module/-run inputs.
 commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $lane $sha [skip ci]")
-git push -q --no-verify origin "$commit:refs/heads/$branch" 2>/dev/null ||
-  { echo "ci-test: could not push the ci branch (is origin reachable and writable?)" >&2; exit 1; }
+# Retry once (GitHub sometimes refuses a push for a moment) and show git's own error if it still fails.
+push_err=$(git push -q --no-verify origin "$commit:refs/heads/$branch" 2>&1) ||
+  { sleep 5; push_err=$(git push -q --no-verify origin "$commit:refs/heads/$branch" 2>&1); } ||
+  { echo "ci-test: could not push the ci branch $branch: $push_err" >&2; exit 1; }
 
 args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run" -f "count=$count")
 gh workflow run lane-test.yml "${args[@]}"
