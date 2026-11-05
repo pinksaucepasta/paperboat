@@ -597,3 +597,50 @@ func TestInstallLockRecreatesResetStateWithoutRepairingUnsafeEntries(t *testing.
 		t.Fatal("symlink lock root accepted")
 	}
 }
+
+// pbvm: the uninstall removed the system copy but left ~/.local/bin/pb pointing at it, so the next `pb` was "command not
+// found" (rc 127). The uninstall removes the link it installed, and nothing else in that directory.
+func TestUninstallRemovesTheInstalledCommandLinkOnly(t *testing.T) {
+	home, system := t.TempDir(), t.TempDir()
+	worker := filepath.Join(system, "pb")
+	if err := os.WriteFile(worker, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(bin, "pb")
+	if err := os.Symlink(worker, link); err != nil {
+		t.Fatal(err)
+	}
+	request, paths := Request{Home: home}, installPaths{worker: worker}
+	if err := removeCommandLink(request, paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the installed command link remains: %v", err)
+	}
+	if _, err := os.Lstat(worker); err != nil {
+		t.Fatalf("the link's target was touched: %v", err)
+	}
+	// The account's own `pb` (another target, or a regular file) is not ours.
+	other := filepath.Join(system, "other")
+	if err := os.WriteFile(other, []byte("mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, own := range []func() error{func() error { return os.Symlink(other, link) }, func() error { return os.WriteFile(link, []byte("mine"), 0o755) }} {
+		if err := own(); err != nil {
+			t.Fatal(err)
+		}
+		if err := removeCommandLink(request, paths); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(link); err != nil {
+			t.Fatalf("the account's own pb was removed: %v", err)
+		}
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

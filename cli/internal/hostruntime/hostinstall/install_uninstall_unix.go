@@ -133,7 +133,7 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		if err := restoreUserLinger(ctx, request, paths); err != nil {
 			return withUninstallStage("uninstall_linger", err)
 		}
-		return withUninstallStage("uninstall_files", removeInstalledFiles(ctx, paths))
+		return withUninstallStage("uninstall_files", errors.Join(removeCommandLink(request, paths), removeInstalledFiles(ctx, paths)))
 	}
 	hostd, updater, err := pendingInstallers(request, paths)
 	if err != nil {
@@ -203,14 +203,34 @@ func finalizeUninstall(ctx context.Context, request Request, paths installPaths,
 	if err := restoreUserLinger(ctx, request, paths); err != nil {
 		return withUninstallStage("uninstall_linger", err)
 	}
+	linkErr := removeCommandLink(request, paths)
 	journal, journalErr := loadJournal(paths.journal)
 	if journalErr == nil {
-		return withUninstallStage("uninstall_files", rollbackFiles(paths, journal))
+		return withUninstallStage("uninstall_files", errors.Join(linkErr, rollbackFiles(paths, journal)))
 	}
 	if !installNotExistOnly(journalErr) {
-		return withUninstallStage("uninstall_journal", journalErr)
+		return withUninstallStage("uninstall_journal", errors.Join(linkErr, journalErr))
 	}
-	return withUninstallStage("uninstall_files", removeInstalledFiles(ctx, paths))
+	return withUninstallStage("uninstall_files", errors.Join(linkErr, removeInstalledFiles(ctx, paths)))
+}
+
+// removeCommandLink removes the ~/.local/bin/pb link the install made, so the account is not left with a `pb` that
+// points at the system copy this uninstall removes ("command not found"). The user-level cleanup also removes it, but
+// only after the service stopped; the link is this installation's, whatever that cleanup decides. A link to anything
+// else, or a regular file, is the account's own and stays.
+func removeCommandLink(request Request, paths installPaths) error {
+	if !filepath.IsAbs(request.Home) || paths.worker == "" {
+		return nil
+	}
+	link := filepath.Join(request.Home, ".local", "bin", "pb")
+	target, err := os.Readlink(link)
+	if err != nil || target != paths.worker {
+		return nil // absent, not a link, or not ours
+	}
+	if err := os.Remove(link); err != nil && !installNotExistOnly(err) {
+		return err
+	}
+	return nil
 }
 
 func uninstallWithActivation(ctx context.Context, retire, uninstall func(context.Context) error) error {
