@@ -9,7 +9,7 @@ const origin = process.env.ORIGIN
 const token = readFileSync(process.env.FINAL_FIXTURES_TOKEN_FILE, "utf8").trim()
 const dns = async (method, path, body) => {
   const r = await fetch(`${process.env.FINAL_FIXTURES_URL.replace(/\/$/, "")}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-  if (!r.ok) throw new Error(`fixtures ${method} ${path}: HTTP ${r.status}`)
+  if (!r.ok) throw new Error(`fixtures ${method} ${path} (${body?.type ?? ""} ${body?.name ?? ""}): HTTP ${r.status} ${(await r.text()).slice(0, 200)}`)
   return r.status === 204 ? null : (await r.json()).data
 }
 const created = []
@@ -23,10 +23,12 @@ try {
   await page.waitForTimeout(4000)
   await page.evaluate((d) => { window.__domain = d }, domain)
   const done = page.evaluate(readFileSync(process.env.CHECK, "utf8"))
+  done.catch(() => {}) // a failure below is reported first; the closed page must not mask it
   let records = null
   for (let i = 0; i < 240 && !records; i++) { records = await page.evaluate(() => window.__dnsRecords ?? null); if (!records) await page.waitForTimeout(1000) }
   if (records) {
-    for (const r of records) {
+    // only this run's domain: the page also lists records of other domains bound to the tunnel
+    for (const r of records.filter((x) => { const n = x.name.replace(/\.$/, ""); return n === domain || n.endsWith(`.${domain}`) || `${n}.${zoneName}` === domain || `${n}.${zoneName}`.endsWith(`.${domain}`) })) {
       const name = r.name.endsWith(zoneName) ? r.name.replace(/\.$/, "") : `${r.name.replace(/\.$/, "")}.${zoneName}`
       const res = await dns("POST", "/dns", { type: r.type, name, content: r.value.replace(/\.$/, "") })
       created.push(res.id)
@@ -39,7 +41,7 @@ try {
   console.log(`${served.startsWith("HTTP 200") ? "PASS" : "FAIL"}  outside the page, https://${domain}/ serves over verified TLS  (${served})`)
   await page.evaluate(() => { window.__removeNow = true })
   const steps = await done
-  failed = 0
+  failed = served.startsWith("HTTP 200") ? 0 : 1 // the outside fetch is the row's main path
   for (const s of steps ?? []) { if (!s.ok) failed++; console.log(`${s.ok ? "PASS" : "FAIL"}  ${s.step}${s.detail ? `  (${s.detail})` : ""}`) }
   console.log(`${(steps ?? []).length - failed}/${(steps ?? []).length} passed`)
   const url = `https://${domain}/`
@@ -51,6 +53,9 @@ try {
     if (!last.startsWith("HTTP 200")) break
     await page.waitForTimeout(3000)
   }
+} catch (error) {
+  // the primary error is printed before cleanup, which can only add its own failures after it
+  console.log(`FAIL  ${String(error?.stack ?? error).slice(0, 600)}`)
 } finally {
   for (const id of created) await dns("DELETE", `/dns/${id}`).catch((e) => console.log("cleanup failed", id, e.message))
   console.log(`dns records deleted: ${created.length}`)
