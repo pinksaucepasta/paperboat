@@ -425,8 +425,9 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	}
 	stale := request
 	stale.WorkerGeneration = 2
-	if _, err = service.Attach(ctx, proof, stale); !errors.Is(err, ErrUnavailable) {
-		t.Fatal("unobserved worker accepted")
+	// Refused as stale (409, retried) while another worker generation is registered, never a 503.
+	if _, err = service.Attach(ctx, proof, stale); err != ErrStale {
+		t.Fatalf("unobserved worker: %v, want ErrStale", err)
 	}
 	stale = request
 	stale.ProcessID = "other_process"

@@ -446,6 +446,8 @@ UPDATE user_machines
 SET public_identity_key = sqlc.arg(public_identity_key),
     installation_generation = installation_generation +
       CASE WHEN public_identity_key IS NOT NULL AND public_identity_key <> sqlc.arg(public_identity_key) THEN 1 ELSE 0 END,
+    -- A new identity is a fresh install, whose workers count from 1 again.
+    worker_generation = CASE WHEN public_identity_key IS DISTINCT FROM sqlc.arg(public_identity_key) THEN 0 ELSE worker_generation END,
     enrolled_at = coalesce(enrolled_at, sqlc.arg(now)), updated_at = sqlc.arg(now),
     version = version + CASE WHEN public_identity_key IS DISTINCT FROM sqlc.arg(public_identity_key) THEN 1 ELSE 0 END
 WHERE environment_id = sqlc.arg(environment_id) AND deleted_at IS NULL
@@ -703,6 +705,9 @@ SET worker_generation = sqlc.arg(worker_generation),
     updated_at = now()
 WHERE id = sqlc.arg(id) AND environment_id = sqlc.arg(environment_id)
   AND deleted_at IS NULL
+  -- Through a pb update both workers report; the newer one owns the row, so an old worker's later report never
+  -- moves the generation back (that flip invalidated the new carrier and refused its attach).
+  AND worker_generation <= sqlc.arg(worker_generation)
   AND (runtime_diagnostics_observed_at IS NULL OR runtime_diagnostics_observed_at <= sqlc.arg(observed_at))
   -- Diagnostics are written only when they change; how recently they were observed is last_seen_at, which the
   -- same heartbeat refreshes (mapMachine reports the later of the two).

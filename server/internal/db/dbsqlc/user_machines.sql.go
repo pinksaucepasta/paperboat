@@ -178,6 +178,8 @@ UPDATE user_machines
 SET public_identity_key = $1,
     installation_generation = installation_generation +
       CASE WHEN public_identity_key IS NOT NULL AND public_identity_key <> $1 THEN 1 ELSE 0 END,
+    -- A new identity is a fresh install, whose workers count from 1 again.
+    worker_generation = CASE WHEN public_identity_key IS DISTINCT FROM $1 THEN 0 ELSE worker_generation END,
     enrolled_at = coalesce(enrolled_at, $2), updated_at = $2,
     version = version + CASE WHEN public_identity_key IS DISTINCT FROM $1 THEN 1 ELSE 0 END
 WHERE environment_id = $3 AND deleted_at IS NULL
@@ -5125,6 +5127,9 @@ SET worker_generation = $1,
     updated_at = now()
 WHERE id = $7 AND environment_id = $8
   AND deleted_at IS NULL
+  -- Through a pb update both workers report; the newer one owns the row, so an old worker's later report never
+  -- moves the generation back (that flip invalidated the new carrier and refused its attach).
+  AND worker_generation <= $1
   AND (runtime_diagnostics_observed_at IS NULL OR runtime_diagnostics_observed_at <= $6)
   -- Diagnostics are written only when they change; how recently they were observed is last_seen_at, which the
   -- same heartbeat refreshes (mapMachine reports the later of the two).

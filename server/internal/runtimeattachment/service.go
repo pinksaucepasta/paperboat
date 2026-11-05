@@ -82,6 +82,14 @@ AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.seat_state='occupied' AN
 AND e.desired_state='active' AND r.desired_state IN ('attached','replacing')
 ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.InstallationGeneration, request.WorkerGeneration).Scan(&route, &environment, &host, &revision, &publicKey, &teamID, &managedHost, &mode)
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Another worker generation is registered (a pb update overlap): a state the worker retries, not an outage.
+			var otherWorker bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines WHERE id=$1 AND user_id=$2 AND installation_generation=$3 AND worker_generation<>$4 AND revoked_at IS NULL AND deleted_at IS NULL)`, proof.MachineID, proof.UserID, proof.InstallationGeneration, request.WorkerGeneration).Scan(&otherWorker); err != nil {
+				return err
+			}
+			if otherWorker {
+				return ErrStale
+			}
 			return ErrUnavailable
 		}
 		if err != nil {
