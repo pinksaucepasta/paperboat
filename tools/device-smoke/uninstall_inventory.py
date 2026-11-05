@@ -16,6 +16,9 @@ def run(args):
                           stdin=subprocess.DEVNULL)
 
 
+LEFTOVER_FILES = []
+
+
 def retained(path, inbox):
     if path.is_symlink():
         return True
@@ -231,7 +234,9 @@ def inventory(account, inbox):
                  '.ssh/.paperboat-config-transaction-v1.json'])
     for pattern in patterns:
         paths.extend(glob.glob(pattern))
-    add('files', sum(retained(Path(path), inbox) for path in set(paths)))
+    kept = sorted(path for path in set(paths) if retained(Path(path), inbox))
+    LEFTOVER_FILES[:] = kept[:20]  # names only (never contents), so a failure says which file stayed
+    add('files', len(kept))
     add('ssh_configuration', owned_ssh_configuration(home / '.ssh/config'))
     processes = run(['ps', '-axo', 'comm'])
     if processes.returncode:
@@ -254,7 +259,8 @@ def main():
     leftovers = inventory(pwd.getpwnam(args.user), inbox)
     print(json.dumps({'check': 'uninstall-inventory',
                       'status': 'FAIL' if leftovers else 'PASS',
-                      'leftovers': leftovers, 'total': sum(leftovers.values())}))
+                      'leftovers': leftovers, 'total': sum(leftovers.values()),
+                      'file_paths': LEFTOVER_FILES}))
     return bool(leftovers)
 
 

@@ -160,7 +160,7 @@ def inventory(script, inbox, installed, password):
     elif result.returncode or receipt.get('status') != 'PASS' or receipt.get('total') != 0:
         print(json.dumps({'check': 'uninstall-inventory', 'status': 'FAIL',
                           'leftovers': receipt.get('leftovers', {}),
-                          'total': receipt.get('total'),
+                          'total': receipt.get('total'), 'file_paths': receipt.get('file_paths', []),
                           'reason': receipt.get('reason', receipt.get('error'))}), flush=True)
         raise RuntimeError('uninstall inventory did not reach zero leftovers')
     return receipt
