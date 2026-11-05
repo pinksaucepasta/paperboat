@@ -22,6 +22,7 @@ const (
 	Label             = "com.pinksaucepasta.paperboat.runtime-host"
 	HostLabel         = "com.pinksaucepasta.paperboat.runtime-privileged"
 	ConfigLabel       = "com.pinksaucepasta.paperboat.runtime-config"
+	ConfigUnit        = "paperboat-runtime-config.service"
 	DaemonLabel       = "com.pinksaucepasta.paperboatd"
 	HostdLabel        = "com.pinksaucepasta.paperboat.hostd"
 	UpdaterLabel      = "com.pinksaucepasta.paperboat.updated"
@@ -185,7 +186,7 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		} else if config.Kind == UpdaterKind {
 			unit = "paperboat-updated.service"
 		} else if config.Kind == ConfigKind {
-			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboat-runtime-config.service")
+			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", ConfigUnit)
 		} else if config.Kind == DaemonKind {
 			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboatd.service")
 		} else if config.Kind != WorkerKind && config.Kind != HostdKind && config.Kind != UpdaterKind {

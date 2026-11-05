@@ -704,7 +704,7 @@ func collectLocalDoctor(ctx context.Context) (report localDoctorReport) {
 			report.RecoveryActions = append(report.RecoveryActions, "repair the Windows config-sync service")
 		}
 	} else if home, homeErr := os.UserHomeDir(); homeErr == nil {
-		definition := filepath.Join(home, ".config", "systemd", "user", "paperboat-runtime-config.service")
+		definition := filepath.Join(home, ".config", "systemd", "user", service.ConfigUnit)
 		if runtime.GOOS == "darwin" {
 			definition = filepath.Join(home, "Library", "LaunchAgents", service.ConfigLabel+".plist")
 		}
@@ -730,7 +730,7 @@ func localConfigServiceState() string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if runtime.GOOS == "linux" {
-		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", "paperboat-runtime-config.service")
+		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", service.ConfigUnit)
 		prepareConfigServiceQuery(query)
 		output, err := query.Output()
 		state := strings.TrimSpace(string(output))

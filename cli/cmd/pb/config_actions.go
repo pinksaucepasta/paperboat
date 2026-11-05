@@ -301,7 +301,7 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 		}
 		controller = service.LaunchdController{Runner: runner, UID: uid, Label: service.ConfigLabel, UserDomain: true}
 	case "linux":
-		controller = service.SystemdController{Runner: runner, Unit: "paperboat-runtime-config.service", User: true}
+		controller = service.SystemdController{Runner: runner, Unit: service.ConfigUnit, User: true}
 	default:
 		return service.ErrUnsupportedPlatform
 	}

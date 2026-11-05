@@ -97,7 +97,7 @@ func removeService(ctx context.Context, config serviceConfig) error {
 	if config.Platform == "darwin" {
 		definition.Controller = hostservice.LaunchdController{Runner: config.Runner, UID: config.UID, Label: hostservice.ConfigLabel, UserDomain: true}
 	} else {
-		definition.Controller = hostservice.SystemdController{Runner: config.Runner, Unit: "paperboat-runtime-config.service", User: true}
+		definition.Controller = hostservice.SystemdController{Runner: config.Runner, Unit: hostservice.ConfigUnit, User: true}
 	}
 	return hostservice.Remove(ctx, definition)
 }
