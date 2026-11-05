@@ -185,7 +185,13 @@ func unixUpdateActivatorDefinition(platform string, uid int, binary string, envi
 		body.WriteString("Environment=" + systemdEscape(key+"="+values[key]) + "\n")
 	}
 	body.WriteString("Nice=" + UpdateNice + "\nIOSchedulingClass=" + UpdateIOClass + "\n")
-	body.WriteString("Restart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n")
+	// The helper is started explicitly for each activation, which resets systemd's restart counter
+	// (src/core/service.c service_start), so it needs no RESTART_RESET; it backs off like every other unit.
+	body.WriteString("Restart=on-failure\n")
+	for _, option := range restartBackoff {
+		body.WriteString(option.Name + "=" + option.Value + "\n")
+	}
+	body.WriteString("[Install]\nWantedBy=multi-user.target\n")
 	return []byte(body.String()), nil
 }
 
