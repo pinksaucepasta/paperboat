@@ -48580,6 +48580,204 @@
         },
         "x-operator-capability": "operations"
       }
+    },
+    "/v1/admin/server-nodes/{node_id}/drain": {
+      "post": {
+        "operationId": "post_v1_admin_server_nodes_drain",
+        "summary": "Operator-only: Drain a server node (out of the region map and DNS; held connections continue)",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Exact node id."
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Opaque audit reason reference."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Stable key for retrying the exact mutation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNodeEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Any enrolled node serves this (equal peers).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-operator-capability": "admin"
+      }
+    },
+    "/v1/admin/server-nodes/{node_id}/remove": {
+      "post": {
+        "operationId": "post_v1_admin_server_nodes_remove",
+        "summary": "Operator-only: Remove a server node (its heartbeat is refused; the slot can be enrolled again)",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Exact node id."
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Opaque audit reason reference."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Stable key for retrying the exact mutation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNodeEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Any enrolled node serves this (equal peers).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-operator-capability": "admin"
+      }
     }
   }
 }

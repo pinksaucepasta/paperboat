@@ -97,4 +97,26 @@ func TestServerNodeEnrollmentDeliversSealedConfigOnPostgres(t *testing.T) {
 	if _, err := e.Enroll(ctx, "operator-test", addr2, code2); !errors.Is(err, ErrUsed) {
 		t.Fatalf("a second node took an enrolled region/instance: %v", err)
 	}
+
+	// Drain, then remove: a removed node cannot rejoin by heartbeating, actions on it conflict, and its slot
+	// can be enrolled again.
+	if s, err := Drain(ctx, store, id); err != nil || s.State != "draining" {
+		t.Fatalf("drain: %+v %v", s, err)
+	}
+	if s, err := Remove(ctx, store, id); err != nil || s.State != "removed" {
+		t.Fatalf("remove: %+v %v", s, err)
+	}
+	if _, err := Drain(ctx, store, id); !errors.Is(err, ErrState) {
+		t.Fatalf("drain of a removed node: %v", err)
+	}
+	if _, err := Remove(ctx, store, "missing-"+id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("remove of an unknown node: %v", err)
+	}
+	if err := Heartbeat(ctx, store, Node{ID: id, Region: "mumbai", Version: "v", Commit: "c", StartedAt: time.Now()}); !errors.Is(err, ErrRemoved) {
+		t.Fatalf("a removed node rejoined: %v", err)
+	}
+	_, code3, addr3 := startUnenrolled(t, slot)
+	if got, err := e.Enroll(ctx, "operator-test", addr3, code3); err != nil || got.State != "registered" {
+		t.Fatalf("re-enrolling a removed slot: %+v %v", got, err)
+	}
 }

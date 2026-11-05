@@ -7670,6 +7670,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/server-nodes/{node_id}/drain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator-only: Drain a server node (out of the region map and DNS; held connections continue)
+         * @description Any enrolled node serves this (equal peers).
+         */
+        post: operations["post_v1_admin_server_nodes_drain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/server-nodes/{node_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator-only: Remove a server node (its heartbeat is refused; the slot can be enrolled again)
+         * @description Any enrolled node serves this (equal peers).
+         */
+        post: operations["post_v1_admin_server_nodes_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -28346,6 +28386,86 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_admin_server_nodes_drain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Exact node id. */
+                "Operator-Target": string;
+                /** @description Opaque audit reason reference. */
+                "Operator-Reason": string;
+                /** @description Stable key for retrying the exact mutation. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Result in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerNodeEnvelope"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_admin_server_nodes_remove: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Exact node id. */
+                "Operator-Target": string;
+                /** @description Opaque audit reason reference. */
+                "Operator-Reason": string;
+                /** @description Stable key for retrying the exact mutation. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Result in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerNodeEnvelope"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };

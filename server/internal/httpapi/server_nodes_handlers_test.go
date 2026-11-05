@@ -74,10 +74,22 @@ func checkServerNodeRoutes(t *testing.T, ctx context.Context, store *db.DB, requ
 		t.Fatal("enrollment answer disclosed the delivered config")
 	}
 	expect("replayed code", request("POST", path, body(addr, code), true, confirm(addr)), 409, "server_node_exists")
+	nodeAction := func(id, action string) *httptest.ResponseRecorder {
+		return request("POST", "/v1/admin/server-nodes/"+id+"/"+action, `{}`, true, confirm(id))
+	}
+	if r := nodeAction("mumbai-slot-64", "drain"); r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"draining"`) {
+		t.Fatalf("drain: %d %s", r.Code, r.Body.String())
+	}
+	expect("unconfirmed drain", request("POST", "/v1/admin/server-nodes/mumbai-slot-64/drain", `{}`, true), 400, "operator_confirmation_required")
+	expect("unknown node", nodeAction("mumbai-slot-63", "remove"), 404, "server_node_not_found")
 	listed := request("GET", "/v1/admin/server-nodes", "", false)
 	if listed.Code != 200 || !strings.Contains(listed.Body.String(), `"mumbai-slot-64"`) {
 		t.Fatalf("list: %d %s", listed.Code, listed.Body.String())
 	}
+	if r := nodeAction("mumbai-slot-64", "remove"); r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"removed"`) {
+		t.Fatalf("remove: %d %s", r.Code, r.Body.String())
+	}
+	expect("remove twice", nodeAction("mumbai-slot-64", "remove"), 409, "server_node_state_conflict")
 }
 
 // Every enrollment failure maps to one status and code; an infrastructure cause never hides behind a domain one.
@@ -91,6 +103,8 @@ func TestServerNodeErrorShapes(t *testing.T) {
 		{servernodes.ErrUnauthorized, 403, "claim_code_mismatch"},
 		{servernodes.ErrExpired, 410, "claim_code_expired"},
 		{servernodes.ErrUsed, 409, "server_node_exists"},
+		{servernodes.ErrNotFound, 404, "server_node_not_found"},
+		{servernodes.ErrState, 409, "server_node_state_conflict"},
 		{errors.Join(servernodes.ErrUnreachable, syscall.ECONNREFUSED), 502, "server_node_unreachable"},
 	} {
 		request, _, _ := diagnosticRequest("/v1/admin/server-nodes/enrollments")

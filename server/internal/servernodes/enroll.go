@@ -303,7 +303,11 @@ func (e *Enroller) Enroll(ctx context.Context, actor, address, code string) (Sta
 	id := in.Region + "-" + in.Instance
 	tag, err := e.DB.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_nodes
   (id, region, state, version, commit, started_at, last_seen_at, endpoint_host, tls_spki_sha256, enrolled_by)
-VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7)
+ON CONFLICT (id) DO UPDATE SET state='registered', version=excluded.version, commit=excluded.commit, started_at=now(),
+  last_seen_at=now(), endpoint_host=excluded.endpoint_host, tls_spki_sha256=excluded.tls_spki_sha256,
+  enrolled_by=excluded.enrolled_by
+WHERE control_server_nodes.state='removed'`,
 		id, in.Region, in.Version, in.Commit, in.EndpointHost, pin, actor)
 	if err != nil {
 		return Status{}, err
@@ -328,11 +332,12 @@ VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7) ON CONFLICT (id) DO NOTHI
 	return Status{ID: id, Region: in.Region, State: "registered", Version: in.Version, Commit: in.Commit}, nil
 }
 
-// forget removes a registration whose delivery failed, so the operator can retry with a fresh code.
+// forget marks a registration whose delivery failed removed, so the operator can retry with a fresh code and
+// the region's DNS is still reconciled.
 func (e *Enroller) forget(id string, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := e.DB.Pool().Exec(ctx, `DELETE FROM paperboat.control_server_nodes WHERE id=$1 AND state='registered'`, id); err != nil {
+	if _, err := e.DB.Pool().Exec(ctx, `UPDATE paperboat.control_server_nodes SET state='removed' WHERE id=$1 AND state='registered'`, id); err != nil {
 		return errors.Join(cause, fmt.Errorf("remove the unfinished registration %s: %w", id, err))
 	}
 	return cause

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
@@ -159,4 +161,41 @@ func (c *RegionCache) Get(ctx context.Context) []Region {
 		return []Region{}
 	}
 	return c.last
+}
+
+var (
+	ErrNotFound = errors.New("server node not found")
+	ErrState    = errors.New("server node is not in a state this action applies to")
+)
+
+// Drain takes a node out of the region map and its region's DNS at once (no new clients); it keeps serving
+// the connections it holds. Remove also refuses its heartbeat, so it cannot rejoin. The row is kept, so the
+// region's DNS is still reconciled (to empty) after its last node leaves; the slot can be enrolled again.
+func Drain(ctx context.Context, d *db.DB, id string) (Status, error) {
+	return setState(ctx, d, id, "draining", "active", "registered")
+}
+
+func Remove(ctx context.Context, d *db.DB, id string) (Status, error) {
+	return setState(ctx, d, id, "removed", "active", "registered", "draining")
+}
+
+func setState(ctx context.Context, d *db.DB, id, to string, from ...string) (Status, error) {
+	var s Status
+	err := d.Pool().QueryRow(ctx, `UPDATE paperboat.control_server_nodes SET state=$2 WHERE id=$1 AND state = ANY($3)
+RETURNING id, region, state, version, commit, started_at, last_seen_at`, id, to, from).
+		Scan(&s.ID, &s.Region, &s.State, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt)
+	if err == nil {
+		return s, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Status{}, err
+	}
+	var exists bool
+	if err := d.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.control_server_nodes WHERE id=$1)`, id).Scan(&exists); err != nil {
+		return Status{}, err
+	}
+	if !exists {
+		return Status{}, ErrNotFound
+	}
+	return Status{}, ErrState
 }
