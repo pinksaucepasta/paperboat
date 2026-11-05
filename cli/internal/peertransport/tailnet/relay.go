@@ -497,24 +497,33 @@ func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certif
 func (a *Authority) relayCredential(node RegionalNode) func(context.Context) (string, error) {
 	return func(context.Context) (string, error) {
 		token, err := a.relayToken(node)
-		if errors.Is(err, ErrRelayGrantExpired) {
+		if errors.Is(err, ErrRelayGrantExpired) || errors.Is(err, errRelayNotCurrent) {
 			a.RequestRefresh()
 		}
 		return token, err
 	}
 }
 
+// errRelayNotCurrent is a relay missing from this machine's current relay set, or a grant not yet issued for
+// its current process: a refresh that landed in a heartbeat gap, a relay marked draining or full, or a set that
+// expired before its refresh. derpquic latches every credential error except ErrExpired for the carrier's
+// lifetime and magicsock's reader stops on it, so this was a relay dead until a restart (pbmac 2026-11-05,
+// F3-15 N13). As expired authority it is refetched and retried under magicsock's relay reconnect backoff, as
+// Tailscale's DERP client redials after every failure (wgengine/magicsock/derp.go runDerpReader). A relay
+// that is listed again under another identity stays refused: its region changes and gets a new carrier.
+var errRelayNotCurrent = fmt.Errorf("relay is not in this machine's current relay set; waiting for fresh relay authority: %w", derpquic.ErrExpired)
+
 // relayToken is node's current grant, refused when the relay moved or its grant does not match.
 func (a *Authority) relayToken(node RegionalNode) (string, error) {
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
 	grant := a.relay.grants[node.NodeID]
-	current := a.relay.nodes[regionalID(node.NodeID)]
-	if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
-		return "", ErrAuthority
+	current, listed := a.relay.nodes[regionalID(node.NodeID)]
+	if node.NodeID == "" || listed && (current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256) {
+		return "", ErrAuthority // the relay moved: its region is redefined and magicsock builds a new carrier
 	}
-	if node.NodeID == "" || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
-		return "", ErrAuthority
+	if !listed || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
+		return "", errRelayNotCurrent
 	}
 	if grant.ExpiresAt <= serverclock.Now().Unix() {
 		return "", ErrRelayGrantExpired
