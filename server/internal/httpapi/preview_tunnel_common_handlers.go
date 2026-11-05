@@ -26,6 +26,11 @@ const (
 	previewTunnelEventHeartbeat = 15 * time.Second
 )
 
+// previewTunnelEventMaxStream bounds one event stream, as every streaming route bounds its own
+// lifetime: the client reconnects with Last-Event-ID (the stream sets retry: 2000), so a stream
+// held by a server a rollout retired moves to the new one instead of keeping the old one alive.
+var previewTunnelEventMaxStream = 5 * time.Minute
+
 func previewTunnelOperationGet(service PreviewTunnelAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, ok := previewTunnelRequestContext(w, r)
@@ -104,6 +109,8 @@ func previewTunnelEvents(service PreviewTunnelAPI, resourceKind, pathParameter s
 		}
 
 		lastHeartbeat := time.Now()
+		end := time.NewTimer(previewTunnelEventMaxStream)
+		defer end.Stop()
 		for {
 			for _, event := range page.Items {
 				payload, marshalErr := json.Marshal(event)
@@ -133,6 +140,9 @@ func previewTunnelEvents(service PreviewTunnelAPI, resourceKind, pathParameter s
 			timer := time.NewTimer(previewTunnelEventPoll)
 			select {
 			case <-r.Context().Done():
+				timer.Stop()
+				return
+			case <-end.C:
 				timer.Stop()
 				return
 			case <-timer.C:

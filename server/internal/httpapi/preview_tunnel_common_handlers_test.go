@@ -328,6 +328,32 @@ func TestPreviewTunnelEventsStreamsAndResumes(t *testing.T) {
 	}
 }
 
+// An event stream ends at its lifetime bound, so a stream a retired server holds moves to the new
+// one: the client reconnects after the advertised retry and resumes from its last event id.
+func TestPreviewTunnelEventStreamEndsAtItsLifetimeBound(t *testing.T) {
+	previous := previewTunnelEventMaxStream
+	previewTunnelEventMaxStream = 50 * time.Millisecond
+	defer func() { previewTunnelEventMaxStream = previous }()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tunnels/tun_1/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	req.SetPathValue("tunnel_id", "tun_1")
+	ctx := context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "acct_1", Role: auth.RoleUser}})
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		previewTunnelEvents(&fakePreviewTunnelAPI{}, "tunnel", "tunnel_id").ServeHTTP(rec, req.WithContext(ctx))
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("event stream outlived its lifetime bound")
+	}
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Body.String(), "retry: 2000\n\n") {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPreviewTunnelEventsRejectsConflictingResumeCursors(t *testing.T) {
 	service := &fakePreviewTunnelAPI{}
 	req := httptest.NewRequest(http.MethodGet, "/v1/tunnels/tun_1/events?cursor=cur_1", nil)
