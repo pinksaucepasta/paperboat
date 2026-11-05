@@ -11,7 +11,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
-	"sync"
+	"strconv"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -33,7 +33,7 @@ func (f *targetCarrierFixture) ensureNativePrimary(t *testing.T, ctx context.Con
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener := &targetPrimaryPacketListener{bound: make(chan uint16, 4)}
+	listener := newTargetPrimaryPacketListener(t)
 	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: filepath.Join(f.root, "peer-network"), Secrets: config.FileSecretStore{Dir: filepath.Join(f.root, "peer-network", "secrets")}}, Issuer: f.issuer, Self: self, Keys: targetCarrierKeys{f.signer.Public().(ed25519.PublicKey)}, TestOnlyPacketListener: listener})
 	if err != nil {
 		t.Fatal(err)
@@ -120,15 +120,39 @@ func (f *targetCarrierFixture) prepareGeneration(ctx context.Context, peer strin
 	return native.ParseCarrierOffer(result.Offer)
 }
 
+// targetPrimaryPacketListener keeps the primary's IPv4 socket on one port. The
+// client is given that endpoint once; magicsock rebinds try its configured port
+// 41642 first, and on CI another test's engine freed it 6 ms after the primary
+// started on a random port, so the primary moved and the client pinged a dead
+// port until its deadline (main CI job 127099348562).
 type targetPrimaryPacketListener struct {
-	bound chan uint16
-	once  sync.Once
+	port  uint16
+	bound chan uint16 // each IPv4 bind, dropped when full; one engine only
+}
+
+func newTargetPrimaryPacketListener(t *testing.T) *targetPrimaryPacketListener {
+	t.Helper()
+	probe, err := net.ListenPacket("udp4", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint16(probe.LocalAddr().(*net.UDPAddr).Port)
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &targetPrimaryPacketListener{port: port, bound: make(chan uint16, 16)}
 }
 
 func (l *targetPrimaryPacketListener) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
+	if network == "udp4" {
+		address = net.JoinHostPort("", strconv.Itoa(int(l.port)))
+	}
 	socket, err := (&net.ListenConfig{}).ListenPacket(ctx, network, address)
 	if err == nil && network == "udp4" {
-		l.once.Do(func() { l.bound <- socket.LocalAddr().(*net.UDPAddr).AddrPort().Port() })
+		select {
+		case l.bound <- l.port:
+		default:
+		}
 	}
 	return socket, err
 }
