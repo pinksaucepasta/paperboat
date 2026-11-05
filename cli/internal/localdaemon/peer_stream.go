@@ -74,6 +74,18 @@ func tracedDial(request, lifetime context.Context, consumer string) context.Cont
 	return diagnostics.WithReconnect(lifetime, rand.Text(), "target", rand.Text())
 }
 
+// applyResume makes target re-attach the terminal its owner held, with the host's resume secret and the access session
+// that attachment was admitted under, instead of a credential. It reports false when this daemon holds no such secret.
+func applyResume(target *resolver.TerminalTarget, machineID string, payload localapi.PeerTerminalPayload, now time.Time) bool {
+	secret, resource, attachmentID, ok := terminalInputOwners.takeResume(payload.InputOwner, machineID, payload.SessionID, now)
+	if !ok {
+		return false
+	}
+	target.Resume, target.ResumeSecret, target.InputAttachmentID = true, secret, attachmentID
+	target.Auth.Token, target.Auth.ResourceID = "", resource
+	return true
+}
+
 // stopping ends when the daemon starts to stop, before it closes its transports.
 func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
@@ -89,6 +101,11 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 		cursor := &tunnel.LocalPeerCursorBridge{Stopping: stopping}
 		target := &resolver.TerminalTarget{Protocol: terminalPayload.Protocol, Debug: terminalPayload.Debug, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Scopes: terminalPayload.Scopes, Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format("2006-01-02T15:04:05Z07:00"), ResourceID: request.AccessSessionID, UsageSessionID: request.UsageSessionID, Offline: request.Offline}, SessionID: terminalPayload.SessionID, CWD: terminalPayload.CWD, Env: terminalPayload.Environment, Cols: terminalPayload.Columns, Rows: terminalPayload.Rows, RestartIfNotRunning: terminalPayload.RestartIfNotRunning, ReplayHistory: terminalPayload.ReplayHistory, AfterSequence: terminalPayload.AfterSequence, InputAttachmentID: terminalPayload.InputAttachmentID, SequenceSink: cursor.RecordSequence, ReplayGapSink: cursor.RecordReplayGap, LaunchWarningSink: cursor.RecordLaunchWarnings}
 		target.QUICEndpoint, target.WSSEndpoint = request.QUICEndpoint, request.WSSEndpoint
+		if request.Resume {
+			if !applyResume(target, request.MachineID, terminalPayload, time.Now()) {
+				return nil, localapi.ResumeUnavailableError{}
+			}
+		}
 		if request.Consumer == "terminal" {
 			terminalInputOwners.adopt(terminalPayload.InputOwner, request.MachineID, target, time.Now())
 		}
@@ -151,6 +168,9 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 		client, server := net.Pipe()
 		go func() {
 			defer staged.Abort()
+			if request.Consumer == "terminal" {
+				defer func() { terminalInputOwners.finish(terminalPayload.InputOwner, request.MachineID, target, time.Now()) }()
+			}
 			if request.Consumer == "terminal" && terminalPayload.Debug {
 				reportLocalPeerBridgeFailure(lifetime, tunnel.ServeLocalPeerDebugTerminalConn(lifetime, server, remote, cursor))
 			} else {
