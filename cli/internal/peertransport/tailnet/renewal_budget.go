@@ -59,6 +59,14 @@ func (b *tokenBucket) take(now time.Time, urgent bool) time.Duration {
 	return time.Duration((1 - b.tokens) * float64(b.refill))
 }
 
+// refund returns a token spent on a renewal that was not sent after all.
+func (b *tokenBucket) refund() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tokens = min(b.burst, b.tokens+1)
+	b.granted--
+}
+
 // wait blocks until a token is spent or ctx ends; an urgent wait blocks only for a 429's hold.
 func (b *tokenBucket) wait(ctx context.Context, urgent bool) error {
 	for {

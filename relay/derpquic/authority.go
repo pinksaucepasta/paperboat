@@ -19,11 +19,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"tailscale.com/types/key"
 )
 
 // MaxClockSkew tolerates issuer clock drift without extending signed expiry.
 const MaxClockSkew = time.Minute
+
+// MaxGrantLifetime bounds a signed grant. A grant is checked when a connection is admitted (or re-authenticated);
+// the admitted connection then lives until revocation, drain or a network fault (tailscale
+// derp/derpserver/derpserver.go:1784 verifyClient runs at accept, not on a timer).
+const MaxGrantLifetime = peernetwork.Lifetime
 
 var ErrAdmission = &Error{Code: 1, Message: "relay authorization rejected"}
 var ErrProtocol = &Error{Code: 2, Message: "relay protocol rejected"}
@@ -218,7 +224,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		return Grant{}, fmt.Errorf("client certificate key differs from grant: %w", ErrAdmission)
 	case now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil:
 		return Grant{}, fmt.Errorf("client certificate validity: %w", ErrAdmission)
-	case g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60:
+	case g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > int64(MaxGrantLifetime/time.Second):
 		return Grant{}, fmt.Errorf("grant lifetime: %w", ErrAdmission)
 	case g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers:
 		return Grant{}, fmt.Errorf("grant identity: %w", ErrAdmission)

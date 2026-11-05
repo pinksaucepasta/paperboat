@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"io"
 	"net"
 	"net/http"
@@ -52,7 +53,7 @@ func (p *Provider) SignNetworkConfiguration(claims map[string]any) (string, erro
 	issuedAt, issuedOK := integerClaim(claims["iat"])
 	expiresAt, expiresOK := integerClaim(claims["exp"])
 	generation, generationOK := integerClaim(claims["generation"])
-	if !issuerOK || strings.TrimSpace(issuer) == "" || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(MaxProofTTL/time.Second) {
+	if !issuerOK || strings.TrimSpace(issuer) == "" || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(peernetwork.Lifetime/time.Second) {
 		return "", errors.New("network configuration claims are invalid")
 	}
 	if _, ok := claims["self"].(map[string]any); !ok {
@@ -94,7 +95,7 @@ func (p *Provider) SignRelayGrant(claims map[string]any) (string, error) {
 		!wgOK || wgDecodeErr != nil || len(decodedWGKey) != 32 || base64.RawURLEncoding.EncodeToString(decodedWGKey) != wgKey ||
 		!certOK || fingerprintDecodeErr != nil || len(decodedFingerprint) != 32 || hex.EncodeToString(decodedFingerprint) != certFingerprint ||
 		!nodeOK || nodeID == "" || !epochOK || processEpoch == "" || !discoOK || !peerRelayOK || !relayPeersClaim(peers) || !peersOK ||
-		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > 60 || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
+		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > int64(peernetwork.Lifetime/time.Second) || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
 		return "", errors.New("relay grant claims are invalid")
 	}
 	return p.signClaims(RelayGrantType, claims)
@@ -201,7 +202,7 @@ func (p *Provider) SignRegionalCandidates(claims map[string]any) (string, error)
 	issuedAt, issuedOK := integerClaim(claims["iat"])
 	expiresAt, expiresOK := integerClaim(claims["exp"])
 	generation, generationOK := integerClaim(claims["generation"])
-	if _, ok := claims["account_id"].(string); !ok || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > 60 {
+	if _, ok := claims["account_id"].(string); !ok || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(peernetwork.Lifetime/time.Second) {
 		return "", errors.New("regional candidate claims are invalid")
 	}
 	if _, ok := claims["endpoint_id"].(string); !ok {

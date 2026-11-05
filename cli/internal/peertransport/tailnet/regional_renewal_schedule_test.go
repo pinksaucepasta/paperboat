@@ -3,74 +3,61 @@ package tailnet
 import (
 	"context"
 	"crypto/ed25519"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"sync/atomic"
+	"tailscale.com/tailcfg"
 	"testing"
 	"time"
 )
 
-// Relays went unusable for ~2 s every ~20 s on hp: recovery renewed 9.2-9.8 s after the last
-// renewal, but the signed observations it got were already up to 5 s old and end 15 s after
-// they were made, so the next renewal often came after they had ended.
-func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
-	at := func(health, capacity int64) RegionalNode {
-		return RegionalNode{ObservedAt: now.Unix() - health, CapacityObservedAt: now.Unix() - capacity}
-	}
-	for _, c := range []struct {
-		name  string
-		nodes []RegionalNode
-		want  time.Duration
-	}{
-		{"fresh at issuance", []RegionalNode{at(0, 0)}, 12 * time.Second},
-		{"five seconds old", []RegionalNode{at(5, 5)}, 7 * time.Second},
-		{"earliest node decides", []RegionalNode{at(1, 1), at(6, 2)}, 6 * time.Second},
-		{"older capacity observation decides", []RegionalNode{at(2, 8)}, 4 * time.Second},
-		{"already old stays bounded", []RegionalNode{at(13, 13)}, regionalMinimumRenewal},
-	} {
-		if got := regionalRenewalAfter(c.nodes, now); got != c.want {
-			t.Errorf("%s: renew after %v, want %v", c.name, got, c.want)
-		}
-	}
-	if _, ok := (&Authority{}).regionalRenewalDelay(now); ok {
-		t.Error("an authority without eligible relays scheduled an observation renewal")
-	}
-}
-
-// On pbvm2 an idle machine withdrew every relay region, and with it every relay connection, about every 17 s:
-// the refresh scheduled the regional renewal before the relays' observations ended, but the configuration it
-// had just applied woke the loop again, and that wake re-armed the timer at the 24-36 s cadence. A renewal
-// must come before the observations end, whichever path armed the timer.
-func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T) {
+// pbvm4 dev-a0d9ac57: an idle machine pair fetched its signed configuration about 20 times a minute per machine
+// (102 machine and 68 CLI fetches in 5 min). Every engine in regional recovery renewed before its relays' 15 s
+// observations ended (every ~12 s), on top of a 24-36 s cadence. A held relay needs no fresh observation, so an idle
+// engine now fetches once, then only on the jittered 5-6 min safety refresh. An update burst of server
+// announcements is spaced (urgentRefreshSpacing) and coalesced: a handful of fetches, not one each.
+func TestIdleEngineFetchesOnlyOnTheSafetyRefreshAndAnUpdateBurstIsCoalesced(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	now := time.Now()
-	// Observed 10 s ago: it ends in 5 s, so the renewal is due after the 4 s minimum.
-	a.regional = &RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
-		NodeID: "relay_renewal", NodeGeneration: 1, ProcessEpoch: "epoch_renewal", Region: "test", FailureDomain: "rack",
+	relay := RegionalNode{NodeID: "relay_held", NodeGeneration: 1, ProcessEpoch: "epoch_held", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
-	}}}
+		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10}
+	a.regional = &RegionalCandidates{ExpiresAt: now.Add(peernetwork.Lifetime).Unix(), Nodes: []RegionalNode{relay}}
 	a.mu.Lock()
 	a.relay.mu.Lock()
 	a.relay.recovery = a.newRegionalRecoveryLocked()
+	a.relay.nodes = map[tailcfg.DERPRegionID]RegionalNode{regionalID(relay.NodeID): relay} // the engine holds this relay
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
-	refreshed := make(chan struct{}, 8)
+	var fetches atomic.Int32
 	client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+		fetches.Add(1)
 		c.Generation++
 		c.IssuedAt = time.Now().Unix()
-		c.ExpiresAt = c.IssuedAt + 60
+		c.ExpiresAt = c.IssuedAt + int64(peernetwork.Lifetime/time.Second)
 		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
-		refreshed <- struct{}{}
 		return networkToken(t, signer, c), nil
 	}}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx, client, nil) }()
 	defer func() { cancel(); <-done }()
-	<-refreshed
-	select {
-	case <-refreshed:
-	case <-time.After(7 * time.Second):
-		t.Fatal("no renewal before the relays' observations ended; the applied configuration's wake re-armed the regular cadence")
+	// Idle: the held relay's observations end 5 s in; 8 s later there was still only the startup fetch.
+	time.Sleep(8 * time.Second)
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("an idle engine holding a relay fetched %d times in 8 s, want only the startup fetch", n)
+	}
+	if next := a.nextRefresh(nil, 0, 0); next < 5*time.Minute {
+		t.Fatalf("the next idle fetch is due in %s, want the 5-6 min safety refresh", next)
+	}
+	// An update burst: peers re-register and the server announces each change, 40 announcements in 4 s.
+	for range 20 {
+		a.RequestUrgentRefresh()
+		a.RequestRefresh()
+		time.Sleep(200 * time.Millisecond)
+	}
+	time.Sleep(urgentRefreshSpacing + time.Second)
+	if n := fetches.Load() - 1; n < 1 || n > 4 {
+		t.Fatalf("an update burst of 40 announcements in 4 s made %d fetches, want 1-4 (spaced %s)", n, urgentRefreshSpacing)
 	}
 }
 
