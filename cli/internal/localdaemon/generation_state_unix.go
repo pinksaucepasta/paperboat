@@ -19,8 +19,8 @@ import (
 type GenerationState struct {
 	Generation string    `json:"generation"`
 	PID        int       `json:"pid"`
-	State      string    `json:"state"` // "live" or "draining"
-	Streams    int       `json:"streams"`
+	State      string    `json:"state"`   // "live" or "draining"
+	Streams    int       `json:"streams"` // held connections: forwards and local API peer streams
 	DrainUntil time.Time `json:"drain_until,omitzero"`
 }
 

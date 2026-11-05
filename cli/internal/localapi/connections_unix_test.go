@@ -4,11 +4,14 @@ package localapi
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
 // An update replaces the daemon and ends the streams it carries, so the daemon reports the open
@@ -68,4 +71,67 @@ func TestLocalAPIReportsOpenSSHStreams(t *testing.T) {
 	_ = second.Close()
 	_ = other.Close()
 	eventually(0)
+}
+
+// A daemon generation that drains on SIGQUIT stops its local API, but an exec already running through
+// it keeps flowing (no end of stream, no redial) and counts as held until it closes, so the drainer
+// waits for it (pbvm1 2026-11-05: an exec redialed across a daemon restart).
+func TestExecInFlightOutlivesTheLocalAPIStop(t *testing.T) {
+	socket := filepath.Join(localAPITestDir(t), "drain.sock")
+	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+		Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+		PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+			local, remote := net.Pipe()
+			go func() { defer remote.Close(); _, _ = io.Copy(remote, remote) }()
+			return local, nil
+		})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stopLocalAPI := context.WithCancel(t.Context())
+	defer stopLocalAPI()
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); _ = server.Run(ctx) }()
+	waitForSocket(t, socket)
+	client, err := NewClient(socket, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := liveconnections.Held()
+	request, err := NewPeerStreamRequest("machine_1", "environment_1", 2, "exec", "operation_1", "credential", time.Now().Add(time.Minute), 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := client.OpenPeerStream(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer exec.Close()
+	echo := func(message string) {
+		t.Helper()
+		_ = exec.SetDeadline(time.Now().Add(time.Second))
+		if _, err := exec.Write([]byte(message)); err != nil {
+			t.Fatalf("exec write after the local API stop: %v", err)
+		}
+		got := make([]byte, len(message))
+		if _, err := io.ReadFull(exec, got); err != nil || string(got) != message {
+			t.Fatalf("exec read after the local API stop: %q, %v", got, err)
+		}
+	}
+	echo("before")
+	stopLocalAPI()
+	<-stopped
+	for range 5 {
+		echo("during drain")
+		time.Sleep(50 * time.Millisecond)
+	}
+	if held := liveconnections.Held(); held < baseline+1 {
+		t.Fatalf("held connections = %d, want the exec counted (baseline %d)", held, baseline)
+	}
+	_ = exec.Close()
+	for deadline := time.Now().Add(2 * time.Second); liveconnections.Held() > baseline; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("closed exec still held: %d > %d", liveconnections.Held(), baseline)
+		}
+	}
 }
