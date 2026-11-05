@@ -63,7 +63,7 @@ func TestBrowserTerminalBridgeFailureAndRecovery(t *testing.T) {
 			completed <- err
 			return
 		}
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
 	}))
 	defer edge.Close()
 	dial := func(id string) *websocket.Conn {
@@ -223,7 +223,7 @@ func TestBrowserTerminalBridgeWaitsForAFrozenBrowser(t *testing.T) {
 			completed <- err
 			return
 		}
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
 	}))
 	defer edge.Close()
 	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
@@ -288,7 +288,7 @@ func TestBrowserTerminalBridgeTellsALaggingBrowserAndStaysUp(t *testing.T) {
 			return
 		}
 		close(subscribed)
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
 	}))
 	defer edge.Close()
 	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)

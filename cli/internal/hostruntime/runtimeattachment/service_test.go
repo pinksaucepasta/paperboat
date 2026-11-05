@@ -687,3 +687,89 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 		t.Fatal("the worker did not close after the edge stopped sending it requests")
 	}
 }
+
+// pb update: after the handover the retiring worker keeps its carrier while it serves browser
+// terminals, and only until the last one leaves or terminalDrainLimit; Shutdown then closes at once.
+func TestRetiringWorkerKeepsItsCarrierForHeldBrowserTerminals(t *testing.T) {
+	for _, end := range []string{"last terminal leaves", "drain limit"} {
+		t.Run(end, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				if hubs, _ := service.Hubs(); len(hubs) != 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("runtime carrier never came into service")
+				}
+			}
+			var attached atomic.Int32
+			attached.Store(1)
+			service.attached = func() int { return int(attached.Load()) }
+			if end == "drain limit" {
+				previous := terminalDrainLimit
+				terminalDrainLimit = time.Second
+				t.Cleanup(func() { terminalDrainLimit = previous })
+			}
+			started := time.Now()
+			drained := make(chan error, 1)
+			go func() { drained <- service.DrainBrowserTerminals(ctx) }()
+			var request connector.StreamOpen
+			for {
+				stream, open, err := edge.AcceptStream(ctx)
+				if err != nil {
+					t.Fatalf("no goaway: %v", err)
+				}
+				_ = stream.Close()
+				if open.Kind == sharedprotocol.Goaway {
+					request = open
+					break
+				}
+			}
+			if end == "drain limit" {
+				select {
+				case err := <-drained:
+					if err != nil || time.Since(started) < handoverQuiet+time.Second-100*time.Millisecond {
+						t.Fatalf("drain ended after %v (%v), want the handover then the limit", time.Since(started), err)
+					}
+				case <-time.After(handoverQuiet + 3*time.Second):
+					t.Fatal("the drain outlived its limit")
+				}
+			} else {
+				// Past the handover the carrier still serves the held terminal's streams.
+				time.Sleep(handoverQuiet + 500*time.Millisecond)
+				request.Kind, request.RequestID = "http", "request-held"
+				stream, err := edge.OpenStream(ctx)
+				if err == nil {
+					err = connectorprotocol.WriteStreamOpen(stream, request)
+					_ = stream.Close()
+				}
+				if err != nil {
+					t.Fatalf("the retiring worker closed its carrier under a held terminal: %v", err)
+				}
+				select {
+				case <-drained:
+					t.Fatal("the drain ended while a browser terminal was held")
+				default:
+				}
+				attached.Store(0)
+				select {
+				case err := <-drained:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("the drain did not end when the last terminal left")
+				}
+			}
+			closing := time.Now()
+			if err := service.Shutdown(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if waited := time.Since(closing); waited >= handoverQuiet {
+				t.Fatalf("Shutdown waited %v for a second handover", waited)
+			}
+		})
+	}
+}

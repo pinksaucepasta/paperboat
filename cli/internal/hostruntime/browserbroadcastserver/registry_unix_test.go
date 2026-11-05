@@ -795,3 +795,28 @@ func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// Attached counts the browsers receiving output, which a retiring worker drains (pb update).
+func TestAttachedCountsBrowsersUntilTheyLeave(t *testing.T) {
+	manager, id, generation, original := newPublisherTestSession(t)
+	registry, err := NewRegistry(manager, original.signingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy := &signalPublisher{writes: make(chan struct{}, 4), closed: make(chan struct{})}
+	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) { return healthy, nil })
+	for _, browser := range []string{"browser_a", "browser_b"} {
+		attachTestViewer(t, manager, id, generation, browser)
+		if _, err := registry.Join(context.Background(), id, generation, browser); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := registry.Attached(); got != 2 {
+		t.Fatalf("Attached = %d, want 2", got)
+	}
+	registry.Leave(id, "browser_a")
+	registry.Leave(id, "browser_b")
+	if got := registry.Attached(); got != 0 {
+		t.Fatalf("Attached after both left = %d, want 0", got)
+	}
+}

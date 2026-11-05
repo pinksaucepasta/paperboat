@@ -298,8 +298,8 @@ func (w *RuntimeCarrierWorker) withdraw() {
 		a, ok := allowed[r.RouteID]
 		if !ok || a.Identity != r.Identity || a.AttachmentGeneration != r.AttachmentGeneration || a.RouteRevision != r.Revision {
 			// A route a newer attachment of the same machine took over stays until that carrier
-			// attaches it here (make-before-break at a worker handover; bounded by supersededGrace).
-			if r.EndpointRoute && w.Expected.Superseded(r.Identity, r.RouteID, time.Now().UTC()) {
+			// attaches it here (make-before-break at a worker handover; see datacarrier.supersededBy).
+			if w.Expected.Superseded(r.Identity, r.RouteID, time.Now().UTC()) {
 				continue
 			}
 			w.detachRoute(r)

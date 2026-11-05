@@ -27,6 +27,12 @@ const (
 	CapabilityEndpointDeltas = "endpoint_deltas"
 )
 const MaximumAdmissions = 4096
+
+// DrainLimit bounds how long a retiring generation (pb update) keeps serving what it already holds, as
+// nginx's worker_shutdown_timeout bounds a graceful shutdown. For browser terminals on its runtime carriers:
+// the host closes its carriers at it and the edge holds the replaced runtime admission no longer; each
+// browser still on it then reconnects at once to the new generation (terminalend.Moved).
+const DrainLimit = 6 * time.Hour
 const MaximumEdgeCandidates = 32
 const HostPath = "/v1/runtime/carrier-attachment"
 const EdgePullPath = "/v1/edge/runtime/carrier-admissions"

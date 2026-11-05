@@ -195,12 +195,32 @@ func TestBrowserTerminalHubLagsOnlySlowParticipantAndFencesOldGeneration(t *test
 	if err := hub.ActivateRoute("route_test", fence2); err != nil {
 		t.Fatal(err)
 	}
+	// pb update: the replaced generation keeps publishing to the browsers it serves until its carrier
+	// detaches it; new browsers join only the new one.
+	select {
+	case <-publisher.Done():
+		t.Fatal("a newer worker generation cut the old one's held terminal")
+	default:
+	}
+	if err := publisher.Publish([]byte("held")); err != nil {
+		t.Fatalf("held publisher refused: %v", err)
+	}
+	if got, err := fast.Next(ctx); err != nil || string(got) != "held" {
+		t.Fatalf("held participant got %q, err=%v", got, err)
+	}
+	late := BrowserTerminalSessionKey{RouteID: "route_test", TerminalSessionID: "term_3", ProcessGeneration: identity.ProcessGeneration}
+	if _, err := hub.Subscribe(late, fence, "attach_late"); !errors.Is(err, ErrBrowserTerminalHubStale) {
+		t.Fatalf("a new browser joined the replaced generation: %v", err)
+	}
+	hub.DeactivateRoute("route_test", fence)
 	select {
 	case <-publisher.Done():
 	case <-ctx.Done():
-		t.Fatal("old publisher was not fenced")
+		t.Fatal("old publisher was not fenced when its carrier detached")
 	}
-	hub.DeactivateRoute("route_test", fence)
+	if !hub.Moved("route_test", fence) || hub.Moved("route_test", fence2) {
+		t.Fatal("the detached generation's browsers are not told the route moved")
+	}
 	key2 := BrowserTerminalSessionKey{RouteID: "route_test", TerminalSessionID: "term_2", ProcessGeneration: identity2.ProcessGeneration}
 	if _, err := hub.Subscribe(key2, fence2, "attach_new"); err != nil {
 		t.Fatalf("old detach evicted new generation: %v", err)
@@ -359,5 +379,45 @@ func TestBrowserTerminalCanceledPublisherRetainsAbnormalReset(t *testing.T) {
 	hub.observe(ctx, errors.Join(normal, syscall.EIO))
 	if len(failures) != 2 || !errors.Is(failures[0], abnormal) || !errors.Is(failures[1], syscall.EIO) {
 		t.Fatal("canceled publisher masked operational reset")
+	}
+}
+
+// Revocation wins: withdrawing the route's active generation ends the terminals the replaced one still
+// holds at once, and they are not told to reconnect to a moved route.
+func TestBrowserTerminalHubWithdrawalEndsHeldTerminals(t *testing.T) {
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	identity, next := testEdgePreviewIdentity(1, 1), testEdgePreviewIdentity(1, 2)
+	next.SessionID = "session_02"
+	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	fence2 := BrowserTerminalRouteFence{Identity: next, Revision: 1, AttachmentGeneration: 2}
+	if err := hub.ActivateRoute("route_test", fence); err != nil {
+		t.Fatal(err)
+	}
+	key := BrowserTerminalSessionKey{RouteID: "route_test", TerminalSessionID: "term_1", ProcessGeneration: identity.ProcessGeneration}
+	subscriber, err := hub.Subscribe(key, fence, "attach_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher, err := hub.RegisterPublisher(key, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.ActivateRoute("route_test", fence2); err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher.Publish([]byte("held")); err != nil {
+		t.Fatalf("held publisher refused: %v", err)
+	}
+	hub.DeactivateRoute("route_test", fence2)
+	for name, done := range map[string]<-chan struct{}{"publisher": publisher.Done(), "subscriber": subscriber.Done()} {
+		select {
+		case <-done:
+		default:
+			t.Fatalf("the held %s outlived the route's withdrawal", name)
+		}
+	}
+	if hub.Moved("route_test", fence) {
+		t.Fatal("a withdrawn route told its held browsers it moved")
 	}
 }

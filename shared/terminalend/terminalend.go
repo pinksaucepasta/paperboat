@@ -33,6 +33,9 @@ const (
 	EdgeUnavailable Reason = "edge_unavailable"
 	// Protocol: a message or framing error.
 	Protocol Reason = "protocol"
+	// Moved: the terminal's connection ran on a machine generation pb update replaced, and that one
+	// stopped serving it; the new one already serves. Reconnect at once, with no message.
+	Moved Reason = "moved"
 )
 
 // WebSocket close codes (private 4xxx): one per reason, so a tool without the table still sees the class.
@@ -47,6 +50,7 @@ const (
 	CodeMachineUnavailable = 4503
 	CodeEdgeUnavailable    = 4504
 	CodeTooManyPending     = 4429
+	CodeMoved              = 4301
 )
 
 // CloseCode is the WebSocket close code for the reason.
@@ -70,6 +74,8 @@ func (r Reason) CloseCode() int {
 		return CodeMachineUnavailable
 	case EdgeUnavailable:
 		return CodeEdgeUnavailable
+	case Moved:
+		return CodeMoved
 	}
 	return CodeProtocol
 }
@@ -78,7 +84,7 @@ func (r Reason) CloseCode() int {
 func Parse(value string) Reason {
 	code, _, _ := strings.Cut(value, ": ")
 	switch r := Reason(code); r {
-	case NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable, Protocol:
+	case NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable, Moved, Protocol:
 		return r
 	}
 	return Protocol
@@ -86,7 +92,7 @@ func Parse(value string) Reason {
 
 // ForCloseCode is the reason for a WebSocket close code that arrived without a reason; an unknown code is Protocol.
 func ForCloseCode(code int) Reason {
-	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable} {
+	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable, Moved} {
 		if r.CloseCode() == code {
 			return r
 		}

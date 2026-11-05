@@ -62,15 +62,20 @@ type BrowserTerminalHub struct {
 	mu           sync.Mutex
 	closed       bool
 	activeRoutes map[string]BrowserTerminalRouteFence
-	sessions     map[BrowserTerminalSessionKey]*browserTerminalSession
+	// heldRoutes are the fences a newer worker generation of the same machine replaced (pb update):
+	// their carriers keep publishing to the browsers they already serve until they detach. New
+	// browsers join only the active fence.
+	heldRoutes map[string][]BrowserTerminalRouteFence
+	sessions   map[BrowserTerminalSessionKey]*browserTerminalSession
 }
 
 func NewBrowserTerminalHub() *BrowserTerminalHub {
-	return &BrowserTerminalHub{activeRoutes: make(map[string]BrowserTerminalRouteFence), sessions: make(map[BrowserTerminalSessionKey]*browserTerminalSession)}
+	return &BrowserTerminalHub{activeRoutes: make(map[string]BrowserTerminalRouteFence), heldRoutes: make(map[string][]BrowserTerminalRouteFence), sessions: make(map[BrowserTerminalSessionKey]*browserTerminalSession)}
 }
 
-// ActivateRoute records the current runtime process generation. A newer
-// generation fences and closes old publishers and participant subscriptions.
+// ActivateRoute records the current runtime process generation. A newer worker generation of the
+// same machine (pb update) holds the old one: its publishers and subscriptions go on until its
+// carrier detaches it. Any other change fences and closes them.
 func (h *BrowserTerminalHub) ActivateRoute(routeID string, fence BrowserTerminalRouteFence) error {
 	if h == nil || connectorprotocol.ValidateIdentifier(routeID) != nil || fence.Identity.Validate() != nil || fence.Revision == 0 || fence.AttachmentGeneration == 0 {
 		return ErrBrowserTerminalHubInvalid
@@ -82,33 +87,82 @@ func (h *BrowserTerminalHub) ActivateRoute(routeID string, fence BrowserTerminal
 	}
 	if current, ok := h.activeRoutes[routeID]; ok && current != fence {
 		h.activeRoutes[routeID] = fence
-		for key, session := range h.sessions {
-			if key.RouteID == routeID {
-				h.closeSessionLocked(key, session)
-			}
+		if replacedGeneration(current, fence) {
+			h.heldRoutes[routeID] = append(h.heldRoutes[routeID], current)
+			return nil
 		}
+		h.closeRouteLocked(routeID)
 		return nil
 	}
 	h.activeRoutes[routeID] = fence
 	return nil
 }
 
-// DeactivateRoute closes only the generation that still owns the route. A
-// delayed cleanup from an older carrier cannot evict its replacement.
+// replacedGeneration reports whether next is a newer worker generation of old's machine.
+func replacedGeneration(old, next BrowserTerminalRouteFence) bool {
+	return next.Identity.AccountID == old.Identity.AccountID && next.Identity.HostID == old.Identity.HostID && next.Identity.ProcessGeneration > old.Identity.ProcessGeneration
+}
+
+// Moved reports whether fence's carrier was replaced by a newer worker generation of the same machine
+// that is the route's active one: a browser it served reconnects at once (terminalend.Moved).
+func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFence) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	current, ok := h.activeRoutes[routeID]
+	return ok && replacedGeneration(fence, current)
+}
+
+func (h *BrowserTerminalHub) heldLocked(routeID string, identity datacarrier.Identity) bool {
+	for _, held := range h.heldRoutes[routeID] {
+		if held.Identity == identity {
+			return true
+		}
+	}
+	return false
+}
+
+// closeRouteLocked closes every session of the route and forgets its held fences.
+func (h *BrowserTerminalHub) closeRouteLocked(routeID string) {
+	delete(h.heldRoutes, routeID)
+	for key, session := range h.sessions {
+		if key.RouteID == routeID {
+			h.closeSessionLocked(key, session)
+		}
+	}
+}
+
+// DeactivateRoute closes only the generation that still owns the route, every held one with it (a
+// withdrawal, such as a revocation, ends the drained terminals too). A held fence closes only its
+// own sessions. A delayed cleanup from an older carrier cannot evict its replacement.
 func (h *BrowserTerminalHub) DeactivateRoute(routeID string, fence BrowserTerminalRouteFence) {
 	if h == nil || routeID == "" || fence.Identity.Validate() != nil || fence.Revision == 0 || fence.AttachmentGeneration == 0 {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.activeRoutes[routeID] != fence {
+	if h.activeRoutes[routeID] == fence {
+		delete(h.activeRoutes, routeID)
+		h.closeRouteLocked(routeID)
 		return
 	}
-	delete(h.activeRoutes, routeID)
-	for key, session := range h.sessions {
-		if key.RouteID == routeID {
-			h.closeSessionLocked(key, session)
+	held := h.heldRoutes[routeID]
+	for i, candidate := range held {
+		if candidate != fence {
+			continue
 		}
+		h.heldRoutes[routeID] = append(held[:i:i], held[i+1:]...)
+		if len(h.heldRoutes[routeID]) == 0 {
+			delete(h.heldRoutes, routeID)
+		}
+		for key, session := range h.sessions {
+			if key.RouteID == routeID && key.ProcessGeneration == fence.Identity.ProcessGeneration {
+				h.closeSessionLocked(key, session)
+			}
+		}
+		return
 	}
 }
 
@@ -157,7 +211,7 @@ func (h *BrowserTerminalHub) RegisterPublisher(key BrowserTerminalSessionKey, id
 		return nil, ErrBrowserTerminalHubClosed
 	}
 	fence, ok := h.activeRoutes[key.RouteID]
-	if !ok || fence.Identity != identity {
+	if (!ok || fence.Identity != identity) && !h.heldLocked(key.RouteID, identity) {
 		return nil, ErrBrowserTerminalHubStale
 	}
 	session := h.sessions[key]
@@ -318,6 +372,7 @@ func (h *BrowserTerminalHub) Close() error {
 		h.closeSessionLocked(key, session)
 	}
 	h.activeRoutes = make(map[string]BrowserTerminalRouteFence)
+	h.heldRoutes = make(map[string][]BrowserTerminalRouteFence)
 	return nil
 }
 
@@ -421,7 +476,7 @@ func (p *BrowserTerminalPublisher) Publish(record []byte) error {
 	default:
 	}
 	fence, active := h.activeRoutes[p.key.RouteID]
-	if h.closed || !active || fence.Identity != p.identity || p.key.ProcessGeneration != p.identity.ProcessGeneration {
+	if h.closed || (!active || fence.Identity != p.identity) && !h.heldLocked(p.key.RouteID, p.identity) || p.key.ProcessGeneration != p.identity.ProcessGeneration {
 		return ErrBrowserTerminalHubStale
 	}
 	session := h.sessions[p.key]

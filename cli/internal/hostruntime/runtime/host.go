@@ -138,6 +138,7 @@ type Host struct {
 	workloadFingerprint string
 	updateGate          hostdproto.UpdateGateHandler
 	reconcileCarrierSSH func(context.Context, bool) error
+	terminals           interface{ DrainBrowserTerminals(context.Context) error }
 }
 
 func (h *Host) UpdateGate() hostdproto.UpdateGateHandler {
@@ -637,6 +638,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		return errors.Join(dispatchErr, durable.Close(), usageService.Shutdown(context.Background()))
 	}, reconcileCarrierSSH: dependencies.ReconcileCarrierSSH}
 	host.managedSSHSelection, _ = dependencies.ManagedSSHService.(interface{ Disable(context.Context) error })
+	host.terminals, _ = dependencies.RuntimeAttachmentService.(interface{ DrainBrowserTerminals(context.Context) error })
 	host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: host.beginTransferUpdate, EndUpdate: host.endTransferUpdate})
 	if err != nil {
 		return nil, errors.Join(ErrHostInvalid, err)
@@ -880,12 +882,13 @@ func (h *Host) Shutdown(ctx context.Context) error {
 }
 
 // DrainLocal stops accepting on the loopback listener and waits, until ctx
-// ends, for in-flight local requests and the file transfers its native streams
-// carry (up to managedssh.CarrierDrainTimeout, as managed SSH drains). A
-// retiring worker generation calls it before Shutdown while the next
-// generation already serves the same socket.
+// ends, for in-flight local requests, the file transfers its native streams
+// carry (up to managedssh.CarrierDrainTimeout, as managed SSH drains) and the
+// browser terminals its runtime carriers hold (bounded by
+// runtimewire.DrainLimit). A retiring worker generation calls it before
+// Shutdown while the next generation already serves the same socket.
 func (h *Host) DrainLocal(ctx context.Context) error {
-	transfers := make(chan error, 1)
+	transfers, terminals := make(chan error, 1), make(chan error, 1)
 	go func() {
 		if h.nativeDispatch == nil {
 			transfers <- nil
@@ -895,7 +898,14 @@ func (h *Host) DrainLocal(ctx context.Context) error {
 		defer cancel()
 		transfers <- h.nativeDispatch.DrainTransfers(drainCtx)
 	}()
-	return errors.Join(h.http.Shutdown(ctx), <-transfers)
+	go func() {
+		if h.terminals == nil {
+			terminals <- nil
+			return
+		}
+		terminals <- h.terminals.DrainBrowserTerminals(ctx)
+	}()
+	return errors.Join(h.http.Shutdown(ctx), <-transfers, <-terminals)
 }
 
 // ShutdownHostd drains the stable daemon after the external runtime worker has

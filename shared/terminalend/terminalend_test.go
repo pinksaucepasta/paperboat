@@ -5,7 +5,7 @@ import "testing"
 func TestEveryReasonHasItsOwnCloseCodeAndParsesBack(t *testing.T) {
 	want := map[Reason]int{
 		NoAccess: 4404, Ended: 4409, Revoked: 4401, Expired: 4408, Limit: 4402, BandwidthQuotaExhausted: 4403,
-		TooManyPending: 4429, MachineUnavailable: 4503, EdgeUnavailable: 4504, Protocol: 4500,
+		TooManyPending: 4429, MachineUnavailable: 4503, EdgeUnavailable: 4504, Moved: 4301, Protocol: 4500,
 	}
 	seen := map[int]Reason{}
 	for reason, code := range want {

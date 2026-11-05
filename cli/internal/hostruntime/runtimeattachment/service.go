@@ -62,6 +62,7 @@ type Service struct {
 	lastProbe   time.Time
 	latency     []edgeLatency                       // edge probe times to send with the next control request
 	probeDial   func(context.Context, string) error // tests only; nil dials TCP
+	attached    func() int                          // tests only; nil counts the broadcaster's browsers
 	mu          sync.Mutex
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -81,9 +82,10 @@ type Service struct {
 	// answered is closed by the first successful attachment answer.
 	answered     chan struct{}
 	answeredOnce sync.Once
-	// leaving is set by Shutdown: no attachment round runs while the edges move to the next
-	// worker, so this one cannot take its carriers back.
-	leaving atomic.Bool
+	// leaving is set by the handover: no attachment round runs while the edges move to the next
+	// worker, so this one cannot take its carriers back. handover runs it once (drain or Shutdown).
+	leaving  atomic.Bool
+	handover sync.Once
 }
 
 // EndpointsServed implements preview.AgentCarriers: every edge of the latest attachment admits
@@ -250,14 +252,58 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
+// handOver is make-before-break, as cloudflared unregisters a connection and serves on for its
+// grace period (connection/control.go waitForUnregister): each edge hears that its carrier is going
+// away and sends new requests to the next worker's carrier once that one has attached there; until
+// then this one keeps serving.
+func (s *Service) handOver(ctx context.Context) {
+	s.handover.Do(func() {
+		s.leaving.Store(true)
+		s.sendGoaways()
+		s.awaitHandover(ctx, time.Now())
+	})
+}
+
+// DrainBrowserTerminals is a retiring worker's drain (pb update), as nginx's graceful shutdown
+// keeps an old worker's open connections (ngx_process_cycle.c): after the handover it keeps its
+// carriers for the browser terminals it already serves, and only those, until the last one leaves,
+// runtimewire.DrainLimit, or ctx. New terminals land on the next worker (the edge sends
+// them to the route's current carrier). A revocation ends a drained terminal at the edge at once.
+// Shutdown then closes the carriers.
+func (s *Service) DrainBrowserTerminals(ctx context.Context) error {
+	s.handOver(ctx)
+	attached := s.attached
+	if attached == nil && s.broadcaster != nil {
+		attached = s.broadcaster.Attached
+	}
+	if attached == nil {
+		return nil
+	}
+	s.mu.Lock()
+	done := s.done
+	s.mu.Unlock()
+	limit := time.NewTimer(terminalDrainLimit)
+	defer limit.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for attached() != 0 {
+		select {
+		case <-done: // nil before Start: never ready
+			return nil
+		case <-limit.C:
+			diagnosticlog.TryInfo("browser terminal drain reached its limit; the edge moves them to the next worker", "attached", attached())
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
 func (s *Service) Shutdown(ctx context.Context) error {
-	// Make-before-break, as cloudflared unregisters a connection and serves on for its grace
-	// period (connection/control.go waitForUnregister): each edge hears that its carrier is going
-	// away and sends new requests to the next worker's carrier once that one has attached there;
-	// until then this one keeps serving. Canceling below closes the carriers.
-	s.leaving.Store(true)
-	s.sendGoaways()
-	s.awaitHandover(ctx, time.Now())
+	s.handOver(ctx)
+	// Canceling closes the carriers.
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.cancel()
@@ -738,6 +784,9 @@ func (s *Service) sendGoaways() {
 // carrierDrainGrace is how long a closing carrier keeps serving after its goaway (the edges move
 // to the next worker's carrier within it) and how long its open streams may then finish.
 const carrierDrainGrace = 10 * time.Second
+
+// terminalDrainLimit is runtimewire.DrainLimit; a variable for tests.
+var terminalDrainLimit = runtimewire.DrainLimit
 
 // handoverQuiet: once the edges have opened no stream on this worker's carriers for this long
 // after the goaway, they have moved to the next worker's carriers (an edge pulls a changed

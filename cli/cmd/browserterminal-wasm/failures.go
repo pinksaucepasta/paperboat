@@ -58,6 +58,8 @@ func closeFailure(code int, reason string, clean bool) error {
 		state = "closed"
 	case terminalend.NoAccess, terminalend.Revoked, terminalend.Limit, terminalend.BandwidthQuotaExhausted:
 		state = "denied"
+	case terminalend.Moved:
+		state = "reconnecting" // pb update moved the terminal: the new generation serves already
 	}
 	message := ""
 	if ended == terminalend.BandwidthQuotaExhausted {

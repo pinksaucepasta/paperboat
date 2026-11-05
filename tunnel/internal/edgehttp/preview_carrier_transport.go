@@ -151,9 +151,15 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 		return ErrDataCarrierPreviewRegistryClosed
 	}
 	old := r.byRoute[validated.RouteID]
-	if standby := r.standby[validated.RouteID]; old != nil && standby != nil && sameDataCarrierPreviewRoute(standby.route, validated) {
-		r.mu.Unlock()
-		return nil
+	if standby := r.standby[validated.RouteID]; old != nil && standby != nil {
+		// The standby's carrier re-reads its held admission, whose hold sets its own expiry.
+		previous := standby.route
+		previous.ExpiresAt = validated.ExpiresAt
+		if sameDataCarrierPreviewRoute(previous, validated) {
+			standby.route.ExpiresAt = validated.ExpiresAt
+			r.mu.Unlock()
+			return nil
+		}
 	}
 	if old != nil {
 		// A renewed runtime lease updates only its deadline. Preserve the entry

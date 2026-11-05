@@ -80,13 +80,18 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	// Until the bridge runs, an ended admission cancels the dial; the bridge then watches it itself, so
+	// it closes the browser with the reason before anything cancels its reads (a canceled read
+	// hard-closes the WebSocket, and the reason was lost).
 	admissionWatcherDone := make(chan struct{})
+	bridging := make(chan struct{})
 	defer func() { cancel(); <-admissionWatcherDone }()
 	go func() {
 		defer close(admissionWatcherDone)
 		select {
 		case <-admission.Closed:
 			cancel()
+		case <-bridging:
 		case <-ctx.Done():
 		}
 	}()
@@ -127,11 +132,20 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 	upstream.SetReadLimit(browserTerminalMaxRecordBytes)
 	defer upstream.CloseNow()
 
-	ended := bridgeBrowserTerminal(ctx, browser, upstream, subscription, func(cause error) (terminalend.Reason, bool) {
-		return browserTerminalEnd(cause, admission)
+	close(bridging)
+	moved := false
+	ended := bridgeBrowserTerminal(ctx, browser, upstream, subscription, admission.Closed, func(cause error) (terminalend.Reason, bool) {
+		if reason, typed := browserTerminalEnd(cause, admission); typed {
+			return reason, true
+		}
+		// A terminal pb update's retiring generation held until it stopped: the new one serves already.
+		moved = p.config.BrowserTerminalHub.Moved(key.RouteID, fence)
+		return terminalend.Moved, moved
 	})
 	logBrowserTerminalEnd(ctx, ended)
-	p.observeBrowserTerminal(ctx, ended)
+	if !moved { // the end of a drain is expected, not an edge failure
+		p.observeBrowserTerminal(ctx, ended)
+	}
 }
 
 // bridgeEnd names the side of the bridge whose read or write ended it.
@@ -172,9 +186,10 @@ func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFe
 	}
 }
 
-// bridgeBrowserTerminal runs the browser <-> host bridge until one side ends it. endReason names the typed close
-// the browser should get for the cause, if any; every other end drops the connection (the browser reconnects).
-func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, endReason func(error) (terminalend.Reason, bool)) (result error) {
+// bridgeBrowserTerminal runs the browser <-> host bridge until one side ends it or stop closes (the control plane
+// ended the admission). endReason names the typed close the browser should get for the cause, if any; every other
+// end drops the connection (the browser reconnects).
+func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, stop <-chan struct{}, endReason func(error) (terminalend.Reason, bool)) (result error) {
 	ctx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	failures := make(chan error, 3)
@@ -291,6 +306,8 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			return ctx.Err()
 		case <-subscription.Done():
 			return bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}
+		case <-stop:
+			return bridgeEnd{"admission_ended", context.Canceled}
 		case cause := <-failures:
 			return cause
 		case message := <-outbound:

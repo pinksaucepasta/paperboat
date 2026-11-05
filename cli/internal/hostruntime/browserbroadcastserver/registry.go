@@ -143,6 +143,19 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	return updates, nil
 }
 
+// Attached reports how many browser attachments receive this registry's output now.
+func (r *Registry) Attached() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, p := range r.sessions {
+		p.mu.Lock()
+		count += len(p.subscribers)
+		p.mu.Unlock()
+	}
+	return count
+}
+
 // Lags reports how often the session's shared output dropped a backlog (see publication.lags).
 func (r *Registry) Lags(sessionID string) uint64 {
 	r.mu.Lock()

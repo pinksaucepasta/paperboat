@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 // A route has at most two carriers here: the current one and, for a moment after a worker
@@ -22,9 +23,9 @@ type previewCandidate struct {
 	revoked <-chan struct{}
 }
 
-// retireLocked ends the entry next replaces. An endpoint route the same machine's newer carrier
-// took over becomes the standby, so its open streams finish instead of being cut; anything else
-// is withdrawn at once.
+// retireLocked ends the entry next replaces. An endpoint or runtime route the same machine's newer
+// carrier took over becomes the standby, so its open streams (a held browser terminal, pb update)
+// finish instead of being cut; anything else is withdrawn at once.
 func (r *DataCarrierPreviewRegistry) retireLocked(old *dataCarrierPreviewRouteEntry, next DataCarrierPreviewRoute) {
 	live := old.route.Server != nil
 	if live {
@@ -34,7 +35,8 @@ func (r *DataCarrierPreviewRegistry) retireLocked(old *dataCarrierPreviewRouteEn
 		default:
 		}
 	}
-	if !live || !old.route.EndpointRoute || !next.EndpointRoute || old.route.Identity.HostID != next.Identity.HostID || old.route.Server == next.Server {
+	runtimeRoutes := old.route.Kind == runtimewire.RouteKind && next.Kind == runtimewire.RouteKind
+	if !live || !(old.route.EndpointRoute && next.EndpointRoute || runtimeRoutes) || old.route.Identity.HostID != next.Identity.HostID || old.route.Server == next.Server {
 		old.close()
 		return
 	}

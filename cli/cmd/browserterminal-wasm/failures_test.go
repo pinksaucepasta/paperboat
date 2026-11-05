@@ -48,6 +48,8 @@ func TestEdgeClosesMapToTypedOutcomes(t *testing.T) {
 		{4429, "too_many_pending", "transport-error", "too_many_pending"},
 		{4503, "machine_unavailable", "transport-error", "machine_unavailable"},
 		{4504, "", "transport-error", "edge_unavailable"},
+		{4301, "moved", "reconnecting", "moved"},
+		{4301, "", "reconnecting", "moved"},
 		{4999, "something_new", "transport-error", "protocol"},
 	} {
 		var got *terminalConnectError
