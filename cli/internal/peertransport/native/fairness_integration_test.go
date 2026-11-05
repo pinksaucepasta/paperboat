@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	fairnessTransferBytes = 32 << 20
-	fairnessSamples       = 100
-	fairnessP95           = 250 * time.Millisecond
-	fairnessMaximum       = time.Second
+	// Bulk runs until the interactive workload ends: a fixed size finished first on a fast runner (macOS arm64).
+	fairnessBulkLimit = 1 << 40
+	fairnessSamples   = 100
+	fairnessP95       = 250 * time.Millisecond
+	fairnessMaximum   = time.Second
 	// A machine under load slows an idle connection as much as a busy one, so the gate is the larger
 	// of the absolute limit and a multiple of what the same connection measures with no bulk traffic.
 	fairnessIdleP95Factor = 25
@@ -98,8 +99,9 @@ func TestNativeBulkDoesNotStarveInteractiveAndControl(t *testing.T) {
 
 	bulkStarted := make(chan struct{}, 2)
 	bulkDone := make(chan error, 2)
+	bulkStop := make(chan struct{})
 	for transfer := 0; transfer < 2; transfer++ {
-		go runFairnessBulk(ctx, session, transfer, bulkStarted, bulkDone)
+		go runFairnessBulk(ctx, session, transfer, bulkStop, bulkStarted, bulkDone)
 	}
 	for range 2 {
 		select {
@@ -119,6 +121,7 @@ func TestNativeBulkDoesNotStarveInteractiveAndControl(t *testing.T) {
 		t.Fatalf("bulk traffic did not overlap the complete interactive workload: %v", err)
 	default:
 	}
+	close(bulkStop)
 	for range 2 {
 		select {
 		case err := <-bulkDone:
@@ -144,7 +147,7 @@ func serveFairnessSession(ctx context.Context, session *native.Session) error {
 			defer connection.Close()
 			if header.Consumer == "file_transfer" {
 				hash := sha256.New()
-				if _, err := io.CopyN(hash, connection, fairnessTransferBytes); err == nil {
+				if _, err := io.Copy(hash, connection); err == nil {
 					_, _ = connection.Write(hash.Sum(nil))
 				}
 				return
@@ -162,8 +165,8 @@ func serveFairnessSession(ctx context.Context, session *native.Session) error {
 	}
 }
 
-func runFairnessBulk(ctx context.Context, session *native.Session, ordinal int, started chan<- struct{}, done chan<- error) {
-	header, err := streamauth.New("fairness_bulk", "file_transfer", "fairness_bulk_"+string(rune('a'+ordinal)), "credential_file_transfer", time.Now().Add(time.Minute), fairnessTransferBytes+sha256.Size)
+func runFairnessBulk(ctx context.Context, session *native.Session, ordinal int, stop <-chan struct{}, started chan<- struct{}, done chan<- error) {
+	header, err := streamauth.New("fairness_bulk", "file_transfer", "fairness_bulk_"+string(rune('a'+ordinal)), "credential_file_transfer", time.Now().Add(time.Minute), fairnessBulkLimit)
 	if err != nil {
 		done <- err
 		return
@@ -184,12 +187,22 @@ func runFairnessBulk(ctx context.Context, session *native.Session, ordinal int, 
 	}
 	full := sha256.New()
 	started <- struct{}{}
-	for written := 0; written < fairnessTransferBytes; written += len(chunk) {
+send:
+	for written := 0; written+len(chunk)+sha256.Size <= fairnessBulkLimit; written += len(chunk) {
+		select {
+		case <-stop:
+			break send
+		default:
+		}
 		if _, err = connection.Write(chunk); err != nil {
 			done <- err
 			return
 		}
 		_, _ = full.Write(chunk)
+	}
+	if err = connection.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+		done <- err
+		return
 	}
 	var digest [sha256.Size]byte
 	if _, err = io.ReadFull(connection, digest[:]); err == nil && !errors.Is(ctx.Err(), context.Canceled) {
