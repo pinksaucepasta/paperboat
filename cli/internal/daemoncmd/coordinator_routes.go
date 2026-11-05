@@ -75,6 +75,9 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if c.ctx == nil {
 		return errors.New("coordinator is not running")
 	}
+	// Withdrawal first: forwards kept across a reset are cut as soon as a snapshot no longer authorizes their
+	// machine and port, whether or not the guard can be reached to rebuild the listeners below.
+	c.cutWithdrawnDrainingLocked(ctx, peers)
 	nameClient := c.nameClient
 	if nameClient == nil {
 		if c.cfg.ConnectNameClient == nil {
@@ -290,19 +293,6 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 			removedRoutes = append(removedRoutes, route)
 		}
 	}
-	wantedMachines := make(map[string]bool, len(wanted))
-	for _, route := range wanted {
-		wantedMachines[route.machineID] = true
-	}
-	kept := c.draining[:0]
-	for _, route := range c.draining {
-		if route.idle() || !wantedMachines[route.machineID] {
-			removedRoutes = append(removedRoutes, route) // finished, or its machine was withdrawn: cut it
-		} else {
-			kept = append(kept, route)
-		}
-	}
-	c.draining = kept
 	var removedWeb []guardedWebRoute
 	for key, route := range c.webRoutes {
 		if _, ok := wantedWeb[key]; !ok {
@@ -349,6 +339,7 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 	// A reset (guard, alias or name error) stops accepting but keeps established forwards: the next
 	// successful reconcile cuts those of machines that are gone, and Stop cuts all.
 	for _, route := range routes {
+		route.markDraining()
 		c.draining = append(c.draining, route)
 	}
 	cleanup := c.launchCleanupLocked(func() error {
@@ -370,4 +361,48 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 	case <-ctx.Done():
 	}
 
+}
+
+// cutWithdrawnDrainingLocked closes the draining routes the snapshot no longer authorizes (their machine and
+// port, with the same rules that build the listeners) and those whose forwards have all ended.
+func (c *Coordinator) cutWithdrawnDrainingLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate) {
+	if len(c.draining) == 0 {
+		return
+	}
+	authorized := make(map[string]bool)
+	for _, peer := range peers {
+		if peer == nil || !peer.GetApproved() || !peer.GetOnline() || peer.GetAlias() == "" {
+			continue
+		}
+		if _, err := netip.ParseAddr(peer.GetAssignedIp()); err != nil {
+			continue
+		}
+		for _, port := range peer.GetExportedPorts() {
+			authorized[peer.GetPeerId()+"\x00"+strconv.Itoa(int(port))] = true
+		}
+	}
+	var cut []*guardedRoute
+	kept := c.draining[:0]
+	for _, route := range c.draining {
+		if route.idle() || !authorized[route.machineID+"\x00"+strconv.Itoa(route.port)] {
+			cut = append(cut, route)
+		} else {
+			kept = append(kept, route)
+		}
+	}
+	c.draining = kept
+	if len(cut) == 0 {
+		return
+	}
+	cleanup := c.launchCleanupLocked(func() error {
+		var causes []error
+		for _, route := range cut {
+			causes = append(causes, route.close())
+		}
+		return coordinatorFailure("withdrawn local forwards could not close", causes...)
+	})
+	select {
+	case <-cleanup.done:
+	case <-ctx.Done():
+	}
 }

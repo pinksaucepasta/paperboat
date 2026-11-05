@@ -118,10 +118,16 @@ type guardedRoute struct {
 // stopAccepting closes only the listener: forwards already accepted keep running (a guard or name error
 // must not cut a user's established connections; only withdrawal, revocation or Stop does, via close).
 func (r *guardedRoute) stopAccepting() error {
+	r.markDraining()
+	return lifecycleCleanup(r.listener.Close())
+}
+
+// markDraining is set before the guard client closes: the guard then shuts the shared listening socket, and
+// the accept loop must see an intentional stop, not a failed listener (which would cut the forwards).
+func (r *guardedRoute) markDraining() {
 	r.mu.Lock()
 	r.draining = true
 	r.mu.Unlock()
-	return lifecycleCleanup(r.listener.Close())
 }
 
 func (r *guardedRoute) isDraining() bool {

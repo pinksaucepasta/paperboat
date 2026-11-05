@@ -51,7 +51,9 @@ func (c *Coordinator) serveRoute(route *guardedRoute) {
 // Withdraw only the failed owning listener. A late failure from an old
 // generation cannot erase a replacement or another machine's native readiness.
 func (c *Coordinator) retireFailedRoute(route *guardedRoute, cause error) {
-	failure := coordinatorFailure("local machine listener failed", cause, route.close())
+	// A failed listener (the guard restarted or withdrew it) stops new connects only: established forwards do
+	// not use it and keep running until a snapshot withdraws their machine and port, or Stop.
+	failure := coordinatorFailure("local machine listener failed", cause, route.stopAccepting())
 	c.snapshotMu.Lock()
 	c.mu.Lock()
 	removed := false
@@ -60,6 +62,9 @@ func (c *Coordinator) retireFailedRoute(route *guardedRoute, cause error) {
 			delete(c.routes, key)
 			removed = true
 		}
+	}
+	if removed {
+		c.draining = append(c.draining, route)
 	}
 	c.mu.Unlock()
 	if removed {
