@@ -155,3 +155,28 @@ func TestPruneRemovesOnlyExitedGenerations(t *testing.T) {
 		})
 	}
 }
+
+// Installing generation A again while A still drains (A, then B, then A) replaces the draining A:
+// two processes on one identity would share a WireGuard key and flap.
+func TestReinstallingADrainingGenerationReplacesItsProcess(t *testing.T) {
+	again, live := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	for platform, replace := range map[string]string{
+		"linux":  "systemctl --user restart paperboatd-" + again + ".service",
+		"darwin": "launchctl bootout gui/501/com.pinksaucepasta.paperboatd." + again,
+	} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			writeGenerationDefinition(t, platform, home, again, 2*time.Hour)
+			writeGenerationDefinition(t, platform, home, live, time.Hour)
+			runner := &generationRunner{running: map[string]bool{again: true, live: true}}
+			config := serviceConfig{Platform: platform, Home: home, Generation: again, Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
+			if _, err := replaceService(context.Background(), config, ""); err != nil {
+				t.Fatal(err)
+			}
+			replaced, quit := indexOf(runner.calls, replace), indexOf(runner.calls, "SIGQUIT")
+			if replaced < 0 || quit < replaced || !strings.Contains(runner.calls[quit], live) {
+				t.Fatalf("the draining process must be replaced, then the live generation quit:\n%s", strings.Join(runner.calls, "\n"))
+			}
+		})
+	}
+}
