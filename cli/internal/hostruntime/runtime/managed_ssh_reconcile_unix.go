@@ -30,14 +30,17 @@ type managedSSHKeyReconciler struct {
 	// machine's, a changed set (the owner regenerated them) is published at the next tick.
 	readPublicKeys func() ([]string, error)
 	refusedAt      time.Time
-	home           string
-	ownerUID       uint32
-	interval       time.Duration
-	timeout        time.Duration
-	events         *machineevents.Subscription
-	sequence       atomic.Uint64
-	ready          atomic.Bool
-	hostKeyInUse   atomic.Bool
+	// keyChanges counts host-key sets re-read after start. The server keeps one set per observation
+	// generation, so each changed set is observed under its own generation (observationGeneration).
+	keyChanges   uint64
+	home         string
+	ownerUID     uint32
+	interval     time.Duration
+	timeout      time.Duration
+	events       *machineevents.Subscription
+	sequence     atomic.Uint64
+	ready        atomic.Bool
+	hostKeyInUse atomic.Bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -119,7 +122,7 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 	s.ready.Store(false)
 	sequence := s.sequence.Add(1)
 	suffix := s.registration.MachineID + "-" + strconv.FormatUint(uint64(s.registration.InstallationGeneration), 10) + "-" + strconv.FormatUint(s.workerGeneration, 10) + "-refresh-" + strconv.FormatUint(sequence, 10)
-	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
+	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.observationGeneration(), s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
 	s.hostKeyInUse.Store(hostKeysInUseElsewhere(err))
 	if s.hostKeyInUse.Load() {
 		s.refusedAt = time.Now()
@@ -222,6 +225,16 @@ func hostKeysInUseElsewhere(err error) bool {
 // (days), so this bounds how late such a key is removed.
 const managedSSHKeyFallback = 10 * time.Minute
 
+// observationGeneration is the worker generation for the keys read at start and, after the host keys
+// changed, a value no worker generation reaches (boot generations count worker starts, far below 2^20),
+// so the changed set is a new observation instead of a conflict with the first one (C066).
+func (s *managedSSHKeyReconciler) observationGeneration() uint64 {
+	if s.keyChanges == 0 {
+		return s.workerGeneration
+	}
+	return s.workerGeneration<<20 | s.keyChanges
+}
+
 // reconcileDue reports whether this wake-up asks the server. Changed host keys on disk always do.
 // Refused host keys do not change by asking again, so while they are refused only managedSSHHostKeyInUseRetry
 // passing does.
@@ -229,6 +242,7 @@ func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, publ
 	if s.readPublicKeys != nil {
 		if keys, err := s.readPublicKeys(); err == nil && len(keys) > 0 && !slices.Equal(keys, s.publicKeys) {
 			s.publicKeys = keys
+			s.keyChanges++
 			return true
 		}
 	}

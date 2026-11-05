@@ -175,13 +175,26 @@ type rotatingManagedSSHClient struct {
 	hostStates    []string
 	observeErrors []error
 	hostCalls     int
+	// observed holds the keys of each observation generation: like the server, the same generation with
+	// other keys is a conflict.
+	observed  map[uint64]string
+	conflicts int
 }
 
-func (c *rotatingManagedSSHClient) ObserveManagedSSHHostKeys(context.Context, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error) {
+func (c *rotatingManagedSSHClient) ObserveManagedSSHHostKeys(_ context.Context, _, _, _ string, _, observation uint64, keys []string, _ []byte) (clientapi.ManagedSSHHostKeySet, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	index := c.hostCalls
 	c.hostCalls++
+	if c.observed == nil {
+		c.observed = map[uint64]string{}
+	}
+	joined := strings.Join(keys, "\n")
+	if previous, ok := c.observed[observation]; ok && previous != joined {
+		c.conflicts++
+		return clientapi.ManagedSSHHostKeySet{}, &clientapi.APIError{Status: http.StatusConflict, Code: "conflict"}
+	}
+	c.observed[observation] = joined
 	if index < len(c.observeErrors) && c.observeErrors[index] != nil {
 		return clientapi.ManagedSSHHostKeySet{}, c.observeErrors[index]
 	}

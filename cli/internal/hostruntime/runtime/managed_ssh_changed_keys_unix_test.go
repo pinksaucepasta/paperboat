@@ -61,10 +61,22 @@ func TestChangedHostKeysAreReportedWithinAnInterval(t *testing.T) {
 	mu.Lock()
 	onDisk = []string{"ssh-ed25519 BBBB regenerated"}
 	mu.Unlock()
+	accepted := func() bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		for _, keys := range client.observed {
+			if keys == "ssh-ed25519 BBBB regenerated" {
+				return true
+			}
+		}
+		return false
+	}
 	deadline := time.Now().Add(2 * time.Second)
-	for asked() == idle {
+	for !accepted() {
 		if time.Now().After(deadline) {
-			t.Fatal("regenerated host keys were not reported to the server")
+			client.mu.Lock()
+			defer client.mu.Unlock()
+			t.Fatalf("regenerated host keys were not accepted by the server (asked %d times, %d conflicts)", client.hostCalls-idle, client.conflicts)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
