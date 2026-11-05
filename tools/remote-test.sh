@@ -54,7 +54,8 @@ export PATH=$HOME/.local/go1.27.3/bin:$HOME/go-sdk/bin:$PATH GOTOOLCHAIN=local
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
 # A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
-if [ ! -f "$HOME/.pb-test-pg-dsn" ]; then exec nice go test -p 2 "$@"; fi
+case $module in server | tunnel | helper) ;; *) exec nice go test -p 2 "$@" ;; esac # no database suites elsewhere
+[ -f "$HOME/.pb-test-pg-dsn" ] || exec nice go test -p 2 "$@"
 base=$(cat "$HOME/.pb-test-pg-dsn") pkgs=() args=() failed=0
 for a in "$@"; do case $a in ./* | ...) pkgs+=("$a") ;; *) args+=("$a") ;; esac; done
 mod=$(go list -f "{{.Module.Path}}" "${pkgs[@]}" | sed -n 1p)
