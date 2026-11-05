@@ -146,12 +146,20 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		return nil
 	}
 	// Every outcome ends with the install inventory: nothing of another version may stay on the host.
+	// It has its own bound, so a caller without a deadline (or a recovery context) never waits on it unbounded.
 	inventory := func(callCtx context.Context) error {
+		callCtx, cancel := context.WithTimeout(callCtx, installInventoryTimeout)
+		defer cancel()
 		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", "inventory")
 		return runInventoryCommand(callCtx, command)
 	}
 	if err = invoke(ctx, "install-supplied"); err != nil {
-		return "", errors.Join(err, inventory(context.WithoutCancel(ctx)))
+		if ctx.Err() != nil {
+			// Cancelled (Ctrl-C, or a caller that ended): start no new privileged child; the next pb install
+			// runs the inventory.
+			return "", err
+		}
+		return "", errors.Join(err, inventory(ctx))
 	}
 	link, err := installWorkerCommand(directory, layout.Binary)
 	var restoreService func(context.Context) error
@@ -247,7 +255,12 @@ func suppliedCommitRequest(request hostinstall.Request, installed installsource.
 
 // Diagnostic storage belongs to the child's effective identity. Keep the
 // enrolled identity in the supplied request and invoking UID, never in HOME.
-func privilegedInstallCommand(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
+// installInventoryTimeout bounds one privileged install inventory: stopping leftovers takes at most a few
+// unit stops and a TERM/KILL wait, far below it.
+const installInventoryTimeout = 2 * time.Minute
+
+// privilegedInstallCommand is a variable so a workspace test can record the privileged children it would start.
+var privilegedInstallCommand = func(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
 	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID}
 	if diagnostics.TerminalHopsEnabled() {
 		args = append(args, "PAPERBOAT_TERMINAL_HOPS=1")
