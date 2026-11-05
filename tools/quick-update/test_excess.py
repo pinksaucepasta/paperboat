@@ -44,4 +44,20 @@ class T(unittest.TestCase):
   r=row(ev,'preview');self.assertEqual((r['failures'],r['failures_in_update']),(1,1));self.assertFalse(r['ok']);self.assertGreater(r['excess_s'],4)
  def test_no_data_in_window_fails(self):
   self.assertFalse(row(calls('exec_short',frange(10,90,1.3),1.1),'exec_short')['ok'])
+
+ def test_noise_as_high_as_the_excess_is_unresolved_never_pass(self):
+  ev=calls('exec_short',frange(10,200,1.3),1.1)+calls('exec_short',[60.0],3.0)+calls('exec_short',[112.0],2.5)  # noise 1.9, excess 1.4
+  r=row(ev,'exec_short');self.assertEqual(r['status'],'UNRESOLVED');self.assertFalse(r['ok']);self.assertAlmostEqual(r['noise_s'],1.9,1)
+ def test_excess_above_the_noise_still_fails(self):
+  ev=calls('exec_short',frange(10,200,1.3),1.1)+calls('exec_short',[60.0],1.6)+calls('exec_short',[112.0],2.5)  # noise 0.5, excess 1.4
+  self.assertEqual(row(ev,'exec_short')['status'],'FAIL')
+ def test_excess_within_the_bar_passes_whatever_the_noise(self):
+  ev=calls('exec_short',frange(10,200,1.3),1.1)+calls('exec_short',[60.0],3.0)+calls('exec_short',[112.0],1.9)  # excess 0.8
+  self.assertEqual(row(ev,'exec_short')['status'],'PASS')
+ def test_failure_is_never_unresolved(self):
+  ev=calls('preview',frange(10,200,0.3),0.12)+calls('preview',[60.0],5.0)+calls('preview',[115.0],5.0,ok=False)
+  self.assertEqual(row(ev,'preview')['status'],'FAIL')
+ def test_pb_version_parse(self):
+  self.assertEqual(excess.pb_version('noise\n{"data":{"version":"v1","commit":"abc"}}'),dict(version='v1',commit='abc'))
+  self.assertIn('error',excess.pb_version('not json'))
 if __name__=='__main__':unittest.main()

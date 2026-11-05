@@ -51,6 +51,11 @@ else:raise SystemExit('held terminal not ready')
 # Probes start >30 s before the update: the analysis window opens 30 s before it, and probe
 # start-up (the controller resolver's first lookup takes 5 s) must stay outside it (prefix1).
 time.sleep(45)
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)));import excess  # the one scoring module (windows, excess, verdicts)
+# What is measured, recorded before the update: pb before it, the candidate under test, the probe's and scorer's file hash.
+build=excess.build_info(excess.pb_version(R('~/.local/bin/pb version --json',check=False)),
+ excess.pb_version(R(f'~/gap5/{name}/candidate version --json',check=False)) if cand!='-' else dict(version='none (no update)',commit='-'),pathlib.Path(__file__).with_name('probe.py'))
+(run/'build.json').write_text(json.dumps(build))
 t0=now();(run/'update-start.utc').write_text(t0)
 if cand=='-':
  time.sleep(60);r=subprocess.CompletedProcess([],0,stdout='none')
@@ -79,9 +84,8 @@ for _ in range(300):
 R(f'{U} cat /home/pbt/{name}/held/result.json > ~/gap5/{name}/held-result.json; {U} cat /home/pbt/{name}/held/markers.json > ~/gap5/{name}/held-markers.json',check=False)
 R(f'{U} cat /home/pbt/{name}/p/events.jsonl > ~/gap5/{name}/events.jsonl; {U} rm -f /home/pbt/{name}/big.bin',check=False)
 subprocess.run(['rsync','-a',(os.path.expanduser(f'~/gap5/{name}/') if LOCAL else f'{H}:gap5/{name}/'),str(run)+'/','--exclude=candidate'],timeout=300)
-sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)));import excess  # the one scoring module (windows, excess, verdicts)
 ts=excess.iso
 ev=excess.load_events(run)
 rows=excess.score(ev,[(ts(t0),ts(t1))])
-s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows,updates=[(t0,t1)])
+s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows,build=build,updates=[(t0,t1)])
 (run/'summary.json').write_text(json.dumps(s,indent=1));print(json.dumps(s))
