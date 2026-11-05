@@ -104,7 +104,11 @@ func (a *NativePrivateTCPAccess) openGrant(ctx context.Context, operationID stri
 	stopCancel := context.AfterFunc(ctx, func() { _ = connection.Close(); _ = session.Close() })
 	defer stopCancel()
 	// A socket deadline runs on the local clock; the grant's expiry is the server's (F21-02).
-	deadline := time.Now().Add(min(10*time.Second, grant.ExpiresAt.Sub(a.config.Now())))
+	wait := grant.ExpiresAt.Sub(a.config.Now())
+	if wait > 10*time.Second {
+		wait = 10 * time.Second
+	}
+	deadline := time.Now().Add(wait)
 	if err = connection.SetReadDeadline(deadline); err != nil {
 		_ = connection.Close()
 		_ = session.Close()
