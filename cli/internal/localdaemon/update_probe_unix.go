@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/unit"
+	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"howett.net/plist"
@@ -106,22 +107,44 @@ func currentUserDaemonClient(ctx context.Context) (*localapi.Client, error) {
 	return localapi.NewClient(paths.SocketPath, time.Second)
 }
 
+// RestartCurrentUserForUpdate starts the updated binary's daemon generation in its own unit, with the
+// arguments and environment of the generation the last install started, then sends the others
+// SIGQUIT so they drain (replaceService). The updater runs it as the enrolled user after promotion.
 func RestartCurrentUserForUpdate(ctx context.Context) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	if _, err := updateServiceEnvironment(runtime.GOOS, home, os.Geteuid()); err != nil {
-		return err
-	}
-	controller, err := updateDaemonController(home)
+	declared, err := readUpdateDeclaration(runtime.GOOS, home, os.Geteuid())
 	if err != nil {
 		return err
 	}
-	if err := controller.Stop(ctx, ""); err != nil {
+	executable, err := os.Executable()
+	if err != nil {
 		return err
 	}
-	return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home))
+	resolved, err := endpointbinary.Daemon(executable)
+	if err != nil {
+		return err
+	}
+	config, err := currentUserServiceConfig(resolved)
+	if err != nil {
+		return err
+	}
+	if config.Generation, err = DaemonGeneration(resolved); err != nil {
+		return err
+	}
+	config.Executable, config.Environment = resolved, declared.environment
+	for i := 0; i+1 < len(declared.arguments); i++ {
+		switch declared.arguments[i] {
+		case "--config":
+			config.ConfigPath = declared.arguments[i+1]
+		case "--server":
+			config.ServerURL = declared.arguments[i+1]
+		}
+	}
+	_, err = replaceService(ctx, config, "")
+	return err
 }
 
 // updateDaemonController addresses the newest installed daemon generation, the one the last install started.
@@ -140,55 +163,18 @@ func updateDaemonController(home string) (service.NativeLifecycleController, err
 	return controller.(service.NativeLifecycleController), nil
 }
 
+// updateDeclaration is what the newest daemon generation's definition declares.
+type updateDeclaration struct {
+	environment map[string]string
+	arguments   []string // after the executable
+}
+
 func updateServiceEnvironment(platform, home string, uid int) (map[string]string, error) {
-	path := updateServiceDefinitionPath(platform, home)
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	declared, err := readUpdateDeclaration(platform, home, uid)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(owner.Uid) != uid || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Size() < 1 || info.Size() > 64<<10 {
-		return nil, localapi.ErrUnsafeSocket
-	}
-	body, err := io.ReadAll(io.LimitReader(file, (64<<10)+1))
-	if err != nil || len(body) > 64<<10 {
-		return nil, errors.Join(localapi.ErrInvalidConfig, err)
-	}
-	values := map[string]string{}
-	if platform == "darwin" {
-		var declaration struct {
-			Environment map[string]string `plist:"EnvironmentVariables"`
-		}
-		if _, err := plist.Unmarshal(body, &declaration); err != nil {
-			return nil, err
-		}
-		values = declaration.Environment
-	} else {
-		options, err := unit.Deserialize(bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		for _, option := range options {
-			if option.Section != "Service" || option.Name != "Environment" {
-				continue
-			}
-			value, err := strconv.Unquote(option.Value)
-			if err != nil {
-				return nil, localapi.ErrInvalidConfig
-			}
-			value = strings.ReplaceAll(strings.ReplaceAll(value, "%%", "%"), "$$", "$")
-			key, value, ok := strings.Cut(value, "=")
-			if !ok {
-				return nil, localapi.ErrInvalidConfig
-			}
-			values[key] = value
-		}
-	}
+	values := declared.environment
 	environment := map[string]string{"HOME": home}
 	for _, key := range []string{"XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"} {
 		if value := values[key]; value != "" {
@@ -209,4 +195,90 @@ func updateServiceDefinitionPath(platform, home string) string {
 		return generationDefinitionPath(platform, home, "none")
 	}
 	return generationDefinitionPath(platform, home, generations[0])
+}
+
+func readUpdateDeclaration(platform, home string, uid int) (updateDeclaration, error) {
+	path := updateServiceDefinitionPath(platform, home)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return updateDeclaration{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return updateDeclaration{}, err
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(owner.Uid) != uid || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Size() < 1 || info.Size() > 64<<10 {
+		return updateDeclaration{}, localapi.ErrUnsafeSocket
+	}
+	body, err := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	if err != nil || len(body) > 64<<10 {
+		return updateDeclaration{}, errors.Join(localapi.ErrInvalidConfig, err)
+	}
+	declared := updateDeclaration{environment: map[string]string{}}
+	if platform == "darwin" {
+		var declaration struct {
+			Environment map[string]string `plist:"EnvironmentVariables"`
+			Arguments   []string          `plist:"ProgramArguments"`
+		}
+		if _, err := plist.Unmarshal(body, &declaration); err != nil {
+			return updateDeclaration{}, err
+		}
+		if declaration.Environment != nil {
+			declared.environment = declaration.Environment
+		}
+		if len(declaration.Arguments) > 0 {
+			declared.arguments = declaration.Arguments[1:]
+		}
+		return declared, nil
+	}
+	options, err := unit.Deserialize(bytes.NewReader(body))
+	if err != nil {
+		return updateDeclaration{}, err
+	}
+	for _, option := range options {
+		if option.Section != "Service" {
+			continue
+		}
+		switch option.Name {
+		case "Environment":
+			value, err := unsystemdQuote(option.Value)
+			if err != nil {
+				return updateDeclaration{}, err
+			}
+			key, value, ok := strings.Cut(value, "=")
+			if !ok {
+				return updateDeclaration{}, localapi.ErrInvalidConfig
+			}
+			declared.environment[key] = value
+		case "ExecStart":
+			// service.renderSystemd writes each word as one systemdEscape'd quoted string.
+			for rest := strings.TrimSpace(option.Value); rest != ""; rest = strings.TrimSpace(rest) {
+				quoted, err := strconv.QuotedPrefix(rest)
+				if err != nil {
+					return updateDeclaration{}, localapi.ErrInvalidConfig
+				}
+				word, err := unsystemdQuote(quoted)
+				if err != nil {
+					return updateDeclaration{}, err
+				}
+				declared.arguments = append(declared.arguments, word)
+				rest = rest[len(quoted):]
+			}
+			if len(declared.arguments) > 0 {
+				declared.arguments = declared.arguments[1:]
+			}
+		}
+	}
+	return declared, nil
+}
+
+// unsystemdQuote reverses service.systemdEscape.
+func unsystemdQuote(value string) (string, error) {
+	unquoted, err := strconv.Unquote(value)
+	if err != nil {
+		return "", localapi.ErrInvalidConfig
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(unquoted, "%%", "%"), "$$", "$"), nil
 }
