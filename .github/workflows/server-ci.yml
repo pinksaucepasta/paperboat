@@ -66,6 +66,9 @@ jobs:
             go.work.sum
       - run: go vet ./...
       - run: go test ./...
+      - name: cli tests that need root (under sudo)
+        if: matrix.module == 'cli'
+        run: ../tools/cli-root-tests.sh
 
   repository:
     name: Repository policy checks

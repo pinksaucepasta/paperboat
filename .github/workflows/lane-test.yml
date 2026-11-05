@@ -135,6 +135,11 @@ jobs:
               go test -race -count="$COUNT" -timeout 30m "${run[@]}" "$pkg" || failed=1
           done
           exit $failed
+      - name: cli tests that need root (under sudo)
+        if: matrix.module == 'cli' && !cancelled()
+        run: |
+          run=(); [ -z "$RUN" ] || run=(-v -run "$RUN")
+          ../tools/cli-root-tests.sh "${run[@]}"
       - name: migration tests (each on its own empty database)
         if: matrix.module == 'server' && !cancelled()
         run: |
