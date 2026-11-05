@@ -21,6 +21,7 @@ type resetForwardFixture struct {
 	local      net.Conn
 	remote     net.Conn
 	connectErr error // set: the guard is unavailable for every later connect
+	guard      *shutdownGuardClient
 }
 
 // shutdownGuardClient is the guard's behaviour when its control connection closes: it withdraws the leases,
@@ -64,7 +65,8 @@ func newResetForwardFixture(t *testing.T) *resetForwardFixture {
 			}
 			client := f.clients[next]
 			next++
-			return &shutdownGuardClient{coordinatorNameClient: client}, nil
+			f.guard = &shutdownGuardClient{coordinatorNameClient: client}
+			return f.guard, nil
 		},
 		DialMachine: func(context.Context, string, int) (net.Conn, error) {
 			client, remote := net.Pipe()
@@ -200,5 +202,24 @@ func TestCoordinatorResetKeepsForwardsWhenTheGuardShutsTheListenerFirst(t *testi
 		f.failReconcile(t)
 		f.echo(t, "b")
 		_ = f.c.Stop()
+	}
+}
+
+// The guard can withdraw a listener on its own (a guard restart or update shuts its sockets): new connects stop,
+// but the established forward keeps running until a snapshot withdraws its machine.
+func TestCoordinatorGuardShuttingAListenerKeepsEstablishedForwards(t *testing.T) {
+	f := newResetForwardFixture(t)
+	defer f.c.Stop()
+	f.guard.mu.Lock()
+	for _, listener := range f.guard.listeners {
+		_ = listener.Close()
+	}
+	f.guard.mu.Unlock()
+	time.Sleep(200 * time.Millisecond) // the accept loop sees the failure and retires the listener
+	f.echo(t, "b")
+	f.connectErr = errors.New("guard restarting")
+	_ = f.c.replaceGuardedRoutes(t.Context(), nil)
+	if !f.cut(t) {
+		t.Fatal("withdrawing the machine left the forward of a failed listener open")
 	}
 }
