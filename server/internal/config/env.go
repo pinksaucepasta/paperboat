@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 )
 
 func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(string) ([]byte, error)) error {
@@ -117,12 +119,8 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_SENTRY_INSTANCE", &c.Reporting.Instance)
 	setString("PAPERBOAT_SENTRY_ISSUE_URL", &c.Reporting.IssueURL)
 	// Compose commonly passes an optional variable as an empty string. An empty
-	// direct value must not erase an official artifact's embedded destination
-	// or release; a nonempty runtime value remains an explicit override, and
-	// a secret file remains an explicit deployment-owned override.
-	if v, ok := lookup("PAPERBOAT_SENTRY_RELEASE"); ok && strings.TrimSpace(v) != "" {
-		c.Reporting.Release = v
-	}
+	// direct value must not erase an official artifact's embedded destination;
+	// a nonempty runtime value or a secret file is a deployment-owned override.
 	if v, ok := lookup("PAPERBOAT_SENTRY_DSN"); ok && strings.TrimSpace(v) != "" {
 		c.Secrets.SentryDSN = v
 	}
@@ -132,6 +130,10 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 			return fmt.Errorf("read PAPERBOAT_SENTRY_DSN_FILE: %w", err)
 		}
 		c.Secrets.SentryDSN = strings.TrimSpace(string(b))
+	}
+	// The release names the running build, never a deployment setting that outlives it.
+	if c.Secrets.SentryDSN != "" && c.Reporting.Release == "" {
+		c.Reporting.Release = "paperboat-server:" + buildinfo.Version
 	}
 	setString("PAPERBOAT_ENV", (*string)(&c.Environment))
 	setString("PAPERBOAT_HTTP_ADDRESS", &c.HTTP.Address)

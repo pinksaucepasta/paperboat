@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 )
 
 func TestReportingDefaultsValidationAndRedaction(t *testing.T) {
@@ -72,12 +74,18 @@ func TestEmbeddedReportingDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("explicit disable was not honored: enabled=%v err=%v", disabled.Reporting.Enabled, err)
 	}
 
+	// A deployment-owned DSN reports the running build's release. A release in the environment is not
+	// read: one written once in server.env labelled every later build 2026.10.15.13 (support_fb7b442e).
+	DefaultSentryDSN, DefaultSentryRelease = "", ""
+	previousVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+	buildinfo.Version = "2026.11.05.10"
 	owned, err := Load(context.Background(), LoadOptions{LookupEnv: mapLookup(map[string]string{
 		"PAPERBOAT_SENTRY_DSN":     "https://owned@example.test/2",
-		"PAPERBOAT_SENTRY_RELEASE": "selfhost:1",
+		"PAPERBOAT_SENTRY_RELEASE": "paperboat-server:2026.10.15.13",
 	})})
-	if err != nil || owned.Secrets.SentryDSN != "https://owned@example.test/2" || owned.Reporting.Release != "selfhost:1" {
-		t.Fatalf("deployment reporting override lost: dsn=%q release=%q err=%v", owned.Secrets.SentryDSN, owned.Reporting.Release, err)
+	if err != nil || owned.Secrets.SentryDSN != "https://owned@example.test/2" || owned.Reporting.Release != "paperboat-server:2026.11.05.10" {
+		t.Fatalf("deployment reporting: dsn=%q release=%q err=%v", owned.Secrets.SentryDSN, owned.Reporting.Release, err)
 	}
 	if err := owned.Validate(); err != nil {
 		t.Fatalf("deployment reporting override is invalid: %v", err)

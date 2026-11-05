@@ -19,9 +19,8 @@ ghcr.io/pinksaucepasta/paperboat/server@sha256:<manifest-digest>
 ```
 
 When Sentry release association is configured in GitHub, the publish workflow
-creates `paperboat-server:<tag>`. A deployment that enables Sentry must set
-`PAPERBOAT_SENTRY_RELEASE` to that exact value; the image tag, source commit, and
-runtime telemetry then share one release identity. Image publication does not
+creates `paperboat-server:<tag>`. The server reports that same release from its own build
+version, so the image tag, source commit, and runtime telemetry share one release identity. Image publication does not
 create a Sentry deploy record.
 
 Before the first unified release, the public relay repository must first contain

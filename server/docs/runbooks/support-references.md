@@ -13,7 +13,8 @@ Reporting is disabled by default. Server environment variables:
 
 - `PAPERBOAT_SENTRY_ENABLED=true` explicitly enables Sentry.
 - `PAPERBOAT_SENTRY_DSN` (or `_FILE`) supplies the project DSN over HTTPS.
-- `PAPERBOAT_SENTRY_RELEASE` identifies the exact deployed artifact, such as a Git revision.
+- The release is the running build, `paperboat-server:<version>`, set by the binary itself; there is no
+  release variable (a static one labelled later builds with an old release).
 - `PAPERBOAT_SENTRY_ISSUE_URL` optionally supplies the trusted HTTPS issues page, without
   credentials, query or fragment (for example `https://example.sentry.io/issues/`).
 
