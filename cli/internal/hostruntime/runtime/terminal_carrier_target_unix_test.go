@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -196,6 +197,11 @@ func newTargetCarrierFixture(t *testing.T) *targetCarrierFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	scratch := "/var/lib"
+	if runtime.GOOS == "darwin" {
+		scratch = "/Library"
+	}
+	recoverTargetCarrierFixture(t, layout.InstallRoot, scratch)
 	if _, err := os.Lstat(layout.InstallRoot); !os.IsNotExist(err) {
 		t.Fatal("isolated root fixture installation path is already occupied")
 	}
@@ -203,10 +209,10 @@ func newTargetCarrierFixture(t *testing.T) *targetCarrierFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(layout.InstallRoot) })
-	root, err := os.MkdirTemp("/var/lib", "pb-carrier-test-")
-	if runtime.GOOS == "darwin" {
-		root, err = os.MkdirTemp("/Library", "pb-carrier-test-")
+	if err := os.WriteFile(filepath.Join(layout.InstallRoot, targetCarrierFixtureMarker), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
+	root, err := os.MkdirTemp(scratch, "pb-carrier-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,6 +285,36 @@ func newTargetCarrierFixture(t *testing.T) *targetCarrierFixture {
 	}
 	t.Cleanup(f.client.Close)
 	return f
+}
+
+const targetCarrierFixtureMarker = ".pb-carrier-fixture"
+
+// recoverTargetCarrierFixture removes what a killed fixture left (a signal or
+// -test.timeout skips t.Cleanup; one left uid 0's install path and blocked every
+// later run). The kernel releases the lock on any exit, so holding it proves no
+// live fixture owns those paths; an install root without the marker is a real
+// installation and is kept.
+func recoverTargetCarrierFixture(t *testing.T, install, scratch string) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(os.TempDir(), "pb-root-carrier-fixture.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lock.Close() })
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal("another root carrier fixture is running", err)
+	}
+	if _, err := os.Lstat(filepath.Join(install, targetCarrierFixtureMarker)); err == nil {
+		if err := os.RemoveAll(install); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale, _ := filepath.Glob(filepath.Join(scratch, "pb-carrier-test-*"))
+	for _, path := range stale {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func targetCarrierRoot(t *testing.T) bool {
