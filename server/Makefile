@@ -19,7 +19,7 @@ GO_FILES := $(shell find . -path ./.git -prune -o -name '*.go' -print)
 load-env = set -a; [ -f $(ENV_FILE) ] && . ./$(ENV_FILE); set +a
 config-arg = $(if $(strip $(CONFIG)),-config $(CONFIG),)
 
-.PHONY: binary-size-check build check clean control-storm dependencies fmt fmt-check generate generate-check license-check metrics-check metrics-generate migrate race reproducible-builds run scenario-matrix-check scenario-matrix-generate source-policy static-analysis test tidy topology-fault-smoke topology-smoke verification verify-toolchain vet vulnerability-check standalone-build
+.PHONY: policy-checks binary-size-check build check clean control-storm dependencies fmt fmt-check generate generate-check license-check metrics-check metrics-generate migrate race reproducible-builds run scenario-matrix-check scenario-matrix-generate source-policy static-analysis test tidy topology-fault-smoke topology-smoke verification verify-toolchain vet vulnerability-check standalone-build
 
 dependencies:
 	@./tools/verify-dependencies.sh
@@ -58,7 +58,10 @@ generate:
 generate-check:
 	@before="$$(git diff -- internal/db/dbsqlc)"; $(MAKE) generate >/dev/null; test "$$(git diff -- internal/db/dbsqlc)" = "$$before" || { echo "generated sqlc output is stale; run make generate" >&2; git diff -- internal/db/dbsqlc; exit 1; }
 
-check: standalone-build verify-toolchain dependencies source-policy metrics-check scenario-matrix-check fmt-check generate-check vet test build
+## policy-checks: the non-test checks of `make check`; tools/ci-test.sh runs them too, so a green lane run means main's checks pass
+policy-checks: standalone-build verify-toolchain dependencies source-policy metrics-check scenario-matrix-check fmt-check generate-check
+
+check: policy-checks vet test build
 
 scenario-matrix-generate:
 	$(GO) run ./tools/scenario-matrix testdata/topology/scenarios.json internal/testtopology/topology_test.go ../.github/server-generated/topology-matrix.json

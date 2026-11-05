@@ -107,6 +107,14 @@ jobs:
         if: matrix.module == 'shared'
         run: ../tools/check-shared-imports.sh
       - run: go vet ./...
+      # The same non-test checks as main's Server checks job (make check; Makefile policy-checks), so a green
+      # full-module lane run means main goes green too. Narrowed -run runs skip them to stay fast.
+      - name: server policy checks and static analysis
+        if: matrix.module == 'server' && inputs.run == ''
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
+          python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
+          make policy-checks static-analysis
       - name: go test -race
         run: |
           run=(); [ -z "$RUN" ] || run=(-v -run "$RUN")
