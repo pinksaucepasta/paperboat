@@ -21,7 +21,7 @@ func AddMachineGuardCommand(root *cobra.Command) {
 			return err
 		}
 		domain, _ := cmd.Flags().GetString("browser-domain")
-		undo, err := machineguard.Install(cmd.Context(), executable, domain)
+		undo, err := machineguard.Install(cmd.Context(), executable, domain, nil)
 		if err != nil {
 			return err
 		}

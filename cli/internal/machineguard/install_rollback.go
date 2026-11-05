@@ -203,8 +203,9 @@ func unwrapJoinedExcept(err, skip error) []error {
 
 // Install installs and starts the guard from executable. On success (trust may still be pending) it
 // returns the Undo that restores the prior installation; the caller restores or discards it.
-func Install(ctx context.Context, executable, browserDomain string) (*Undo, error) {
+// units are the installed build's own guard unit files (nil: this build's, Units).
+func Install(ctx context.Context, executable, browserDomain string, units map[string]string) (*Undo, error) {
 	var undo *Undo
-	err := installGuard(ctx, executable, browserDomain, &undo)
+	err := installGuard(ctx, executable, browserDomain, units, &undo)
 	return undo, err
 }

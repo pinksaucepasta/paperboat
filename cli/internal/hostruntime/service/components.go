@@ -28,7 +28,7 @@ type ComponentConfig struct {
 	Environment          map[string]string
 	EncryptedCredentials map[string]string
 	Controller           Controller
-	// Rendered: see Config.Rendered (hostd only).
+	// Rendered: see Config.Rendered.
 	Rendered []byte
 }
 
@@ -155,6 +155,7 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 		Platform: config.Layout.Platform, Kind: UpdaterKind, Instance: config.Layout.Instance, ConfigRoot: "/", Executable: binary,
 		User: "root", Group: group, Arguments: []string{"daemon", "__runtime-updated"}, Environment: environment,
 		UpgradeMode: UpgradeReload, Controller: config.Controller,
+		Rendered: config.Rendered,
 	}
 	if allowMissingExecutable {
 		return newInstaller(serviceConfig, true)

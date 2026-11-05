@@ -18,7 +18,7 @@ import (
 // Install copies the invoked executable into root-only installation storage and
 // restores only address isolation before user sessions. DNS startup does not gate
 // normal logins. No user-writable binary runs as root.
-func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, undo **Undo) (resultErr error) {
 	defer diagnostics.UpdateStep("guard_install")()
 	if err := requirePrivilege(); err != nil {
 		return err
@@ -136,27 +136,16 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err != nil {
 		return err
 	}
-	units := map[string]string{
-		"paperboat-machineguard-deny.service": guardDenyUnit,
-		"paperboat-machineguard.service": `[Unit]
-Description=Paperboat protected machine names
-Requires=paperboat-machineguard-deny.service
-After=paperboat-machineguard-deny.service systemd-resolved.service
-Wants=systemd-resolved.service
-
-[Service]
-Type=notify
-NotifyAccess=main
-TimeoutStartSec=30
-ExecStart=/usr/local/libexec/paperboat-machineguard/pb daemon machine-guard run
-Restart=on-failure
-RestartSec=1
-TimeoutStopSec=10
-UMask=0077
-
-[Install]
-WantedBy=multi-user.target
-`,
+	if units == nil {
+		units = Units()
+	}
+	if len(units) != len(Units()) {
+		return errGuardUnits
+	}
+	for name := range Units() {
+		if units[name] == "" {
+			return errGuardUnits
+		}
 	}
 	for name, unit := range units {
 		path := filepath.Join("/etc/systemd/system", name)
@@ -237,3 +226,30 @@ TimeoutStartSec=10
 [Install]
 RequiredBy=systemd-user-sessions.service
 `
+
+// Units returns this build's guard unit files by name. An update installs the
+// candidate build's own units, so the guard never runs another build's render.
+func Units() map[string]string {
+	return map[string]string{
+		"paperboat-machineguard-deny.service": guardDenyUnit,
+		"paperboat-machineguard.service": `[Unit]
+Description=Paperboat protected machine names
+Requires=paperboat-machineguard-deny.service
+After=paperboat-machineguard-deny.service systemd-resolved.service
+Wants=systemd-resolved.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=30
+ExecStart=/usr/local/libexec/paperboat-machineguard/pb daemon machine-guard run
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+`,
+	}
+}

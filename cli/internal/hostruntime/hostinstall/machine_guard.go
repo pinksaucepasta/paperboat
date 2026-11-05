@@ -21,8 +21,9 @@ import (
 // Explicit guard installation remains responsible for upgrading its executable.
 var existingMachineGuardReady = readyMachineGuard
 var prepareMachineGuardForInstall = prepareMachineGuardFoundation
-var installMissingMachineGuard = func(ctx context.Context, executable, domain string) (guardUndo, error) {
-	undo, err := machineguard.Install(ctx, executable, domain)
+// units are the installed build's own guard units (nil: this build's).
+var installMissingMachineGuard = func(ctx context.Context, executable, domain string, units map[string]string) (guardUndo, error) {
+	undo, err := machineguard.Install(ctx, executable, domain, units)
 	if undo == nil {
 		return nil, err
 	}
@@ -111,8 +112,8 @@ func validateMachineGuardStatus(status machineguard.RuntimeStatus) error {
 	// TrustReady may be false while browser trust awaits approval; the guard is usable.
 	return nil
 }
-func installMachineGuard(ctx context.Context, request Request) error {
-	undo, err := installMachineGuardReversible(ctx, request)
+func installMachineGuard(ctx context.Context, request Request, units map[string]string) error {
+	undo, err := installMachineGuardReversible(ctx, request, units)
 	finishMachineGuard(ctx, undo, nil)
 	return err
 }
@@ -120,7 +121,7 @@ func installMachineGuard(ctx context.Context, request Request) error {
 // installMachineGuardReversible installs the guard when the existing one is not ready and returns the
 // Undo that restores the replaced guard (nil when the existing guard was kept). An update restores it
 // if the update fails after this step, so no component is left on the new version.
-func installMachineGuardReversible(ctx context.Context, request Request) (guardUndo, error) {
+func installMachineGuardReversible(ctx context.Context, request Request, units map[string]string) (guardUndo, error) {
 	if ctx == nil {
 		return nil, ErrInvalidRequest
 	}
@@ -157,7 +158,7 @@ func installMachineGuardReversible(ctx context.Context, request Request) (guardU
 		domain = found
 	}
 	// A ready guard whose browser trust awaits approval is installed successfully.
-	undo, err := installMissingMachineGuard(ctx, request.Executable, domain)
+	undo, err := installMissingMachineGuard(ctx, request.Executable, domain, units)
 	if err != nil && !errors.Is(err, machineguard.ErrTrustPending) {
 		return nil, hostInstallFailure("install Paperboat machine guard", readyErr, err)
 	}

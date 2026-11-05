@@ -12,6 +12,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
 // candidateOutputLimit bounds what a candidate build reports back to the helper.
@@ -29,7 +32,9 @@ var runCandidate = func(ctx context.Context, executable string, args []string, r
 	command.Stdin = bytes.NewReader(body)
 	var stdout bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, os.Stderr
-	return stdout.Bytes(), command.Run()
+	// Run first: stdout.Bytes() in the same return statement is read before Run executes.
+	err = command.Run()
+	return stdout.Bytes(), err
 }
 
 // stageCandidateByExecutable has the candidate's own executable (its verified pin)
@@ -75,22 +80,31 @@ func candidatePin(request Request) (string, error) {
 	return pin, request.Source.Verify(pin)
 }
 
-// CandidateRender is a build's own render of its hostd unit: during an update
-// (maintenance pending) and once the update commits.
+// CandidateRender is a build's own render of every unit an install or update
+// writes for it: hostd (during an update and once committed), the updater, the
+// privileged host service and the machine guard. The installing process may be
+// another build, so it installs these bytes instead of rendering them itself.
 type CandidateRender struct {
-	HostdPending []byte `json:"hostd_pending"`
-	Hostd        []byte `json:"hostd"`
+	HostdPending []byte            `json:"hostd_pending,omitempty"`
+	Hostd        []byte            `json:"hostd,omitempty"`
+	Updater      []byte            `json:"updater,omitempty"`
+	Host         []byte            `json:"host,omitempty"`
+	Guard        map[string]string `json:"guard"`
 }
 
-// renderOutputLimit bounds a candidate's render report (two units, base64).
-const renderOutputLimit = 512 << 10
+// renderOutputLimit bounds a candidate's render report (several units, base64).
+const renderOutputLimit = 1 << 20
 
-// RenderCandidate runs in the build being installed and renders its own hostd unit.
+// RenderCandidate runs in the build being installed and renders its own units. A
+// first install that is not enrolled yet writes only the machine guard.
 func RenderCandidate(request Request) (CandidateRender, error) {
+	render := CandidateRender{Guard: machineguard.Units()}
+	if request.EnrollmentPending {
+		return render, nil
+	}
 	paths := platformPaths(request.UID)
-	var render CandidateRender
 	for _, pending := range []bool{true, false} {
-		hostd, _, err := installersWithMaintenance(request, paths, true, pending, nil)
+		hostd, updater, err := installersWithMaintenance(request, paths, true, pending, nil)
 		if err != nil {
 			return CandidateRender{}, err
 		}
@@ -98,21 +112,23 @@ func RenderCandidate(request Request) (CandidateRender, error) {
 		if err != nil {
 			return CandidateRender{}, err
 		}
-		if pending {
-			render.HostdPending = body
-		} else {
+		if !pending {
 			render.Hostd = body
+			if render.Updater, err = updater.Render(); err != nil {
+				return CandidateRender{}, err
+			}
+			continue
 		}
+		render.HostdPending = body
 	}
-	return render, nil
-}
-
-func renderCandidateByExecutable(ctx context.Context, request Request) (CandidateRender, error) {
-	pin, err := candidatePin(request)
+	host, err := hostInstallerWithMissing(request, paths, true)
 	if err != nil {
 		return CandidateRender{}, err
 	}
-	return renderCandidateWith(ctx, pin, request)
+	if render.Host, err = host.Render(); err != nil {
+		return CandidateRender{}, err
+	}
+	return render, nil
 }
 
 func renderCandidateWith(ctx context.Context, executable string, request Request) (CandidateRender, error) {
@@ -124,8 +140,33 @@ func renderCandidateWith(ctx context.Context, executable string, request Request
 	if err := json.NewDecoder(io.LimitReader(bytes.NewReader(out), renderOutputLimit)).Decode(&render); err != nil {
 		return CandidateRender{}, errors.Join(ErrInvalidRequest, err)
 	}
-	if len(render.Hostd) == 0 || len(render.HostdPending) == 0 {
+	if len(render.Guard) == 0 || !request.EnrollmentPending && (len(render.Hostd) == 0 || len(render.HostdPending) == 0 || len(render.Updater) == 0 || len(render.Host) == 0) {
 		return CandidateRender{}, ErrInvalidRequest
 	}
 	return render, nil
+}
+
+// candidateInstallers renders the candidate's units with its own executable and
+// builds the installers that write them (privileged host, hostd, updater), plus the
+// candidate's guard units.
+func candidateInstallers(ctx context.Context, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, guard map[string]string, err error) {
+	pin, err := candidatePin(request)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return candidateInstallersWith(ctx, pin, request, paths, maintenancePending)
+}
+
+func candidateInstallersWith(ctx context.Context, pin string, request Request, paths installPaths, maintenancePending bool) (host, hostd, updater *service.Installer, guard map[string]string, err error) {
+	rendered, err := renderCandidateWith(ctx, pin, request)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if host, err = renderedHostInstaller(request, paths, true, rendered.Host); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if hostd, updater, err = installersWithMaintenance(request, paths, true, maintenancePending, &rendered); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return host, hostd, updater, rendered.Guard, nil
 }

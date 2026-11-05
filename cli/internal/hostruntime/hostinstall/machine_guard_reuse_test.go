@@ -61,16 +61,16 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		return nil
 	}
 	prepareMachineGuardForInstall = func() error { prepared++; return nil }
-	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) { installed++; return nil, nil }
+	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) { installed++; return nil, nil }
 	request := Request{Executable: executable, Source: source}
-	if err := installMachineGuard(context.Background(), request); err != nil {
+	if err := installMachineGuard(context.Background(), request, nil); err != nil {
 		t.Fatal(err)
 	}
 	if probed != 1 || prepared != 0 || installed != 0 {
 		t.Fatal("ready shared guard was mutated")
 	}
 	request.Source.SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
-	if err := installMachineGuard(context.Background(), request); err == nil {
+	if err := installMachineGuard(context.Background(), request, nil); err == nil {
 		t.Fatal("changed supplied bytes accepted")
 	}
 	if probed != 1 || prepared != 0 || installed != 0 {
@@ -78,7 +78,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 	}
 	request.Source = source
 	existingMachineGuardReady = func(context.Context, string) error { probed++; return errors.New("unavailable") }
-	if err := installMachineGuard(context.Background(), request); err != nil {
+	if err := installMachineGuard(context.Background(), request, nil); err != nil {
 		t.Fatal(err)
 	}
 	if probed != 2 || prepared != 1 || installed != 1 {
@@ -86,7 +86,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := installMachineGuard(ctx, request); !errors.Is(err, context.Canceled) {
+	if err := installMachineGuard(ctx, request, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation was not preserved")
 	}
 	if probed != 2 || prepared != 1 || installed != 1 {

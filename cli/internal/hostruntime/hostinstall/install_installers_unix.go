@@ -29,10 +29,17 @@ func installersWithMissing(request Request, paths installPaths, allowMissingExec
 	return installersWithMaintenance(request, paths, allowMissingExecutable, false, nil)
 }
 
-// installersWithMaintenance builds the hostd and updater installers; hostdRendered
-// is the candidate build's own render of its hostd unit when the caller is another
-// build (a signed update's helper), nil to render it here.
-func installersWithMaintenance(request Request, paths installPaths, allowMissingExecutable, maintenancePending bool, hostdRendered []byte) (*service.Installer, *service.Installer, error) {
+// installersWithMaintenance builds the hostd and updater installers; rendered is
+// the installed build's own render of its units when the caller may be another
+// build (candidateInstallers), nil to render them here.
+func installersWithMaintenance(request Request, paths installPaths, allowMissingExecutable, maintenancePending bool, rendered *CandidateRender) (*service.Installer, *service.Installer, error) {
+	var hostdRendered, updaterRendered []byte
+	if rendered != nil {
+		hostdRendered, updaterRendered = rendered.Hostd, rendered.Updater
+		if maintenancePending {
+			hostdRendered = rendered.HostdPending
+		}
+	}
 	layout, err := componentLayout(paths)
 	if err != nil {
 		return nil, nil, err
@@ -78,7 +85,7 @@ func installersWithMaintenance(request Request, paths installPaths, allowMissing
 	updaterConfig := service.ComponentConfig{
 		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID,
 		HostdTokenFile: paths.hostdToken, ReleaseRepository: request.Artifact.RepositoryURL, MachineID: request.UserMachineID, Source: request.Source,
-		HealthURL: "http://" + request.HelperListenAddress + "/healthz", Controller: updaterController,
+		HealthURL: "http://" + request.HelperListenAddress + "/healthz", Controller: updaterController, Rendered: updaterRendered,
 	}
 	var updater *service.Installer
 	if allowMissingExecutable {
@@ -198,6 +205,11 @@ func hostInstaller(request Request, paths installPaths) (*service.Installer, err
 }
 
 func hostInstallerWithMissing(request Request, paths installPaths, allowMissingExecutable bool) (*service.Installer, error) {
+	return renderedHostInstaller(request, paths, allowMissingExecutable, nil)
+}
+
+// renderedHostInstaller: rendered as in installersWithMaintenance.
+func renderedHostInstaller(request Request, paths installPaths, allowMissingExecutable bool, rendered []byte) (*service.Installer, error) {
 	instance := "u" + strconv.Itoa(request.UID)
 	hostController := service.Controller(service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboat-runtime-privileged-" + instance + ".service"})
 	rootGroup := "root"
@@ -213,7 +225,7 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 		User: "root", Group: rootGroup, Arguments: []string{
 			"daemon", "__runtime-host-service", "--uid", strconv.Itoa(request.UID), "--gid", strconv.Itoa(request.GID),
 			"--listen-address", request.HelperListenAddress,
-		}, Controller: hostController,
+		}, Controller: hostController, Rendered: rendered,
 	}
 	var host *service.Installer
 	var err error
