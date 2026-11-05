@@ -35,6 +35,15 @@ const UpdateNotReadyExitCode = 79
 // across Unix elevation.
 const NoPendingInstallationExitCode = 80
 
+// ServiceUsageExitCode (sysexits EX_USAGE) is a privileged service asked for an operation it does not
+// have: a newer pb driving an older build. The caller maps it to a typed error; it never parses output.
+const ServiceUsageExitCode = 64
+
+// serviceUsageError is an unknown privileged service operation or argument.
+type serviceUsageError struct{ message string }
+
+func (e serviceUsageError) Error() string { return e.message }
+
 const usage = `pb daemon internal host runtime.
 
 Usage:
@@ -253,7 +262,7 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 	if unowned == nil {
 		return code
 	}
-	if (code == LegacyCarrierRunningExitCode && !outputFailed && runtimeCausesOnly(err, hostinstall.ErrLegacyCarrierRunning)) || (code == 2 && !outputFailed) || fault.Outcome == "canceled" || fault.Outcome == "rejected" || operation == "doctor" {
+	if (code == LegacyCarrierRunningExitCode && !outputFailed && runtimeCausesOnly(err, hostinstall.ErrLegacyCarrierRunning)) || (code == 2 && !outputFailed) || (code == ServiceUsageExitCode && !outputFailed) || fault.Outcome == "canceled" || fault.Outcome == "rejected" || operation == "doctor" {
 		observeRuntimeFailure(ctx, operation, err)
 	} else {
 		errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", operation, "command", "unexpected_cli_failure", unowned)
@@ -281,6 +290,9 @@ func serviceFailureExitCode(err error) int {
 	}
 	if errors.Is(err, hostinstall.ErrNoPendingInstallation) {
 		return NoPendingInstallationExitCode
+	}
+	if _, usage := err.(serviceUsageError); usage {
+		return ServiceUsageExitCode
 	}
 	return 1
 }
