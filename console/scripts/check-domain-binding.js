@@ -52,7 +52,7 @@
   if (!domain) return steps
   pass("hostname is not bound yet", !(await mine()))
 
-  button("Add")?.click()
+  ;(await until(() => button("Add")))?.click() // the tunnel page renders Add after its first fetch
   const yours = await until(() => button("Your domain", dialog() ?? main()))
   yours?.click()
   await sleep(500)
