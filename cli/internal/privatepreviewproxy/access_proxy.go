@@ -65,6 +65,7 @@ type AccessProxyConfig struct {
 	ListenPort         uint16
 	Source             AccessSource
 	MaximumConnections int
+	gate               *peerGate // tests inject a fake owner lookup
 	MaximumRoutes      int
 	HeaderTimeout      time.Duration
 	IdleTimeout        time.Duration
@@ -87,9 +88,7 @@ type AccessProxy struct {
 	done       chan error
 
 	snapshotGate chan struct{}
-	peerOwner    func(net.Conn) (uint32, error)
-	ownerUID     uint32
-	refused      refusals
+	gate         *peerGate
 	pacMu        sync.RWMutex
 	pacBodies    map[string][]byte
 	mu           sync.Mutex
@@ -189,7 +188,9 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 		openWait: config.OpenTimeout, runContext: runContext, cancel: cancel, done: make(chan error, 1),
 		active: make(map[io.Closer]struct{}), snapshotGate: make(chan struct{}, 1),
 	}
-	proxy.peerOwner, proxy.ownerUID = defaultPeerOwner()
+	if proxy.gate = config.gate; proxy.gate == nil {
+		proxy.gate = newPeerGate()
+	}
 	address := listener.Addr().String()
 	proxy.ProxyAddress = address
 	proxy.PACURL = "http://" + address + "/proxy.pac"

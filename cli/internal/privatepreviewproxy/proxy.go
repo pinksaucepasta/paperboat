@@ -19,6 +19,7 @@ type Config struct {
 	ListenAddress      string
 	Dial               Dial
 	MaximumConnections int
+	gate               *peerGate // tests inject a fake owner lookup
 }
 
 type Proxy struct {
@@ -28,6 +29,7 @@ type Proxy struct {
 	permits  chan struct{}
 	cancel   context.CancelFunc
 	done     chan error
+	gate     *peerGate
 	mu       sync.Mutex
 	active   map[io.Closer]struct{}
 	once     sync.Once
@@ -62,12 +64,19 @@ func Start(ctx context.Context, config Config) (*Proxy, error) {
 			listenNetwork = "tcp6"
 		}
 	}
+	gate := config.gate
+	if gate == nil {
+		gate = newPeerGate()
+	}
+	if listenNetwork == "tcp6" && gate.owner != nil {
+		return nil, ErrLoopbackUnrestricted
+	}
 	listener, err := net.Listen(listenNetwork, listenAddress)
 	if err != nil {
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	proxy := &Proxy{URL: "http://" + listener.Addr().String(), listener: listener, dial: config.Dial, permits: make(chan struct{}, config.MaximumConnections), cancel: cancel, done: make(chan error, 1), active: make(map[io.Closer]struct{})}
+	proxy := &Proxy{URL: "http://" + listener.Addr().String(), listener: listener, dial: config.Dial, permits: make(chan struct{}, config.MaximumConnections), cancel: cancel, done: make(chan error, 1), active: make(map[io.Closer]struct{}), gate: gate}
 	go proxy.run(runCtx)
 	go func() {
 		<-runCtx.Done()
@@ -124,6 +133,10 @@ func (p *Proxy) run(ctx context.Context) {
 			}
 			result = err
 			return
+		}
+		if !p.gate.allow(local) {
+			_ = local.Close() // before any stream is opened for another user
+			continue
 		}
 		select {
 		case p.permits <- struct{}{}:

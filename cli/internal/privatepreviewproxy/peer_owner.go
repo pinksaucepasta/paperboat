@@ -9,9 +9,10 @@ import (
 	"sync"
 )
 
-// The proxy and its PAC are one OS user's: a loopback port is open to every local user, so each connection must
-// come from the user that runs this hostd. The owner is found from the kernel by the connection's tuple, with the
-// guard's attribution (machineguard.ConnectionOwnerUID); anything else is refused and counted by reason.
+// The proxies are one OS user's: a loopback port is open to every local user, and each connection opens a
+// stream under hostd's machine session. So every connection must come from the user that runs this hostd. The
+// owner is found from the kernel by the connection's tuple, with the guard's attribution
+// (machineguard.ConnectionOwnerUID); anything else is refused and counted by reason.
 
 const (
 	refusalOtherUser    = "other_user"
@@ -21,10 +22,66 @@ const (
 // platformPeerOwner is nil where the platform has no attribution (see peer_other.go).
 var platformPeerOwner func(net.Conn) (uint32, error)
 
+var errOtherUser = errors.New("connection is not from the owning OS user")
+
+// ErrLoopbackUnrestricted refuses a listener whose clients cannot be attributed to a user (IPv6 loopback).
+var ErrLoopbackUnrestricted = errors.New("this loopback address cannot be restricted to your OS user; use 127.0.0.1")
+
+type peerGate struct {
+	owner   func(net.Conn) (uint32, error)
+	uid     uint32
+	mu      sync.Mutex
+	refused map[string]uint64
+}
+
+func newPeerGate() *peerGate {
+	return &peerGate{owner: platformPeerOwner, uid: uint32(os.Geteuid())}
+}
+
+// allow reports whether conn's peer is the owning user, counting a refusal by reason.
+func (g *peerGate) allow(conn net.Conn) bool {
+	if g.owner == nil {
+		return true
+	}
+	uid, err := g.owner(conn)
+	reason := ""
+	switch {
+	case err != nil:
+		reason = peerRefusalReason(err)
+	case uid != g.uid:
+		reason = refusalOtherUser
+	default:
+		return true
+	}
+	g.mu.Lock()
+	if g.refused == nil {
+		g.refused = map[string]uint64{}
+	}
+	g.refused[reason]++
+	g.mu.Unlock()
+	return false
+}
+
+func (g *peerGate) refusals() map[string]uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make(map[string]uint64, len(g.refused))
+	for reason, n := range g.refused {
+		out[reason] = n
+	}
+	return out
+}
+
+// Refusals reports the connections refused so far, by reason.
+func (p *AccessProxy) Refusals() map[string]uint64 { return p.gate.refusals() }
+
+// Refusals reports the connections refused so far, by reason.
+func (p *Proxy) Refusals() map[string]uint64 { return p.gate.refusals() }
+
 type peerCheck struct {
-	conn net.Conn
-	once sync.Once
-	err  error
+	conn    net.Conn
+	once    sync.Once
+	allowed bool
 }
 
 type peerCheckKey struct{}
@@ -33,57 +90,12 @@ func peerConnContext(ctx context.Context, conn net.Conn) context.Context {
 	return context.WithValue(ctx, peerCheckKey{}, &peerCheck{conn: conn})
 }
 
-// refusals counts refused connections by a fixed set of reasons.
-type refusals struct {
-	mu     sync.Mutex
-	counts map[string]uint64
-}
-
-func (r *refusals) add(reason string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.counts == nil {
-		r.counts = map[string]uint64{}
-	}
-	r.counts[reason]++
-}
-
-// Refusals reports the connections refused so far, by reason.
-func (p *AccessProxy) Refusals() map[string]uint64 {
-	p.refused.mu.Lock()
-	defer p.refused.mu.Unlock()
-	out := make(map[string]uint64, len(p.refused.counts))
-	for reason, n := range p.refused.counts {
-		out[reason] = n
-	}
-	return out
-}
-
-// peerAllowed decides once per connection whether its peer is the owning user.
+// peerAllowed decides once per HTTP connection whether its peer is the owning user.
 func (p *AccessProxy) peerAllowed(request *http.Request) bool {
-	if p.peerOwner == nil {
-		return true
-	}
 	check, _ := request.Context().Value(peerCheckKey{}).(*peerCheck)
 	if check == nil {
-		return false
+		return p.gate.owner == nil
 	}
-	check.once.Do(func() {
-		uid, err := p.peerOwner(check.conn)
-		switch {
-		case err != nil:
-			p.refused.add(peerRefusalReason(err))
-			check.err = err
-		case uid != p.ownerUID:
-			p.refused.add(refusalOtherUser)
-			check.err = errOtherUser
-		}
-	})
-	return check.err == nil
-}
-
-var errOtherUser = errors.New("connection is not from the owning OS user")
-
-func defaultPeerOwner() (func(net.Conn) (uint32, error), uint32) {
-	return platformPeerOwner, uint32(os.Geteuid())
+	check.once.Do(func() { check.allowed = p.gate.allow(check.conn) })
+	return check.allowed
 }

@@ -89,6 +89,9 @@ func TestProxyPreservesExactIPv6LoopbackListener(t *testing.T) {
 	if err != nil {
 		t.Skip("IPv6 loopback unavailable")
 	}
+	if platformPeerOwner != nil {
+		t.Skip("an IPv6 loopback listener cannot be restricted to the owning user here (TestPrivateTCPProxyRefusesAnIPv6ListenerItCannotRestrict)")
+	}
 	_ = probe.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
