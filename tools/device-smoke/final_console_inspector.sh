@@ -10,6 +10,10 @@ DOCKER=${SMOKE_CT_DOCKER:-docker}
 X() { ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT bash -lc $(printf '%q' "$*")"; }
 FAILED=0
 ID= PHOST=
+started() { # started NAME: a fresh preview for step NAME, or a FAIL line for it (never a silent skip)
+  new_preview && return 0
+  echo "FAIL $1: could not start a preview"; FAILED=1; return 1
+}
 new_preview() { # new_preview: a fresh background preview of a marker origin; sets ID and PHOST
   X 'curl -fs -o /dev/null http://127.0.0.1:8080/ || (nohup python3 -m http.server 8080 >/dev/null 2>&1 &) ; sleep 1' >/dev/null
   local json
@@ -28,9 +32,9 @@ step() { # step NAME COMMAND...
 new_preview || { echo "FAIL inspector-page: could not start a preview"; exit 1; }
 step inspector-page node "$ROOT/console/scripts/run-console-check.mjs" "$ROOT/console/scripts/check-preview-inspector.js" "/previews/$ID/inspect" "{\"__previewHost\":\"$PHOST\"}"
 stop_preview
-new_preview && step inspector-hold env HOLD=${HOLD:-300} node "$ROOT/console/scripts/check-preview-inspector-hold.mjs" "$ID" "$PHOST"
+started inspector-hold && step inspector-hold env HOLD=${HOLD:-300} node "$ROOT/console/scripts/check-preview-inspector-hold.mjs" "$ID" "$PHOST"
 stop_preview
-new_preview && step inspector-restart env \
+started inspector-restart && step inspector-restart env \
   RESTART_CMD="ssh $HOST '$DOCKER exec $CT systemctl restart \"paperboat-carrier-u1000-*.service\"'" \
   STOP_CMD="ssh $HOST \"$DOCKER exec -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT .local/bin/pb preview stop <id> --json\" >/dev/null" \
   node "$ROOT/console/scripts/check-preview-inspector-restart.mjs" "$ID" "$PHOST"
