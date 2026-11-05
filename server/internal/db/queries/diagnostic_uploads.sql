@@ -6,12 +6,12 @@ FOR UPDATE;
 -- name: CreateDiagnosticUploadIntent :one
 INSERT INTO diagnostic_upload_intents
   (id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id,
-   object_key, expected_bytes, sha256, categories, expires_at, retain_until, created_at)
+   object_key, expected_bytes, sha256, categories, failure_references, expires_at, retain_until, created_at)
 SELECT
   sqlc.arg(id), sqlc.arg(user_id), sqlc.arg(cli_client_session_id), sqlc.arg(operation_key),
    sqlc.arg(request_hash), sqlc.arg(correlation_id), sqlc.arg(object_key),
-   sqlc.arg(expected_bytes), sqlc.arg(sha256), sqlc.arg(categories), sqlc.arg(expires_at),
-   sqlc.arg(retain_until), sqlc.arg(created_at)
+   sqlc.arg(expected_bytes), sqlc.arg(sha256), sqlc.arg(categories), sqlc.arg(failure_references)::text[],
+   sqlc.arg(expires_at), sqlc.arg(retain_until), sqlc.arg(created_at)
 FROM cli_client_sessions
 WHERE id = sqlc.arg(cli_client_session_id) AND user_id = sqlc.arg(user_id) AND state = 'active'
 RETURNING *;

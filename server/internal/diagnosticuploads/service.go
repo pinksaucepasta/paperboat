@@ -42,7 +42,13 @@ type CreateRequest struct {
 	Bytes              int64
 	SHA256             string
 	Categories         []string
+	// FailureReferences are the support references of the failures the bundle carries, listed by the client
+	// (never parsed from bundle text): a lookup by any of them finds the upload.
+	FailureReferences []string
 }
+
+// MaximumFailureReferences bounds the failure references one bundle is indexed under.
+const MaximumFailureReferences = 64
 
 type Intent struct {
 	ID                 string
@@ -264,6 +270,11 @@ func normalizeRequest(request CreateRequest) (CreateRequest, [32]byte, error) {
 	request.OperationKey = strings.TrimSpace(request.OperationKey)
 	request.CorrelationID = strings.TrimSpace(request.CorrelationID)
 	request.SHA256 = strings.ToLower(strings.TrimSpace(request.SHA256))
+	references, ok := normalizeFailureReferences(request.FailureReferences, request.CorrelationID)
+	if !ok {
+		return CreateRequest{}, [32]byte{}, ErrInvalid
+	}
+	request.FailureReferences = references
 	if !validIdentifier(request.UserID, 1, 128) || !validIdentifier(request.CLIClientSessionID, 1, 128) ||
 		len(request.OperationKey) < 16 || len(request.OperationKey) > 200 || request.Bytes < 1 || request.Bytes > MaximumBundleBytes ||
 		!supportreport.ValidReference(request.CorrelationID) ||
@@ -277,11 +288,30 @@ func normalizeRequest(request CreateRequest) (CreateRequest, [32]byte, error) {
 		Bytes              int64    `json:"bytes"`
 		SHA256             string   `json:"sha256"`
 		Categories         []string `json:"categories"`
-	}{"paperboat.diagnostic-upload-intent-request/v1", request.CLIClientSessionID, request.CorrelationID, request.Bytes, request.SHA256, request.Categories})
+		FailureReferences  []string `json:"failure_references"`
+	}{"paperboat.diagnostic-upload-intent-request/v1", request.CLIClientSessionID, request.CorrelationID, request.Bytes, request.SHA256, request.Categories, request.FailureReferences})
 	if err != nil {
 		return CreateRequest{}, [32]byte{}, err
 	}
 	return request, sha256.Sum256(canonical), nil
+}
+
+// normalizeFailureReferences keeps valid, distinct references other than the upload's own, in order.
+func normalizeFailureReferences(references []string, own string) ([]string, bool) {
+	if len(references) > MaximumFailureReferences {
+		return nil, false
+	}
+	out := make([]string, 0, len(references))
+	for _, reference := range references {
+		reference = strings.TrimSpace(reference)
+		if !supportreport.ValidReference(reference) {
+			return nil, false
+		}
+		if reference != own && !slices.Contains(out, reference) {
+			out = append(out, reference)
+		}
+	}
+	return out, true
 }
 
 func validateAuthority(authority UploadAuthority) error {

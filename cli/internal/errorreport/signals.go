@@ -13,6 +13,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -482,6 +483,9 @@ func sanitizeTransaction(e *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 
 func environment() string {
 	v := os.Getenv("PB_SENTRY_ENVIRONMENT")
+	if v == "" {
+		v = buildinfo.DefaultSentryEnvironment
+	}
 	if v == "" {
 		return "production"
 	}

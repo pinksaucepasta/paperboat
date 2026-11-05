@@ -22,6 +22,8 @@ type DiagnosticUploadIntentRequest struct {
 	Bytes         int64    `json:"bytes"`
 	SHA256        string   `json:"sha256"`
 	Categories    []string `json:"categories"`
+	// FailureReferences index the upload under the support references of the failures it carries.
+	FailureReferences []string `json:"failure_references,omitempty"`
 }
 
 type DiagnosticUploadIntent struct {

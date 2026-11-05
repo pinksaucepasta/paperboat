@@ -50,9 +50,11 @@ func (s *localStub) CreateBugreport(context.Context) (diagnostics.Bundle, error)
 type serverStub struct {
 	uploaded []byte
 	fail     error
+	intent   api.DiagnosticUploadIntentRequest
 }
 
 func (s *serverStub) CreateDiagnosticUploadIntent(_ context.Context, _ string, request api.DiagnosticUploadIntentRequest) (api.DiagnosticUploadIntent, error) {
+	s.intent = request
 	if s.fail != nil {
 		return api.DiagnosticUploadIntent{}, s.fail
 	}
@@ -87,6 +89,21 @@ func TestWorkflowRecordsAndUploadsExactBundle(t *testing.T) {
 	}
 	if result.Validate() != nil || !result.Recorded || !result.Uploaded || result.ServerCorrelationID != result.CorrelationID || !slices.Equal(local.markers, []string{"start", "end"}) || !bytes.Equal(server.uploaded, content) || shown.SHA256 == "" || prompt.Len() == 0 {
 		t.Fatalf("result=%#v markers=%v uploaded=%q shown=%#v prompt=%q", result, local.markers, server.uploaded, shown, prompt.String())
+	}
+}
+
+// A client-only failure printed reference X; `pb bugreport --upload` then asks the server to index the bundle
+// under X too, so a support lookup of X finds it (the server half is TestSQLRepositoryDiagnosticUploadLifecycle).
+func TestUploadIndexesTheBundleUnderItsFailureReferences(t *testing.T) {
+	const clientFailure = "support_598bfe61-4113-4390-b17c-a7a0c0bc1858"
+	bundle := testBundle(t, []byte("PK bundle with a failure record"))
+	bundle.FailureReferences = []string{clientFailure}
+	server := &serverStub{}
+	if _, err := Run(context.Background(), Options{Upload: true, Input: bytes.NewBuffer(nil), Prompt: io.Discard, Local: &localStub{bundle: bundle}, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(server.intent.FailureReferences, []string{clientFailure}) {
+		t.Fatalf("upload intent failure references %q, want %q", server.intent.FailureReferences, clientFailure)
 	}
 }
 

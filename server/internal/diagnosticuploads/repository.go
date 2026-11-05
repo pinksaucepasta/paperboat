@@ -42,7 +42,7 @@ func (r *SQLRepository) Reserve(ctx context.Context, request CreateRequest, hash
 			ID: proposed.ID, UserID: proposed.UserID, CLIClientSessionID: proposed.CLIClientSessionID,
 			OperationKey: proposed.OperationKey, RequestHash: hash[:], CorrelationID: proposed.CorrelationID,
 			ObjectKey: proposed.ObjectKey, ExpectedBytes: proposed.Bytes, Sha256: proposed.SHA256[:],
-			Categories: proposed.Categories, ExpiresAt: proposed.ExpiresAt, RetainUntil: proposed.RetainUntil, CreatedAt: proposed.CreatedAt,
+			Categories: proposed.Categories, FailureReferences: request.FailureReferences, ExpiresAt: proposed.ExpiresAt, RetainUntil: proposed.RetainUntil, CreatedAt: proposed.CreatedAt,
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -79,7 +79,7 @@ func (r *SQLRepository) Get(ctx context.Context, userID, intentID string) (Inten
 
 func (r *SQLRepository) UploadedForCorrelation(ctx context.Context, userID, correlationID string) (bool, error) {
 	var found bool
-	err := r.store.SQL().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM paperboat.diagnostic_upload_intents WHERE user_id=$1 AND correlation_id=$2 AND state='uploaded')`, userID, correlationID).Scan(&found)
+	err := r.store.SQL().QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM paperboat.diagnostic_upload_intents WHERE user_id=$1 AND (correlation_id=$2 OR $2 = ANY(failure_references)) AND state='uploaded')`, userID, correlationID).Scan(&found)
 	return found, err
 }
 

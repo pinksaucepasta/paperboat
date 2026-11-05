@@ -252,3 +252,30 @@ func deterministicRandom() func([]byte) error {
 		return nil
 	}
 }
+
+// The failure references a client lists are validated (at most 64, each a valid reference), deduplicated,
+// exclude the upload's own reference, and are part of the idempotent request.
+func TestCreateRequestFailureReferences(t *testing.T) {
+	request := validRequest()
+	other := "support_11111111-2222-4333-8444-555555555555"
+	request.FailureReferences = []string{other, request.CorrelationID, " " + other + " "}
+	normalized, digest, err := normalizeRequest(request)
+	if err != nil || len(normalized.FailureReferences) != 1 || normalized.FailureReferences[0] != other {
+		t.Fatalf("normalized %q err %v", normalized.FailureReferences, err)
+	}
+	request.FailureReferences = nil
+	if _, without, _ := normalizeRequest(request); without == digest {
+		t.Fatal("failure references are not part of the idempotent request")
+	}
+	request.FailureReferences = []string{"free text"}
+	if _, _, err := normalizeRequest(request); err == nil {
+		t.Fatal("an invalid failure reference was accepted")
+	}
+	request.FailureReferences = make([]string, MaximumFailureReferences+1)
+	for i := range request.FailureReferences {
+		request.FailureReferences[i] = other
+	}
+	if _, _, err := normalizeRequest(request); err == nil {
+		t.Fatal("more than MaximumFailureReferences were accepted")
+	}
+}

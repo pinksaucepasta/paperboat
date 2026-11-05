@@ -14,6 +14,10 @@ var Distribution = "custom"
 var DefaultSentryDSN = ""
 var DefaultSentryRelease = ""
 
+// DefaultSentryEnvironment tags reports from this build; empty is production. Dev device builds stamp "dev"
+// with the same DSN, so test machines report through the release code path, kept apart by environment.
+var DefaultSentryEnvironment = ""
+
 // WindowsPublisher is the required Authenticode signer subject fragment for
 // Windows release components. Release builds replace it with the legal
 // publisher name encoded in the signing certificate.

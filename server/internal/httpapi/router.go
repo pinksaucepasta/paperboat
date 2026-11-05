@@ -808,7 +808,7 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		if opts.DiagnosticUploads != nil {
 			uploadLookup = opts.DiagnosticUploads
 		}
-		mux.Handle("GET /v1/admin/support/{reference}", operatorRoute(opts, supportLookup(opts.SupportReports, nil, true, opts.Config.Reporting.IssueURL)))
+		mux.Handle("GET /v1/admin/support/{reference}", operatorRoute(opts, supportLookup(opts.SupportReports, uploadLookup, true, opts.Config.Reporting.IssueURL)))
 		mux.Handle("GET /v1/support/{reference}", requireAnyAuth(opts.Auth, opts.DeviceAuth, supportLookup(opts.SupportReports, uploadLookup, false, "")))
 	}
 	userAuth := func(scope string, next http.Handler) http.Handler {

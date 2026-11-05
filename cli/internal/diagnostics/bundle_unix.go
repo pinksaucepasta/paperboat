@@ -35,11 +35,21 @@ type Bundle struct {
 	Path        string    `json:"path"`
 	Bytes       int64     `json:"bytes"`
 	Categories  []string  `json:"categories"`
+	// FailureReferences are the support references of the failure records in the bundle (failureReferences).
+	FailureReferences []string `json:"failure_references,omitempty"`
 }
 
 func (b Bundle) Validate() error {
 	if b.Schema != BundleSchemaV1 || !supportref.Valid(b.Correlation) || b.CreatedAt.IsZero() || b.CreatedAt.Location() != time.UTC || !filepath.IsAbs(b.Path) || filepath.Clean(b.Path) != b.Path || b.Bytes <= 0 || b.Bytes > MaximumBundleBytes || len(b.Categories) != 4 {
 		return ErrInvalid
+	}
+	if len(b.FailureReferences) > MaximumBundleFailureReferences {
+		return ErrInvalid
+	}
+	for _, reference := range b.FailureReferences {
+		if !supportref.Valid(reference) {
+			return ErrInvalid
+		}
 	}
 	want := []string{"manifest", "recent_events", "redacted_events", "status"}
 	for index := range want {
@@ -105,7 +115,8 @@ func CreateBundle(ctx context.Context, config BundleConfig) (Bundle, error) {
 	if storageErr != nil {
 		persistenceError = errorreport.ProjectFault(ctx, "pb", "bugreport", "diagnostic_storage", "diagnostic_storage_unavailable", storageErr).Cause
 	}
-	recent, err := marshalEvents(config.Recorder.Recent())
+	recentEvents := config.Recorder.Recent()
+	recent, err := marshalEvents(recentEvents)
 	if err != nil {
 		return Bundle{}, err
 	}
@@ -144,7 +155,8 @@ func CreateBundle(ctx context.Context, config BundleConfig) (Bundle, error) {
 		_ = removeDiagnosticFile(finalPath, owner)
 		return Bundle{}, ErrInvalid
 	}
-	return Bundle{Schema: BundleSchemaV1, Correlation: correlation, CreatedAt: createdAt, Path: finalPath, Bytes: info.Size(), Categories: categories}, nil
+	return Bundle{Schema: BundleSchemaV1, Correlation: correlation, CreatedAt: createdAt, Path: finalPath, Bytes: info.Size(), Categories: categories,
+		FailureReferences: failureReferences(events, recentEvents)}, nil
 }
 
 type boundedBundleBuffer struct {

@@ -16,7 +16,7 @@ UPDATE diagnostic_upload_intents
 SET state = 'uploaded', uploaded_at = $1, object_etag = $2
 WHERE id = $3 AND user_id = $4 AND state = 'pending'
   AND expires_at > $1
-RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag
+RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references
 `
 
 type CompleteDiagnosticUploadIntentParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) CompleteDiagnosticUploadIntent(ctx context.Context, arg Comple
 		&i.CreatedAt,
 		&i.UploadedAt,
 		&i.ObjectEtag,
+		&i.FailureReferences,
 	)
 	return i, err
 }
@@ -58,15 +59,15 @@ func (q *Queries) CompleteDiagnosticUploadIntent(ctx context.Context, arg Comple
 const createDiagnosticUploadIntent = `-- name: CreateDiagnosticUploadIntent :one
 INSERT INTO diagnostic_upload_intents
   (id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id,
-   object_key, expected_bytes, sha256, categories, expires_at, retain_until, created_at)
+   object_key, expected_bytes, sha256, categories, failure_references, expires_at, retain_until, created_at)
 SELECT
   $1, $2, $3, $4,
    $5, $6, $7,
-   $8, $9, $10, $11,
-   $12, $13
+   $8, $9, $10, $11::text[],
+   $12, $13, $14
 FROM cli_client_sessions
 WHERE id = $3 AND user_id = $2 AND state = 'active'
-RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag
+RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references
 `
 
 type CreateDiagnosticUploadIntentParams struct {
@@ -80,6 +81,7 @@ type CreateDiagnosticUploadIntentParams struct {
 	ExpectedBytes      int64
 	Sha256             []byte
 	Categories         []string
+	FailureReferences  []string
 	ExpiresAt          time.Time
 	RetainUntil        time.Time
 	CreatedAt          time.Time
@@ -97,6 +99,7 @@ func (q *Queries) CreateDiagnosticUploadIntent(ctx context.Context, arg CreateDi
 		arg.ExpectedBytes,
 		arg.Sha256,
 		arg.Categories,
+		arg.FailureReferences,
 		arg.ExpiresAt,
 		arg.RetainUntil,
 		arg.CreatedAt,
@@ -119,6 +122,7 @@ func (q *Queries) CreateDiagnosticUploadIntent(ctx context.Context, arg CreateDi
 		&i.CreatedAt,
 		&i.UploadedAt,
 		&i.ObjectEtag,
+		&i.FailureReferences,
 	)
 	return i, err
 }
@@ -145,7 +149,7 @@ const expireDiagnosticUploadIntents = `-- name: ExpireDiagnosticUploadIntents :m
 UPDATE diagnostic_upload_intents
 SET state = 'expired'
 WHERE state = 'pending' AND expires_at <= $1
-RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag
+RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references
 `
 
 func (q *Queries) ExpireDiagnosticUploadIntents(ctx context.Context, now time.Time) ([]DiagnosticUploadIntent, error) {
@@ -174,6 +178,7 @@ func (q *Queries) ExpireDiagnosticUploadIntents(ctx context.Context, now time.Ti
 			&i.CreatedAt,
 			&i.UploadedAt,
 			&i.ObjectEtag,
+			&i.FailureReferences,
 		); err != nil {
 			return nil, err
 		}
@@ -186,7 +191,7 @@ func (q *Queries) ExpireDiagnosticUploadIntents(ctx context.Context, now time.Ti
 }
 
 const getDiagnosticUploadIntentByOperationForUpdate = `-- name: GetDiagnosticUploadIntentByOperationForUpdate :one
-SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag FROM diagnostic_upload_intents
+SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references FROM diagnostic_upload_intents
 WHERE user_id = $1 AND operation_key = $2
 FOR UPDATE
 `
@@ -216,12 +221,13 @@ func (q *Queries) GetDiagnosticUploadIntentByOperationForUpdate(ctx context.Cont
 		&i.CreatedAt,
 		&i.UploadedAt,
 		&i.ObjectEtag,
+		&i.FailureReferences,
 	)
 	return i, err
 }
 
 const getDiagnosticUploadIntentForUserForUpdate = `-- name: GetDiagnosticUploadIntentForUserForUpdate :one
-SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag FROM diagnostic_upload_intents
+SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references FROM diagnostic_upload_intents
 WHERE id = $1 AND user_id = $2
 FOR UPDATE
 `
@@ -251,12 +257,13 @@ func (q *Queries) GetDiagnosticUploadIntentForUserForUpdate(ctx context.Context,
 		&i.CreatedAt,
 		&i.UploadedAt,
 		&i.ObjectEtag,
+		&i.FailureReferences,
 	)
 	return i, err
 }
 
 const listDiagnosticUploadCleanupCandidates = `-- name: ListDiagnosticUploadCleanupCandidates :many
-SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag FROM diagnostic_upload_intents
+SELECT id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references FROM diagnostic_upload_intents
 WHERE (state = 'pending' AND expires_at <= $1) OR retain_until <= $1
 ORDER BY LEAST(expires_at, retain_until), id
 LIMIT $2
@@ -293,6 +300,7 @@ func (q *Queries) ListDiagnosticUploadCleanupCandidates(ctx context.Context, arg
 			&i.CreatedAt,
 			&i.UploadedAt,
 			&i.ObjectEtag,
+			&i.FailureReferences,
 		); err != nil {
 			return nil, err
 		}
@@ -308,7 +316,7 @@ const markDiagnosticUploadIntentExpired = `-- name: MarkDiagnosticUploadIntentEx
 UPDATE diagnostic_upload_intents
 SET state = 'expired'
 WHERE id = $1 AND state = 'pending' AND expires_at <= $2
-RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag
+RETURNING id, user_id, cli_client_session_id, operation_key, request_hash, correlation_id, object_key, expected_bytes, sha256, categories, state, expires_at, retain_until, created_at, uploaded_at, object_etag, failure_references
 `
 
 type MarkDiagnosticUploadIntentExpiredParams struct {
@@ -336,6 +344,7 @@ func (q *Queries) MarkDiagnosticUploadIntentExpired(ctx context.Context, arg Mar
 		&i.CreatedAt,
 		&i.UploadedAt,
 		&i.ObjectEtag,
+		&i.FailureReferences,
 	)
 	return i, err
 }

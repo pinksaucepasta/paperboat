@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
 type integrationObjects struct {
@@ -84,6 +85,9 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 	service.clock = func() time.Time { return now }
 	request := validRequest()
 	request.UserID, request.CLIClientSessionID, request.OperationKey = userA, clientA, "diagnostic-operation-"+suffix
+	// The reference a client-only failure (an install) printed before the user ran `pb bugreport --upload`.
+	clientFailure := supportreport.NewReference()
+	request.FailureReferences = []string{clientFailure}
 	intent, _, err := service.Create(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +106,9 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 	}
 	if found, err := service.Uploaded(ctx, userA, request.CorrelationID); err != nil || found {
 		t.Fatalf("a pending upload resolved as uploaded: %v %v", found, err)
+	}
+	if found, err := service.Uploaded(ctx, userA, clientFailure); err != nil || found {
+		t.Fatalf("a pending upload resolved its failure reference: %v %v", found, err)
 	}
 	objects.metadata[intent.ObjectKey] = ObjectMetadata{Bytes: intent.Bytes, SHA256: intent.SHA256, ETag: "etag-integration"}
 	const workers = 8
@@ -130,6 +137,16 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 	}
 	if found, err := service.Uploaded(ctx, userB, request.CorrelationID); err != nil || found {
 		t.Fatalf("another account's reference resolved: %v %v", found, err)
+	}
+	// The original failure's reference now finds the bundle, for its owner only; an unlisted one does not.
+	if found, err := service.Uploaded(ctx, userA, clientFailure); err != nil || !found {
+		t.Fatalf("the client-only failure reference does not find its uploaded bundle: %v %v", found, err)
+	}
+	if found, err := service.Uploaded(ctx, userB, clientFailure); err != nil || found {
+		t.Fatalf("another account found the failure reference: %v %v", found, err)
+	}
+	if found, err := service.Uploaded(ctx, userA, supportreport.NewReference()); err != nil || found {
+		t.Fatalf("an unlisted reference resolved: %v %v", found, err)
 	}
 	var completionAudits int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE resource_type='diagnostic_upload' AND resource_id=$1 AND event_type='diagnostic_upload.completed'`, intent.ID).Scan(&completionAudits); err != nil {
