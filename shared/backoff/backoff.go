@@ -19,12 +19,11 @@ func Jitter(d time.Duration) time.Duration {
 // Retry is the wait before retry n (1 for the first) of a failing call: base doubling to max, then
 // jittered. n below 1 counts as 1.
 func Retry(n int, base, max time.Duration) time.Duration {
-	delay := max
-	if n < 1 {
-		n = 1
+	// Doubling stops at max, so it never overflows: base<<(n-1) wrapped negative for a large base·2^(n-1)
+	// (5 min at n=26, 10 s at n=31) and the wait became 0, a retry loop with no wait.
+	delay := base
+	for doubled := 1; doubled < n && delay > 0 && delay < max; doubled++ {
+		delay *= 2
 	}
-	if n < 32 && base<<(n-1) < max {
-		delay = base << (n - 1)
-	}
-	return Jitter(delay)
+	return Jitter(min(delay, max))
 }

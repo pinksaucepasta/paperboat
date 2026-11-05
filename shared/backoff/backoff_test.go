@@ -23,3 +23,17 @@ func TestRetryDoublesToTheCapWithSpreadJitter(t *testing.T) {
 		t.Fatal("Jitter(0) waits")
 	}
 }
+
+// Long failure streaks keep waiting the cap: doubling a large base must not overflow into a zero wait.
+func TestRetryNeverOverflowsIntoAZeroWait(t *testing.T) {
+	for _, c := range []struct{ base, max time.Duration }{{5 * time.Minute, 6 * time.Hour}, {10 * time.Second, time.Minute}, {15 * time.Second, 5 * time.Minute}, {time.Second, time.Minute}} {
+		for n := 1; n <= 200; n++ {
+			if got := Retry(n, c.base, c.max); got <= 0 || got >= c.max/2*3 {
+				t.Fatalf("Retry(%d, %v, %v) = %v, want within (0, %v)", n, c.base, c.max, got, c.max/2*3)
+			}
+		}
+		if got := Retry(1000, c.base, c.max); got < c.max/2 {
+			t.Fatalf("Retry(1000, %v, %v) = %v, below the capped range", c.base, c.max, got)
+		}
+	}
+}
