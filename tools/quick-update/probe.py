@@ -58,9 +58,12 @@ def stdin_echo(feat,size,every):
   except subprocess.TimeoutExpired:ok=False
   ev(feat,ok,int((time.time()-s0)*1000));time.sleep(max(0,every-(time.time()-s0)))
 def send(path):
+ # pb send reports no progress, so: a small file back to back; each call's latency is the measure (excess.py).
  while not stop():
-  s=time.time();r=subprocess.run([pb,'send',path,'--to',tgt,'--json'],capture_output=True,text=True,timeout=900)
-  ev('send',r.returncode==0,int((time.time()-s)*1000));time.sleep(1)
+  s=time.time()
+  try:ok=subprocess.run([pb,'send',path,'--to',tgt,'--json'],capture_output=True,text=True,timeout=60).returncode==0
+  except subprocess.TimeoutExpired:ok=False
+  ev('send',ok,int((time.time()-s)*1000));time.sleep(0.2)
 ticker="i=0; while [ $i -lt 100000 ]; do date +%s.%N; i=$((i+1)); sleep 0.1; done"
 T=[threading.Thread(target=loop,args=('exec_short',[pb,'exec',tgt,'--','true'],0.2)),
    threading.Thread(target=stream,args=('exec_long',[pb,'exec',tgt,'--','sh','-c',ticker])),
