@@ -261,3 +261,43 @@ func TestRuntimeCarrierRoutesStayOnHostGoaway(t *testing.T) {
 		t.Fatal("handler kept a closed carrier")
 	}
 }
+
+// A carrier that matched no admission asks for a pull; the pull it waits for starts after it asked,
+// concurrent asks share one pull, and asks are paced to one pull per missPullInterval.
+func TestRuntimeCarrierRequestPullCoalescesAndSeesNewAdmissions(t *testing.T) {
+	a := runtimeAdmission(t)
+	source := &runtimeSourceFake{}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 5 * time.Minute, Timeout: time.Second}
+	if err := w.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	first, second := w.RequestPull(), w.RequestPull()
+	if first != second {
+		t.Fatal("concurrent pull requests did not share one pull")
+	}
+	<-first
+	source.mu.Lock()
+	source.admissions = []runtimewire.Admission{a}
+	source.mu.Unlock()
+	asked := time.Now()
+	select {
+	case <-w.RequestPull():
+	case <-time.After(3 * time.Second):
+		t.Fatal("requested pull did not finish")
+	}
+	if len(expected.Snapshot()) != 1 {
+		t.Fatal("the requested pull did not install the admission issued before the request")
+	}
+	if waited := time.Since(asked); waited < missPullInterval/2 {
+		t.Fatalf("second requested pull ran after %v, want it paced to about %v", waited, missPullInterval)
+	}
+}

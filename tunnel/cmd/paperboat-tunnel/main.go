@@ -358,7 +358,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		reporter.ObserveFailure(ctx, "browser_terminal_stream", cause)
 	}
-	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Ready: nodeReady, Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout}
+	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Ready: nodeReady, Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout,
+		OnPull: func(pull uint64, admissions, previous int) {
+			edgetelemetry.Log(context.Background(), edgetelemetry.SeverityInfo, "runtime_admission_pull", edgetelemetry.OutcomeSuccess, "pull", pull, "admissions", admissions, "previous", previous)
+		}}
 	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
 	if err != nil {
 		return nil, err

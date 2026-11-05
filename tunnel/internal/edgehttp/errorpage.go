@@ -1,8 +1,11 @@
 package edgehttp
 
 import (
+	"context"
 	"html/template"
 	"net/http"
+
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 // Every visitor-facing edge error is this page: the status code is kept, the body says in one plain sentence
@@ -56,6 +59,10 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 	}
 	if message == "" {
 		message = retryMessage
+	}
+	if status >= http.StatusInternalServerError {
+		// Every 5xx the edge itself answers is a user-visible failure; the deploy gate counts these.
+		edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "edge_http_5xx", edgetelemetry.OutcomeFailed, "status", status)
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")

@@ -340,16 +340,18 @@ func (r *DurableAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Ident
 		return Identity{}, ErrCarrierClosed
 	}
 	var matched Identity
-	found := false
+	found, keyKnown, live := false, false, false
 	now := time.Now().UTC()
 	for _, entry := range r.byID {
 		if entry.machineIdentityPublicKey != encoded || entry.machineIdentityThumbprint != thumbprint {
 			continue
 		}
+		keyKnown = true
 		for _, admission := range entry.byRoute {
 			if admission.State != "staged" && admission.State != "active" || !admission.ExpiresAt.IsZero() && !admission.ExpiresAt.After(now) {
 				continue
 			}
+			live = true
 			binding := connectorprotocol.CarrierIdentityBinding{AccountID: admission.Identity.AccountID, HostID: admission.Identity.HostID, TunnelID: admission.Identity.TunnelID, ConnectorID: admission.Identity.ConnectorID, SessionID: admission.Identity.SessionID, ProcessGeneration: admission.Identity.ProcessGeneration, ConfigGeneration: admission.Identity.Generation, EdgeProcessEpoch: admission.EdgeProcessEpoch}
 			if connectorprotocol.MatchCarrierIdentityURN(certificate.URIs, binding) != nil {
 				continue
@@ -362,7 +364,7 @@ func (r *DurableAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Ident
 		}
 	}
 	if !found {
-		return Identity{}, ErrDurableAdmissionMissing
+		return Identity{}, fmt.Errorf("%w: %w", ErrDurableAdmissionMissing, refusal(len(r.byID) != 0, keyKnown, live))
 	}
 	return matched, nil
 }
@@ -429,6 +431,17 @@ func AnyPeerBinding(bindings ...PeerBinding) PeerBinding {
 		}
 		if len(failures) == 0 {
 			return Identity{}, ErrDurableAdmissionMissing
+		}
+		// The most specific refusal goes first, so errors.As names it in the handshake log.
+		var best CarrierRefusal
+		for _, failure := range failures {
+			var reason CarrierRefusal
+			if errors.As(failure, &reason) && reason > best {
+				best = reason
+			}
+		}
+		if best != 0 {
+			failures = append([]error{best}, failures...)
 		}
 		return Identity{}, carrierFailure{sentinel: ErrDurableAdmissionMissing, cause: errors.Join(failures...)}
 	}

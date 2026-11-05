@@ -114,7 +114,7 @@ for edge in "$@"; do
 	attach=$(count 'runtime_route_attach_refused' "$log")
 	edge5xx=$(count 'edge_http_5xx' "$log")
 	echo "edge $target: preview failures=$probes control=$control carrier=$carrier attach=$attach edge5xx=$edge5xx"
-	grep -h 'carrier_connection_failed' "$log" | sed 's/.*error=//' | sort | uniq -c | sed 's/^/  carrier refusals: /' || true
+	grep -h 'carrier_connection_failed' "$log" | grep -o '"reason":"[a-z_]*"' | sort | uniq -c | sed 's/^/  carrier refusals: /' || true
 	[ "$probes$control$carrier$attach$edge5xx" = 00000 ] || fail=1
 done
 server5xx=$(sql "select count(*) from paperboat.support_reports where created_at >= '$start' and http_status >= 500;")

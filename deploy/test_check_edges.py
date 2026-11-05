@@ -62,8 +62,8 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertIn('edge gate: PASS', out)
 
     def test_refused_host_carrier_fails(self):
-        code, out = self.run_gate(edge_log='WARN carrier_connection_failed error="data carrier TLS handshake failed: '
-                                           'carrier refused: unknown_machine"\n')
+        code, out = self.run_gate(edge_log='{"level":"WARN","msg":"carrier_connection_failed","schema":"paperboat.edge_event.v1",'
+                                           '"reason":"unknown_machine"}\n')
         self.assertEqual(code, 1, out)
         self.assertIn('carrier=1', out)
         self.assertIn('unknown_machine', out)
@@ -74,7 +74,7 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertRegex(out, r'preview failures=[1-9]')
 
     def test_edge_5xx_and_attach_refusal_fail(self):
-        code, out = self.run_gate(edge_log='WARN edge_http_5xx status=503\nWARN runtime_route_attach_refused route_id=r\n')
+        code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\nWARN runtime_route_attach_refused route_id=r\n')
         self.assertEqual(code, 1, out)
         self.assertIn('attach=1 edge5xx=1', out)
 

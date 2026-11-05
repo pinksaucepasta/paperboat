@@ -49,11 +49,49 @@ type RuntimeCarrierWorker struct {
 	endpointCursor string
 	endpointFullAt time.Time
 	endpointExpiry time.Time
-	mu             sync.Mutex
-	cancel         context.CancelFunc
-	done           chan struct{}
-	wake           chan struct{}
-	closed         bool
+	// OnPull, when set, is told of the first successful runtime pull and of every change in the
+	// number of admissions it returned, so a refused carrier can be placed against what the edge held.
+	OnPull func(pull uint64, admissions, previous int)
+	// pulls counts successful runtime pulls; pulledCount is the size of the last one (worker goroutine only).
+	pulls       uint64
+	pulledCount int
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	done        chan struct{}
+	wake        chan struct{}
+	// pullWake and pullDone serve RequestPull: pullDone is closed once a pull that began after the
+	// request has finished.
+	pullWake chan struct{}
+	pullDone chan struct{}
+	closed   bool
+}
+
+// missPullInterval bounds pulls asked for by carriers that matched no admission, so unadmitted
+// peers cannot drive control-plane traffic above one pull a second per edge.
+const missPullInterval = time.Second
+
+// RequestPull asks for a runtime admission pull now instead of at the next tick and returns a
+// channel closed once a pull that began after this call has finished. Concurrent requests share
+// one pull. The server hands a machine its admission for this process up to one tick before
+// the edge pulls it (prod 2026-11-05: 22 host carriers refused in the 5 s after a restart).
+func (w *RuntimeCarrierWorker) RequestPull() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	if w.pullDone == nil {
+		w.pullDone = make(chan struct{})
+		if w.pullWake != nil {
+			select {
+			case w.pullWake <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return w.pullDone
 }
 
 func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
@@ -72,6 +110,10 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 	w.cancel = cancel
 	w.done = make(chan struct{})
 	w.wake = make(chan struct{}, 1)
+	w.pullWake = make(chan struct{}, 1)
+	if w.pullDone != nil {
+		w.pullWake <- struct{}{}
+	}
 	go func() {
 		defer close(w.done)
 		if w.Ready != nil {
@@ -82,6 +124,7 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 			}
 		}
 		w.reconcile(run)
+		var lastMissPull time.Time
 		ticker := time.NewTicker(w.Interval)
 		defer ticker.Stop()
 		var fast <-chan time.Time
@@ -100,6 +143,23 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 				w.reconcileEndpoints(run)
 			case <-w.wake:
 				w.observe(run)
+			case <-w.pullWake:
+				if wait := time.Until(lastMissPull.Add(missPullInterval)); wait > 0 {
+					select {
+					case <-run.Done():
+						return
+					case <-time.After(wait):
+					}
+				}
+				w.mu.Lock()
+				done := w.pullDone
+				w.pullDone = nil
+				w.mu.Unlock()
+				lastMissPull = time.Now()
+				w.reconcile(run)
+				if done != nil {
+					close(done)
+				}
 			}
 		}
 	}()
@@ -171,6 +231,11 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 		if err = w.install(); err != nil {
 			return err
 		}
+		w.pulls++
+		if w.OnPull != nil && (w.pulls == 1 || len(w.runtimeSet) != w.pulledCount) {
+			w.OnPull(w.pulls, len(w.runtimeSet), w.pulledCount)
+		}
+		w.pulledCount = len(w.runtimeSet)
 	}
 	w.withdraw()
 	w.observe(parent)
