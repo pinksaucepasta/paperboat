@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/controlbackoff"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -35,6 +36,12 @@ import (
 )
 
 var platformUpdateProbeCommand func() *cobra.Command
+
+// The network registration retry schedule: doubling from a second to five minutes, jittered.
+const (
+	registerNetworkFirstRetry   = time.Second
+	registerNetworkMaximumRetry = 5 * time.Minute
+)
 
 type dynamicNativePrivateGrantIssuer struct {
 	serverURL string
@@ -289,13 +296,17 @@ func localDaemonCommand() *cobra.Command {
 					resultErr = coordinatorFailure("Paperboat daemon cleanup failed", resultErr, cleanupErr)
 				}
 			}()
+			// steps is the daemon's one step tracker: failing start steps and loops show in pb status and pb doctor.
+			steps := health.New(buildinfo.Version, nil, nil)
 			if profileErr == nil {
-				// Peers learn this daemon's identity before its first command; on failure the first native
-				// operation registers as before.
+				// Peers learn this daemon's identity before its first command, so a failed registration is
+				// retried with backoff until it succeeds instead of waiting for that command.
 				go func() {
-					registerCtx, cancelRegister := context.WithTimeout(command.Context(), 30*time.Second)
-					defer cancelRegister()
-					_ = peerTunnel.RegisterNetwork(registerCtx)
+					_ = steps.Retry(command.Context(), localdaemon.StepRegisterNetwork, registerNetworkFirstRetry, registerNetworkMaximumRetry, func(ctx context.Context) error {
+						registerCtx, cancelRegister := context.WithTimeout(ctx, 30*time.Second)
+						defer cancelRegister()
+						return peerTunnel.RegisterNetwork(registerCtx)
+					})
 				}()
 			}
 			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess}
@@ -387,7 +398,7 @@ func localDaemonCommand() *cobra.Command {
 				go refreshMachineServices(ctx, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
-					InventoryEvents: inventoryEvents, AccessEvents: accessEvents,
+					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, Steps: steps,
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
