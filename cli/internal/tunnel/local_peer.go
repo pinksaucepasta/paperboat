@@ -475,6 +475,7 @@ type localPeerConn struct {
 	sequenceSink      func(int)
 	delivered         func() int // see SkipDelivered
 	skipThrough       uint64
+	seenSequence      uint64 // where the last frame this link read ended: the byte cursor the next frame should continue
 	replayGapSink     func(uint64, uint64, uint64)
 	launchWarningSink func([]string)
 	linkMu            sync.Mutex
@@ -781,8 +782,17 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 		if !ok {
 			return 0, io.EOF
 		}
+		continues := output.sequence != 0 && output.sequence >= uint64(len(output.data)) && output.sequence-uint64(len(output.data)) == c.seenSequence
+		if output.sequence != 0 {
+			c.seenSequence = output.sequence
+		}
 		if output.sequence != 0 && output.sequence <= c.skipThrough {
 			continue // replayed output another link already delivered
+		}
+		if start := output.sequence - uint64(len(output.data)); continues && len(output.data) > 0 && start < c.skipThrough {
+			// The replay arrives as one frame that starts before what the other link delivered: keep the rest. A frame
+			// that does not continue this link's cursor (a screen checkpoint) is not a byte range and is never cut.
+			output.data = output.data[c.skipThrough-start:]
 		}
 		if len(output.data) > 0 {
 			break

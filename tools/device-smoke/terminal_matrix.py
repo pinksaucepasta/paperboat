@@ -132,7 +132,14 @@ def exactly_once(out, prefix, first, last):
     dup = len(got) - len(set(got))
     missing = len(set(want) - set(got))
     gone = sorted(set(want) - set(got))[:5]
-    return False, f'{len(got)} lines, {dup} duplicated, {missing} missing' + (f' (first missing: {gone})' if gone else '')
+    runs = []  # the order lines arrived in, as consecutive runs: "1-6, 7-72, 7-90" shows which stretch came twice
+    for n in got:
+        if runs and runs[-1][1] + 1 == n:
+            runs[-1][1] = n
+        else:
+            runs.append([n, n])
+    order = ', '.join(f'{a}-{b}' if a != b else str(a) for a, b in runs[:12])
+    return False, f'{len(got)} lines, {dup} duplicated, {missing} missing' + (f' (first missing: {gone})' if gone else '') + f' [arrived as {order}]'
 
 
 def has_iptables():
