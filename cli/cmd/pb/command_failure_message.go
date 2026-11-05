@@ -54,6 +54,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if message := sshFailureMessage(err); message != "" {
 		return message
 	}
+	if errors.Is(err, ErrPreviewOwnerSessionUnavailable) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+		return "The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`."
+	}
 	if preference, ok := soleCommandOwner(err).(preferenceLoadFailure); ok {
 		return preference.Error()
 	}
