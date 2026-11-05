@@ -16,7 +16,7 @@ U=f'sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 
 def R(c,timeout=300,check=True):
  r=subprocess.run(SSHX(c),capture_output=True,text=True,timeout=timeout)
  (run/'steps.log').open('a').write('$ '+c[:160]+'\n'+r.stdout[-2000:]+r.stderr[-2000:]+'\n')
- if check and r.returncode:raise SystemExit('step failed: '+c[:100])
+ if check and r.returncode:raise SystemExit('step failed: '+c[:100]+' :: '+(r.stderr or r.stdout or '').strip()[-500:])
  return r.stdout
 now=lambda:datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds')
 R(f'mkdir -p ~/gap5/{name}')
