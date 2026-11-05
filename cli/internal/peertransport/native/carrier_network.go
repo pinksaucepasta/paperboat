@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -93,9 +94,14 @@ func (o *Owner) closeCarrierPeers(peers []string, network *tailnet.CarrierNetwor
 		}
 	}
 	o.mu.Unlock()
+	var closing time.Duration
 	for _, session := range sessions {
 		session.Close()
+		closing = max(closing, session.quic.ClosingPeriod())
 	}
+	// Watch closes the network or removes these peers next, which drops a
+	// CONNECTION_CLOSE still queued in it (revocation stranded held terminals).
+	time.Sleep(closing)
 }
 
 // StartCarrierNetwork exposes only authenticated WG packets on the public UDP

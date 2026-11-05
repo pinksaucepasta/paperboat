@@ -358,6 +358,15 @@ func closingPeriod(connection *quic.Conn) time.Duration {
 	return min(3*pto, time.Second)
 }
 
+// ClosingPeriod is how long a network carrying this locally closed session
+// must stay up for its queued CONNECTION_CLOSE; zero when nothing was sent.
+func (s *Session) ClosingPeriod() time.Duration {
+	if s == nil || s.Connection == nil {
+		return 0
+	}
+	return closingPeriod(s.Connection)
+}
+
 func (s *Session) PTOCount() uint32 {
 	if s == nil || s.pto == nil {
 		return 0

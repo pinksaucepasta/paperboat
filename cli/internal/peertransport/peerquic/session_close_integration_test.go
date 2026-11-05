@@ -137,6 +137,9 @@ func testListenerShutdownDeliversRemoteApplicationClose(t *testing.T, sessionFir
 	if err := <-closed; err != nil {
 		t.Fatal(err)
 	}
+	if server.ClosingPeriod() <= 0 || client.ClosingPeriod() != 0 {
+		t.Fatal("closing period must cover only the side that sent the close")
+	}
 }
 
 // queuedPacketSocket models a userspace path: a write is only queued. Closing
