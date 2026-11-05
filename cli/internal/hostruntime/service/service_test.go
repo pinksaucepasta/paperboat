@@ -5,11 +5,13 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type controller struct {
@@ -49,6 +51,40 @@ func TestSystemdDefinitionSignalsWorkerBeforeForceCleaningCgroup(t *testing.T) {
 		!strings.Contains(definition, "RuntimeDirectory=paperboat\n") || !strings.Contains(definition, "StateDirectoryMode=0700\n") ||
 		!strings.Contains(definition, "CacheDirectoryMode=0750\n") {
 		t.Fatalf("systemd shutdown policy missing:\n%s", definition)
+	}
+}
+
+// A crash-looping hostd or worker restarts with a growing, jittered delay capped at 30 s, and never fast enough
+// to reach systemd's default start limit (5 starts in 10 s), which would leave it failed until someone restarts it.
+func TestSystemdRestartBacksOffWithJitterWithinTheStartLimit(t *testing.T) {
+	for _, kind := range []string{HostdKind, WorkerKind} {
+		body, err := renderSystemd(Config{Kind: kind, User: "paperboat", Group: "paperboat", Executable: "/usr/local/libexec/paperboat/pb"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition := string(body)
+		for _, line := range []string{"RestartSec=5s\n", "RestartSteps=3\n", "RestartMaxDelaySec=30s\n", "RestartRandomizedDelaySec=5s\n"} {
+			if !strings.Contains(definition, line) {
+				t.Fatalf("%s unit lacks %q:\n%s", kind, strings.TrimSpace(line), definition)
+			}
+		}
+		// systemd's schedule (src/core/service.c service_restart_usec_nth): RestartSec * (max/RestartSec)^((n-1)/steps).
+		starts := []time.Duration{0}
+		for n := 1; n <= 6; n++ {
+			delay := 30 * time.Second
+			if n <= 3 {
+				delay = time.Duration(float64(5*time.Second) * math.Pow(6, float64(n-1)/3))
+			}
+			starts = append(starts, starts[len(starts)-1]+delay)
+		}
+		for i := 4; i < len(starts); i++ {
+			if starts[i]-starts[i-4] <= 10*time.Second {
+				t.Fatalf("%s: 5 starts within 10 s (%v) trip the default start limit", kind, starts[i-4:i+1])
+			}
+		}
+		if last := starts[len(starts)-1] - starts[len(starts)-2]; last != 30*time.Second {
+			t.Fatalf("%s: restart delay is not capped at 30 s: %v", kind, last)
+		}
 	}
 }
 
