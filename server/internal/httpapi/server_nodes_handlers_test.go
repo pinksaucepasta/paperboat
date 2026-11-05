@@ -22,7 +22,7 @@ type operatorRequest func(method, path, body string, csrf bool, extra ...map[str
 func checkServerNodeRoutes(t *testing.T, ctx context.Context, store *db.DB, request operatorRequest) {
 	t.Helper()
 	const path = "/v1/admin/server-nodes/enrollments"
-	u, code, err := servernodes.NewUnenrolled("mumbai", "slot-64", "127.0.0.1", "v-test", "c-test", filepath.Join(t.TempDir(), "node.json"))
+	u, code, err := servernodes.NewUnenrolled("mumbai", "slot-64", "127.0.0.1", "203.0.113.20", "v-test", "c-test", filepath.Join(t.TempDir(), "node.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

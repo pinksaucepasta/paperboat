@@ -15,20 +15,33 @@ type AddressPublisher interface {
 	Reconcile(context.Context, tunnelcert.DesiredAddressPublication) error
 }
 
-// RegionalDNS points <region>.<domain> at the verified public addresses of the region's active, fresh nodes
-// (the address the enrolling node dialed, pinned). Run by the worker leader only, so there is one writer; a
+// RegionalDNS points <region>.<domain> at the public addresses of the region's active, fresh nodes (declared by
+// the node in its signed inspection and approved by the enrolling operator). Run by the worker leader only, so there is one writer; a
 // region whose nodes all left gets an empty set, which removes its records.
 type RegionalDNS struct {
 	DB        *db.DB
 	Publisher AddressPublisher
 	Domain    string
 	Now       func() time.Time
+	// Issuer and Key, when set, also keep the regional wildcard certificate issued (EnsureCertificate); a failed
+	// issuance waits 10 minutes before the next attempt (ACME failure rate limits).
+	Issuer       DNS01Issuer
+	Key          string
+	issueBackoff time.Time
 }
 
-// Sync reconciles every region that has a node row. It keeps going past one region's failure.
+// Sync keeps the regional certificate issued and reconciles every region that has a node row. It keeps going
+// past one region's failure.
 func (r *RegionalDNS) Sync(ctx context.Context) error {
-	rows, err := r.DB.Pool().Query(ctx, `SELECT region, coalesce(array_agg(endpoint_host ORDER BY endpoint_host)
-  FILTER (WHERE state='active' AND endpoint_host IS NOT NULL AND last_seen_at > now() - make_interval(secs => $1)), '{}')
+	var certErr error
+	if r.Issuer != nil && time.Now().After(r.issueBackoff) {
+		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, time.Now()); certErr != nil {
+			r.issueBackoff = time.Now().Add(10 * time.Minute)
+		}
+	}
+	rows, err := r.DB.Pool().Query(ctx, `SELECT region, coalesce(array_agg(coalesce(public_address, endpoint_host) ORDER BY coalesce(public_address, endpoint_host))
+  FILTER (WHERE state='active' AND coalesce(public_address, endpoint_host) IS NOT NULL
+    AND last_seen_at > now() - make_interval(secs => $1)), '{}')
 FROM paperboat.control_server_nodes GROUP BY region ORDER BY region`, HealthyWithin.Seconds())
 	if err != nil {
 		return err
@@ -75,5 +88,5 @@ FROM paperboat.control_server_nodes GROUP BY region ORDER BY region`, HealthyWit
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return errors.Join(append(errs, certErr)...)
 }

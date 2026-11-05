@@ -62,6 +62,10 @@ VALUES ($1,$2,$3,'v','c',now(),`+seen+`,$4)`, id, region, state, host); err != n
 	add(p+"a-4", p+"a", "draining", "203.0.113.13", "now()")
 	add(p+"a-5", p+"a", "active", "203.0.113.14", "now()-interval '1 minute'")
 	add(p+"b-1", p+"b", "draining", "198.51.100.7", "now()")
+	// Reached over a private network: DNS publishes the public address it declared, not the dialed one.
+	if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.control_server_nodes SET endpoint_host='10.0.0.5', public_address='203.0.113.11' WHERE id=$1`, p+"a-2"); err != nil {
+		t.Fatal(err)
+	}
 	pub := &recordedPublications{last: map[string]tunnelcert.DesiredAddressPublication{}}
 	dns := &RegionalDNS{DB: store, Publisher: pub, Domain: "example.test"}
 	if err := dns.Sync(ctx); err != nil {

@@ -3,122 +3,177 @@ package servernodes
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/acme"
-	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
-// ACMECache is autocert's cache in the shared database, encrypted with the shared key: the nodes of a region
-// share one certificate, and any of them answers an HTTP-01 challenge another one started (autocert keeps
-// challenge tokens in the cache). Prior art: headscale serves its own TLS with autocert (hscontrol/app.go:1166).
-type ACMECache struct {
-	DB  *db.DB
-	Key string
+// One certificate for *.<regional_domain> covers every region name. The worker leader issues and renews it with
+// DNS-01 through the existing ACME issuer (one writer, no port 80, one issuance for all regions and nodes) and
+// stores it encrypted in the shared database; every node serves it from there and picks up renewals without a
+// restart. Prior art: headscale terminates its own TLS in the control server (hscontrol/app.go:1166); Caddy's
+// cluster mode shares one certificate store between instances behind one name.
+
+const (
+	certificateKey = "regional-wildcard"
+	renewBefore    = 30 * 24 * time.Hour
+)
+
+// DNS01Issuer is tunnelcert.ACMEIssuer.
+type DNS01Issuer interface {
+	IssueDNS01(context.Context, tunnelcert.Domain) (tunnelcert.CertificateBundle, error)
 }
 
-func (c *ACMECache) Get(ctx context.Context, key string) ([]byte, error) {
+type storedCertificate struct {
+	CertificatePEM []byte    `json:"certificate_pem"`
+	PrivateKeyPEM  []byte    `json:"private_key_pem"`
+	NotAfter       time.Time `json:"not_after"`
+}
+
+func wildcardName(domain string) string { return "*." + domain }
+
+func loadCertificate(ctx context.Context, d *db.DB, key string) (storedCertificate, error) {
 	var sealed []byte
-	err := c.DB.Pool().QueryRow(ctx, `SELECT sealed FROM paperboat.control_server_node_acme_cache WHERE key=$1`, key).Scan(&sealed)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, autocert.ErrCacheMiss
-	}
+	err := d.Pool().QueryRow(ctx, `SELECT sealed FROM paperboat.control_server_node_acme_cache WHERE key=$1`, certificateKey).Scan(&sealed)
 	if err != nil {
-		return nil, err
+		return storedCertificate{}, err
 	}
-	plain, err := secrets.Decrypt(c.Key, sealed)
-	return []byte(plain), err
+	plain, err := secrets.Decrypt(key, sealed)
+	if err != nil {
+		return storedCertificate{}, err
+	}
+	var c storedCertificate
+	return c, json.Unmarshal([]byte(plain), &c)
 }
 
-func (c *ACMECache) Put(ctx context.Context, key string, data []byte) error {
-	sealed, err := secrets.Encrypt(c.Key, string(data))
+// EnsureCertificate issues the regional wildcard when none is stored or it expires within 30 days. The leader
+// calls it; it returns quickly when nothing is due.
+func EnsureCertificate(ctx context.Context, d *db.DB, key, domain string, issuer DNS01Issuer, now time.Time) error {
+	current, err := loadCertificate(ctx, d, key)
+	if err == nil && current.NotAfter.Sub(now) > renewBefore {
+		return nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("read the regional certificate: %w", err)
+	}
+	bundle, err := issuer.IssueDNS01(ctx, tunnelcert.Domain{ID: "regional_wildcard_v1", AccountID: tunnelcert.PlatformAccountID,
+		TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: wildcardName(domain), Generation: 1,
+		Strategy: tunnelcert.StrategyPlatformDNS01, OwnershipState: "verified"})
+	if err != nil {
+		return fmt.Errorf("issue %s: %w", wildcardName(domain), err)
+	}
+	if _, err := tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM); err != nil {
+		return fmt.Errorf("issued %s is unusable: %w", wildcardName(domain), err)
+	}
+	plain, _ := json.Marshal(storedCertificate{CertificatePEM: bundle.CertificatePEM, PrivateKeyPEM: bundle.PrivateKeyPEM, NotAfter: bundle.NotAfter})
+	sealed, err := secrets.Encrypt(key, string(plain))
 	if err != nil {
 		return err
 	}
-	_, err = c.DB.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_node_acme_cache (key, sealed) VALUES ($1,$2)
-ON CONFLICT (key) DO UPDATE SET sealed=excluded.sealed, updated_at=now()`, key, sealed)
+	_, err = d.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_node_acme_cache (key, sealed) VALUES ($1,$2)
+ON CONFLICT (key) DO UPDATE SET sealed=excluded.sealed, updated_at=now()`, certificateKey, sealed)
 	return err
 }
 
-func (c *ACMECache) Delete(ctx context.Context, key string) error {
-	_, err := c.DB.Pool().Exec(ctx, `DELETE FROM paperboat.control_server_node_acme_cache WHERE key=$1`, key)
-	return err
-}
-
-// RegionalTLS serves handler on :443 for <region>.<domain> with a certificate from ACME (HTTP-01 on :80), and
-// turns this node from registered to active once it holds the certificate. directory "" is Let's Encrypt.
+// RegionalTLS serves handler for <region>.<domain> with the stored wildcard, reloading it every minute, and
+// turns this node from registered to active once it can serve.
 type RegionalTLS struct {
-	DB                        *db.DB
-	Node                      Node
-	Domain, Key               string
-	Directory                 string
-	HTTPSAddress, HTTPAddress string
-	Handler                   http.Handler
-	ShutdownTimeout           time.Duration // graceful: GOAWAY, then held requests finish
-	Logger                    *slog.Logger
+	DB              *db.DB
+	Node            Node
+	Domain, Key     string
+	Address         string // HTTPS listen address, for example :443
+	Handler         http.Handler
+	Logger          *slog.Logger
+	ShutdownTimeout time.Duration // graceful: GOAWAY, then held requests finish
+
+	mu   sync.RWMutex
+	cert *tls.Certificate
 }
 
 func (r *RegionalTLS) Name() string { return r.Node.Region + "." + r.Domain }
 
-func (r *RegionalTLS) manager() *autocert.Manager {
-	m := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(r.Name()), Cache: &ACMECache{DB: r.DB, Key: r.Key}}
-	if r.Directory != "" {
-		m.Client = &acme.Client{DirectoryURL: r.Directory}
-	}
-	return m
-}
-
-// Run serves until ctx ends. A listener failure is returned; certificate errors are retried with backoff.
-func (r *RegionalTLS) Run(ctx context.Context) error {
-	m := r.manager()
-	https := &http.Server{Addr: r.HTTPSAddress, Handler: r.Handler, ReadHeaderTimeout: 10 * time.Second,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: m.GetCertificate, NextProtos: []string{"h2", "http/1.1", acme.ALPNProto}}}
-	challenge := &http.Server{Addr: r.HTTPAddress, Handler: m.HTTPHandler(nil), ReadHeaderTimeout: 5 * time.Second}
-	failed := make(chan error, 2)
-	go func() {
-		failed <- fmt.Errorf("regional HTTPS on %s: %w", r.HTTPSAddress, https.ListenAndServeTLS("", ""))
-	}()
-	go func() { failed <- fmt.Errorf("ACME HTTP-01 on %s: %w", r.HTTPAddress, challenge.ListenAndServe()) }()
-	go r.activate(ctx, m)
-	select {
-	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), max(r.ShutdownTimeout, 5*time.Second))
-		defer cancel()
-		return errors.Join(https.Shutdown(shutdown), challenge.Shutdown(shutdown))
-	case err := <-failed:
-		_ = https.Close()
-		_ = challenge.Close()
+// reload loads the stored certificate when it changed; it keeps the one it has on a read error.
+func (r *RegionalTLS) reload(ctx context.Context) error {
+	stored, err := loadCertificate(ctx, r.DB, r.Key)
+	if err != nil {
 		return err
 	}
+	pair, err := tls.X509KeyPair(stored.CertificatePEM, stored.PrivateKeyPEM)
+	if err != nil {
+		return err
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil || leaf.VerifyHostname(r.Name()) != nil {
+		return fmt.Errorf("the stored regional certificate does not cover %s", r.Name())
+	}
+	pair.Leaf = leaf
+	r.mu.Lock()
+	r.cert = &pair
+	r.mu.Unlock()
+	return nil
 }
 
-// activate obtains the certificate (backoff 5 s to 5 min) and then marks the node active, so it enters the
-// region map only once it can serve its name.
-func (r *RegionalTLS) activate(ctx context.Context, m *autocert.Manager) {
+func (r *RegionalTLS) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.cert == nil {
+		return nil, errors.New("regional certificate not loaded yet")
+	}
+	return r.cert, nil
+}
+
+// Run serves until ctx ends: it waits for the certificate (backoff 5 s to 5 min), marks the node active, then
+// serves HTTPS and reloads the certificate every minute.
+func (r *RegionalTLS) Run(ctx context.Context) error {
 	delay := 5 * time.Second
-	for ctx.Err() == nil {
-		_, err := m.GetCertificate(&tls.ClientHelloInfo{ServerName: r.Name(), CipherSuites: []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}})
+	for {
+		err := r.reload(ctx)
 		if err == nil {
-			if err = MarkActive(ctx, r.DB, r.Node.ID); err == nil {
-				r.Logger.Info("server node serves its regional name", "name", r.Name(), "node", r.Node.ID)
-				return
-			}
+			break
 		}
 		r.Logger.Warn("server node regional certificate not ready", "name", r.Name(), "error", err, "retry_in", delay)
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-time.After(delay):
 		}
 		delay = min(2*delay, 5*time.Minute)
+	}
+	server := &http.Server{Addr: r.Address, Handler: r.Handler, ReadHeaderTimeout: 10 * time.Second,
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: r.getCertificate, NextProtos: []string{"h2", "http/1.1"}}}
+	failed := make(chan error, 1)
+	go func() { failed <- fmt.Errorf("regional HTTPS on %s: %w", r.Address, server.ListenAndServeTLS("", "")) }()
+	if err := MarkActive(ctx, r.DB, r.Node.ID); err != nil {
+		r.Logger.Warn("server node could not mark itself active", "error", err)
+	} else {
+		r.Logger.Info("server node serves its regional name", "name", r.Name(), "node", r.Node.ID)
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(context.Background(), max(r.ShutdownTimeout, 5*time.Second))
+			defer cancel()
+			return server.Shutdown(shutdown)
+		case err := <-failed:
+			return err
+		case <-ticker.C:
+			if err := r.reload(ctx); err != nil {
+				r.Logger.Warn("server node kept its regional certificate; reload failed", "error", err)
+			}
+		}
 	}
 }
 

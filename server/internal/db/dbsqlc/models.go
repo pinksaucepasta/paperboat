@@ -848,6 +848,7 @@ type ControlServerNode struct {
 	StartedAt     time.Time
 	LastSeenAt    time.Time
 	CreatedAt     time.Time
+	PublicAddress sql.NullString
 }
 
 type ControlServerNodeAcmeCache struct {

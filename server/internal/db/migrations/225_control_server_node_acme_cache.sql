@@ -1,6 +1,6 @@
 -- +goose Up
--- Shared ACME cache for regional server-node names: every node of a region reads the same certificate and
--- answers HTTP-01 challenges from the same tokens. Values are encrypted with the shared encryption key.
+-- Shared, encrypted store for the regional server-node certificate (*.<regional_domain>): the worker leader
+-- writes it, every node serves it. Values are encrypted with the shared encryption key.
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE paperboat.control_server_node_acme_cache (
     key text PRIMARY KEY CHECK (octet_length(key) BETWEEN 1 AND 512),

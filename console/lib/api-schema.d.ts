@@ -11602,6 +11602,8 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string;
             healthy: boolean;
+            /** @description Public IP DNS publishes for this node, declared by the node at enrollment. */
+            public_address?: string;
         };
         ServerNodeEnvelope: {
             data: components["schemas"]["ServerNode"];

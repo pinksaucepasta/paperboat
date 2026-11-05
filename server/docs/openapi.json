@@ -15695,6 +15695,10 @@
           },
           "healthy": {
             "type": "boolean"
+          },
+          "public_address": {
+            "type": "string",
+            "description": "Public IP DNS publishes for this node, declared by the node at enrollment."
           }
         }
       },

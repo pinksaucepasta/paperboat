@@ -24,15 +24,16 @@ func runEnrollNode(args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	region := fs.String("region", "", "region name, for example mumbai")
 	instance := fs.String("instance", "", "instance slot in the region, slot-01 to slot-64")
-	host := fs.String("host", "", "public host name or IP address operators reach this node at")
+	host := fs.String("host", "", "host name or IP address operators reach this node at")
+	public := fs.String("public-address", "", "public IP address DNS publishes for this node (default: -host)")
 	listen := fs.String("listen", ":8443", "address to accept the claim on")
 	out := fs.String("config-out", "", "absolute path to store the delivered config (owner-only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	u, code, err := servernodes.NewUnenrolled(*region, *instance, *host, buildinfo.Version, buildinfo.Commit, *out)
+	u, code, err := servernodes.NewUnenrolled(*region, *instance, *host, *public, buildinfo.Version, buildinfo.Commit, *out)
 	if err != nil {
-		return fmt.Errorf("prepare enrollment: %w (need --region, --instance slot-NN, --host and --config-out)", err)
+		return fmt.Errorf("prepare enrollment: %w (need -region, -instance slot-NN, -host, -config-out and a public -public-address)", err)
 	}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {

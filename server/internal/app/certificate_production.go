@@ -171,11 +171,23 @@ func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentRefe
 	if err != nil {
 		return nil, fmt.Errorf("%w: public DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
-	dnsZones, err := tunnelcert.NewDNS01Zones(map[string]tunnelcert.DNS01Provider{
+	zones := map[string]tunnelcert.DNS01Provider{
 		cfg.Preview.BaseDomain:          publicDNS,
 		cfg.RuntimeBaseDomain:           dnsProvider,
 		certificateConfig.ChallengeZone: dnsProvider,
-	})
+	}
+	if cfg.RegionalDomain != "" && cfg.RegionalDNSZoneID != "" {
+		// The regional server-node wildcard writes its _acme-challenge TXT in the regional zone.
+		regionalDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+			ZoneID: cfg.RegionalDNSZoneID, TokenReference: certificateConfig.DNSTokenReference, TokenSource: secrets,
+			HTTPClient: providerHTTPClient("cloudflare-regional-dns", cfg.HTTP.RequestTimeout), WriteBase: certificateConfig.DNSWriteBase,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: regional DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+		}
+		zones[cfg.RegionalDomain] = regionalDNS
+	}
+	dnsZones, err := tunnelcert.NewDNS01Zones(zones)
 	if err != nil {
 		return nil, fmt.Errorf("%w: configured DNS zones: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}

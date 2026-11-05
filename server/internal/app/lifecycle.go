@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -159,10 +160,10 @@ func (a *App) Run(ctx context.Context) error {
 			func() { a.logger.Info("server node draining: shutting down gracefully"); close(nodeDrained) })
 		if a.cfg.RegionalDomain != "" {
 			regional := &servernodes.RegionalTLS{DB: a.db, Node: node, Domain: a.cfg.RegionalDomain, Key: a.cfg.Secrets.EncryptionKey,
-				HTTPSAddress: ":443", HTTPAddress: ":80", Handler: a.server.Handler, Logger: a.logger, ShutdownTimeout: a.cfg.HTTP.ShutdownTimeout}
+				Address: cmp.Or(a.cfg.RegionalHTTPSAddress, ":443"), Handler: a.server.Handler, Logger: a.logger, ShutdownTimeout: a.cfg.HTTP.ShutdownTimeout}
 			go func() {
 				if err := regional.Run(runContext); err != nil && runContext.Err() == nil {
-					a.logger.Error("server node cannot serve its regional name; check that ports 80 and 443 are free and reachable", "name", regional.Name(), "error", err)
+					a.logger.Error("server node cannot serve its regional name; check that its HTTPS port is free", "name", regional.Name(), "error", err)
 				}
 			}()
 		}

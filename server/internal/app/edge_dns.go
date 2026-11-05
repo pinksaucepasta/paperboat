@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"time"
@@ -49,7 +50,11 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 		if err != nil {
 			return nil, err
 		}
-		regional = &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain}
+		issuer, _, _, err := newPublicCertificateIssuer(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("regional certificate issuer: %w", err)
+		}
+		regional = &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey}
 	}
 	return edgeDNSWorker(database, public, runtime, regional), nil
 }

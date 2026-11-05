@@ -66,6 +66,7 @@ type Inspection struct {
 	Region        string `json:"region"`
 	Instance      string `json:"instance"`
 	EndpointHost  string `json:"endpoint_host"`
+	PublicAddress string `json:"public_address"`
 	Version       string `json:"version"`
 	Commit        string `json:"commit"`
 	Certificate   string `json:"certificate"`
@@ -120,6 +121,7 @@ func parseCode(code string) (pin []byte, secret string, err error) {
 // Unenrolled is a node waiting to be claimed. It holds no database credentials.
 type Unenrolled struct {
 	Region, Instance, EndpointHost, Version, Commit string
+	PublicAddress                                   string // the IP DNS publishes; empty means EndpointHost
 	BundlePath                                      string // written 0600 once claimed
 
 	tlsCert   tls.Certificate
@@ -136,11 +138,14 @@ type Unenrolled struct {
 }
 
 // NewUnenrolled makes fresh TLS, enrollment and box keys and returns the node with its claim code.
-func NewUnenrolled(region, instance, endpointHost, version, commit, bundlePath string) (*Unenrolled, string, error) {
-	if !regionPattern.MatchString(region) || !instancePattern.MatchString(instance) || !validHost(endpointHost) || bundlePath == "" {
+func NewUnenrolled(region, instance, endpointHost, publicAddress, version, commit, bundlePath string) (*Unenrolled, string, error) {
+	if publicAddress == "" {
+		publicAddress = endpointHost
+	}
+	if !regionPattern.MatchString(region) || !instancePattern.MatchString(instance) || !validHost(endpointHost) || !publicIP(publicAddress) || bundlePath == "" {
 		return nil, "", ErrInvalid
 	}
-	u := &Unenrolled{Region: region, Instance: instance, EndpointHost: endpointHost, Version: version, Commit: commit,
+	u := &Unenrolled{Region: region, Instance: instance, EndpointHost: endpointHost, PublicAddress: publicAddress, Version: version, Commit: commit,
 		BundlePath: bundlePath, expiresAt: time.Now().Add(CodeLife), claimed: make(chan struct{})}
 	tlsKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -214,7 +219,7 @@ func (u *Unenrolled) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.nonce = in.Nonce
-		out := Inspection{Nonce: in.Nonce, Region: u.Region, Instance: u.Instance, EndpointHost: u.EndpointHost, Version: u.Version,
+		out := Inspection{Nonce: in.Nonce, Region: u.Region, Instance: u.Instance, EndpointHost: u.EndpointHost, PublicAddress: u.PublicAddress, Version: u.Version,
 			Commit: u.Commit, Certificate: u.certPEM, EnrollmentKey: b64(u.signKey.Public().(ed25519.PublicKey)),
 			BoxKey: b64(u.boxPub[:]), ExpiresAt: u.expiresAt.Unix()}
 		out.Signature = sign(u.signKey, out)
@@ -302,13 +307,13 @@ func (e *Enroller) Enroll(ctx context.Context, actor, address, code string) (Sta
 	}
 	id := in.Region + "-" + in.Instance
 	tag, err := e.DB.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_nodes
-  (id, region, state, version, commit, started_at, last_seen_at, endpoint_host, tls_spki_sha256, enrolled_by)
-VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7)
+  (id, region, state, version, commit, started_at, last_seen_at, endpoint_host, tls_spki_sha256, enrolled_by, public_address)
+VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7,$8)
 ON CONFLICT (id) DO UPDATE SET state='registered', version=excluded.version, commit=excluded.commit, started_at=now(),
   last_seen_at=now(), endpoint_host=excluded.endpoint_host, tls_spki_sha256=excluded.tls_spki_sha256,
-  enrolled_by=excluded.enrolled_by
+  enrolled_by=excluded.enrolled_by, public_address=excluded.public_address
 WHERE control_server_nodes.state='removed'`,
-		id, in.Region, in.Version, in.Commit, in.EndpointHost, pin, actor)
+		id, in.Region, in.Version, in.Commit, in.EndpointHost, pin, actor, in.PublicAddress)
 	if err != nil {
 		return Status{}, err
 	}
@@ -329,7 +334,7 @@ WHERE control_server_nodes.state='removed'`,
 	if got.Nonce != in.Nonce || subtle.ConstantTimeCompare(got.BundleHash, sum[:]) != 1 || !verify(signKey, sig, got) {
 		return Status{}, e.forget(id, ErrUnauthorized)
 	}
-	return Status{ID: id, Region: in.Region, State: "registered", Version: in.Version, Commit: in.Commit}, nil
+	return Status{ID: id, Region: in.Region, State: "registered", PublicAddress: in.PublicAddress, Version: in.Version, Commit: in.Commit}, nil
 }
 
 // forget marks a registration whose delivery failed removed, so the operator can retry with a fresh code and
@@ -351,7 +356,7 @@ func checkInspection(in Inspection, nonce, host string, pin []byte) (signKey []b
 	if !ok || !ok2 || !verify(signKey, sig, in) {
 		return nil, nil, ErrUnauthorized
 	}
-	if in.Nonce != nonce || in.EndpointHost != host || !regionPattern.MatchString(in.Region) || !instancePattern.MatchString(in.Instance) ||
+	if in.Nonce != nonce || in.EndpointHost != host || !publicIP(in.PublicAddress) || !regionPattern.MatchString(in.Region) || !instancePattern.MatchString(in.Instance) ||
 		in.Version == "" || len(in.Version) > 64 || in.Commit == "" || len(in.Commit) > 64 {
 		return nil, nil, ErrInvalid
 	}
@@ -441,4 +446,15 @@ func publicDialAddress(ctx context.Context, address string) (string, error) {
 		}
 	}
 	return net.JoinHostPort(ips[0].String(), port), nil
+}
+
+// publicIP accepts the global unicast addresses DNS may publish.
+func publicIP(s string) bool {
+	ip, err := netip.ParseAddr(s)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() &&
+		!netip.MustParsePrefix("100.64.0.0/10").Contains(ip)
 }

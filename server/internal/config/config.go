@@ -69,34 +69,36 @@ type Config struct {
 	// publishes no control regions.
 	RegionalDomain string `json:"regional_domain"`
 	// RegionalDNSZoneID is the Cloudflare zone holding <region>.<regional_domain>; empty publishes no records.
-	RegionalDNSZoneID string           `json:"regional_dns_zone_id"`
-	BrowserSessions   BrowserSessions  `json:"browser_sessions"`
-	HTTP              HTTPConfig       `json:"http"`
-	Database          Database         `json:"database"`
-	Billing           Billing          `json:"billing"`
-	Business          Business         `json:"business"`
-	APITokens         APITokens        `json:"api_tokens"`
-	RateLimits        RateLimits       `json:"rate_limits"`
-	UserMachines      UserMachines     `json:"user_machines"`
-	ManagedSSH        ManagedSSH       `json:"managed_ssh"`
-	TerminalSessions  TerminalSessions `json:"terminal_sessions"`
-	Preview           Preview          `json:"preview"`
-	Tunnel            Tunnel           `json:"tunnel"`
-	TestFixtures      TestFixtures     `json:"test_fixtures"`
-	Certificates      Certificates     `json:"certificates"`
-	ConfigSync        ConfigSync       `json:"config_sync"`
-	CLIAuth           CLIAuth          `json:"cli_auth"`
-	GitHub            GitHub           `json:"github"`
-	Access            Access           `json:"access"`
-	Diagnostics       Diagnostics      `json:"diagnostics"`
-	Retention         Retention        `json:"retention"`
-	Notifications     Notifications    `json:"notifications"`
-	Providers         Providers        `json:"providers"`
-	Secrets           Secrets          `json:"secrets"`
-	ReleaseDirectory  string           `json:"release_directory"`
-	ReleaseBaseURL    string           `json:"release_base_url"`
-	ReleaseAuthority  ReleaseAuthority `json:"release_authority"`
-	WorkspacePolicy   WorkspacePolicy  `json:"workspace_policy"`
+	RegionalDNSZoneID string `json:"regional_dns_zone_id"`
+	// RegionalHTTPSAddress is where a regional node serves its name (empty: :443).
+	RegionalHTTPSAddress string           `json:"regional_https_address"`
+	BrowserSessions      BrowserSessions  `json:"browser_sessions"`
+	HTTP                 HTTPConfig       `json:"http"`
+	Database             Database         `json:"database"`
+	Billing              Billing          `json:"billing"`
+	Business             Business         `json:"business"`
+	APITokens            APITokens        `json:"api_tokens"`
+	RateLimits           RateLimits       `json:"rate_limits"`
+	UserMachines         UserMachines     `json:"user_machines"`
+	ManagedSSH           ManagedSSH       `json:"managed_ssh"`
+	TerminalSessions     TerminalSessions `json:"terminal_sessions"`
+	Preview              Preview          `json:"preview"`
+	Tunnel               Tunnel           `json:"tunnel"`
+	TestFixtures         TestFixtures     `json:"test_fixtures"`
+	Certificates         Certificates     `json:"certificates"`
+	ConfigSync           ConfigSync       `json:"config_sync"`
+	CLIAuth              CLIAuth          `json:"cli_auth"`
+	GitHub               GitHub           `json:"github"`
+	Access               Access           `json:"access"`
+	Diagnostics          Diagnostics      `json:"diagnostics"`
+	Retention            Retention        `json:"retention"`
+	Notifications        Notifications    `json:"notifications"`
+	Providers            Providers        `json:"providers"`
+	Secrets              Secrets          `json:"secrets"`
+	ReleaseDirectory     string           `json:"release_directory"`
+	ReleaseBaseURL       string           `json:"release_base_url"`
+	ReleaseAuthority     ReleaseAuthority `json:"release_authority"`
+	WorkspacePolicy      WorkspacePolicy  `json:"workspace_policy"`
 }
 
 type HTTPConfig struct {

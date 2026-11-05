@@ -28,14 +28,15 @@ type Node struct {
 
 // Status is one node as any node's panel sees it.
 type Status struct {
-	ID         string    `json:"id"`
-	Region     string    `json:"region"`
-	State      string    `json:"state"`
-	Version    string    `json:"version"`
-	Commit     string    `json:"commit"`
-	StartedAt  time.Time `json:"started_at"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-	Healthy    bool      `json:"healthy"`
+	ID            string    `json:"id"`
+	Region        string    `json:"region"`
+	State         string    `json:"state"`
+	PublicAddress string    `json:"public_address,omitempty"`
+	Version       string    `json:"version"`
+	Commit        string    `json:"commit"`
+	StartedAt     time.Time `json:"started_at"`
+	LastSeenAt    time.Time `json:"last_seen_at"`
+	Healthy       bool      `json:"healthy"`
 }
 
 // ErrRemoved means an operator removed this node; it must not rejoin by heartbeating.
@@ -66,7 +67,7 @@ RETURNING state`, n.ID, n.Region, n.Version, n.Commit, n.StartedAt).Scan(&state)
 
 // List returns every node that is not removed, healthy when seen within HealthyWithin and not draining.
 func List(ctx context.Context, pool *pgxpool.Pool) ([]Status, error) {
-	rows, err := pool.Query(ctx, `SELECT id, region, state, version, commit, started_at, last_seen_at,
+	rows, err := pool.Query(ctx, `SELECT id, region, state, coalesce(public_address, ''), version, commit, started_at, last_seen_at,
   state='active' AND last_seen_at > now() - make_interval(secs => $1)
 FROM paperboat.control_server_nodes WHERE state <> 'removed' ORDER BY region, id`, HealthyWithin.Seconds())
 	if err != nil {
@@ -76,7 +77,7 @@ FROM paperboat.control_server_nodes WHERE state <> 'removed' ORDER BY region, id
 	var out []Status
 	for rows.Next() {
 		var s Status
-		if err := rows.Scan(&s.ID, &s.Region, &s.State, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt, &s.Healthy); err != nil {
+		if err := rows.Scan(&s.ID, &s.Region, &s.State, &s.PublicAddress, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt, &s.Healthy); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

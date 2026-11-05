@@ -19,7 +19,7 @@ import (
 func startUnenrolled(t *testing.T, instance string) (*Unenrolled, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "node-config.json")
-	u, code, err := NewUnenrolled("mumbai", instance, "127.0.0.1", "v-test", "c-test", path)
+	u, code, err := NewUnenrolled("mumbai", instance, "127.0.0.1", "203.0.113.20", "v-test", "c-test", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,9 +85,9 @@ func TestServerNodeEnrollmentDeliversSealedConfigOnPostgres(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil || cfg.Database.DSN != base.Database.DSN || cfg.Reporting.Region != "mumbai" || cfg.Reporting.Instance != slot {
 		t.Fatalf("bundle config: region %q instance %q dsn ok %v err %v", cfg.Reporting.Region, cfg.Reporting.Instance, cfg.Database.DSN == base.Database.DSN, err)
 	}
-	var state, host string
+	var state, host, public string
 	var spki []byte
-	if err := store.Pool().QueryRow(ctx, `SELECT state, endpoint_host, tls_spki_sha256 FROM paperboat.control_server_nodes WHERE id=$1`, id).Scan(&state, &host, &spki); err != nil || state != "registered" || host != "127.0.0.1" || string(spki) != string(pin) {
+	if err := store.Pool().QueryRow(ctx, `SELECT state, endpoint_host, public_address, tls_spki_sha256 FROM paperboat.control_server_nodes WHERE id=$1`, id).Scan(&state, &host, &public, &spki); err != nil || state != "registered" || host != "127.0.0.1" || public != "203.0.113.20" || string(spki) != string(pin) {
 		t.Fatalf("row: %s %s %v", state, host, err)
 	}
 	if _, err := e.Enroll(ctx, "operator-test", addr, code); !errors.Is(err, ErrUsed) {
