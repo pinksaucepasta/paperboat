@@ -57,7 +57,7 @@ go version
 if [ ! -f "$HOME/.pb-test-pg-dsn" ]; then exec nice go test -p 2 "$@"; fi
 base=$(cat "$HOME/.pb-test-pg-dsn") pkgs=() args=() failed=0
 for a in "$@"; do case $a in ./* | ...) pkgs+=("$a") ;; *) args+=("$a") ;; esac; done
-mod=$(go list -f '{{.Module.Path}}' "${pkgs[@]}" | head -n1)
+mod=$(go list -m)
 for pkg in $(go list "${pkgs[@]}"); do
   db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
   psql "${base%%lane_test*}postgres?sslmode=disable" -qc "drop database if exists \"$db\" with (force)" -c "create database \"$db\"" || { failed=1; continue; }
