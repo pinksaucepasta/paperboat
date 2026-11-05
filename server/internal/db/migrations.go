@@ -29,9 +29,9 @@ func Migrate(ctx context.Context, d *DB) error {
 	// request statement timeout would cut index builds. Lock waits stay short.
 	migrationConfig := d.migrationConfig.Copy()
 	// Reset on every checkout: a migration's SET must not change the next one's budget.
-	migrationConfig.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+	migrationConfig.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
 		_, err := conn.Exec(ctx, `SET lock_timeout = '5s'`)
-		return err == nil
+		return err == nil, err
 	}
 	migrationPool, err := pgxpool.NewWithConfig(ctx, migrationConfig)
 	if err != nil {

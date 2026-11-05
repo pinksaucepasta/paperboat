@@ -29,9 +29,9 @@ func TestE2EProxy(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	go p.probe(ctx)
-	director := func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "backend" } // RoundTrip picks the host
+	rewrite := func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "backend" } // RoundTrip picks the host
 	server := &http.Server{Addr: os.Getenv("PAPERBOAT_E2E_LISTEN"), ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		Handler: logRequests(t, &httputil.ReverseProxy{Director: director, Transport: p, FlushInterval: -1})}
+		Handler: logRequests(t, &httputil.ReverseProxy{Rewrite: rewrite, Transport: p, FlushInterval: -1})}
 	go func() {
 		_ = server.ListenAndServeTLS(os.Getenv("PAPERBOAT_E2E_TLS_CERT"), os.Getenv("PAPERBOAT_E2E_TLS_KEY"))
 	}()

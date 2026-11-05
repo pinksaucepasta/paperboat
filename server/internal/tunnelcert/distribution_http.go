@@ -807,12 +807,6 @@ func ackMatchesMessage(input distributionAck, message DistributionMessage) bool 
 	return input.Version == message.Version && input.Action == message.Action && input.CertificateID == message.CertificateID && input.AccountID == message.AccountID && input.TunnelID == message.TunnelID && input.DomainID == message.DomainID && input.TargetKind == message.TargetKind && input.RouteID == message.RouteID && input.PreviewID == message.PreviewID && input.PreviewGeneration == message.PreviewGeneration && input.PreviewState == message.PreviewState && input.PreviewExpiresAt.Equal(message.PreviewExpiresAt) && input.Hostname == message.Hostname && input.DomainGeneration == message.DomainGeneration && input.CertificateGeneration == message.CertificateGeneration && input.EdgeNodeID == message.EdgeNodeID && input.EdgeProcessEpoch == message.EdgeProcessEpoch && input.AssignmentGeneration == message.AssignmentGeneration && input.Fingerprint == message.Fingerprint
 }
 
-func cloneDistributionMessage(message DistributionMessage) DistributionMessage {
-	message.CertificatePEM = append([]byte(nil), message.CertificatePEM...)
-	message.PrivateKeyPEM = append([]byte(nil), message.PrivateKeyPEM...)
-	return message
-}
-
 func wipeDistributionMessage(message *DistributionMessage) {
 	if message == nil {
 		return
