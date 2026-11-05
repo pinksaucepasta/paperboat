@@ -219,8 +219,9 @@ type Owner struct {
 	closed           bool
 	sessions         map[*Session]struct{}
 	handshakes       map[string]*peerHandshake
-	restarted        map[string]bool // peers that closed a dialed session on purpose; guarded by mu
+	restarted        map[string]bool          // peers that closed a dialed session on purpose; guarded by mu
 	routes           map[string]*carrierRoute // client: each machine's active carrier generation; guarded by mu
+	relayPaths       map[string]time.Time     // peer relay paths found by a failed handshake, kept until; guarded by mu
 	workers          sync.WaitGroup
 }
 
@@ -288,6 +289,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		tlsConfig.NextProtos = []string{PrivateHTTP3ALPN}
 	}
 	pathBefore, _ := o.authority.PeerPath(peerID)
+	started := time.Now()
 	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path_category", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
@@ -295,6 +297,9 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	pathAfter, _ := o.authority.PeerPath(peerID)
 	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path_category", pathAfter, "failed", err != nil)
 	if err != nil {
+		if pathAfter == "peer_relay" && pathBefore != pathAfter {
+			o.keepRelayPath(peerID, started)
+		}
 		// DialPacket releases its failed socket before the shared cache decision.
 		return nil, o.failedPeerDial(ctx, peerID, client, err)
 	}

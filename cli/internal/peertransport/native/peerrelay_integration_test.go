@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"net"
 	"net/netip"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -146,6 +147,26 @@ func (f *directFilter) relayCounter(p []byte) *atomic.Uint64 {
 
 func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) { testAutomaticPeerRelay(t, false) }
 func TestDelegatedCarrierUsesPeerRelayWithDirectBlocked(t *testing.T) {
+	testAutomaticPeerRelay(t, true)
+}
+
+// Under CPU contention the peer relay path is found only after a fresh peer's
+// first WireGuard initiation, which wireguard-go repeats after 5s. Retiring the
+// client after every one-second QUIC attempt discarded that path, so a peer
+// reachable only through a peer relay was never reached (CI, 2026-11-04).
+func TestPeerRelayOnlyDialUnderCPUStarvation(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+		}
+	}()
 	testAutomaticPeerRelay(t, true)
 }
 

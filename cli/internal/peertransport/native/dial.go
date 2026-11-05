@@ -29,10 +29,38 @@ func retryablePeerDial(err error) bool {
 
 func (o *Owner) failedPeerDial(ctx context.Context, peerID string, client *tailnet.UDPClient, err error) error {
 	failure := o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
-	if ctx.Err() == nil && retryablePeerDial(failure) {
+	if ctx.Err() == nil && retryablePeerDial(failure) && !o.keepingRelayPath(peerID) {
 		o.authority.RetireIdleClient(client)
 	}
 	return failure
+}
+
+// A fresh client's first WireGuard initiation leaves before its peer relay path exists (allocation, bind and
+// ping take a round trip through the relay), and wireguard-go repeats it only after RekeyTimeout, 5 s plus up to
+// 1/3 s jitter (wireguard-go device/timers.go). Retiring the client after each one-second attempt discarded
+// the found path, so under load a peer reachable only through a peer relay was never reached. A failed attempt
+// that found the path keeps the client through that retry and one more attempt. A dead peer finds no new
+// path: its stale state is still retired at once.
+const relayPathKeep = 7 * time.Second
+
+func (o *Owner) keepRelayPath(peerID string, found time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.relayPaths == nil {
+		o.relayPaths = make(map[string]time.Time)
+	}
+	o.relayPaths[peerID] = found.Add(relayPathKeep)
+}
+
+func (o *Owner) keepingRelayPath(peerID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	until, ok := o.relayPaths[peerID]
+	if ok && !time.Now().Before(until) {
+		delete(o.relayPaths, peerID)
+		return false
+	}
+	return ok
 }
 
 // Dial obtains a new QUIC association before any application request is sent.
