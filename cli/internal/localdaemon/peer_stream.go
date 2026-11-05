@@ -2,6 +2,7 @@ package localdaemon
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
@@ -61,6 +62,18 @@ func dialWithin(timeout time.Duration, consumer string, abort func(), dial func(
 	return nil, peerStreamOpenTimeoutError{cause: err, exec: consumer == "exec"}
 }
 
+// tracedDial gives an exec, ssh or config-compare dial the step records a terminal redial has (peer_descriptor,
+// regional_prepare, carrier_dial, quic_handshake with durations), so a dial that stalls names its step. The staged
+// lifetime carries neither the recorder nor a trace; a terminal sets up its own.
+func tracedDial(request, lifetime context.Context, consumer string) context.Context {
+	recorder := diagnostics.FromContext(request)
+	if recorder == nil || consumer == "terminal" {
+		return lifetime
+	}
+	lifetime = supportref.WithContext(diagnostics.WithRecorder(lifetime, recorder), supportref.FromContext(request))
+	return diagnostics.WithReconnect(lifetime, rand.Text(), "target", rand.Text())
+}
+
 // stopping ends when the daemon starts to stop, before it closes its transports.
 func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
@@ -87,7 +100,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 		if err != nil {
 			return nil, err
 		}
-		lifetime := staged.Context()
+		lifetime := tracedDial(ctx, staged.Context(), request.Consumer)
 		var remote tunnel.Conn
 		dial := func() (tunnel.Conn, error) {
 			switch request.Consumer {
