@@ -37,6 +37,10 @@ func require(ok bool, message string) {
 }
 
 func (s *suite) docker(ctx context.Context, container string, args ...string) *exec.Cmd {
+	// MCP_SMOKE_EXEC runs "PROGRAM CONTAINER ARGS..." instead, for machines that are not local containers (macOS).
+	if wrapper := os.Getenv("MCP_SMOKE_EXEC"); wrapper != "" {
+		return exec.CommandContext(ctx, wrapper, append([]string{container}, args...)...)
+	}
 	command := []string{"-n", "docker", "exec", "-i", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", container}
 	return exec.CommandContext(ctx, "sudo", append(command, args...)...)
 }
