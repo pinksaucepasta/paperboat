@@ -147,7 +147,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	requestID := "request_" + requestUUID.String()
 	operationID := newIdempotencyKey()
-	acceptance, err := client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, operationID)
+	acceptance, err := client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute)}, operationID)
 	if err != nil {
 		if limit := serverTransferLimit(err, prepared.Sources); limit != nil {
 			return limit
@@ -209,7 +209,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		if retention <= 0 || retention > 7*24*time.Hour {
 			retention = 7 * 24 * time.Hour
 		}
-		expiresAt := time.Now().UTC().Truncate(time.Second).Add(retention)
+		expiresAt := serverclock.Now().UTC().Truncate(time.Second).Add(retention)
 		if localSender, localErr := localFileTransferSenderFromEnvironment(); localErr != nil {
 			return localErr
 		} else if localSender != nil {

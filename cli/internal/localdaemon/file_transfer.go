@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"sync"
@@ -70,7 +71,8 @@ func NewFileTransferBroker(peerTunnel nativeTransferPreparer) (*FileTransferBrok
 	if peerTunnel == nil {
 		return nil, ErrInvalidInventoryConfig
 	}
-	return &FileTransferBroker{tunnel: peerTunnel, now: time.Now, leases: make(map[string]daemonTransferLease)}, nil
+	// Deadlines are server-issued, so they are judged on the server clock (F21-02).
+	return &FileTransferBroker{tunnel: peerTunnel, now: serverclock.Now, leases: make(map[string]daemonTransferLease)}, nil
 }
 
 func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer localapi.Peer, request localapi.FileTransferRequest) (localapi.FileTransferResult, error) {
