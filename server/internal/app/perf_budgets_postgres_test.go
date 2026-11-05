@@ -101,10 +101,11 @@ ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash,expires_at=exc
 			application.server.Handler.ServeHTTP(recorder, request)
 			elapsed := time.Since(started)
 			cancel()
-			if i >= 2 { // the first two warm caches and prepared statements
+			status = recorder.Code
+			if i >= 2 { // the first two warm caches and prepared statements; neither their time nor their cache fills count
 				durations = append(durations, elapsed)
+				queries = max(queries, counter.Load())
 			}
-			queries, status = max(queries, counter.Load()), recorder.Code
 		}
 		slices.Sort(durations)
 		return durations[len(durations)/2], durations[(len(durations)*95+99)/100-1], queries, status
