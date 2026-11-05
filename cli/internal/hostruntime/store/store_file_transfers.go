@@ -178,12 +178,19 @@ func (s *Store) FileTransfersForSource(ctx context.Context, sourceMachineID, use
 	return page, nil
 }
 
-func (s *Store) CommitFileTransferOffset(ctx context.Context, id string, expected, next int64) (resultErr error) {
+// CommitFileTransferOffset records appended bytes. A nonzero leaseUntil renews the idle lease of every
+// unfinished member of the transfer's batch, so a batch expires only when none of it makes progress.
+func (s *Store) CommitFileTransferOffset(ctx context.Context, id string, expected, next int64, leaseUntil time.Time) (resultErr error) {
 	defer protectStoreError(&resultErr)
 	if expected < 0 || next < expected {
 		return ErrConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE file_transfers SET committed_offset=?,state='uploading' WHERE id=? AND committed_offset=? AND state IN ('created','uploading') AND ?<=size`, next, id, expected, next)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer retainRollback(tx, &resultErr)
+	result, err := tx.ExecContext(ctx, `UPDATE file_transfers SET committed_offset=?,state='uploading' WHERE id=? AND committed_offset=? AND state IN ('created','uploading') AND ?<=size`, next, id, expected, next)
 	if err != nil {
 		return err
 	}
@@ -194,7 +201,12 @@ func (s *Store) CommitFileTransferOffset(ctx context.Context, id string, expecte
 	if changed != 1 {
 		return ErrConflict
 	}
-	return nil
+	if !leaseUntil.IsZero() {
+		if _, err := tx.ExecContext(ctx, `UPDATE file_transfers SET expires_at=MAX(expires_at,?) WHERE batch_id=(SELECT batch_id FROM file_transfers WHERE id=?) AND state IN ('created','uploading')`, leaseUntil.UnixNano(), id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CompleteFileTransfer(ctx context.Context, id, localMachineID string) (resultErr error) {
@@ -220,7 +232,9 @@ func (s *Store) CompleteFileTransfer(ctx context.Context, id, localMachineID str
 	return nil
 }
 
-func (s *Store) CompleteFileTransferBatch(ctx context.Context, batchID, localMachineID string) (resultErr error) {
+// CompleteFileTransferBatch publishes (or queues for delivery) a fully uploaded batch; published files are
+// kept until retainUntil, which replaces their upload lease.
+func (s *Store) CompleteFileTransferBatch(ctx context.Context, batchID, localMachineID string, retainUntil time.Time) (resultErr error) {
 	defer protectStoreError(&resultErr)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -241,7 +255,7 @@ func (s *Store) CompleteFileTransferBatch(ctx context.Context, batchID, localMac
 		}
 		return ErrConflict
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE file_transfers SET state=CASE destination_machine_id WHEN ? THEN 'published' ELSE 'pending' END,result_code=CASE destination_machine_id WHEN ? THEN 'published' ELSE 'pending' END WHERE batch_id=? AND committed_offset=size AND state IN ('created','uploading')`, localMachineID, localMachineID, batchID)
+	result, err := tx.ExecContext(ctx, `UPDATE file_transfers SET state=CASE destination_machine_id WHEN ? THEN 'published' ELSE 'pending' END,result_code=CASE destination_machine_id WHEN ? THEN 'published' ELSE 'pending' END,expires_at=CASE destination_machine_id WHEN ? THEN ? ELSE expires_at END WHERE batch_id=? AND committed_offset=size AND state IN ('created','uploading')`, localMachineID, localMachineID, localMachineID, retainUntil.UnixNano(), batchID)
 	if err != nil {
 		return err
 	}

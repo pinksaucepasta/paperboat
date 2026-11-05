@@ -209,7 +209,7 @@ func TestStoreCompletionFallbackRetainsRealReadFailureAndRecovery(t *testing.T) 
 	if _, err := state.db.Exec(`DROP VIEW file_transfers; ALTER TABLE saved_transfers RENAME TO file_transfers`); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.CommitFileTransferOffset(t.Context(), transfer.ID, 0, 4); err != nil {
+	if err := state.CommitFileTransferOffset(t.Context(), transfer.ID, 0, 4, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := state.CompleteFileTransfer(t.Context(), transfer.ID, "destination"); err != nil {

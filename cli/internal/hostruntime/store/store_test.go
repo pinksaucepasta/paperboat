@@ -202,18 +202,18 @@ func TestFileTransferOffsetIsCompareAndSwapAndBounded(t *testing.T) {
 	if err := state.CreateFileTransfers(context.Background(), []FileTransfer{transfer}); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, 0, 2); err != nil {
+	if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, 0, 2, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, call := range []struct{ expected, next int64 }{{0, 3}, {2, 5}, {3, 2}} {
-		if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, call.expected, call.next); !errors.Is(err, ErrConflict) {
+		if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, call.expected, call.next, time.Time{}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("offset %+v err=%v", call, err)
 		}
 	}
 	if err := state.CompleteFileTransfer(context.Background(), transfer.ID, "machine_host"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("early complete err=%v", err)
 	}
-	if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, 2, 4); err != nil {
+	if err := state.CommitFileTransferOffset(context.Background(), transfer.ID, 2, 4, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := state.CompleteFileTransfer(context.Background(), transfer.ID, "machine_host"); err != nil {
@@ -644,7 +644,7 @@ func TestCancelBatchAndReceiptNeverPartiallyCancel(t *testing.T) {
 		if err := state.CreateFileTransfers(t.Context(), []FileTransfer{a, b}); err != nil {
 			t.Fatal(err)
 		}
-		if err := state.CompleteFileTransferBatch(t.Context(), a.BatchID, "source"); err != nil {
+		if err := state.CompleteFileTransferBatch(t.Context(), a.BatchID, "source", time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		start := make(chan struct{})

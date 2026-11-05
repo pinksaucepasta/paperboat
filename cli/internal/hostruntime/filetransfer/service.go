@@ -188,10 +188,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		if err != nil {
 			return nil, storageFailure(err)
 		}
-		expiresAt := now.Add(time.Duration(policy.RetentionSeconds) * time.Second)
-		if request.DestinationMachineID != s.config.LocalMachineID {
-			expiresAt = now.Add(time.Duration(policy.DeliveryTimeoutSeconds) * time.Second)
-		}
+		// Outgoing: the delivery deadline. Incoming: an idle upload lease, renewed by progress and replaced
+		// by the retention period when the batch is published, so an abandoned upload frees its slot.
+		expiresAt := now.Add(time.Duration(policy.DeliveryTimeoutSeconds) * time.Second)
 		transfers[i] = store.FileTransfer{ID: id, BatchID: request.BatchID, SourceMachineID: request.SourceMachineID, DestinationMachineID: request.DestinationMachineID, InitiatingUserID: request.InitiatingUserID, SessionID: request.SessionID, DeliveryClientID: request.DeliveryClientID, Basename: file.Basename, Size: file.Size, SHA256: file.SHA256, State: "created", CreatedAt: now, ExpiresAt: expiresAt}
 	}
 	if request.DestinationMachineID == s.config.LocalMachineID {
@@ -323,7 +322,11 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 	if err := file.Sync(); err != nil {
 		return transfer, storageFailure(err)
 	}
-	if err := s.config.Store.CommitFileTransferOffset(ctx, id, offset, offset+written); err != nil {
+	var lease time.Time
+	if transfer.DestinationMachineID == s.config.LocalMachineID {
+		lease = s.config.Now().Add(time.Duration(s.config.Policy.Current().DeliveryTimeoutSeconds) * time.Second)
+	}
+	if err := s.config.Store.CommitFileTransferOffset(ctx, id, offset, offset+written, lease); err != nil {
 		return transfer, &Error{Code: OffsetConflict, Cause: err}
 	}
 	transfer.CommittedOffset += written
@@ -423,7 +426,8 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 	if err := syncDir(s.config.Root); err != nil {
 		return requested, storageFailure(err)
 	}
-	if err := s.config.Store.CompleteFileTransferBatch(ctx, requested.BatchID, s.config.LocalMachineID); err != nil {
+	retainUntil := s.config.Now().Add(time.Duration(s.config.Policy.Current().RetentionSeconds) * time.Second)
+	if err := s.config.Store.CompleteFileTransferBatch(ctx, requested.BatchID, s.config.LocalMachineID, retainUntil); err != nil {
 		return requested, storageFailure(err)
 	}
 	for _, transfer := range transfers {
