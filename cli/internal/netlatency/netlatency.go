@@ -130,6 +130,8 @@ type Reporter struct {
 	Every     time.Duration // zero means Interval
 
 	recent map[string][]int64 // the last SmoothingRounds measurements of each node still answering
+	// newTimer starts the wait before a round; nil is a real timer. Tests fire it at once.
+	newTimer func(time.Duration) (<-chan time.Time, func() bool)
 }
 
 // smooth replaces each measurement with the fastest of the node's last SmoothingRounds rounds and
@@ -169,23 +171,32 @@ func (r *Reporter) Run(ctx context.Context) {
 	if every == 0 {
 		every = Interval
 	}
+	newTimer := r.newTimer
+	if newTimer == nil {
+		newTimer = func(d time.Duration) (<-chan time.Time, func() bool) { t := time.NewTimer(d); return t.C, t.Stop }
+	}
 	failures := 0
 	for {
-		timer := time.NewTimer(jittered(wait))
+		fired, stop := newTimer(jittered(wait))
 		select {
 		case <-ctx.Done():
-			timer.Stop()
+			stop()
 			return
-		case <-timer.C:
+		case <-fired:
 		}
-		// A server that cannot take reports (not deployed yet, refusing) is asked less and less often.
 		if r.once(ctx) {
-			failures, wait = 0, every
+			failures = 0
 		} else {
 			failures = min(failures+1, 4)
-			wait = min(every<<failures, MaxBackoff)
 		}
+		wait = nextWait(every, failures)
 	}
+}
+
+// nextWait is the wait before the next round after failures failed rounds in a row: a server that
+// cannot take reports (not deployed yet, refusing) is asked less and less often.
+func nextWait(every time.Duration, failures int) time.Duration {
+	return min(every<<failures, MaxBackoff)
 }
 
 // once runs one round and reports whether it ended well (nothing to measure counts as well).

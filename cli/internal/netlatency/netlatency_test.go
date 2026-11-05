@@ -3,7 +3,6 @@ package netlatency
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,35 +98,47 @@ func TestReporterReportsOnScheduleAndSurvivesFailures(t *testing.T) {
 	}
 }
 
+// The reporter keeps reporting through refusals: each wait it asks for grows while the server refuses
+// and returns to the interval once a report is taken. The waits are recorded through the timer seam and
+// fired at once, so wall-clock gaps (macOS run 42015154092: 46 ms then 67 ms) cannot decide the result.
 func TestReporterBacksOffWhileTheServerRefusesAndRecovers(t *testing.T) {
-	var times []time.Time
-	var mu sync.Mutex
+	const first, every = time.Minute, 10 * time.Minute
+	var waits []time.Duration
+	rounds := 0
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	reporter := &Reporter{
 		Targets: func(context.Context) ([]Target, error) { return []Target{{"node_a", "a:1"}}, nil },
 		Report: func(context.Context, []Measurement) error {
-			mu.Lock()
-			defer mu.Unlock()
-			times = append(times, time.Now())
-			if len(times) < 4 {
+			if rounds++; rounds < 4 {
 				return errors.New("not found")
 			}
-			cancel()
 			return nil
 		},
 		Dial:  func(context.Context, string) error { return nil },
-		First: time.Millisecond, Every: 10 * time.Millisecond,
+		First: first, Every: every,
+		newTimer: func(d time.Duration) (<-chan time.Time, func() bool) {
+			waits = append(waits, d)
+			if len(waits) == 6 {
+				cancel() // the wait after the second success is the last one this test needs; it never fires
+				return nil, func() bool { return true }
+			}
+			fired := make(chan time.Time, 1)
+			fired <- time.Time{}
+			return fired, func() bool { return true }
+		},
 	}
 	reporter.Run(ctx)
-	mu.Lock()
-	defer mu.Unlock()
-	if len(times) != 4 {
-		t.Fatalf("rounds=%d", len(times))
+	// The first round, three refusals doubling the wait (the third stops at MaxBackoff), then back to the
+	// interval after each success.
+	want := []time.Duration{first, 2 * every, 4 * every, min(8*every, MaxBackoff), every, every}
+	if len(waits) != len(want) {
+		t.Fatalf("waits %v, want one per round: %v", waits, want)
 	}
-	first, last := times[1].Sub(times[0]), times[3].Sub(times[2])
-	if last < first+first/2 {
-		t.Fatalf("waits did not grow while failing: %v then %v", first, last)
+	for i, w := range want {
+		if waits[i] < w-w/5 || waits[i] > w+w/5 {
+			t.Fatalf("wait %d = %v, want %v within its jitter (all: %v)", i, waits[i], w, waits)
+		}
 	}
 }
 
