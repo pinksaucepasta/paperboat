@@ -99,8 +99,6 @@ github.com/pinksaucepasta/paperboat/internal/peertransport/native TestServerIssu
 github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet TestNetworkProducedConfiguration
 github.com/pinksaucepasta/paperboat/internal/peertransport/udpsocket TestOpenBindsAvailableFamiliesToSamePort
 github.com/pinksaucepasta/paperboat/internal/splitdns TestBrowserIsolationFixture
-github.com/pinksaucepasta/paperboat/server/internal/app TestE2EProxy
-github.com/pinksaucepasta/paperboat/server/internal/app TestE2EServe
 github.com/pinksaucepasta/paperboat/server/internal/backupreport TestProducerRealPostgresBackupRestore
 github.com/pinksaucepasta/paperboat/server/internal/billing TestStripeTestModeCheckoutAndSubscriptionContract
 github.com/pinksaucepasta/paperboat/server/internal/billing TestStripeTestModeScopedPortalContract
