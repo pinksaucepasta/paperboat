@@ -153,11 +153,17 @@ func previewRouteMatch(preview DataCarrierPreviewRoute) route.RouteMatch {
 	if generation == 0 {
 		generation = preview.Identity.Generation
 	}
+	// An endpoint route has no lease on the edge (its admission requires generation 0); the server's
+	// preview_routes view and hostd bind it as generation 1, so grants for it name generation 1.
+	leaseGeneration := preview.LeaseGeneration
+	if preview.EndpointRoute && leaseGeneration == 0 {
+		leaseGeneration = 1
+	}
 	kind := route.PreviewHTTPSWSS
 	if preview.Kind == dataCarrierPreviewPrivateRouteKind {
 		kind = route.Kind(dataCarrierPreviewPrivateRouteKind)
 	}
-	rule := route.RouteRule{ID: preview.RouteID, RouteID: preview.RouteID, RouteGeneration: preview.Revision, Revision: preview.Revision, Generation: generation, AssignmentID: preview.OperationID, AssignmentGeneration: preview.LeaseGeneration, ResourceKind: "preview", SessionGeneration: preview.LeaseGeneration, Environment: preview.PreviewID, AccountID: preview.Identity.AccountID, HostID: preview.Identity.HostID, TunnelID: preview.PreviewID, ConnectorID: preview.Identity.ConnectorID, ConnectorSessionID: preview.Identity.SessionID, ConnectorProcessGeneration: preview.Identity.ProcessGeneration, ConfigGeneration: preview.Identity.Generation, Node: preview.EdgeNodeID, EdgeProcessEpoch: preview.EdgeProcessEpoch, Kind: kind, MatchType: route.MatchExact, Hostname: preview.Hostname, PathPrefix: "/", Target: preview.Endpoint, Protocol: "https", OriginScheme: "http", AccessMode: preview.AccessMode, PreserveHost: true, DesiredState: "active", ObservedState: "ready"}
+	rule := route.RouteRule{ID: preview.RouteID, RouteID: preview.RouteID, RouteGeneration: preview.Revision, Revision: preview.Revision, Generation: generation, AssignmentID: preview.OperationID, AssignmentGeneration: leaseGeneration, ResourceKind: "preview", SessionGeneration: leaseGeneration, Environment: preview.PreviewID, AccountID: preview.Identity.AccountID, HostID: preview.Identity.HostID, TunnelID: preview.PreviewID, ConnectorID: preview.Identity.ConnectorID, ConnectorSessionID: preview.Identity.SessionID, ConnectorProcessGeneration: preview.Identity.ProcessGeneration, ConfigGeneration: preview.Identity.Generation, Node: preview.EdgeNodeID, EdgeProcessEpoch: preview.EdgeProcessEpoch, Kind: kind, MatchType: route.MatchExact, Hostname: preview.Hostname, PathPrefix: "/", Target: preview.Endpoint, Protocol: "https", OriginScheme: "http", AccessMode: preview.AccessMode, PreserveHost: true, DesiredState: "active", ObservedState: "ready"}
 	if preview.Kind == runtimewire.RouteKind {
 		rule.Kind = route.Kind(runtimewire.RouteKind)
 		rule.ResourceKind = "runtime"
