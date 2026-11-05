@@ -4,13 +4,14 @@
 # regenerated inside the container, so no real machine's SSH identity is touched.
 #   DOCKER="sudo -n docker" tools/qualify-ssh-trust-host.sh --pb /path/to/arm64/pb --owner-command "ssh -o BatchMode=yes anvit@hp"
 # The owner computer runs pb ssh; it needs a signed-in pb. --owner-command is how a shell on it is reached
-# (its arguments are one command string); the throwaway's record is revoked at the end by its exact name.
+# (its arguments are one command string); --prefix names the throwaway (default lanea-); its record is revoked at the end by its exact name.
 set -eu
-base=ubuntu:24.04 platform='' pb='' owner_command=''
+base=ubuntu:24.04 platform='' pb='' owner_command='' prefix=lanea-
 while [ "$#" -gt 0 ]; do
  case "$1" in
   --base) base=$2; shift 2;; --platform) platform=$2; shift 2;; --pb) pb=$2; shift 2;;
   --owner-command) owner_command=$2; shift 2;;
+  --prefix) prefix=$2; shift 2;;
   *) echo "unknown argument: $1" >&2; exit 2;;
  esac
 done
@@ -21,7 +22,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mkdir -p "$repo/.build"
 work=$(mktemp -d "$repo/.build/qualify-trust.XXXXXX")
 name=pb-trust-$(basename "$work" | tr 'A-Z.' 'a-z-')
-machine=lanea-trust-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+machine=${prefix}trust-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 step() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 . "$repo/tools/fresh-host.sh"
