@@ -533,7 +533,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if resolveErr != nil {
 			var apiErr *api.APIError
 			if errors.As(resolveErr, &apiErr) && apiErr.Code == "machine_revoked" {
-				resolveErr = tunnel.StopReconnect(resolveErr)
+				resolveErr = tunnel.Revoked(resolveErr)
 			}
 			return nil, resolveErr
 		}

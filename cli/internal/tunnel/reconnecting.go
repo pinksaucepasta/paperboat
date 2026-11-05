@@ -30,6 +30,20 @@ func StopReconnect(err error) error {
 	return stopReconnectError{error: err}
 }
 
+type revokedError struct{ error }
+
+func (e revokedError) Unwrap() error { return e.error }
+
+// Revoked marks a refusal because access to the terminal was withdrawn. It is permanent like StopReconnect, and
+// the only kind that ends a terminal whose link is silent at once: pb wraps every other non-retryable dial error
+// in StopReconnect too, including the local-daemon dial that fails while the network is down.
+func Revoked(err error) error {
+	if err == nil {
+		return nil
+	}
+	return StopReconnect(revokedError{error: err})
+}
+
 type TelemetryContext struct {
 	MachineID     string
 	EnvironmentID string
@@ -576,9 +590,12 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 		next, err := c.dialReconnect(c.ctx, "probeStalled", connection)
 		var stop stopReconnectError
 		if errors.As(err, &stop) {
-			// Final (access revoked): end the terminal with it now. Keeping the silent link only delayed it
-			// until the transport gave up, about 150 s of silence (F3-15 N13).
-			if still() {
+			// Revoked access ends the terminal now; keeping the silent link only delayed it until the transport
+			// gave up, about 150 s of silence (F3-15 N13). Any other permanent refusal (pb wraps every dial error
+			// that is not retryable, such as the open timeout while the network is down) stops probing and keeps
+			// the link, which the normal reconnect replaces once it is lost (F3-15 N4).
+			var revoked revokedError
+			if errors.As(err, &revoked) && still() {
 				c.refused.Store(&err)
 				_ = stalled.Close()
 			}

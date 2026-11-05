@@ -258,7 +258,7 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 		if err != nil {
 			var apiErr *api.APIError
 			if errors.As(err, &apiErr) && (apiErr.Status == 403 || apiErr.Status == 404) {
-				return nil, tunnel.StopReconnect(err)
+				return nil, tunnel.Revoked(err)
 			}
 			return nil, err
 		}

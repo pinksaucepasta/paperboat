@@ -472,7 +472,7 @@ func TestReconnectingConnStalledLinkEndsAtOnceWhenTheReattachIsRefused(t *testin
 	var reconnects atomic.Int32
 	c := NewReconnectingConn(context.Background(), first, 600, time.Millisecond, func(context.Context) (Conn, error) {
 		reconnects.Add(1)
-		return nil, StopReconnect(revoked)
+		return nil, Revoked(revoked)
 	})
 	defer c.Close()
 	ended := make(chan error, 1)
@@ -605,5 +605,40 @@ func TestReconnectingConnDoesNotBackOffANewLossAfterShortRecovery(t *testing.T) 
 	}
 	if _, err := c.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// lostLinkConn is a stalled link that, once closed, reports an unexpected transport loss, as a QUIC link does when
+// its idle timeout fires after the network returns.
+type lostLinkConn struct{ stalledReconnectConn }
+
+func (c lostLinkConn) Wait() (int, error) { <-c.stop; return 0, ErrTransportLost }
+
+// F3-15 N4 (45 s network drop) regression: pb wraps every dial error that is not retryable in StopReconnect, and
+// the local-daemon dial fails that way while the network is down. Only a revocation may end a terminal whose link
+// is silent; any other refusal during the outage keeps the link, and the terminal resumes when it is lost.
+func TestReconnectingConnStalledLinkSurvivesANonRevocationRefusalDuringAnOutage(t *testing.T) {
+	first := lostLinkConn{stalledReconnectConn{&blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}}
+	second := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 5}
+	var reconnects atomic.Int32
+	probed := make(chan struct{})
+	c := NewReconnectingConn(context.Background(), first, 3, time.Millisecond, func(context.Context) (Conn, error) {
+		if reconnects.Add(1) == 1 {
+			close(probed)
+			return nil, StopReconnect(errors.New("the stream to the machine did not open within 10 s"))
+		}
+		return second, nil
+	})
+	defer c.Close()
+	<-probed
+	time.Sleep(50 * time.Millisecond) // the probe has returned; a bad probe would have closed the link by now
+	_ = first.Close()                 // the outage ends and the transport gives up the silent link
+	got, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal("terminal ended during the outage:", err)
+	}
+	code, err := c.Wait()
+	if err != nil || code != 5 || string(got) != "resumed" || reconnects.Load() != 2 {
+		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
 	}
 }
