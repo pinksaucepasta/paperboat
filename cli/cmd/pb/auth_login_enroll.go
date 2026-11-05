@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/pinksaucepasta/paperboat/shared/machinename"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
@@ -110,6 +112,21 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	return nil
 }
 
+// loginDaemonAwaitingEnrollment reports whether this computer's daemon says it is not enrolled. It only reads the
+// local snapshot: a missing or unreachable daemon is not that state.
+var loginDaemonAwaitingEnrollment = func(ctx context.Context) bool {
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		return false
+	}
+	client, err := localapi.NewClient(paths.SocketPath, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	snapshot, err := client.Snapshot(ctx)
+	return err == nil && snapshot.DaemonState == "awaiting_enrollment"
+}
+
 // errStartFresh is returned from the login prompt when the user asks to remove this computer's setup
 // and add it again; the caller does that after the login lock is released.
 var errStartFresh = errors.New("start fresh")
@@ -117,7 +134,12 @@ var errStartFresh = errors.New("start fresh")
 // offerLoginChoices tells a signed-in, already added computer where it stands and offers to sign in
 // again or start fresh. It reports whether login should go on to a new approval.
 func offerLoginChoices(c *command.Context, store config.ProfileStore, issuer string, old config.Profile, machineID string, state *config.BrowserLoginState) (bool, error) {
-	summary := "Already signed in as " + firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID)
+	who := firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID)
+	if loginDaemonAwaitingEnrollment(c.Context) {
+		// The sign-in is valid but this computer's service lost its enrollment; signing in again cannot restore it.
+		return false, errors.New("Signed in as " + who + ", but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again.")
+	}
+	summary := "Already signed in as " + who
 	if where := machineWorkspaceSummary(c.Context, store, issuer, machineID); where != "" {
 		summary += " on " + where
 	}
