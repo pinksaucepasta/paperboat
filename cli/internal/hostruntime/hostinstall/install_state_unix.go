@@ -499,6 +499,7 @@ func removeInstalledFiles(ctx context.Context, paths installPaths) error {
 			result = errors.Join(result, err)
 		}
 	}
+	result = errors.Join(result, purgeOwnedState(ctx, paths, keep))
 	// Preserved account-private control directories are removed only after
 	// every owning native role is uninstalled. Never recursively delete an
 	// unexpected entry in this shared lifetime namespace.
@@ -534,6 +535,47 @@ func removeInstalledFiles(ctx context.Context, paths installPaths) error {
 		}
 	}
 	return result
+}
+
+// purgeOwnedState removes the account's state directories as a whole, whatever build wrote what is in them, then the
+// shared parent (/var/lib/paperboat, /var/lib/paperboat-installer, "/Library/Application Support/Paperboat") once no
+// other account's directory is left in it. A symlink in place of a directory is unlinked, never followed.
+func purgeOwnedState(ctx context.Context, paths installPaths, keep string) error {
+	var result error
+	seen := map[string]bool{}
+	var parents []string
+	for _, directory := range []string{paths.runtimeState, paths.installerState} {
+		if directory == "" || !filepath.IsAbs(directory) || seen[directory] {
+			continue
+		}
+		seen[directory] = true
+		result = errors.Join(result, removeOwnedDirectory(ctx, directory, keep))
+		if users := filepath.Dir(directory); filepath.Base(users) == "users" {
+			parents = append(parents, users)
+		}
+	}
+	for _, users := range parents {
+		// Remove fails while another account's directory is in it; that account still owns the parent.
+		if err := os.Remove(users); err != nil && !installNotExistOnly(err) {
+			continue
+		}
+		result = errors.Join(result, removeOwnedDirectory(ctx, filepath.Dir(users), keep))
+	}
+	return result
+}
+
+func removeOwnedDirectory(ctx context.Context, directory, keep string) error {
+	info, err := os.Lstat(directory)
+	if installNotExistOnly(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return os.Remove(directory)
+	}
+	return RemovePathPreservingCLI(ctx, directory, keep)
 }
 
 func regularFile(path string) bool {

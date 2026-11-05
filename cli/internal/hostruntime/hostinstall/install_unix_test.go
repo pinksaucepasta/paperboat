@@ -58,7 +58,7 @@ func TestWorkerEnvironmentKeepsControlAndReleasePlanesOutsideSystemPAC(t *testin
 	}
 }
 
-func TestRemoveInstalledFilesDeletesOnlyAllowlistedHostState(t *testing.T) {
+func TestRemoveInstalledFilesPurgesTheAccountsStateDirectories(t *testing.T) {
 	root, state := filepath.Join(t.TempDir(), "install"), filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -96,8 +96,60 @@ func TestRemoveInstalledFilesDeletesOnlyAllowlistedHostState(t *testing.T) {
 	if _, err := os.Lstat(updateRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("privileged update directory retained: %v", err)
 	}
-	if body, err := os.ReadFile(unrelated); err != nil || string(body) != "preserve" {
-		t.Fatalf("unrelated file changed: %q, %v", body, err)
+	// The directory is the account's own, so what an older build left in it goes too.
+	if _, err := os.Lstat(unrelated); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a file of an older build survived the uninstall: %v", err)
+	}
+}
+
+// An older build wrote /var/lib/paperboat/availability-policy.json beside users/: the shared parent goes with the last
+// account, but not while another account's directory is still in it, and a symlink is unlinked, never followed.
+func TestRemoveInstalledFilesPurgesTheSharedParentWithTheLastAccount(t *testing.T) {
+	base := t.TempDir()
+	parent := filepath.Join(base, "paperboat")
+	mine, other := filepath.Join(parent, "users", "u1"), filepath.Join(parent, "users", "u2")
+	for _, directory := range []string{mine, other} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := filepath.Join(parent, "availability-policy.json")
+	if err := os.WriteFile(stale, []byte("old build"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside")
+	if err := os.Mkdir(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "keep"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(mine, "link")); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "install")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := installPaths{root: root, installerState: mine, runtimeState: mine, worker: filepath.Join(root, "pb"), metadata: filepath.Join(mine, "install-metadata.json")}
+	if err := removeInstalledFiles(t.Context(), paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(mine); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the account's state directory remains: %v", err)
+	}
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("the shared parent was purged while another account is still in it: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(outside, "keep")); err != nil || string(body) != "keep" {
+		t.Fatalf("a symlink in the state directory was followed: %q %v", body, err)
+	}
+	paths.installerState, paths.runtimeState = other, other
+	if err := removeInstalledFiles(t.Context(), paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(parent); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the last account's uninstall left the shared parent with the stale file: %v", err)
 	}
 }
 
