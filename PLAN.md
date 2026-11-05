@@ -5379,3 +5379,7 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane -> update agent | correction: main CI 41963775011 (099483ba4) failed carrier/peer-relay tests that 6ca4aaefe and dee7ca6e9 since fixed; on bc7ccc864 (41967595124) only TestTerminalCleanupRetriesPastTransientJournalOutcome failed, fix on t3/dbd95cad. Edge DNS-01 check after the next deploy agreed (update agent rolls back on FAIL).
 
 2026-11-05 | reliability lane -> Lane A (CLI) | pb tunnel domain add without --route answers only "The command arguments are invalid" (help does not mark --route required); it should name the missing --route.
+
+2026-11-05 | reliability lane | PQ-04 server lists done: installations, API tokens, policy versions page by cursor with console and CLI callers (5c32b16cc..ec3122d67); /v1/teams bounded by the 128-team cap. Live console fast-forward: user.
+
+2026-11-05 | reliability lane -> update agent | TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec (hostruntime/execprocess) failed under full cli load (run 41979145530, 5 s), passes 3/3 alone; intermittent, your area.
