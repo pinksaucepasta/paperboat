@@ -302,7 +302,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	networkAPI := connectedNetworkAPI{register: func(request api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		client := tailnet.NetworkBinding{AccountID: accountID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, KeyGeneration: request.ExpectedKeyGeneration + 1, WireGuardPublicKey: request.WireGuardPublicKey, DiscoPublicKey: request.DiscoPublicKey, QUICCertificateFingerprint: request.QUICCertificateFingerprint, QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey), VirtualAddress: "fd7a:115c:a1e0::91"}
+		client := tailnet.NetworkBinding{AccountID: accountID, EndpointID: testDaemonEndpoint(cliID), Role: "cli", EndpointGeneration: 1, KeyGeneration: request.ExpectedKeyGeneration + 1, WireGuardPublicKey: request.WireGuardPublicKey, DiscoPublicKey: request.DiscoPublicKey, QUICCertificateFingerprint: request.QUICCertificateFingerprint, QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey), VirtualAddress: "fd7a:115c:a1e0::91"}
 		clientConfig := connectedConfiguration(now, issuer, client, machineBinding, "dial")
 		machineConfig := connectedConfiguration(now, issuer, machineBinding, client, "accept")
 		if machine != nil {
@@ -347,7 +347,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})}
 	relayTrust := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: relayRoots, ServerName: "localhost", Certificates: []tls.Certificate{cliLeaf}}
-	runtime, err := newCLINativeRuntime(ctx, issuer, store, networkAPI, clientHTTP, relayTrust, accountID, cliID, identity, "")
+	runtime, err := newCLINativeRuntime(ctx, issuer, store, networkAPI, clientHTTP, relayTrust, accountID, testDaemonEndpoint(cliID), identity, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	if mode == "quic" {
 		runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
 		var requests atomic.Int32
-		peer := &PeerTerminalTunnel{nativeRuntime: runtime, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(*http.Request) (*http.Response, error) {
+		peer := &PeerTerminalTunnel{nativeRuntime: runtime, config: PeerTerminalConfig{Issuer: issuer, Generation: testDaemonGeneration, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(*http.Request) (*http.Response, error) {
 			requests.Add(1)
 			return nil, errors.New("control plane unavailable")
 		})}}}

@@ -42,8 +42,7 @@ func (s ProfileStore) UpdatePeerNetworkState(issuer, accountID, endpointID strin
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
-	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + endpointID))
-	ref := "peer-network-v1-" + hex.EncodeToString(digest[:])
+	ref := peerNetworkStateRef(issuer, accountID, endpointID)
 	previous, err := s.Secrets.Get(ref)
 	if err != nil && !credentialAbsenceOnly(err) {
 		return credentialStoreFailure("peer network custody could not be loaded", err)
@@ -85,6 +84,39 @@ func (s ProfileStore) UpdatePeerNetworkState(issuer, accountID, endpointID strin
 	}
 	if err := s.Secrets.Set(ref, string(encoded)); err != nil {
 		return credentialStoreFailure("peer network custody could not be stored", err)
+	}
+	return nil
+}
+
+func peerNetworkStateRef(issuer, accountID, endpointID string) string {
+	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + endpointID))
+	return "peer-network-v1-" + hex.EncodeToString(digest[:])
+}
+
+// DeletePeerNetworkState removes one endpoint's network key custody and its last verified configuration: a daemon
+// generation that withdrew leaves nothing behind. Deleting what is already gone succeeds.
+func (s ProfileStore) DeletePeerNetworkState(issuer, accountID, endpointID string) (resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) || !validCredentialID(endpointID) {
+		return ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return err
+	}
+	lock := newSharedLock(s.profilePath(issuer) + ".peer-network.lock")
+	if err := lock.Lock(); err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
+	if err := s.Secrets.Delete(peerNetworkStateRef(issuer, accountID, endpointID)); err != nil && !credentialAbsenceOnly(err) {
+		return credentialStoreFailure("peer network custody could not be removed", err)
+	}
+	path, err := s.peerNetworkConfigurationPath(issuer, accountID, endpointID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

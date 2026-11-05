@@ -49,7 +49,7 @@ func retainAdmittedCertificates(ctx context.Context, tx *sql.Tx, self *networkBi
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(
 SELECT 1 FROM paperboat.peer_endpoint_certificates old
 JOIN paperboat.peer_endpoint_certificates current ON current.fingerprint=decode($7,'hex')
-WHERE old.fingerprint=$1 AND old.user_id=$2 AND old.endpoint_id=$3
+WHERE old.fingerprint=$1 AND old.user_id=$2 AND old.endpoint_id=(SELECT owner_endpoint_id FROM paperboat.peer_network_identities WHERE user_id=$2 AND endpoint_id=$3)
 AND old.role=$4 AND old.generation=$5 AND old.quic_public_key=$6
 AND old.signer_public_key=current.signer_public_key AND old.issued_at<=$8
 AND (old.revoked_at IS NULL OR old.revocation_reason='certificate_superseded')

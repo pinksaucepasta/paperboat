@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -37,6 +38,10 @@ type cliNativeNetworkAPI struct {
 	issuer string
 	auth   config.AuthSource
 	http   *http.Client
+	// generation is this daemon generation; every request names it, so the server answers for its own endpoint.
+	generation string
+	// refused reports the server refusing this generation's identity (generation_evicted or revoked).
+	refused func(reason string)
 }
 
 func (c cliNativeNetworkAPI) client() (*api.Client, error) {
@@ -52,7 +57,13 @@ func (c cliNativeNetworkAPI) RegisterPeerNetwork(ctx context.Context, request ap
 	if err != nil {
 		return api.PeerNetworkRegistrationResult{}, err
 	}
-	return client.RegisterPeerNetwork(ctx, request)
+	request.DaemonGeneration = c.generation
+	result, err := client.RegisterPeerNetwork(ctx, request)
+	for _, evicted := range result.EvictedEndpoints {
+		diagnosticlog.TryWarn("an older pb daemon generation was replaced; the streams it still held have ended", "endpoint", evicted, "limit", "4 daemon generations per sign-in")
+	}
+	c.observeRefusal(err)
+	return result, err
 }
 
 func (c cliNativeNetworkAPI) PeerNetworkConfiguration(ctx context.Context, request api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error) {
@@ -60,7 +71,38 @@ func (c cliNativeNetworkAPI) PeerNetworkConfiguration(ctx context.Context, reque
 	if err != nil {
 		return api.PeerNetworkConfigurationResult{}, err
 	}
-	return client.PeerNetworkConfiguration(ctx, request)
+	request.DaemonGeneration = c.generation
+	result, err := client.PeerNetworkConfiguration(ctx, request)
+	c.observeRefusal(err)
+	return result, err
+}
+
+// observeRefusal reports a server answer that refuses this generation's identity: tailnet then drops the
+// authority (rejectRefusedAuthority), which ends every stream this generation holds.
+func (c cliNativeNetworkAPI) observeRefusal(err error) {
+	if c.refused == nil || err == nil {
+		return
+	}
+	if reason := refusalReason(err); reason != "" {
+		c.refused(reason)
+	}
+}
+
+// ErrGenerationRetiring refuses new native work in a daemon generation that drains, withdrew or was refused: the
+// current generation serves it.
+var ErrGenerationRetiring = errors.New("this pb daemon generation is retiring; the current daemon serves new connections")
+
+// refusalReason is "generation_evicted" when a newer daemon generation replaced this one, "revoked" when the server
+// refused its identity otherwise (session or account revoked, drain past its cap), and "" for any other error.
+func refusalReason(err error) string {
+	var response *api.APIError
+	switch {
+	case errors.As(err, &response) && response.Code == "peer_network_generation_evicted":
+		return "generation_evicted"
+	case errors.Is(err, api.ErrUnauthenticated), errors.As(err, &response) && (response.Status == http.StatusUnauthorized || response.Status == http.StatusForbidden):
+		return "revoked"
+	}
+	return ""
 }
 
 // cliNativeRuntime owns the one CLI-role authority and Tailcat engine shared
@@ -462,8 +504,12 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 // acquireNativeRuntime returns the live runtime, refreshing its signed admission first, or starts
 // one. A caller that creates no new peer grant passes admitted: a runtime that already admits its
 // target is reused without that refresh round trip.
-func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID, endpointID string, identity clientauthority.Authority, admitted func(*tailnet.Authority) bool) (*cliNativeRuntime, bool, error) {
+func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID, cliSessionID string, identity clientauthority.Authority, admitted func(*tailnet.Authority) bool) (*cliNativeRuntime, bool, error) {
 	if t == nil {
+		return nil, false, ErrPeerTerminalInvalid
+	}
+	endpointID, ok := peernetwork.DaemonEndpointID(cliSessionID, t.config.Generation)
+	if !ok {
 		return nil, false, ErrPeerTerminalInvalid
 	}
 	t.nativeMu.Lock()
@@ -472,7 +518,7 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		return nil, false, net.ErrClosed
 	}
 	fingerprint := identity.LocalCertificate.Fingerprint()
-	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
+	networkAPI := t.networkAPI()
 	if current := t.nativeRuntime; current != nil && current.alive() && current.accountID == accountID && current.endpointID == endpointID && current.identityFingerprint == fingerprint && identity.LocalCertificate.Claims.ExpiresAt.After(time.Now().UTC()) {
 		t.nativeMu.Unlock()
 		diagnosticlog.TryInfo("native cache reuse", "stage", "admission_check", "predicate_present", admitted != nil)
@@ -497,6 +543,9 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		return current, false, nil
 	}
 	defer t.nativeMu.Unlock()
+	if t.retiring.Load() {
+		return nil, false, ErrGenerationRetiring
+	}
 	if t.nativeRuntime != nil {
 		_ = t.nativeRuntime.Close()
 		t.nativeRuntime = nil
@@ -631,8 +680,14 @@ func (t *PeerTerminalTunnel) RegisterNetwork(ctx context.Context) error {
 		return err
 	}
 	defer identity.Clear()
-	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
-	authority, _, _, err := newCLINativeAuthority(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, profile.Account.ID, profile.CLIClientSessionID, identity, t.config.LocalMachineID)
+	if t.retiring.Load() {
+		return ErrGenerationRetiring
+	}
+	endpointID, ok := peernetwork.DaemonEndpointID(profile.CLIClientSessionID, t.config.Generation)
+	if !ok {
+		return ErrPeerTerminalInvalid
+	}
+	authority, _, _, err := newCLINativeAuthority(ctx, t.config.Issuer, t.config.Store, t.networkAPI(), t.config.HTTPClient, t.config.TLS, profile.Account.ID, endpointID, identity, t.config.LocalMachineID)
 	if err != nil {
 		return err
 	}
