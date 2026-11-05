@@ -7,7 +7,10 @@ import (
 )
 
 type PeerNetworkRegistration struct {
-	OperationID                string `json:"operation_id"`
+	OperationID string `json:"operation_id"`
+	// DaemonGeneration names the user daemon generation registering (shared/peernetwork.DaemonEndpointID); a
+	// machine leaves it empty.
+	DaemonGeneration           string `json:"daemon_generation,omitempty"`
 	WireGuardPublicKey         string `json:"wireguard_public_key"`
 	DiscoPublicKey             string `json:"disco_public_key"`
 	ExpectedKeyGeneration      uint64 `json:"expected_key_generation"`
@@ -16,6 +19,8 @@ type PeerNetworkRegistration struct {
 type PeerNetworkRegistrationResult struct {
 	KeyGeneration  uint64 `json:"key_generation"`
 	VirtualAddress string `json:"virtual_address"`
+	// EvictedEndpoints are older daemon generations this registration revoked (at most 4 live per session).
+	EvictedEndpoints []string `json:"evicted_endpoints"`
 }
 
 func (c *Client) RegisterPeerNetwork(ctx context.Context, request PeerNetworkRegistration) (PeerNetworkRegistrationResult, error) {
@@ -44,9 +49,10 @@ type PeerNetworkConfigurationResult struct {
 // own candidate addresses, sent only once the server announced EndpointReports and only when they changed:
 // nil omits the field (the server keeps its stored set), an empty slice clears it.
 type PeerNetworkConfigurationRequest struct {
-	OperationID    string                 `json:"operation_id"`
-	AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
-	Endpoints      *[]string              `json:"endpoints,omitempty"`
+	OperationID      string                 `json:"operation_id"`
+	DaemonGeneration string                 `json:"daemon_generation,omitempty"`
+	AdmittedScopes   []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
+	Endpoints        *[]string              `json:"endpoints,omitempty"`
 	// MembershipGrants asks for relay grants with memberships; this client verifies and uses them.
 	MembershipGrants bool `json:"membership_grants,omitempty"`
 	// Authority "until_revoked_v1" asks for machine_network scopes and host session rights without expiry
@@ -99,4 +105,21 @@ func (c *Client) ReportCarrierOffer(ctx context.Context, report CarrierOfferRepo
 		return errors.New("report carrier offer: machine authentication is not configured")
 	}
 	return c.doRequest(ctx, http.MethodPost, "/v1/machine-peer-network/carrier", report, nil, http.Header{"Idempotency-Key": {report.OperationID}}, true)
+}
+
+// PeerNetworkGeneration names a user daemon generation of this CLI session.
+type PeerNetworkGeneration struct {
+	DaemonGeneration string `json:"daemon_generation"`
+}
+
+// BeginPeerNetworkDrain records that this daemon generation stopped accepting and drains what it holds, for at most
+// runtimeattachment.DrainLimit. Repeating it is harmless.
+func (c *Client) BeginPeerNetworkDrain(ctx context.Context, generation PeerNetworkGeneration) error {
+	return c.doRequest(ctx, http.MethodPost, "/v1/peer-network/drain", generation, nil, nil, true)
+}
+
+// WithdrawPeerNetwork revokes this daemon generation's network identity once it finished draining. Repeating it is
+// harmless.
+func (c *Client) WithdrawPeerNetwork(ctx context.Context, generation PeerNetworkGeneration) error {
+	return c.doRequest(ctx, http.MethodPost, "/v1/peer-network/withdraw", generation, nil, nil, true)
 }

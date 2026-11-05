@@ -426,6 +426,8 @@ func NewRouter(opts Options) http.Handler {
 				}
 				mux.Handle("POST /v1/peer-network/register", peerNetworkAuth(peerNetworkRegister(opts.PeerNetwork)))
 				mux.Handle("POST /v1/peer-network/config", peerNetworkAuth(peerNetworkConfig(opts.PeerNetwork)))
+				mux.Handle("POST /v1/peer-network/drain", peerNetworkAuth(peerNetworkGeneration(opts.PeerNetwork.BeginDrain)))
+				mux.Handle("POST /v1/peer-network/withdraw", peerNetworkAuth(peerNetworkGeneration(opts.PeerNetwork.Withdraw)))
 			}
 			if opts.ManagedSSH != nil && opts.DeviceAuth != nil {
 				sshRead := func(next http.Handler) http.Handler {

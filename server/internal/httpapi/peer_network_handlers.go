@@ -18,10 +18,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 type peerNetworkRegisterBody struct {
 	OperationID                string `json:"operation_id"`
+	DaemonGeneration           string `json:"daemon_generation"`
 	WireGuardPublicKey         string `json:"wireguard_public_key"`
 	DiscoPublicKey             string `json:"disco_public_key"`
 	ExpectedKeyGeneration      int64  `json:"expected_key_generation"`
@@ -29,6 +31,7 @@ type peerNetworkRegisterBody struct {
 }
 type peerNetworkConfigBody struct {
 	OperationID          string                             `json:"operation_id"`
+	DaemonGeneration     string                             `json:"daemon_generation"`
 	AdmittedScopes       []peersessions.AdmittedScope       `json:"admitted_scopes,omitempty"`
 	AdmittedCertificates []peersessions.AdmittedCertificate `json:"admitted_certificates,omitempty"`
 	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent once a config
@@ -42,6 +45,23 @@ type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
 	Configuration(context.Context, peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error)
 	ReportCarrierOffer(context.Context, peersessions.CarrierOfferReport) error
+	BeginDrain(ctx context.Context, userID, ownerEndpointID, endpointID string) error
+	Withdraw(ctx context.Context, userID, ownerEndpointID, endpointID string) error
+}
+
+// daemonEndpoint is the network endpoint of the calling daemon generation of the CLI session.
+func daemonEndpoint(w http.ResponseWriter, r *http.Request, generation string) (principal, string, bool) {
+	p, ok := principalFromContext(r.Context())
+	if !ok || p.Client == nil {
+		writeError(w, r, http.StatusUnauthorized, "authentication_required", "CLI authentication is required.")
+		return p, "", false
+	}
+	endpoint, ok := peernetwork.DaemonEndpointID(p.Client.SessionID, generation)
+	if !ok {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The daemon generation must be 32 lowercase hex characters.")
+		return p, "", false
+	}
+	return p, endpoint, true
 }
 
 func decodePeerNetworkRegister(body peerNetworkRegisterBody) ([]byte, []byte, []byte, bool) {
@@ -52,6 +72,12 @@ func decodePeerNetworkRegister(body peerNetworkRegisterBody) ([]byte, []byte, []
 }
 func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, peersessions.ErrGenerationLimit):
+		writeError(w, r, http.StatusConflict, "peer_network_generation_limit", "Four pb daemon generations of this sign-in may still hold connections. Wait for an older one to finish draining (pb doctor lists them), or stop it, then retry.")
+	case errors.Is(err, peersessions.ErrGenerationEvicted):
+		writeError(w, r, http.StatusForbidden, "peer_network_generation_evicted", "A newer pb daemon generation replaced this one; the streams it still held have ended.")
+	case errors.Is(err, peersessions.ErrGenerationWithdrawn):
+		writeError(w, r, http.StatusForbidden, "peer_network_generation_withdrawn", "This pb daemon generation has finished; the current daemon serves new connections.")
 	case errors.Is(err, peersessions.ErrConflict):
 		writeError(w, r, http.StatusConflict, "peer_network_conflict", "The peer network key generation changed. Refresh registration state before retrying rotation.")
 	case errors.Is(err, peersessions.ErrDenied):
@@ -70,13 +96,12 @@ func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 
 func peerNetworkRegister(s peerNetworkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		if !ok || p.Client == nil {
-			writeError(w, r, http.StatusUnauthorized, "authentication_required", "CLI authentication is required.")
-			return
-		}
 		var body peerNetworkRegisterBody
 		if !decodeStrictJSON(w, r, &body) {
+			return
+		}
+		p, endpoint, ok := daemonEndpoint(w, r, body.DaemonGeneration)
+		if !ok {
 			return
 		}
 		key, disco, fingerprint, valid := decodePeerNetworkRegister(body)
@@ -84,7 +109,7 @@ func peerNetworkRegister(s peerNetworkService) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network registration is invalid.")
 			return
 		}
-		value, err := s.Register(r.Context(), peersessions.NetworkRegistration{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: body.ExpectedKeyGeneration, WireGuardPublicKey: key, DiscoPublicKey: disco, QUICCertificateFingerprint: fingerprint})
+		value, err := s.Register(r.Context(), peersessions.NetworkRegistration{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: endpoint, OwnerEndpointID: p.Client.SessionID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: body.ExpectedKeyGeneration, WireGuardPublicKey: key, DiscoPublicKey: disco, QUICCertificateFingerprint: fingerprint})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
@@ -94,21 +119,44 @@ func peerNetworkRegister(s peerNetworkService) http.HandlerFunc {
 }
 func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		if !ok || p.Client == nil {
-			writeError(w, r, http.StatusUnauthorized, "authentication_required", "CLI authentication is required.")
-			return
-		}
 		var body peerNetworkConfigBody
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates, Endpoints: body.Endpoints, Authority: body.Authority})
+		p, endpoint, ok := daemonEndpoint(w, r, body.DaemonGeneration)
+		if !ok {
+			return
+		}
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: endpoint, AdmittedScopes: body.AdmittedScopes, AdmittedCertificates: body.AdmittedCertificates, Endpoints: body.Endpoints, Authority: body.Authority})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: value})
+	}
+}
+
+type peerNetworkGenerationBody struct {
+	DaemonGeneration string `json:"daemon_generation"`
+}
+
+// peerNetworkGeneration serves a daemon generation's own lifecycle step: drain (it stopped accepting and keeps what
+// it holds, up to runtimeattachment.DrainLimit) or withdraw (it finished). Both are idempotent.
+func peerNetworkGeneration(step func(context.Context, string, string, string) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body peerNetworkGenerationBody
+		if !decodeStrictJSON(w, r, &body) {
+			return
+		}
+		p, endpoint, ok := daemonEndpoint(w, r, body.DaemonGeneration)
+		if !ok {
+			return
+		}
+		if err := step(r.Context(), p.User.ID, p.Client.SessionID, endpoint); err != nil {
+			peerNetworkError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]bool{"ok": true}})
 	}
 }
 
@@ -211,7 +259,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network registration is invalid.")
 				return
 			}
-			value, e := s.Register(r.Context(), peersessions.NetworkRegistration{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, Role: "machine", MachineID: claims.MachineID, EndpointGeneration: claims.InstallationGeneration, MachineGeneration: claims.InstallationGeneration, ExpectedKeyGeneration: body.ExpectedKeyGeneration, WireGuardPublicKey: key, DiscoPublicKey: disco, QUICCertificateFingerprint: fingerprint})
+			value, e := s.Register(r.Context(), peersessions.NetworkRegistration{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, OwnerEndpointID: claims.MachineID, Role: "machine", MachineID: claims.MachineID, EndpointGeneration: claims.InstallationGeneration, MachineGeneration: claims.InstallationGeneration, ExpectedKeyGeneration: body.ExpectedKeyGeneration, WireGuardPublicKey: key, DiscoPublicKey: disco, QUICCertificateFingerprint: fingerprint})
 			if e != nil {
 				peerNetworkError(w, r, e)
 				return

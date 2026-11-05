@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -21,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 var ErrPeerTerminalInvalid = errors.New("invalid peer terminal tunnel configuration")
@@ -35,6 +37,13 @@ type PeerTerminalConfig struct {
 	Now               func() time.Time
 	// LocalMachineID is the machine the daemon runs on, if enrolled (see tailnet.AuthorityOptions).
 	LocalMachineID string
+	// Generation is this daemon generation (32 lowercase hex, its unit's name). Each generation has its own network
+	// endpoint (peernetwork.DaemonEndpointID), so an upgraded daemon serves new connects while the old one drains.
+	Generation string
+	// OnIdentityRevoked is called once when the server refuses this generation's identity: "generation_evicted" (a
+	// newer generation pushed it out of the session's limit) or "revoked" (session, account or drain cap). Every
+	// stream it held ends then. Never called after Withdraw.
+	OnIdentityRevoked func(reason string)
 }
 
 // PeerTerminalTunnel owns native client authority and sessions for the daemon.
@@ -47,10 +56,15 @@ type PeerTerminalTunnel struct {
 	lifetime       context.Context
 	cancelLifetime context.CancelFunc
 	warmWG         sync.WaitGroup
+	revokedOnce    sync.Once
+	withdrawn      atomic.Bool
+	// retiring is set by BeginDrain, Withdraw or a refused identity: this generation keeps the runtime it has but
+	// never starts or registers a new one, so a retired generation cannot revive itself and evict a newer one.
+	retiring atomic.Bool
 }
 
 func NewPeerTerminalTunnel(config PeerTerminalConfig) (*PeerTerminalTunnel, error) {
-	if config.Issuer == "" || config.Store.Path == "" || config.Store.Secrets == nil || config.Auth == nil || config.TLS == nil {
+	if config.Issuer == "" || config.Store.Path == "" || config.Store.Secrets == nil || config.Auth == nil || config.TLS == nil || !peernetwork.ValidDaemonGeneration(config.Generation) {
 		return nil, ErrPeerTerminalInvalid
 	}
 	if config.Now == nil {
@@ -103,6 +117,72 @@ func (t *PeerTerminalTunnel) WarmMachines(ctx context.Context, machines []api.Us
 	}
 	authority.Clear()
 	return warmCtx.Err()
+}
+
+// networkAPI is the server's peer-network API as this daemon generation.
+func (t *PeerTerminalTunnel) networkAPI() cliNativeNetworkAPI {
+	return cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient, generation: t.config.Generation, refused: t.identityRefused}
+}
+
+func (t *PeerTerminalTunnel) identityRefused(reason string) {
+	if t.withdrawn.Load() {
+		return
+	}
+	t.retiring.Store(true)
+	t.revokedOnce.Do(func() {
+		diagnosticlog.TryWarn("this pb daemon generation's network identity was refused; the streams it held end", "reason", reason, "generation", t.config.Generation)
+		if t.config.OnIdentityRevoked != nil {
+			t.config.OnIdentityRevoked(reason)
+		}
+	})
+}
+
+// BeginDrain tells the server this generation stopped accepting and drains what it holds (for at most
+// runtimeattachment.DrainLimit). The tunnel keeps renewing its network configuration meanwhile, so held streams stay
+// admitted until they end, Withdraw, or a revocation (OnIdentityRevoked). Repeating it is harmless.
+func (t *PeerTerminalTunnel) BeginDrain(ctx context.Context) error {
+	if t == nil {
+		return ErrPeerTerminalInvalid
+	}
+	t.retiring.Store(true)
+	return t.generationStep(ctx, (*api.Client).BeginPeerNetworkDrain)
+}
+
+// Withdraw revokes this generation's network identity once it finished draining (its machines drop it) and removes
+// the generation's local key custody and cached configuration. It returns nil when the identity is already revoked
+// (withdrawn before, evicted, or the session ended).
+func (t *PeerTerminalTunnel) Withdraw(ctx context.Context) error {
+	if t == nil {
+		return ErrPeerTerminalInvalid
+	}
+	t.withdrawn.Store(true)
+	t.retiring.Store(true)
+	err := t.generationStep(ctx, (*api.Client).WithdrawPeerNetwork)
+	if err != nil && refusalReason(err) == "" {
+		return err
+	}
+	// The identity is gone on the server: its key custody and cached configuration go too, so an upgrade leaves
+	// nothing of the old generation behind.
+	profile, err := t.config.Store.Load(t.config.Issuer)
+	if err != nil {
+		return err
+	}
+	endpointID, ok := peernetwork.DaemonEndpointID(profile.CLIClientSessionID, t.config.Generation)
+	if !ok {
+		return ErrPeerTerminalInvalid
+	}
+	return t.config.Store.DeletePeerNetworkState(t.config.Issuer, profile.Account.ID, endpointID)
+}
+
+func (t *PeerTerminalTunnel) generationStep(ctx context.Context, step func(*api.Client, context.Context, api.PeerNetworkGeneration) error) error {
+	if t == nil || ctx == nil {
+		return ErrPeerTerminalInvalid
+	}
+	client, err := t.networkAPI().client()
+	if err != nil {
+		return err
+	}
+	return step(client, ctx, api.PeerNetworkGeneration{DaemonGeneration: t.config.Generation})
 }
 
 func (t *PeerTerminalTunnel) Close() error {

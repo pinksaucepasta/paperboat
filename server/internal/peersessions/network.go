@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
@@ -34,14 +33,18 @@ const networkConfigLimit = peernetwork.MaxConfigurationBytes
 const maximumAccountEndpoints = peernetwork.MaxEndpoints
 
 type NetworkRegistration struct {
-	OperationID                                                    string
-	UserID, EndpointID, Role, MachineID                            string
+	OperationID                         string
+	UserID, EndpointID, Role, MachineID string
+	// OwnerEndpointID is what the identity acts for: the CLI session of a daemon generation, or the machine.
+	OwnerEndpointID                                                string
 	EndpointGeneration, MachineGeneration, ExpectedKeyGeneration   int64
 	WireGuardPublicKey, DiscoPublicKey, QUICCertificateFingerprint []byte
 }
 type NetworkRegistrationResult struct {
 	KeyGeneration  int64  `json:"key_generation"`
 	VirtualAddress string `json:"virtual_address"`
+	// EvictedEndpoints are the older daemon generations this registration revoked (MaximumDaemonGenerations).
+	EvictedEndpoints []string `json:"evicted_endpoints,omitempty"`
 }
 type NetworkConfigRequest struct {
 	OperationID, UserID, EndpointID string
@@ -110,110 +113,6 @@ func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (
 	return out, err
 }
 
-func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistration) (NetworkRegistrationResult, error) {
-	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || !validWireGuardPublicKey(in.WireGuardPublicKey) || !validWireGuardPublicKey(in.DiscoPublicKey) || len(in.QUICCertificateFingerprint) != 32 || in.ExpectedKeyGeneration < 0 || (in.Role != "cli" && in.Role != "machine") {
-		return NetworkRegistrationResult{}, ErrInvalid
-	}
-	if in.Role == "cli" && (in.MachineID != "" || in.MachineGeneration != 0) || in.Role == "machine" && (in.MachineID != in.EndpointID || in.MachineGeneration < 1) {
-		return NetworkRegistrationResult{}, ErrInvalid
-	}
-	hash := sha256.Sum256([]byte(in.UserID + "\x00" + in.EndpointID + "\x00" + in.Role + "\x00" + fmt.Sprint(in.EndpointGeneration) + "\x00" + fmt.Sprint(in.MachineGeneration) + "\x00" + fmt.Sprint(in.ExpectedKeyGeneration) + "\x00" + base64.RawURLEncoding.EncodeToString(in.WireGuardPublicKey) + "\x00" + base64.RawURLEncoding.EncodeToString(in.DiscoPublicKey) + "\x00" + hex.EncodeToString(in.QUICCertificateFingerprint)))
-	tx, err := db.BeginSerializable(ctx, s.store.SQL())
-	if err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	defer tx.Rollback()
-	now := s.now().UTC()
-	var certRole, certEndpoint string
-	var certGeneration int64
-	err = tx.QueryRowContext(ctx, `SELECT c.role,c.endpoint_id,c.generation FROM paperboat.peer_endpoint_certificates c WHERE c.user_id=$1 AND c.fingerprint=$2 AND c.revoked_at IS NULL AND c.issued_at<=$3 AND c.expires_at>$3`, in.UserID, in.QUICCertificateFingerprint, now).Scan(&certRole, &certEndpoint, &certGeneration)
-	if err == sql.ErrNoRows || err == nil && (certRole != in.Role || certEndpoint != in.EndpointID || certGeneration != in.EndpointGeneration) {
-		return NetworkRegistrationResult{}, ErrDenied
-	}
-	if err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	if in.Role == "cli" {
-		var active bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c JOIN paperboat.users u ON u.id=c.user_id AND u.status='active' WHERE c.id=$1 AND c.user_id=$2 AND c.state='active' AND c.revoked_at IS NULL)`, in.EndpointID, in.UserID).Scan(&active)
-		if err != nil {
-			return NetworkRegistrationResult{}, err
-		}
-		if !active {
-			return NetworkRegistrationResult{}, ErrDenied
-		}
-	} else {
-		var generation int64
-		err = tx.QueryRowContext(ctx, `SELECT m.installation_generation FROM paperboat.user_machines m JOIN paperboat.users u ON u.id=m.user_id AND u.status='active' JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL WHERE m.id=$1 AND m.user_id=$2 AND m.state IN ('online','offline') AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL`, in.EndpointID, in.UserID).Scan(&generation)
-		if err == sql.ErrNoRows || err == nil && generation != in.MachineGeneration {
-			return NetworkRegistrationResult{}, ErrDenied
-		}
-		if err != nil {
-			return NetworkRegistrationResult{}, err
-		}
-	}
-	var oldHash []byte
-	var replayGen int64
-	err = tx.QueryRowContext(ctx, `SELECT request_hash,key_generation FROM paperboat.peer_network_registration_operations WHERE operation_id=$1`, in.OperationID).Scan(&oldHash, &replayGen)
-	if err == nil {
-		if !equalBytes(oldHash, hash[:]) {
-			return NetworkRegistrationResult{}, ErrConflict
-		}
-		var address string
-		if err = tx.QueryRowContext(ctx, `SELECT host(virtual_address) FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2 AND revoked_at IS NULL`, in.UserID, in.EndpointID).Scan(&address); err != nil {
-			return NetworkRegistrationResult{}, unavailableWithCause(err)
-		}
-		return NetworkRegistrationResult{replayGen, address}, nil
-	}
-	if err != sql.ErrNoRows {
-		return NetworkRegistrationResult{}, err
-	}
-	var currentGen int64
-	var address string
-	var currentWireGuard, currentDisco, currentCertificate []byte
-	created := false
-	err = tx.QueryRowContext(ctx, `SELECT key_generation,host(virtual_address),wireguard_public_key,disco_public_key,quic_certificate_fingerprint FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2 AND role=$3 AND revoked_at IS NULL FOR UPDATE`, in.UserID, in.EndpointID, in.Role).Scan(&currentGen, &address, &currentWireGuard, &currentDisco, &currentCertificate)
-	if err == sql.ErrNoRows {
-		if in.ExpectedKeyGeneration != 0 {
-			return NetworkRegistrationResult{}, ErrConflict
-		}
-		created = true
-		err = tx.QueryRowContext(ctx, `INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,nullif($4,''),$5,$6,1,$7,$8,$9,('fd7a:115c:a1e0::'::inet + nextval('paperboat.peer_network_virtual_address_seq')), $10,$10) RETURNING key_generation,host(virtual_address)`, in.UserID, in.EndpointID, in.Role, in.MachineID, in.EndpointGeneration, in.MachineGeneration, in.WireGuardPublicKey, in.DiscoPublicKey, in.QUICCertificateFingerprint, now).Scan(&currentGen, &address)
-	} else if err == nil {
-		if currentGen != in.ExpectedKeyGeneration {
-			return NetworkRegistrationResult{}, ErrConflict
-		}
-		if !equalBytes(currentWireGuard, in.WireGuardPublicKey) || !equalBytes(currentDisco, in.DiscoPublicKey) {
-			currentGen++
-		}
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET endpoint_generation=$1,machine_generation=$2,key_generation=$3,wireguard_public_key=$4,disco_public_key=$5,quic_certificate_fingerprint=$6,revoked_at=NULL,updated_at=$7 WHERE user_id=$8 AND endpoint_id=$9`, in.EndpointGeneration, in.MachineGeneration, currentGen, in.WireGuardPublicKey, in.DiscoPublicKey, in.QUICCertificateFingerprint, now, in.UserID, in.EndpointID)
-	}
-	if err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.peer_network_registration_operations(operation_id,user_id,endpoint_id,request_hash,key_generation,created_at) VALUES($1,$2,$3,$4,$5,$6)`, in.OperationID, in.UserID, in.EndpointID, hash[:], currentGen, now); err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM paperboat.peer_network_registration_operations o WHERE o.user_id=$1 AND o.endpoint_id=$2 AND o.operation_id IN (SELECT operation_id FROM paperboat.peer_network_registration_operations WHERE user_id=$1 AND endpoint_id=$2 ORDER BY key_generation DESC,created_at DESC,operation_id DESC OFFSET 64)`, in.UserID, in.EndpointID); err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	eventType := "peer_network.key_rotated"
-	if created {
-		eventType = "peer_network.key_registered"
-	} else if equalBytes(currentWireGuard, in.WireGuardPublicKey) && equalBytes(currentDisco, in.DiscoPublicKey) && !equalBytes(currentCertificate, in.QUICCertificateFingerprint) {
-		eventType = "peer_network.certificate_rebound"
-	}
-	auditID := "aud_peer_network_" + hex.EncodeToString(hash[:16])
-	metadata, _ := json.Marshal(map[string]any{"endpoint_id": in.EndpointID, "role": in.Role, "key_generation": currentGen, "virtual_address": address})
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.audit_events(id,actor_user_id,actor_type,event_type,resource_type,resource_id,idempotency_key,metadata,created_at) VALUES($1,$2,'user',$3,'peer_network_identity',$4,$5,$6::jsonb,$7) ON CONFLICT (event_type,resource_type,resource_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`, auditID, in.UserID, eventType, in.EndpointID, in.OperationID, metadata, now); err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	if err = tx.Commit(); err != nil {
-		return NetworkRegistrationResult{}, err
-	}
-	return NetworkRegistrationResult{currentGen, address}, nil
-}
-
 type networkBinding struct {
 	AccountID                       string   `json:"account_id"`
 	EndpointID                      string   `json:"endpoint_id"`
@@ -235,6 +134,8 @@ type networkBinding struct {
 	// and moved to the peer entry on the way out (deliverCarrierOffer).
 	CarrierOffer        []byte `json:"carrier_offer,omitempty"`
 	CarrierOfferExpires int64  `json:"carrier_offer_expires,omitempty"`
+	// OwnerEndpointID is what the identity acts for (its CLI session, or the machine); never signed.
+	OwnerEndpointID string `json:"-"`
 }
 type networkScope struct {
 	ResourceKind       string `json:"resource_kind"`
@@ -328,7 +229,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	defer tx.Rollback()
 	self, certExpiry, err := loadNetworkBinding(ctx, tx, in.UserID, in.EndpointID, now, len(in.AdmittedScopes) > 0)
 	if err == sql.ErrNoRows || err == ErrUnavailable {
-		return NetworkConfigResult{}, ErrDenied
+		return NetworkConfigResult{}, refusedGeneration(ctx, tx, in.UserID, in.EndpointID)
 	}
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -351,7 +252,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		 OR (coalesce(a.terminal_role,'owner')='owner' AND a.team_id IS NOT NULL AND NOT ('private_access'=ANY(a.capabilities)) AND NOT EXISTS(
 		  SELECT 1 FROM unnest(a.capabilities) capability
 		  WHERE NOT paperboat.team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability))))
-		ORDER BY (a.id=ANY($4::text[])) DESC, (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 129`, in.UserID, in.EndpointID, now, live["machine_access"])
+		ORDER BY (a.id=ANY($4::text[])) DESC, (a.expires_at>$3) DESC, a.expires_at DESC, a.id LIMIT 129`, in.UserID, self.OwnerEndpointID, now, live["machine_access"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -406,7 +307,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if rowErr != nil {
 		return NetworkConfigResult{}, rowErr
 	}
-	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY (credential_id=ANY($4::text[])) DESC, credential_id LIMIT 129`, in.EndpointID, in.UserID, now, live["inspector"])
+	inspectorRows, err := tx.QueryContext(ctx, `SELECT credential_id,native_cli_session_id,native_machine_id,account_id,owner_account_id,expires_at FROM paperboat.inspector_native_admissions WHERE ((native_cli_session_id=$1 AND account_id=$2) OR (native_machine_id=$1 AND owner_account_id=$2)) AND (expires_at>$3 OR credential_id=ANY($4::text[])) ORDER BY (credential_id=ANY($4::text[])) DESC, credential_id LIMIT 129`, self.OwnerEndpointID, in.UserID, now, live["inspector"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -436,7 +337,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  WHERE ((a.native_cli_session_id=$2 AND a.account_id=$1) OR (a.machine_id=$2 AND a.account_id=$1))
  AND (a.expires_at>$3 OR a.assignment_id=ANY($4::text[]))
  AND ((a.workspace_id='personal' AND assignment.adopted_team_id IS NULL) OR (assignment.adopted_team_id=a.workspace_id AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=a.workspace_id AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=a.account_id AND member.active)))
- AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 129`, in.UserID, in.EndpointID, now, live["config_compare"])
+ AND EXISTS(SELECT 1 FROM jsonb_array_elements(status.conflicts) conflict WHERE conflict->>'path'=a.config_path AND conflict->>'revision'=a.conflict_revision) ORDER BY a.assignment_id,a.native_cli_session_id,a.machine_id,a.expires_at DESC LIMIT 129`, in.UserID, self.OwnerEndpointID, now, live["config_compare"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -475,38 +376,45 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		if len(g.capabilities) == 0 {
 			continue
 		}
-		peerID, peerAccount, direction := g.machine, g.machineAccount, "dial"
-		if in.EndpointID == g.machine {
-			peerID, peerAccount, direction = g.cli, g.cliAccount, "accept"
+		peerOwner, peerAccount, direction := g.machine, g.machineAccount, "dial"
+		if self.OwnerEndpointID == g.machine {
+			peerOwner, peerAccount, direction = g.cli, g.cliAccount, "accept"
 		}
 		admitted := slices.Contains(live[g.kind], g.id)
-		if admitted {
-			admittedPeers[peerID] = true
+		// A grant to a CLI session reaches each of its daemon generations: the running one and those draining.
+		peerIDs, e := ownerEndpoints(ctx, tx, peerAccount, peerOwner, direction == "accept")
+		if e != nil {
+			return NetworkConfigResult{}, e
 		}
-		p := byPeer[peerID]
-		if p == nil {
-			binding, peerCertExpiry, e := loadNetworkBinding(ctx, tx, peerAccount, peerID, now, admitted)
-			if e == sql.ErrNoRows || e == ErrUnavailable {
-				continue
+		for _, peerID := range peerIDs {
+			if admitted {
+				admittedPeers[peerID] = true
 			}
-			if e != nil {
-				return NetworkConfigResult{}, e
+			p := byPeer[peerID]
+			if p == nil {
+				binding, peerCertExpiry, e := loadNetworkBinding(ctx, tx, peerAccount, peerID, now, admitted)
+				if e == sql.ErrNoRows || e == ErrUnavailable {
+					continue
+				}
+				if e != nil {
+					return NetworkConfigResult{}, e
+				}
+				if len(byPeer) >= maximumNetworkAccessPeers {
+					continue
+				}
+				if peerCertExpiry.After(now) && peerCertExpiry.Before(expiry) {
+					expiry = peerCertExpiry
+				}
+				p = &networkPeer{Identity: binding}
+				byPeer[peerID] = p
 			}
-			if len(byPeer) >= maximumNetworkAccessPeers {
-				continue
+			for _, capability := range g.capabilities {
+				if scopes >= maximumNetworkAccessScopes {
+					break
+				}
+				p.Scopes = append(p.Scopes, networkScope{g.kind, g.id, 1, capability, direction, 443, g.expiry.Unix()})
+				scopes++
 			}
-			if peerCertExpiry.After(now) && peerCertExpiry.Before(expiry) {
-				expiry = peerCertExpiry
-			}
-			p = &networkPeer{Identity: binding}
-			byPeer[peerID] = p
-		}
-		for _, capability := range g.capabilities {
-			if scopes >= maximumNetworkAccessScopes {
-				break
-			}
-			p.Scopes = append(p.Scopes, networkScope{g.kind, g.id, 1, capability, direction, 443, g.expiry.Unix()})
-			scopes++
 		}
 	}
 	// Durable personal-machine connectivity is distinct from application access.
@@ -653,7 +561,7 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id FROM paperboat.peer_network_identities n
  WHERE n.user_id=$1 AND n.endpoint_id<>$2 AND n.revoked_at IS NULL AND
  ((n.role='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL))
- OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))
+ OR ($3='machine' AND n.role='cli' AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=n.owner_endpoint_id AND c.user_id=n.user_id AND c.state='active' AND c.revoked_at IS NULL)))
  ORDER BY n.endpoint_id LIMIT $4`, self.AccountID, self.EndpointID, self.Role, maximumAccountEndpoints+1)
 	if err != nil {
 		return nil, err

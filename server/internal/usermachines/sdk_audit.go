@@ -35,13 +35,15 @@ func validSDKOperationEnd(e OfflineAuditEvent) bool {
 }
 
 // recordSDKOperationEndTx accepts only a current host's exact persisted token-session operation.
+// The host names the peer's network endpoint, a daemon generation of the session (peersessions owner_endpoint_id).
 func (s *Service) recordSDKOperationEndTx(ctx context.Context, tx *db.Tx, machine string, e OfflineAuditEvent) error {
-	var token, team, capability string
-	err := tx.QueryRow(ctx, `SELECT c.api_token_id,coalesce(a.team_id,''),a.capabilities[1]
+	var token, team, capability, cliSession string
+	err := tx.QueryRow(ctx, `SELECT c.api_token_id,coalesce(a.team_id,''),a.capabilities[1],c.id
  FROM paperboat.user_machine_access_sessions a JOIN paperboat.cli_client_sessions c ON c.id=a.cli_client_session_id AND c.user_id=a.user_id
- WHERE a.id=$1 AND a.user_machine_id=$2 AND a.user_id=$3 AND a.cli_client_session_id=$4 AND a.operation_id=$5
+ WHERE a.id=$1 AND a.user_machine_id=$2 AND a.user_id=$3 AND a.operation_id=$5
+ AND a.cli_client_session_id=(SELECT n.owner_endpoint_id FROM paperboat.peer_network_identities n WHERE n.user_id=$3 AND n.endpoint_id=$4 AND n.role='cli')
  AND c.api_token_id IS NOT NULL AND a.credential_kind='control_plane_signed' FOR UPDATE OF a`,
-		e.SessionID, machine, e.PeerAccountID, e.PeerEndpointID, e.OperationID).Scan(&token, &team, &capability)
+		e.SessionID, machine, e.PeerAccountID, e.PeerEndpointID, e.OperationID).Scan(&token, &team, &capability, &cliSession)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrOfflineAuditInvalid
 	}
@@ -62,7 +64,7 @@ func (s *Service) recordSDKOperationEndTx(ctx context.Context, tx *db.Tx, machin
 	if team != "" {
 		ws = team
 	}
-	metadata := map[string]any{"api_token_id": token, "cli_client_session_id": e.PeerEndpointID, "workspace": ws,
+	metadata := map[string]any{"api_token_id": token, "cli_client_session_id": cliSession, "workspace": ws,
 		"operation_id": e.OperationID, "access_session_id": e.SessionID, "capability": capability, "outcome": e.Outcome,
 		"scope_set": true, "occurred_at": e.OccurredAt.UTC(), "reporter": "destination"}
 	if team != "" {

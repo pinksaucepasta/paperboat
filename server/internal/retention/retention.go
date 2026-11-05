@@ -78,6 +78,14 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.FinishedOperations })},
 	{"managed_ssh_client_keys", batchOf("managed_ssh_client_keys", `state = 'revoked' AND revoked_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
+	// A user daemon generation still draining at runtimeattachment.DrainLimit (peersessions.BeginDrain) is revoked:
+	// its machines drop it, which ends what it still holds.
+	{"peer_network_generations_drain_expired", `UPDATE paperboat.peer_network_identities SET revoked_at=now(),revocation_reason='drain_expired',updated_at=now()
+ WHERE ctid = ANY(ARRAY(SELECT ctid FROM paperboat.peer_network_identities WHERE role='cli' AND revoked_at IS NULL AND drain_until<now()
+  LIMIT $1 FOR UPDATE SKIP LOCKED))`, none},
+	// A CLI identity revoked long ago (each daemon generation leaves one); its registration operations cascade.
+	{"peer_network_identities", batchOf("peer_network_identities", `role='cli' AND revoked_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
 	// A peer certificate long expired: first its revocation and issuance records (their keys restrict it), then the
 	// certificate itself unless an identity still names it.
 	{"peer_endpoint_certificate_revocations", `DELETE FROM paperboat.peer_endpoint_certificate_revocations WHERE certificate_fingerprint = ANY(ARRAY(

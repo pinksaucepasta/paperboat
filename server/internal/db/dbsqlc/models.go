@@ -1978,6 +1978,10 @@ type PeerNetworkIdentity struct {
 	EndpointsDueAt             sql.NullTime
 	CarrierOffer               []byte
 	CarrierOfferExpiresAt      sql.NullTime
+	CLIClientSessionID         sql.NullString
+	OwnerEndpointID            sql.NullString
+	DrainUntil                 sql.NullTime
+	RevocationReason           sql.NullString
 }
 
 type PeerNetworkRegistrationOperation struct {

@@ -77,8 +77,11 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		execute(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,$4,1,1,$5,$6,$7,$8,'expiry-test',$9)`, fingerprint[:], account, endpoint.id, endpoint.roleName, certificate, quic[:], now, now.Add(time.Hour), public)
 		key, wireguard := networkX25519Key(t)
 		registration := NetworkRegistration{OperationID: "register_" + endpoint.id, UserID: account, EndpointID: endpoint.id, Role: endpoint.roleName, EndpointGeneration: 1, WireGuardPublicKey: wireguard, DiscoPublicKey: networkDiscoPublic(t, key), QUICCertificateFingerprint: fingerprint[:]}
+		registration.OwnerEndpointID = endpoint.id
 		if endpoint.role == wire.RoleMachine {
 			registration.MachineID, registration.MachineGeneration = machine, 1
+		} else {
+			registration.EndpointID = daemonEndpoint(endpoint.id)
 		}
 		if _, err := service.Register(ctx, registration); err != nil {
 			t.Fatal(err)
@@ -98,7 +101,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		execute(`UPDATE paperboat.user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(remaining))
 		execute(`UPDATE inspector_credentials SET expires_at=$2 WHERE credential_id=$1`, inspector, now.Add(remaining))
 		execute(`UPDATE config_compare_admissions SET expires_at=$2 WHERE assignment_id=$1`, assignment, now.Add(remaining))
-		for _, endpoint := range []string{cli, machine} {
+		for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 			result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "configuration_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
 			if err != nil {
 				t.Fatalf("application expiry %s: %v", remaining, err)
@@ -151,7 +154,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
  SELECT 'external_issuer',$1||'-fresh-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['exec'],$8||i,$9 FROM generate_series(1,200) i`, access, machine, account, environment, cli, "terminal_fresh_"+suffix, "files_fresh_"+suffix, "operation_fresh_"+suffix, now.Add(2*time.Minute))
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(5*time.Second))
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "admitted_first_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
 		if err != nil {
 			t.Fatal(err)
@@ -162,7 +165,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	}
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id LIKE $1||'-fresh-%'`, access, now.Add(-time.Second))
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(-time.Second))
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "inactive_history_" + suffix, UserID: account, EndpointID: endpoint})
 		if err != nil {
 			t.Fatalf("inactive credential history exhausted bounded configuration: %v", err)
@@ -170,7 +173,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		assertNoNetworkScope(t, result.Configuration, "machine_access", access, "terminal")
 	}
 	var generationBefore, generationAfter int64
-	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, cli).Scan(&generationBefore); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, daemonEndpoint(cli)).Scan(&generationBefore); err != nil {
 		t.Fatal(err)
 	}
 	for name, refs := range map[string][]AdmittedScope{
@@ -179,34 +182,34 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		"oversized id":     {{ResourceKind: "machine_access", ResourceID: strings.Repeat("a", 257)}},
 		"over budget":      make([]AdmittedScope, 129),
 	} {
-		_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_refs_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: refs})
+		_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_refs_" + suffix, UserID: account, EndpointID: daemonEndpoint(cli), AdmittedScopes: refs})
 		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("%s continuation input accepted: %v", name, err)
 		}
 	}
 
 	for name, refs := range map[string][]AdmittedCertificate{
-		"duplicate certificates": {{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}, {EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}},
-		"uppercase certificate":  {{EndpointID: cli, Fingerprint: strings.Repeat("AB", 32)}},
-		"invalid certificate":    {{EndpointID: cli, Fingerprint: "not-a-fingerprint"}},
+		"duplicate certificates": {{EndpointID: daemonEndpoint(cli), Fingerprint: strings.Repeat("ab", 32)}, {EndpointID: daemonEndpoint(cli), Fingerprint: strings.Repeat("ab", 32)}},
+		"uppercase certificate":  {{EndpointID: daemonEndpoint(cli), Fingerprint: strings.Repeat("AB", 32)}},
+		"invalid certificate":    {{EndpointID: daemonEndpoint(cli), Fingerprint: "not-a-fingerprint"}},
 		"oversized endpoint":     {{EndpointID: strings.Repeat("a", 129), Fingerprint: strings.Repeat("ab", 32)}},
 		"certificate budget":     make([]AdmittedCertificate, 129),
 	} {
-		if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: live, AdmittedCertificates: refs}); !errors.Is(err, ErrInvalid) {
+		if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_cert_" + suffix, UserID: account, EndpointID: daemonEndpoint(cli), AdmittedScopes: live, AdmittedCertificates: refs}); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("%s accepted: %v", name, err)
 		}
 	}
-	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "no_scope_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedCertificates: []AdmittedCertificate{{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}}}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "no_scope_cert_" + suffix, UserID: account, EndpointID: daemonEndpoint(cli), AdmittedCertificates: []AdmittedCertificate{{EndpointID: daemonEndpoint(cli), Fingerprint: strings.Repeat("ab", 32)}}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("certificate continuation without live scopes accepted: %v", err)
 	}
-	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, cli).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM peer_network_identities WHERE endpoint_id=$1`, daemonEndpoint(cli)).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
 		t.Fatal("invalid continuation request changed network authority")
 	}
 
 	// Expired endpoint certificates gate a new transport, not admitted authority.
 	service.now = func() time.Time { return now.Add(2 * time.Hour) }
 	var networkID string
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "fresh_expired_cert_" + suffix, UserID: account, EndpointID: endpoint}); !errors.Is(err, ErrDenied) {
 			t.Fatalf("new transport accepted expired certificate: %v", err)
 		}
@@ -233,7 +236,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	execute(`UPDATE control_config_assignments SET version=version+1 WHERE id=$1`, assignment)
 	// Explicit withdrawal reaches both the caller and the machine even after TTL.
 	execute(`UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='test' WHERE id=$1`, access)
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +250,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	// The idle admitted carrier also survives certificate TTL after app work ends.
 	service.now = func() time.Time { return now.Add(2 * time.Hour) }
 	carrierRef := []AdmittedScope{{ResourceKind: "machine_network", ResourceID: networkID}}
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "idle_carrier_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: carrierRef})
 		if err != nil {
 			t.Fatalf("idle admitted carrier expired: %v", err)
@@ -258,7 +261,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	// Same-key renewal changes the admission certificate, not the identity of a
 	// carrier that already authenticated the old exact certificate.
 	var oldFingerprint, quicBytes, wg, disco []byte
-	if err := store.SQL().QueryRowContext(ctx, `SELECT n.quic_certificate_fingerprint,c.quic_public_key,n.wireguard_public_key,n.disco_public_key FROM peer_network_identities n JOIN peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint WHERE n.endpoint_id=$1`, cli).Scan(&oldFingerprint, &quicBytes, &wg, &disco); err != nil {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT n.quic_certificate_fingerprint,c.quic_public_key,n.wireguard_public_key,n.disco_public_key FROM peer_network_identities n JOIN peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint WHERE n.endpoint_id=$1`, daemonEndpoint(cli)).Scan(&oldFingerprint, &quicBytes, &wg, &disco); err != nil {
 		t.Fatal(err)
 	}
 	var quic [32]byte
@@ -266,14 +269,14 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	renewed, renewedFingerprint := networkCertificateWithKeys(t, private, account, wire.RoleCLI, cli, 1, 2, quic, now.Add(2*time.Hour), now.Add(4*time.Hour))
 	execute(`UPDATE peer_endpoint_certificates SET revoked_at=$2,revocation_reason='certificate_superseded' WHERE endpoint_id=$1`, cli, now.Add(2*time.Hour))
 	execute(`INSERT INTO peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'cli',1,2,$4,$5,$6,$7,'expiry-test',$8)`, renewedFingerprint[:], account, cli, renewed, quic[:], now.Add(2*time.Hour), now.Add(4*time.Hour), public)
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "rebind_gap_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: carrierRef})
 		if err != nil {
 			t.Fatalf("same-key renewal gap revoked admitted carrier: %v", err)
 		}
 		assertNetworkScope(t, result.Configuration, "machine_network", networkID, "connect")
 	}
-	if _, err := service.Register(ctx, NetworkRegistration{OperationID: "renew_" + suffix, UserID: account, EndpointID: cli, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wg, DiscoPublicKey: disco, QUICCertificateFingerprint: renewedFingerprint[:]}); err != nil {
+	if _, err := service.Register(ctx, NetworkRegistration{OperationID: "renew_" + suffix, UserID: account, EndpointID: daemonEndpoint(cli), OwnerEndpointID: cli, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wg, DiscoPublicKey: disco, QUICCertificateFingerprint: renewedFingerprint[:]}); err != nil {
 		t.Fatal(err)
 	}
 	oldHex := hex.EncodeToString(oldFingerprint)
@@ -314,18 +317,18 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 			t.Fatalf("exact old admitted binding retained=%v want=%v", got, want)
 		}
 	}
-	pinned := []AdmittedCertificate{{EndpointID: cli, Fingerprint: oldHex}}
-	for _, endpoint := range []string{cli, machine} {
+	pinned := []AdmittedCertificate{{EndpointID: daemonEndpoint(cli), Fingerprint: oldHex}}
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		checkPinned(endpoint, pinned, true)
 		checkPinned(endpoint, nil, false)
-		checkPinned(endpoint, []AdmittedCertificate{{EndpointID: cli, Fingerprint: strings.Repeat("ab", 32)}}, false)
+		checkPinned(endpoint, []AdmittedCertificate{{EndpointID: daemonEndpoint(cli), Fingerprint: strings.Repeat("ab", 32)}}, false)
 	}
 	execute(`UPDATE peer_endpoint_certificates SET revocation_reason='key_compromise' WHERE fingerprint=$1`, oldFingerprint)
-	for _, endpoint := range []string{cli, machine} {
+	for _, endpoint := range []string{daemonEndpoint(cli), machine} {
 		checkPinned(endpoint, pinned, false)
 	}
 	execute(`UPDATE peer_endpoint_certificates SET revoked_at=now(),revocation_reason='key_compromise' WHERE endpoint_id=$1`, cli)
-	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: carrierRef}); !errors.Is(err, ErrDenied) {
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_cert_" + suffix, UserID: account, EndpointID: daemonEndpoint(cli), AdmittedScopes: carrierRef}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("revoked endpoint certificate retained authority: %v", err)
 	}
 	result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_peer_cert_" + suffix, UserID: account, EndpointID: machine, AdmittedScopes: carrierRef})
