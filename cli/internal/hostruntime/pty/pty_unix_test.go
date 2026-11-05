@@ -233,7 +233,10 @@ func TestTerminateRetainsOwnedCleanupFailureAndRecovers(t *testing.T) {
 // at once, and the paste left in the queue must never reach the shell as commands (F3-11).
 func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	// The shell survives SIGINT (a handler, so sleep keeps the default) and then reads what is left in the queue.
-	process, root := startShell(t, `trap : INT; sleep 30; dd iflag=nonblock bs=4096 count=1 of=got 2>/dev/null; echo done > ran`)
+	// stty min 0 time 1 makes dd return what is queued within 0.1 s (BSD dd has no iflag=nonblock).
+	process, root := startShell(t, `trap : INT; sleep 30; stty -icanon min 0 time 1; dd bs=4096 count=1 of=got 2>/dev/null; echo done > ran`)
+	// The session always reads output; unread echo makes the exiting shell wait in close on darwin (ttywflush).
+	go io.Copy(io.Discard, process)
 	paste := bytes.Repeat([]byte("echo pasted > pasted\n"), 256<<10/21)
 	written := make(chan error, 1)
 	go func() { _, err := process.Write(paste); written <- err }()
