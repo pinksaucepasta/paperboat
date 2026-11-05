@@ -52,9 +52,16 @@ func TestDeploymentCarrierListenerValidation(t *testing.T) {
 	}
 }
 
-func TestDeploymentCarrierMintsProcessTrustWithoutStaticFiles(t *testing.T) {
+// Every edge serves one stable carrier certificate that an install hands over unchanged; there
+// is no per-process certificate.
+func TestDeploymentRequiresTheStableCarrierCertificate(t *testing.T) {
 	if _, err := LoadDeployment(writeDeployment(t, validDeploymentJSON())); err != nil {
-		t.Fatalf("process-bound carrier trust profile rejected: %v", err)
+		t.Fatalf("deployment with the carrier certificate rejected: %v", err)
+	}
+	for _, field := range []string{`"infrastructure_tls_cert_file":"/opt/paperboat-tunnel/private/tls.crt",`, `"infrastructure_tls_key_file":"/opt/paperboat-tunnel/private/tls.key",`} {
+		if _, err := LoadDeployment(writeDeployment(t, strings.Replace(validDeploymentJSON(), field, "", 1))); err == nil {
+			t.Fatalf("deployment without %s accepted", field)
+		}
 	}
 }
 

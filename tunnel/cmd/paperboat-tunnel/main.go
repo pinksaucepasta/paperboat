@@ -146,16 +146,12 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	if len(reporters) > 0 {
 		reporter = reporters[0]
 	}
-	// A self-hosted install hands over (tunnel/internal/handover): the new process inherits the
-	// serving process's sockets and epoch. It needs the stable claimed carrier certificate, which
-	// the server and hosts already pin; a per-process certificate could not carry over.
+	// An install hands over (tunnel/internal/handover): the new process inherits the serving
+	// process's sockets and epoch, and serves with the same stable carrier certificate.
 	handoverDir := filepath.Dir(cfg.DeploymentPath)
-	handsOver := deployment.InfrastructureTLSCertFile != ""
-	var inheritance *handover.Inheritance
-	if handsOver {
-		if inheritance, err = handover.Inherit(handoverDir); err != nil {
-			return serviceFailure{error: err, definition: "service_build"}
-		}
+	inheritance, err := handover.Inherit(handoverDir)
+	if err != nil {
+		return serviceFailure{error: err, definition: "service_build"}
 	}
 	epoch := ""
 	if inheritance != nil {
@@ -190,15 +186,13 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 		}
 	}
 	released := make(chan struct{})
-	if handsOver {
-		stopOffer, err := handover.Offer(handoverDir, service.Handover.Epoch, func() { close(released) })
-		if err != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-			defer cancel()
-			return serviceFailure{error: errors.Join(err, service.Shutdown(shutdownCtx)), definition: "service_start"}
-		}
-		defer stopOffer()
+	stopOffer, err := handover.Offer(handoverDir, service.Handover.Epoch, func() { close(released) })
+	if err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		return serviceFailure{error: errors.Join(err, service.Shutdown(shutdownCtx)), definition: "service_start"}
 	}
+	defer stopOffer()
 	var runtimeErr error
 	select {
 	case <-root.Done():

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -134,7 +135,17 @@ func TestEdgeStartupSendsNoControlRequestTheServerRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	carrierTrust, err := control.NewProcessCarrierServerTrust(nodeID, "installation", "edge.example.test", time.Now().UTC(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrierKey, err := x509.MarshalPKCS8PrivateKey(carrierTrust.Certificate.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	deployment := map[string]any{
+		"infrastructure_tls_cert_file": write("tls.crt", carrierTrust.CertificateChainPEM, 0o600),
+		"infrastructure_tls_key_file":  write("tls.key", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: carrierKey})), 0o600),
 		"control_url":                  server.URL,
 		"control_ca_file":              write("control-ca.pem", string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})), 0o644),
 		"control_credential_file":      write("control.credential", strings.Repeat("c", 48), 0o600),

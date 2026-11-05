@@ -186,8 +186,7 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	if _, err = carrierServerTrust(deployment, "node", "epoch", "127.0.0.1", now.Add(2*time.Hour)); err == nil {
 		t.Fatal("accepted expired identity")
 	}
-	hosted, err := carrierServerTrust(config.Deployment{}, "node", "hosted", "127.0.0.1", now)
-	if err != nil || hosted.SPKISHA256 == infrastructure.SPKISHA256 {
-		t.Fatalf("hosted process identity changed: %v", err)
+	if _, err := carrierServerTrust(config.Deployment{}, "node", "hosted", "127.0.0.1", now); err == nil {
+		t.Fatal("an edge without its stable carrier certificate minted a per-process one")
 	}
 }
