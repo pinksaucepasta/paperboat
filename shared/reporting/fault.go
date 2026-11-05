@@ -2,7 +2,6 @@ package reporting
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -224,10 +223,15 @@ func projectFault(component string, definition Definition, reference string, err
 		Name: serviceName(component, definition.Name), Code: definition.Code, Cause: "internal", ErrorType: "error",
 		Outcome: "failed", SupportReference: reference, CorrelationID: reference,
 	}
-	p := Project(err, Options{})
-	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
+	// Project's walk is bounded (an error chain may cycle); it also finds the request path.
 	var located interface{ DiagnosticPath() string }
-	if errors.As(err, &located) && safeRoutePath(located.DiagnosticPath()) {
+	p := Project(err, Options{Visit: func(node error) {
+		if located == nil {
+			located, _ = node.(interface{ DiagnosticPath() string })
+		}
+	}})
+	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
+	if located != nil && safeRoutePath(located.DiagnosticPath()) {
 		fault.Path = located.DiagnosticPath()
 	}
 	if definition.Outcome != "" {
