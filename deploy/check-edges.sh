@@ -22,8 +22,9 @@ host=${url#https://}; host=${host%%/*}
 fail=0
 for edge in "$@"; do
 	target=${edge%%=*} ip=${edge#*=}
-	# The window includes the container's startup: a restart must not log a control failure either.
-	logs='c=$(sudo docker ps --format "{{.Names}}" | grep -m1 -- "-tunnel$"); up=$(( $(date +%s) - $(date -d "$(sudo docker inspect -f "{{.State.StartedAt}}" "$c")" +%s) + 1 )); [ $up -gt 90 ] && up=90; sudo docker logs --since ${up}s "$c" 2>&1 | grep -c -E "tunnel_control_request_failed|tunnel_route_reconcile_failed" || true'
+	# A container started in the last 10 min is read from its start, so a restart that logs a
+	# control failure fails the gate however late the gate reaches it; otherwise the last 90 s.
+	logs='c=$(sudo docker ps --format "{{.Names}}" | grep -m1 -- "-tunnel$"); start=$(sudo docker inspect -f "{{.State.StartedAt}}" "$c"); since=90s; [ $(( $(date +%s) - $(date -d "$start" +%s) )) -le 600 ] && since=$start; sudo docker logs --since "$since" "$c" 2>&1 | grep -c -E "tunnel_control_request_failed|tunnel_route_reconcile_failed" || true'
 	if [ "$target" = local ]; then n=$(sh -c "$logs"); else n=$(ssh "$target" "$logs"); fi
 	code=000
 	for _ in 1 2 3 4 5 6; do # the new route reaches each edge within a few seconds
@@ -31,7 +32,7 @@ for edge in "$@"; do
 		[ "$code" = 200 ] && break
 		sleep 5
 	done
-	echo "edge $target ($ip): control failures in 90 s=$n, fresh preview https=$code"
+	echo "edge $target ($ip): control failures since start or in 90 s=$n, fresh preview https=$code"
 	if [ "$n" != 0 ] || [ "$code" != 200 ]; then fail=1; fi
 done
 [ $fail = 0 ] && echo "edge gate: PASS" || { echo "edge gate: FAIL (roll back: deploy/README.md step 5)"; exit 1; }
