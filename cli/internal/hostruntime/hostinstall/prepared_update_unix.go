@@ -227,7 +227,11 @@ func commitValidatedPreparedUpdate(ctx context.Context, request Request, paths i
 		return err
 	}
 	request.Executable = paths.worker
-	request.SessionOwnerGeneration = request.Source.SHA256[:32]
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return err
+	}
+	request.SessionOwnerGeneration = generation
 	return writeInstallMetadata(paths.metadata, request)
 }
 

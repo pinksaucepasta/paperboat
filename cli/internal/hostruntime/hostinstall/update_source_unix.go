@@ -35,7 +35,9 @@ func CommitUpdatedSource(ctx context.Context, uid int, source installsource.Sour
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	request.SessionOwnerGeneration = source.SHA256[:32]
+	if request.SessionOwnerGeneration, err = sourceGeneration(source); err != nil {
+		return err
+	}
 	return writeInstallMetadata(paths.metadata, request)
 }
 

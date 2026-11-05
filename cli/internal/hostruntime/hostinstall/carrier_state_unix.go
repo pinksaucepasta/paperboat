@@ -33,11 +33,11 @@ type unixCarrierBaseline struct {
 }
 
 func deriveUnixCarrierConfig(r Request, paths installPaths) (CarrierConfig, error) {
-	if r.Source.Validate() != nil {
-		return CarrierConfig{}, ErrInvalidRequest
+	generation, err := sourceGeneration(r.Source)
+	if err != nil {
+		return CarrierConfig{}, err
 	}
 	root := filepath.Dir(carrierConfigPath(paths.instance))
-	generation := r.Source.SHA256[:32]
 	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source, Generation: generation,
 		Executable: filepath.Join(filepath.Dir(paths.workerRollback), "pins", r.Source.SHA256, "pb"), UID: r.UID, GID: r.GID, User: r.User, Group: r.Group, RuntimeRoot: r.StateRoot,
 		Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: carrierControlEndpoint(paths.hostdSocket, generation), HostdTokenFile: paths.hostdToken,
@@ -216,15 +216,19 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 // startBaselineHostd restarts the previous hostd generation if it handed its
 // listeners over and exited; a still serving one is left alone.
 func startBaselineHostd(ctx context.Context, request Request, source *installsource.Source) error {
-	if source == nil || source.SHA256[:32] == request.Source.SHA256[:32] {
+	if source == nil || source.SHA256 == request.Source.SHA256 {
 		return nil
 	}
-	controller, err := service.HostdController(request.Platform, source.SHA256[:32], request.UID, service.ExecRunner{})
+	generation, err := sourceGeneration(*source)
+	if err != nil {
+		return err
+	}
+	controller, err := service.HostdController(request.Platform, generation, request.UID, service.ExecRunner{})
 	if err != nil {
 		return err
 	}
 	native := controller.(service.NativeLifecycleController)
-	definition := hostdGenerationDefinition(request.Platform, request.UID, source.SHA256[:32])
+	definition := hostdGenerationDefinition(request.Platform, request.UID, generation)
 	status, err := native.Inspect(ctx, definition)
 	if err != nil || !status.Registered || status.Running {
 		return err

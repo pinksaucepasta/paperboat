@@ -56,7 +56,10 @@ func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowne
 	if err != nil {
 		return c, sessionowner.Descriptor{}, err
 	}
-	generation := request.Source.SHA256[:32]
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return c, sessionowner.Descriptor{}, err
+	}
 	d := sessionowner.Descriptor{Schema: sessionowner.Schema, Generation: generation, Instance: instance, Source: request.Source, Executable: pin, RuntimeRoot: request.StateRoot, Endpoint: `\\.\pipe\PaperboatSessionOwner-` + instance + "-" + generation, UID: request.UID, GID: request.GID, OwnerSID: request.OwnerSID, Workspace: request.WorkspaceRoot, Shell: filepath.Join(system, "cmd.exe")}
 	d, err = bindInitialSessionStore(ctx, c, d, request.SessionOwnerGeneration)
 	if err != nil {

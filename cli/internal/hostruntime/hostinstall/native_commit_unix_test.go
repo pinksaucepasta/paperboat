@@ -88,7 +88,7 @@ func TestNativeCommitFinishesWithExistingUpdateState(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			source := installsource.Source{Version: "custom"}
+			source := generationRequest("a").Source
 			request := Request{Schema: SchemaV1, Source: source}
 			journal, err := newInstallJournal(paths, source)
 			if err != nil {

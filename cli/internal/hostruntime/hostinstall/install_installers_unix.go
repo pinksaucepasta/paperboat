@@ -36,10 +36,10 @@ func installersWithMaintenance(request Request, paths installPaths, allowMissing
 	}
 	// Each source runs its own hostd unit, so an update starts the candidate while
 	// the serving generation keeps running until it hands its listeners over.
-	if request.Source.Validate() != nil {
-		return nil, nil, ErrInvalidRequest
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return nil, nil, err
 	}
-	generation := request.Source.SHA256[:32]
 	hostdController, err := service.HostdController(request.Platform, generation, request.UID, service.ExecRunner{})
 	if err != nil {
 		return nil, nil, err

@@ -52,7 +52,10 @@ func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowne
 	} else if err := stageBinary(request.Executable, pin, request.Source); err != nil {
 		return c, sessionowner.Descriptor{}, err
 	}
-	generation := request.Source.SHA256[:32]
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return c, sessionowner.Descriptor{}, err
+	}
 	endpointRoot := filepath.Join("/run", "paperboat-session-owner-"+instance+"-"+generation)
 	if runtime.GOOS == "darwin" {
 		ipcParent := filepath.Join("/Library/Application Support/Paperboat", "ipc")
@@ -226,7 +229,11 @@ func preflightUnixCarrier(ctx context.Context, request Request, paths installPat
 	for _, check := range checks {
 		var controller service.Controller
 		if check.kind == service.HostdKind {
-			controller, err = service.HostdController(request.Platform, request.Source.SHA256[:32], request.UID, service.ExecRunner{})
+			generation, generationErr := sourceGeneration(request.Source)
+			if generationErr != nil {
+				return false, generationErr
+			}
+			controller, err = service.HostdController(request.Platform, generation, request.UID, service.ExecRunner{})
 		} else if runtime.GOOS == "linux" {
 			controller = service.SystemdController{Runner: service.ExecRunner{}, Unit: filepath.Base(check.installer.DefinitionPath())}
 		} else {

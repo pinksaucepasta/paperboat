@@ -262,5 +262,5 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 // imports the serving generation's listeners instead of replacing a stopped one.
 func hostdHandover(paths installPaths, request Request) bool {
 	installed, err := loadInstallMetadata(paths.metadata, request.UID)
-	return err == nil && installed.Source.SHA256[:32] != request.Source.SHA256[:32]
+	return err == nil && installed.Source.SHA256 != request.Source.SHA256
 }

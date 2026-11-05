@@ -3,6 +3,8 @@
 package hostinstall
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -105,6 +107,41 @@ func TestRetainedGenerationKeepsTheControlSocketItsBuildChose(t *testing.T) {
 		tampered.ControlEndpoint = endpoint
 		if tampered.Validate() == nil {
 			t.Fatalf("control socket in %s accepted", name)
+		}
+	}
+}
+
+// The root helper slices a source's SHA-256 into generation names: a request with
+// an empty or short digest or generation must be refused, never panic.
+func TestMalformedSourceOrGenerationRefusedWithoutPanic(t *testing.T) {
+	for _, digest := range []string{"", "abc", strings.Repeat("a", 31)} {
+		request := generationRequest("a")
+		request.Source.SHA256 = digest
+		paths := platformPaths(request.UID)
+		root := t.TempDir()
+		paths.metadata, paths.journal = filepath.Join(root, "metadata"), filepath.Join(root, "journal")
+		if err := commitPreparedInstallationLocked(context.Background(), request, paths, true); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("commit with SHA-256 %q: %v", digest, err)
+		}
+		if _, err := deriveUnixCarrierConfig(request, paths); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("carrier derivation with SHA-256 %q: %v", digest, err)
+		}
+		if _, _, err := installersWithMaintenance(request, paths, true, false); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("installers with SHA-256 %q: %v", digest, err)
+		}
+		if err := startBaselineHostd(context.Background(), generationRequest("b"), &request.Source); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("baseline hostd with SHA-256 %q: %v", digest, err)
+		}
+	}
+	c, err := deriveUnixCarrierConfig(generationRequest("a"), platformPaths(1001))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, generation := range []string{"a", strings.Repeat("a", 15), strings.Repeat("a", 31)} {
+		short := c
+		short.Generation = generation
+		if !errors.Is(short.Validate(), ErrInvalidRequest) || validCarrierControlEndpoint(short) {
+			t.Errorf("carrier descriptor with generation %q accepted", generation)
 		}
 	}
 }

@@ -37,13 +37,17 @@ func checkPendingInstallation(journal installJournal, request Request) error {
 }
 
 func commitPreparedInstallationLocked(ctx context.Context, request Request, paths installPaths, nativeLockHeld bool) (resultErr error) {
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return err
+	}
 	journal, err := loadJournal(paths.journal)
 	if installNotExistOnly(err) {
 		installed, err := loadInstallMetadata(paths.metadata, request.UID)
 		if err != nil {
 			return err
 		}
-		if installed.Source != request.Source || installed.SessionOwnerGeneration != request.Source.SHA256[:32] {
+		if installed.Source != request.Source || installed.SessionOwnerGeneration != generation {
 			return hostInstallFailure("the recorded installation is not the executable being committed", ErrInvalidRequest)
 		}
 		return hostInstallFailure("the installed executable no longer matches its record", installed.Source.Verify(paths.worker))
@@ -70,7 +74,7 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 			return err
 		}
 	}
-	request.SessionOwnerGeneration = request.Source.SHA256[:32]
+	request.SessionOwnerGeneration = generation
 	if err := writeInstallMetadata(paths.metadata, request); err != nil {
 		return err
 	}
@@ -217,7 +221,9 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 		if err := applyUnixNativeRoles(ctx, legacyHost, hostd, updater, request.HelperListenAddress); err != nil {
 			return err
 		}
-		request.SessionOwnerGeneration = request.Source.SHA256[:32]
+		if request.SessionOwnerGeneration, err = sourceGeneration(request.Source); err != nil {
+			return err
+		}
 		return writeInstallMetadata(paths.metadata, request)
 	})
 }

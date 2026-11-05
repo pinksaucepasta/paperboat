@@ -798,7 +798,11 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (
 		return err
 	}
 	request.Artifact.Version = request.Source.Version
-	config := WindowsRuntimeConfig{SessionOwnerGeneration: request.Source.SHA256[:32], Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
+	generation, err := sourceGeneration(request.Source)
+	if err != nil {
+		return err
+	}
+	config := WindowsRuntimeConfig{SessionOwnerGeneration: generation, Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
 	if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return writeWindowsConfigAt(config, instanceRoot) }); err != nil {
 		return err
 	}
@@ -1957,7 +1961,11 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 			if err := repairWindowsRoleServices(ctx, request, layout); err != nil {
 				return err
 			}
-			config.SessionOwnerGeneration = config.Source.SHA256[:32]
+			generation, err := sourceGeneration(config.Source)
+			if err != nil {
+				return err
+			}
+			config.SessionOwnerGeneration = generation
 			instanceRoot, err := WindowsInstanceRoot(instance)
 			if err != nil {
 				return err

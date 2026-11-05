@@ -27,7 +27,11 @@ func stageTerminalHandover(ctx context.Context, r Request, retained CarrierConfi
 	if err != nil {
 		return nil, err
 	}
-	previous, err := sessionowner.Read(filepath.Join(catalog.Root, retained.Source.SHA256[:32]+".json"))
+	generation, err := sourceGeneration(retained.Source)
+	if err != nil {
+		return nil, err
+	}
+	previous, err := sessionowner.Read(filepath.Join(catalog.Root, generation+".json"))
 	if err != nil || previous.Source != retained.Source || previous.RuntimeRoot != r.StateRoot || previous.UID != r.UID || previous.GID != r.GID {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}

@@ -101,7 +101,7 @@ func SessionOwnerRecorded(ctx context.Context, request Request) (bool, error) {
 		return false, err
 	}
 	if request.SessionOwnerGeneration != "" {
-		if request.SessionOwnerGeneration != request.Source.SHA256[:32] || !recorded {
+		if generation, err := sourceGeneration(request.Source); err != nil || request.SessionOwnerGeneration != generation || !recorded {
 			return false, sessionowner.ErrInvalid
 		}
 		return true, nil

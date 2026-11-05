@@ -84,7 +84,10 @@ func prepareCarrierConfig(ctx context.Context, r Request) (CarrierConfig, error)
 	if err := r.Source.Verify(pin); err != nil {
 		return CarrierConfig{}, err
 	}
-	generation := r.Source.SHA256[:32]
+	generation, err := sourceGeneration(r.Source)
+	if err != nil {
+		return CarrierConfig{}, err
+	}
 	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, User: r.User, Group: r.Group, RuntimeRoot: r.StateRoot, Environment: workerEnvironment(r), WorkerAddress: r.HelperListenAddress, HostdEndpoint: paths.hostdSocket, ControlEndpoint: carrierControlEndpoint(paths.hostdSocket, generation), HostdTokenFile: paths.hostdToken, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }

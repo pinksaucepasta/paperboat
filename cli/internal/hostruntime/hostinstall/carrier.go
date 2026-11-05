@@ -83,11 +83,20 @@ func validCarrierControlEndpoint(c CarrierConfig) bool {
 		return false
 	}
 	suffix := c.ControlEndpoint[len(prefix):]
-	return !strings.ContainsAny(suffix, "/\x00") && strings.Contains(suffix, c.Generation[:16])
+	return len(c.Generation) == 32 && !strings.ContainsAny(suffix, "/\x00") && strings.Contains(suffix, c.Generation[:16])
+}
+
+// sourceGeneration names a source's per-generation units, sockets and locks: its
+// SHA-256 prefix. The root helper refuses a malformed source instead of slicing it.
+func sourceGeneration(s installsource.Source) (string, error) {
+	if s.Validate() != nil {
+		return "", ErrInvalidRequest
+	}
+	return s.SHA256[:32], nil
 }
 
 // carrierControlEndpoint is the account-private control socket of one carrier
-// generation; two generations serve side by side during an update.
+// generation (from sourceGeneration); two generations serve side by side during an update.
 func carrierControlEndpoint(hostdEndpoint, generation string) string {
 	if generation == "" {
 		return hostdEndpoint + ".carrier"

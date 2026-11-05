@@ -42,7 +42,9 @@ func sweepGenerations(ctx context.Context, request Request, activeCarrier string
 	}
 	active := ""
 	if !stop {
-		active = request.Source.SHA256[:32]
+		if active, err = sourceGeneration(request.Source); err != nil {
+			return errors.Join(result, err)
+		}
 	}
 	hostds, err := filepath.Glob(hostdGenerationDefinition(request.Platform, request.UID, "*"))
 	if err != nil {
