@@ -24,49 +24,88 @@ import (
 // stays (the row is soft-deleted and audit events are separate). The new machine then takes the
 // exact name the retired record held when it only got a numbered variant of it.
 func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID, retiredID, replacementID string) error {
+	_, err := s.replaceMachineTx(ctx, tx, userID, retiredID, replacementID, true)
+	return err
+}
+
+// ErrReplacementTeamMismatch refuses a replacement across ownership: a personal record never replaces a team one.
+var ErrReplacementTeamMismatch = errors.New("a personal machine record cannot replace a team one")
+
+// ReplaceMachine is the cutover of pb reset: pb pair calls it with the new machine's session once the new
+// runtime is verified (signed configuration fetched, daemon bound), and only then is the old record of the
+// same computer removed. A reset or pairing that fails earlier leaves the old record untouched
+// (make-before-break). The replacement takes the old record's local address and exact name in the same
+// transaction. The caller is the account owner, who may remove the old record anyway, so its state is not
+// checked; an old record that is already gone is a no-op, so a retry after a lost answer succeeds.
+// Prior art: Tailscale RegisterRequest.OldNodeKey (tailcfg/tailcfg.go) re-keys the same node, which keeps its address.
+func (s *Service) ReplaceMachine(ctx context.Context, userID, retiredID, replacementID string) error {
+	retiredID, replacementID = strings.TrimSpace(retiredID), strings.TrimSpace(replacementID)
 	if retiredID == "" || replacementID == "" || retiredID == replacementID {
-		return nil
+		return ErrNotFound
+	}
+	var replaced bool
+	if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var err error
+		replaced, err = s.replaceMachineTx(ctx, tx, userID, retiredID, replacementID, false)
+		return err
+	}); err != nil || !replaced {
+		return err
+	}
+	return s.RevokeUserMachineSessions(ctx, retiredID, "user_machine_deleted")
+}
+
+// replaceMachineTx removes retiredID in favour of replacementID. onlyRetired keeps a live record (the
+// implicit host-key path); it reports whether a record was removed.
+func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retiredID, replacementID string, onlyRetired bool) (bool, error) {
+	if retiredID == "" || replacementID == "" || retiredID == replacementID {
+		return false, nil
 	}
 	if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
-		return err
+		return false, err
 	}
 	if err := tx.Queries().LockUserMachineAliases(ctx, userID); err != nil {
-		return err
+		return false, err
 	}
 	retired, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: retiredID, UserID: userID})
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // already removed, or not this account's record
+		return false, nil // already removed, or not this account's record
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Only a record that cannot answer is replaced: removed/revoked/disconnected, or offline right now.
 	// A live machine is never removed.
-	if retired.State != "disconnected" && retired.State != "revoked" && !(retired.State == "offline" && !retired.Online) {
-		return nil
+	if onlyRetired && retired.State != "disconnected" && retired.State != "revoked" && !(retired.State == "offline" && !retired.Online) {
+		return false, nil
 	}
 	replacement, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: replacementID, UserID: userID})
+	if errors.Is(err, sql.ErrNoRows) && !onlyRetired {
+		return false, ErrNotFound
+	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if retired.OwnerTeamID.Valid != replacement.OwnerTeamID.Valid {
-		return nil // a personal record never replaces a team one
+		if onlyRetired {
+			return false, nil
+		}
+		return false, ErrReplacementTeamMismatch
 	}
 	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
-		return err
+		return false, err
 	}
 	if err := s.auditReplacedTx(ctx, tx, userID, retired, replacement.ID); err != nil {
-		return err
+		return false, err
 	}
 	if err := adoptControlSyncLease(ctx, tx, retired.ID, replacement.ID); err != nil {
-		return err
+		return false, err
 	}
 	if replacement.Alias != retired.Alias && isNumberedVariant(replacement.Alias, retired.Alias) {
 		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, ID: replacement.ID, UserID: userID}); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // adoptControlSyncLease gives the replacement the retired record's local address lease (the
@@ -109,7 +148,8 @@ func (s *Service) auditReplacedTx(ctx context.Context, tx *db.Tx, userID string,
 }
 
 // retireForFreshEnrollmentTx honours a pairing's replaces_machine_id hint when a fresh machine is
-// about to be created (start fresh deletes the old record first; the new install arrives later).
+// about to be created and the old record is already retired (removed in the dashboard, or revoked).
+// A record that may still work is replaced only after the new machine is verified (ReplaceMachine).
 // The hint is a request, never authority: only a retired (disconnected, revoked or already removed)
 // personal record of the same account is acted on; anything else, including live machines, other
 // accounts' records and unknown ids, is ignored. A record that is not yet removed is removed first,

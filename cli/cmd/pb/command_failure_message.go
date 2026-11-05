@@ -143,6 +143,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		}
 	case setupFailureError:
 		return owned.Error()
+	case machineReplacementError:
+		return owned.Error()
 	case commandPreparationFailure:
 		return owned.Error()
 	}

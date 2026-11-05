@@ -250,8 +250,6 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
 			return fmt.Errorf("persist machine enrollment material: %w", err)
 		}
-		// The pairing carried the reset's note (the server stores it); it is not needed again.
-		_ = bootstrap.ClearReplacement()
 	}
 	if *tokenFile != "" && tokenFileErr == nil {
 		if err := bootstrap.ConsumeEnrollmentTokenFile(*tokenFile); err != nil {

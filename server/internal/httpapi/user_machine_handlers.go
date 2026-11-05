@@ -1055,6 +1055,36 @@ func userMachineDisconnect(service *usermachines.Service) http.HandlerFunc {
 	}
 }
 
+// userMachineReplace removes the old record of this computer once its new machine (the path one) works:
+// pb pair calls it after the new daemon bound, so a failed reset never strands the old record.
+func userMachineReplace(service *usermachines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		var body struct {
+			RetiredMachineID string `json:"retired_machine_id"`
+		}
+		if !decodeStrictJSON(w, r, &body) {
+			return
+		}
+		err := service.ReplaceMachine(r.Context(), p.User.ID, body.RetiredMachineID, r.PathValue("machine_id"))
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]bool{"replaced": true}})
+		case errors.Is(err, usermachines.ErrNotFound):
+			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
+		case errors.Is(err, usermachines.ErrReplacementTeamMismatch):
+			writeError(w, r, http.StatusConflict, "user_machine_replace_team_mismatch", "A personal machine cannot replace a team machine. Remove the old machine in the dashboard.")
+		default:
+			writeError(w, r, http.StatusInternalServerError, "user_machine_replace_failed", "Unable to replace the old machine record.", err)
+		}
+	}
+}
+
 func userMachineDelete(service *usermachines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())

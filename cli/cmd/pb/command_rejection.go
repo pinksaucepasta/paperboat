@@ -39,7 +39,6 @@ const (
 	commandRejectTeamReserved
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
-	commandRejectResetRetire
 	commandRejectDaemonAccount
 	commandRejectInspector
 	commandRejectInsufficientSpace
@@ -99,8 +98,6 @@ func (e commandRejection) Error() string {
 		if errors.As(e.cause, &refusal) {
 			return refusal.Error()
 		}
-	case commandRejectResetRetire:
-		return "The old machine record could not be removed, so nothing was reset. Check your connection and run `pb reset` again."
 	case commandRejectInspector:
 		var daemonErr *inspectorDaemonError
 		if errors.As(e.cause, &daemonErr) {

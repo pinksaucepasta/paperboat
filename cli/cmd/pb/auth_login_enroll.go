@@ -104,6 +104,13 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	if code := hostruntimecmd.Execute(c.Context, arguments, os.Stdin, out, errOut); code != 0 {
 		return errors.New(runtimeFailureLine(failure.String(), "pairing failed"))
 	}
+	machineID, err := configuredMachineID()
+	if err != nil {
+		return fmt.Errorf("read paired machine registration: %w", err)
+	}
+	if err := finishMachineReplacement(c, machineID); err != nil {
+		return err
+	}
 	for _, warning := range installedTrustWarnings(c.Context) {
 		if _, err = fmt.Fprintln(c.ErrWriter, warning); err != nil {
 			return err
@@ -213,15 +220,15 @@ func machineWorkspaceSummary(ctx context.Context, store config.ProfileStore, iss
 	return strings.Join(parts, ", ")
 }
 
-// startFresh removes this computer's local setup and its machine record, and reinstalls the running
-// executable, so login can add the computer again from nothing.
+// startFresh removes this computer's local setup and reinstalls the running executable, so login can add
+// the computer again from nothing; the new pairing then replaces the old machine record.
 func startFresh(c *command.Context) error {
 	cobraCommand, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command)
 	if !ok {
 		return errors.New("start fresh needs a CLI command context")
 	}
-	if _, err := removeOwnMachineRecordFunc(cobraCommand); err != nil {
-		return err
+	if _, err := rememberReplacedMachineFunc(); err != nil {
+		return machineReplacementError{step: replaceStepRemember, cause: err}
 	}
 	if err := freshEnrollmentCleanup(cobraCommand); err != nil {
 		return err
@@ -235,6 +242,6 @@ func startFresh(c *command.Context) error {
 	if _, err = installSuppliedExecutable(ctx, executable, source, "", selectedInstallServer(cobraCommand)); err != nil {
 		return fmt.Errorf("reinstall after cleanup: %w", err)
 	}
-	_, err = fmt.Fprintln(c.ErrWriter, "Removed this computer's setup and its machine record. Adding it again.")
+	_, err = fmt.Fprintln(c.ErrWriter, "Removed this computer's setup. Adding it again; the new machine replaces the old record once it works.")
 	return err
 }

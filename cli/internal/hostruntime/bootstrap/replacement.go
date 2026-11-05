@@ -24,7 +24,8 @@ type replacementMarker struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func replacementPath() (string, error) {
+// ReplacementPath is where the note lives; pb reset keeps it through its wipe.
+func ReplacementPath() (string, error) {
 	directory, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -39,14 +40,14 @@ func validReplacementID(value string) bool {
 	return !strings.ContainsAny(value, "\x00\r\n\t /\\")
 }
 
-// SaveReplacement records, after a reset wiped this computer's state, which machine record the
-// next pairing replaces. The server treats it as a request: it only honours a retired record of
-// the same account.
+// SaveReplacement records, before a reset wipes this computer's state, which machine record the
+// next pairing replaces once the new machine works. The server only acts on a record of the same
+// account.
 func SaveReplacement(machineID string, now time.Time) error {
 	if !validReplacementID(machineID) {
 		return ErrInvalid
 	}
-	path, err := replacementPath()
+	path, err := ReplacementPath()
 	if err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func SaveReplacement(machineID string, now time.Time) error {
 // LoadReplacement returns the machine ID the next pairing replaces, or "" when none is pending
 // (absent, unreadable, malformed or older than a day).
 func LoadReplacement(now time.Time) string {
-	path, err := replacementPath()
+	path, err := ReplacementPath()
 	if err != nil {
 		return ""
 	}
@@ -85,9 +86,9 @@ func LoadReplacement(now time.Time) string {
 	return marker.MachineID
 }
 
-// ClearReplacement removes the pending note once a pairing carried it.
+// ClearReplacement removes the pending note once the new machine replaced the old record.
 func ClearReplacement() error {
-	path, err := replacementPath()
+	path, err := ReplacementPath()
 	if err != nil {
 		return err
 	}

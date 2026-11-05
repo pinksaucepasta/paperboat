@@ -345,6 +345,16 @@ func (c *Client) SetUserMachineCapabilities(ctx context.Context, machineID, idem
 	return out, err
 }
 
+// ReplaceUserMachine removes retiredID, the old record of this computer, in favour of the working
+// replacementID, which takes its local address and name (POST /v1/machines/{id}/replace).
+func (c *Client) ReplaceUserMachine(ctx context.Context, replacementID, retiredID string) error {
+	if strings.TrimSpace(replacementID) == "" || strings.TrimSpace(retiredID) == "" {
+		return errors.New("machine IDs are required")
+	}
+	body := map[string]string{"retired_machine_id": retiredID}
+	return c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(replacementID)+"/replace", body, nil)
+}
+
 func (c *Client) DeleteUserMachine(ctx context.Context, machineID string) error {
 	if strings.TrimSpace(machineID) == "" {
 		return errors.New("machine ID is required")
