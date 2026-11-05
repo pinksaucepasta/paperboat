@@ -592,17 +592,12 @@ func (r *ExpectedAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Iden
 		return Identity{}, ErrCarrierClosed
 	}
 	var identity Identity
-	found, keyKnown, live := false, false, false
+	found := false
 	now := time.Now().UTC()
 	for _, admission := range r.byKey {
-		if admission.MachineIdentityPublicKey != encoded || admission.MachineIdentityThumbprint != thumbprint {
+		if !admission.Admitted || !admission.ExpiresAt.After(now) || admission.MachineIdentityPublicKey != encoded || admission.MachineIdentityThumbprint != thumbprint {
 			continue
 		}
-		keyKnown = true
-		if !admission.Admitted || !admission.ExpiresAt.After(now) {
-			continue
-		}
-		live = true
 		binding := connectorprotocol.CarrierIdentityBinding{
 			AccountID: admission.Identity.AccountID, HostID: admission.Identity.HostID,
 			TunnelID: admission.Identity.TunnelID, ConnectorID: admission.Identity.ConnectorID,
@@ -622,7 +617,7 @@ func (r *ExpectedAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Iden
 		}
 	}
 	if !found {
-		return Identity{}, fmt.Errorf("%w: %w", ErrAdmissionNotExpected, refusal(len(r.byKey) != 0, keyKnown, live))
+		return Identity{}, ErrAdmissionNotExpected
 	}
 	return identity, nil
 }
