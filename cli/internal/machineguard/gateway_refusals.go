@@ -66,6 +66,9 @@ func attributionRefusalReason(err error) string {
 	return refusalLookupFailed
 }
 
+// AttributionRefusalReason is attributionRefusalReason for callers outside the guard (the per-user preview proxy).
+func AttributionRefusalReason(err error) string { return attributionRefusalReason(err) }
+
 func gatewayRefusalSnapshot() map[string]uint64 {
 	gatewayRefusals.Lock()
 	defer gatewayRefusals.Unlock()

@@ -87,6 +87,9 @@ type AccessProxy struct {
 	done       chan error
 
 	snapshotGate chan struct{}
+	peerOwner    func(net.Conn) (uint32, error)
+	ownerUID     uint32
+	refused      refusals
 	pacMu        sync.RWMutex
 	pacBodies    map[string][]byte
 	mu           sync.Mutex
@@ -186,11 +189,13 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 		openWait: config.OpenTimeout, runContext: runContext, cancel: cancel, done: make(chan error, 1),
 		active: make(map[io.Closer]struct{}), snapshotGate: make(chan struct{}, 1),
 	}
+	proxy.peerOwner, proxy.ownerUID = defaultPeerOwner()
 	address := listener.Addr().String()
 	proxy.ProxyAddress = address
 	proxy.PACURL = "http://" + address + "/proxy.pac"
 	proxy.server = &http.Server{
 		Handler:           proxy,
+		ConnContext:       peerConnContext,
 		ReadHeaderTimeout: config.HeaderTimeout,
 		IdleTimeout:       config.IdleTimeout,
 		MaxHeaderBytes:    maximumAccessHeaderBytes,
@@ -214,6 +219,11 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 func (p *AccessProxy) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if p == nil || p.source == nil || request == nil || request.URL == nil {
 		writeAccessProxyError(writer, http.StatusServiceUnavailable)
+		return
+	}
+	if !p.peerAllowed(request) {
+		writer.Header().Set("Connection", "close")
+		_ = writeAccessProxyError(writer, http.StatusForbidden)
 		return
 	}
 	servesPAC := request.Method == http.MethodGet && (request.URL.Path == "/proxy.pac" || strings.HasPrefix(request.URL.Path, "/proxy-"))
