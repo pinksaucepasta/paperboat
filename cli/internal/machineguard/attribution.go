@@ -101,7 +101,8 @@ func attributeOwner(tuple socketTuple, lookup lookupOwners) (uint32, error) {
 
 // attributeConnection finds the daemon an accepted gateway connection belongs to. daemons maps a uid to its
 // registered daemon; a uid without one (root, system users, users who never installed) is refused with
-// errAttributionNoDaemon, which the gateway answers with the refusal page on 80/443 and a close elsewhere.
+// errAttributionNoDaemon, which the gateway answers with the refusal page on 80 and a close elsewhere (443 too:
+// no per-user CA exists for such a caller, so no certificate it trusts).
 func attributeConnection[D any](accepted net.Conn, lookup lookupOwners, daemons func(uint32) (D, bool)) (uint32, D, error) {
 	var none D
 	tuple, err := clientTuple(accepted)
