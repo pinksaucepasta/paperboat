@@ -38,11 +38,12 @@ type StagedCandidate struct {
 }
 
 // stageUnixUpgrade has the build being installed stage its own session owner and,
-// for a source upgrade of a serving carrier, its own carrier generation (stage);
-// then it moves the old generation's clients to it. Each build renders and checks
-// only its own units: a signed update's helper is the previous build, so it runs
-// the candidate's executable for this (stageCandidateByExecutable).
-func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, carrier bool, stage func(context.Context, bool) (StagedCandidate, error)) (_ *unixCarrierUpgrade, resultErr error) {
+// for a source upgrade of a serving carrier, its own carrier generation, through
+// its own executable (stageCandidateByExecutable); then it moves the old
+// generation's clients to it. Each build renders and checks only its own units, and
+// the installing process is often another build: a signed update's helper is the
+// previous build, and pb update --from runs the invoking CLI (pbvm1).
+func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, carrier bool) (_ *unixCarrierUpgrade, resultErr error) {
 	var retained CarrierConfig
 	if carrier {
 		var err error
@@ -51,7 +52,7 @@ func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, 
 		}
 		carrier = retained.Source != request.Source
 	}
-	staged, err := stage(ctx, carrier)
+	staged, err := stageCandidateByExecutable(ctx, request, carrier)
 	if err != nil || !carrier {
 		return nil, err
 	}

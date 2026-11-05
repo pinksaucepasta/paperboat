@@ -32,10 +32,10 @@ var runCandidate = func(ctx context.Context, executable string, args []string, r
 	return stdout.Bytes(), command.Run()
 }
 
-// stageCandidateByExecutable is a signed update's staging: the helper running it
-// is the previous build, so the candidate's own executable (its verified pin)
-// writes and starts the candidate's units and descriptors (StageCandidate).
-// Rollback stays with the helper, which removes them by generation name.
+// stageCandidateByExecutable has the candidate's own executable (its verified pin)
+// write and start the candidate's units and descriptors (StageCandidate): the
+// installing process may be another build. Rollback stays with the installing
+// process, which removes them by generation name.
 func stageCandidateByExecutable(ctx context.Context, request Request, carrier bool) (StagedCandidate, error) {
 	pin, err := candidatePin(request)
 	if err != nil {
