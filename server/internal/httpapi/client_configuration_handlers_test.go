@@ -20,7 +20,7 @@ func TestClientConfigurationPublishesDashboardURLs(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/v1/client-configuration", nil)
 	recorder := httptest.NewRecorder()
 
-	clientConfiguration(cfg).ServeHTTP(recorder, request)
+	clientConfiguration(cfg, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -56,12 +56,15 @@ func TestClientConfigurationPublishesConfiguredDomains(t *testing.T) {
 			cfg.Tunnel.BaseDomain = "public." + base
 			cfg.RuntimeBaseDomain = "runtime." + base
 			w := httptest.NewRecorder()
-			clientConfiguration(cfg).ServeHTTP(w, httptest.NewRequest("GET", "/v1/client-configuration", nil))
+			clientConfiguration(cfg, nil).ServeHTTP(w, httptest.NewRequest("GET", "/v1/client-configuration", nil))
 			var response struct {
-				Data map[string]string `json:"data"`
+				Data map[string]any `json:"data"`
 			}
 			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil {
 				t.Fatalf("discovery status=%d", w.Code)
+			}
+			if regions, ok := response.Data["control_regions"].([]any); !ok || len(regions) != 0 {
+				t.Fatalf("control_regions without a regional domain = %#v, want []", response.Data["control_regions"])
 			}
 			for field, want := range map[string]string{
 				"issuer":                   "https://api." + base,
@@ -96,7 +99,7 @@ func TestClientConfigurationRejectsMissingOrInvalidDeployment(t *testing.T) {
 			c.HTTP.BrowserLoginOrigin = "https://console.example.test"
 			mutate(&c)
 			w := httptest.NewRecorder()
-			clientConfiguration(c).ServeHTTP(w, httptest.NewRequest("GET", "/v1/client-configuration", nil))
+			clientConfiguration(c, nil).ServeHTTP(w, httptest.NewRequest("GET", "/v1/client-configuration", nil))
 			var response ErrorResponse
 			if json.Unmarshal(w.Body.Bytes(), &response) != nil || w.Code != 503 || response.Error.Code != "client_configuration_unavailable" {
 				t.Fatalf("status=%d code=%s", w.Code, response.Error.Code)

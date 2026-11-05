@@ -19,6 +19,9 @@ func (c Config) ValidateClientDiscovery() error {
 			return fmt.Errorf("client discovery requires configured %s", name)
 		}
 	}
+	if c.RegionalDomain != "" && (!validEndpointBaseDomain(c.RegionalDomain) || net.ParseIP(c.RegionalDomain) != nil) {
+		return fmt.Errorf("client discovery requires a valid regional_domain")
+	}
 	for name, value := range map[string]string{
 		"http.public_base_url":      c.HTTP.PublicBaseURL,
 		"http.browser_login_origin": c.HTTP.BrowserLoginOrigin,

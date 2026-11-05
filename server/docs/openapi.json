@@ -1752,7 +1752,8 @@
           "local_access_base_domain",
           "preview_base_domain",
           "tunnel_base_domain",
-          "runtime_base_domain"
+          "runtime_base_domain",
+          "control_regions"
         ],
         "properties": {
           "version": {
@@ -1793,6 +1794,13 @@
           "runtime_base_domain": {
             "type": "string",
             "format": "hostname"
+          },
+          "control_regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ControlRegion"
+            },
+            "description": "Control-plane regions clients rank by measured latency; empty when the server has no regional nodes."
           }
         }
       },
@@ -15616,6 +15624,131 @@
             "type": "integer",
             "minimum": 0,
             "description": "Every machine shared into the team."
+          }
+        }
+      },
+      "ControlRegion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "api_origin",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "api_origin": {
+            "type": "string",
+            "format": "uri"
+          },
+          "state": {
+            "enum": [
+              "healthy",
+              "draining"
+            ]
+          }
+        }
+      },
+      "ServerNode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "region",
+          "state",
+          "version",
+          "commit",
+          "started_at",
+          "last_seen_at",
+          "healthy"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "registered",
+              "active",
+              "draining",
+              "removed"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "healthy": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ServerNodeEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ServerNode"
+          }
+        }
+      },
+      "ServerNodeListEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "nodes"
+            ],
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ServerNode"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ServerNodeEnrollment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "address",
+          "code"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 200
           }
         }
       }
@@ -48320,6 +48453,132 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/admin/server-nodes/enrollments": {
+      "post": {
+        "operationId": "post_v1_admin_server_nodes_enrollments",
+        "summary": "Operator-only: Enroll a new server node with the claim code it printed",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Exact address of the new node."
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Opaque audit reason reference."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Stable key for retrying the exact mutation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNodeEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Any enrolled node serves this (equal peers). Dials the node pinned to the code, verifies its signed inspection, records it registered and delivers its config sealed to the node.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerNodeEnrollment"
+              }
+            }
+          }
+        },
+        "x-operator-capability": "admin"
+      }
+    },
+    "/v1/admin/server-nodes": {
+      "get": {
+        "operationId": "get_v1_admin_server_nodes",
+        "summary": "Operator-only: List server nodes",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNodeListEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-operator-capability": "operations"
       }
     }
   }

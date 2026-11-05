@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 )
 
 type clientConfigurationResponse struct {
@@ -17,9 +18,11 @@ type clientConfigurationResponse struct {
 	Version               string `json:"version"`
 	CLIVerificationURL    string `json:"cli_verification_url"`
 	MachinesURL           string `json:"machines_url"`
+	// ControlRegions is the region map clients rank by measured latency (PLAN 3b).
+	ControlRegions []servernodes.Region `json:"control_regions"`
 }
 
-func clientConfiguration(cfg config.Config) http.HandlerFunc {
+func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) http.HandlerFunc {
 	response := clientConfigurationResponse{
 		Version:               "1",
 		Issuer:                config.NormalizeIssuer(cfg.HTTP.PublicBaseURL),
@@ -38,6 +41,8 @@ func clientConfiguration(cfg config.Config) http.HandlerFunc {
 			writeError(w, r, http.StatusServiceUnavailable, "client_configuration_unavailable", "Server discovery is not configured; contact the server operator.")
 			return
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: response})
+		out := response
+		out.ControlRegions = regions.Get(r.Context())
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
 	}
 }

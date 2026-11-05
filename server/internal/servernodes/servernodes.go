@@ -5,6 +5,7 @@ package servernodes
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -95,4 +96,67 @@ func Run(ctx context.Context, d *db.DB, n Node, failed func(error)) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// Region is one entry of the control-plane region map in discovery (PLAN 3b): its API origin and state.
+type Region struct {
+	ID        string `json:"id"`
+	APIOrigin string `json:"api_origin"`
+	State     string `json:"state"` // healthy | draining
+}
+
+// Regions lists the regions with a fresh serving node: healthy when one is active, draining when the only
+// fresh nodes drain. Registered nodes (no certificate yet) and stale or removed ones are not listed.
+func Regions(ctx context.Context, d *db.DB, domain string) ([]Region, error) {
+	rows, err := d.Pool().Query(ctx, `SELECT region, bool_or(state='active') FROM paperboat.control_server_nodes
+WHERE state IN ('active','draining') AND last_seen_at > now() - make_interval(secs => $1)
+GROUP BY region ORDER BY region`, HealthyWithin.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Region{}
+	for rows.Next() {
+		var r Region
+		var active bool
+		if err := rows.Scan(&r.ID, &active); err != nil {
+			return nil, err
+		}
+		r.APIOrigin, r.State = "https://"+r.ID+"."+domain, "draining"
+		if active {
+			r.State = "healthy"
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RegionCache answers discovery from memory; it refreshes at most every few seconds and keeps the last good
+// map when the database fails, so discovery never breaks on a read error.
+type RegionCache struct {
+	DB     *db.DB
+	Domain string
+	mu     sync.Mutex
+	at     time.Time
+	last   []Region
+}
+
+func (c *RegionCache) Get(ctx context.Context) []Region {
+	if c == nil || c.Domain == "" {
+		return []Region{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Since(c.at) < 5*time.Second && c.last != nil {
+		return c.last
+	}
+	read, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if regions, err := Regions(read, c.DB, c.Domain); err == nil {
+		c.last, c.at = regions, time.Now()
+	}
+	if c.last == nil {
+		return []Region{}
+	}
+	return c.last
 }
