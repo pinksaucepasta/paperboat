@@ -55,9 +55,9 @@ jobs:
     env:
       QV_N: ${{ matrix.n }}
       QV_SERVER: ${{ vars.PAPERBOAT_DEFAULT_SERVER_URL }}
-      QV_OUT: ${{ runner.temp }}/qu-out
       QV_SRC: ${{ github.workspace }}/src
     steps:
+      - run: echo "QV_OUT=$RUNNER_TEMP/qu-out" >> "$GITHUB_ENV"
       # The harness comes from the dispatched ref (main); the code under test is checked out beside it in src/.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

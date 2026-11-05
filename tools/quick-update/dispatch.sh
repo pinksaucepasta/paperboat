@@ -19,16 +19,16 @@ for r in "${refs[@]}"; do
 done
 gh workflow run quick-update.yml --ref main -f "refs=${shas[*]}" -f "web=$web"
 id=""
-for _ in $(seq 30); do
+for _ in $(seq 8); do
   id=$(gh run list --workflow quick-update.yml --branch main --event workflow_dispatch -L1 --json databaseId,createdAt \
     --jq "map(select(.createdAt > \"$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)\")) | .[0].databaseId // empty")
-  [ -n "$id" ] && break; sleep 3
+  [ -n "$id" ] && break; sleep 15
 done
 [ -n "$id" ] || { echo "dispatch: the run did not start" >&2; exit 1; }
 echo "dispatch: $(gh run view "$id" --json url --jq .url)" >&2
 deadline=$((SECONDS + 5400))
 until [ "$(gh run view "$id" --json status --jq .status)" = completed ]; do
-  [ $SECONDS -lt $deadline ] || { echo "dispatch: gave up waiting" >&2; exit 1; }; sleep 30
+  [ $SECONDS -lt $deadline ] || { echo "dispatch: gave up waiting" >&2; exit 1; }; sleep 90
 done
 out=$(mktemp -d); gh run download "$id" -D "$out" 2>/dev/null || true
 for i in "${!shas[@]}"; do
