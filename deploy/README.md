@@ -198,11 +198,17 @@ additive, so the previous server still runs on the new schema; a migration that 
 anything must not be deployed in the same step as the code that needs it). Edges: the same `pbh install`
 with the previous tags. Release the lock, then tell the lane that was waiting what happened.
 
-**6. Recheck and smoke.** After every server or edge deploy, first the edge gate:
-`PROBE='<command that runs a shell on the paired probe machine>' deploy/check-edges.sh local=<oracle ip>
-anvit=<anvit ip>` (from oracle). It creates its own preview on the probe, GETs it through every edge (200
-required) and stops it, and fails when an edge logged control failures in the last 90 s; a failure means roll
-back (step 5). The 2026-11-04 outage (server .3 answer field rejected by every .2 edge) would have failed it. Then: public health (`/healthz`, `/readyz`), the `server-version`
+**6. Recheck and smoke.** Every server or edge deploy runs inside the deploy gate (from oracle):
+`PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production database,
+SQL on stdin, -At>' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<oracle ip> anvit=<anvit ip>`.
+It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
+follows the log of every tunnel container that runs in the window, the replaced one included. It fails unless
+all of these are 0: preview failures, edge control failures, refused host carriers
+(`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
+(`support_reports`), and machines online before the deploy that went offline during it. A failure means roll
+back (step 5). Without `--deploy` it watches for 30 s. The 2026-11-04 outage (server .3 answer field
+rejected by every .2 edge) and the 2026-11-05 edge restart (22 refused carriers, a preview 503, a
+machine_offline) both fail it. Its test: `python3 deploy/test_check_edges.py`. Then: public health (`/healthz`, `/readyz`), the `server-version`
 commit, one preview created and fetched through each edge, and `docker logs --since 5m` of the active
 server container with no new `level=ERROR` family. Then ask Lane A (thread "Lane A — CLI & Linux
 devices") for one smoke run against the deployed server, naming the version and what changed. A check that
