@@ -574,7 +574,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "peer_transport", Required: false, Retry: true, Service: nativePeerService})
 	}
 	if dependencies.PreviewRecovery != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "preview_recovery", Required: false, Service: dependencies.PreviewRecovery})
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "preview_recovery", Required: false, Retry: true, Service: dependencies.PreviewRecovery})
 	}
 	if dependencies.RuntimeObservationService != nil {
 		// Presence is a stable host responsibility. The replaceable worker
