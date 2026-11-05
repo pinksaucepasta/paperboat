@@ -5,12 +5,11 @@ package privateproxyconfig
 import (
 	"errors"
 	"os"
-	"path/filepath"
 )
 
-func NewPlatformManager(stateRoot string) (*Manager, error) {
-	return New(filepath.Join(stateRoot, "private-access", "system-proxy.json"), NewMacOSAdapter(ExecRunner{}))
-}
+// There is no NewPlatformManager on macOS: the system auto-proxy needs administrator rights and is one setting
+// for every user, so the root machine guard owns it (machineguard preview_pac_darwin.go) and hostd never runs
+// networksetup.
 
 func validateProxyJournal(_ *os.File, info os.FileInfo) error {
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {

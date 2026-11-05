@@ -74,6 +74,9 @@ type request struct {
 	// Handoff asks for a gateway route instead of a listener: the daemon receives one end of a socket pair carrying
 	// each gateway connection attributed to its OS user (FeatureGatewayRouting).
 	Handoff bool `json:"handoff,omitempty"`
+	// PAC is the private-preview PAC this daemon's browser gets from the guard's PAC endpoint ("preview_pac");
+	// empty withdraws it.
+	PAC string `json:"pac,omitempty"`
 }
 type response struct {
 	Certificate *CertificateBundle `json:"certificate,omitempty"`

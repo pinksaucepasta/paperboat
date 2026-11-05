@@ -64,6 +64,7 @@ type guardServer struct {
 	trustReady       bool
 	certificateGate  chan struct{}
 	certificates     map[controlConn]map[string]cachedCertificate
+	previewPAC       map[controlConn]string
 }
 
 func Serve(ctx context.Context, cfg Config) (resultErr error) {
@@ -122,6 +123,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	g.claims.adoptLegacy(g.reserved.IPs, time.Now())
 	g.reserved.IPs = nil
 	defer retirePlatform(cfg)
+	defer g.startPreviewPAC(ctx)()
 	if err = g.applyRules(ctx); err != nil {
 		return err
 	}
@@ -691,6 +693,8 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		return nil, g.persist()
 	case "aliases":
 		return nil, g.replaceAliases(ctx, conn, uid, in.Names)
+	case "preview_pac":
+		return nil, g.setPreviewPAC(conn, in.PAC)
 	case "names":
 		if len(in.Names) > 128 {
 			return nil, errors.New("too many machine names")
@@ -784,6 +788,7 @@ func (g *guardServer) withdraw(ctx context.Context, conn controlConn) {
 	delete(g.names, conn)
 	delete(g.aliases, conn)
 	delete(g.certificates, conn)
+	delete(g.previewPAC, conn)
 	// If nft updates fail, retained kernel rules still demand the root-marked
 	// listener; shutting down the shared listening socket disables every SCM_RIGHTS copy.
 	// Existing unmarked replacement sockets still fail the retained SYN mark rule.

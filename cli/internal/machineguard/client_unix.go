@@ -223,6 +223,16 @@ func (c *Client) ReplaceAliases(ctx context.Context, aliases map[string]string) 
 	}
 	return err
 }
+
+// SetPreviewPAC registers the PAC the guard serves this OS user's browser; empty withdraws it. The guard also drops
+// it when this connection closes.
+func (c *Client) SetPreviewPAC(ctx context.Context, body string) error {
+	_, file, err := c.exchange(ctx, request{Operation: "preview_pac", PAC: body})
+	if file != nil {
+		file.Close()
+	}
+	return err
+}
 func (c *Client) ReplaceNames(ctx context.Context, names map[string]netip.Addr) error {
 	values := make(map[string]string, len(names))
 	for name, ip := range names {

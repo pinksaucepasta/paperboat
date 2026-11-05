@@ -77,6 +77,11 @@ func (f *darwinPurgeFixture) run(_ context.Context, name string, args ...string)
 	return nil, nil
 }
 
+func (f *darwinPurgeFixture) restoreProxy(context.Context) error {
+	f.calls = append(f.calls, "restore-proxy")
+	return nil
+}
+
 func (f *darwinPurgeFixture) purge(ctx context.Context) error {
 	return purgeDarwin(ctx, darwinPurge{
 		Paths: f.paths,
@@ -84,6 +89,7 @@ func (f *darwinPurgeFixture) purge(ctx context.Context) error {
 		LocalNames: func(context.Context) error {
 			return nil
 		},
+		RestoreProxy: f.restoreProxy,
 	})
 }
 
@@ -199,7 +205,7 @@ func TestPurgeDarwinPreservesResourcesUntilStoppedGuardCustody(t *testing.T) {
 			if kind == "canceled" {
 				cancel()
 			}
-			if err := purgeDarwin(ctx, darwinPurge{Paths: f.paths, Run: run, LocalNames: func(context.Context) error { return nil }}); err == nil {
+			if err := purgeDarwin(ctx, darwinPurge{Paths: f.paths, Run: run, LocalNames: func(context.Context) error { return nil }, RestoreProxy: f.restoreProxy}); err == nil {
 				t.Fatal("unsafe or active guard accepted")
 			}
 			for _, path := range []string{f.paths.StateDir, f.paths.HelperPath, f.paths.LaunchPath} {
@@ -452,7 +458,7 @@ func TestPurgeDarwinRetiresOrphanCertificatesInIsolatedKeychain(t *testing.T) {
 		}
 		return f.run(ctx, name, args...)
 	}
-	if err := purgeDarwin(context.Background(), darwinPurge{Paths: f.paths, Run: run, LocalNames: func(context.Context) error { return nil }}); err != nil {
+	if err := purgeDarwin(context.Background(), darwinPurge{Paths: f.paths, Run: run, LocalNames: func(context.Context) error { return nil }, RestoreProxy: f.restoreProxy}); err != nil {
 		t.Fatal("purge orphan trust", err)
 	}
 	if _, err := os.Lstat(f.paths.StateDir); !errors.Is(err, os.ErrNotExist) {

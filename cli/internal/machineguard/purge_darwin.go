@@ -51,6 +51,7 @@ func Purge(ctx context.Context) error {
 		LocalNames: func(ctx context.Context) error {
 			return cleanupHistoricalLocalNames(ctx, Config{StateDir: DefaultStateDir})
 		},
+		RestoreProxy: func(ctx context.Context) error { return removePreviewProxy(ctx, DefaultStateDir) },
 	})
 }
 
@@ -68,6 +69,8 @@ type darwinPurge struct {
 	Paths      darwinPurgePaths
 	Run        func(context.Context, string, ...string) ([]byte, error)
 	LocalNames func(context.Context) error
+	// RestoreProxy puts back the system auto-proxy setting the guard replaced.
+	RestoreProxy func(context.Context) error
 }
 
 func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
@@ -156,6 +159,7 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	// Owned loopback aliases and the PF enable token are recorded in state.
 	retirePlatform(Config{StateDir: paths.StateDir})
 	result = errors.Join(result, darwinRetiredPlatformState(paths.StateDir))
+	result = errors.Join(result, p.RestoreProxy(ctx))
 	roots, err := uninstallRoots(paths.StateDir)
 	if err != nil {
 		result = errors.Join(result, fmt.Errorf("read machine guard trust state: %w", err))
@@ -226,6 +230,9 @@ func purgeDarwinAccount(ctx context.Context, run func(context.Context, string, .
 // reference that retirePlatform could not release. retirePlatform does not return
 // errors, so its leftovers are the only evidence of failure.
 func darwinRetiredPlatformState(stateDir string) error {
+	if err := previewProxyLeftover(stateDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(stateDir, "pf-enable-token")); err == nil {
 		return errors.New("machine guard PF enable reference was not released")
 	}

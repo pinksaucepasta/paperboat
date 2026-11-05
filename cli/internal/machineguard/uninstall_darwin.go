@@ -162,7 +162,10 @@ func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Conf
 	if err = removeBrowserDomainSelection(guardCfg.StateDir); err != nil {
 		return result, err
 	}
-	result.Removed = append(result.Removed, "owned private HTTPS system trust and CA state", "machine access launch mode")
+	if err = removePreviewProxy(ctx, guardCfg.StateDir); err != nil {
+		return result, err
+	}
+	result.Removed = append(result.Removed, "owned private HTTPS system trust and CA state", "system auto-proxy setting", "machine access launch mode")
 	if err = lock.Close(); err != nil {
 		return result, err
 	}

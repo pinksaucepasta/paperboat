@@ -97,7 +97,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 			_ = runtime.Close(context.WithoutCancel(config.RunContext))
 			return nil, errors.Join(ErrProductionInvalid, err)
 		}
-		privatePAC, err = privateproxyconfig.NewPlatformManager(config.StateRoot)
+		privatePAC, err = newPlatformPrivatePAC(config.StateRoot)
 		if err != nil {
 			_ = runtime.Close(context.WithoutCancel(config.RunContext))
 			return nil, errors.Join(ErrProductionInvalid, err)
