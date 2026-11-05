@@ -203,7 +203,18 @@ func (a *Authority) EligibleRegionalNodes(role, transport string, allowedRegions
 	if a.regional == nil || a.closed {
 		return nil, RedundancyNone, ErrRegionalAuthority
 	}
-	return a.regional.Eligible(role, transport, allowedRegions, now)
+	return a.regional.Eligible(role, transport, allowedRegions, now, nil)
+}
+
+// heldRelaysLocked names the relays the engine uses now. Callers hold a.mu.
+func (a *Authority) heldRelaysLocked() map[string]bool {
+	a.relay.mu.Lock()
+	defer a.relay.mu.Unlock()
+	held := make(map[string]bool, len(a.relay.nodes))
+	for _, n := range a.relay.nodes {
+		held[n.NodeID] = true
+	}
+	return held
 }
 
 // RequestRefresh asks Run to renew the signed configuration now, for example when a peer's

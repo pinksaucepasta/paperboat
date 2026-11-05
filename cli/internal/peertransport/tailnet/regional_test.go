@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"testing"
 	"time"
 )
@@ -58,11 +59,18 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 	overloaded := node("overloaded", "hel", "hel-d", "ready", 90)
 	candidates := RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{excluded, draining, stale, overloaded, ready}}
 
-	got, redundancy, err := candidates.Eligible("relay", "derp_quic", map[string]bool{"hel": true}, now)
+	got, redundancy, err := candidates.Eligible("relay", "derp_quic", map[string]bool{"hel": true}, now, nil)
 	if err != nil || len(got) != 1 || got[0].NodeID != "ready" || redundancy != RedundancyReduced {
 		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
 	}
-	if _, _, err := candidates.Eligible("relay", "derp_quic", nil, now.Add(61*time.Second)); !errors.Is(err, ErrRegionalAuthority) {
+	// A relay already in use needs no fresh observation (its connection is its health signal), but a draining
+	// or overloaded one is still withdrawn.
+	held := map[string]bool{"stale": true, "draining": true, "overloaded": true}
+	got, _, err = candidates.Eligible("relay", "derp_quic", map[string]bool{"hel": true}, now, held)
+	if err != nil || len(got) != 2 || got[0].NodeID != "ready" || got[1].NodeID != "stale" {
+		t.Fatalf("eligible with held relays = %#v, err = %v", got, err)
+	}
+	if _, _, err := candidates.Eligible("relay", "derp_quic", nil, now.Add(61*time.Second), held); !errors.Is(err, ErrRegionalAuthority) {
 		t.Fatalf("expired candidates error = %v", err)
 	}
 }
@@ -73,17 +81,16 @@ func TestRegionalCandidatesDifferentFailureDomainIsObservable(t *testing.T) {
 		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "hel", FailureDomain: domain, Roles: []string{"edge"}, Transports: []string{"http3"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10, CapacityObservedAt: now.Unix()}
 	}
 	candidates := RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{node("a", "rack-a"), node("b", "rack-b")}}
-	got, redundancy, err := candidates.Eligible("edge", "http3", nil, now)
+	got, redundancy, err := candidates.Eligible("edge", "http3", nil, now, nil)
 	if err != nil || len(got) != 2 || redundancy != RedundancyAvailable {
 		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
 	}
 }
 
-func TestRegionalCandidateRefreshJitterIsBounded(t *testing.T) {
+func TestSafetyRefreshIsJitteredUnderHalfTheSignedLifetime(t *testing.T) {
 	for range 256 {
-		delay := regionalRefreshDelay()
-		if delay < 24*time.Second || delay > 36*time.Second {
-			t.Fatalf("refresh delay = %s", delay)
+		if delay := safetyRefreshDelay(); delay < 5*time.Minute || delay > 6*time.Minute || delay > peernetwork.Lifetime*6/10 {
+			t.Fatalf("safety refresh delay = %s", delay)
 		}
 	}
 }

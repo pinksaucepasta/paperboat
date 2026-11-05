@@ -11,8 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"os"
 	"strings"
 	"testing"
@@ -123,7 +123,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 				t.Fatal("network signature invalid")
 			}
 			claims := networkClaims(t, result.Configuration)
-			if claims["exp"].(float64) != float64(now.Add(admission.DefaultLifetime).Unix()) {
+			if claims["exp"].(float64) != float64(now.Add(peernetwork.Lifetime).Unix()) {
 				t.Fatal("application scope shortened unrelated network binding")
 			}
 			assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")

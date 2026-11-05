@@ -94,6 +94,9 @@ func (a *Authority) endpointsChanged() {
 		a.reportMu.Lock()
 		a.reportTimer = nil
 		a.reportMu.Unlock()
-		a.RequestRefresh()
+		// A re-discovery that ends on the set already reported costs no request.
+		if a.endpointReportDue() != nil {
+			a.RequestRefresh()
+		}
 	})
 }

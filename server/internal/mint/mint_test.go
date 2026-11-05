@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -63,9 +64,13 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if header["alg"] != "EdDSA" || header["typ"] != RelayGrantType || header["kid"] != "relay-key" {
 		t.Fatalf("header = %#v", header)
 	}
-	claims["exp"] = int64(1_700_000_061)
+	claims["exp"] = int64(1_700_000_000) + int64(peernetwork.Lifetime/time.Second)
+	if _, err := provider.SignRelayGrant(claims); err != nil {
+		t.Fatalf("refused a relay grant of peernetwork.Lifetime: %v", err)
+	}
+	claims["exp"] = int64(1_700_000_001) + int64(peernetwork.Lifetime/time.Second)
 	if _, err := provider.SignRelayGrant(claims); err == nil {
-		t.Fatal("accepted relay grant longer than 60 seconds")
+		t.Fatal("accepted relay grant longer than peernetwork.Lifetime")
 	}
 	claims["exp"] = int64(1_700_000_060)
 	claims["peer_relay"] = map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "virtual_address": "fd7a:115c:a1e0::9"}
