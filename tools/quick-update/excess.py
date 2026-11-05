@@ -3,15 +3,17 @@
 # the worst value among calls/gaps that overlap [update_start-LO, update_end+HI], minus that feature's median
 # before the window; it passes at <=LIMIT s with 0 failures. Above LIMIT it fails, unless the noise outside the window
 # (pre/post max) is as high as the in-window excess: then the probe cannot tell, and the row is UNRESOLVED (never PASS).
-#  - request loops (exec, ssh_connect, send, preview, tunnel): value = that call's own latency, so a loop's
-#    cadence (exec_stdin_large starts one every 10 s) is never counted as a pause;
-#  - streams (exec_long, ssh_stream, term_cli, term_web): value = gap between consecutive markers.
-# send: `pb send` exposes no progress, so the probe sends a small file back to back and each call's latency is
-# the measure (a stall inside a send lengthens that call).
+#  - request loops (exec, ssh_connect, send): value = that call's own latency, so a loop's cadence
+#    (exec_stdin_large starts one every 10 s) is never counted as a pause;
+#  - streams (exec_long, ssh_stream, term_cli, term_web) and the HTTP fetch loops (preview, tunnel): value = gap
+#    between consecutive successful markers/fetches, i.e. the outage between the last success before a pause and
+#    the first one after it; a failed or timed-out fetch only makes the gap longer (and counts as a failure).
+# send: only sends overlapping the window are scored, by their own latency. `pb send` exposes no progress, so a
+# stall inside a send cannot be seen separately from the send's total time (see the note in probe.py's send()).
 import json,sys,datetime,pathlib
 LO,HI,LIMIT=2.0,10.0,1.0
 FEATS=['exec_short','exec_long','exec_stdin','exec_stdin_large','ssh_stream','ssh_connect','send','preview','tunnel','term_cli','term_web']
-STREAMS={'exec_long','ssh_stream','term_cli','term_web'}
+STREAMS={'exec_long','ssh_stream','term_cli','term_web','preview','tunnel'}
 iso=lambda s:datetime.datetime.fromisoformat(s.strip()).timestamp()
 hms=lambda t:datetime.datetime.fromtimestamp(t,datetime.timezone.utc).strftime('%H:%M:%S.%f')[:-3]
 
@@ -29,7 +31,7 @@ def load_events(run):
  return ev
 
 def items(e,stream):
- """(start,end,seconds) of every call, or of every gap between consecutive successful markers."""
+ """(start,end,seconds) of every call, or of every gap between consecutive successful markers/fetches."""
  if stream:
   ts=sorted(x['t'] for x in e if x['ok']);return [(a,b,b-a) for a,b in zip(ts,ts[1:])]
  return [(x['t']-x['ms']/1000,x['t'],x['ms']/1000) for x in e if x['ms'] is not None]  # a failed call's wait counts too

@@ -7,6 +7,8 @@ def calls(f,ends,ms,ok=True):return [dict(f=f,t=t,ok=ok,ms=int(ms*1000)) for t i
 def ticks(f,times):return [dict(f=f,t=t,ok=True,ms=None) for t in times]
 def row(ev,f):return {r['feature']:r for r in excess.score(ev,U)}[f]
 frange=lambda a,b,s:[a+i*s for i in range(int((b-a)/s)+1)]
+def fetches(a,b,skip=None,f='preview'):  # a fetch every 0.3 s taking 0.1 s; none completes inside skip=(from,to)
+ return calls(f,[t for t in frange(a,b,0.3) if not skip or not skip[0]<t<skip[1]],0.1)
 
 class T(unittest.TestCase):
  def test_pre_window_slow_call_excluded(self):
@@ -40,7 +42,7 @@ class T(unittest.TestCase):
   pre=[t for t in frange(10,200,0.1) if not 50<t<52.1]  # same gap, 50 s before the update
   r=row(ticks('exec_long',pre),'exec_long');self.assertLess(r['excess_s'],0.01);self.assertTrue(r['ok'])
  def test_failure_fails_the_verdict(self):
-  ev=calls('preview',frange(10,200,0.3),0.12)+calls('preview',[115.0],5.0,ok=False)
+  ev=fetches(10,200,skip=(110,115))+calls('preview',[115.0],5.0,ok=False)  # one fetch timed out after 5 s
   r=row(ev,'preview');self.assertEqual((r['failures'],r['failures_in_update']),(1,1));self.assertFalse(r['ok']);self.assertGreater(r['excess_s'],4)
  def test_no_data_in_window_fails(self):
   self.assertFalse(row(calls('exec_short',frange(10,90,1.3),1.1),'exec_short')['ok'])
@@ -60,4 +62,26 @@ class T(unittest.TestCase):
  def test_pb_version_parse(self):
   self.assertEqual(excess.pb_version('noise\n{"data":{"version":"v1","commit":"abc"}}'),dict(version='v1',commit='abc'))
   self.assertIn('error',excess.pb_version('not json'))
+ def test_send_overlapping_the_window_counts(self):
+  ev=calls('send',frange(10,200,1.6),1.5)+calls('send',[99.0],3.5)  # began at 95.5, still running at the window's start (98)
+  r=row(ev,'send');self.assertAlmostEqual(r['excess_s'],2.0,1);self.assertFalse(r['ok'])
+ def test_slow_send_after_the_window_does_not_count(self):
+  ev=calls('send',frange(10,200,1.6),1.5)+calls('send',[160.0],4.0)  # window ends at 140
+  r=row(ev,'send');self.assertTrue(r['ok']);self.assertAlmostEqual(r['post_max_s'],2.5,1);self.assertLess(r['excess_s'],0.3)
+ def test_a_1_2_second_stall_inside_a_send_fails(self):
+  ev=calls('send',frange(10,200,1.6),1.5)+calls('send',[115.0],2.7)  # a 1.5 s send held 1.2 s mid-transfer
+  r=row(ev,'send');self.assertAlmostEqual(r['excess_s'],1.2,1);self.assertEqual(r['status'],'FAIL')
+ def test_a_send_stall_under_the_bar_passes(self):
+  ev=calls('send',frange(10,200,1.6),1.5)+calls('send',[115.0],2.4)  # 0.9 s
+  self.assertEqual(row(ev,'send')['status'],'PASS')
+ def test_fetch_loop_scores_the_outage_between_successes(self):
+  r=row(fetches(10,200,skip=(111.0,112.5)),'preview')  # no fetch succeeds for 1.5 s inside the window
+  self.assertAlmostEqual(r['excess_s'],1.5,delta=0.2);self.assertEqual(r['status'],'FAIL')
+  r=row(fetches(10,200,skip=(111.0,111.9),f='tunnel'),'tunnel')  # a 0.9 s outage is inside the bar
+  self.assertEqual(r['status'],'PASS')
+ def test_fetch_outage_outside_the_window_is_noise(self):
+  r=row(fetches(10,200,skip=(40.0,43.0)),'preview');self.assertTrue(r['ok']);self.assertGreater(r['pre_max_s'],2)
+  r=row(fetches(10,200,skip=(170.0,173.0)),'preview');self.assertTrue(r['ok']);self.assertGreater(r['post_max_s'],2)
+ def test_fetch_loop_latency_alone_is_not_an_outage(self):
+  self.assertTrue(row(calls('preview',frange(10,200,0.3),0.25),'preview')['ok'])  # slow but steady fetches
 if __name__=='__main__':unittest.main()

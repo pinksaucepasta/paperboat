@@ -58,7 +58,9 @@ def stdin_echo(feat,size,every):
   except subprocess.TimeoutExpired:ok=False
   ev(feat,ok,int((time.time()-s0)*1000));time.sleep(max(0,every-(time.time()-s0)))
 def send(path):
- # pb send reports no progress, so: a small file back to back; each call's latency is the measure (excess.py).
+ # pb send prints only its final result (the server gets committed bytes at most every 5 s), so a stall inside a send
+ # is not visible apart from the send's total time: a small file back to back, each call's latency is the measure
+ # (excess.py). Seeing it needs a CLI progress line per committed 1 MiB chunk (filetransfer.Client.Committed).
  while not stop():
   s=time.time()
   try:ok=subprocess.run([pb,'send',path,'--to',tgt,'--json'],capture_output=True,text=True,timeout=60).returncode==0
