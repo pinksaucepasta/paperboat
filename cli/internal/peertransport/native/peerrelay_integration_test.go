@@ -393,7 +393,11 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 	if err := oldUDP.Close(); err != nil {
 		t.Fatal(err)
 	}
-	derpDeadline := time.Now().Add(8 * time.Second)
+	// magicsock keeps sending only to a relay path it trusts for 6.5s after its
+	// last pong (tailscale wgengine/magicsock/magicsock.go trustUDPAddrDuration,
+	// endpoint.go addrForSendLocked); QUIC then backs its probes off over that
+	// silence, so DERP data can first appear about 8s after the outage.
+	derpDeadline := time.Now().Add(20 * time.Second)
 	beforeClientDERP, beforeServerDERP := clientFilter.derpData.Load(), serverFilter.derpData.Load()
 	var derpErr error
 	for time.Now().Before(derpDeadline) {
