@@ -678,3 +678,41 @@ func TestPersistentPendingOperationBecomesRestartFailure(t *testing.T) {
 		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
+
+// A client that reattaches within the linger keeps its command; one that
+// never comes back has it canceled. Cancellation is the abandon outcome.
+func TestDetachedExecLingersForReattachThenIsCanceled(t *testing.T) {
+	const linger = 150 * time.Millisecond
+	root := t.TempDir()
+	manager := testManager(t, root, func(c *Config) { c.DetachedLinger = linger })
+	defer manager.Shutdown(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	execution, _, err := manager.Start(ctx, Request{OperationID: "operation_linger", Argv: []string{"/bin/cat"}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := execution.OpenReader(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(linger / 2)
+	reattached, err := execution.OpenReader(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * linger)
+	if state := execution.Snapshot().State; state != StateRunning {
+		t.Fatalf("reattached command ended: %s", state)
+	}
+	if err := reattached.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := execution.Wait(ctx)
+	if err != nil || snapshot.State != StateCanceled || snapshot.ErrorCode != "exec_canceled" {
+		t.Fatalf("abandoned command: %+v %v", snapshot, err)
+	}
+}

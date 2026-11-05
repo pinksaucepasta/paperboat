@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -92,6 +91,9 @@ type Config struct {
 	Clock              func() time.Time
 	Store              *store.Store
 	Retention          time.Duration
+	// DetachedLinger is how long a command with no attached client keeps
+	// running; it outlasts the client's reattach window (pb exec: ~30 s).
+	DetachedLinger time.Duration
 }
 
 type Manager struct {
@@ -128,6 +130,7 @@ type Execution struct {
 	waitErr         error
 	readers         map[uint64]uint64
 	nextReader      uint64
+	linger          *time.Timer
 	// delivered is the first sequence no reader has taken yet: output before it has reached a
 	// client at least once and may be dropped from the replay buffer; output at or after it has not
 	// and is never dropped, so the producer waits instead.
@@ -197,11 +200,14 @@ func NewPersistent(ctx context.Context, config Config) (*Manager, error) {
 	if config.Retention == 0 {
 		config.Retention = time.Hour
 	}
+	if config.DetachedLinger == 0 {
+		config.DetachedLinger = time.Minute
+	}
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
 	root, err := filepath.EvalSymlinks(config.WorkspaceRoot)
-	if err != nil || !filepath.IsAbs(root) || config.MaximumActive < 1 || config.MaximumActive > 1024 || config.MaximumOperations < config.MaximumActive || config.MaximumOperations > 1<<20 || config.ReplayBytes < 64<<10 || config.ReplayBytes > 64<<20 || config.ChunkBytes < 1024 || config.ChunkBytes > 1<<20 || config.CancelGrace < 0 || config.CancelGrace > time.Minute || config.Retention <= 0 || config.Retention > 7*24*time.Hour || !validBaseEnvironment(config.BaseEnvironment) {
+	if err != nil || !filepath.IsAbs(root) || config.MaximumActive < 1 || config.MaximumActive > 1024 || config.MaximumOperations < config.MaximumActive || config.MaximumOperations > 1<<20 || config.ReplayBytes < 64<<10 || config.ReplayBytes > 64<<20 || config.ChunkBytes < 1024 || config.ChunkBytes > 1<<20 || config.CancelGrace < 0 || config.CancelGrace > time.Minute || config.DetachedLinger < 0 || config.DetachedLinger > time.Hour || config.Retention <= 0 || config.Retention > 7*24*time.Hour || !validBaseEnvironment(config.BaseEnvironment) {
 		return nil, ErrInvalid
 	}
 	config.WorkspaceRoot = filepath.Clean(root)
@@ -272,6 +278,7 @@ func (m *Manager) Start(ctx context.Context, request Request) (ExecutionService,
 		}
 	}
 	execution := &Execution{launchEnvironment: LaunchEnvironment(ctx), manager: m, request: request, hash: hash, state: StateAuthorized, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), abort: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
+	execution.linger = time.AfterFunc(m.config.DetachedLinger, execution.abandon)
 	m.operations[request.OperationID] = execution
 	m.active++
 	m.mu.Unlock()
@@ -444,93 +451,6 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 		return Request{}, [sha256.Size]byte{}, ErrInvalid
 	}
 	return request, sha256.Sum256(canonical), nil
-}
-
-// OpenReader registers a live delivery cursor. Replay remains bounded when no
-// reader is attached; an attached reader pins unread events and backpressures
-// the child process instead of allowing ordinary live output to become a gap.
-func (e *Execution) OpenReader(from uint64) (ReaderService, error) {
-	if e == nil || from == 0 {
-		return nil, ErrInvalid
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if from < e.earliest {
-		return nil, ErrReplayUnavailable
-	}
-	e.nextReader++
-	if e.nextReader == 0 {
-		return nil, ErrCapacity
-	}
-	id := e.nextReader
-	e.readers[id] = from
-	return &Reader{execution: e, id: id, next: from}, nil
-}
-
-func (r *Reader) Next(ctx context.Context) (Event, func(), error) {
-	if r == nil || r.execution == nil || ctx == nil {
-		return Event{}, nil, ErrInvalid
-	}
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return Event{}, nil, io.EOF
-	}
-	from := r.next
-	r.mu.Unlock()
-	event, err := r.execution.Next(ctx, from)
-	if err != nil {
-		return Event{}, nil, err
-	}
-	var once sync.Once
-	release := func() {
-		once.Do(func() {
-			r.mu.Lock()
-			if !r.closed && r.next == event.Sequence {
-				r.next = event.Sequence + 1
-			}
-			next, closed := r.next, r.closed
-			r.mu.Unlock()
-			if !closed {
-				r.execution.advanceReader(r.id, next)
-			}
-		})
-	}
-	return event, release, nil
-}
-
-func (r *Reader) Close() error {
-	if r == nil || r.execution == nil {
-		return nil
-	}
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return nil
-	}
-	r.closed = true
-	r.mu.Unlock()
-	r.execution.removeReader(r.id)
-	return nil
-}
-
-func (e *Execution) advanceReader(id, next uint64) {
-	e.mu.Lock()
-	if _, ok := e.readers[id]; ok {
-		e.readers[id] = next
-		e.delivered = max(e.delivered, next)
-		e.evictLocked()
-		e.signalLocked()
-	}
-	e.mu.Unlock()
-}
-
-func (e *Execution) removeReader(id uint64) {
-	e.mu.Lock()
-	delete(e.readers, id)
-	e.evictLocked()
-	e.signalLocked()
-	e.mu.Unlock()
 }
 
 func (e *Execution) Write(data []byte) (int, error) {
