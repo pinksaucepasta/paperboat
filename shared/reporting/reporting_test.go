@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -720,5 +721,31 @@ func TestSelfhostFaultUsesFiniteComponentAndPreservesProcessReference(t *testing
 	}
 	if len(local) != 2 || logs != 2 || exceptions != 1 {
 		t.Fatalf("local=%d logs=%d exceptions=%d", len(local), logs, exceptions)
+	}
+}
+
+type pathedFailure struct{ path string }
+
+func (e pathedFailure) Error() string          { return "control request failed" }
+func (e pathedFailure) DiagnosticPath() string { return e.path }
+
+// A control failure names the fixed route it used; anything that could carry an id or query is dropped.
+func TestObserveFailureNamesTheControlPath(t *testing.T) {
+	var local []Fault
+	reporter := &Reporter{localFault: func(fault Fault) { local = append(local, fault) }}
+	ctx := WithSupportReference(context.Background(), "support_01234567-89ab-4def-8123-456789abcdef")
+	for path, want := range map[string]string{
+		"/v1/edge/certificates/distributions/pull": "/v1/edge/certificates/distributions/pull",
+		"/v1/machines/machine_2d636dac":            "",
+		"/v1/edge/routes?token=private":            "",
+		"https://private.example.test/v1/x":        "",
+	} {
+		fault := reporter.ObserveFailure(ctx, "control_request", fmt.Errorf("attempt: %w", pathedFailure{path}))
+		if fault.Path != want {
+			t.Errorf("path %q projected as %q, want %q", path, fault.Path, want)
+		}
+	}
+	if len(local) != 4 {
+		t.Fatalf("local faults %d", len(local))
 	}
 }

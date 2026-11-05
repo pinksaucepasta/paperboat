@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
@@ -411,19 +412,20 @@ func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr er
 	ctx, finish := c.startRequest(ctx, "dependency_health")
 	defer func() { finish(resultErr) }()
 	endpoint := c.base.ResolveReference(&url.URL{Path: "/v1/trust/revocations"})
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return nil, ErrControlInvalid
+	var response *http.Response
+	var err error
+	for attempt := 1; ; attempt++ {
+		request, buildErr := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+		if buildErr != nil {
+			return nil, ErrControlInvalid
+		}
+		request.Header.Set("Authorization", "Bearer "+c.credential)
+		c.applyTraceHeaders(ctx, request.Header)
+		request.Header.Set("Accept", "application/json")
+		if response, err = c.client.Do(request); err == nil || !resendAfterCut(ctx, attempt, err) {
+			break
+		}
 	}
-	request.Header.Set("Authorization", "Bearer "+c.credential)
-	if correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation); correlation.trace != "" {
-		request.Header.Set("sentry-trace", correlation.trace)
-	}
-	if correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation); correlation.reference != "" {
-		request.Header.Set("Support-Reference", correlation.reference)
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := c.client.Do(request)
 	if err != nil {
 		return nil, &RequestFailure{Path: "/v1/trust/revocations", Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
@@ -486,53 +488,25 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	if err != nil || len(payload) > maximum {
 		return ErrControlInvalid
 	}
-	endpoint := c.base.ResolveReference(&url.URL{Path: path})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
-	if err != nil {
-		return ErrControlInvalid
-	}
-	request.Header.Set("Authorization", "Bearer "+c.credential)
-	c.applyTraceHeaders(ctx, request.Header)
-	if nodeID != "" {
-		request.Header.Set("X-Paperboat-Edge-Node-ID", nodeID)
-	}
-	if processEpoch != "" {
-		request.Header.Set("X-Paperboat-Edge-Process-Epoch", processEpoch)
-	}
-	distribution := path == CertificateDistributionPullPath || path == CertificateDistributionAckPath || path == CertificateDistributionRequestPath
-	if nodeID != "" && distribution {
-		signer := c.distributionRequestSigner()
-		if signer == nil {
-			return ErrControlInvalid
-		}
-		proof, err := signer.SignDistributionRequest(ctx, http.MethodPost, path, payload)
-		if err != nil {
-			return err
-		}
-		headers, err := distributionProofHeaders(proof)
-		if err != nil {
-			return err
-		}
-		for key, value := range headers {
-			request.Header.Set(key, value)
-		}
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	if !distribution && path != "/v1/nodes/register" {
-		// Every other node request is a read, an idempotent state report (heartbeat,
-		// observations), or a usage report the server deduplicates by operation id. Marking it
-		// idempotent lets net/http resend it once on a fresh connection when a server rollout
-		// closes the kept-alive one mid-request; a nil value is not sent on the wire.
-		// Distribution requests carry a single-use signed nonce: a resend would be a replay.
-		// Register is not resent: replaying it resets this process's readiness on the server.
-		request.Header["Idempotency-Key"] = nil
-	}
 	httpClient := c.client
 	if path == CertificateDistributionRequestPath {
 		httpClient = c.onDemand
 	}
-	response, err := httpClient.Do(request)
+	var response *http.Response
+	for attempt := 1; ; attempt++ {
+		request, buildErr := c.nodeRequest(ctx, path, nodeID, processEpoch, payload)
+		if buildErr != nil {
+			return buildErr
+		}
+		response, err = httpClient.Do(request)
+		// Every node request but register is a read, an idempotent state report (heartbeat,
+		// observations, distribution ack), or deduplicated by the server (usage operation id,
+		// on-demand issuance). Register is not resent: replaying it resets this process's
+		// readiness on the server.
+		if err == nil || path == "/v1/nodes/register" || !resendAfterCut(ctx, attempt, err) {
+			break
+		}
+	}
 	if err != nil {
 		return &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
@@ -570,6 +544,70 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	return nil
+}
+
+// nodeRequest builds one attempt of a node request. A distribution request is signed per attempt,
+// so a resend carries a fresh single-use nonce, never the one the server may already have seen.
+func (c *HTTPClient) nodeRequest(ctx context.Context, path, nodeID, processEpoch string, payload []byte) (*http.Request, error) {
+	endpoint := c.base.ResolveReference(&url.URL{Path: path})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, ErrControlInvalid
+	}
+	request.Header.Set("Authorization", "Bearer "+c.credential)
+	c.applyTraceHeaders(ctx, request.Header)
+	if nodeID != "" {
+		request.Header.Set("X-Paperboat-Edge-Node-ID", nodeID)
+	}
+	if processEpoch != "" {
+		request.Header.Set("X-Paperboat-Edge-Process-Epoch", processEpoch)
+	}
+	distribution := path == CertificateDistributionPullPath || path == CertificateDistributionAckPath || path == CertificateDistributionRequestPath
+	if nodeID != "" && distribution {
+		signer := c.distributionRequestSigner()
+		if signer == nil {
+			return nil, ErrControlInvalid
+		}
+		proof, err := signer.SignDistributionRequest(ctx, http.MethodPost, path, payload)
+		if err != nil {
+			return nil, err
+		}
+		headers, err := distributionProofHeaders(proof)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range headers {
+			request.Header.Set(key, value)
+		}
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	return request, nil
+}
+
+// controlAttempts bounds the sends of one control request whose connection a server rollout cut.
+const controlAttempts = 3
+
+// resendAfterCut reports whether an idempotent control request is sent again after attempt failed,
+// and waits out the backoff first. Only a connection closed before any answer is resent: a Caddy
+// reload closes its kept-alive client connections, and net/http resends a request written onto one
+// only when it is replayable (transport.go shouldRetryRequest), never a signed distribution request,
+// and never on a fresh connection. The backoff lets the client drop the old proxy's closed
+// connections, so the resend dials the new one. Timeouts are not resent. Prior art: tailscale
+// control/controlclient/auto.go rebuilds each control request after util/backoff instead of
+// treating one cut as an outage.
+func resendAfterCut(ctx context.Context, attempt int, err error) bool {
+	if attempt >= controlAttempts || !(errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)) {
+		return false
+	}
+	timer := time.NewTimer(time.Duration(attempt) * 100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 type controlTraceKey struct{}

@@ -13,6 +13,12 @@ type RequestFailure struct {
 
 func (e *RequestFailure) Error() string   { return "control request failed" }
 func (e *RequestFailure) Unwrap() []error { return []error{e.Err, e.Cause} }
+func (e *RequestFailure) DiagnosticPath() string {
+	if e == nil {
+		return ""
+	}
+	return e.Path
+}
 func (e *RequestFailure) DiagnosticStatus() int {
 	if e == nil {
 		return 0

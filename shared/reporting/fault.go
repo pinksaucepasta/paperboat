@@ -2,6 +2,7 @@ package reporting
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -35,9 +36,11 @@ type Fault struct {
 	CorrelationID    string    `json:"correlation_id"`
 	Errno            int       `json:"errno,omitempty"`
 	HTTPStatus       int       `json:"http_status,omitempty"`
-	SourceFile       string    `json:"source_file,omitempty"`
-	SourceFunction   string    `json:"source_function,omitempty"`
-	SourceLine       int       `json:"source_line,omitempty"`
+	// Path is the control API path a failed request used (a fixed route, never an id or query).
+	Path           string `json:"path,omitempty"`
+	SourceFile     string `json:"source_file,omitempty"`
+	SourceFunction string `json:"source_function,omitempty"`
+	SourceLine     int    `json:"source_line,omitempty"`
 }
 
 // Definition is one named failure a service reports: where it happened and the bounded labels it carries.
@@ -204,6 +207,9 @@ func (r *Reporter) captureFaultLog(ctx context.Context, fault Fault) {
 	if fault.SourceLine > 0 {
 		attrs = append(attrs, attribute.String("source_line", strconv.Itoa(fault.SourceLine)))
 	}
+	if fault.Path != "" {
+		attrs = append(attrs, attribute.String("path", fault.Path))
+	}
 	logger.SetAttributes(attrs...)
 	if fault.Severity == "warning" {
 		entry = logger.Warn()
@@ -220,6 +226,10 @@ func projectFault(component string, definition Definition, reference string, err
 	}
 	p := Project(err, Options{})
 	fault.Cause, fault.ErrorType, fault.ErrorChain, fault.Errno, fault.HTTPStatus = p.Cause, p.ErrorType, p.ErrorChain, p.Errno, p.HTTPStatus
+	var located interface{ DiagnosticPath() string }
+	if errors.As(err, &located) && safeRoutePath(located.DiagnosticPath()) {
+		fault.Path = located.DiagnosticPath()
+	}
 	if definition.Outcome != "" {
 		fault.Outcome = definition.Outcome
 		if definition.Outcome == "rejected" {
@@ -385,6 +395,19 @@ func addFaultTags(tags map[string]string, fault Fault) {
 	}
 }
 
+// safeRoutePath admits only a fixed API route: lower-case words, no query; prefixed ids (route_…) are refused.
+func safeRoutePath(path string) bool {
+	if len(path) > 96 || !strings.HasPrefix(path, "/v1/") {
+		return false
+	}
+	for _, r := range path {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '/' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func writeLocalFault(fault Fault) {
 	// The destination is os.Stderr at the time of the fault, not at the first fault of the process.
 	localLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{ReplaceAttr: func(_ []string, value slog.Attr) slog.Attr {
@@ -422,6 +445,9 @@ func writeLocalFault(fault Fault) {
 	}
 	if fault.SourceLine > 0 {
 		attrs = append(attrs, slog.Int("source_line", fault.SourceLine))
+	}
+	if fault.Path != "" {
+		attrs = append(attrs, slog.String("path", fault.Path))
 	}
 	localLogger.LogAttrs(context.Background(), level, fault.Name, attrs...)
 }
