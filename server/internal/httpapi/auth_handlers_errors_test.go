@@ -67,8 +67,14 @@ func TestWorkOSCallbackFailureSeparatesRejectionProviderAndStoreErrors(t *testin
 			records := append([]supportreport.Record(nil), store.records...)
 			store.mu.Unlock()
 			if !tc.wantCapture {
-				if len(records) != 0 {
-					t.Fatalf("expected rejection created support failure: %+v", records)
+				// An expected rejection is stored only as a rejection (its support reference resolves), never as a failure.
+				for _, record := range records {
+					if record.Outcome != "rejected" {
+						t.Fatalf("expected rejection created support failure: %+v", records)
+					}
+				}
+				if len(records) != 1 {
+					t.Fatalf("expected rejection should be one rejected record: %+v", records)
 				}
 				if !strings.Contains(logs.String(), "support_reference") || !strings.Contains(logs.String(), "outcome=rejected") {
 					t.Fatalf("expected rejection lacks correlated safe warning: %s", logs.String())
