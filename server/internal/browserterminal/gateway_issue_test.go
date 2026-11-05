@@ -16,7 +16,10 @@ func (issueTestTickets) Issue(_ context.Context, ticket Ticket) (Ticket, error) 
 	ticket.Value = "one-use-ticket"
 	return ticket, nil
 }
-func (issueTestTickets) ConsumeEdge(context.Context, string, string) (Ticket, error) {
+func (issueTestTickets) ResumeEdge(context.Context, string, string, string) (Ticket, error) {
+	return Ticket{}, ErrTicketInvalid
+}
+func (issueTestTickets) ConsumeEdge(context.Context, string, string, string) (Ticket, error) {
 	return Ticket{}, ErrTicketInvalid
 }
 func (issueTestTickets) SessionActive(context.Context, string, string) (bool, error) {

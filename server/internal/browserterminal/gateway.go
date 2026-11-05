@@ -67,7 +67,8 @@ type Authorizer interface {
 
 type TicketAuthority interface {
 	Issue(context.Context, Ticket) (Ticket, error)
-	ConsumeEdge(context.Context, string, string) (Ticket, error)
+	ConsumeEdge(ctx context.Context, value, origin, attachmentID string) (Ticket, error)
+	ResumeEdge(ctx context.Context, value, origin, attachmentID string) (Ticket, error)
 	SessionActive(context.Context, string, string) (bool, error)
 }
 
@@ -77,7 +78,11 @@ type Gateway struct {
 	// RecordUsageAttached keeps an attachment counted as an open browser terminal until the given time;
 	// RecordUsageDetached ends it when the edge's control connection closes (plan limit: attached only).
 	RecordUsageAttached func(ctx context.Context, attachment string, until time.Time) error
-	RecordUsageDetached func(ctx context.Context, attachment string) error
+	// RecordUsageResumed re-attaches attachment, a terminal's attachment through node that was still
+	// attached at since, until until; it returns ErrForbidden for any other attachment.
+	RecordUsageResumed func(ctx context.Context, attachment, terminal, node string, since, until time.Time) error
+	// RecordUsageDetached leaves an attachment that a resume on another connection extended past until.
+	RecordUsageDetached func(ctx context.Context, attachment string, until time.Time) error
 	Tickets             TicketAuthority
 	Authorizer          Authorizer
 	Signer              *mint.Provider

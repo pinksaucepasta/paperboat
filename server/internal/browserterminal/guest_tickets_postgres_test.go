@@ -68,7 +68,7 @@ func TestGuestTicketsPostgres(t *testing.T) {
 	if err != nil || used.GuestSessionID != guest || used.UserID != "" || used.BrowserSessionID != "" || used.Role != "viewer" || used.PolicyGeneration != 2 || used.BrowserPublicKeySHA256 != testBrowserKeyDigest {
 		t.Fatalf("guest ticket binding: %+v %v", used, err)
 	}
-	if _, err = tickets.ConsumeEdge(ctx, first.Value, in.Origin); !errors.Is(err, ErrTicketInvalid) {
+	if _, err = tickets.ConsumeEdge(ctx, first.Value, in.Origin, "attachment_test"); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("guest ticket replay: %v", err)
 	}
 	clearPending := func() {
@@ -89,7 +89,7 @@ func TestGuestTicketsPostgres(t *testing.T) {
 				id = guest
 			}
 			exec(test.change, id)
-			if _, err := tickets.ConsumeEdge(ctx, out.Value, in.Origin); !errors.Is(err, ErrTicketInvalid) {
+			if _, err := tickets.ConsumeEdge(ctx, out.Value, in.Origin, "attachment_test"); !errors.Is(err, ErrTicketInvalid) {
 				t.Fatalf("invalidated guest ticket admitted: %v", err)
 			}
 			if test.name != "ticket expiry" {

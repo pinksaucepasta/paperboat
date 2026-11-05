@@ -1,6 +1,7 @@
 package resourceusage
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -213,9 +214,24 @@ func (s *Service) RecordBrowserAttached(ctx context.Context, attachment string, 
 	return err
 }
 
-func (s *Service) RecordBrowserDetached(ctx context.Context, attachment string) error {
-	_, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=least(attached_until,now()) WHERE access_session_id=$1 AND resource_kind='terminal'`, attachment)
+// A resume extended attached_until past until (the value the detaching connection last wrote):
+// the resumed connection owns the attachment and it stays attached.
+func (s *Service) RecordBrowserDetached(ctx context.Context, attachment string, until time.Time) error {
+	_, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=least(attached_until,now()) WHERE access_session_id=$1 AND resource_kind='terminal' AND attached_until<=$2`, attachment, until)
 	return err
+}
+
+// ResumeBrowserAttached re-attaches a terminal attachment whose edge control connection was cut,
+// until until. Only that terminal's attachment through node, still attached at since, qualifies.
+func (s *Service) ResumeBrowserAttached(ctx context.Context, attachment, terminal, node string, since, until time.Time) error {
+	result, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=$5 WHERE access_session_id=$1 AND resource_kind='terminal' AND resource_id=$2 AND edge_node_id=$3 AND attached_until>$4`, attachment, terminal, node, since, until)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return cmp.Or(err, ErrDenied)
+	}
+	return nil
 }
 
 // RecordBrowserAdmission snapshots the exact issued browser attachment. A

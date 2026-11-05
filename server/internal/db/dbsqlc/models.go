@@ -429,6 +429,7 @@ type BrowserTerminalTicket struct {
 	BrowserPublicKeySha256 string
 	GuestSessionID         sql.NullString
 	InspectorCredentialID  sql.NullString
+	EdgeAttachmentID       sql.NullString
 }
 
 type BrowserViewerPolicy struct {

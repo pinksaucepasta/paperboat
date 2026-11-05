@@ -22,11 +22,12 @@ import (
 )
 
 type edgeTestTickets struct {
-	mu     sync.Mutex
-	used   bool
-	active bool
-	ticket Ticket
-	value  string
+	mu         sync.Mutex
+	used       bool
+	active     bool
+	ticket     Ticket
+	value      string
+	attachment string
 }
 
 type testBrowserAuthorizer struct {
@@ -68,13 +69,21 @@ func (s *edgeTestTickets) Issue(context.Context, Ticket) (Ticket, error) {
 func (s *edgeTestTickets) Consume(context.Context, string, string, string) (Ticket, error) {
 	return Ticket{}, ErrTicketInvalid
 }
-func (s *edgeTestTickets) ConsumeEdge(_ context.Context, value, origin string) (Ticket, error) {
+func (s *edgeTestTickets) ConsumeEdge(_ context.Context, value, origin, attachmentID string) (Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.used || value != s.value || origin != s.ticket.Origin {
+	if s.used || value != s.value || origin != s.ticket.Origin || attachmentID == "" {
 		return Ticket{}, ErrTicketInvalid
 	}
-	s.used = true
+	s.used, s.attachment = true, attachmentID
+	return s.ticket, nil
+}
+func (s *edgeTestTickets) ResumeEdge(_ context.Context, value, origin, attachmentID string) (Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.used || value != s.value || origin != s.ticket.Origin || attachmentID != s.attachment || !s.active {
+		return Ticket{}, ErrTicketInvalid
+	}
 	return s.ticket, nil
 }
 func (s *edgeTestTickets) SessionActive(context.Context, string, string) (bool, error) {
@@ -370,4 +379,114 @@ func TestEdgeControlRefusalsCarryATypedReason(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A server rollout's proxy closes the edge's control socket (Caddy stream_close_delay, close 1001)
+// while the browser stream stays up. The edge resumes the same attachment with its ticket: the
+// server re-runs admission and re-attaches usage only for this edge node. The connection that was
+// cut does not detach the resumed attachment. A ticket naming another attachment, another node or a
+// revoked terminal is refused, never brought back.
+func TestEdgeControlResumesACutAttachmentAndRefusesARevokedOne(t *testing.T) {
+	signer, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := Ticket{UserID: "usr_1", BrowserSessionID: "ses_1", TerminalSessionID: "term_1", Origin: "https://dashboard.example.test", Role: "interactive", PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
+	tickets := &edgeTestTickets{active: true, ticket: ticket, value: "resumable-ticket"}
+	decision := Decision{WorkspaceID: "personal", UserID: ticket.UserID, OwnerAccountID: ticket.UserID, TerminalSessionID: ticket.TerminalSessionID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: ticket.Role, PolicyGeneration: 1}
+	authorizer := &testBrowserAuthorizer{decision: decision}
+	var usageMu sync.Mutex
+	var resumed []string
+	detached := map[string]time.Time{}
+	attachedUntil := map[string]time.Time{}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}, AdmissionLifetime: time.Minute,
+		RecordUsageResumed: func(_ context.Context, attachment, terminal, node string, _, until time.Time) error {
+			usageMu.Lock()
+			defer usageMu.Unlock()
+			if terminal != ticket.TerminalSessionID || node != "edge_1" {
+				return ErrForbidden
+			}
+			resumed = append(resumed, attachment)
+			attachedUntil[attachment] = until
+			return nil
+		},
+		RecordUsageDetached: func(_ context.Context, attachment string, until time.Time) error {
+			usageMu.Lock()
+			defer usageMu.Unlock()
+			if current, ok := attachedUntil[attachment]; !ok || !current.After(until) {
+				detached[attachment] = until // only a connection that still owns it detaches it
+			}
+			return nil
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gateway.ServeEdgeControl(w, r, r.Header.Get("X-Node"), "epoch_1")
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	open := func(node string, request EdgeControlRequest) (*websocket.Conn, map[string]string, error) {
+		connection, _, err := websocket.Dial(ctx, "ws://"+strings.TrimPrefix(server.URL, "http://"), &websocket.DialOptions{HTTPHeader: http.Header{"X-Node": {node}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := json.Marshal(request)
+		if err := connection.Write(ctx, websocket.MessageText, payload); err != nil {
+			t.Fatal(err)
+		}
+		_, reply, err := connection.Read(ctx)
+		if err != nil {
+			connection.CloseNow()
+			return nil, nil, err
+		}
+		fields := map[string]string{}
+		_ = json.Unmarshal(reply, &fields)
+		return connection, fields, nil
+	}
+	request := EdgeControlRequest{Ticket: "resumable-ticket", Origin: ticket.Origin, Host: "machine.runtime.example.test"}
+	first, admitted, err := open("edge_1", request)
+	if err != nil || admitted["attachment_id"] == "" {
+		t.Fatalf("admission: %v %v", admitted, err)
+	}
+	attachment := admitted["attachment_id"]
+	first.CloseNow() // the proxy closes both sides of the socket
+
+	refusedWith := func(name, node string, request EdgeControlRequest, reason string) {
+		t.Helper()
+		_, _, err := open(node, request)
+		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || !strings.Contains(err.Error(), `reason = "`+reason+`"`) {
+			t.Fatalf("%s: resume error %v, want refusal %q", name, err, reason)
+		}
+	}
+	other := request
+	other.Resume = "attachment_other"
+	refusedWith("another attachment", "edge_1", other, "expired")
+	request.Resume = attachment
+	refusedWith("another edge node", "edge_2", request, "no_access")
+
+	second, answer, err := open("edge_1", request)
+	if err != nil || answer["attachment_id"] != attachment {
+		t.Fatalf("resume: %v %v", answer, err)
+	}
+	if kind, heartbeat, err := second.Read(ctx); err != nil || kind != websocket.MessageText || string(heartbeat) != "ok" {
+		t.Fatalf("resumed channel heartbeat %q, %v", heartbeat, err)
+	}
+	usageMu.Lock()
+	if len(resumed) != 1 || resumed[0] != attachment {
+		t.Fatalf("usage resumed %v", resumed)
+	}
+	if _, ok := detached[attachment]; ok {
+		t.Fatal("the cut connection detached the resumed attachment")
+	}
+	usageMu.Unlock()
+
+	second.CloseNow()
+	authorizer.mu.Lock()
+	authorizer.decision.PolicyGeneration++ // access revoked during the gap
+	authorizer.mu.Unlock()
+	refusedWith("revoked during the gap", "edge_1", request, "revoked")
+	tickets.mu.Lock()
+	tickets.active = false
+	tickets.mu.Unlock()
+	refusedWith("signed out during the gap", "edge_1", request, "expired")
 }

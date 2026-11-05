@@ -170,11 +170,11 @@ func TestBrowserInspectorTicketIsBoundToItsCredentialPostgres(t *testing.T) {
 	if _, err := tickets.Consume(ctx, issued.Value, issued.Origin, "term_any"); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("inspector ticket redeemed for a terminal: %v", err)
 	}
-	used, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin)
+	used, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin, "attachment_test")
 	if err != nil || used.Role != RoleInspector || used.InspectorCredentialID != credentialID || used.TerminalSessionID != "" || used.UserID != userID {
 		t.Fatalf("consumed inspector ticket = %#v, %v", used, err)
 	}
-	if _, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin); !errors.Is(err, ErrTicketInvalid) {
+	if _, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin, "attachment_test"); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("replayed inspector ticket: %v", err)
 	}
 	for name, mutate := range map[string]func(*Ticket){
@@ -198,7 +198,85 @@ func TestBrowserInspectorTicketIsBoundToItsCredentialPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(`DELETE FROM inspector_credentials WHERE credential_id=$1`, credentialID)
-	if _, err := tickets.ConsumeEdge(ctx, second.Value, second.Origin); !errors.Is(err, ErrTicketInvalid) {
+	if _, err := tickets.ConsumeEdge(ctx, second.Value, second.Origin, "attachment_test"); !errors.Is(err, ErrTicketInvalid) {
 		t.Fatalf("ticket outlived its credential: %v", err)
+	}
+}
+
+// A consumed edge ticket names its attachment: only that attachment resumes with it, only while the
+// principal's session is live. Cleanup keeps it while the attachment is attached (and an hour
+// after), however old the ticket, then deletes it like any other.
+func TestEdgeTicketResumesItsAttachmentAndIsKeptWhileAttachedPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	x := fmt.Sprint(time.Now().UnixNano())
+	user, session, machine, terminal, attachment := "usr_btr_"+x, "ses_btr_"+x, "mch_btr_"+x, "term_btr_"+x, "attachment_btr_"+x
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO users (id,workos_subject,primary_email,status) VALUES ($1,$1,$1||'@example.test','active')`, user)
+	defer store.SQL().ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user)
+	exec(`INSERT INTO sessions (id,user_id,session_hash,csrf_hash,expires_at) VALUES ($1,$2,$1||'_s',$1||'_c',now()+interval '1 hour')`, session, user)
+	exec(`INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES ($1,$2,$1,'btr','linux','amd64','/w','offline','released')`, machine, user)
+	exec(`INSERT INTO user_machine_terminal_sessions (id,user_machine_id,name,launch_cwd,owner_account) VALUES ($1,$2,'t','/w',$3)`, terminal, machine, user)
+	tickets := TicketStore{DB: store}
+	issue := func() Ticket {
+		t.Helper()
+		out, err := tickets.Issue(ctx, Ticket{UserID: user, BrowserSessionID: session, TerminalSessionID: terminal, Origin: "https://dashboard.example.test", Role: "owner", PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	issued := issue()
+	if _, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, attachment); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("an unconsumed ticket resumed: %v", err)
+	}
+	if _, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin, attachment); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, attachment)
+	if err != nil || resumed.TerminalSessionID != terminal || resumed.UserID != user || resumed.BrowserSessionID != session || resumed.Role != "owner" {
+		t.Fatalf("resume = %#v, %v", resumed, err)
+	}
+	if _, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, "attachment_other_"+x); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("resumed another attachment: %v", err)
+	}
+	exec(`UPDATE sessions SET revoked_at=now() WHERE id=$1`, session)
+	if _, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, attachment); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("resumed after sign-out: %v", err)
+	}
+	exec(`UPDATE sessions SET revoked_at=NULL WHERE id=$1`, session)
+
+	// Long expired, but its attachment is attached: kept.
+	exec(`INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,actor_account_id,attached_until) SELECT $1,m.id,m.installation_generation,'personal:'||$3,'terminal',$2,'t','btr',ARRAY['terminal'],now(),now()+interval '1 minute',now()+interval '7 days','edge_btr',$3,now()+interval '1 minute' FROM user_machines m WHERE m.id=$4`, attachment, terminal, user, machine)
+	exec(`UPDATE browser_terminal_tickets SET created_at=now()-interval '3 hours',expires_at=now()-interval '2 hours' WHERE edge_attachment_id=$1`, attachment)
+	_ = issue() // runs cleanup
+	if _, err := tickets.ResumeEdge(ctx, issued.Value, issued.Origin, attachment); err != nil {
+		t.Fatalf("cleanup deleted the ticket of an attached attachment: %v", err)
+	}
+	// The attachment ended over an hour ago: the next cleanup deletes the ticket.
+	exec(`UPDATE native_usage_authorities SET attached_until=now()-interval '61 minutes' WHERE access_session_id=$1`, attachment)
+	_ = issue()
+	var kept int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM browser_terminal_tickets WHERE edge_attachment_id=$1`, attachment).Scan(&kept); err != nil || kept != 0 {
+		t.Fatalf("tickets kept after their attachment ended: %d, %v", kept, err)
 	}
 }

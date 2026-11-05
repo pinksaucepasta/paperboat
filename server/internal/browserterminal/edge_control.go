@@ -2,6 +2,7 @@ package browserterminal
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,9 @@ type EdgeControlRequest struct {
 	Ticket string `json:"ticket"`
 	Origin string `json:"origin"`
 	Host   string `json:"host"`
+	// Resume names the attachment this ticket admitted, when the edge redials a control channel that
+	// was cut without an answer (a server rollout's proxy closes it). Every admission check runs again.
+	Resume string `json:"resume,omitempty"`
 }
 
 type edgeAdmission struct {
@@ -39,17 +43,38 @@ type edgeAdmission struct {
 	Decision     Decision
 	Credential   string
 	AttachmentID string
+	// AttachedUntil is the attached_until this connection last recorded for the attachment.
+	AttachedUntil time.Time
 }
 
-func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeID, processEpoch string) (edgeAdmission, func(), error) {
+// edgeHostURL is the host browser-terminal URL an edge control request names, or ErrForbidden.
+func (g *Gateway) edgeHostURL(input EdgeControlRequest, nodeID, processEpoch string) (*url.URL, error) {
 	if g == nil || g.Authorizer == nil || g.Signer == nil || nodeID == "" || processEpoch == "" || input.Host == "" || !slices.Contains(g.AllowedOrigins, input.Origin) {
-		return edgeAdmission{}, nil, ErrForbidden
+		return nil, ErrForbidden
 	}
 	urlValue, err := url.Parse("wss://" + input.Host + "/v1/browser-terminal")
 	if err != nil || urlValue.Host != input.Host || urlValue.Hostname() == "" || urlValue.Port() != "" || urlValue.User != nil || urlValue.RawQuery != "" || urlValue.Fragment != "" {
-		return edgeAdmission{}, nil, ErrForbidden
+		return nil, ErrForbidden
 	}
-	ticket, err := g.Tickets.ConsumeEdge(ctx, input.Ticket, input.Origin)
+	return urlValue, nil
+}
+
+// matchesTicket reports whether the current decision still is the one the ticket was issued for, at
+// this edge process.
+func matchesTicket(decision Decision, ticket Ticket, urlValue *url.URL, nodeID, processEpoch string) bool {
+	return validDecision(decision, ticket.subjectID(), ticket.TerminalSessionID) && decision.Role == ticket.Role && decision.PolicyGeneration == ticket.PolicyGeneration && decision.TeamGeneration == ticket.TeamGeneration && decision.MembershipGeneration == ticket.MembershipGeneration && decision.BindingGeneration == ticket.BindingGeneration && decision.HostWSSURL == urlValue.String() && decision.EdgeNodeID == nodeID && decision.EdgeProcessEpoch == processEpoch
+}
+
+func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeID, processEpoch string) (edgeAdmission, func(), error) {
+	urlValue, err := g.edgeHostURL(input, nodeID, processEpoch)
+	if err != nil {
+		return edgeAdmission{}, nil, err
+	}
+	attachmentID, err := secureID("attachment")
+	if err != nil {
+		return edgeAdmission{}, nil, err
+	}
+	ticket, err := g.Tickets.ConsumeEdge(ctx, input.Ticket, input.Origin, attachmentID)
 	if err != nil {
 		if expectedTerminalRejection(err) {
 			return edgeAdmission{}, nil, refused(terminalend.Expired, ErrForbidden)
@@ -68,12 +93,12 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
-	if !validDecision(decision, ticket.subjectID(), ticket.TerminalSessionID) || decision.Role != ticket.Role || decision.PolicyGeneration != ticket.PolicyGeneration || decision.TeamGeneration != ticket.TeamGeneration || decision.MembershipGeneration != ticket.MembershipGeneration || decision.BindingGeneration != ticket.BindingGeneration || decision.HostWSSURL != urlValue.String() || decision.EdgeNodeID != nodeID || decision.EdgeProcessEpoch != processEpoch {
+	if !matchesTicket(decision, ticket, urlValue, nodeID, processEpoch) {
 		release()
 		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
 	if ticket.Role == RoleInspector {
-		admitted, err := g.admitInspectorEdge(ticket, decision)
+		admitted, err := g.admitInspectorEdge(ticket, decision, attachmentID)
 		if err != nil {
 			release()
 			return edgeAdmission{}, nil, err
@@ -107,11 +132,6 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
 	now := time.Now().UTC()
-	attachmentID, err := secureID("attachment")
-	if err != nil {
-		release()
-		return edgeAdmission{}, nil, err
-	}
 	jti, err := secureID("token")
 	if err != nil {
 		release()
@@ -137,7 +157,66 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 			return edgeAdmission{}, nil, err
 		}
 	}
-	return edgeAdmission{Ticket: ticket, Decision: decision, Credential: credential.Token, AttachmentID: attachmentID}, release, nil
+	return edgeAdmission{Ticket: ticket, Decision: decision, Credential: credential.Token, AttachmentID: attachmentID, AttachedUntil: credential.ExpiresAt}, release, nil
+}
+
+// resumeEdge re-admits the attachment a ticket admitted, for an edge whose control channel was cut
+// without an answer while its browser stream stayed up. It re-runs admission before anything is
+// re-attached: the ticket by its hash and the attachment it admitted, the principal's session and
+// account, the current decision against the ticket's generations at this edge process, and the
+// attachment's usage row naming this edge node, attached within the resume grace. A revoked
+// terminal is refused, never brought back. An inspector channel has no usage row and is not resumed.
+// Prior art: tailscale control/controlclient/auto.go re-establishes its control stream with its
+// durable identity after a backoff, and the server rebuilds its state from it.
+func (g *Gateway) resumeEdge(ctx context.Context, input EdgeControlRequest, nodeID, processEpoch string) (edgeAdmission, func(), error) {
+	urlValue, err := g.edgeHostURL(input, nodeID, processEpoch)
+	if err != nil || g.RecordUsageResumed == nil {
+		return edgeAdmission{}, nil, cmp.Or(err, ErrForbidden)
+	}
+	ticket, err := g.Tickets.ResumeEdge(ctx, input.Ticket, input.Origin, input.Resume)
+	if err != nil {
+		if expectedTerminalRejection(err) {
+			return edgeAdmission{}, nil, refused(terminalend.Expired, ErrForbidden)
+		}
+		return edgeAdmission{}, nil, unavailableCause(err)
+	}
+	if ticket.Role == RoleInspector {
+		return edgeAdmission{}, nil, refused(terminalend.Expired, ErrForbidden)
+	}
+	if !g.acquire(ticket.principalSessionID()) {
+		return edgeAdmission{}, nil, refused(terminalend.TooManyPending, ErrForbidden)
+	}
+	release := func() { g.release(ticket.principalSessionID()) }
+	decision, err := g.resolveTicketRole(ctx, ticket)
+	if err == nil && (decision.EdgeNodeID != nodeID || decision.EdgeProcessEpoch != processEpoch) {
+		err = refused(terminalend.NoAccess, ErrForbidden) // not this edge process's terminal
+	} else if err == nil && !matchesTicket(decision, ticket, urlValue, nodeID, processEpoch) {
+		err = refused(terminalend.Revoked, ErrForbidden) // its grant changed during the gap
+	}
+	if err == nil {
+		var active bool
+		if active, err = g.ticketSessionActive(ctx, ticket); err == nil && !active {
+			err = refused(terminalend.Revoked, ErrSessionInactive)
+		}
+	}
+	now := time.Now().UTC()
+	until := now.Add(g.AdmissionLifetime)
+	if err == nil {
+		// The edge resumes within authorityOutageGrace of the cut; the rest is edge/server clock slack.
+		err = g.RecordUsageResumed(ctx, input.Resume, ticket.TerminalSessionID, nodeID, now.Add(-authorityOutageGrace-4*time.Second), until)
+	}
+	if err != nil {
+		release()
+		var answer refusal
+		if errors.As(err, &answer) {
+			return edgeAdmission{}, nil, err
+		}
+		if expectedTerminalRejection(err) {
+			return edgeAdmission{}, nil, refused(rejectionReason(err), ErrForbidden)
+		}
+		return edgeAdmission{}, nil, unavailableCause(err)
+	}
+	return edgeAdmission{Ticket: ticket, Decision: decision, AttachmentID: input.Resume, AttachedUntil: until}, release, nil
 }
 
 // ServeEdgeControl holds the admission reservation and checks the browser
@@ -169,7 +248,11 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 		_ = connection.Close(websocket.StatusPolicyViolation, "invalid admission")
 		return
 	}
-	admission, release, err := g.admitEdge(r.Context(), input, nodeID, processEpoch)
+	admit := g.admitEdge
+	if input.Resume != "" {
+		admit = g.resumeEdge
+	}
+	admission, release, err := admit(r.Context(), input, nodeID, processEpoch)
 	if err != nil {
 		reportEdgeAdmissionFailure(r.Context(), err)
 		// The edge closes the browser's WebSocket with the code of this reason.
@@ -177,7 +260,7 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 		return
 	}
 	defer release()
-	defer g.detachUsage(admission.AttachmentID)
+	defer func() { g.detachUsage(admission.AttachmentID, admission.AttachedUntil) }()
 	response, err := json.Marshal(struct {
 		Credential        string `json:"credential"`
 		TerminalSessionID string `json:"terminal_session_id"`
@@ -233,10 +316,11 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 			}
 			if time.Since(renewedAt) >= attachedRenewInterval && g.RecordUsageAttached != nil {
 				renewCtx, done := context.WithTimeout(r.Context(), 2*time.Second)
-				if err := g.RecordUsageAttached(renewCtx, admission.AttachmentID, time.Now().Add(g.AdmissionLifetime)); err != nil {
+				until := time.Now().Add(g.AdmissionLifetime)
+				if err := g.RecordUsageAttached(renewCtx, admission.AttachmentID, until); err != nil {
 					reportEdgeAdmissionFailure(r.Context(), err)
 				} else {
-					renewedAt = time.Now()
+					renewedAt, admission.AttachedUntil = time.Now(), until
 				}
 				done()
 			}
@@ -347,13 +431,14 @@ const attachedRenewInterval = 30 * time.Second
 
 // detachUsage ends the attachment's count as an open browser terminal, on any exit of its control
 // connection (browser close, edge crash, access revoked).
-func (g *Gateway) detachUsage(attachment string) {
+// A resume on another connection (or server) moved attached_until past until; that one owns it now.
+func (g *Gateway) detachUsage(attachment string, until time.Time) {
 	if g.RecordUsageDetached == nil || attachment == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := g.RecordUsageDetached(ctx, attachment); err != nil {
+	if err := g.RecordUsageDetached(ctx, attachment, until); err != nil {
 		reportEdgeAdmissionFailure(ctx, err)
 	}
 }

@@ -717,6 +717,13 @@ func New(opts Options) (*App, error) {
 			return resourceUsageService.RecordBrowserAdmission(ctx, attachment, machine, terminal, node, actor, expires)
 		},
 		RecordUsageAttached: resourceUsageService.RecordBrowserAttached,
+		RecordUsageResumed: func(ctx context.Context, attachment, terminal, node string, since, until time.Time) error {
+			err := resourceUsageService.ResumeBrowserAttached(ctx, attachment, terminal, node, since, until)
+			if errors.Is(err, resourceusage.ErrDenied) {
+				return browserterminal.ErrForbidden
+			}
+			return err
+		},
 		RecordUsageDetached: resourceUsageService.RecordBrowserDetached,
 		Tickets:             browserterminal.TicketStore{DB: store},
 		Authorizer:          browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},

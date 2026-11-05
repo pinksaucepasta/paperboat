@@ -69,7 +69,7 @@ func TestClosedBrowserTerminalFreesItsSlotAtOncePostgres(t *testing.T) {
 	if err := open("ba_t2_" + x); !errors.Is(err, planlimits.ErrLimitReached) {
 		t.Fatalf("second terminal while the first is attached: %v", err)
 	}
-	if err := usage.RecordBrowserDetached(ctx, "ba_a1_"+x); err != nil {
+	if err := usage.RecordBrowserDetached(ctx, "ba_a1_"+x, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := open("ba_t2_" + x); err != nil {
@@ -152,7 +152,7 @@ func TestTenBrowserTerminalsOpenAndClosedOnFreePostgres(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if err := usage.RecordBrowserDetached(ctx, fmt.Sprintf("bt_a%d_%s", i, x)); err != nil {
+			if err := usage.RecordBrowserDetached(ctx, fmt.Sprintf("bt_a%d_%s", i, x), time.Now().Add(time.Hour)); err != nil {
 				t.Error(err)
 			}
 		}(i)
@@ -160,5 +160,91 @@ func TestTenBrowserTerminalsOpenAndClosedOnFreePostgres(t *testing.T) {
 	wg.Wait()
 	if err := canOpen(10); err != nil {
 		t.Fatalf("11th terminal after the 10 closed: %v", err)
+	}
+}
+
+// A browser terminal's edge control channel cut by a server rollout resumes on the same attachment:
+// only that terminal's attachment through the same edge node, still attached a moment ago, is
+// re-attached. The cut connection's late detach does not end the resumed attachment.
+func TestResumedBrowserAttachmentIsTheEdgesAndOutlivesTheCutConnectionPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	x := fmt.Sprint(time.Now().UnixNano())
+	user, machine, terminal, attachment := "br_u_"+x, "br_m_"+x, "br_t_"+x, "br_a_"+x
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$1,'br','linux','amd64','/w','online','occupied',true)`, machine, user)
+	exec(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd) VALUES($1,$2,$3,$1,'/w')`, terminal, machine, user)
+	usage := New(store)
+	admittedUntil := time.Now().Add(2 * time.Minute)
+	if err := usage.RecordBrowserAdmission(ctx, attachment, machine, terminal, "node_br", user, admittedUntil); err != nil {
+		t.Fatal(err)
+	}
+	attachedUntil := func() time.Time {
+		t.Helper()
+		var until time.Time
+		if err := store.SQL().QueryRowContext(ctx, `SELECT attached_until FROM native_usage_authorities WHERE access_session_id=$1`, attachment).Scan(&until); err != nil {
+			t.Fatal(err)
+		}
+		return until
+	}
+	if err := usage.RecordBrowserDetached(ctx, attachment, admittedUntil); err != nil { // the cut
+		t.Fatal(err)
+	}
+	if !attachedUntil().Before(time.Now().Add(time.Second)) {
+		t.Fatal("the cut connection did not detach")
+	}
+	since, until := time.Now().Add(-10*time.Second), time.Now().Add(3*time.Minute)
+	for name, resume := range map[string]func() error{
+		"another edge node": func() error {
+			return usage.ResumeBrowserAttached(ctx, attachment, terminal, "node_other", since, until)
+		},
+		"another terminal": func() error {
+			return usage.ResumeBrowserAttached(ctx, attachment, "br_t_other", "node_br", since, until)
+		},
+		"detached too long": func() error {
+			return usage.ResumeBrowserAttached(ctx, attachment, terminal, "node_br", time.Now().Add(time.Second), until)
+		},
+		"another attachment": func() error { return usage.ResumeBrowserAttached(ctx, "br_a_other", terminal, "node_br", since, until) },
+	} {
+		if err := resume(); !errors.Is(err, ErrDenied) {
+			t.Fatalf("%s: resume = %v, want ErrDenied", name, err)
+		}
+	}
+	if err := usage.ResumeBrowserAttached(ctx, attachment, terminal, "node_br", since, until); err != nil {
+		t.Fatal(err)
+	}
+	// The cut connection's detach arriving after the resume leaves it attached.
+	if err := usage.RecordBrowserDetached(ctx, attachment, admittedUntil); err != nil {
+		t.Fatal(err)
+	}
+	if got := attachedUntil(); got.Before(until.Add(-time.Second)) {
+		t.Fatalf("late detach ended the resumed attachment: attached_until %v", got)
+	}
+	// The resumed connection's own detach ends it.
+	if err := usage.RecordBrowserDetached(ctx, attachment, until); err != nil {
+		t.Fatal(err)
+	}
+	if !attachedUntil().Before(time.Now().Add(time.Second)) {
+		t.Fatal("the resumed connection's detach did not end it")
 	}
 }

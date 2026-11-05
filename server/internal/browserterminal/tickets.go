@@ -63,7 +63,11 @@ func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resul
 	in.Value = base64.RawURLEncoding.EncodeToString(secret)
 	hash := sha256.Sum256(secret)
 	in.ExpiresAt = time.Now().UTC().Add(TicketLifetime)
-	_, err := s.DB.SQL().ExecContext(ctx, `DELETE FROM browser_terminal_tickets WHERE expires_at < now() - interval '1 hour'`)
+	// A consumed edge ticket is kept while its attachment is attached (and an hour after), so the
+	// edge can resume that attachment's control channel; then it goes like any other.
+	_, err := s.DB.SQL().ExecContext(ctx, `DELETE FROM browser_terminal_tickets ticket WHERE ticket.expires_at < now() - interval '1 hour'
+		AND NOT EXISTS (SELECT 1 FROM native_usage_authorities usage WHERE usage.access_session_id=ticket.edge_attachment_id
+			AND usage.resource_kind='terminal' AND usage.attached_until > now() - interval '1 hour')`)
 	if err != nil {
 		return Ticket{}, err
 	}
@@ -134,37 +138,78 @@ func (s TicketStore) Consume(ctx context.Context, value, origin, terminalSession
 	if terminalSessionID == "" {
 		return Ticket{}, ErrTicketInvalid
 	}
-	return s.consume(ctx, value, origin, terminalSessionID)
+	return s.consume(ctx, value, origin, terminalSessionID, "")
 }
 
 // ConsumeEdge resolves the terminal from the one-use secret. The edge need not
 // learn or supply a resource identifier before the control plane checks it.
-func (s TicketStore) ConsumeEdge(ctx context.Context, value, origin string) (Ticket, error) {
-	return s.consume(ctx, value, origin, "")
+// It records the attachment the ticket admits, the binding a resume is checked against.
+func (s TicketStore) ConsumeEdge(ctx context.Context, value, origin, attachmentID string) (Ticket, error) {
+	if attachmentID == "" {
+		return Ticket{}, ErrTicketInvalid
+	}
+	return s.consume(ctx, value, origin, "", attachmentID)
 }
 
-func (s TicketStore) consume(ctx context.Context, value, origin, terminalSessionID string) (Ticket, error) {
-	if s.DB == nil || origin == "" {
+// ResumeEdge returns the ticket that admitted attachmentID, for an edge whose control channel was
+// cut without an answer. The principal's session and account (or guest code) are checked again as at
+// consumption; the caller re-runs the rest of admission.
+func (s TicketStore) ResumeEdge(ctx context.Context, value, origin, attachmentID string) (Ticket, error) {
+	hash, ok := ticketHash(value)
+	if s.DB == nil || origin == "" || attachmentID == "" || !ok {
 		return Ticket{}, ErrTicketInvalid
 	}
+	var out Ticket
+	err := s.DB.SQL().QueryRowContext(ctx, `SELECT `+ticketColumns+` FROM browser_terminal_tickets ticket
+		WHERE ticket.token_hash=$1 AND ticket.origin=$2 AND ticket.edge_attachment_id=$3 AND ticket.consumed_at IS NOT NULL
+		AND `+ticketPrincipalActive, hash[:], origin, attachmentID).Scan(out.scanTargets()...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Ticket{}, ErrTicketInvalid
+	}
+	if err != nil {
+		return Ticket{}, err
+	}
+	return out, nil
+}
+
+func ticketHash(value string) ([sha256.Size]byte, bool) {
 	secret, err := base64.RawURLEncoding.Strict().DecodeString(value)
 	if err != nil || len(secret) != 32 || base64.RawURLEncoding.EncodeToString(secret) != value {
-		return Ticket{}, ErrTicketInvalid
+		return [sha256.Size]byte{}, false
 	}
-	hash := sha256.Sum256(secret)
-	var out Ticket
-	err = s.DB.SQL().QueryRowContext(ctx, `UPDATE browser_terminal_tickets ticket SET consumed_at=now()
-		WHERE ticket.token_hash=$1 AND ticket.origin=$2 AND ($3='' OR ticket.terminal_session_id=$3)
-  AND ticket.consumed_at IS NULL AND ticket.expires_at>now()
-  AND ((ticket.guest_session_id IS NULL AND EXISTS(
+	return sha256.Sum256(secret), true
+}
+
+// ticketPrincipalActive holds while the ticket's principal may still use it: the account's browser
+// session and account, or the guest's session and its terminal's current access code.
+const ticketPrincipalActive = `((ticket.guest_session_id IS NULL AND EXISTS(
    SELECT 1 FROM sessions auth_session JOIN users account ON account.id=auth_session.user_id
    WHERE auth_session.id=ticket.browser_session_id AND auth_session.user_id=ticket.user_id
    AND auth_session.revoked_at IS NULL AND auth_session.expires_at>now() AND account.status='active'))
    OR (ticket.guest_session_id IS NOT NULL AND EXISTS(
     SELECT 1 FROM terminal_guest_sessions g JOIN terminal_code_access c ON c.terminal_session_id=g.terminal_session_id
     WHERE g.id=ticket.guest_session_id AND g.terminal_session_id=ticket.terminal_session_id AND g.expires_at>now()
-    AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation AND c.generation=ticket.policy_generation AND c.role=ticket.role)))
-  RETURNING coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),coalesce(ticket.terminal_session_id,''),coalesce(ticket.inspector_credential_id,''),ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,'')`, hash[:], origin, terminalSessionID).Scan(&out.UserID, &out.BrowserSessionID, &out.TerminalSessionID, &out.InspectorCredentialID, &out.Origin, &out.Role, &out.PolicyGeneration, &out.TeamGeneration, &out.MembershipGeneration, &out.BindingGeneration, &out.BrowserPublicKeySHA256, &out.ExpiresAt, &out.GuestSessionID)
+    AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation AND c.generation=ticket.policy_generation AND c.role=ticket.role)))`
+
+const ticketColumns = `coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),coalesce(ticket.terminal_session_id,''),coalesce(ticket.inspector_credential_id,''),ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,'')`
+
+func (t *Ticket) scanTargets() []any {
+	return []any{&t.UserID, &t.BrowserSessionID, &t.TerminalSessionID, &t.InspectorCredentialID, &t.Origin, &t.Role, &t.PolicyGeneration, &t.TeamGeneration, &t.MembershipGeneration, &t.BindingGeneration, &t.BrowserPublicKeySHA256, &t.ExpiresAt, &t.GuestSessionID}
+}
+
+func (s TicketStore) consume(ctx context.Context, value, origin, terminalSessionID, attachmentID string) (Ticket, error) {
+	if s.DB == nil || origin == "" {
+		return Ticket{}, ErrTicketInvalid
+	}
+	hash, ok := ticketHash(value)
+	if !ok {
+		return Ticket{}, ErrTicketInvalid
+	}
+	var out Ticket
+	err := s.DB.SQL().QueryRowContext(ctx, `UPDATE browser_terminal_tickets ticket SET consumed_at=now(), edge_attachment_id=nullif($4,'')
+		WHERE ticket.token_hash=$1 AND ticket.origin=$2 AND ($3='' OR ticket.terminal_session_id=$3)
+		AND ticket.consumed_at IS NULL AND ticket.expires_at>now() AND `+ticketPrincipalActive+`
+		RETURNING `+ticketColumns, hash[:], origin, terminalSessionID, attachmentID).Scan(out.scanTargets()...)
 	if err == sql.ErrNoRows {
 		return Ticket{}, ErrTicketInvalid
 	}

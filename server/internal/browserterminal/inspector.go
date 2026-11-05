@@ -57,12 +57,8 @@ func (a MachineAuthorizer) ResolveInspector(ctx context.Context, userID, credent
 
 // admitInspectorEdge mints the inspector channel's host credential. There is
 // no terminal process to snapshot; the edge hub key is the attachment ID.
-func (g *Gateway) admitInspectorEdge(ticket Ticket, decision Decision) (edgeAdmission, error) {
+func (g *Gateway) admitInspectorEdge(ticket Ticket, decision Decision, attachmentID string) (edgeAdmission, error) {
 	now := time.Now().UTC()
-	attachmentID, err := secureID("attachment")
-	if err != nil {
-		return edgeAdmission{}, err
-	}
 	jti, err := secureID("token")
 	if err != nil {
 		return edgeAdmission{}, err
