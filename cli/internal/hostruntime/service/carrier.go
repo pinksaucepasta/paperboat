@@ -86,7 +86,7 @@ func HostdController(platform, generation string, enrolledUID int, runner Runner
 }
 
 // QuitCarrier asks a retired carrier generation to shut down gracefully: it stops admitting new
-// streams, keeps serving open ones up to managedssh.CarrierDrainTimeout, then exits 0 and stays
+// streams, keeps serving open ones up to runtimewire.DrainLimit, then exits 0 and stays
 // down. SIGQUIT is the graceful-shutdown signal of both nginx and Teleport (lib/service/signals.go).
 func QuitCarrier(ctx context.Context, controller Controller) error {
 	switch c := controller.(type) {

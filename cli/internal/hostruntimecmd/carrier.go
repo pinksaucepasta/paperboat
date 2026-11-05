@@ -50,7 +50,7 @@ func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 
 // runCarrierProcess serves one carrier generation. retire (SIGQUIT) means a newer
 // generation took over: stop admitting SSH, keep serving open SSH bridges and
-// other streams up to managedssh.CarrierDrainTimeout, then exit 0 so the unit
+// other streams up to runtimewire.DrainLimit, then exit 0 so the unit
 // stays down.
 func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, ready, watchdog func() error, interval time.Duration, retire <-chan os.Signal) (resultErr error) {
 	if err := ctx.Err(); err != nil {

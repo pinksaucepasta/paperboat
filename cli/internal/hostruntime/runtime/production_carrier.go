@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 // ProductionCarrier owns one native connection carrier generation of the
@@ -282,13 +283,13 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 
 // Drain lets a retired generation finish: new SSH is fenced, and it returns
 // once no SSH bridge or other application stream is open, or at
-// managedssh.CarrierDrainTimeout. Clients already open new connections on the
+// runtimewire.DrainLimit. Clients already open new connections on the
 // newer generation it offered (MoveTerminals).
 func (c *ProductionCarrier) Drain(ctx context.Context) error {
 	c.peer.retired.Store(true)
 	ssh := make(chan error, 1)
 	go func() { ssh <- c.ssh.Drain(ctx) }()
-	streams := c.peer.drainStreams(ctx, managedssh.CarrierDrainTimeout)
+	streams := c.peer.drainStreams(ctx, runtimewire.DrainLimit)
 	return errors.Join(streams, <-ssh)
 }
 

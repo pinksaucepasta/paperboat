@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 type hostdHost interface {
@@ -204,7 +205,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 			// Teleport's parent Shutdown once the child signalled readiness
 			// (lib/service/signals.go): stop accepting, drain, exit 0.
 			listeners.stopAccepting()
-			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostdproto.HandoverDrainLimit)
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimewire.DrainLimit)
 			defer cancel()
 			return errors.Join(notifier.Draining(), owned.drain(drainCtx))
 		case lost := <-owned.lost:
@@ -311,7 +312,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 		case <-quit:
 			// A new hostd generation serves the shared runtime listener now:
 			// stop accepting, finish in-flight requests, then shut down.
-			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostdproto.HandoverDrainLimit)
+			drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimewire.DrainLimit)
 			defer cancel()
 			if draining, ok := feature.(interface{ DrainLocal(context.Context) error }); ok {
 				return draining.DrainLocal(drainCtx)

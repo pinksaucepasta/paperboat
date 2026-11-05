@@ -4,22 +4,16 @@ import (
 	"context"
 	"errors"
 	"time"
-)
 
-// CarrierDrainTimeout bounds how long a retired carrier generation keeps serving
-// its accepted SSH/rsync bridges after the new generation took over new ones. At
-// the cap they are closed; clients reconnect to the new generation. Like Teleport,
-// whose old process drains existing connections for up to the maximum
-// certificate lifetime (lib/service/signals.go), the bound is long: an update
-// must never cut a working session.
-const CarrierDrainTimeout = 12 * time.Hour
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+)
 
 const carrierDrainCloseTimeout = 5 * time.Second
 
 // Drain fences new bridges at once, then waits for every accepted one to end,
-// closing those still open at CarrierDrainTimeout. A cancelled ctx returns
+// closing those still open at runtimewire.DrainLimit. A cancelled ctx returns
 // without closing anything.
-func (h *Host) Drain(ctx context.Context) error { return h.drain(ctx, CarrierDrainTimeout) }
+func (h *Host) Drain(ctx context.Context) error { return h.drain(ctx, runtimewire.DrainLimit) }
 
 func (h *Host) drain(ctx context.Context, timeout time.Duration) error {
 	if h == nil || ctx == nil {

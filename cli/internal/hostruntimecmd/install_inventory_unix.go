@@ -17,7 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 // The install inventory runs after every install, upgrade and rollback, also
@@ -29,7 +29,7 @@ import (
 
 // inventoryDrainCap bounds how long a previous generation may keep serving the
 // streams it held at activation. It is the longest drain any held stream has.
-const inventoryDrainCap = managedssh.CarrierDrainTimeout
+const inventoryDrainCap = runtimewire.DrainLimit
 
 // inventoryPaths are the generation-specific locations of one account, as
 // canonical host paths.

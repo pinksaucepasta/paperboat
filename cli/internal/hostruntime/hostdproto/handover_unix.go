@@ -32,13 +32,9 @@ import (
 //	new -> old: 'C' once the new worker serves on the start files
 //	old -> new: 'C' + SCM_RIGHTS(commit files)  (fixed lifecycle, workloads, handover listeners)
 //	new -> old: 'A' after it holds them; the old generation then stops
-//	            accepting and drains for at most HandoverDrainLimit.
+//	            accepting and drains for at most runtimewire.DrainLimit.
 //
 // A new generation that fails before 'A' leaves the old one serving.
-
-// HandoverDrainLimit bounds how long a retiring generation finishes in-flight
-// requests and streams after the new one took over its listeners.
-const HandoverDrainLimit = 6 * time.Hour
 
 // HandoverEnv names the old generation's handover socket for a new hostd.
 const HandoverEnv = "PAPERBOAT_HOSTD_HANDOVER_SOCKET"

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 // nativeWorkerStarter starts only the fixed Paperboat worker entry point. The runtime
@@ -198,9 +199,9 @@ func (w *execWorker) Stop(ctx context.Context) error {
 
 // Drain asks the worker to stop accepting and finish in-flight requests
 // (nginx's graceful QUIT, src/core/ngx_config.h NGX_SHUTDOWN_SIGNAL), killing
-// it when ctx ends or after HandoverDrainLimit.
+// it when ctx ends or after runtimewire.DrainLimit.
 func (w *execWorker) Drain(ctx context.Context) error {
-	return w.signalAndWait(ctx, syscall.SIGQUIT, hostdproto.HandoverDrainLimit)
+	return w.signalAndWait(ctx, syscall.SIGQUIT, runtimewire.DrainLimit)
 }
 
 func (w *execWorker) signalAndWait(ctx context.Context, signal os.Signal, grace time.Duration) error {

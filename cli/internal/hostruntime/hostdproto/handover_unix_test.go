@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 const handoverHelperEnv = "PAPERBOAT_TEST_HANDOVER_OLD_OWNER"
@@ -178,7 +180,7 @@ func TestHandoverHelperOldOwner(t *testing.T) {
 	// process accepted whose request arrives after it starts.
 	_ = tcp.Close()
 	<-served
-	deadline := time.Now().Add(HandoverDrainLimit)
+	deadline := time.Now().Add(runtimewire.DrainLimit)
 	for server.SetKeepAlivesEnabled(false); connections.Load() > 0; server.SetKeepAlivesEnabled(false) {
 		if time.Now().After(deadline) {
 			t.Fatal("old owner did not drain its connections")

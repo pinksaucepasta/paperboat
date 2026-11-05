@@ -45,6 +45,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 var ErrHostInvalid = errors.New("invalid host runtime composition")
@@ -882,10 +883,9 @@ func (h *Host) Shutdown(ctx context.Context) error {
 }
 
 // DrainLocal stops accepting on the loopback listener and waits, until ctx
-// ends, for in-flight local requests, the file transfers its native streams
-// carry (up to managedssh.CarrierDrainTimeout, as managed SSH drains) and the
-// browser terminals its runtime carriers hold (bounded by
-// runtimewire.DrainLimit). A retiring worker generation calls it before
+// ends, for in-flight local requests and, each up to runtimewire.DrainLimit,
+// the file transfers its native streams carry and the browser terminals its
+// runtime carriers hold. A retiring worker generation calls it before
 // Shutdown while the next generation already serves the same socket.
 func (h *Host) DrainLocal(ctx context.Context) error {
 	transfers, terminals := make(chan error, 1), make(chan error, 1)
@@ -894,7 +894,7 @@ func (h *Host) DrainLocal(ctx context.Context) error {
 			transfers <- nil
 			return
 		}
-		drainCtx, cancel := context.WithTimeout(ctx, managedssh.CarrierDrainTimeout)
+		drainCtx, cancel := context.WithTimeout(ctx, runtimewire.DrainLimit)
 		defer cancel()
 		transfers <- h.nativeDispatch.DrainTransfers(drainCtx)
 	}()
