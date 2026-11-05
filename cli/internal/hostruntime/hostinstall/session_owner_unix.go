@@ -79,9 +79,6 @@ func PrepareSessionOwner(ctx context.Context, request Request) error {
 	}
 	return startPreparedSessionOwner(ctx, c, d)
 }
-func prepareSessionOwner(ctx context.Context, request Request, _ installPaths) error {
-	return PrepareSessionOwner(ctx, request)
-}
 
 // PrepareUpdatedSessionOwner prepares the verified promoted runtime without
 // committing installation metadata or restarting the routing daemon.

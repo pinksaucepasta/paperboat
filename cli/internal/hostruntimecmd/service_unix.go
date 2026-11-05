@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,36 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 			return errors.New("inventory accepts only --check")
 		}
 		return writePurgeResult(ctx, stdout, runInstallInventory(ctx, invokingServiceUID(), len(args) == 2))
+	}
+	if len(args) == 1 && args[0] == "render-candidate" {
+		// A signed update's helper (the previous build) installs this build's own render of its units.
+		request, err := hostinstall.Decode(stdin)
+		if err != nil {
+			return err
+		}
+		rendered, err := hostinstall.RenderCandidate(request)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(rendered)
+	}
+	if len(args) >= 1 && args[0] == "stage-candidate" {
+		// A signed update's helper (the previous build) has this build stage its own services.
+		if os.Geteuid() != 0 {
+			return hostinstall.ErrNotPrivileged
+		}
+		if len(args) > 2 || len(args) == 2 && args[1] != "--session-owner-only" {
+			return errors.New("stage-candidate accepts only --session-owner-only")
+		}
+		request, err := hostinstall.Decode(stdin)
+		if err != nil {
+			return err
+		}
+		staged, err := hostinstall.StageCandidate(ctx, request, len(args) == 1)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(staged)
 	}
 	preserveCLI := len(args) == 2 && args[0] == "purge" && args[1] == "--preserve-cli"
 	if (!preserveCLI && len(args) != 1) || args[0] != "install" && args[0] != "commit" && args[0] != "repair" && args[0] != "repair-persisted" && args[0] != "stop" && args[0] != "uninstall" && args[0] != "uninstall-persisted" && args[0] != "purge" && args[0] != "install-supplied" && args[0] != "commit-supplied" && args[0] != "rollback-supplied" {

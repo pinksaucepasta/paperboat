@@ -74,7 +74,15 @@ type Config struct {
 	// The empty value preserves the legacy restart-on-upgrade behavior.
 	UpgradeMode string
 	Controller  Controller
+	// Rendered is the declaration as the build that runs it rendered it. An update's
+	// helper is the previous build, so it installs the candidate's own render
+	// instead of rendering the candidate's unit with its own code.
+	Rendered []byte
 }
+
+// renderedLimit bounds a declaration rendered by another build.
+const renderedLimit = 64 << 10
+
 type Installer struct {
 	config         Config
 	definitionPath string
@@ -422,7 +430,16 @@ func (i *Installer) VerifyPublishedDefinition() error {
 	return nil
 }
 
+// Render returns the declaration this build renders for the installer's config.
+func (i *Installer) Render() ([]byte, error) { return i.render() }
+
 func (i *Installer) render() ([]byte, error) {
+	if i.config.Rendered != nil {
+		if len(i.config.Rendered) == 0 || len(i.config.Rendered) > renderedLimit {
+			return nil, ErrInvalidDefinition
+		}
+		return bytes.Clone(i.config.Rendered), nil
+	}
 	if i.config.Platform == "darwin" {
 		return renderLaunchd(i.config)
 	}

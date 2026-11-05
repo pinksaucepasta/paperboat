@@ -172,7 +172,7 @@ func prepareCarrierLocked(ctx context.Context, request Request) error {
 				return cleanupCarrierStartup(ctx, installer, err)
 			}
 			return nil
-		} else if err := installer.VerifyPublishedDefinition(); err != nil {
+		} else if err := verifyCarrierNative(previous, installer); err != nil {
 			return err
 		}
 		return waitCarrierReady(ctx, previous)
@@ -316,9 +316,12 @@ func verifyCarrierNativeConfig(c CarrierConfig, err error) (CarrierConfig, error
 	return c, nil
 }
 
+// carrierDescriptorLimit bounds one carrier descriptor's encoding.
+const carrierDescriptorLimit = 32 << 10
+
 func decodeCarrier(body []byte) (CarrierConfig, error) {
 	var c CarrierConfig
-	err := decodeInstallJSON(strings.NewReader(string(body)), &c, 32<<10)
+	err := decodeInstallJSON(strings.NewReader(string(body)), &c, carrierDescriptorLimit)
 	return c, err
 }
 
