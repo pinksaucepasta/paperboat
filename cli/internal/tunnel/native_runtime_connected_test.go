@@ -192,7 +192,7 @@ func TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner(t *
 	}
 }
 
-func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
+func connectedProductionRuntime(t *testing.T, mode string) {
 	var machine *connectedMachineAccess
 	if mode == "machine_service" || mode == "machine_proxy" {
 		machine = newConnectedMachineAccess(t)
@@ -275,8 +275,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		machineNode.Transports = []string{"derp_quic", "derp_wss"}
 	}
 	machineBinding := tailnet.NetworkBinding{AccountID: accountID, EndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: identity.MachineCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.MachineCertificate.Claims.QUICPublicKey), VirtualAddress: "fd7a:115c:a1e0::92"}
-	machineStore := connectedStore(t)
-	machineAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: machineStore, Issuer: issuer, Self: machineBinding, Keys: connectedNetworkKeys{signerPublic}})
+	machineAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: connectedStore(t), Issuer: issuer, Self: machineBinding, Keys: connectedNetworkKeys{signerPublic}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,17 +286,6 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	}
 	machineBinding.KeyGeneration++
 	machineBinding.DiscoPublicKey, _ = machineAuthority.DiscoveryPublicKey()
-	var terminal *connectedTerminalMove
-	if mode == "terminal_move" {
-		lifetime := 5 * time.Minute
-		if len(fault) != 0 && fault[0] == "expired_credential" {
-			lifetime = 2 * time.Second
-		}
-		terminal = newConnectedTerminalMove(t, ctx, issuer, machineID, cliID, signerPublic, signerPrivate, lifetime)
-		if len(fault) != 0 {
-			terminal.crashPhase = fault[0]
-		}
-	}
 	state := &connectedConfigState{}
 	networkAPI := connectedNetworkAPI{register: func(request api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 		state.mu.Lock()
@@ -308,10 +296,6 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		if machine != nil {
 			clientConfig.Peers[0].Scopes[0].Capability = "private_access"
 			machineConfig.Peers[0].Scopes[0].Capability = "private_access"
-		}
-		if terminal != nil {
-			clientConfig.Peers[0].Scopes[0].Capability = "terminal"
-			machineConfig.Peers[0].Scopes[0].Capability = "terminal"
 		}
 		if hostRules {
 			hostScope := machineConfig.Peers[0].Scopes[0]
@@ -361,7 +345,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	if hostRules {
 		admitOffline = func(context.Context, native.OfflineAdmission) error { return nil }
 	}
-	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, PrepareCarrier: terminal.prepareCarrier, AdmitOffline: admitOffline, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
+	machineOwner, err := native.NewOwner(native.Config{Authority: machineAuthority, AdmitOffline: admitOffline, TLS: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{machineLeaf}}}) //nolint:gosec
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,9 +356,6 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	listenDone := make(chan error, 1)
 	go func() {
 		listenDone <- machineOwner.Listen(ctx, regions[0], func(serveCtx context.Context, session *native.Session) error {
-			if terminal != nil {
-				return terminal.serve(serveCtx, session)
-			}
 			if machine != nil {
 				return machine.serve(serveCtx, session)
 			}
@@ -462,12 +443,6 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("machine receiver did not stop")
 		}
-		return
-	}
-	if terminal != nil {
-		terminal.exercise(t, ctx, runtime, machineOwner, machineAuthority, machineStore, machineLeaf, signerPublic)
-		cancel()
-		<-listenDone
 		return
 	}
 	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)

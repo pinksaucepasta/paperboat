@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"runtime"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
@@ -21,7 +20,6 @@ import (
 // (~/ref/nginx/src/os/unix/ngx_process_cycle.c). Nothing is refused meanwhile.
 type unixCarrierUpgrade struct {
 	candidate, previous CarrierConfig
-	terminals           *terminalHandover
 }
 
 func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths installPaths) (_ *unixCarrierUpgrade, resultErr error) {
@@ -68,34 +66,7 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 		return nil, err
 	}
 	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_ready")
-	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
-	if err != nil {
-		return nil, err
-	}
-	// Every connected client opens its new connections on the candidate from
-	// here; open streams stay on the old generation until they close. A client
-	// that declines stays on the old one until it retires.
-	moveErr := moveCarrierClients(ctx, candidate, capability, client)
-	diagnosticlog.TryInfo("carrier cutover", "stage", "move_clients", "failed", moveErr != nil)
-	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
-	if moveErr != nil {
-		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
-	}
-	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals}, nil
-}
-
-// moveCarrierClients has the serving generation offer the candidate's signed
-// generation offer to every client connected to it (Owner.OfferCarrier).
-func moveCarrierClients(ctx context.Context, candidate CarrierConfig, capability []byte, previous *carriercontrol.Client) error {
-	next, err := carriercontrol.NewClient(candidate.ControlEndpoint, capability, candidate.Source.SHA256)
-	if err != nil {
-		return err
-	}
-	offer, err := next.GenerationOffer(ctx)
-	if err != nil {
-		return err
-	}
-	return previous.MoveTerminals(ctx, offer)
+	return &unixCarrierUpgrade{candidate: candidate, previous: retained}, nil
 }
 
 // activate marks the already serving candidate generation active: readers of
@@ -112,18 +83,14 @@ func (u *unixCarrierUpgrade) activate() error {
 // finish retires the previous generation once the update committed. A failed
 // update was already rolled back to it, so it keeps serving untouched.
 func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
-	if u == nil {
+	if u == nil || failed {
 		return nil
-	}
-	err := u.terminals.finish(ctx, failed)
-	if failed {
-		return err
 	}
 	// The update is committed; reconciliation retries a retirement that fails here.
 	if _, retireErr := retireCarrierGeneration(context.WithoutCancel(ctx), u.previous); retireErr != nil {
 		diagnosticlog.TryWarn("carrier retirement deferred", "stage", "retire_previous")
 	}
-	return err
+	return nil
 }
 
 // retireCarrierGeneration stops a non-active generation from starting at boot and

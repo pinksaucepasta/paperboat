@@ -63,22 +63,14 @@ func (o *Owner) dropRoute(peerID string, route *carrierRoute) {
 	}
 }
 
-func (o *Owner) hasRoute(peerID string, offer CarrierOffer) bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	route := o.routes[peerID]
-	return route != nil && route.offer.Namespace() == offer.Namespace()
-}
-
 // dialRoute opens a new connection on peerID's active generation, or returns
-// nil so the caller dials as before. want restricts it to that generation. A
-// generation that does not answer within one attempt is dropped: the caller's
+// nil so the caller dials as before. A generation that does not answer within one attempt is dropped: the caller's
 // own path is then the fallback, never a second wait.
-func (o *Owner) dialRoute(ctx context.Context, peerID string, want *CarrierOffer, class peerquic.Class) *Session {
+func (o *Owner) dialRoute(ctx context.Context, peerID string, class peerquic.Class) *Session {
 	o.mu.Lock()
 	route := o.routes[peerID]
 	o.mu.Unlock()
-	if route == nil || want != nil && route.offer.Namespace() != want.Namespace() {
+	if route == nil {
 		return nil
 	}
 	peer, err := o.authority.Peer(peerID)

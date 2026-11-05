@@ -4,7 +4,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -21,8 +20,7 @@ import (
 const carrierRenewInterval = 150 * time.Second
 
 // startDelegatedGeneration serves every application on the generation's own
-// network, as staged terminal carriers do (terminal_carrier_start.go), and
-// keeps its signed offer current for clients that dial it.
+// network and keeps its signed offer current for clients that dial it.
 func (s *productionNativePeerService) startDelegatedGeneration(run, daemon context.Context, g *productionNativePeerGeneration, name string) error {
 	identity, err := g.owner.PrepareCarrierIdentity()
 	if err != nil {
@@ -74,8 +72,8 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 	return nil
 }
 
-// generationNetwork is a delegated generation's control: read-only, as for
-// staged terminal carriers, until the generation takes the primary role.
+// generationNetwork is a delegated generation's control: read-only until the
+// generation takes the primary role.
 type generationNetwork struct {
 	tailnet.NetworkAPI
 	primary atomic.Bool
@@ -188,73 +186,6 @@ func (g *productionNativePeerGeneration) sendCarrierReports(ctx context.Context)
 				diagnosticlog.TryWarn("carrier generation report failed", "stage", "report_generation", "error_type", fmt.Sprintf("%T", err))
 			}
 		}
-	}
-}
-
-// generationOffer is the delegated generation's current signed offer.
-func (s *productionNativePeerService) generationOffer() (native.CarrierOffer, error) {
-	s.mu.Lock()
-	generation := s.current
-	s.mu.Unlock()
-	if generation == nil || generation.carrier == nil {
-		return native.CarrierOffer{}, ErrProductionInvalid
-	}
-	return generation.carrier.Current(), nil
-}
-
-// preparePeer readies this delegated generation for peerID, whose candidate
-// exchange reached an older generation over the client's authenticated link.
-func (s *productionNativePeerService) preparePeer(ctx context.Context, peerID string, encoded []byte) (native.CarrierOffer, error) {
-	s.mu.Lock()
-	generation := s.current
-	s.mu.Unlock()
-	var exchange native.CarrierExchange
-	if generation == nil || generation.carrier == nil || peerID == "" || json.Unmarshal(encoded, &exchange) != nil {
-		return native.CarrierOffer{}, ErrProductionInvalid
-	}
-	offer := generation.carrier.Current()
-	if exchange.Offer.Namespace() != offer.Namespace() {
-		return native.CarrierOffer{}, ErrProductionInvalid
-	}
-	if err := readyCarrierPeer(ctx, generation.network, peerID, exchange); err != nil {
-		return native.CarrierOffer{}, err
-	}
-	return offer, nil
-}
-
-// readyCarrierPeer adds the client's candidates to a generation's network and
-// punches toward it, so the client's dial finds a path.
-func readyCarrierPeer(ctx context.Context, network *tailnet.CarrierNetwork, peerID string, exchange native.CarrierExchange) error {
-	if err := network.AddPeer(peerID, exchange.DiscoPublicKey, exchange.Endpoints); err != nil {
-		diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_add", "failed", true, "error_type", fmt.Sprintf("%T", err))
-		return err
-	}
-	// The relay is the fallback path; a refused relay registration must not
-	// block a direct (punched) move. Dial below decides (pbvm4 run3b).
-	if err := network.PreparePeerRelay(ctx, peerID, exchange.RelayNodeID); err != nil {
-		diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_relay", "failed", true, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
-	}
-	socket, err := network.Dial(ctx, peerID)
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "prepare_peer_dial", "failed", err != nil, "error_type", fmt.Sprintf("%T", err), "reason", relayReason(exchange.RelayNodeID))
-	if err != nil {
-		return err
-	}
-	socket.Close()
-	return nil
-}
-
-// prepareCarrierPeer routes a moving client's candidates: a generation that
-// serves every application is another carrier process, a terminal-only one a
-// session owner's staged carrier.
-func prepareCarrierPeer(terminal, generation func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)) func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error) {
-	return func(ctx context.Context, peer string, exchange native.CarrierExchange) (native.CarrierOffer, error) {
-		if !exchange.Offer.Claims.AllApplications {
-			return terminal(ctx, peer, exchange)
-		}
-		if generation == nil {
-			return native.CarrierOffer{}, ErrProductionInvalid
-		}
-		return generation(ctx, peer, exchange)
 	}
 }
 

@@ -1,15 +1,12 @@
 package native_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"io"
 	"net"
 	"runtime"
@@ -17,11 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"go.uber.org/goleak"
 )
 
 // Keep real sockets and their deadline/close behavior while blocking direct data.
@@ -33,19 +31,7 @@ type regionalRelay struct {
 	stop func()
 }
 
-func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false, false) }
-func TestDelegatedCarrierNegotiatesAndRenewsItsRegionalRoute(t *testing.T) {
-	testNativeRegionalFailover(t, true, false)
-}
-
-// Requirement (pbvm4 run8/run13): the relay is the move's guarantee. With the
-// staged carrier's first relay edge dead, the move must use the other edge,
-// give up on the dead one within about a second, and log a typed reason.
-func TestDelegatedCarrierMovesThroughTheOtherEdgeWhenItsRelayIsDead(t *testing.T) {
-	testNativeRegionalFailover(t, true, true)
-}
-
-func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
+func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
@@ -61,20 +47,7 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 	clientBinding := tailnet.NetworkBinding{AccountID: "regional", EndpointID: "regional-client", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFP, VirtualAddress: "fd7a:115c:a1e0::41"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "regional", EndpointID: "regional-server", Role: "machine", MachineID: "regional-server", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFP, VirtualAddress: "fd7a:115c:a1e0::42"}
 	clientAuthority := testAuthority(t, clientBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
-	var err error
-	var serverStore config.ProfileStore
-	var serverAuthority *tailnet.Authority
-	if delegated {
-		raw, _ := testQUICKeys.Load(serverFP)
-		serverBinding.QUICPublicKey = raw.(string)
-		serverStore = config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}
-		serverAuthority, err = tailnet.NewAuthority(tailnet.AuthorityOptions{Store: serverStore, Issuer: "https://api.example.test", Self: serverBinding, Keys: testKeys{"native_test": pub}, TestOnlyPacketListener: &regionalDirectBlock{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		serverAuthority = testAuthority(t, serverBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
-	}
+	serverAuthority := testAuthority(t, serverBinding, testKeys{"native_test": pub}, &regionalDirectBlock{})
 	clientBinding.WireGuardPublicKey, clientBinding.KeyGeneration = prepareBinding(t, clientAuthority)
 	serverBinding.WireGuardPublicKey, serverBinding.KeyGeneration = prepareBinding(t, serverAuthority)
 	clientDisco, err := clientAuthority.DiscoveryPublicKey()
@@ -130,12 +103,6 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 	a, b := start("regional-a", "rack-a", "127.0.0.1:0"), start("regional-b", "rack-b", "127.0.0.1:0")
 	defer func() { a.stop(); b.stop() }()
 	nodes := []tailnet.RegionalNode{a.node, b.node}
-	var c *regionalRelay
-	if deadEdge {
-		c = start("regional-c", "rack-c", "127.0.0.1:0")
-		defer c.stop()
-		nodes = append(nodes, c.node)
-	}
 	applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, serverDisco, nodes)
 	applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, []tailnet.RegionalNode{b.node})
 	clientRegions, err := clientAuthority.ConfigureRegionalRelays(regionalTLS(clientTLS, roots))
@@ -152,28 +119,7 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 
 	clientOwner, _ := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
 	defer clientOwner.Close()
-	var generation *tailnet.CarrierNetwork
-	var identity *native.CarrierIdentity
-	serverOwner, _ := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS, PrepareCarrier: func(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
-		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
-			return native.CarrierOffer{}, native.ErrInvalid
-		}
-		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
-			t.Logf("generation candidate admission: %v", err)
-			return native.CarrierOffer{}, err
-		}
-		if err := generation.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
-			t.Logf("generation selected relay %s: %v", request.RelayNodeID, err)
-			return native.CarrierOffer{}, err
-		}
-		socket, err := generation.Dial(ctx, peer)
-		if err != nil {
-			t.Logf("generation return path: %v", err)
-			return native.CarrierOffer{}, err
-		}
-		socket.Close()
-		return identity.Offer, nil
-	}})
+	serverOwner, _ := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS})
 	defer serverOwner.Close()
 	refresh := func() {
 		clientConfig.Generation++
@@ -204,85 +150,6 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 	assertRegionalBytes(t, ctx, session, "before-failover")
 	if got := clientAuthority.RegionalStatus(); got.NodeID != b.node.NodeID || got.Redundancy != tailnet.RedundancyReduced {
 		t.Fatalf("asymmetric candidate intersection: %+v", got)
-	}
-	if delegated {
-		current, err := serverAuthority.Self()
-		if err != nil {
-			t.Fatal(err)
-		}
-		nextAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: serverStore, Issuer: "https://api.example.test", Self: current, Keys: testKeys{"native_test": pub}, TestOnlyPacketListener: &regionalDirectBlock{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := nextAuthority.Restore(ctx); err != nil {
-			t.Fatal(err)
-		}
-		generationNodes := []tailnet.RegionalNode{b.node}
-		if deadEdge {
-			// The old connection keeps relay b; the staged carrier knows only a and c.
-			generationNodes = []tailnet.RegionalNode{a.node, c.node}
-		}
-		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, generationNodes)
-		if _, err := nextAuthority.ConfigureRegionalRelays(regionalTLS(serverTLS, roots)); err != nil {
-			t.Fatal(err)
-		}
-		nextOwner, err := native.NewOwner(native.Config{Authority: nextAuthority, TLS: serverTLS})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer nextOwner.Close()
-		identity, err = nextOwner.PrepareCarrierIdentity()
-		if err != nil {
-			t.Fatal(err)
-		}
-		generation, err = startDelegatedRelayEcho(t, ctx, nextOwner, identity)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer generation.Close()
-		if deadEdge {
-			logs := captureDiagnosticLog(t)
-			a.stop()
-			started := time.Now()
-			next, err := session.DialCarrier(ctx, identity.Offer)
-			if err != nil {
-				t.Fatal("move did not use the other relay edge", err)
-			}
-			defer next.Close()
-			assertRegionalBytes(t, ctx, next, "delegated-other-edge")
-			attemptAt, failedAt, connectedAt, path := logs.moveEvidence(t)
-			if attemptAt.IsZero() || failedAt.IsZero() || failedAt.Sub(attemptAt) >= time.Second {
-				t.Fatalf("dead relay edge not abandoned within 1 s with a typed reason: attempt=%v failed=%v", attemptAt, failedAt)
-			}
-			if path != "regional_relay" || connectedAt.Sub(failedAt) > time.Second {
-				t.Fatalf("move did not use the other relay edge within 1 s: path=%q after %v", path, connectedAt.Sub(failedAt))
-			}
-			t.Logf("dead edge abandoned after %v; other edge connected %v later; DialCarrier %v", failedAt.Sub(attemptAt), connectedAt.Sub(failedAt), time.Since(started))
-			return
-		}
-		next, err := session.DialCarrier(ctx, identity.Offer)
-		if err != nil {
-			t.Fatal("generation did not select the authenticated common relay", err)
-		}
-		defer next.Close()
-		assertRegionalBytes(t, ctx, next, "delegated-common-region")
-		old := b
-		b = start("regional-b", "rack-b", "127.0.0.1:0")
-		nodes = []tailnet.RegionalNode{a.node, b.node}
-		refresh()
-		applyTestConfiguration(t, nextAuthority, signer, serverConfig)
-		fresh := append([]tailnet.RegionalNode(nil), nodes...)
-		for i := range fresh {
-			fresh[i].ObservedAt = time.Now().Unix()
-			fresh[i].CapacityObservedAt = fresh[i].ObservedAt
-			fresh[i].ExpiresAt = fresh[i].ObservedAt + 60
-		}
-		applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, fresh)
-		old.stop()
-		renewed, stopRenewed := context.WithTimeout(ctx, 5*time.Second)
-		defer stopRenewed()
-		assertRegionalBytes(t, renewed, next, "delegated-after-signed-relay-rebind")
-		return
 	}
 	refresh()
 	waitRegional := func(wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {

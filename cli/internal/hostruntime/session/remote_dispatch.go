@@ -29,8 +29,6 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 		return json.Marshal(struct{ V0 []ActiveWriter }{writers})
 	case "DetachAttachment", "WaitNextAttachment":
 		return serveAttachmentLease(ctx, m, op, body)
-	case "IssueResume", "ResumeAttachment":
-		return serveResume(m, op, body)
 	case "ResourceCounts":
 		var args struct{}
 		if err := decodeRemoteRequest(body, &args); err != nil {

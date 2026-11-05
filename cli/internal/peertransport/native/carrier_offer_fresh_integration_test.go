@@ -165,3 +165,29 @@ func startTestRegionalRelay(t *testing.T, ctx context.Context, pub ed25519.Publi
 	port := pc.LocalAddr().(*net.UDPAddr).Port
 	return &regionalRelay{addr: fmt.Sprintf("127.0.0.1:%d", port), node: tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}}
 }
+
+func carrierEcho(t *testing.T, stream net.Conn) {
+	t.Helper()
+	stream.SetDeadline(time.Now().Add(time.Second))
+	if _, err := stream.Write([]byte("unchanged")); err != nil {
+		t.Fatal(err)
+	}
+	var b [9]byte
+	if _, err := io.ReadFull(stream, b[:]); err != nil || string(b[:]) != "unchanged" {
+		t.Fatal("carrier altered its live stream", err)
+	}
+}
+
+func openConsumer(t *testing.T, ctx context.Context, s *native.Session, consumer string) net.Conn {
+	t.Helper()
+	h, err := streamauth.New(consumer, consumer, consumer, "credential_"+consumer, time.Now().Add(time.Minute), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := map[string]string{"exec": "exec", "ssh": "managed_ssh"}[consumer]
+	stream, err := s.OpenAuthorized(ctx, h, "grant_test", capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream
+}

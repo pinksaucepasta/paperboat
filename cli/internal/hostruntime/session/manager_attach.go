@@ -29,10 +29,6 @@ func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Pa
 	}
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
-	return m.attachParticipantLocked(session, participant, fromSequence, expectedGeneration)
-}
-
-func (m *Manager) attachParticipantLocked(session *managedSession, participant Participant, fromSequence, expectedGeneration uint64) (AttachResult, error) {
 	if !validParticipant(participant, expectedGeneration) {
 		return AttachResult{}, ErrInvalidInput
 	}

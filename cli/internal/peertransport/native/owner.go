@@ -201,8 +201,7 @@ type Config struct {
 	RefreshAuthority func(context.Context) error
 	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
 	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
-	AdmitOffline   func(context.Context, OfflineAdmission) error
-	PrepareCarrier func(context.Context, string, CarrierExchange) (CarrierOffer, error)
+	AdmitOffline func(context.Context, OfflineAdmission) error
 }
 
 type Owner struct {
@@ -212,7 +211,6 @@ type Owner struct {
 	refreshAuthority func(context.Context) error
 	meterIncoming    func(net.Conn, MeterBinding) net.Conn
 	admitOffline     func(context.Context, OfflineAdmission) error
-	prepareCarrier   func(context.Context, string, CarrierExchange) (CarrierOffer, error)
 	carrierMu        sync.Mutex
 	carrierNetworks  map[[32]byte]*carrierNetworkRef
 	ctx              context.Context
@@ -235,7 +233,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, prepareCarrier: config.PrepareCarrier, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {
@@ -312,19 +310,10 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", tailnet.ErrAdmission)
 	}
-	session, err := newSession(o, peerID, peer, quicSession, false)
+	session, err := newSession(o, peerID, peer, quicSession)
 	if err != nil {
 		_ = quicSession.Close()
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
-	}
-	// A dialed session reads offers from its first moment: a generation that
-	// serves every application moves sessions without a terminal too.
-	session.routerMu.Lock()
-	routerErr := session.ensureRouterLocked()
-	session.routerMu.Unlock()
-	if routerErr != nil {
-		_ = session.Close()
-		return nil, routerErr
 	}
 	go o.watchPeerClose(session)
 	if err := o.add(session); err != nil {
@@ -396,7 +385,7 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				}
 				return
 			}
-			session, err := newSession(o, peer.EndpointID, peer, quicSession, false)
+			session, err := newSession(o, peer.EndpointID, peer, quicSession)
 			if err != nil {
 				_ = quicSession.Close()
 				o.emit(Event{Kind: "accept_failed", PeerID: peer.EndpointID, Err: err})

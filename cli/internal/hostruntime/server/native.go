@@ -104,14 +104,8 @@ func (m *NativeAssociationManager) serveControl(conn net.Conn, p nativeproto.Pre
 }
 
 // controlAuthorizer takes the server credential from the preface, or for a stream admitted offline
-// or to resume an attachment (no credential, by construction) the admitted peer. They never mix.
+// (no credential, by construction) the admitted peer. The two never mix.
 func (m *NativeAssociationManager) controlAuthorizer(conn net.Conn, p nativeproto.Preface) (Authorizer, error) {
-	if resume, ok := conn.(ResumePeerConn); ok {
-		if p.Token != "" {
-			return nil, ErrNativeAssociation
-		}
-		return newResumeAuthorizer(resume)
-	}
 	offline, isOffline := conn.(OfflinePeerConn)
 	if isOffline != (p.Token == "") {
 		return nil, ErrNativeAssociation

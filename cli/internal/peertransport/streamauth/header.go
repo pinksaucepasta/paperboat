@@ -40,10 +40,6 @@ type Header struct {
 	// because the client could not reach Paperboat (F21-11). It carries no credential: the
 	// native session already proves the peer, and the host decides from its own state.
 	Offline bool `json:"offline,omitempty"`
-	// Resume names the access session a terminal attachment was admitted under when it moves to a
-	// new carrier without a fresh credential. It carries no secret: the host checks the peer's current
-	// authority here and the attachment's resume secret inside the stream.
-	Resume string `json:"resume,omitempty"`
 }
 
 // OfflineConsumers are the sessions a host may start without Paperboat.
@@ -51,15 +47,6 @@ var OfflineConsumers = map[string]bool{"terminal": true, "exec": true, "ssh": tr
 
 func NewOffline(operationID, consumer, streamID string, deadline time.Time, maximumBytes uint64) (Header, error) {
 	value := Header{Version: Version, OperationID: operationID, Consumer: consumer, StreamID: streamID, DeadlineUnix: deadline.UTC().Unix(), MaximumBytes: maximumBytes, Offline: true}
-	if value.Validate(time.Time{}) != nil {
-		return Header{}, ErrInvalid
-	}
-	return value, nil
-}
-
-// NewResume opens a stream that moves a terminal attachment of sessionID; see Header.Resume.
-func NewResume(sessionID, streamID, resource string, deadline time.Time, maximumBytes uint64) (Header, error) {
-	value := Header{Version: Version, OperationID: sessionID, Consumer: "terminal", StreamID: streamID, DeadlineUnix: deadline.UTC().Unix(), MaximumBytes: maximumBytes, Resume: resource}
 	if value.Validate(time.Time{}) != nil {
 		return Header{}, ErrInvalid
 	}
@@ -86,11 +73,7 @@ func (h Header) Validate(now time.Time) error {
 	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 || len(h.Target) > MaximumTarget {
 		return ErrInvalid
 	}
-	resume := h.Resume != ""
-	if (h.Offline || resume) != (h.Credential == "") || h.Offline && !OfflineConsumers[h.Consumer] {
-		return ErrInvalid
-	}
-	if resume && (h.Offline || h.Consumer != "terminal" || len(h.Resume) > 128) {
+	if h.Offline != (h.Credential == "") || h.Offline && !OfflineConsumers[h.Consumer] {
 		return ErrInvalid
 	}
 	if len(h.UsageSessionID) > 128 || strings.ContainsAny(h.UsageSessionID, "\x00\r\n") || h.UsageSessionID != "" && h.Consumer != "config_compare" {

@@ -118,7 +118,6 @@ type managedSession struct {
 	screen          *xterm.Terminal
 	continuation    screenContinuation
 	participants    map[string]Participant
-	resumes         map[string]*attachmentResume // in memory only, guarded by opMu
 }
 
 // liveProcess is immutable after publication. Terminal v1 input can therefore
@@ -392,7 +391,6 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 // acknowledgement. session.opMu must be held.
 func (s *managedSession) removeParticipantLocked(attachmentID string) {
 	delete(s.participants, attachmentID)
-	delete(s.resumes, attachmentID)
 	s.sizes.detach(attachmentID, time.Now())
 	if s.history != nil {
 		s.history.Forget(attachmentID)
