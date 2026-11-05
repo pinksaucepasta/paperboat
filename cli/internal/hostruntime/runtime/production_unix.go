@@ -639,7 +639,7 @@ type peerEnrollmentRuntimeService struct {
 }
 
 func newPeerEnrollmentRuntimeService(enrollment peerEnrollmentEnsurer, interval time.Duration) *peerEnrollmentRuntimeService {
-	return &peerEnrollmentRuntimeService{enrollment: enrollment, interval: interval, done: make(chan struct{})}
+	return &peerEnrollmentRuntimeService{enrollment: enrollment, interval: interval}
 }
 
 func (s *peerEnrollmentRuntimeService) Start(ctx context.Context) error {
@@ -647,21 +647,28 @@ func (s *peerEnrollmentRuntimeService) Start(ctx context.Context) error {
 		return ErrProductionInvalid
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	s.cancel = cancel
+	done := make(chan struct{})
+	s.cancel, s.done = cancel, done
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		_ = waitForPeerEnrollment(runCtx, s.enrollment, s.interval)
 	}()
 	return nil
 }
 
 func (s *peerEnrollmentRuntimeService) Shutdown(ctx context.Context) error {
-	if s == nil || ctx == nil || s.cancel == nil {
+	if s == nil || ctx == nil {
 		return ErrProductionInvalid
+	}
+	if s.cancel == nil {
+		// Never started (a sibling in its group failed first) or already stopped: nothing to stop.
+		return nil
 	}
 	s.cancel()
 	select {
 	case <-s.done:
+		// Stopped: a later Start (the stable host's retry) starts it afresh.
+		s.cancel, s.done = nil, nil
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

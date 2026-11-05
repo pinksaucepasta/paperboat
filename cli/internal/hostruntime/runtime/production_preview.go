@@ -39,6 +39,9 @@ type productionPreviewAssembly struct {
 	runCtx        context.Context
 	runtimeDone   chan struct{}
 	once          sync.Once
+	// started is set by a successful Start. A failed Start leaves the assembly untouched and Shutdown then
+	// stops nothing, so the stable host's retry can start it again; only a started assembly is torn down.
+	started bool
 }
 
 type productionPreviewAssemblyConfig struct {
@@ -205,12 +208,20 @@ func (a *productionPreviewAssembly) Dispatch(ctx context.Context, authorization 
 }
 
 func (a *productionPreviewAssembly) Start(ctx context.Context) error {
-	if a == nil || a.privateAccess == nil || ctx == nil {
+	if a == nil || a.privateAccess == nil || ctx == nil || a.started {
 		return ErrProductionInvalid
 	}
+	// A failed private-access start (its loopback port still held, say) cleans up after itself
+	// (AccessService.Start), so the assembly stays ready for the next attempt.
+	if err := startPreviewPrivateAccess(ctx, a.privateAccess); err != nil {
+		return err
+	}
+	a.started = true
 	// Resuming background previews waits for the control plane, so it must not hold up the start.
-	go a.dispatcher.RestoreBackground(a.runCtx)
-	return startPreviewPrivateAccess(ctx, a.privateAccess)
+	if a.dispatcher != nil {
+		go a.dispatcher.RestoreBackground(a.runCtx)
+	}
+	return nil
 }
 
 type previewPrivateAccessLifecycle interface {
@@ -235,6 +246,11 @@ func startPreviewPrivateAccess(ctx context.Context, service previewPrivateAccess
 func (a *productionPreviewAssembly) Shutdown(ctx context.Context) error {
 	if a == nil || ctx == nil {
 		return ErrProductionInvalid
+	}
+	if !a.started {
+		// shortcut: a never-started assembly's constructed parts live until the process exits; hostd stops the
+		// stable host only on exit, so nothing else would reuse them.
+		return nil
 	}
 	var result error
 	a.once.Do(func() {

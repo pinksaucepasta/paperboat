@@ -81,8 +81,9 @@ func (s *layerEnvironmentService) Shutdown(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	if s.cancel == nil {
+		// Never started (a sibling in its group failed first): nothing to stop, and a later Start may still run.
 		s.mu.Unlock()
-		return ErrProductionInvalid
+		return nil
 	}
 	s.closed = true
 	cancel := s.cancel

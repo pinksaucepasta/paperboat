@@ -77,6 +77,7 @@ func (s *offlineAuditService) Shutdown(ctx context.Context) error {
 	s.cancel()
 	select {
 	case <-s.done:
+		s.cancel, s.done = nil, nil // a later Start runs the uploader afresh
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
