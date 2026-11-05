@@ -169,3 +169,58 @@ func (s *orderedService) Shutdown(context.Context) error {
 	*s.order = append(*s.order, "stop:"+s.name)
 	return nil
 }
+
+// A connection accepted just before Shutdown (here still sending its protocol prefix) is in flight:
+// Shutdown returns only after its response, as a retiring generation exits right after.
+func TestHTTPServiceShutdownWaitsForAConnectionAcceptedBeforeIt(t *testing.T) {
+	var finished sync.WaitGroup
+	finished.Add(1)
+	service, err := NewHTTPService(HTTPConfig{Address: "127.0.0.1:0", NativeHandler: func(c net.Conn) { _ = c.Close() }, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		defer finished.Done()
+		time.Sleep(200 * time.Millisecond)
+		_, _ = io.WriteString(w, "done")
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := net.Dial("tcp", service.Address().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
+	time.Sleep(50 * time.Millisecond) // let the listener accept it and wait for the prefix
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		stopped <- service.Shutdown(ctx)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if _, err := io.WriteString(connection, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatalf("in-flight request cut by shutdown: %v", err)
+	}
+	_ = response.Body.Close()
+	inFlight := make(chan struct{})
+	go func() { finished.Wait(); close(inFlight) }()
+	select {
+	case err := <-stopped:
+		select {
+		case <-inFlight:
+		default:
+			t.Fatal("shutdown returned while a request it accepted was still running")
+		}
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown did not return")
+	}
+}

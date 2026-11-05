@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,6 +38,8 @@ type HTTPService struct {
 	serveErr error
 	running  bool
 	stopped  bool
+	// connections counts accepted HTTP connections that have not closed.
+	connections atomic.Int64
 }
 
 func NewHTTPService(config HTTPConfig) (*HTTPService, error) {
@@ -77,12 +80,12 @@ func (s *HTTPService) Start(ctx context.Context) error {
 	if s.config.NativeHandler != nil {
 		listener = &protocolListener{Listener: listener, native: s.config.NativeHandler, timeout: s.config.ReadHeaderTimeout}
 	}
-	server := &http.Server{Handler: s.config.Handler, ReadHeaderTimeout: s.config.ReadHeaderTimeout, IdleTimeout: s.config.IdleTimeout, MaxHeaderBytes: s.config.MaxHeaderBytes}
+	server := &http.Server{Handler: s.config.Handler, ReadHeaderTimeout: s.config.ReadHeaderTimeout, IdleTimeout: s.config.IdleTimeout, MaxHeaderBytes: s.config.MaxHeaderBytes, ConnState: s.trackConnection}
 	s.server, s.listener, s.done, s.running = server, listener, make(chan struct{}), true
 	go func() {
 		err := server.Serve(listener)
 		s.mu.Lock()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) && !(s.stopped && errors.Is(err, net.ErrClosed)) {
 			s.serveErr = err
 		}
 		s.running = false
@@ -136,14 +139,37 @@ func (s *HTTPService) Shutdown(ctx context.Context) error {
 		return err
 	}
 	s.stopped = true
-	server, done, running := s.server, s.done, s.running
+	server, listener, done, running := s.server, s.listener, s.done, s.running
 	s.mu.Unlock()
 	if server == nil {
 		return nil
 	}
 	var shutdownErr error
 	if running {
-		shutdownErr = server.Shutdown(ctx)
+		// http.Server.Shutdown drops a connection whose request is read after it starts (net/http
+		// conn.serve returns when shuttingDown after readRequest) and misses one Serve accepted but has
+		// not tracked yet, such as one still sending the protocol prefix. A retiring generation must
+		// answer every connection it accepted, as Envoy's hot-restart drain does: stop accepting, let
+		// Serve return, then close idle connections and keep-alives until every accepted one is done.
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			shutdownErr = err
+		}
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for serving := done; serving != nil || s.connections.Load() > 0; {
+			select {
+			case <-serving:
+				serving = nil
+			case <-ticker.C:
+			case <-ctx.Done():
+				_ = server.Close()
+				return errors.Join(shutdownErr, ctx.Err())
+			}
+			if serving == nil {
+				server.SetKeepAlivesEnabled(false)
+			}
+		}
+		shutdownErr = errors.Join(shutdownErr, server.Shutdown(ctx))
 	}
 	if done != nil {
 		select {
@@ -157,6 +183,15 @@ func (s *HTTPService) Shutdown(ctx context.Context) error {
 	serveErr := s.serveErr
 	s.mu.Unlock()
 	return errors.Join(shutdownErr, serveErr)
+}
+
+func (s *HTTPService) trackConnection(_ net.Conn, state http.ConnState) {
+	switch state {
+	case http.StateNew:
+		s.connections.Add(1)
+	case http.StateClosed, http.StateHijacked:
+		s.connections.Add(-1)
+	}
 }
 
 func (s *HTTPService) Address() net.Addr {

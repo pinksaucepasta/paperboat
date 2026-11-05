@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -139,7 +140,15 @@ func TestHandoverHelperOldOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var connections atomic.Int64
+	server := &http.Server{ConnState: func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			connections.Add(1)
+		case http.StateClosed, http.StateHijacked:
+			connections.Add(-1)
+		}
+	}, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Owner", "old")
 		if r.URL.Path != "/slow" {
 			_, _ = io.WriteString(w, "old")
@@ -152,15 +161,22 @@ func TestHandoverHelperOldOwner(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		_, _ = io.WriteString(w, "done")
 	})}
-	go func() { _ = server.Serve(tcp) }()
+	served := make(chan struct{})
+	go func() { _ = server.Serve(tcp); close(served) }()
 	fmt.Printf("ready %s\n", tcp.Addr())
 	if err := ServeHandover(context.Background(), handover, HandoverConfig{UID: os.Geteuid(), Token: token, Start: []*os.File{runtimeFile}, Commit: []*os.File{fixedFile}}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), HandoverDrainLimit)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		t.Fatal(err)
+	// Drain as runtime HTTPService.Shutdown does: http.Server.Shutdown would drop a connection this
+	// process accepted whose request arrives after it starts.
+	_ = tcp.Close()
+	<-served
+	deadline := time.Now().Add(HandoverDrainLimit)
+	for server.SetKeepAlivesEnabled(false); connections.Load() > 0; server.SetKeepAlivesEnabled(false) {
+		if time.Now().After(deadline) {
+			t.Fatal("old owner did not drain its connections")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	os.Exit(0)
 }
