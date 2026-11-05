@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -81,6 +82,13 @@ func newInventoryHost(t *testing.T, active string, activated time.Time, now time
 	h.sources = hostinstall.InventorySources{Active: active, Activated: activated, Retained: map[string]bool{}}
 	h.sweep = testSweep(root, plan, h.fake)
 	h.sweep.sources = func(context.Context) (hostinstall.InventorySources, error) { return h.sources, nil }
+	jobs := map[int]string{}
+	for _, process := range processes {
+		if process.ppid == 1 && process.unit != "" {
+			jobs[process.pid] = process.unit
+		}
+	}
+	h.sweep.jobs = func(context.Context) (map[int]string, error) { return jobs, nil }
 	h.sweep.clock = func() time.Time { return now }
 	return h
 }
@@ -109,7 +117,7 @@ func (h *inventoryHost) assertExactlyActive(keep []string, gone []string, alive 
 }
 
 func managedProcess(pid int, exe, unit string, started time.Time) unixProcess {
-	return unixProcess{pid: pid, ppid: 1, exe: exe, started: started, managed: true, unit: unit}
+	return unixProcess{pid: pid, ppid: 1, exe: exe, started: started, unit: unit}
 }
 
 func TestInstallInventoryFreshInstallKeepsEverythingOfTheActiveVersion(t *testing.T) {
@@ -141,8 +149,8 @@ func TestInstallInventoryUpgradeRemovesThePreviousVersion(t *testing.T) {
 	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files,
 		managedProcess(4001, invPin(digestB), "paperboat-hostd-u1001-"+digestB[:32]+".service", activated.Add(time.Second)),
 		// The old guard and the old updater still run images the upgrade replaced.
-		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, managed: true, started: activated.Add(-time.Hour)},
-		unixProcess{pid: 4003, ppid: 1, exe: invRoot + "/bin/pb", stale: true, managed: true, started: activated.Add(-time.Hour)},
+		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, started: activated.Add(-time.Hour), unit: "paperboat-machineguard.service"},
+		unixProcess{pid: 4003, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: activated.Add(-time.Hour), unit: "paperboatd.service"},
 		managedProcess(4004, invGuard, "paperboat-machineguard.service", activated.Add(time.Second)),
 	)
 	h.fake.termExits[4002], h.fake.termExits[4003] = true, true
@@ -150,6 +158,10 @@ func TestInstallInventoryUpgradeRemovesThePreviousVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.assertExactlyActive(versionFiles(digestB), old, 4001, 4004)
+	// The guard's unit restarts only on failure: the inventory starts it again on the current image.
+	if !containsString(h.fake.commands, "/usr/bin/systemctl start paperboat-machineguard.service") || containsString(h.fake.commands, "/usr/bin/systemctl start paperboatd.service") {
+		t.Fatalf("replaced fixed roles not restarted exactly once each: %v", h.fake.commands)
+	}
 	for _, unit := range []string{"paperboat-hostd-u1001-" + digestA[:32] + ".service", "paperboat-carrier-u1001-" + digestA[:32] + ".service"} {
 		if !containsString(h.fake.commands, "/usr/bin/systemctl stop "+unit) {
 			t.Fatalf("old unit %s not stopped by systemd: %v", unit, h.fake.commands)
@@ -180,7 +192,7 @@ func TestInstallInventoryUnfinishedInstallationFailsLoudly(t *testing.T) {
 	files := append(append([]string(nil), versionFiles(digestA)...), versionFiles(digestB)...)
 	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files,
 		managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
-		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, managed: true},
+		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, unit: "paperboat-machineguard.service"},
 	)
 	h.fake.termExits[4002] = true
 	journal := "/var/lib/paperboat-installer/users/u1001/install-journal.json"
@@ -279,7 +291,7 @@ func TestInstallInventorySecondUserInstallAndUpgradeLeaveTheOtherAccount(t *test
 		h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files,
 			append([]unixProcess{
 				managedProcess(4001, invPin(digestB), "paperboat-hostd-u1001-"+digestB[:32]+".service", activated.Add(time.Second)),
-				unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, managed: true, started: activated.Add(-time.Hour)},
+				unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, started: activated.Add(-time.Hour), unit: "paperboat-machineguard.service"},
 			}, otherProcesses...)...)
 		h.fake.termExits[4002] = true
 		if err := h.sweep.settleInventory(context.Background(), false); err != nil {
@@ -293,7 +305,7 @@ func TestInstallInventorySecondUserInstallAndUpgradeLeaveTheOtherAccount(t *test
 // the same without changing anything (the device harness's view).
 func TestInstallInventoryNamesWhatItCannotRemoveAndCheckChangesNothing(t *testing.T) {
 	activated := time.Unix(1_800_000_000, 0)
-	stale := unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, managed: true}
+	stale := unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, unit: "paperboat-machineguard.service"}
 	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), versionFiles(digestA), stale)
 	if err := h.sweep.settleInventory(context.Background(), true); err == nil {
 		t.Fatal("check passed with another version on the host")
@@ -312,6 +324,97 @@ func TestInstallInventoryNamesWhatItCannotRemoveAndCheckChangesNothing(t *testin
 	assertGone(t, h.root, versionFiles(digestA)...)
 	if result := (&purgeOutput{}); writePurgeResult(context.Background(), result, err) == nil || !strings.Contains(string(result.data), `"remaining":["process 4002`) {
 		t.Fatalf("result does not carry the leftover: %s", result.data)
+	}
+}
+
+// A user's own pb of an old version, started from a Paperboat terminal (inside the
+// session owner's cgroup) or a login shell, is not the install's: it survives.
+func TestInstallInventoryNeverTouchesAUsersOwnPB(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	files := append(append([]string(nil), versionFiles(digestB)...), sessionOwnerFiles(digestB)...)
+	owner := managedProcess(4001, invPin(digestB), "paperboat-session-owner-u1001-"+digestB[:32]+".service", activated.Add(time.Second))
+	shell := unixProcess{pid: 4002, ppid: 4001, exe: "/bin/bash", unit: owner.unit}
+	inTerminal := unixProcess{pid: 4003, ppid: 4002, exe: invRoot + "/bin/pb", stale: true, unit: owner.unit, started: activated.Add(-time.Hour)}
+	// Reparented to init after its terminal closed, still in the session owner's cgroup.
+	orphaned := unixProcess{pid: 4004, ppid: 1, exe: invPin(digestA), unit: owner.unit, started: activated.Add(-time.Hour)}
+	loginShell := unixProcess{pid: 4005, ppid: 900, exe: invRoot + "/bin/pb", stale: true, unit: "session-3.scope"}
+	h := newInventoryHost(t, digestB, activated, activated.Add(inventoryDrainCap+time.Hour), files, owner, shell, inTerminal, orphaned, loginShell)
+	h.sweep.jobs = func(context.Context) (map[int]string, error) { return map[int]string{4001: owner.unit}, nil }
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	h.assertExactlyActive(files, nil, 4001, 4002, 4003, 4004, 4005)
+	if len(h.fake.signals) != 0 {
+		t.Fatalf("user processes were signalled: %v", h.fake.signals)
+	}
+}
+
+// The guard hands over by exec'ing the new binary in place: same pid, same start
+// time, new image. macOS compares the image's inode (lsof txt) with the file's.
+func TestInstallInventoryOwnsAGuardAfterAnInPlaceExecHandover(t *testing.T) {
+	const guard = "/Library/PrivilegedHelperTools/io.paperboat.machineguard"
+	activated := time.Unix(1_800_000_000, 0)
+	root := t.TempDir()
+	plantFile(t, root, guard)
+	info, err := os.Stat(filepath.Join(root, guard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := uint64(info.Sys().(*syscall.Stat_t).Ino)
+	plan, err := newUnixPurgePlan("darwin", 501)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Started a day before the new guard binary was written.
+	process := unixProcess{pid: 88, ppid: 1, exe: guard, started: activated.Add(-24 * time.Hour)}
+	for _, tc := range []struct {
+		name   string
+		inodes []uint64
+		owned  bool
+	}{{"exec'd into the installed file", []uint64{installed + 1, installed}, true}, {"still the replaced image", []uint64{installed + 1}, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newPurgeFake(process)
+			sweep := testSweep(root, plan, fake)
+			sweep.jobs = func(context.Context) (map[int]string, error) {
+				return map[int]string{88: "io.paperboat.machineguard"}, nil
+			}
+			sweep.imageInodes = func(context.Context, int) ([]uint64, error) { return tc.inodes, nil }
+			sweep.sources = func(context.Context) (hostinstall.InventorySources, error) {
+				return hostinstall.InventorySources{Active: digestA, Activated: activated}, nil
+			}
+			sweep.clock = func() time.Time { return activated.Add(time.Minute) }
+			findings, err := sweep.versionLeftovers(context.Background(), hostinstall.InventorySources{Active: digestA, Activated: activated})
+			if err != nil || (len(findings) == 0) != tc.owned {
+				t.Fatalf("findings = %v, %v; owned want %v", findings, err, tc.owned)
+			}
+		})
+	}
+}
+
+func TestServiceManagerOutputsNameMainProcesses(t *testing.T) {
+	systemd := "Id=paperboat-hostd-u1001.service\nMainPID=412\n\nId=paperboat-carrier-u1001-x.service\nMainPID=0\n\nId=paperboat-machineguard.service\nMainPID=77\n"
+	if got := parseSystemdMainPIDs(systemd); !reflect.DeepEqual(got, map[int]string{412: "paperboat-hostd-u1001.service", 77: "paperboat-machineguard.service"}) {
+		t.Fatalf("systemd = %v", got)
+	}
+	launchd := "PID\tStatus\tLabel\n-\t0\tcom.apple.x\n91\t0\tio.paperboat.machineguard\n92\t-9\tcom.pinksaucepasta.paperboat.hostd.u501\n"
+	if got := parseLaunchctlList(launchd); !reflect.DeepEqual(got, map[int]string{91: "io.paperboat.machineguard", 92: "com.pinksaucepasta.paperboat.hostd.u501"}) {
+		t.Fatalf("launchd = %v", got)
+	}
+	if got := parseLaunchctlPrintPID("gui/501/com.pinksaucepasta.paperboatd = {\n\tstate = running\n\tpid = 1234\n}"); got != 1234 {
+		t.Fatalf("launchctl print pid = %d", got)
+	}
+	if got := parseLsofInodes("p88\nftxt\ni4242\nftxt\ni99\n"); !reflect.DeepEqual(got, []uint64{4242, 99}) {
+		t.Fatalf("lsof inodes = %v", got)
+	}
+	plan, _ := newUnixPurgePlan("linux", 1001)
+	sweep := unixSweep{plan: plan}
+	for name, want := range map[string]bool{
+		"paperboat-hostd-u1001-" + digestA[:32] + ".service": true, "paperboat-machineguard.service": true, "paperboatd.service": true,
+		"paperboat-hostd-u1002.service": false, "paperboat-hostd-u10010.service": false, "session-3.scope": false, "user@1001.service": false,
+	} {
+		if sweep.ourUnit(name) != want {
+			t.Fatalf("ourUnit(%q) = %v", name, !want)
+		}
 	}
 }
 

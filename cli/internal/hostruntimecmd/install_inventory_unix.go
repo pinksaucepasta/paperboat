@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -144,6 +144,22 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 		_ = s.reloadUnits(ctx, units)
 	}
 	_ = s.stopTargets(ctx, processes)
+	// A fixed role that ran a replaced image comes back on the current one.
+	// launchd's KeepAlive and the user unit's Restart=always do that already;
+	// a system unit with Restart=on-failure (the guard) needs a start.
+	var restart []string
+	for _, process := range processes {
+		unit := process.unit
+		if s.plan.platform == "linux" && process.stale && strings.HasPrefix(unit, "paperboat") &&
+			generationToken(unit) == "" && unit != "paperboatd.service" && !containsString(restart, unit) {
+			restart = append(restart, unit)
+		}
+	}
+	for _, unit := range restart {
+		if err := s.run(ctx, "/usr/bin/systemctl", "start", unit); err != nil {
+			observeRuntimeFailure(ctx, "install", runtimeFailure("restarting a replaced role failed", err))
+		}
+	}
 }
 
 // versionLeftovers lists every item of this account and the shared guard that
@@ -197,11 +213,9 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 	return append(findings, files...), err
 }
 
-// sessionOwnerProcess reports a session owner by its unit. shortcut: macOS
-// lists no unit per process, so there every process of a retained digest
-// counts as its session owner; read launchctl job labels if that matters.
+// sessionOwnerProcess reports a session owner by its unit or job label.
 func sessionOwnerProcess(process unixProcess) bool {
-	return process.unit == "" || strings.Contains(process.unit, "session-owner")
+	return strings.Contains(process.unit, "session-owner")
 }
 
 // versionFiles lists definitions, generation files, pins and release slots of
@@ -265,43 +279,74 @@ func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string
 	return findings, err
 }
 
-// inventoryProcesses returns the service-managed processes that run this
-// account's payload or the shared guard, excluding this process tree. On macOS
-// a launchd job's descendants are its own.
+// inventoryProcesses returns the main processes of this account's units and
+// jobs and of the shared guard, as the service manager reports them (systemd's
+// MainPID, launchctl's job pid). A process the user started, in any terminal or
+// inside one of our units, is never in this list, whatever its executable.
 func (s unixSweep) inventoryProcesses(ctx context.Context, paths inventoryPaths) ([]unixProcess, error) {
 	all, err := s.processes(ctx)
 	if err != nil {
 		return nil, err
 	}
+	jobs, err := s.jobs(ctx)
+	if err != nil {
+		return nil, err
+	}
 	excluded := processTreeOf(all, os.Getpid())
 	roots := append(append([]string(nil), s.plan.payloadPaths...), paths.guardBinaries...)
-	candidates := map[int]unixProcess{}
-	for _, process := range all {
-		if !excluded[process.pid] && underAnyRoot(process.exe, roots) {
-			candidates[process.pid] = process
-		}
-	}
-	managed := func(process unixProcess) bool {
-		for seen := 0; seen < len(all); seen++ {
-			if process.managed {
-				return true
-			}
-			parent, ok := candidates[process.ppid]
-			if !ok {
-				return false
-			}
-			process = parent
-		}
-		return false
-	}
 	var result []unixProcess
-	for _, process := range candidates {
-		if managed(process) {
-			result = append(result, process)
+	for _, process := range all {
+		unit, ok := jobs[process.pid]
+		if !ok || !s.ourUnit(unit) || excluded[process.pid] || !underAnyRoot(process.exe, roots) {
+			continue
+		}
+		process.unit = unit
+		if process.stale, err = s.replacedImage(ctx, process); err != nil {
+			return nil, err
+		}
+		result = append(result, process)
+	}
+	return result, nil
+}
+
+// ourUnit reports a unit or job this account's install owns: one carrying its
+// exact token, the shared guard's, or the account's own user daemon.
+func (s unixSweep) ourUnit(name string) bool {
+	switch name {
+	case "paperboat-machineguard.service", "io.paperboat.machineguard", "paperboatd.service", service.DaemonLabel:
+		return true
+	}
+	return (strings.HasPrefix(name, "paperboat-") || strings.HasPrefix(name, "com.pinksaucepasta.paperboat.")) && ownsInstance(name, s.plan.instance)
+}
+
+// replacedImage reports a process running an image other than the file now at
+// its path. An in-place exec handover keeps the pid and start time but maps the
+// new file, so it compares images, not times.
+func (s unixSweep) replacedImage(ctx context.Context, process unixProcess) (bool, error) {
+	if s.imageInodes == nil {
+		return process.stale, nil // Linux: the listing compared /proc/<pid>/exe
+	}
+	info, err := os.Stat(s.at(process.exe))
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, errors.New("installed executable has no inode")
+	}
+	inodes, err := s.imageInodes(ctx, process.pid)
+	if err != nil {
+		return false, err
+	}
+	for _, inode := range inodes {
+		if inode == uint64(stat.Ino) {
+			return false, nil
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].pid < result[j].pid })
-	return result, nil
+	return len(inodes) > 0, nil
 }
 
 // pinDigest returns the source digest of a pinned executable path.

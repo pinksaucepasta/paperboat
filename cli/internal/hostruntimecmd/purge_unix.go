@@ -221,14 +221,12 @@ type unixProcess struct {
 	pid  int
 	ppid int
 	exe  string
-	// started is when the process started. stale reports that exe was replaced
-	// after it started, so it runs another version's image. managed reports a
-	// process the service manager owns: a paperboat unit's cgroup on Linux, a
-	// launchd job (parent 1) on macOS.
+	// started is when the process started. stale reports (Linux) that the
+	// image it runs is not the file now at exe: another version's.
 	started time.Time
 	stale   bool
-	managed bool
-	// unit is the systemd unit a Linux process runs in; empty on macOS.
+	// unit is the systemd unit or launchd job whose main process this is; the
+	// inventory sets it from the service manager, never from the exe.
 	unit string
 }
 
@@ -236,16 +234,21 @@ type unixProcess struct {
 // host paths; root prefixes every filesystem operation so tests run in a temp
 // tree. Every external effect is injected.
 type unixSweep struct {
-	root          string
-	keepCLI       string
-	plan          unixPurgePlan
-	run           func(context.Context, string, ...string) error
-	remove        func(string) error
-	processes     func(context.Context) ([]unixProcess, error)
-	signal        func(pid int, sig syscall.Signal) error
-	uninstall     func(context.Context) error
-	guard         func(context.Context) error
-	sources       func(context.Context) (hostinstall.InventorySources, error)
+	root      string
+	keepCLI   string
+	plan      unixPurgePlan
+	run       func(context.Context, string, ...string) error
+	remove    func(string) error
+	processes func(context.Context) ([]unixProcess, error)
+	signal    func(pid int, sig syscall.Signal) error
+	uninstall func(context.Context) error
+	guard     func(context.Context) error
+	sources   func(context.Context) (hostinstall.InventorySources, error)
+	// jobs maps the main pid of each running unit or launchd job to its name.
+	jobs func(context.Context) (map[int]string, error)
+	// imageInodes lists the inodes a process maps as text (macOS); nil when
+	// the process listing already compared images (Linux).
+	imageInodes   func(context.Context, int) ([]uint64, error)
 	clock         func() time.Time
 	terminateWait time.Duration
 	killWait      time.Duration
@@ -273,6 +276,8 @@ func newHostUnixSweep(plan unixPurgePlan) unixSweep {
 		sources: func(ctx context.Context) (hostinstall.InventorySources, error) {
 			return hostinstall.LoadInventorySources(ctx, plan.uid)
 		},
+		jobs:          hostJobs(plan),
+		imageInodes:   hostImageInodes(plan),
 		terminateWait: 5 * time.Second,
 		killWait:      2 * time.Second,
 	}
@@ -772,9 +777,6 @@ func listLinuxProcesses(context.Context) ([]unixProcess, error) {
 			current, currentErr := os.Stat(exe)
 			process.stale = imageErr == nil && (currentErr != nil || !os.SameFile(image, current))
 		}
-		cgroup, _ := os.ReadFile(filepath.Join(directory, "cgroup"))
-		process.unit = filepath.Base(strings.TrimSpace(string(cgroup)))
-		process.managed = strings.HasPrefix(process.unit, "paperboat")
 		processes = append(processes, process)
 	}
 	return processes, nil
@@ -838,17 +840,7 @@ func listDarwinProcesses(ctx context.Context) ([]unixProcess, error) {
 	if err != nil {
 		return nil, err
 	}
-	processes := parseDarwinProcesses(string(output), time.Now())
-	for index := range processes {
-		process := &processes[index]
-		process.managed = process.ppid == 1
-		// ps has no image identity; a binary written after the process started
-		// is a newer version than the one it runs. etime has 1 s resolution.
-		if info, err := os.Stat(process.exe); err == nil {
-			process.stale = process.started.Add(2 * time.Second).Before(info.ModTime())
-		}
-	}
-	return processes, nil
+	return parseDarwinProcesses(string(output), time.Now()), nil
 }
 
 func parseDarwinProcesses(output string, now time.Time) []unixProcess {
