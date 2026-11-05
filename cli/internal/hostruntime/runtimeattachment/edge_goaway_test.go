@@ -1,19 +1,27 @@
 package runtimeattachment
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
 
 func edgeRequest(route, id, kind string) connector.StreamOpen {
@@ -38,7 +46,13 @@ func edgeOpen(t *testing.T, edge *connector.DataCarrier, open connector.StreamOp
 // route, then it waits at most 1 s for the host to close it.
 func sendEdgeGoaway(t *testing.T, edge *connector.DataCarrier) {
 	t.Helper()
-	stream := edgeOpen(t, edge, edgeRequest("route-test", "goaway", sharedprotocol.Goaway))
+	sendEdgeGoawayOn(t, edge, "route-test")
+}
+
+// sendEdgeGoawayOn names route, one of the routes attached on the carrier.
+func sendEdgeGoawayOn(t *testing.T, edge *connector.DataCarrier, route string) {
+	t.Helper()
+	stream := edgeOpen(t, edge, edgeRequest(route, "goaway", sharedprotocol.Goaway))
 	if err := sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayEdgeDraining, time.Now().Add(30*time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -250,5 +264,102 @@ func TestRevocationDuringEdgeDrainEndsTheHeldStream(t *testing.T) {
 	_ = hostHeld.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err := hostHeld.Read(make([]byte, 1)); err == nil {
 		t.Fatal("held stream read data after revocation")
+	}
+}
+
+// Edge deploy with an engine tunnel on the runtime carrier: the edge names the tunnel's route on
+// its goaway (any route attached on the carrier). The hub hands the notice to the pool, never to
+// the tunnel's origin forwarder, which would drop it as an unknown kind and leave the host to
+// redial only after the old edge closed the carrier. A held tunnel response keeps streaming on the
+// draining carrier, and the next tunnel request goes through on the replacement with no gap.
+func TestEdgeGoawayKeepsAHeldTunnelConnectionAndServesTheNextOnTheReplacement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hold" {
+			_, _ = io.WriteString(w, "engine-ok")
+			return
+		}
+		_, _ = io.WriteString(w, "first|")
+		w.(http.Flusher).Flush()
+		<-release
+		_, _ = io.WriteString(w, "second")
+	}))
+	defer origin.Close()
+	defer close(release)
+	const tunnelID, routeID = "tunnel_engine", "route_engine"
+	payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":1,"name":"engine","desired_state":"active","access_mode":"public","stable_endpoint":"https://brave-blue-beacon-0421.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":%q,"name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":%q,"preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}]}`, tunnelID, routeID, strings.TrimPrefix(origin.URL, "http://"))
+	snapshot, err := hoststate.NewConfigSnapshot(tunnelID, 1, []byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tunnels := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != runtimewire.HostTunnelsPath {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("{}")), Request: request}, nil
+		}
+		list := []runtimewire.EngineTunnel{{TunnelID: tunnelID, ConfigGeneration: 1, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload)}}
+		body, _ := json.Marshal(map[string]any{"data": map[string]any{"tunnels": list}})
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+	})
+	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{expiry: time.Now().Add(time.Hour), status: func() int { return http.StatusOK }, other: tunnels,
+		tweak: func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }})
+	old := nextEdge(t, h, 5*time.Second)
+	engine := &EngineTunnels{Service: h.service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, Prober: tunnelmanager.NetworkOriginProber{}}
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(context.Background())
+	waitFor(t, ctx, func() bool { return engine.Served(tunnelID) })
+	hub := hubFor(t, h.service, "edge-test")
+	// tunnelGet sends one tunnel request from edge and returns its response.
+	tunnelGet := func(edge *connector.DataCarrier, path string) *bufio.Reader {
+		t.Helper()
+		stream := edgeOpen(t, edge, edgeRequest(routeID, "request-"+strings.TrimPrefix(path, "/"), "https"))
+		if _, err := io.WriteString(stream, "GET "+path+" HTTP/1.1\r\nHost: brave-blue-beacon-0421.tunnel.example.test\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		return bufio.NewReader(stream)
+	}
+	body := func(reader *bufio.Reader) string {
+		t.Helper()
+		response, err := http.ReadResponse(reader, nil)
+		if err != nil {
+			t.Fatalf("tunnel request failed: %v", err)
+		}
+		defer response.Body.Close()
+		got, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatalf("tunnel response cut: %q, %v", got, err)
+		}
+		return string(got)
+	}
+	held := tunnelGet(old.edge, "/hold")
+	response, err := http.ReadResponse(held, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	first := make([]byte, len("first|"))
+	if _, err := io.ReadFull(response.Body, first); err != nil {
+		t.Fatal(err)
+	}
+
+	sendEdgeGoawayOn(t, old.edge, routeID)
+	replacement := nextEdge(t, h, 2*time.Second)
+	if got := body(tunnelGet(replacement.edge, "/next")); got != "engine-ok" {
+		t.Fatalf("tunnel request on the replacement: %q", got)
+	}
+	release <- struct{}{}
+	if rest, err := io.ReadAll(response.Body); err != nil || string(rest) != "second" {
+		t.Fatalf("held tunnel connection across the edge drain: %q, %v", rest, err)
+	}
+	_ = old.edge.Close()
+	time.Sleep(1500 * time.Millisecond) // a few attachment rounds and engine reconciles
+	if hubs, _ := h.service.Hubs(); len(hubs) != 1 || hubs[0] != hub {
+		t.Fatalf("host carriers changed when the drained carrier closed: %d hubs", len(hubs))
+	}
+	if got := body(tunnelGet(replacement.edge, "/after")); got != "engine-ok" {
+		t.Fatalf("tunnel request after the old carrier closed: %q", got)
 	}
 }
