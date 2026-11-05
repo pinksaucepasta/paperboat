@@ -449,3 +449,40 @@ func TestPreviewDomainJSONOutputFailureStopsSession(t *testing.T) {
 		t.Fatal("output failure left preview active")
 	}
 }
+
+// A domain waiting on the user's DNS used to be re-read every 500 ms until it was ready; unchanged
+// reads now back off.
+func TestObservePreviewDomainsBacksOffWhileNothingChanges(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var mu sync.Mutex
+	getCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/previews/prv_domains" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			return
+		}
+		mu.Lock()
+		getCalls++
+		mu.Unlock()
+		value := previewDomainCommandLease(now, "connecting", "session_cli")
+		domains := value["domains"].([]map[string]any)
+		domains[0]["state"] = "waiting_dns"
+		domains[0]["certificate"].(map[string]any)["state"] = "issuing"
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"ptv1:preview_lease:cHJ2X2RvbWFpbnM:1"`)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
+	}))
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
+	ctx, cancel := context.WithTimeout(context.Background(), 3200*time.Millisecond)
+	defer cancel()
+	if err := observePreviewDomainChanges(ctx, client, "prv_domains", []string{"app.example.com"}, func(api.PreviewDomainSummary) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// Reads at 0, 0.5, 1.5 s (then 3.5 s); a fixed 500 ms poll makes 7.
+	if getCalls > 4 {
+		t.Fatalf("unchanged domain read %d times in 3.2 s, want at most 4", getCalls)
+	}
+}

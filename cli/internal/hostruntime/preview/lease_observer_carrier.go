@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 )
 
 var (
@@ -22,7 +23,17 @@ var (
 const (
 	defaultLeaseObserverPoll = 250 * time.Millisecond
 	maxLeaseObserverPoll     = 5 * time.Second
+	// leaseObserverIdleRefresh bounds re-reads of a ready lease when no change wait is available or it
+	// fails; while the wait works the hub's one-minute fallback applies.
+	leaseObserverIdleRefresh = 30 * time.Second
 )
+
+// LeaseChangeWaiter is an optional LeaseReader extension: one long-held request on the owner machine's
+// event topics (POST /v1/machines/{id}/events/wait). A ready lease is re-read only when its previews
+// topic moves, instead of on every poll tick.
+type LeaseChangeWaiter interface {
+	WaitMachineEvents(ctx context.Context, machineID string, known map[string]int64) (map[string]int64, error)
+}
 
 // LeaseReader is the read-only half of the preview control-plane client. It
 // is deliberately separate from LeaseClient so a CLI can use its ordinary
@@ -163,6 +174,17 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 		c.mu.Unlock()
 	}()
 
+	// Before readiness the observer polls; once ready it waits for the previews topic (stop, expiry,
+	// owner loss and target changes all move it) and otherwise re-reads only on the slow fallback.
+	var changes *machineevents.Subscription
+	var changeHub *machineevents.Hub
+	defer func() {
+		if changeHub != nil {
+			shutdownCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			_ = changeHub.Shutdown(shutdownCtx)
+			stop()
+		}
+	}()
 	lastETag := ""
 	for {
 		observed, err := reader.Get(runCtx, lease.ID)
@@ -190,10 +212,28 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 				}
 				lastETag = observed.ETag
 			}
+			if waiter, ok := reader.(LeaseChangeWaiter); ok && changeHub == nil {
+				hub, hubErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
+					return waiter.WaitMachineEvents(waitCtx, lease.OwnerMachineID, known)
+				}), 0)
+				if hubErr != nil {
+					return hubErr
+				}
+				changeHub, changes = hub, hub.Subscribe(machineevents.TopicPreviews)
+				if hubErr := hub.Start(runCtx); hubErr != nil {
+					return hubErr
+				}
+			}
 		case observed.State == "expired":
 			return ErrLeaseExpired
 		case observed.State == "stopped", observed.State == "owner_disconnected":
 			return ErrLeaseObserverTerminal
+		}
+		if lastETag != "" {
+			if !changes.Wait(runCtx, leaseObserverIdleRefresh) {
+				return nil
+			}
+			continue
 		}
 		timer := time.NewTimer(poll)
 		select {

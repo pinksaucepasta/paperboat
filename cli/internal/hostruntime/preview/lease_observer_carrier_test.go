@@ -159,3 +159,100 @@ func TestLeaseObserverOriginCheckAndCancellation(t *testing.T) {
 		t.Fatal("untrusted TLS origin passed preflight")
 	}
 }
+
+// fakeLeaseChanges is a LeaseReader that also answers owner-machine event waits like the server: at
+// once when the previews generation is above the one known, otherwise held until it moves.
+type fakeLeaseChanges struct {
+	mu         sync.Mutex
+	lease      Lease
+	reads      int
+	generation int64
+	moved      chan struct{}
+}
+
+func (f *fakeLeaseChanges) Get(context.Context, string) (Lease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	return f.lease, nil
+}
+
+func (f *fakeLeaseChanges) WaitMachineEvents(ctx context.Context, machineID string, known map[string]int64) (map[string]int64, error) {
+	for {
+		f.mu.Lock()
+		generation, moved := f.generation, f.moved
+		f.mu.Unlock()
+		if generation > known["previews"] {
+			return map[string]int64{"previews": generation}, nil
+		}
+		select {
+		case <-moved:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func (f *fakeLeaseChanges) change(lease Lease) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lease = lease
+	f.generation++
+	close(f.moved)
+	f.moved = make(chan struct{})
+}
+
+func (f *fakeLeaseChanges) readCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
+}
+
+// A ready preview used to re-read its lease every 250 ms for its whole life (~2 GET/s per preview on
+// production). Once ready it now reads only when the owner machine's previews topic moves.
+func TestLeaseObserverCarrierReadsReadyLeaseOnlyOnChange(t *testing.T) {
+	now := time.Now().UTC()
+	ready := Lease{
+		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_idle", AccountID: "account_01", ActorID: "actor_01",
+		OwnerMachineID: "host_01", OwnerSessionID: "owner_session_01", OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, AccessMode: "public",
+		Endpoint: "https://preview.example.test", EndpointState: "ready", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready",
+		CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_idle", ETag: formatLeaseETag("preview_observer_idle", 1), Generation: 1,
+	}
+	fake := &fakeLeaseChanges{lease: ready, generation: 7, moved: make(chan struct{})}
+	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyCalls := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- carrier.Run(context.Background(), ready, func(Lease) error {
+			select {
+			case readyCalls <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-readyCalls:
+	case <-time.After(time.Second):
+		t.Fatal("observer did not report readiness")
+	}
+	time.Sleep(500 * time.Millisecond)
+	// One read reached readiness and one followed the first wait answer (the generation baseline).
+	if reads := fake.readCount(); reads > 2 {
+		t.Fatalf("ready lease read %d times in 500 ms with nothing changing, want at most 2", reads)
+	}
+	stopped := ready
+	stopped.State, stopped.Endpoint, stopped.EndpointState = "stopped", "", "ended"
+	fake.change(stopped)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseObserverTerminal) {
+			t.Fatalf("observer run after stop = %v, want terminal", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("observer did not see the stop the previews topic announced")
+	}
+}

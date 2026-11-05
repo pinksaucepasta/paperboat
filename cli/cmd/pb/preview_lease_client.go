@@ -113,6 +113,17 @@ func (c *previewDomainLeaseClient) Get(ctx context.Context, previewID string) (p
 	return previewLeaseFromAPI(lease), nil
 }
 
+// WaitMachineEvents lets the foreground observer wait for the preview's owner machine topics instead
+// of polling the lease.
+func (c *previewDomainLeaseClient) WaitMachineEvents(ctx context.Context, machineID string, known map[string]int64) (map[string]int64, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("preview domain lease client is unavailable")
+	}
+	return c.client.WaitMachineEvents(ctx, machineID, known)
+}
+
+var _ preview.LeaseChangeWaiter = (*previewDomainLeaseClient)(nil)
+
 func apiLeaseFromPreview(lease preview.Lease) api.PreviewLease {
 	return api.PreviewLease{
 		Schema:         lease.Schema,
@@ -201,7 +212,11 @@ func observePreviewDomainChanges(ctx context.Context, client *api.Client, previe
 	hadFailure := false
 	reportedFailure := false
 	var failureContext context.Context
+	// Domain progress does not move an event topic, so a domain that waits on the user's DNS backs off
+	// to one read per previewDomainPollMax; any observed change reads at the fast interval again.
+	delay := previewDomainPollMin
 	for {
+		changed := false
 		lease, err := client.GetPreviewLease(ctx, previewID)
 		if err == nil {
 			if hadFailure {
@@ -230,6 +245,7 @@ func observePreviewDomainChanges(ctx context.Context, client *api.Client, previe
 				key := previewDomainObservationKey(domain)
 				if seen[hostname] != key {
 					seen[hostname] = key
+					changed = true
 					if err := observe(domain); err != nil {
 						return previewFailure("preview domain status output failed", err)
 					}
@@ -260,7 +276,11 @@ func observePreviewDomainChanges(ctx context.Context, client *api.Client, previe
 				}
 			}
 		}
-		timer := time.NewTimer(500 * time.Millisecond)
+		if changed {
+			delay = previewDomainPollMin
+		}
+		timer := time.NewTimer(delay)
+		delay = min(delay*2, previewDomainPollMax)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
@@ -269,6 +289,11 @@ func observePreviewDomainChanges(ctx context.Context, client *api.Client, previe
 		}
 	}
 }
+
+const (
+	previewDomainPollMin = 500 * time.Millisecond
+	previewDomainPollMax = 15 * time.Second
+)
 
 func previewDomainByHostname(domains []api.PreviewDomainSummary, hostname string) (api.PreviewDomainSummary, bool) {
 	for _, domain := range domains {
