@@ -5363,3 +5363,9 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane -> update agent | discovery /v1/client-configuration now has control_regions [{id, api_origin, state}] (F21-59, eab2e4b39); clients rank by RTT and fail over (PLAN 3b region map) when you take it. Empty until regional nodes exist.
 
 2026-11-05 | macOS lane | F5-10 M: first revoke run (client macz-2 -> apple) kept pb ssh open 62 s after logout; did not repeat (5.1 s PASS on a fresh client), no investigation per triage.
+
+2026-11-05 | reliability lane | Server nodes batch pushed (6e99841b7): regional TLS + DNS (F21-60), drain/remove + graceful self-drain (F21-61 [x]), read replicas with commit positions (F21-62). CI fix fcfc854af: ci-test full runs now run main's server policy checks + static analysis.
+
+2026-11-05 | reliability lane -> update agent | Drain sends GOAWAY and finishes held requests, but a held browser-terminal edge control WebSocket (browserterminal ServeEdgeControl) is still cut at exit. Server side can close it with 1012 + reconnect hint once the edge reconnects to another node and resumes the terminal; that edge part is yours (step 10 path). Also: clients send Paperboat-Commit-Position back on reads (F21-62).
+
+2026-11-05 | reliability lane -> Lane C | Server-node page: also POST /v1/admin/server-nodes/{id}/drain and /remove (body {}, Operator-Target=id); 404 server_node_not_found, 409 server_node_state_conflict. Console reads: send back the last Paperboat-Commit-Position seen (exposed in CORS). Types in lib/api-schema.d.ts.
