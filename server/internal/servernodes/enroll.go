@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -306,19 +307,21 @@ func (e *Enroller) Enroll(ctx context.Context, actor, address, code string) (Sta
 		return Status{}, err
 	}
 	id := in.Region + "-" + in.Instance
-	tag, err := e.DB.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_nodes
+	var enrolledAt time.Time
+	err = e.DB.Pool().QueryRow(ctx, `INSERT INTO paperboat.control_server_nodes
   (id, region, state, version, commit, started_at, last_seen_at, endpoint_host, tls_spki_sha256, enrolled_by, public_address)
 VALUES ($1,$2,'registered',$3,$4,now(),now(),$5,$6,$7,$8)
 ON CONFLICT (id) DO UPDATE SET state='registered', version=excluded.version, commit=excluded.commit, started_at=now(),
   last_seen_at=now(), endpoint_host=excluded.endpoint_host, tls_spki_sha256=excluded.tls_spki_sha256,
   enrolled_by=excluded.enrolled_by, public_address=excluded.public_address
-WHERE control_server_nodes.state='removed'`,
-		id, in.Region, in.Version, in.Commit, in.EndpointHost, pin, actor, in.PublicAddress)
+WHERE control_server_nodes.state='removed'
+RETURNING started_at`,
+		id, in.Region, in.Version, in.Commit, in.EndpointHost, pin, actor, in.PublicAddress).Scan(&enrolledAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Status{}, ErrUsed
+	}
 	if err != nil {
 		return Status{}, err
-	}
-	if tag.RowsAffected() == 0 {
-		return Status{}, ErrUsed
 	}
 	sealed, err := box.SealAnonymous(nil, bundle, boxKey, rand.Reader)
 	if err != nil {
@@ -334,7 +337,8 @@ WHERE control_server_nodes.state='removed'`,
 	if got.Nonce != in.Nonce || subtle.ConstantTimeCompare(got.BundleHash, sum[:]) != 1 || !verify(signKey, sig, got) {
 		return Status{}, e.forget(id, ErrUnauthorized)
 	}
-	return Status{ID: id, Region: in.Region, State: "registered", PublicAddress: in.PublicAddress, Version: in.Version, Commit: in.Commit}, nil
+	return Status{ID: id, Region: in.Region, State: "registered", PublicAddress: in.PublicAddress, Version: in.Version, Commit: in.Commit,
+		StartedAt: enrolledAt, LastSeenAt: enrolledAt}, nil
 }
 
 // forget marks a registration whose delivery failed removed, so the operator can retry with a fresh code and

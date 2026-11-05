@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
 	"strings"
 	"testing"
 
@@ -52,5 +54,28 @@ func TestRegionalNodeRefusesToStartWithoutCertificateSecrets(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: want an error naming %s, got %v", name, tc.want, err)
 		}
+	}
+}
+
+// Propagation is checked at the closest enclosing zone's nameservers: a challenge name below the zone apex walks
+// up to the zone that has NS records.
+func TestAuthoritativeResolverFindsTheEnclosingZoneNameservers(t *testing.T) {
+	asked := []string{}
+	r := authoritativeResolver{lookupNS: func(_ context.Context, name string) ([]*net.NS, error) {
+		asked = append(asked, name)
+		if name == "example.test" {
+			return []*net.NS{{Host: "ns1.example.test."}, {Host: "ns2.example.test."}}, nil
+		}
+		return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+	}}
+	servers, err := r.nameservers(context.Background(), "_acme-challenge.regions.example.test")
+	if err != nil || strings.Join(servers, ",") != "ns1.example.test,ns2.example.test" {
+		t.Fatalf("servers %v %v", servers, err)
+	}
+	if strings.Join(asked, ",") != "_acme-challenge.regions.example.test,regions.example.test,example.test" {
+		t.Fatalf("walk %v", asked)
+	}
+	if _, err := r.nameservers(context.Background(), "nothing.invalid"); err == nil {
+		t.Fatal("a name with no enclosing zone returned nameservers")
 	}
 }

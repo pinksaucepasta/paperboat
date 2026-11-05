@@ -68,7 +68,7 @@ func TestServerNodeEnrollmentDeliversSealedConfigOnPostgres(t *testing.T) {
 		t.Fatalf("a code with the wrong pin was accepted: %v", err)
 	}
 	got, err := e.Enroll(ctx, "operator-test", addr, code)
-	if err != nil || got.ID != id || got.State != "registered" {
+	if err != nil || got.ID != id || got.State != "registered" || got.StartedAt.IsZero() || got.LastSeenAt.IsZero() {
 		t.Fatalf("enroll: %+v %v", got, err)
 	}
 	select {
@@ -100,7 +100,7 @@ func TestServerNodeEnrollmentDeliversSealedConfigOnPostgres(t *testing.T) {
 
 	// Drain, then remove: a removed node cannot rejoin by heartbeating, actions on it conflict, and its slot
 	// can be enrolled again.
-	if s, err := Drain(ctx, store, id); err != nil || s.State != "draining" {
+	if s, err := Drain(ctx, store, id); err != nil || s.State != "draining" || s.PublicAddress != "203.0.113.20" {
 		t.Fatalf("drain: %+v %v", s, err)
 	}
 	if s, err := Remove(ctx, store, id); err != nil || s.State != "removed" {

@@ -194,8 +194,8 @@ func Remove(ctx context.Context, d *db.DB, id string) (Status, error) {
 func setState(ctx context.Context, d *db.DB, id, to string, from ...string) (Status, error) {
 	var s Status
 	err := d.Pool().QueryRow(ctx, `UPDATE paperboat.control_server_nodes SET state=$2 WHERE id=$1 AND state = ANY($3)
-RETURNING id, region, state, version, commit, started_at, last_seen_at`, id, to, from).
-		Scan(&s.ID, &s.Region, &s.State, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt)
+RETURNING id, region, state, coalesce(public_address, ''), version, commit, started_at, last_seen_at`, id, to, from).
+		Scan(&s.ID, &s.Region, &s.State, &s.PublicAddress, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt)
 	if err == nil {
 		return s, nil
 	}

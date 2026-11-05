@@ -15,15 +15,30 @@ import (
 )
 
 type recordedPublications struct {
-	mu   sync.Mutex
-	last map[string]tunnelcert.DesiredAddressPublication
+	mu    sync.Mutex
+	last  map[string]tunnelcert.DesiredAddressPublication
+	owned map[string]string
 }
 
 func (p *recordedPublications) Reconcile(_ context.Context, d tunnelcert.DesiredAddressPublication) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.last[d.Hostname] = d
+	if len(d.Addresses) > 0 {
+		p.owned[d.Owner] = d.Hostname
+	} else {
+		delete(p.owned, d.Owner)
+	}
 	return nil
+}
+
+func (p *recordedPublications) OwnedHostnames(_ context.Context, owner string) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if h, ok := p.owned[owner]; ok {
+		return []string{h}, nil
+	}
+	return nil, nil
 }
 
 // A region's name points at its active, fresh nodes only; a registered, draining or stale node is left out,
@@ -66,7 +81,8 @@ VALUES ($1,$2,$3,'v','c',now(),`+seen+`,$4)`, id, region, state, host); err != n
 	if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.control_server_nodes SET endpoint_host='10.0.0.5', public_address='203.0.113.11' WHERE id=$1`, p+"a-2"); err != nil {
 		t.Fatal(err)
 	}
-	pub := &recordedPublications{last: map[string]tunnelcert.DesiredAddressPublication{}}
+	pub := &recordedPublications{last: map[string]tunnelcert.DesiredAddressPublication{}, owned: map[string]string{}}
+	pub.owned["server_region:"+p+"b"] = p + "b.example.test" // b published before its node started draining
 	dns := &RegionalDNS{DB: store, Publisher: pub, Domain: "example.test"}
 	if err := dns.Sync(ctx); err != nil {
 		t.Fatal(err)
@@ -76,6 +92,26 @@ VALUES ($1,$2,$3,'v','c',now(),`+seen+`,$4)`, id, region, state, host); err != n
 		t.Fatalf("region a: %+v", a)
 	}
 	if b.Hostname == "" || len(b.Addresses) != 0 {
-		t.Fatalf("a region with no serving node must be published empty: %+v", b)
+		t.Fatalf("a region whose last serving node left must be published empty: %+v", b)
+	}
+	// An unchanged region is not rewritten on the next tick.
+	delete(pub.last, p+"a.example.test")
+	if err := dns.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, called := pub.last[p+"a.example.test"]; called {
+		t.Fatal("an unchanged region was published again within the refresh window")
+	}
+	// A region that never published and has no serving node costs no provider call.
+	add(p+"c-1", p+"c", "registered", "203.0.113.30", "now()")
+	delete(pub.last, p+"b.example.test")
+	if err := dns.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, called := pub.last[p+"c.example.test"]; called {
+		t.Fatal("a never-published empty region was reconciled")
+	}
+	if _, called := pub.last[p+"b.example.test"]; called {
+		t.Fatal("an already withdrawn region was reconciled again")
 	}
 }

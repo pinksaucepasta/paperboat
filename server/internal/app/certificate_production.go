@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -199,6 +201,7 @@ func newRegionalCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, er
 	provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
 		ZoneID: cfg.RegionalDNSZoneID, TokenReference: cfg.Certificates.DNSTokenReference, TokenSource: secrets,
 		HTTPClient: providerHTTPClient("cloudflare-regional-dns", cfg.HTTP.RequestTimeout), WriteBase: cfg.Certificates.DNSWriteBase,
+		Resolver: authoritativeResolver{lookupNS: net.DefaultResolver.LookupNS},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("regional DNS provider: %w", err)
@@ -235,4 +238,57 @@ func checkRegionalCertificateSecrets(cfg config.Config, secrets tunnelcert.Envir
 		return fmt.Errorf("regional_domain is set but the ACME account key %s does not resolve to a usable private key: set %s", c.AccountKeyReference, name)
 	}
 	return nil
+}
+
+// authoritativeResolver checks DNS-01 and address propagation at the zone's own nameservers, not a recursive resolver: a
+// recursive resolver caches the first NXDOMAIN for the zone's SOA minimum (up to 30 min), so every attempt in that
+// window looked pending. Prior art: lego checks the authoritative nameservers (challenge/dns01/precheck.go).
+type authoritativeResolver struct {
+	lookupNS func(context.Context, string) ([]*net.NS, error)
+}
+
+// nameservers walks up from name to the closest enclosing zone that has NS records.
+func (r authoritativeResolver) nameservers(ctx context.Context, name string) ([]string, error) {
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for i := 0; i < len(labels)-1; i++ {
+		ns, err := r.lookupNS(ctx, strings.Join(labels[i:], "."))
+		if err != nil || len(ns) == 0 {
+			continue
+		}
+		out := make([]string, 0, len(ns))
+		for _, n := range ns {
+			out = append(out, strings.TrimSuffix(n.Host, "."))
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("no nameservers found for %s", name)
+}
+
+func (r authoritativeResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	return r.ask(ctx, name, (*net.Resolver).LookupTXT)
+}
+
+func (r authoritativeResolver) LookupHost(ctx context.Context, name string) ([]string, error) {
+	return r.ask(ctx, name, (*net.Resolver).LookupHost)
+}
+
+// ask sends the query to each authoritative nameserver until one answers; a not-found answer is an answer.
+func (r authoritativeResolver) ask(ctx context.Context, name string, query func(*net.Resolver, context.Context, string) ([]string, error)) ([]string, error) {
+	servers, err := r.nameservers(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	var last error
+	for _, server := range servers {
+		resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, net.JoinHostPort(server, "53"))
+		}}
+		values, err := query(resolver, ctx, name)
+		var dnsErr *net.DNSError
+		if err == nil || errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return values, err
+		}
+		last = err
+	}
+	return nil, last
 }

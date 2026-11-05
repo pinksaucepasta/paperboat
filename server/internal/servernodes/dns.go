@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -14,6 +15,7 @@ import (
 // AddressPublisher is tunnelcert.AddressReconciler: it makes a hostname's A/AAAA records exactly a set.
 type AddressPublisher interface {
 	Reconcile(context.Context, tunnelcert.DesiredAddressPublication) error
+	OwnedHostnames(context.Context, string) ([]string, error)
 }
 
 // RegionalDNS points <region>.<domain> at the public addresses of the region's active, fresh nodes (declared by
@@ -30,7 +32,17 @@ type RegionalDNS struct {
 	Key          string
 	Logger       *slog.Logger
 	issueBackoff time.Time
+	// reconciled is each region's last successfully published address set and when; a region is published again
+	// only when its set changes or after regionalRefresh, so the provider is not rewritten every tick.
+	reconciled map[string]regionPublication
 }
+
+type regionPublication struct {
+	addresses string
+	at        time.Time
+}
+
+const regionalRefresh = 5 * time.Minute
 
 // Sync keeps the regional certificate issued and reconciles every region that has a node row. It keeps going
 // past one region's failure.
@@ -80,20 +92,48 @@ FROM paperboat.control_server_nodes GROUP BY region ORDER BY region`, HealthyWit
 				addresses = append(addresses, ip.Unmap().String())
 			}
 		}
+		owner := "server_region:" + g.id
+		if len(addresses) == 0 {
+			// Nothing to withdraw for a region that never published: skip the provider and resolver round trips.
+			published, err := r.Publisher.OwnedHostnames(ctx, owner)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if len(published) == 0 {
+				continue
+			}
+		}
 		at := now().UTC()
-		desired := tunnelcert.DesiredAddressPublication{Owner: "server_region:" + g.id, Hostname: g.id + "." + r.Domain,
+		key := strings.Join(addresses, ",")
+		if last, ok := r.reconciled[g.id]; ok && last.addresses == key && at.Sub(last.at) < regionalRefresh {
+			continue
+		}
+		desired := tunnelcert.DesiredAddressPublication{Owner: owner, Hostname: g.id + "." + r.Domain,
 			ResourceGeneration: uint64(at.Unix()), ObservedAt: at, Addresses: addresses}
 		if len(addresses) > 0 {
-			desired.ReadinessVersion, desired.ValidUntil = "server-node-heartbeat", at.Add(2*time.Minute)
+			desired.ReadinessVersion, desired.ValidUntil = "server-node-heartbeat", at.Add(2*regionalRefresh)
 		}
-		attempt, cancel := context.WithTimeout(ctx, 10*time.Second)
+		attempt, cancel := context.WithTimeout(ctx, time.Minute)
 		err := r.Publisher.Reconcile(attempt, desired)
 		cancel()
-		if err != nil && !tunnelcert.WaitingForDNS(err) {
+		switch {
+		case err == nil:
+			if r.reconciled == nil {
+				r.reconciled = map[string]regionPublication{}
+			}
+			r.reconciled[g.id] = regionPublication{addresses: key, at: at}
+			if r.Logger != nil {
+				r.Logger.Info("regional DNS published", "name", desired.Hostname, "addresses", key, "took", time.Since(at).Round(time.Millisecond))
+			}
+		case !tunnelcert.WaitingForDNS(err):
+			delete(r.reconciled, g.id)
 			errs = append(errs, err)
 			if r.Logger != nil {
 				r.Logger.Warn("regional DNS not reconciled", "name", desired.Hostname, "error", err)
 			}
+		default:
+			delete(r.reconciled, g.id)
 		}
 	}
 	return errors.Join(append(errs, certErr)...)
