@@ -69,7 +69,7 @@ while :; do
   done
   [ "$(jq -r .status <<<"$state")" = completed ] && break
   [ $SECONDS -lt $deadline ] || { echo "ci-test: gave up waiting after 90 min: $url" >&2; exit 1; }
-  sleep 20
+  sleep 60  # one GitHub API call per run per minute: many lanes poll at once, 5000/h is shared
 done
 
 final=$(gh run view "$id" --json conclusion,jobs)
