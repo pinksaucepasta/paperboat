@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -46,6 +47,9 @@ type DaemonConfig struct {
 	InventoryEvents *machineevents.Subscription
 	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).
 	AccessEvents *machineevents.Subscription
+	// Steps is the daemon's step tracker: start steps and background loops that are failing show in the
+	// snapshot's health (applySteps).
+	Steps *health.Registry
 }
 
 func Run(ctx context.Context, config DaemonConfig) (runErr error) {
@@ -152,7 +156,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		return err
 	}
 	defer stopNetwork()
-	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport, network: network}
+	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport, network: network, steps: config.Steps}
 	diagnosticAPI.snapshots = source
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()

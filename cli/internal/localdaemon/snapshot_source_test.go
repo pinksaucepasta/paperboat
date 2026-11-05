@@ -4,11 +4,14 @@ package localdaemon
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -136,5 +139,36 @@ func TestSnapshotSourceServesTheWatch(t *testing.T) {
 	snapshot, err := watcher.Watch(ctx, 0)
 	if err != nil || len(snapshot.Machines) != 1 || snapshot.Machines[0].SelectedPath != "direct" {
 		t.Fatalf("watch = %+v err=%v", snapshot.Machines, err)
+	}
+}
+
+// A failing daemon step is an error health item naming the step and its cause until it recovers; while the
+// control plane is unreachable only that root cause shows (the updater's gate reads it alone).
+func TestFailingStepsReachTheSnapshotUntilTheyRecover(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	inventory, _ := newTestInventory(t, &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{}}}}, func() time.Time { return now })
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	steps := health.New("test", nil, nil)
+	source := snapshotSource{Inventory: inventory, steps: steps}
+	steps.Fail(StepRegisterNetwork, errors.New("dial tcp: connection refused"), 4*time.Second)
+	snapshot, err := source.Snapshot(context.Background())
+	if err != nil || len(snapshot.Health) != 1 || snapshot.Validate() != nil {
+		t.Fatalf("failing step: health=%+v err=%v", snapshot.Health, err)
+	}
+	if item := snapshot.Health[0]; item.Code != StepRegisterNetwork || item.Severity != "error" ||
+		!strings.Contains(item.Title, "connection refused") || !strings.Contains(item.Title, "retrying in 4s") {
+		t.Fatalf("failing step item = %+v", item)
+	}
+	steps.Set(StepRegisterNetwork, health.Ready, "", 0)
+	if snapshot, err = source.Snapshot(context.Background()); err != nil || len(snapshot.Health) != 0 {
+		t.Fatalf("recovered step: health=%+v err=%v", snapshot.Health, err)
+	}
+	steps.Fail(StepMachineServices, errors.New("server unavailable"), time.Second)
+	outage := localapi.Snapshot{Health: []localapi.HealthItem{{Code: "control_plane_unavailable"}}}
+	applySteps(&outage, steps)
+	if len(outage.Health) != 1 {
+		t.Fatalf("step shown behind the control plane outage: %+v", outage.Health)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -29,6 +30,7 @@ type snapshotSource struct {
 	denial    func() *api.APIError
 	transport func() tunnel.NativeTransport
 	network   *networkStatus
+	steps     *health.Registry
 }
 
 // networkDownVisible is how long no interface may be up before pb status says so (Tailscale's
@@ -100,6 +102,7 @@ func (s snapshotSource) decorate(snapshot localapi.Snapshot) localapi.Snapshot {
 	if s.network.down() {
 		hideBehindNetworkDown(&snapshot)
 	}
+	applySteps(&snapshot, s.steps)
 	if s.denial == nil {
 		return snapshot
 	}

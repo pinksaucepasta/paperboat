@@ -1,8 +1,11 @@
 package health
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 )
 
 type State string
@@ -76,4 +79,42 @@ func (r *Registry) Snapshot() Snapshot {
 		copyStates[name] = state
 	}
 	return Snapshot{Live: r.live, Version: r.version, Capabilities: copyStates, CheckedAt: r.clock.Now()}
+}
+
+// Fail marks capability degraded by err until the next attempt after retryAfter. The reason is err's
+// text, redacted and bounded like every health string, because doctor shows it to the user.
+func (r *Registry) Fail(capability string, err error, retryAfter time.Duration) {
+	reason := "failed"
+	if err != nil {
+		if safe, safeErr := safeBoundedString(err.Error(), maximumMessageBytes, true); safeErr == nil {
+			reason = safe
+		}
+	}
+	r.Set(capability, Degraded, reason, retryAfter)
+}
+
+// Retry runs step until it succeeds or ctx ends: each failure marks capability degraded and waits
+// backoff.Retry (base doubling to max, jittered); success marks it ready. A failed step therefore never
+// stays failed until a restart. Prior art: tailscale health.Tracker SetUnhealthy/SetHealthy around a
+// retried operation (health/health.go), with util/backoff between attempts.
+func (r *Registry) Retry(ctx context.Context, capability string, base, max time.Duration, step func(context.Context) error) error {
+	for failures := 1; ; failures++ {
+		err := step(ctx)
+		if err == nil {
+			r.Set(capability, Ready, "", 0)
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		wait := backoff.Retry(failures, base, max)
+		r.Fail(capability, err, wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net"
 	"time"
@@ -53,6 +54,9 @@ type DaemonConfig struct {
 	InventoryEvents *machineevents.Subscription
 	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).
 	AccessEvents *machineevents.Subscription
+	// Steps is the daemon's step tracker: start steps and background loops that are failing show in the
+	// snapshot's health (applySteps).
+	Steps *health.Registry
 }
 
 func Run(ctx context.Context, config DaemonConfig) error { return runWindowsDaemon(ctx, config) }
