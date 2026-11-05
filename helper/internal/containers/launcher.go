@@ -17,11 +17,16 @@ import (
 )
 
 const ownerLabel = "io.paperboat.pbh-owner"
+// StartupTimeout bounds a runtime container from start to ready: certificates, registration and
+// its first control pulls.
 const StartupTimeout = 45 * time.Second
 
-// HandoverTimeout bounds a tunnel handover: the replacement's startup, then the serving process's
-// whole shutdown budget (its drain is half of it) until it exits (tunnel -shutdown-timeout, 30 s).
-const HandoverTimeout = StartupTimeout + 30*time.Second
+// DrainTimeout bounds a replaced tunnel process from release to exit: its whole shutdown budget
+// (tunnel -shutdown-timeout), of which the carrier drain is half.
+const DrainTimeout = 30 * time.Second
+
+// HandoverTimeout bounds a tunnel handover: the replacement starts, then the serving one drains.
+const HandoverTimeout = StartupTimeout + DrainTimeout
 const commandTimeout = 15 * time.Second
 
 type Launcher struct {

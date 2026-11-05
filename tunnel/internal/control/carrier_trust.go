@@ -13,10 +13,7 @@ import (
 	"time"
 )
 
-const (
-	DefaultProcessCarrierServerCertificateLifetime = 7 * 24 * time.Hour
-	MaxProcessCarrierServerCertificateLifetime     = 7 * 24 * time.Hour
-)
+const MaxProcessCarrierServerCertificateLifetime = 7 * 24 * time.Hour
 
 type ProcessCarrierServerTrust struct {
 	Certificate         tls.Certificate

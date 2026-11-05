@@ -38,9 +38,6 @@ func TestProcessCarrierServerTrustIsProcessUniqueAndExactlyBound(t *testing.T) {
 
 func TestProcessCarrierServerTrustLifetimeIsBounded(t *testing.T) {
 	now := time.Now().UTC()
-	if DefaultProcessCarrierServerCertificateLifetime != MaxProcessCarrierServerCertificateLifetime {
-		t.Fatal("default process certificate lifetime must use the bounded service-restart window")
-	}
 	if _, err := NewProcessCarrierServerTrust("edge_1", "epoch_1", "edge.example.test", now, MaxProcessCarrierServerCertificateLifetime+time.Second); err == nil {
 		t.Fatal("over-limit process certificate lifetime accepted")
 	}

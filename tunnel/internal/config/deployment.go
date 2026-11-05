@@ -26,8 +26,8 @@ var routeBaseDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z
 
 type Deployment struct {
 	SelfHosted                bool   `json:"self_hosted,omitempty"`
-	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file,omitempty"`
-	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file,omitempty"`
+	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file"`
+	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file"`
 	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
 	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
@@ -118,6 +118,13 @@ func (d Deployment) validate() error {
 	for _, path := range []string{d.ControlCredentialFile, d.JWKSFile, d.RevocationsFile, d.UsageSigningKeyFile} {
 		if path == "" || !filepath.IsAbs(path) || len(path) > 4096 {
 			return errors.New("deployment paths must be bounded and absolute")
+		}
+	}
+	// The carrier certificate is the edge's stable identity: the server and hosts pin it, and an
+	// install hands it to the replacement process unchanged (tunnel/internal/handover).
+	for _, path := range []string{d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile} {
+		if path == "" || !filepath.IsAbs(path) || len(path) > 4096 {
+			return errors.New("infrastructure_tls_cert_file and infrastructure_tls_key_file must be bounded absolute paths")
 		}
 	}
 	if d.ControlCAFile != "" && (!filepath.IsAbs(d.ControlCAFile) || len(d.ControlCAFile) > 4096) {
