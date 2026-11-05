@@ -23,7 +23,7 @@ const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machinegua
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
 const darwinLaunchMarker = "<!-- Managed by Paperboat machine guard -->"
 
-func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -70,14 +70,35 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		return err
 	}
 
-	return installDarwin(ctx, executable, darwinInstallConfig{
-		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath,
-		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, StateDir: DefaultStateDir,
-		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, RollbackState: &oldState, Undo: undo,
-	})
+	cfg := darwinGuardConfig()
+	cfg.StateDir, cfg.InstallAccount, cfg.RollbackState, cfg.Undo = DefaultStateDir, true, &oldState, undo
+	if units != nil {
+		cfg.Unit = units[filepath.Base(darwinLaunchPath)]
+		if len(units) != 1 || cfg.Unit == "" {
+			return errGuardUnits
+		}
+	}
+	return installDarwin(ctx, executable, cfg)
+}
+
+func darwinGuardConfig() darwinInstallConfig {
+	return darwinInstallConfig{HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, Label: "io.paperboat.machineguard",
+		Socket: DefaultSocket, Account: darwinBrokerAccount, LaunchArguments: []string{"daemon", "machine-guard", "run"}}
+}
+
+// Units returns this build's guard unit files by name. An update installs the
+// candidate build's own units, so the guard never runs another build's render.
+func Units() map[string]string {
+	unit, err := darwinLaunchUnit(darwinGuardConfig())
+	if err != nil {
+		return nil
+	}
+	return map[string]string{filepath.Base(darwinLaunchPath): unit}
 }
 
 type darwinInstallConfig struct {
+	// Unit is the launchd declaration as the installed build rendered it; empty renders this build's.
+	Unit string
 	HelperPath, LaunchPath, Label, Socket, Account string
 	StateDir                                       string
 	LaunchMarker                                   string
@@ -167,26 +188,12 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 			return trustErr
 		}
 	}
-	programArguments := append([]string{cfg.HelperPath}, cfg.LaunchArguments...)
-	var argumentXML strings.Builder
-	for _, argument := range programArguments {
-		argumentXML.WriteString("<string>")
-		if err := xml.EscapeText(&argumentXML, []byte(argument)); err != nil {
+	unit := cfg.Unit
+	if unit == "" {
+		if unit, err = darwinLaunchUnit(cfg); err != nil {
 			return err
 		}
-		argumentXML.WriteString("</string>")
 	}
-	unit := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-%s
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array>%s</array>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-<key>ProcessType</key><string>Background</string><key>ThrottleInterval</key><integer>2</integer>
-<key>Umask</key><integer>63</integer>
-</dict></plist>
-`, darwinLaunchMarker, cfg.Label, argumentXML.String())
 	err = darwinWrite(cfg.LaunchPath, []byte(unit), 0644)
 	rollback.record(cfg.LaunchPath)
 	if err != nil {
@@ -342,4 +349,28 @@ func darwinInstallAccount(ctx context.Context, account string) error {
 		}
 	}
 	return nil
+}
+
+// darwinLaunchUnit renders this build's launchd declaration for cfg.
+func darwinLaunchUnit(cfg darwinInstallConfig) (string, error) {
+	programArguments := append([]string{cfg.HelperPath}, cfg.LaunchArguments...)
+	var argumentXML strings.Builder
+	for _, argument := range programArguments {
+		argumentXML.WriteString("<string>")
+		if err := xml.EscapeText(&argumentXML, []byte(argument)); err != nil {
+			return "", err
+		}
+		argumentXML.WriteString("</string>")
+	}
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+%s
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>%s</string>
+<key>ProgramArguments</key><array>%s</array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>ProcessType</key><string>Background</string><key>ThrottleInterval</key><integer>2</integer>
+<key>Umask</key><integer>63</integer>
+</dict></plist>
+`, darwinLaunchMarker, cfg.Label, argumentXML.String()), nil
 }

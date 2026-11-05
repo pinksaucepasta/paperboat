@@ -343,7 +343,7 @@ func finalizePreparedUpdateLocked(ctx context.Context, uid int) error {
 	if err != nil {
 		return err
 	}
-	hostd, updater, err := installersWithMaintenance(request, paths, false, false, rendered.Hostd)
+	hostd, updater, err := installersWithMaintenance(request, paths, false, false, &rendered)
 	if err != nil {
 		return err
 	}

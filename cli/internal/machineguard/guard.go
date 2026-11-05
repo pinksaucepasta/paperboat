@@ -13,6 +13,9 @@ var ErrUnsupported = errors.New("protected machine-name access requires the Linu
 
 var ErrPortInUse = errors.New("protected port is already in use")
 
+// errGuardUnits: the guard units handed to Install are not this guard's set of files.
+var errGuardUnits = errors.New("machine guard units do not match the guard's unit files")
+
 // ErrListenerRefused is a refusal of one listener (its name or address belongs to another OS user, the
 // user's reservation limit, a listener another connection holds). The caller skips that item; the rest of
 // its machines keep working.

@@ -58,17 +58,17 @@ func TestAReadyGuardOnAnotherVersionIsReplaced(t *testing.T) {
 	}
 	prepareMachineGuardForInstall = func() error { return nil }
 	installed := 0
-	installMissingMachineGuard = func(context.Context, string, string) (guardUndo, error) {
+	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) {
 		installed++
 		running = "dev-294d86df"
 		return &recordingGuardUndo{}, nil
 	}
 	request := Request{Executable: executable, Source: source}
-	undo, err := installMachineGuardReversible(context.Background(), request)
+	undo, err := installMachineGuardReversible(context.Background(), request, nil)
 	if err != nil || installed != 1 || undo == nil {
 		t.Fatalf("mismatched guard: installed=%d undo=%v err=%v", installed, undo, err)
 	}
-	if undo, err := installMachineGuardReversible(context.Background(), request); err != nil || installed != 1 || undo != nil {
+	if undo, err := installMachineGuardReversible(context.Background(), request, nil); err != nil || installed != 1 || undo != nil {
 		t.Fatalf("matching guard was replaced again: installed=%d undo=%v err=%v", installed, undo, err)
 	}
 }

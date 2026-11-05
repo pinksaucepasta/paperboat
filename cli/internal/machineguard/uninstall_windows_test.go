@@ -40,7 +40,7 @@ func TestWindowsUninstallOwnedLifecycle(t *testing.T) {
 			t.Error("final product deactivation", e)
 		}
 	}()
-	undo, err := Install(ctx, executable, testBrowserDomain)
+	undo, err := Install(ctx, executable, testBrowserDomain, nil)
 	if err != nil {
 		t.Fatal("install", err)
 	}
@@ -156,7 +156,7 @@ func TestWindowsUninstallOwnedLifecycle(t *testing.T) {
 		conn.Close()
 		t.Fatal("cached address reached wildcard after uninstall")
 	}
-	undo, err = Install(ctx, executable, testBrowserDomain)
+	undo, err = Install(ctx, executable, testBrowserDomain, nil)
 	undo.Discard()
 	if err != nil {
 		t.Fatal("reinstall", err)

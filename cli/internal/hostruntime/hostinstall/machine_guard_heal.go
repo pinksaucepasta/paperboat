@@ -34,7 +34,7 @@ func HealMachineGuard(ctx context.Context, source installsource.Source, executab
 	if err := prepareMachineGuardForInstall(); err != nil {
 		return false, hostInstallFailure("prepare Paperboat machine guard directory", readyErr, err)
 	}
-	undo, err := installMissingMachineGuard(ctx, executable, domain)
+	undo, err := installMissingMachineGuard(ctx, executable, domain, nil)
 	if errors.Is(err, machineguard.ErrTrustPending) {
 		err = nil
 	}

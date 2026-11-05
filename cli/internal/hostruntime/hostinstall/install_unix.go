@@ -38,23 +38,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	}
 	paths := platformPaths(request.UID)
 	// hostd owns the runtime control plane; the root host service applies only the power policy.
-	legacyHost, err := hostInstallerWithMissing(request, paths, true)
-	if err != nil {
-		return errors.Join(ErrInvalidRequest, err)
-	}
 	// The installing process is often another build (a signed update's helper is the previous
-	// build; pb update --from runs the invoking CLI), so the candidate renders its own hostd unit.
-	rendered, err := renderCandidateByExecutable(ctx, request)
+	// build; pb update --from runs the invoking CLI), so the candidate renders every unit it runs.
+	legacyHost, hostd, updater, guardUnits, err := candidateInstallers(ctx, request, paths, intent != unixEnrollmentInstall)
 	if err != nil {
 		return err
-	}
-	hostdRendered := rendered.Hostd
-	if intent != unixEnrollmentInstall {
-		hostdRendered = rendered.HostdPending
-	}
-	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall, hostdRendered)
-	if err != nil {
-		return errors.Join(ErrInvalidRequest, err)
 	}
 	lifecycle, err := newLifecycleManagerWithRestorePolicy(request, paths, legacyHost, hostd, updater, false, hooks.AuthorizeRestore)
 	if err != nil {
@@ -134,7 +122,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		// Every installation and update, signed updates included, brings the guard to this build's
 		// version; the undo puts the prior guard back if the update does not commit.
-		undo, err := installMachineGuardReversible(ctx, request)
+		undo, err := installMachineGuardReversible(ctx, request, guardUnits)
 		if err != nil {
 			return err
 		}

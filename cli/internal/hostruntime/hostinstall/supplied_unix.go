@@ -156,7 +156,12 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 			return installWithIntent(ctx, request, true, unixSuppliedInstall, &input.Force, hooks)
 		}
 
-		if err = installMachineGuard(ctx, request); err != nil {
+		// The invoking CLI may be another build: the supplied executable renders its own guard units.
+		rendered, err := renderCandidateWith(ctx, request.Executable, request)
+		if err != nil {
+			return err
+		}
+		if err = installMachineGuard(ctx, request, rendered.Guard); err != nil {
 			return err
 		}
 		if err = ensureUserLinger(ctx, request, paths); err != nil {
