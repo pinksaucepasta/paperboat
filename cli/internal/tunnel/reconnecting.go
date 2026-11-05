@@ -224,9 +224,11 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 	}()
 	for {
 		connection := rand.Text()
+		var silent atomic.Bool // this link's own state; linkStalled follows whichever link is current
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {
+				silent.Store(stalled)
 				c.linkStalled.Store(stalled)
 				if stalled {
 					c.recordOldLink(connection, "supervise", "stalled", nil)
@@ -264,6 +266,11 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		}()
 		code, err := conn.Wait()
 		c.recordOldLink(connection, "supervise", "wait_returned", err)
+		if err == nil && silent.Load() && c.ctx.Err() == nil {
+			// A shell exit is heard before it is reported, and hearing the host clears the stall; a clean end of a
+			// link still flagged silent is the daemon tearing it down (F3-15 N4), not the terminal ending.
+			err = ErrTransportLost
+		}
 		cleanupCtx := diagnostics.WithReconnect(c.ctx, "old-link", "supervise", connection)
 		closeEnd := diagnostics.ReconnectStep(cleanupCtx, "old_close")
 		closeErr := conn.Close()

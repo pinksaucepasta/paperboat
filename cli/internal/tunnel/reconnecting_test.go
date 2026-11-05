@@ -642,3 +642,35 @@ func TestReconnectingConnStalledLinkSurvivesANonRevocationRefusalDuringAnOutage(
 		t.Fatalf("code=%d err=%v output=%q reconnects=%d", code, err, got, reconnects.Load())
 	}
 }
+
+// F3-15 N4 (1 run in 16): the daemon tore down both silent links at once and each reported a clean end (code 0, no error),
+// which ended the terminal as if the shell had exited, 46 s into a 45 s outage. A shell exit is heard before it is
+// reported, and hearing the host clears the stall; a clean end of a link still flagged silent is a local teardown, so the
+// terminal redials.
+func TestReconnectingConnStalledLinkThatEndsCleanlyIsRedialedNotEnded(t *testing.T) {
+	first := stalledReconnectConn{&blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	var down atomic.Bool
+	down.Store(true)
+	var reconnects atomic.Int32
+	c := NewReconnectingConn(context.Background(), first, 600, time.Millisecond, func(context.Context) (Conn, error) {
+		reconnects.Add(1)
+		if down.Load() {
+			return nil, errors.New("network down")
+		}
+		return &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 5}, nil // one per dial: the probe and the supervisor may both dial
+	})
+	defer c.Close()
+	for reconnects.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	down.Store(false) // the network is back
+	_ = first.Close() // the daemon tears the silent link down: Wait reports a clean end
+	got, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatal("terminal ended:", err)
+	}
+	code, err := c.Wait()
+	if err != nil || code != 5 || string(got) != "resumed" {
+		t.Fatalf("code=%d err=%v output=%q: a clean end of a silent link ended the terminal", code, err, got)
+	}
+}
