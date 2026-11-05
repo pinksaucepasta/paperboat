@@ -167,7 +167,7 @@ func TestEdgeStartupSendsNoControlRequestTheServerRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := buildServiceWithReporter(cfg, loaded, nil)
+	service, err := buildServiceWithReporter(cfg, loaded, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

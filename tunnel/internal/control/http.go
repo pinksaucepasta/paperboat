@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -93,7 +94,15 @@ type HTTPClient struct {
 	routesHeld    RouteSnapshot
 	routesQuiet   time.Time // when the server last answered "unchanged"; zero after a changed answer
 	routesGap     time.Duration
+	// silent drops this process's node state reports (registration, heartbeat, route and
+	// carrier observations). During an install handover two processes share one node and
+	// process epoch: the old one reports until it releases, the new one from then on, so the
+	// server never sees a re-registration (which resets the node to not ready) or two views.
+	silent atomic.Bool
 }
+
+// SetSilent turns this process's node state reports off or on. Pulls and usage are unaffected.
+func (c *HTTPClient) SetSilent(silent bool) { c.silent.Store(silent) }
 
 // routeQuietGap is how long an unchanged route set is served from memory before the edge asks
 // again, so an idle edge makes at most one route request per gap whatever its control interval.
@@ -224,10 +233,16 @@ func (c *HTTPClient) RegisterNode(ctx context.Context, registration NodeRegistra
 	if err := registration.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrControlInvalid, err)
 	}
+	if c.silent.Load() {
+		return nil
+	}
 	return c.post(ctx, "/v1/nodes/register", registration, nil)
 }
 func (c *HTTPClient) Heartbeat(ctx context.Context, observation NodeObservation) (NodeAnswer, error) {
 	var answer NodeAnswer
+	if c.silent.Load() {
+		return answer, nil
+	}
 	if err := c.post(ctx, "/v1/nodes/heartbeat", observation, &answer); err != nil {
 		return NodeAnswer{}, err
 	}
@@ -447,6 +462,9 @@ func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr er
 func (c *HTTPClient) ObserveRoutes(ctx context.Context, nodeID string, routes []RouteObservation) error {
 	if len(routes) > 1000 {
 		return ErrControlInvalid
+	}
+	if c.silent.Load() {
+		return nil
 	}
 	return c.post(ctx, "/v1/edge/routes/observations", struct {
 		NodeID string             `json:"edge_node_id"`

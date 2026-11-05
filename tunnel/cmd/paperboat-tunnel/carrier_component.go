@@ -5,8 +5,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
@@ -272,7 +276,47 @@ func newCarrierComponentWithTelemetry(
 			return ctx.Err()
 		}
 	}
-	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Reporter: reporter, Service: service, Handle: handle, MaximumHandlers: maximumHandlers, Telemetry: carrierTelemetry})
+	// goaway tells a carrier's host this edge is draining (shared/connectorprotocol/goaway.go): the
+	// host dials a replacement at once and moves its own streams there.
+	goaway := func(ctx context.Context, server *datacarrier.Server, deadline time.Time) error {
+		identity, now := server.Identity(), time.Now().UTC()
+		routeID := ""
+		if runtimeWorker != nil {
+			if admissions := runtimeWorker.Expected.ForIdentity(identity, now); len(admissions) != 0 {
+				routeID = admissions[0].RouteID
+			}
+		}
+		for _, registry := range []*datacarrier.DurableAdmissionRegistry{durableExpected, accessorExpected} {
+			if routeID == "" && registry != nil {
+				if admissions := registry.ForIdentity(identity, now); len(admissions) != 0 {
+					routeID = admissions[0].RouteID
+				}
+			}
+		}
+		if routeID == "" {
+			return nil // nothing routes over it; it is closed at the end of the drain
+		}
+		openCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		stream, err := server.OpenStream(openCtx, datacarrier.StreamOpen{
+			Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion,
+			AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID,
+			SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation,
+			RouteID: routeID, RequestID: "request_" + uuid.NewString(), Kind: connectorprotocol.Goaway,
+		})
+		if err != nil {
+			return fmt.Errorf("open edge goaway stream: %w", err)
+		}
+		defer stream.Close()
+		if err := connectorprotocol.WriteGoawayNotice(stream, connectorprotocol.GoawayEdgeDraining, deadline); err != nil {
+			return fmt.Errorf("write edge goaway: %w", err)
+		}
+		// The host closes the stream once it has the notice.
+		_ = stream.SetReadDeadline(time.Now().Add(time.Second))
+		_, _ = io.Copy(io.Discard, io.LimitReader(stream, 1))
+		return nil
+	}
+	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Reporter: reporter, Service: service, Handle: handle, MaximumHandlers: maximumHandlers, Telemetry: carrierTelemetry, Goaway: goaway})
 	if err != nil {
 		_ = service.Close()
 		return nil, nil, fmt.Errorf("create carrier assembly: %w", err)

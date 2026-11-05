@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/http2"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
@@ -145,4 +146,24 @@ func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *tes
 	}
 	defer client.Close()
 	waitDynamicCondition(t, ctx, func() bool { _, ok := routes.Lookup("machine.runtime.example.test"); return ok })
+
+	// Stopping this edge (an install handover) tells the host first, on its runtime route.
+	drainer, ok := component.(interface{ Drain(context.Context, time.Time) })
+	if !ok {
+		t.Fatal("carrier component does not drain")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	go drainer.Drain(ctx, deadline)
+	stream, open, err := client.AcceptStream(ctx)
+	if err != nil {
+		t.Fatalf("host did not receive the edge goaway: %v", err)
+	}
+	defer stream.Close()
+	if open.Kind != connectorprotocol.Goaway || open.RouteID != "route_miss" {
+		t.Fatalf("edge goaway stream = %s on %s", open.Kind, open.RouteID)
+	}
+	notice, err := connectorprotocol.ReadGoawayNotice(stream)
+	if err != nil || notice.Reason != connectorprotocol.GoawayEdgeDraining || notice.DrainDeadline != deadline.Unix() {
+		t.Fatalf("edge goaway notice = %+v, %v", notice, err)
+	}
 }

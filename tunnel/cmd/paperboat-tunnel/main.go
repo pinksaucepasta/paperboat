@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	edgediagnostics "github.com/pinksaucepasta/paperboat/tunnel/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/operation"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
@@ -144,23 +146,72 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	if len(reporters) > 0 {
 		reporter = reporters[0]
 	}
-	service, err := buildServiceWithReporter(cfg, deployment, reporter)
+	// A self-hosted install hands over (tunnel/internal/handover): the new process inherits the
+	// serving process's sockets and epoch. It needs the stable claimed carrier certificate, which
+	// the server and hosts already pin; a per-process certificate could not carry over.
+	handoverDir := filepath.Dir(cfg.DeploymentPath)
+	handsOver := deployment.InfrastructureTLSCertFile != ""
+	var inheritance *handover.Inheritance
+	if handsOver {
+		if inheritance, err = handover.Inherit(handoverDir); err != nil {
+			return serviceFailure{error: err, definition: "service_build"}
+		}
+	}
+	epoch := ""
+	if inheritance != nil {
+		epoch = inheritance.Epoch
+	}
+	service, err := buildServiceWithReporter(cfg, deployment, reporter, epoch)
 	if err != nil {
+		if inheritance != nil {
+			inheritance.Abort()
+		}
 		return serviceFailure{error: err, definition: "service_build"}
 	}
+	// Components run until Shutdown, not until the signal: the drain needs them serving.
+	serving, endServing := context.WithCancel(processCtx)
+	defer endServing()
 	root, stop := signal.NotifyContext(processCtx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := service.Start(root); err != nil {
+	if inheritance != nil {
+		service.Handover.SetSilent(true) // the serving process reports until it releases
+	}
+	if err := service.Start(serving); err != nil {
+		if inheritance != nil {
+			inheritance.Abort()
+		}
 		return serviceFailure{error: err, definition: "service_start"}
+	}
+	if inheritance != nil {
+		if err := takeOver(root, service, inheritance); err != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+			defer cancel()
+			return serviceFailure{error: errors.Join(err, service.Shutdown(shutdownCtx)), definition: "service_start"}
+		}
+	}
+	released := make(chan struct{})
+	if handsOver {
+		stopOffer, err := handover.Offer(handoverDir, service.Handover.Epoch, func() { close(released) })
+		if err != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+			defer cancel()
+			return serviceFailure{error: errors.Join(err, service.Shutdown(shutdownCtx)), definition: "service_start"}
+		}
+		defer stopOffer()
 	}
 	var runtimeErr error
 	select {
 	case <-root.Done():
+	case <-released:
+		// The replacement accepts and reports from now on; this process only drains.
+		service.Handover.SetSilent(true)
+		stop()
 	case runtimeErr = <-service.Done():
 		stop()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	service.Handover.Drain(ctx, time.Now().Add(cfg.ShutdownTimeout/2))
 	if err := service.Shutdown(ctx); err != nil {
 		return serviceFailure{error: err, definition: "service_shutdown"}
 	}
@@ -170,12 +221,37 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	return nil
 }
 
+// handoverWarmTimeout bounds a replacement's warm-up; the serving process keeps serving meanwhile.
+const handoverWarmTimeout = 30 * time.Second
+
+// takeOver finishes an install handover once this process is warm: it has pulled its admissions
+// (routes and certificates load during Start), so it asks the serving process to release and
+// then accepts and reports itself.
+func takeOver(ctx context.Context, service *edgeruntime.Service, inheritance *handover.Inheritance) error {
+	warm, cancel := context.WithTimeout(ctx, handoverWarmTimeout)
+	defer cancel()
+	select {
+	case <-service.Handover.Warm:
+	case <-warm.Done():
+		inheritance.Abort()
+		return fmt.Errorf("%w: admissions not pulled before the warm-up deadline", handover.ErrHandover)
+	}
+	if err := inheritance.Ready(warm); err != nil {
+		inheritance.Abort()
+		return err
+	}
+	service.Handover.SetSilent(false)
+	return nil
+}
+
 func buildService(cfg config.Config, deployment config.Deployment) (*edgeruntime.Service, error) {
 	return buildServiceWithCarrier(cfg, deployment, nil)
 }
 
-func buildServiceWithReporter(cfg config.Config, deployment config.Deployment, reporter *reporting.Reporter) (*edgeruntime.Service, error) {
-	return buildServiceAssembly(cfg, deployment, nil, reporter)
+// buildServiceWithReporter builds the edge process; a non-empty epoch is the inherited process
+// epoch of an install handover.
+func buildServiceWithReporter(cfg config.Config, deployment config.Deployment, reporter *reporting.Reporter, epoch string) (*edgeruntime.Service, error) {
+	return buildServiceAssembly(cfg, deployment, nil, reporter, epoch)
 }
 
 // buildServiceWithCarrier is the explicit deployment assembly seam for the
@@ -183,9 +259,9 @@ func buildServiceWithReporter(cfg config.Config, deployment config.Deployment, r
 // composition tests; the normal path constructs the authenticated carrier
 // listener from the dedicated deployment certificate and addresses.
 func buildServiceWithCarrier(cfg config.Config, deployment config.Deployment, carrier edgeruntime.Component) (*edgeruntime.Service, error) {
-	return buildServiceAssembly(cfg, deployment, carrier, nil)
+	return buildServiceAssembly(cfg, deployment, carrier, nil, "")
 }
-func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carrier edgeruntime.Component, reporter *reporting.Reporter) (*edgeruntime.Service, error) {
+func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carrier edgeruntime.Component, reporter *reporting.Reporter, inheritedEpoch string) (*edgeruntime.Service, error) {
 	credential, err := readCredential(deployment.ControlCredentialFile)
 	if err != nil {
 		return nil, fmt.Errorf("load control credential: %w", err)
@@ -223,9 +299,14 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create counter epoch: %w", err)
 	}
-	processEpoch, err := usage.NewCounterEpoch()
-	if err != nil {
-		return nil, fmt.Errorf("create process epoch: %w", err)
+	// An install handover keeps the process epoch: the server, the hosts' admissions and the
+	// carrier identities all name it, so the replacement is the same edge process to them.
+	processEpoch := inheritedEpoch
+	if processEpoch == "" {
+		processEpoch, err = usage.NewCounterEpoch()
+		if err != nil {
+			return nil, fmt.Errorf("create process epoch: %w", err)
+		}
 	}
 	certificateRegistry, err := tlscert.NewRegistry(tlscert.Config{})
 	if err != nil {
@@ -675,6 +756,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	service := edgeruntime.New(cfg, state, telemetryLifecycle, assembly, carrierTrustLifetime, telemetryReady{lifecycle: telemetryLifecycle})
 	service.Reporter = reporter
+	service.Handover = edgeruntime.Handover{Epoch: processEpoch, Drain: assembly.Drain, SetSilent: client.SetSilent, Warm: runtimeWorker.Pulled()}
 	if err := service.SetHealthHandler(health); err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()

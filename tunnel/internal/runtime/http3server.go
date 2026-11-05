@@ -13,6 +13,8 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 )
 
 type HTTP3Server struct {
@@ -23,6 +25,8 @@ type HTTP3Server struct {
 	packet   net.PacketConn
 	done     chan error
 	closed   bool
+	// stopped is closed by Shutdown; it ends a wait for UDPReady.
+	stopped chan struct{}
 }
 
 func NewHTTP3Server(address string, handler http.Handler, tlsConfig *tls.Config, maxHeaderBytes int) (*HTTP3Server, error) {
@@ -30,7 +34,7 @@ func NewHTTP3Server(address string, handler http.Handler, tlsConfig *tls.Config,
 		return nil, ErrHTTPServerInvalid
 	}
 	server := &http3.Server{Addr: address, Handler: handler, TLSConfig: tlsConfig.Clone(), MaxHeaderBytes: maxHeaderBytes, IdleTimeout: 2 * time.Minute, QUICConfig: &quic.Config{Allow0RTT: false, HandshakeIdleTimeout: 10 * time.Second, MaxIdleTimeout: 2 * time.Minute, MaxIncomingStreams: 256, Versions: []quic.Version{quic.Version1, quic.Version2}}}
-	return &HTTP3Server{address: address, server: server}, nil
+	return &HTTP3Server{address: address, server: server, stopped: make(chan struct{})}, nil
 }
 
 func (s *HTTP3Server) Start(ctx context.Context) error {
@@ -45,14 +49,23 @@ func (s *HTTP3Server) Start(ctx context.Context) error {
 	if s.closed || s.packet != nil {
 		return ErrHTTPServerInvalid
 	}
-	packet, err := net.ListenPacket("udp", s.address)
+	packet, err := handover.ListenPacket("udp", s.address)
 	if err != nil {
 		return err
 	}
 	s.server.Handler = httpDiagnosticHandler(ctx, s.Reporter, s.server.Handler)
 	s.server.Logger = slog.New(slog.NewTextHandler(httpDiagnosticWriter{ctx: ctx, reporter: s.Reporter}, nil))
 	s.packet, s.done = packet, make(chan error, 1)
+	stopped := s.stopped
 	go func() {
+		// An inheriting process reads UDP only after the process it replaces has exited.
+		select {
+		case <-handover.UDPReady():
+		case <-stopped:
+			s.done <- nil
+			close(s.done)
+			return
+		}
 		err := s.server.Serve(packet)
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
@@ -70,6 +83,7 @@ func (s *HTTP3Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	s.closed = true
+	close(s.stopped)
 	server, packet, done := s.server, s.packet, s.done
 	s.mu.Unlock()
 	if packet == nil {

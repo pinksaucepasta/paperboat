@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
@@ -23,6 +24,15 @@ func (c *trackedCarrierComponent) Start(ctx context.Context) error {
 func (c *trackedCarrierComponent) Shutdown(ctx context.Context) error {
 	c.running.Store(false)
 	return c.Component.Shutdown(ctx)
+}
+
+// Drain passes the stop's first step to a carrier that drains (edgeruntime.CarrierAssembly).
+func (c *trackedCarrierComponent) Drain(ctx context.Context, deadline time.Time) {
+	if carrier, ok := c.Component.(interface {
+		Drain(context.Context, time.Time)
+	}); ok {
+		carrier.Drain(ctx, deadline)
+	}
 }
 
 func (c *trackedCarrierComponent) Done() <-chan error {

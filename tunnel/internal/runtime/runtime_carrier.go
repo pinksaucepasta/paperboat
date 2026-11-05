@@ -63,7 +63,20 @@ type RuntimeCarrierWorker struct {
 	// request has finished.
 	pullWake chan struct{}
 	pullDone chan struct{}
-	closed   bool
+	// pulled is closed after the first successful runtime pull (Pulled).
+	pulled chan struct{}
+	closed bool
+}
+
+// Pulled is closed once the first runtime pull installed this process's admissions: a replacement
+// process takes over from the one it replaces only after that.
+func (w *RuntimeCarrierWorker) Pulled() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.pulled == nil {
+		w.pulled = make(chan struct{})
+	}
+	return w.pulled
 }
 
 // missPullInterval bounds pulls asked for by carriers that matched no admission, so unadmitted
@@ -232,6 +245,12 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 			return err
 		}
 		w.pulls++
+		if w.pulls == 1 {
+			w.Pulled() // makes the channel
+			w.mu.Lock()
+			close(w.pulled)
+			w.mu.Unlock()
+		}
 		if w.OnPull != nil && (w.pulls == 1 || len(w.runtimeSet) != w.pulledCount) {
 			w.OnPull(w.pulls, len(w.runtimeSet), w.pulledCount)
 		}
