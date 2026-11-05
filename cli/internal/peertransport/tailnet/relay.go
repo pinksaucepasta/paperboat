@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"net"
 	"net/url"
 	"sort"
@@ -65,6 +66,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	}
 	cfg := *a.current
 	regional := a.regional
+	held := a.heldRelaysLocked()
 	a.mu.Unlock()
 	next := map[string]string{}
 	grants := map[string]derpquic.Grant{}
@@ -97,7 +99,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	if len(tokens) > MaxRegionalCandidates || regional == nil {
 		return ErrRegionalAuthority
 	}
-	nodes, _, err := regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
+	nodes, _, err := regional.Eligible("relay", "derp_quic", nil, serverclock.Now(), held)
 	if err != nil {
 		return err
 	}
@@ -155,7 +157,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			Type      string `json:"typ"`
 			KeyID     string `json:"kid"`
 		}
-		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt {
+		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > int64(peernetwork.Lifetime/time.Second) || g.ExpiresAt > cfg.ExpiresAt {
 			next = nil
 			grants = nil
 			return ErrAuthority
@@ -309,7 +311,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	// No regional node is usable until signed candidates and grants arrive.
 	var nodes []RegionalNode
 	if a.regional != nil {
-		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
+		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now(), nil)
 		if err != nil {
 			return nil, err
 		}

@@ -33,7 +33,9 @@ type regionalRelay struct {
 	stop func()
 }
 
-func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false, false) }
+func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
+	testNativeRegionalFailover(t, false, false)
+}
 func TestDelegatedCarrierNegotiatesAndRenewsItsRegionalRoute(t *testing.T) {
 	testNativeRegionalFailover(t, true, false)
 }
@@ -336,31 +338,15 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 		t.Fatalf("restored failure-domain backup unavailable: %+v", afterRestore)
 	}
 	assertRegionalBytes(t, ctx, session, "after-restore")
-	// Stop control refresh. Cached signed health expires without widening scope. RegionalStatus shows it once it
-	// has lasted the 10 s warning delay.
-	expiryDeadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(expiryDeadline) && clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
-		time.Sleep(100 * time.Millisecond)
+	// Stop control refresh. The relay already in use needs no fresh signed observation: its connection is its own
+	// health signal, and it keeps carrying the session until revocation, drain, a fault or the signed candidate
+	// set's own expiry (peernetwork.Lifetime; the expired-set bound is TestRegionalCandidatesEligibilityExpiry...).
+	// Before, observations older than 15 s withdrew it and every engine renewed every ~12 s to prevent that.
+	time.Sleep(20 * time.Second)
+	if held := clientAuthority.RegionalStatus(); held.NodeID != afterRestore.NodeID || held.Reason == "no_authorized_common_node" {
+		t.Fatalf("the held relay was withdrawn when its observations aged without a refresh: %+v", held)
 	}
-	if clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
-		t.Fatalf("expired control authority remains usable: %+v", clientAuthority.RegionalStatus())
-	}
-	h, _ := streamauth.New("regional-expired", "terminal", "regional-expired-stream", "credential_terminal", time.Now().Add(time.Minute), 1<<20)
-	// Admission now waits for the host's acknowledgement; include it in the
-	// expired-authority probe's existing one-second I/O budget.
-	expiredCtx, stopExpired := context.WithTimeout(ctx, time.Second)
-	expired, expiredErr := session.OpenAuthorized(expiredCtx, h, "grant_test", "terminal")
-	stopExpired()
-	if expiredErr == nil {
-		_ = expired.SetDeadline(time.Now().Add(time.Second))
-		_, writeErr := expired.Write([]byte("must-not-forward"))
-		got := make([]byte, 16)
-		_, readErr := io.ReadFull(expired, got)
-		_ = expired.Close()
-		if writeErr == nil && readErr == nil {
-			t.Fatal("regional data forwarded after signed node authority expired")
-		}
-	}
+	assertRegionalBytes(t, ctx, session, "without-control-refresh")
 	refresh()
 	waitRegional("", tailnet.RedundancyAvailable)
 	assertRegionalBytes(t, ctx, session, "after-control-recovery")

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams/teamstest"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -972,7 +973,7 @@ func assertRegionalCandidates(t *testing.T, token, accountID, endpointID, nodeID
 	if len(nodes) != count || count > 0 && nodes[0].(map[string]any)["node_id"] != nodeID {
 		t.Fatalf("regional nodes=%v", nodes)
 	}
-	if claims["exp"].(float64)-claims["iat"].(float64) > 60 {
+	if claims["exp"].(float64)-claims["iat"].(float64) > peernetwork.Lifetime.Seconds() {
 		t.Fatalf("regional validity=%v", claims)
 	}
 }
@@ -985,7 +986,7 @@ func assertRelayGrant(t *testing.T, tokens []string, accountID, endpointID, node
 	if claims["version"] != float64(1) || claims["aud"] != "paperboat-relay" || claims["account_id"] != accountID || claims["endpoint_id"] != endpointID || claims["node_id"] != nodeID || claims["process_epoch"] != processEpoch || claims["node_generation"] != float64(nodeGeneration) {
 		t.Fatalf("relay binding=%v", claims)
 	}
-	if claims["wireguard_public_key"] != base64.RawURLEncoding.EncodeToString(selfKey) || claims["disco_public_key"] != base64.RawURLEncoding.EncodeToString(selfDisco) || claims["quic_certificate_fingerprint"] != hex.EncodeToString(fingerprint[:]) || claims["exp"].(float64)-claims["iat"].(float64) > 60 {
+	if claims["wireguard_public_key"] != base64.RawURLEncoding.EncodeToString(selfKey) || claims["disco_public_key"] != base64.RawURLEncoding.EncodeToString(selfDisco) || claims["quic_certificate_fingerprint"] != hex.EncodeToString(fingerprint[:]) || claims["exp"].(float64)-claims["iat"].(float64) > peernetwork.Lifetime.Seconds() {
 		t.Fatalf("relay identity/lifetime=%v", claims)
 	}
 	descriptor, hasDescriptor := claims["peer_relay"].(map[string]any)

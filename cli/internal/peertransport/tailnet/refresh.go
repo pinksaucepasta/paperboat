@@ -264,6 +264,11 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 	}
 	var lastRefresh, lastUrgent time.Time
 	urgent := false // the pending renewal was announced by the server: it skips the budget's wait
+	// announced is a pending renewal an announcement or an on-demand request brought forward. Those share one
+	// bucket per engine, so an update storm (every peer re-registering, each announced) is a few fetches and then
+	// one per eventRefreshRefill, under the server's 30 a minute per machine, instead of one every 1-2 s.
+	announced := false
+	events := &tokenBucket{refill: eventRefreshRefill, burst: eventRefreshBurst}
 	failures := 0
 	unusable := 0 // consecutive successful renewals that brought no usable relay
 	for {
@@ -277,6 +282,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				// The server is failing: the backoff schedule already decides when to retry.
 				continue
 			}
+			announced = true
 			earlier(max(0, onDemandRefreshSpacing-time.Since(lastRefresh)))
 		case <-a.refreshUrgent:
 			// A server-announced change (revocation, peer change) is never kept waiting for the budget, only
@@ -285,19 +291,29 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			// keeps its backoff.
 			if failures == 0 && !urgent {
 				wait := max(0, urgentRefreshSpacing-time.Since(lastUrgent))
-				lastUrgent, urgent = time.Now().Add(wait), true
+				lastUrgent, urgent, announced = time.Now().Add(wait), true, true
 				earlier(wait)
 			}
 		case <-a.refreshWake:
 			// A configuration applied elsewhere may expire sooner than the current schedule.
 			earlier(a.nextRefresh(nil, 0, unusable))
 		case <-timer.C:
-			if a.budgeted() {
-				if wait := renewalBudget.take(time.Now(), urgent); wait > 0 {
+			if announced {
+				if wait := events.take(time.Now(), false); wait > 0 {
 					reset(wait)
 					continue
 				}
 			}
+			if a.budgeted() {
+				if wait := renewalBudget.take(time.Now(), urgent); wait > 0 {
+					if announced {
+						events.refund() // nothing was sent; a storm must not drain the bucket on deferred attempts
+					}
+					reset(wait)
+					continue
+				}
+			}
+			announced = false
 			urgent = false
 			request, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := a.refresh(request, client, time.Time{})
@@ -315,7 +331,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				report(denial)
 			}
 			if err == nil {
-				if _, usable := a.regionalRenewalDelay(serverclock.Now()); usable {
+				if a.regionalUsable(serverclock.Now()) {
 					unusable = 0
 				} else {
 					unusable++
@@ -357,7 +373,8 @@ func (a *Authority) knowSigningKeys(ctx context.Context, tokens []string) error 
 // regionalUnusableRetry and regionalUnusableRetryMaximum space renewals while the signed configuration
 // names no usable relay (a relay outage, or relays withheld): every engine renewing every ~9 s, or every
 // second before, for as long as that lasted is the whole fleet polling. No topic announces a relay coming
-// back, so the cap bounds how long a recovered relay waits to be used.
+// back, so the cap bounds how long a recovered relay waits to be used. Only an engine without any usable
+// relay retries; one holding a relay connection waits for the safety refresh.
 const (
 	regionalUnusableRetry        = 8 * time.Second
 	regionalUnusableRetryMaximum = time.Minute
@@ -366,18 +383,17 @@ const (
 // nextRefresh is the wait before the next refresh after one that ended with err (nil on success),
 // failures consecutive failures and unusable consecutive renewals that brought no usable relay.
 func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration {
-	delay := regionalRefreshDelay()
+	// Changes arrive as server announcements (RequestUrgentRefresh, RequestRefresh), a stream's new grant
+	// asks RefreshForAdmission, and a relay picked for a new connection asks on demand; this cadence is only
+	// the safety net. Held relays need no fresh observations (Eligible), so recovery no longer renews before
+	// they end: that kept every engine fetching every ~12 s while idle (pbvm4 dev-a0d9ac57: about 20 a minute
+	// per machine).
+	delay := safetyRefreshDelay()
 	a.relay.mu.Lock()
 	recovering := a.relay.recovery != nil
 	a.relay.mu.Unlock()
-	// Signed health observations expire regionalObservationMaxAge after they were
-	// made, not after they were issued. Active regional recovery renews before the
-	// earliest one ends, so its relays are not withdrawn between renewals.
-	if recovering {
+	if recovering && unusable > 0 {
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
-		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {
-			delay = due
-		}
 	}
 	// A signed configuration may be much shorter than the regional cadence.
 	// Reserve half its remaining lifetime (at most the request bound) for
@@ -395,34 +411,15 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	return a.refreshDelay(delay)
 }
 
-// regionalRenewBefore is how long before the earliest signed observation ends a renewal starts;
-// regionalMinimumRenewal bounds renewals when the server's observations arrive already old.
-const (
-	regionalRenewBefore    = 3 * time.Second
-	regionalMinimumRenewal = 4 * time.Second
-)
-
-// regionalRenewalDelay is when to renew so the eligible relays' observations stay fresh. It
-// reports false when no relay is eligible.
-func (a *Authority) regionalRenewalDelay(now time.Time) (time.Duration, bool) {
+// regionalUsable reports whether a relay can carry traffic: one the engine already uses, or one with fresh
+// signed observations to pick for a new connection.
+func (a *Authority) regionalUsable(now time.Time) bool {
 	a.mu.Lock()
 	candidates := a.regional
+	held := a.heldRelaysLocked()
 	a.mu.Unlock()
-	nodes, _, err := candidates.Eligible("relay", "derp_quic", nil, now)
-	if err != nil || len(nodes) == 0 {
-		return 0, false
-	}
-	return regionalRenewalAfter(nodes, now), true
-}
-
-func regionalRenewalAfter(nodes []RegionalNode, now time.Time) time.Duration {
-	earliest := time.Unix(min(nodes[0].ObservedAt, nodes[0].CapacityObservedAt), 0)
-	for _, n := range nodes[1:] {
-		if observed := time.Unix(min(n.ObservedAt, n.CapacityObservedAt), 0); observed.Before(earliest) {
-			earliest = observed
-		}
-	}
-	return max(earliest.Add(regionalObservationMaxAge-regionalRenewBefore).Sub(now), regionalMinimumRenewal)
+	nodes, _, err := candidates.Eligible("relay", "derp_quic", nil, now, held)
+	return err == nil && len(nodes) > 0
 }
 
 // refreshRetryDelay is the wait after the failures-th consecutive failed refresh: one second,
@@ -440,15 +437,27 @@ const urgentRefreshSpacing = 2 * time.Second
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
 const onDemandRefreshSpacing = time.Second
 
-func regionalRefreshDelay() time.Duration {
+// eventRefreshBurst and eventRefreshRefill bound the renewals announcements and on-demand requests start, per
+// engine: the first few within urgentRefreshSpacing (a revocation still lands within about 2 s), then one per
+// 10 s while a storm lasts. A host runs up to three engines on its machine credential: 3 x (3 + 6) in a minute
+// stays under the server's 30.
+const (
+	eventRefreshBurst  = 3
+	eventRefreshRefill = 10 * time.Second
+)
+
+// safetyRefreshDelay is the jittered safety refresh: 5 to 6 minutes, under half of peernetwork.Lifetime, so a
+// configuration, its relay grants and its candidate set are renewed well before they end even if every change
+// announcement was missed; jitter keeps engines that started together from renewing together.
+func safetyRefreshDelay() time.Duration {
 	var random [1]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return RefreshInterval
+		return safetyRefreshMinimum
 	}
-	// The declared ±20% jitter is bounded to whole milliseconds and never
-	// changes the 30-second average refresh cadence.
-	return 24*time.Second + time.Duration(uint64(random[0])*12_000/255)*time.Millisecond
+	return safetyRefreshMinimum + time.Duration(uint64(random[0])*uint64(time.Minute)/255)
 }
+
+const safetyRefreshMinimum = 5 * time.Minute
 
 // refreshDelay never extends signed validity and avoids a busy loop when the
 // issuer repeatedly returns a configuration at the end of its grant lifetime.

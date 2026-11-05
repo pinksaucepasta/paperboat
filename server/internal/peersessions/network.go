@@ -464,7 +464,9 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	byPeer := map[string]*networkPeer{}
 	admittedPeers := map[string]bool{}
 	scopes := 0
-	expiry := admission.Expiry(s.signer, now)
+	// The signed configuration is a refresh hint, renewed at about half of it and on announced changes; until a
+	// newer one or a revocation it stays in force (offline-capable authority).
+	expiry := admission.Deadline(now, peernetwork.Lifetime)
 	if certExpiry.After(now) && certExpiry.Before(expiry) {
 		expiry = certExpiry
 	}
@@ -718,7 +720,7 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 // billable peers (their workspace has allowance left); a customer-run node (never metered
 // against Paperboat's allowance) relays every peer.
 func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self networkBinding, peers, billable []networkPeer, generation int64, now, authorityExpiry time.Time) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,registry_expires_at,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address),EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
+	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address),EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL AND roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[] ORDER BY region,id LIMIT 33`, self.AccountID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -732,12 +734,11 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		nodes++
 		var nodeID, processEpoch string
 		var nodeGeneration int64
-		var nodeExpiry time.Time
 		var peerRelayEnabled bool
 		var peerRelayWG, peerRelayDisco []byte
 		var peerRelayAddress sql.NullString
 		var customerOwned bool
-		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &nodeExpiry, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress, &customerOwned); err != nil {
+		if err := rows.Scan(&nodeID, &nodeGeneration, &processEpoch, &peerRelayEnabled, &peerRelayWG, &peerRelayDisco, &peerRelayAddress, &customerOwned); err != nil {
 			return nil, err
 		}
 		nodePeers := billable
@@ -754,12 +755,11 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		if peerRelayReady {
 			size = maximumRelayControlPeers
 		}
-		expires := now.Add(time.Minute)
+		// The grant names the relay's node generation and process epoch, so a restarted relay refuses it; it
+		// does not end with the relay's one-minute registry lease (that forced a renewal every minute).
+		expires := now.Add(peernetwork.Lifetime)
 		if authorityExpiry.Before(expires) {
 			expires = authorityExpiry
-		}
-		if nodeExpiry.Before(expires) {
-			expires = nodeExpiry
 		}
 		chunks := relayGrantChunks(self, nodePeers, size, expires.Unix())
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
@@ -955,7 +955,7 @@ func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, acc
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
-	expires := now.Add(time.Minute)
+	expires := now.Add(peernetwork.Lifetime)
 	if authorityExpiry.Before(expires) {
 		expires = authorityExpiry
 	}
