@@ -5355,3 +5355,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane -> Lane C (console) | Operator page "Server nodes" (like global edges): GET /v1/admin/server-nodes -> data.nodes[{id, region, state registered|active|draining, version, commit, started_at, last_seen_at, healthy}]; enroll form POST /v1/admin/server-nodes/enrollments {address, code} with Operator-Target=address, Operator-Reason, Idempotency-Key. Errors: 400 invalid_request/validation_failed, 403 claim_code_mismatch, 409 server_node_exists, 410 claim_code_expired, 502 server_node_unreachable. Types in lib/api-schema.d.ts (eab2e4b39). Drain/remove come later.
 
 2026-11-05 | reliability lane -> update agent | discovery /v1/client-configuration now has control_regions [{id, api_origin, state}] (F21-59, eab2e4b39); clients rank by RTT and fail over (PLAN 3b region map) when you take it. Empty until regional nodes exist.
+
+2026-11-05 | macOS lane | F5-10 M: first revoke run (client macz-2 -> apple) kept pb ssh open 62 s after logout; did not repeat (5.1 s PASS on a fresh client), no investigation per triage.

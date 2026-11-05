@@ -159,9 +159,25 @@ def refusals():
     report(row, 'PASS' if ran and not bad else 'FAIL', ' '.join(l for l in res.splitlines() if l.startswith('CASE'))[:600])
 
 
+REVOKE = r'''A=%s; PB=~/.local/bin/pb
+"$PB" ssh "$A" -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err & pid=$!
+for i in $(seq 1 60); do grep -q session-up ~/slr.out && break; sleep 1; done
+grep -q session-up ~/slr.out || { echo "RESULT no-session $(tr '\n' ' ' < ~/slr.err | cut -c1-200)"; exit 0; }
+start=$(date +%%s.%%N); "$PB" logout >/dev/null 2>&1
+for i in $(seq 1 600); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+end=$(date +%%s.%%N); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid 2>/dev/null
+echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)]"'''
+
+
 def revoke():
-    report('F5-10 revoke', 'SKIP', 'ssh_live_revoke.sh ends the open session with `pb logout` on a FRESH throwaway client and target; '
-           'here that would sign out macl or revoke a real machine')
+    # `pb logout` signs the client out for good, so it only runs on a FRESH throwaway client (REVOKE_CLIENT_CMD).
+    if not os.environ.get('REVOKE_CLIENT_CMD'):
+        report('F5-10 revoke', 'SKIP', 'set REVOKE_CLIENT_CMD to a fresh throwaway client; logout would sign out CLIENT_CMD')
+        return
+    _, out = run('REVOKE_CLIENT_CMD', REVOKE % shlex.quote(ARGS.alias), timeout=240)
+    m = re.search(r'RESULT seconds=([0-9.]+) alive=(\w+)', out)
+    ok = m and float(m.group(1)) <= 15 and m.group(2) == 'no' and re.search(r'access (to \S+ )?was revoked', out, re.I)
+    report('F5-10 revoke', 'PASS' if ok else 'FAIL', out.strip()[-300:])
 
 
 OTHER_USER = r'''B=%s; U=%s
