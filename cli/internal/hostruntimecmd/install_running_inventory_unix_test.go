@@ -5,10 +5,13 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,26 +24,7 @@ import (
 // context.WithoutCancel, with no deadline, and the workspace test hung for 30 minutes. A cancelled install
 // starts no privileged child; a failed one runs the inventory under its own bound.
 func TestFailedInstallInventoryIsBoundedAndCancelledInstallStartsNone(t *testing.T) {
-	home := shorttemp.Dir(t)
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
-	t.Setenv("XDG_RUNTIME_DIR", home)
-	current, _, err := installsource.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := os.ReadFile(current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	executable := filepath.Join(home, "pb-copy")
-	if err := os.WriteFile(executable, body, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	source, err := installsource.Inspect(executable, buildinfo.Version, buildinfo.Distribution)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executable, source, home := suppliedInstallFixture(t)
 	original := privilegedInstallCommand
 	t.Cleanup(func() { privilegedInstallCommand = original })
 	type started struct {
@@ -69,5 +53,61 @@ func TestFailedInstallInventoryIsBoundedAndCancelledInstallStartsNone(t *testing
 	}
 	if want := []started{{"install-supplied", false}, {"inventory", true}}; !reflect.DeepEqual(children, want) {
 		t.Fatalf("failed install started %+v, want the install step then a bounded inventory %+v", children, want)
+	}
+}
+
+// suppliedInstallFixture is an owner-only copy of the test binary as a supplied pb, in a fresh home.
+func suppliedInstallFixture(t *testing.T) (string, installsource.Source, string) {
+	t.Helper()
+	home := shorttemp.Dir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_RUNTIME_DIR", home)
+	current, _, err := installsource.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(home, "pb-copy")
+	if err := os.WriteFile(executable, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(executable, buildinfo.Version, buildinfo.Distribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return executable, source, home
+}
+
+// soft-g-11051952: a newer pb downgrading to dev-ab41be003 sent `inventory` to that build's service, which
+// predates it; the user saw "privileged cleanup returned an invalid result". The service's usage exit becomes
+// a typed error that names the step and the version.
+func TestInventoryOnAnOlderServiceNamesTheVersionNotAnInvalidResult(t *testing.T) {
+	if code := Execute(t.Context(), []string{"service", "a-verb-from-a-newer-pb"}, strings.NewReader(""), io.Discard, io.Discard); code != ServiceUsageExitCode {
+		t.Fatalf("unknown service operation exited %d, want %d", code, ServiceUsageExitCode)
+	}
+	executable, source, home := suppliedInstallFixture(t)
+	originalCommand, originalInspect := privilegedInstallCommand, inspectInventoryExecutable
+	t.Cleanup(func() { privilegedInstallCommand, inspectInventoryExecutable = originalCommand, originalInspect })
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		if arguments[len(arguments)-1] == "inventory" {
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit "+strconv.Itoa(ServiceUsageExitCode))
+		}
+		return exec.CommandContext(ctx, "/bin/false")
+	}
+	inspectInventoryExecutable = func(context.Context, string) (installsource.Source, error) {
+		return installsource.Source{Version: "dev-ab41be003"}, nil
+	}
+	_, err := InstallRunningBinary(t.Context(), executable, source, filepath.Join(home, "bin"), "")
+	var unsupported InventoryUnsupportedError
+	if !errors.As(err, &unsupported) || unsupported.Version != "dev-ab41be003" {
+		t.Fatalf("err = %v, want InventoryUnsupportedError naming dev-ab41be003", err)
+	}
+	message := runtimeFailureMessage(err)
+	if strings.Contains(err.Error()+message, "invalid result") || !strings.Contains(err.Error(), "Paperboat dev-ab41be003 cannot run the install inventory (it is older than this pb); install it with its own installer") {
+		t.Fatalf("failure reads %q / %q", err.Error(), message)
 	}
 }

@@ -151,7 +151,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		callCtx, cancel := context.WithTimeout(callCtx, installInventoryTimeout)
 		defer cancel()
 		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", "inventory")
-		return runInventoryCommand(callCtx, command)
+		return runInventoryCommand(callCtx, command, installerExecutable)
 	}
 	if err = invoke(ctx, "install-supplied"); err != nil {
 		if ctx.Err() != nil {

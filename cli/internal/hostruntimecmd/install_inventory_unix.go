@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
@@ -411,13 +412,36 @@ func runInstallInventory(ctx context.Context, uid int, check bool) error {
 	return newHostUnixSweep(plan).settleInventory(ctx, check)
 }
 
-// runInventoryCommand runs the privileged inventory and turns what it could not
-// remove into a failure that names each item.
-func runInventoryCommand(ctx context.Context, command *exec.Cmd) error {
+// InventoryUnsupportedError is an executable whose privileged service has no install inventory: a
+// build older than the pb driving the install (a downgrade). Version is empty when it cannot be read.
+type InventoryUnsupportedError struct{ Version string }
+
+func (e InventoryUnsupportedError) Error() string {
+	name := "this Paperboat build"
+	if e.Version != "" {
+		name = "Paperboat " + e.Version
+	}
+	return name + " cannot run the install inventory (it is older than this pb); install it with its own installer"
+}
+
+// inspectInventoryExecutable reads the version of the executable that ran the inventory.
+var inspectInventoryExecutable = installsource.InspectCandidate
+
+// runInventoryCommand runs the privileged inventory with executable and turns what it could not remove
+// into a failure that names each item.
+func runInventoryCommand(ctx context.Context, command *exec.Cmd, executable string) error {
 	var output purgeOutput
 	command.Stdout = &output
 	command.Stderr = os.Stderr
 	err := command.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == ServiceUsageExitCode {
+		unsupported := InventoryUnsupportedError{}
+		if source, inspectErr := inspectInventoryExecutable(ctx, executable); inspectErr == nil {
+			unsupported.Version = source.Version
+		}
+		return runtimeFailure(unsupported.Error(), unsupported, err)
+	}
 	if output.exceeded {
 		return runtimeFailure("the install inventory result exceeded its bound", err)
 	}

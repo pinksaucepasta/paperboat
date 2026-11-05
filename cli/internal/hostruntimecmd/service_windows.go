@@ -33,7 +33,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _
 		return runServiceBridge(ctx, args[1:])
 	}
 	if len(args) != 1 {
-		return errors.New("service requires install, commit, uninstall, uninstall-persisted, purge, repair, or stop")
+		return serviceUsageError{"service requires install, commit, uninstall, uninstall-persisted, purge, repair, or stop"}
 	}
 	switch args[0] {
 	case "uninstall-persisted":
@@ -90,7 +90,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _
 			return uninstallWindowsRuntime(ctx, request)
 		}
 	default:
-		return errors.New("service requires install, commit, uninstall, uninstall-persisted, purge, repair, or stop")
+		return serviceUsageError{"service requires install, commit, uninstall, uninstall-persisted, purge, repair, or stop"}
 	}
 }
 
