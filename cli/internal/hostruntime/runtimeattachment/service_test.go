@@ -767,9 +767,81 @@ func TestRetiringWorkerKeepsItsCarrierForHeldBrowserTerminals(t *testing.T) {
 			if err := service.Shutdown(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if waited := time.Since(closing); waited >= handoverQuiet {
-				t.Fatalf("Shutdown waited %v for a second handover", waited)
+			// No second goaway: Shutdown waits at most until the edge has been quiet for handoverQuiet.
+			if waited := time.Since(closing); waited >= handoverQuiet+500*time.Millisecond {
+				t.Fatalf("Shutdown waited %v, want at most handoverQuiet after the last request", waited)
 			}
 		})
+	}
+}
+
+// pbvm1 vm1-1a6479a4-124638: the held browser terminal ended at 12:51:13.7, so the drain returned and
+// Shutdown closed the old carriers at once, while the edge still had the tunnel route on the old carrier
+// until 20.86: a request hung 5 s and failed. Shutdown keeps serving until the edge has opened no stream
+// for handoverQuiet, never longer than carrierDrainGrace.
+func TestShutdownAfterTheHandoverServesWhileTheEdgeStillSendsRequests(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if hubs, _ := service.Hubs(); len(hubs) != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime carrier never came into service")
+		}
+	}
+	service.attached = func() int { return 0 }
+	drained := make(chan error, 1)
+	go func() { drained <- service.DrainBrowserTerminals(ctx) }()
+	var request connector.StreamOpen
+	for {
+		stream, open, err := edge.AcceptStream(ctx)
+		if err != nil {
+			t.Fatalf("no goaway: %v", err)
+		}
+		_ = stream.Close()
+		if open.Kind == sharedprotocol.Goaway {
+			request = open
+			break
+		}
+	}
+	if err := <-drained; err != nil {
+		t.Fatal(err)
+	}
+	request.Kind = "http"
+	send := func(index int) error {
+		request.RequestID = fmt.Sprintf("request-%d", index)
+		stream, err := edge.OpenStream(ctx)
+		if err == nil {
+			err = connectorprotocol.WriteStreamOpen(stream, request)
+			_ = stream.Close()
+		}
+		return err
+	}
+	for index := range 3 {
+		if err := send(index); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	shutdown := make(chan struct{})
+	go func() { _ = service.Shutdown(context.Background()); close(shutdown) }()
+	// The edge still holds a route on this carrier and keeps sending it requests.
+	until := time.Now().Add(handoverQuiet + time.Second)
+	for index := 3; time.Now().Before(until); index++ {
+		select {
+		case <-shutdown:
+			t.Fatal("Shutdown closed the carrier while the edge still sent it requests")
+		case <-time.After(200 * time.Millisecond):
+		}
+		if err := send(index); err != nil {
+			t.Fatalf("the retiring worker stopped serving while the edge still sent it requests: %v", err)
+		}
+	}
+	select {
+	case <-shutdown:
+	case <-time.After(handoverQuiet + time.Second):
+		t.Fatal("Shutdown did not close after the edge stopped sending it requests")
 	}
 }

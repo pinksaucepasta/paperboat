@@ -260,7 +260,8 @@ func (s *Service) handOver(ctx context.Context) {
 	s.handover.Do(func() {
 		s.leaving.Store(true)
 		s.sendGoaways()
-		s.awaitHandover(ctx, time.Now())
+		now := time.Now()
+		s.awaitHandover(ctx, now, now)
 	})
 }
 
@@ -303,6 +304,9 @@ func (s *Service) DrainBrowserTerminals(ctx context.Context) error {
 
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.handOver(ctx)
+	// An earlier drain (browser terminals) may have ended while an edge still holds a route only on this
+	// worker's carrier (pbvm1 vm1-1a6479a4-124638, the tunnel route for 7 s): serve until it stops sending.
+	s.awaitHandover(ctx, time.Now(), time.Time{})
 	// Canceling closes the carriers.
 	s.mu.Lock()
 	if s.cancel != nil {
@@ -793,15 +797,15 @@ var terminalDrainLimit = runtimewire.DrainLimit
 // endpoint admission within a second) and this worker may close.
 const handoverQuiet = 2 * time.Second
 
-// awaitHandover waits, after the goaways sent at start, until no edge opened a stream on a live
-// carrier for handoverQuiet, at most carrierDrainGrace.
-func (s *Service) awaitHandover(ctx context.Context, start time.Time) {
+// awaitHandover waits until no edge opened a stream on a live carrier for handoverQuiet, counted from the
+// later of quietSince and the last stream, at most carrierDrainGrace after start.
+func (s *Service) awaitHandover(ctx context.Context, start, quietSince time.Time) {
 	deadline := start.Add(carrierDrainGrace)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		hubs, _ := s.Hubs()
-		last := start
+		last := quietSince
 		for _, hub := range hubs {
 			if at := hub.LastStream(); at.After(last) {
 				last = at
