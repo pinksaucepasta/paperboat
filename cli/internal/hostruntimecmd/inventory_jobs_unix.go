@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -35,8 +36,11 @@ func hostJobs(plan unixPurgePlan) func(context.Context) (map[int]string, error) 
 			if err != nil {
 				return nil, err
 			}
-			output, err = exec.CommandContext(ctx, "/usr/bin/systemctl", "--user", "--machine="+account.Username+"@", "show", "--property=Id,MainPID", "paperboatd.service").Output()
+			command, err := userSystemctl(ctx, account, "show", "--property=Id,MainPID", "paperboatd.service")
 			if err != nil {
+				return nil, err
+			}
+			if output, err = command.Output(); err != nil {
 				return nil, fmt.Errorf("read the user daemon unit of %s: %w", account.Username, err)
 			}
 			for pid, unit := range parseSystemdMainPIDs(string(output)) {
@@ -81,6 +85,24 @@ func hostImageInodes(plan unixPurgePlan) func(context.Context, int) ([]uint64, e
 		}
 		return parseLsofInodes(string(output)), nil
 	}
+}
+
+// userSystemctl runs `systemctl --user` as the account itself against its manager's private socket
+// ($XDG_RUNTIME_DIR/systemd/private). `--machine=user@` from root needs the account's D-Bus session bus,
+// which minimal servers and containers lack ("Transport endpoint is not connected").
+func userSystemctl(ctx context.Context, account *user.User, arguments ...string) (*exec.Cmd, error) {
+	uid, err := strconv.ParseUint(account.Uid, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("read the uid of %s: %w", account.Username, err)
+	}
+	gid, err := strconv.ParseUint(account.Gid, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("read the gid of %s: %w", account.Username, err)
+	}
+	command := exec.CommandContext(ctx, "/usr/bin/systemctl", append([]string{"--user"}, arguments...)...)
+	command.Env = []string{"XDG_RUNTIME_DIR=/run/user/" + account.Uid}
+	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}}
+	return command, nil
 }
 
 // parseSystemdMainPIDs reads `systemctl show --property=Id,MainPID` blocks.
