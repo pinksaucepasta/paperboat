@@ -35,15 +35,19 @@ import (
 )
 
 type relayAuthority struct {
-	mu              sync.Mutex
-	tokens          map[string]string
-	grants          map[string]derpquic.Grant
-	config          *tls.Config
-	node            RegionalNode
-	factory         magicsock.DERPCarrierFactory
-	peerNodes       []*tailcfg.Node
-	controlPeers    []key.NodePublic
-	nodes           map[tailcfg.DERPRegionID]RegionalNode
+	mu           sync.Mutex
+	tokens       map[string]string
+	grants       map[string]derpquic.Grant
+	config       *tls.Config
+	node         RegionalNode
+	factory      magicsock.DERPCarrierFactory
+	peerNodes    []*tailcfg.Node
+	controlPeers []key.NodePublic
+	nodes        map[tailcfg.DERPRegionID]RegionalNode
+	// listed is the last relay each region was listed with. magicsock builds a region's carrier lazily and keeps
+	// it while the region is unchanged, so a carrier built while its relay was momentarily missing from nodes
+	// took an empty relay (no address, no pin) for good (pbmac 2026-11-05). Written by setRelayNodesLocked.
+	listed          map[tailcfg.DERPRegionID]RegionalNode
 	usagePeers      map[key.NodePublic]*relayUsageObservation
 	generationUsage map[[32]byte]map[key.NodePublic]*relayUsageObservation
 	// hostedData holds one channel per peer that is closed by the next WireGuard data crossing a
@@ -366,7 +370,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	if len(regions) == 0 && only != "" {
 		return nil, ErrRegionalAuthority
 	}
-	a.relay.nodes = selected
+	a.setRelayNodesLocked(selected)
 	a.relay.updateUsagePeersLocked(a.current.Peers)
 	a.relay.node = RegionalNode{}
 	if len(regions) != 0 {
@@ -529,6 +533,20 @@ func (a *Authority) relayToken(node RegionalNode) (string, error) {
 	return a.relay.tokens[node.NodeID], nil
 }
 
+// setRelayNodesLocked installs the current relay set and remembers each region's relay; a.relay.mu held.
+func (a *Authority) setRelayNodesLocked(nodes map[tailcfg.DERPRegionID]RegionalNode) {
+	a.relay.nodes = nodes
+	if len(a.relay.listed) > 2*MaxRegionalCandidates {
+		a.relay.listed = nil // bounded: relays long gone are forgotten, the current set is kept below
+	}
+	if a.relay.listed == nil {
+		a.relay.listed = make(map[tailcfg.DERPRegionID]RegionalNode, len(nodes))
+	}
+	for id, node := range nodes {
+		a.relay.listed[id] = node
+	}
+}
+
 func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byte, disco key.DiscoPublic) magicsock.DERPCarrierFactory {
 	return func(_ key.NodePrivate, region func() *tailcfg.DERPRegion) magicsock.DERPCarrier {
 		r := region()
@@ -536,6 +554,11 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 		var node RegionalNode
 		if r != nil {
 			node = a.relay.nodes[r.RegionID]
+			// The relay this region was defined for, while it is momentarily unlisted; its dials then wait as
+			// errRelayNotCurrent until it is listed again. Another identity under the same ID is not used.
+			if listed := a.relay.listed[r.RegionID]; node.NodeID == "" && regionForNode(listed).RegionName == r.RegionName {
+				node = listed
+			}
 		}
 		a.relay.mu.Unlock()
 		credential := a.relayCredential(node)

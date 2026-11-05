@@ -401,7 +401,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 			eligible = append(eligible, n)
 		}
 	}
-	a.relay.nodes = next
+	a.setRelayNodesLocked(next)
 	peers := make(map[key.NodePublic]NetworkPeer)
 	for _, p := range a.current.Peers {
 		active := false
