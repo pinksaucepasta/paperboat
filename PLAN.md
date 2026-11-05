@@ -1081,7 +1081,7 @@ IdP's job), SAML-only Paperboat accounts without email.
 - S3-03: Server, relay and tunnel multi-arch images built from the release commit, published, and deployed to our infrastructure with the installer's upgrade path.
 - S3-04: Full smoke suite (every feature F1–F15) green on the release build on L, M, W.
 - S3-05: User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified).
-- S3-06: Operator admin frontend: **USER DECIDES**.
+- S3-06: Operator admin frontend: decided 2026-11-05, none; operator actions are API-only (/v1/admin/*).
 
 ### 3a. Shared endpoint engine: server and edge design (Lane M, approved 2026-10-22)
 
@@ -3079,8 +3079,7 @@ Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-w
   operator action.
 - **Failover.** A dead node drops out of the map after 30 s without a heartbeat; clients move to the next region.
   Database primary failover is as described above. No node holds a role that needs an election.
-- **Console:** an operator page listing server nodes (region, name, state, version, lag, last seen) with enroll,
-  drain and remove, like global edges. That is the console lane's work, requested in the Log once approved.
+- **Operator surface:** API only (user decided 2026-11-05): GET /v1/admin/server-nodes, POST /v1/admin/server-nodes/enrollments, .../{id}/drain, .../{id}/remove; no console page.
 
 #### Inspector: a fresh machine's first preview can miss its first requests (Lane I, open, 2026-10-24)
 
@@ -5393,3 +5392,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | update agent deploys | server 2026.11.05.7 @dca72cb04 (05:50Z; DNS-01 PASS by reliability lane); tunnel+relay .7 both edges; relay per-edge forced-relay check PASS. Server .8 @33e9fc528 (PQ-04) rolled back twice (07:06Z, 07:12Z): on-demand leaf requests answered 503 during issuance (ErrIssuanceLocked); fix with reliability lane, console stays "N of 0" until it ships.
 2026-11-05 | update agent edges | tunnel 2026.11.05.10 @4210d25f6 on oracle 07:37Z + anvit 07:39Z: readiness gate before probes, expected answers not control failures, rollout resend (not register), on-demand leaf wait 25 s; strict gate (no startup skip) PASS, 0 control failures since start on both.
 2026-11-05 | update agent feature runs | dadape cannot judge the 1 s bar (Pi 5 SD card, iowait 75-95 % under probe load, exec 7 s median pre-update); found orphaned exec cat + session owners after client timeout and session_owner_reconcile 2-min deadline -> fixing before the pbvm4 verdict.
+
+2026-11-05 | reliability lane -> Lane C | Withdrawn: the two server-node console page requests above (Operator page "Server nodes"; drain/remove). User decided 2026-11-05: operator actions are API-only via /v1/admin/*; S3-06 n/a.
