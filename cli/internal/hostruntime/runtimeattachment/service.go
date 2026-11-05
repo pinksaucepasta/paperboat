@@ -72,7 +72,7 @@ type Service struct {
 	hubsMu sync.Mutex
 	hubs   map[string]*preview.DataCarrierPreviewHub
 	// goaways tells each edge of a live carrier that it is going away (T10), keyed like hubs.
-	goaways     map[string]func()
+	goaways     map[string]func(context.Context)
 	hubsChanged chan struct{}
 	served      bool
 	// tunnelsServed: every edge of the attachment serves this agent's tunnels as endpoint routes
@@ -114,7 +114,7 @@ func (s *Service) Hubs() ([]*preview.DataCarrierPreviewHub, <-chan struct{}) {
 	return out, s.hubsChanged
 }
 
-func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub, goaway func()) {
+func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub, goaway func(context.Context)) {
 	s.hubsMu.Lock()
 	defer s.hubsMu.Unlock()
 	if hub == nil {
@@ -227,7 +227,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, goaways: map[string]func(){}, hubsChanged: make(chan struct{}), tunnelsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
+	return &Service{hubs: map[string]*preview.DataCarrierPreviewHub{}, goaways: map[string]func(context.Context){}, hubsChanged: make(chan struct{}), tunnelsChanged: make(chan struct{}), answered: make(chan struct{}), config: config, auth: auth, client: &http.Client{Transport: config.Transport, Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("runtime attachment redirect refused") }}, sessions: sessions, processID: processID}, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -259,7 +259,7 @@ func (s *Service) Start(ctx context.Context) error {
 func (s *Service) handOver(ctx context.Context) {
 	s.handover.Do(func() {
 		s.leaving.Store(true)
-		s.sendGoaways()
+		s.sendGoaways(ctx)
 		now := time.Now()
 		s.awaitHandover(ctx, now, now)
 	})
@@ -730,7 +730,7 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
 		})
 	})
-	goaway := func() {
+	goaway := func(drainCtx context.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		requestID, err := randomID("request")
@@ -747,16 +747,19 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			return
 		}
 		defer stream.Close()
-		if sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayHostDraining, time.Now().Add(carrierDrainGrace)) != nil {
+		if sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayHostDraining, time.Now().Add(runtimewire.DrainLimit)) != nil {
 			return
 		}
-		// The edge closes the stream once it has the notice; wait for that (bounded by ctx) so the
-		// carrier is not torn down first.
+		// The edge closes the stream once no route there still uses this carrier (or the carrier ends,
+		// or the edge's own drain cap): the confirmation the routes moved, as an Envoy/cloudflared drain
+		// waits for its peers. Bounded by drainCtx and runtimewire.DrainLimit.
+		waitCtx, cancelWait := context.WithTimeout(drainCtx, runtimewire.DrainLimit)
+		defer cancelWait()
 		received := make(chan struct{})
 		go func() { _, _ = io.Copy(io.Discard, io.LimitReader(stream, 1)); close(received) }()
 		select {
 		case <-received:
-		case <-ctx.Done():
+		case <-waitCtx.Done():
 		}
 	}
 	s.setHub(key, hub, goaway)
@@ -770,17 +773,18 @@ func runtimeOriginForwarder() tunnelmanager.OriginStreamForwarder {
 	return tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{KeepControlPlaneHeaders: true}}
 }
 
-// sendGoaways tells every edge of a live carrier, in parallel, that it is going away.
-func (s *Service) sendGoaways() {
+// sendGoaways tells every edge of a live carrier, in parallel, that it is going away, and returns once
+// each has confirmed its routes moved (ctx bounds the wait).
+func (s *Service) sendGoaways(ctx context.Context) {
 	s.hubsMu.Lock()
-	goaways := make([]func(), 0, len(s.goaways))
+	goaways := make([]func(context.Context), 0, len(s.goaways))
 	for _, goaway := range s.goaways {
 		goaways = append(goaways, goaway)
 	}
 	s.hubsMu.Unlock()
 	var sent sync.WaitGroup
 	for _, goaway := range goaways {
-		sent.Go(goaway)
+		sent.Go(func() { goaway(ctx) })
 	}
 	sent.Wait()
 }

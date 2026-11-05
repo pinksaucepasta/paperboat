@@ -310,6 +310,22 @@ func (r *DataCarrierPreviewRegistry) detachEntry(entry *dataCarrierPreviewRouteE
 	r.removeStandbyLocked(entry.route.RouteID, func(standby *dataCarrierPreviewRouteEntry) bool { return standby == entry })
 }
 
+// Holds reports whether server is the current carrier of a route here; a standby (replaced by the same
+// machine's newer carrier) does not count. The carrier's goaway answer waits on it (datacarrier.Config.RoutesHeld).
+func (r *DataCarrierPreviewRegistry) Holds(server *datacarrier.Server) bool {
+	if r == nil || server == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.byRoute {
+		if entry.route.Server == server {
+			return true
+		}
+	}
+	return false
+}
+
 // Detach removes a route only when its exact identity and revision are still
 // current. It is idempotent for an already-replaced or absent route.
 func (r *DataCarrierPreviewRegistry) Detach(routeID string, identity datacarrier.Identity, revision uint64) error {

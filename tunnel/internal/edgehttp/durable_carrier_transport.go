@@ -356,6 +356,21 @@ func (r *DataCarrierRouteRegistry) Handle(ctx context.Context, server *datacarri
 	}
 }
 
+// Holds reports whether server is attached here for its routes (datacarrier.Config.RoutesHeld).
+func (r *DataCarrierRouteRegistry) Holds(server *datacarrier.Server) bool {
+	if r == nil || server == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.byKey {
+		if entry.server == server {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *DataCarrierRouteRegistry) Close() error {
 	if r == nil {
 		return nil

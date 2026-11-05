@@ -109,3 +109,32 @@ func TestPreviewPostOnAClosingCarrierIsNotRetried(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+// A carrier holds a route while it is that route's current carrier; once the same machine's newer carrier
+// takes the route it is only the standby and holds none, which tells its retiring host the route moved.
+func TestPreviewRouteHeldOnlyByItsCurrentCarrier(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	newIdentity := testEdgePreviewIdentity(1, 2)
+	newIdentity.SessionID = "session_02"
+	oldServer, _ := testEdgePreviewCarrierPair(t, testEdgePreviewIdentity(1, 1))
+	newServer, _ := testEdgePreviewCarrierPair(t, newIdentity)
+	if registry.Holds(oldServer) {
+		t.Fatal("a carrier with no route holds one")
+	}
+	if err := registry.Attach(failoverRoute(oldServer, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.Holds(oldServer) {
+		t.Fatal("the current carrier does not hold its route")
+	}
+	if err := registry.Attach(failoverRoute(newServer, 8)); err != nil {
+		t.Fatal(err)
+	}
+	if registry.Holds(oldServer) || !registry.Holds(newServer) {
+		t.Fatalf("after the handover: old holds=%v new holds=%v, want false true", registry.Holds(oldServer), registry.Holds(newServer))
+	}
+}

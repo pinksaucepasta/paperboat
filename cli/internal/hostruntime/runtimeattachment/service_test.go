@@ -845,3 +845,49 @@ func TestShutdownAfterTheHandoverServesWhileTheEdgeStillSendsRequests(t *testing
 		t.Fatal("Shutdown did not close after the edge stopped sending it requests")
 	}
 }
+
+// Confirmation-based retirement (Envoy/cloudflared drain): the retiring worker serves until each edge
+// has answered its goaway, which the edge does once no route there still uses this carrier, not after
+// a timer. Here the edge sends nothing for longer than handoverQuiet yet has not moved the routes.
+func TestRetiringWorkerWaitsUntilTheEdgeConfirmsItsRoutesMoved(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if hubs, _ := service.Hubs(); len(hubs) != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime carrier never came into service")
+		}
+	}
+	shutdown := make(chan struct{})
+	go func() { _ = service.Shutdown(context.Background()); close(shutdown) }()
+	var goaway io.Closer
+	for goaway == nil {
+		stream, open, err := edge.AcceptStream(ctx)
+		if err != nil {
+			t.Fatalf("no goaway: %v", err)
+		}
+		if open.Kind == sharedprotocol.Goaway {
+			goaway = stream
+		} else {
+			_ = stream.Close()
+		}
+	}
+	select {
+	case <-shutdown:
+		t.Fatal("the worker closed before the edge confirmed its routes moved")
+	case <-time.After(handoverQuiet + time.Second):
+	}
+	moved := time.Now()
+	_ = goaway.Close()
+	select {
+	case <-shutdown:
+		if waited := time.Since(moved); waited > handoverQuiet+time.Second {
+			t.Fatalf("closed %v after the edge confirmed, want within handoverQuiet", waited)
+		}
+	case <-time.After(handoverQuiet + 3*time.Second):
+		t.Fatal("the worker did not close after the edge confirmed its routes moved")
+	}
+}

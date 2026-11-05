@@ -103,6 +103,9 @@ type Config struct {
 	StreamCloseLimit     time.Duration
 	Identity             Identity
 	Authorize            Authorizer
+	// RoutesHeld reports whether a route here still uses the carrier as its current one. A host's goaway
+	// stream stays open until it does not, so the retiring host knows its routes moved; nil closes it at once.
+	RoutesHeld func(*Server) bool
 }
 
 func DefaultConfig() Config {

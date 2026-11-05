@@ -87,7 +87,8 @@ func (s *Server) readInboundDataStream(raw StreamLink) acceptResult {
 		err = ErrAccessStreamIdentity
 	}
 	if err == nil && open.Kind == connectorprotocol.Goaway {
-		s.readGoaway(raw, deadline)
+		// Off the accept loop: the stream may stay open until this carrier's routes have moved.
+		go s.readGoaway(raw, deadline)
 		return acceptResult{}
 	}
 	if err == nil {
@@ -119,4 +120,16 @@ func (s *Server) readGoaway(raw StreamLink, deadline time.Time) {
 		return
 	}
 	s.drain(time.Unix(notice.DrainDeadline, 0), time.Now())
+	if s.config.RoutesHeld == nil {
+		return
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for s.config.RoutesHeld(s) && s.drainingNow(time.Now()) {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+		}
+	}
 }

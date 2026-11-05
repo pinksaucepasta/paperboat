@@ -88,6 +88,10 @@ func newCarrierComponentWithTelemetry(
 		},
 	}
 	carrierConfig := datacarrier.DefaultConfig()
+	// A retiring host's goaway is answered once no route here still uses its carrier (pb update).
+	carrierConfig.RoutesHeld = func(server *datacarrier.Server) bool {
+		return runtimeWorker != nil && (runtimeWorker.Routes.Holds(server) || runtimeWorker.Endpoints.Holds(server)) || durableRoutes.Holds(server)
+	}
 	// One runtime carrier may hold 100 browser-terminal participants plus
 	// their independent input streams and the shared output publisher stream.
 	// The listener shares this bound with the other authenticated carrier uses.

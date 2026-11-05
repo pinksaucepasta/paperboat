@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,5 +113,61 @@ func TestHostGoawayEndsAtItsDeadline(t *testing.T) {
 	edge.drain(now.Add(-time.Second), now)
 	if edge.drainingNow(now) {
 		t.Fatal("a goaway already past its deadline drained the carrier")
+	}
+}
+
+// pb update, confirmation-based retirement: the edge keeps a host's goaway stream open while this carrier
+// is still the current carrier of a route, and closes it once the newer carrier holds them all (or the
+// carrier ends, or the drain deadline). The retiring host waits on that close, not on a timer.
+func TestHostGoawayStreamStaysOpenUntilTheCarrierHoldsNoRoute(t *testing.T) {
+	config := testCarrierConfig(4)
+	var held atomic.Bool
+	held.Store(true)
+	config.RoutesHeld = func(*Server) bool { return held.Load() }
+	edge, connector := dataCarrierPair(t, config)
+	request := testStreamOpen("route-a", "goaway-host")
+	request.Kind = connectorprotocol.Goaway
+	goaway, err := connector.OpenStream(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer goaway.Close()
+	if err := connectorprotocol.WriteGoawayNotice(goaway, connectorprotocol.GoawayHostDraining, time.Now().Add(10*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-edge.Draining():
+	case <-time.After(2 * time.Second):
+		t.Fatal("host goaway did not drain the carrier")
+	}
+	_ = goaway.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := goaway.Read(make([]byte, 1)); err == nil {
+		t.Fatal("edge answered a goaway with data")
+	} else if timeout, ok := err.(interface{ Timeout() bool }); !ok || !timeout.Timeout() {
+		t.Fatalf("edge closed the goaway stream while the carrier still holds routes: %v", err)
+	}
+	// The held goaway does not stop the carrier from reading the host's next stream.
+	junk := testStreamOpen("route-a", "goaway-junk")
+	junk.Kind = connectorprotocol.Goaway
+	second, err := connector.OpenStream(context.Background(), junk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err := io.WriteString(second, "\x00\x00\x00\x04junk"); err != nil {
+		t.Fatal(err)
+	}
+	_ = second.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := second.Read(make([]byte, 1)); err == nil {
+		t.Fatal("edge answered a goaway with data")
+	} else if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+		t.Fatal("a held goaway blocked the carrier's accept loop")
+	}
+	held.Store(false)
+	_ = goaway.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := goaway.Read(make([]byte, 1)); err == nil {
+		t.Fatal("edge answered a goaway with data")
+	} else if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+		t.Fatal("edge kept the goaway stream open after the routes moved")
 	}
 }
