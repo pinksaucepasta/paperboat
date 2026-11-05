@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -102,20 +103,23 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	// no-reply rekey (pbvm4 update: 7 handshake failures at 1 s, then success at +12 s). Reset the peer's WireGuard
 	// state so the next flow handshakes at once; the client and its sessions stay. A session to the peer that is still
 	// alive means the close was not a restart.
-	if !o.peerHasLiveSession(peerID) {
+	live := o.peerLiveSessions(peerID)
+	if live == 0 {
 		o.authority.ResetPeerPath(client)
 	}
+	diagnosticlog.TryInfo("native packet lifecycle", "stage", "peer_close_handled", "live_sessions", live)
 	return client, nil
 }
 
-// peerHasLiveSession reports whether a session to peerID is still running: one the peer did not close.
-func (o *Owner) peerHasLiveSession(peerID string) bool {
+// peerLiveSessions counts the sessions to peerID still running: ones the peer did not close.
+func (o *Owner) peerLiveSessions(peerID string) int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	live := 0
 	for session := range o.sessions {
 		if session.peerID == peerID && session.quic.Connection.Context().Err() == nil {
-			return true
+			live++
 		}
 	}
-	return false
+	return live
 }
