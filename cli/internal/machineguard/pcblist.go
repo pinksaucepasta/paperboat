@@ -53,7 +53,7 @@ func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 		}
 		if known {
 			if (socketTuple{Source: src, Destination: dst}) == tuple {
-				owners = append(owners, socketOwner{Tuple: tuple, UID: le.Uint32(socket[64:]), Established: le.Uint32(tcpcb[36:]) == tcpsEstablished})
+				owners = append(owners, socketOwner{Tuple: tuple, UID: le.Uint32(socket[64:]), Established: le.Uint32(tcpcb[36:]) == tcpsEstablished, Live: livePCBState(le.Uint32(tcpcb[36:]))})
 			}
 		}
 		inpcb, socket, tcpcb = nil, nil, nil
@@ -132,4 +132,13 @@ func (f *snapshotFlight) get() ([]byte, error) {
 	f.mu.Unlock()
 	close(call.done)
 	return call.buf, call.err
+}
+
+// livePCBState: ESTABLISHED, CLOSE_WAIT, FIN_WAIT_1, CLOSING, LAST_ACK, FIN_WAIT_2 (xnu netinet/tcp_fsm.h).
+func livePCBState(state uint32) bool {
+	switch state {
+	case 4, 5, 6, 7, 8, 9:
+		return true
+	}
+	return false
 }

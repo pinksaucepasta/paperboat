@@ -43,6 +43,9 @@ type socketOwner struct {
 	Tuple       socketTuple
 	UID         uint32
 	Established bool
+	// Live is a socket that still names its user: established or half-closed, not TIME_WAIT/CLOSED (which report
+	// uid 0). A client that wrote and half-closed before the proxy looked is Live but no longer Established.
+	Live bool
 }
 
 // lookupOwners asks the kernel which sockets have tuple. It returns every match.
@@ -68,6 +71,16 @@ func clientTuple(accepted net.Conn) (socketTuple, error) {
 // attributionAttempts times within attributionBudget; an ambiguous, inconsistent or not established answer is refused
 // at once.
 func attributeOwner(tuple socketTuple, lookup lookupOwners) (uint32, error) {
+	return attributeOwnerState(tuple, lookup, false)
+}
+
+// attributeLiveOwner is attributeOwner for a caller that serves a client which may already have sent its request and
+// half-closed (a loopback proxy): the owner of a half-closed socket is still its user.
+func attributeLiveOwner(tuple socketTuple, lookup lookupOwners) (uint32, error) {
+	return attributeOwnerState(tuple, lookup, true)
+}
+
+func attributeOwnerState(tuple socketTuple, lookup lookupOwners, live bool) (uint32, error) {
 	deadline := time.Now().Add(attributionBudget)
 	err := error(errAttributionNotFound)
 	for attempt := 0; attempt < attributionAttempts; attempt++ {
@@ -90,7 +103,7 @@ func attributeOwner(tuple socketTuple, lookup lookupOwners) (uint32, error) {
 			return 0, errAttributionAmbiguous
 		case owners[0].Tuple != tuple:
 			return 0, errAttributionInconsistent
-		case !owners[0].Established:
+		case !owners[0].Established && !(live && owners[0].Live):
 			// A closing or TIME_WAIT socket no longer names its user (time-wait sockets report uid 0).
 			return 0, errAttributionNotFound
 		}

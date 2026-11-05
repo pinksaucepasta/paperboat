@@ -12,5 +12,5 @@ func ConnectionOwnerUID(accepted net.Conn) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	return attributeOwner(tuple, platformLookupOwners)
+	return attributeLiveOwner(tuple, platformLookupOwners)
 }

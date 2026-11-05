@@ -127,9 +127,9 @@ func TestGatewayAttributionRefusesAmbiguousAndInconsistentAnswers(t *testing.T) 
 		answer []socketOwner
 		want   error
 	}{
-		"ambiguous":    {[]socketOwner{{tuple, 1000, true}, {tuple, 1001, true}}, errAttributionAmbiguous},
-		"inconsistent": {[]socketOwner{{other, 1000, true}}, errAttributionInconsistent},
-		"time_wait":    {[]socketOwner{{tuple, 0, false}}, errAttributionNotFound},
+		"ambiguous":    {[]socketOwner{{tuple, 1000, true, true}, {tuple, 1001, true, true}}, errAttributionAmbiguous},
+		"inconsistent": {[]socketOwner{{other, 1000, true, true}}, errAttributionInconsistent},
+		"time_wait":    {[]socketOwner{{tuple, 0, false, false}}, errAttributionNotFound},
 		"missing":      {nil, errAttributionNotFound},
 	}
 	for name, tc := range cases {
@@ -204,4 +204,24 @@ func mustClientTuple(t *testing.T, accepted net.Conn) socketTuple {
 		t.Fatal(err)
 	}
 	return tuple
+}
+
+// The proxy regression (cmd/pb TestAccessMachineForwardsFreshAuthorizedFlowsAndHalfClose): a client that writes and
+// half-closes right after connecting must still be attributed to its user by the real kernel lookup.
+func TestConnectionOwnerUIDAttributesAClientThatAlreadyHalfClosed(t *testing.T) {
+	client, accepted := gatewayPair(t, gatewayListener(t), &net.Dialer{})
+	defer client.Close()
+	defer accepted.Close()
+	if _, err := client.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		uid, err := ConnectionOwnerUID(accepted)
+		if err != nil || uid != uint32(os.Getuid()) {
+			t.Fatalf("attempt %d: uid %d, %v; want this process's uid", i, uid, err)
+		}
+	}
 }

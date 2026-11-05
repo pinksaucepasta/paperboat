@@ -141,5 +141,15 @@ func parseInetDiagMessage(data []byte) (socketOwner, error) {
 		Tuple:       socketTuple{Source: source, Destination: destination},
 		UID:         binary.NativeEndian.Uint32(data[64:]),
 		Established: data[1] == tcpEstablished,
+		Live:        livePeerState(data[1]),
 	}, nil
+}
+
+// livePeerState: ESTABLISHED, FIN_WAIT1, FIN_WAIT2, CLOSE_WAIT, LAST_ACK, CLOSING (include/net/tcp_states.h).
+func livePeerState(state byte) bool {
+	switch state {
+	case 1, 4, 5, 8, 9, 11:
+		return true
+	}
+	return false
 }
