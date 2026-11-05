@@ -14,7 +14,7 @@ type Counts struct {
 // Total is every open connection.
 func (c Counts) Total() int { return c.SSH + c.Forwards }
 
-var ssh, forwards atomic.Int64
+var ssh, forwards, peerStreams atomic.Int64
 
 // TrackSSH records one open SSH-family stream; call the returned function once when it closes.
 func TrackSSH() func() { return track(&ssh) }
@@ -22,6 +22,14 @@ func TrackSSH() func() { return track(&ssh) }
 // TrackForward records one open local access forward connection; call the returned function once
 // when it closes.
 func TrackForward() func() { return track(&forwards) }
+
+// TrackPeerStream records one local API peer stream (exec, terminal, SSH, config comparison) a command
+// runs through this daemon; call the returned function once when it closes.
+func TrackPeerStream() func() { return track(&peerStreams) }
+
+// Held is every connection this daemon process carries for commands: local access forwards and peer
+// streams. A draining daemon generation exits when it reaches zero.
+func Held() int { return int(forwards.Load() + peerStreams.Load()) }
 
 func track(counter *atomic.Int64) func() {
 	counter.Add(1)

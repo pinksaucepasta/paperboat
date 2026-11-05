@@ -14,7 +14,8 @@ import (
 )
 
 // daemonGenerationLines describes each running daemon generation: the live one, and every one still
-// draining the forwarded connections it held at an upgrade, with its stream count and drain deadline.
+// draining the connections (forwards, execs, terminals, SSH) it held at an upgrade, with their count and
+// its drain deadline.
 func daemonGenerationLines(now time.Time) ([]string, error) {
 	paths, err := currentLocalDaemonPaths()
 	if err != nil {
@@ -26,7 +27,7 @@ func daemonGenerationLines(now time.Time) ([]string, error) {
 	}
 	lines := make([]string, 0, len(states))
 	for _, state := range states {
-		line := fmt.Sprintf("%s %s: %d forwarded connection", state.State, state.Generation[:8], state.Streams)
+		line := fmt.Sprintf("%s %s: %d held connection", state.State, state.Generation[:8], state.Streams)
 		if state.Streams != 1 {
 			line += "s"
 		}

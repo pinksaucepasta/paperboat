@@ -669,6 +669,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	go watchPeerHangup(streamCtx, local, peer, cancel)
 	go func() {
 		defer cancel()
+		defer liveconnections.TrackPeerStream()()
 		if value.Consumer == "ssh" {
 			defer liveconnections.TrackSSH()()
 		}

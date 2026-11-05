@@ -236,7 +236,9 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil || retired {
 				return err
 			}
-			_ = generation // the network identity of this generation (PeerTerminalConfig.Generation)
+			// Registered at once: a SIGQUIT that arrives while starting waits for the drain hand-over.
+			quit := notifyQuit()
+			drain := newDrainer()
 			paths, err := currentLocalDaemonPaths()
 			if err != nil {
 				return err
@@ -292,7 +294,7 @@ func localDaemonCommand() *cobra.Command {
 			// about it rarely instead of once per loop iteration.
 			controlTransport := &controlbackoff.Transport{Base: peerHTTPTransport, Host: controlHost(cfg.ServerURL)}
 			source.HTTPClient = &http.Client{Transport: controlTransport}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, LocalMachineID: machineID})
+			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, LocalMachineID: machineID, Generation: generation, OnIdentityRevoked: drain.identityRevoked})
 			if err != nil {
 				return err
 			}
@@ -301,13 +303,18 @@ func localDaemonCommand() *cobra.Command {
 					resultErr = coordinatorFailure("Paperboat daemon cleanup failed", resultErr, cleanupErr)
 				}
 			}()
+			// The live part (local API, lock, inventory, events, network registration) ends on SIGQUIT;
+			// the native runtime and the accepted forwards stay until the drain ends. Nothing that runs
+			// after it may register this generation again (tunnel.ErrGenerationRetiring).
+			liveCtx, stopLive := context.WithCancel(command.Context())
+			defer stopLive()
 			// steps is the daemon's one step tracker: failing start steps and loops show in pb status and pb doctor.
 			steps := health.New(buildinfo.Version, nil, nil)
 			if profileErr == nil {
 				// Peers learn this daemon's identity before its first command, so a failed registration is
 				// retried with backoff until it succeeds instead of waiting for that command.
 				go func() {
-					_ = steps.Retry(command.Context(), localdaemon.StepRegisterNetwork, registerNetworkFirstRetry, registerNetworkMaximumRetry, func(ctx context.Context) error {
+					_ = steps.Retry(liveCtx, localdaemon.StepRegisterNetwork, registerNetworkFirstRetry, registerNetworkMaximumRetry, func(ctx context.Context) error {
 						registerCtx, cancelRegister := context.WithTimeout(ctx, 30*time.Second)
 						defer cancelRegister()
 						return peerTunnel.RegisterNetwork(registerCtx)
@@ -350,6 +357,11 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The previous generation hands over the lock, then its sockets, on SIGQUIT (pb install).
+			withLock, err := takeDaemonLock(command.Context(), paths)
+			if err != nil {
+				return err
+			}
 			if err = coordinator.Start(command.Context()); err != nil {
 				return err
 			}
@@ -362,7 +374,23 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runWithCoordinatorFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
+			defer withdrawGenerationState(paths, generation)
+			liveDone := make(chan struct{})
+			drain.coordinator, drain.identity, drain.stopLive, drain.publish = coordinator, peerTunnel, stopLive, publishDrain(paths, generation)
+			quitWatched := make(chan error, 1)
+			go func() {
+				select {
+				case <-quit:
+					quitWatched <- drain.begin(command.Context())
+				case <-liveCtx.Done():
+					quitWatched <- nil
+				}
+			}()
+			runErr := runWithCoordinatorFailure(liveCtx, coordinator.Errors(), func(ctx context.Context) error {
+				go func() {
+					defer close(liveDone)
+					runLiveGeneration(ctx, paths, generation)
+				}()
 				go newRelayLatencyReporter(cfg.ServerURL, source.SourceMachineID, controlTransport, func(ctx context.Context) (config.Credential, error) {
 					return authSource.WithContext(ctx).Credential()
 				}, peerTunnel.NativeRelayCandidates).Run(ctx)
@@ -402,7 +430,7 @@ func localDaemonCommand() *cobra.Command {
 				}
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				teamShared := &teamSharedMachines{}
-				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
+				return localdaemon.Run(ctx, withLock(localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, Steps: steps,
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
@@ -449,8 +477,15 @@ func localDaemonCommand() *cobra.Command {
 						}
 						return inventory, nil
 					},
-				})
+				}))
 			})
+			stopLive()
+			beginErr := <-quitWatched
+			<-liveDone // the live state stops before the drain reports its own
+			if !drain.begun.Load() {
+				return runErr
+			}
+			return errors.Join(beginErr, drain.finish(drain.wait(command.Context())))
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
