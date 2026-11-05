@@ -177,7 +177,6 @@ type Authority struct {
 	reported         *[]string // the last endpoint set the server accepted; nil before the first
 	clients          map[string]authorizedClient
 	withdrawing      map[string]withdrawnPeer // withdrawal.go
-	declinedOffers   map[string][32]byte      // carrier_offer.go
 	clientSlots      chan struct{}
 	regional         *RegionalCandidates
 	relay            relayAuthority
