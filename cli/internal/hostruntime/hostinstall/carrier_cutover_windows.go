@@ -17,7 +17,7 @@ import (
 
 // stageWindowsCarrierUpgrade starts request's carrier generation beside the serving one, before the cutover: as a
 // standby it prepares nothing that touches the machine's state or network until switchNetwork (Linux and macOS:
-// stageUnixCarrierUpgrade). nil means nothing to stage: no carrier yet (the activation creates the first), or the
+// stageUnixUpgrade). nil means nothing to stage: no carrier yet (the activation creates the first), or the
 // serving one already runs request's source.
 func stageWindowsCarrierUpgrade(ctx context.Context, request Request) (*carrierUpgrade, error) {
 	instance, err := WindowsInstanceForSID(request.OwnerSID)
