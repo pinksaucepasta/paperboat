@@ -16,6 +16,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 )
 
 type PublicTCPAuthority interface {
@@ -77,7 +79,7 @@ func NewPublicTCPListeners(cfg PublicTCPListenerConfig) (*PublicTCPListeners, er
 		return nil, errors.New("public TCP listener bounds are invalid")
 	}
 	if cfg.Listen == nil {
-		cfg.Listen = net.Listen
+		cfg.Listen = handover.Listen
 	}
 	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener), connections: make(chan struct{}, cfg.MaximumConnections)}, nil
 }

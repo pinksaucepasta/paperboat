@@ -13,6 +13,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 	_ "github.com/pinksaucepasta/paperboat/tunnel/internal/reportcause"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 )
 
 type Component interface {
@@ -22,6 +24,7 @@ type Component interface {
 
 type Service struct {
 	Reporter   *reporting.Reporter
+	Handover   Handover
 	cfg        config.Config
 	node       *node.State
 	components []Component
@@ -38,7 +41,7 @@ type Service struct {
 }
 
 func New(cfg config.Config, state *node.State, components ...Component) *Service {
-	return &Service{cfg: cfg, node: state, components: components, listen: net.Listen, done: make(chan error, 1), stop: make(chan struct{}), handler: state.HealthHandler()}
+	return &Service{cfg: cfg, node: state, components: components, listen: handover.Listen, done: make(chan error, 1), stop: make(chan struct{}), handler: state.HealthHandler()}
 }
 
 func (s *Service) SetHealthHandler(handler http.Handler) error {
@@ -112,6 +115,18 @@ func (s *Service) Start(ctx context.Context) error {
 		return errors.Join(errors.New("node refused ready transition"), s.shutdownLocked(cleanupCtx))
 	}
 	return nil
+}
+
+// Handover is what an install handover needs from an edge process; the edge assembly sets it.
+type Handover struct {
+	// Epoch is this process's epoch, which a replacement inherits.
+	Epoch string
+	// Drain stops intake gracefully and drains the carriers until deadline (Assembly.Drain).
+	Drain func(ctx context.Context, deadline time.Time)
+	// SetSilent turns this process's node state reports off or on (control.HTTPClient.SetSilent).
+	SetSilent func(bool)
+	// Warm is closed once this process has pulled its admissions.
+	Warm <-chan struct{}
 }
 
 func (s *Service) Done() <-chan error { return s.done }

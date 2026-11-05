@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
@@ -45,6 +46,9 @@ type CarrierAssemblyConfig struct {
 	MaximumHandlers int
 	ObserveError    func(error)
 	Telemetry       *datacarrier.CarrierTelemetry
+	// Goaway, when set, tells one carrier's host that this edge is going away until deadline
+	// (Drain sends it to every carrier).
+	Goaway func(ctx context.Context, server *datacarrier.Server, deadline time.Time) error
 }
 
 // CarrierAssembly owns the accepted datacarrier.Service peers and provides a
@@ -58,7 +62,10 @@ type CarrierAssembly struct {
 	handle          CarrierHandler
 	observeError    func(error)
 	telemetry       *datacarrier.CarrierTelemetry
+	goaway          func(context.Context, *datacarrier.Server, time.Time) error
 	maximumHandlers int
+	// live is every carrier a handler currently serves.
+	live map[*datacarrier.Server]struct{}
 
 	mu         sync.Mutex
 	started    bool
@@ -82,7 +89,8 @@ func NewCarrierAssembly(config CarrierAssemblyConfig) (*CarrierAssembly, error) 
 	}
 	return &CarrierAssembly{
 		reporter: config.Reporter, service: config.Service, handle: config.Handle, observeError: config.ObserveError,
-		telemetry: config.Telemetry, maximumHandlers: config.MaximumHandlers, done: make(chan error, 1),
+		telemetry: config.Telemetry, goaway: config.Goaway, maximumHandlers: config.MaximumHandlers, done: make(chan error, 1),
+		live: map[*datacarrier.Server]struct{}{},
 	}, nil
 }
 
@@ -164,8 +172,16 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 			return
 		}
 		a.handlers.Add(1)
+		a.mu.Lock()
+		a.live[server] = struct{}{}
+		a.mu.Unlock()
 		go func() {
 			defer a.handlers.Done()
+			defer func() {
+				a.mu.Lock()
+				delete(a.live, server)
+				a.mu.Unlock()
+			}()
 			defer func() {
 				if value := recover(); value != nil {
 					a.reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
@@ -241,6 +257,68 @@ func (a *CarrierAssembly) Done() <-chan error {
 		return ch
 	}
 	return a.done
+}
+
+// drainMinimum keeps an idle draining carrier open long enough for its host's replacement
+// carrier to land first.
+var drainMinimum = 5 * time.Second
+
+// Drain is the first step of stopping: every carrier's host is told the edge is going away until
+// deadline (edge_draining), the carriers keep serving, and Drain returns once each has no open
+// stream and drainMinimum has passed, or at deadline. Hosts dial their replacement at once.
+func (a *CarrierAssembly) Drain(ctx context.Context, deadline time.Time) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	servers := make([]*datacarrier.Server, 0, len(a.live))
+	for server := range a.live {
+		servers = append(servers, server)
+	}
+	a.mu.Unlock()
+	if len(servers) == 0 {
+		return
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	if a.goaway != nil {
+		var sent sync.WaitGroup
+		for _, server := range servers {
+			sent.Add(1)
+			go func() {
+				defer sent.Done()
+				if err := a.goaway(ctx, server, deadline); err != nil && ctx.Err() == nil {
+					a.report(ctx, err, false)
+				}
+			}()
+		}
+		sent.Wait()
+	}
+	earliest := time.Now().Add(drainMinimum)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		idle := true
+		for _, server := range servers {
+			select {
+			case <-server.Done():
+				continue
+			default:
+			}
+			if server.ActiveStreams() != 0 {
+				idle = false
+				break
+			}
+		}
+		if idle && !time.Now().Before(earliest) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (a *CarrierAssembly) Shutdown(ctx context.Context) error {

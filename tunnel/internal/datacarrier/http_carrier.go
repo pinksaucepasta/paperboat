@@ -15,6 +15,8 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 )
 
 var ErrCarrierHTTPPanic = errors.New("data carrier HTTP handler panicked")
@@ -75,7 +77,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 			return nil, err
 		}
 		tlsConfig.NextProtos = []string{"h2"}
-		listener, err := net.Listen("tcp", config.TCP.Address)
+		listener, err := handover.Listen("tcp", config.TCP.Address)
 		if err != nil {
 			cancel()
 			return nil, err
@@ -107,7 +109,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 			return nil, err
 		}
 		tlsConfig.NextProtos = []string{"h3"}
-		packet, err := net.ListenPacket("udp", config.QUIC.Address)
+		packet, err := handover.ListenPacket("udp", config.QUIC.Address)
 		if err != nil {
 			_ = s.Close()
 			return nil, err
@@ -117,6 +119,12 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		quicConfig.MaxIncomingUniStreams = 3
 		s.h3 = &http3.Server{Handler: s.safeHandler(s.handler(*config.QUIC, "h3")), Logger: slog.New(slog.NewTextHandler(carrierHTTPDiagnosticWriter{s}, nil)), TLSConfig: tlsConfig, QUICConfig: quicConfig, MaxHeaderBytes: 16 << 10}
 		go func() {
+			// An inheriting process reads UDP only after the process it replaces has exited.
+			select {
+			case <-handover.UDPReady():
+			case <-serviceCtx.Done():
+				return
+			}
 			if err := s.h3.Serve(packet); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
 				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}

@@ -154,6 +154,31 @@ func (a *Assembly) watchServer(name string, server *HTTPServer) {
 
 func (a *Assembly) Done() <-chan error { return a.done }
 
+// Drain is the first step of stopping. The public servers stop keep-alives and finish the
+// requests in flight, while every carrier gets the edge GOAWAY and serves until idle
+// (CarrierAssembly.Drain). It returns when both are done or at deadline. A server stopping here
+// is not a failure, so the exit watchers end first.
+func (a *Assembly) Drain(ctx context.Context, deadline time.Time) {
+	if a == nil || a.dataPlane == nil {
+		return
+	}
+	a.stopOnce.Do(func() { close(a.stop) })
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	var done sync.WaitGroup
+	for _, server := range []Component{a.Gateway, a.Private, a.Redirect, a.HTTP3} {
+		done.Add(1)
+		go func() { defer done.Done(); _ = server.Shutdown(ctx) }()
+	}
+	if carrier, ok := a.dataPlane.spec.Carrier.(interface {
+		Drain(context.Context, time.Time)
+	}); ok {
+		done.Add(1)
+		go func() { defer done.Done(); carrier.Drain(ctx, deadline) }()
+	}
+	done.Wait()
+}
+
 func (a *Assembly) Shutdown(ctx context.Context) error {
 	if a == nil || a.dataPlane == nil {
 		return nil

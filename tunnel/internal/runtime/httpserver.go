@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 )
 
 var ErrHTTPServerInvalid = errors.New("private HTTP server configuration is invalid")
@@ -48,7 +50,7 @@ func NewHTTPServer(spec HTTPServerSpec) (*HTTPServer, error) {
 	if err := validateHTTPServerSpec(spec); err != nil {
 		return nil, err
 	}
-	return &HTTPServer{spec: spec, listen: net.Listen}, nil
+	return &HTTPServer{spec: spec, listen: handover.Listen}, nil
 }
 
 func validateHTTPServerSpec(spec HTTPServerSpec) error {

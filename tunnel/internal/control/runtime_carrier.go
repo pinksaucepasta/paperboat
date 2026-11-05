@@ -167,6 +167,9 @@ func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch s
 			return ErrControlInvalid
 		}
 	}
+	if c.silent.Load() {
+		return nil
+	}
 	if len(observations) == 0 {
 		return nil
 	}
