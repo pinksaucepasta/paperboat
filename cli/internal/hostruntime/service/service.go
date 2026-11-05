@@ -19,11 +19,13 @@ import (
 const (
 	// Legacy labels remain for existing monolithic installations. New automatic
 	// update installations use HostdKind and UpdaterKind below.
-	Label             = "com.pinksaucepasta.paperboat.runtime-host"
-	HostLabel         = "com.pinksaucepasta.paperboat.runtime-privileged"
-	ConfigLabel       = "com.pinksaucepasta.paperboat.runtime-config"
-	ConfigUnit        = "paperboat-runtime-config.service"
-	DaemonLabel       = "com.pinksaucepasta.paperboatd"
+	Label       = "com.pinksaucepasta.paperboat.runtime-host"
+	HostLabel   = "com.pinksaucepasta.paperboat.runtime-privileged"
+	ConfigLabel = "com.pinksaucepasta.paperboat.runtime-config"
+	ConfigUnit  = "paperboat-runtime-config.service"
+	DaemonLabel = "com.pinksaucepasta.paperboatd"
+	// DaemonUnitPrefix starts every systemd --user unit of a local daemon generation.
+	DaemonUnitPrefix  = "paperboatd-"
 	HostdLabel        = "com.pinksaucepasta.paperboat.hostd"
 	UpdaterLabel      = "com.pinksaucepasta.paperboat.updated"
 	WorkerKind        = "worker"
@@ -188,7 +190,7 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		} else if config.Kind == ConfigKind {
 			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", ConfigUnit)
 		} else if config.Kind == DaemonKind {
-			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboatd.service")
+			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", DaemonUnitPrefix+config.Generation+".service")
 		} else if config.Kind != WorkerKind && config.Kind != HostdKind && config.Kind != UpdaterKind {
 			return nil, ErrInvalidDefinition
 		}

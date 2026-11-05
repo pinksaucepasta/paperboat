@@ -302,7 +302,7 @@ func TestConfigServiceDefinitionsUsePerUserDomains(t *testing.T) {
 func TestLocalDaemonDefinitionsUsePerUserDomains(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
-			installer, err := New(Config{Platform: platform, Kind: DaemonKind, ConfigRoot: t.TempDir(), Executable: executable(t), User: "test", Group: "test", Arguments: []string{"__local-daemon"}, Controller: &controller{}})
+			installer, err := New(Config{Platform: platform, Kind: DaemonKind, Generation: testGeneration(DaemonKind), ConfigRoot: t.TempDir(), Executable: executable(t), User: "test", Group: "test", Arguments: []string{"__local-daemon"}, Controller: &controller{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -312,10 +312,10 @@ func TestLocalDaemonDefinitionsUsePerUserDomains(t *testing.T) {
 			body, _ := os.ReadFile(installer.DefinitionPath())
 			definition := string(body)
 			if platform == "darwin" {
-				if !strings.HasSuffix(installer.DefinitionPath(), "/Library/LaunchAgents/"+DaemonLabel+".plist") || !strings.Contains(definition, "<string>"+DaemonLabel+"</string>") {
+				if !strings.HasSuffix(installer.DefinitionPath(), "/Library/LaunchAgents/"+DaemonLabel+"."+testGeneration(DaemonKind)+".plist") || !strings.Contains(definition, "<string>"+DaemonLabel+"."+testGeneration(DaemonKind)+"</string>") {
 					t.Fatalf("path=%s body=%s", installer.DefinitionPath(), body)
 				}
-			} else if !strings.HasSuffix(installer.DefinitionPath(), "/.config/systemd/user/paperboatd.service") || !strings.Contains(definition, "Description=Paperboat local daemon") || !strings.Contains(definition, "WantedBy=default.target") || strings.Contains(definition, "User=test") {
+			} else if !strings.HasSuffix(installer.DefinitionPath(), "/.config/systemd/user/paperboatd-"+testGeneration(DaemonKind)+".service") || !strings.Contains(definition, "Description=Paperboat local daemon") || !strings.Contains(definition, "WantedBy=default.target") || strings.Contains(definition, "User=test") {
 				t.Fatalf("path=%s body=%s", installer.DefinitionPath(), body)
 			}
 		})
@@ -582,8 +582,8 @@ func TestRemoveMissingExecutablePreservesDefinitionOnManagerFailure(t *testing.T
 	root := t.TempDir()
 	managerErr := errors.New("fixture manager unavailable")
 	control := &controller{removeErr: managerErr}
-	cfg := Config{Platform: "linux", Kind: DaemonKind, ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
-	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd.service")
+	cfg := Config{Platform: "linux", Kind: DaemonKind, Generation: testGeneration(DaemonKind), ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
+	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd-"+testGeneration(DaemonKind)+".service")
 	if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -607,8 +607,8 @@ func TestRemoveRejectsSymlinkDefinitionWithMissingExecutable(t *testing.T) {
 	}
 	root := t.TempDir()
 	control := &controller{}
-	cfg := Config{Platform: "linux", Kind: DaemonKind, ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
-	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd.service")
+	cfg := Config{Platform: "linux", Kind: DaemonKind, Generation: testGeneration(DaemonKind), ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
+	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd-"+testGeneration(DaemonKind)+".service")
 	if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
 		t.Fatal(err)
 	}

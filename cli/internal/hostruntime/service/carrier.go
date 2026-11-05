@@ -12,7 +12,7 @@ import (
 // connections) and nginx binary upgrade (~/ref/nginx/src/os/unix/ngx_process_cycle.c: old workers
 // finish their connections). Separate units mean the service manager never kills the old process.
 func generationalUnit(config Config) bool {
-	return (config.Kind == CarrierKind || config.Kind == HostdKind) && config.Platform != "windows"
+	return (config.Kind == CarrierKind || config.Kind == HostdKind || config.Kind == DaemonKind) && config.Platform != "windows"
 }
 
 func validateCarrierConfig(config Config) error {
@@ -85,16 +85,36 @@ func HostdController(platform, generation string, enrolledUID int, runner Runner
 	}
 }
 
-// QuitCarrier asks a retired carrier generation to shut down gracefully: it stops admitting new
-// streams, keeps serving open ones up to runtimewire.DrainLimit, then exits 0 and stays
-// down. SIGQUIT is the graceful-shutdown signal of both nginx and Teleport (lib/service/signals.go).
+// DaemonController addresses one generation of the current user's local daemon on Linux and macOS:
+// a systemd --user unit or a launchd agent label. A new generation serves before the old one drains.
+func DaemonController(platform, generation string, uid int, runner Runner) (Controller, error) {
+	if runner == nil || uid < 0 || !validSessionOwnerGeneration(generation) {
+		return nil, ErrInvalidDefinition
+	}
+	switch platform {
+	case "linux":
+		return SystemdController{Runner: runner, Unit: DaemonUnitPrefix + generation + ".service", User: true}, nil
+	case "darwin":
+		return LaunchdController{Runner: runner, UID: uid, Label: DaemonLabel + "." + generation, UserDomain: true}, nil
+	default:
+		return nil, ErrUnsupportedPlatform
+	}
+}
+
+// QuitCarrier asks a retired carrier or daemon generation to shut down gracefully: it stops
+// admitting new streams, keeps serving open ones up to runtimewire.DrainLimit, then exits 0 and
+// stays down. SIGQUIT is the graceful-shutdown signal of both nginx and Teleport (lib/service/signals.go).
 func QuitCarrier(ctx context.Context, controller Controller) error {
 	switch c := controller.(type) {
 	case SystemdController:
 		if c.Runner == nil {
 			return ErrInvalidDefinition
 		}
-		return c.Runner.Run(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGQUIT", c.unit())
+		args := []string{"kill", "--kill-whom=main", "--signal=SIGQUIT", c.unit()}
+		if c.User {
+			args = append([]string{"--user"}, args...)
+		}
+		return c.Runner.Run(ctx, "systemctl", args...)
 	case LaunchdController:
 		if c.Runner == nil {
 			return ErrInvalidDefinition

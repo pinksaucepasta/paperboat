@@ -34,7 +34,12 @@ func TestNativeLinuxInstalledCandidateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+	generation, err := DaemonGeneration(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := "paperboatd-" + generation + ".service"
+	definition := generationDefinitionPath("linux", home, generation)
 	if _, err := os.Lstat(definition); err == nil {
 		t.Fatalf("refusing to replace existing service definition %s", definition)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -102,7 +107,7 @@ func TestNativeLinuxInstalledCandidateLifecycle(t *testing.T) {
 		t.Fatalf("repair: %v", err)
 	}
 	assertNativeLinuxCandidateReady(t, candidate, expectedVersion)
-	if output, err := exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", "paperboatd.service").CombinedOutput(); err != nil {
+	if output, err := exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", unit).CombinedOutput(); err != nil {
 		t.Fatalf("kill service: %v: %s", err, output)
 	}
 	assertNativeLinuxCandidateReady(t, candidate, expectedVersion)
@@ -143,7 +148,7 @@ func assertNativeLinuxCandidateReady(t *testing.T, candidate, expectedVersion st
 			return
 		}
 		if time.Now().After(deadline) {
-			output, _ := exec.Command("systemctl", "--user", "status", "paperboatd.service", "--no-pager").CombinedOutput()
+			output, _ := exec.Command("systemctl", "--user", "status", unit, "--no-pager").CombinedOutput()
 			t.Fatalf("candidate daemon did not become ready: %v; systemd: %s", snapshotErr, output)
 		}
 		time.Sleep(100 * time.Millisecond)

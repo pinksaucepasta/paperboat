@@ -71,7 +71,11 @@ func TestNativeDarwinInstalledCandidateLifecycle(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(home, "run"))
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", identityRoot)
 	t.Setenv("PAPERBOAT_CONFIG", cfgPath)
-	definition := filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
+	generation, err := DaemonGeneration(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := generationDefinitionPath("darwin", home, generation)
 	if _, err := os.Lstat(definition); err == nil {
 		t.Fatalf("refusing to replace existing service definition %s", definition)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -106,7 +110,7 @@ func TestNativeDarwinInstalledCandidateLifecycle(t *testing.T) {
 		t.Fatalf("repair: %v", err)
 	}
 	assertNativeDarwinCandidateReady(t, candidate, expectedVersion)
-	domain := "gui/" + strconv.Itoa(os.Getuid()) + "/" + hostservice.DaemonLabel
+	domain := "gui/" + strconv.Itoa(os.Getuid()) + "/" + hostservice.DaemonLabel + "." + generation
 	if output, err := exec.Command("launchctl", "kill", "SIGKILL", domain).CombinedOutput(); err != nil {
 		t.Fatalf("kill service: %v: %s", err, output)
 	}
@@ -148,7 +152,7 @@ func assertNativeDarwinCandidateReady(t *testing.T, candidate, expectedVersion s
 			return
 		}
 		if time.Now().After(deadline) {
-			domain := "gui/" + strconv.Itoa(os.Getuid()) + "/" + hostservice.DaemonLabel
+			domain := "gui/" + strconv.Itoa(os.Getuid()) + "/" + hostservice.DaemonLabel + "." + generation
 			output, _ := exec.Command("launchctl", "print", domain).CombinedOutput()
 			t.Fatalf("candidate daemon did not become ready: %v; launchd: %s", snapshotErr, output)
 		}
