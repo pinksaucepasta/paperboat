@@ -391,6 +391,12 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 			return nil, nil, 0, ErrRegionalAuthority
 		}
 		if g.ExpiresAt > serverclock.Now().Unix() && g.NodeGeneration == n.NodeGeneration && g.ProcessEpoch == n.ProcessEpoch {
+			// A refresh lands its candidates before its grants. A relay that moved keeps its previous address
+			// until its grant from the same refresh arrives: a dial in between would present the replaced
+			// grant, which the relay fences for good once another engine of this endpoint showed the new one.
+			if prev, ok := a.relay.nodes[id]; ok && prev.NodeID == n.NodeID && g.Generation != a.regional.AuthorizationGeneration && (prev.TLSSPKISHA256 != n.TLSSPKISHA256 || !reflect.DeepEqual(regionForNode(prev), regionForNode(n))) {
+				n = prev
+			}
 			next[id] = n
 			eligible = append(eligible, n)
 		}
