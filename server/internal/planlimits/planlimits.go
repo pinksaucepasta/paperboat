@@ -102,12 +102,24 @@ type Usage struct {
 	Limit *int `json:"limit"`
 }
 
+// lockSeed and lockKey name the one lock per workspace and kind (hashtextextended(lockKey, lockSeed)).
+const lockSeed = 7311
+
+func lockKey(scope Scope, kind Kind) string { return scope.workspaceID() + "/" + string(kind) }
+
+// InTxHolding runs fn in a serializable transaction (db.InTxUnderSessionLock) that holds the workspace's kind lock
+// from before its snapshot, so creations in one workspace queue instead of failing serialization: CheckTx inside fn
+// takes the same lock again at once.
+func InTxHolding(ctx context.Context, store *db.DB, scope Scope, kind Kind, fn func(context.Context, *db.Tx) error) error {
+	return store.InTxUnderSessionLock(ctx, lockKey(scope, kind), lockSeed, fn)
+}
+
 // CheckTx refuses one more resource of kind when the scope's plan limit is already met. It
 // takes a transaction-scoped advisory lock per workspace and kind, so concurrent creations in one
 // workspace cannot each claim the last place, whatever locks the caller holds.
 func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 	set := current.Load()
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,7311))`, scope.workspaceID()+"/"+string(kind)); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,$2))`, lockKey(scope, kind), lockSeed); err != nil {
 		return err
 	}
 	plan, err := planTx(ctx, tx, scope)

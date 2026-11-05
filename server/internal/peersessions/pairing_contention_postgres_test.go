@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 // The production failure: while an account's daemons refreshed their peer configuration, pairing's seat
@@ -91,7 +92,7 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 	}
 	seats := billing.NewWorkspaceService(store, nil, "")
 	pair := func(machine string) error {
-		return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return planlimits.InTxHolding(ctx, store, planlimits.Scope{Account: account}, planlimits.Machines, func(ctx context.Context, tx *db.Tx) error {
 			if err := seats.ReserveUserMachineSeat(ctx, tx, account); err != nil {
 				return err
 			}
@@ -102,6 +103,7 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 			return err
 		})
 	}
+	// Pairing runs as production does (usermachines approve and Setup: planlimits.InTxHolding).
 	// Rounds of 20 pairings (4 at a time) until at least 200 refreshes ran alongside them; between rounds the 20
 	// machines are released again (setup, not under test).
 	paired, failed := 0, 0
