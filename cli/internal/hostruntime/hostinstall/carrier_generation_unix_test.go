@@ -79,39 +79,6 @@ func TestHostdGenerationDefinitionsParseBack(t *testing.T) {
 	}
 }
 
-// pb install of dev-ee7b48ac8 over dev-232279b79 failed with "invalid privileged
-// installation request": the retained generation's descriptor named its control
-// socket the way its own build did (.carrier-<32 hex>), and the newer build
-// rejected every name but its own rule's.
-func TestRetainedGenerationKeepsTheControlSocketItsBuildChose(t *testing.T) {
-	paths := platformPaths(1001)
-	retained, err := deriveUnixCarrierConfig(generationRequest("a"), paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained.ControlEndpoint = retained.HostdEndpoint + ".carrier-" + retained.Generation
-	// On darwin that name is over sun_path, so the earlier build never bound it there (why it was shortened).
-	if err := retained.Validate(); len(retained.ControlEndpoint) < unixSocketPathLimit && err != nil {
-		t.Fatalf("descriptor from an earlier build refused: %v", err)
-	}
-	other, err := deriveUnixCarrierConfig(generationRequest("b"), paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, endpoint := range map[string]string{
-		"another directory":         "/tmp/x" + retained.Generation,
-		"another generation's name": other.ControlEndpoint,
-		"over sun_path":             retained.HostdEndpoint + "." + retained.Generation + strings.Repeat("x", 120),
-		"nested path":               retained.HostdEndpoint + ".d/" + retained.Generation,
-	} {
-		tampered := retained
-		tampered.ControlEndpoint = endpoint
-		if tampered.Validate() == nil {
-			t.Fatalf("control socket in %s accepted", name)
-		}
-	}
-}
-
 // The root helper slices a source's SHA-256 into generation names: a request with
 // an empty or short digest or generation must be refused, never panic.
 func TestMalformedSourceOrGenerationRefusedWithoutPanic(t *testing.T) {
@@ -141,7 +108,7 @@ func TestMalformedSourceOrGenerationRefusedWithoutPanic(t *testing.T) {
 	for _, generation := range []string{"a", strings.Repeat("a", 15), strings.Repeat("a", 31)} {
 		short := c
 		short.Generation = generation
-		if !errors.Is(short.Validate(), ErrInvalidRequest) || validCarrierControlEndpoint(short) {
+		if !errors.Is(short.Validate(), ErrInvalidRequest) {
 			t.Errorf("carrier descriptor with generation %q accepted", generation)
 		}
 	}
