@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 	"github.com/realclientip/realclientip-go"
 )
 
@@ -166,7 +167,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 				request.Out.URL.Host = request.In.Host
 			}, ModifyResponse: func(response *http.Response) error {
 				if response.Request != nil && response.Request.URL.Path == "/v1/browser-terminal" {
-					slog.InfoContext(response.Request.Context(), "browser terminal host response", "status", response.StatusCode)
+					edgetelemetry.Log(response.Request.Context(), edgetelemetry.SeverityInfo, "browser_terminal_host_response", edgetelemetry.OutcomeSuccess, "status", response.StatusCode)
 				}
 				return legacy.ModifyResponse(response)
 			}}
