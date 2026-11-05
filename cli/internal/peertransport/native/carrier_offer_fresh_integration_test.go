@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,15 +156,16 @@ func startTestRegionalRelay(t *testing.T, ctx context.Context, pub ed25519.Publi
 	rctx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- r.Serve(rctx, pc, relayTLS) }()
-	t.Cleanup(func() {
+	shutdown := sync.OnceFunc(func() {
 		stop()
 		_ = r.Close()
 		_ = pc.Close()
 		<-done
 		r.Wait()
 	})
+	t.Cleanup(shutdown)
 	port := pc.LocalAddr().(*net.UDPAddr).Port
-	return &regionalRelay{addr: fmt.Sprintf("127.0.0.1:%d", port), node: tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}}
+	return &regionalRelay{addr: fmt.Sprintf("127.0.0.1:%d", port), stop: shutdown, node: tailnet.RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "rack-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(90 * time.Second).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}}
 }
 
 func carrierEcho(t *testing.T, stream net.Conn) {
