@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"net/netip"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,8 +29,7 @@ func TestDelegatedGenerationTakesThePrimaryRoleAfterTheOldPrimaryDrains(t *testi
 	f := newPromoteFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	var refuseNew atomic.Bool
-	primary := f.startPrimary(t, ctx, func() bool { return !refuseNew.Load() })
+	primary := f.startPrimary(t, ctx)
 	old, err := f.client.Dial(ctx, f.primaryAddress, "machine_target", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)
@@ -58,11 +56,7 @@ func TestDelegatedGenerationTakesThePrimaryRoleAfterTheOldPrimaryDrains(t *testi
 	if mark != 'G' {
 		t.Fatalf("a new connection was served by %q, not the new generation", mark)
 	}
-	echo(t, held, "held-during-overlap")
-
-	// The overlap ends: the old primary refuses new connections and keeps the held one until it closes.
-	refuseNew.Store(true)
-	echo(t, held, "held-after-overlap")
+	echo(t, held, "held-during-drain")
 	echo(t, kept, "kept-on-generation")
 	held.Close()
 	old.Close()

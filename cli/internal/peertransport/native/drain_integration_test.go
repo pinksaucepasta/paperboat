@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,13 +19,12 @@ import (
 )
 
 type drainFixture struct {
-	co, mo    *native.Owner
-	ma        *tailnet.Authority
-	signer    ed25519.PrivateKey
-	admitting *atomic.Bool
-	client    tailnet.NetworkBinding
-	machine   tailnet.NetworkBinding
-	dial      func(t *testing.T) (*native.Session, error)
+	co, mo  *native.Owner
+	ma      *tailnet.Authority
+	signer  ed25519.PrivateKey
+	client  tailnet.NetworkBinding
+	machine tailnet.NetworkBinding
+	dial    func(t *testing.T) (*native.Session, error)
 }
 
 func newDrainFixture(t *testing.T, ctx context.Context) *drainFixture {
@@ -49,15 +47,13 @@ func newDrainFixture(t *testing.T, ctx context.Context) *drainFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { co.Close() })
-	admitting := &atomic.Bool{}
-	admitting.Store(true)
-	mo, err := native.NewOwner(native.Config{Authority: ma, TLS: machineTLS, AdmitNew: admitting.Load})
+	mo, err := native.NewOwner(native.Config{Authority: ma, TLS: machineTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { mo.Close() })
 	address := startTestServer(t, mo, ma, regions.Regions[1])
-	f := &drainFixture{co: co, mo: mo, ma: ma, signer: signer, admitting: admitting, client: client, machine: machine}
+	f := &drainFixture{co: co, mo: mo, ma: ma, signer: signer, client: client, machine: machine}
 	f.dial = func(t *testing.T) (*native.Session, error) {
 		return co.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
 	}
@@ -106,10 +102,11 @@ func (f *drainFixture) openEcho(t *testing.T, ctx context.Context) (net.Conn, er
 	return stream, err
 }
 
-// pb update retires the generation: a connection it holds keeps being served with no
-// pause and no reattach, a new connection is admitted during the overlap, and after
-// the overlap a new connection is refused only with the restart code.
-func TestDrainedGenerationKeepsHeldStreamsAndRefusesNewOnlyWithTheRestartCode(t *testing.T) {
+// pb update retires the generation: a connection it holds (here an exec stream, the
+// pbvm1 exec_long case) keeps being served with no pause and no reattach while it still
+// admits new connections, until the cap, whose restart close reaches the held stream as
+// a reconnect.
+func TestRetiringGenerationKeepsHeldStreamsUntilItsRestartClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	f := newDrainFixture(t, ctx)
@@ -117,14 +114,14 @@ func TestDrainedGenerationKeepsHeldStreamsAndRefusesNewOnlyWithTheRestartCode(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The overlap: a terminal opened mid-update is served by the retiring generation.
-	if _, err := f.openEcho(t, ctx); err != nil {
-		t.Fatal("a new connection during the overlap was refused", err)
-	}
-	f.admitting.Store(false)
-	// Past the overlap: the held stream continues as before; a reattach would mean an
-	// error here and a redial (seconds), not one more round trip.
 	for i := 0; i < 20; i++ {
+		if i%5 == 0 {
+			// A client its signed configuration cannot yet take to the new generation keeps a path.
+			if _, err := f.openEcho(t, ctx); err != nil {
+				t.Fatal("the retiring generation refused a new connection", i, err)
+			}
+		}
+		// A reattach would mean an error here and a redial (seconds), not one more round trip.
 		took, err := echo(held)
 		if err != nil {
 			t.Fatal("the drain paused or cut a held stream", i, err)
@@ -133,13 +130,6 @@ func TestDrainedGenerationKeepsHeldStreamsAndRefusesNewOnlyWithTheRestartCode(t 
 			t.Fatalf("held round trip %d took %v", i, took)
 		}
 	}
-	if _, err := f.openEcho(t, ctx); !restarted(err) {
-		t.Fatal("a new connection after the overlap was refused without the restart code", err)
-	}
-	if _, err := echo(held); err != nil {
-		t.Fatal("refusing a new connection disturbed a held one", err)
-	}
-	// The cap: what remains is closed with the restart code, so its client reattaches.
 	if err := f.mo.CloseRestarting(); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +148,6 @@ func TestRevocationEndsADrainedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.admitting.Store(false)
 	if _, err := echo(held); err != nil {
 		t.Fatal(err)
 	}

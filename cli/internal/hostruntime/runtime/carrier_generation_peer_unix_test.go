@@ -145,25 +145,17 @@ func TestCarrierGenerationReportsKeepTheLatestAndNeverFollowTheWithdrawal(t *tes
 	}
 }
 
-// A retired generation keeps its held stream, admits new connections only for
-// the overlap, and exits once its last stream ends, or at its cap.
-func TestRetiredGenerationDrainsHeldStreamsPastTheOverlap(t *testing.T) {
+// A retired generation keeps its held stream until it ends, then exits; at its cap
+// it gives up with the stream still open.
+func TestRetiredGenerationDrainsHeldStreamsUntilTheyEnd(t *testing.T) {
 	c := &ProductionCarrier{peer: &productionNativePeerService{}, ssh: &managedssh.Host{}}
 	c.peer.streams.Add(1)
 	done := make(chan error, 1)
-	go func() { done <- c.drain(context.Background(), 100*time.Millisecond, 10*time.Second) }()
-	time.Sleep(20 * time.Millisecond)
-	if c.peer.refuseNew.Load() {
-		t.Fatal("new connections refused during the overlap")
-	}
-	time.Sleep(300 * time.Millisecond)
-	if !c.peer.refuseNew.Load() {
-		t.Fatal("new connections still admitted after the overlap")
-	}
+	go func() { done <- c.drain(context.Background(), 10*time.Second) }()
 	select {
 	case err := <-done:
 		t.Fatal("drain cut a held stream", err)
-	default:
+	case <-time.After(400 * time.Millisecond):
 	}
 	c.peer.streams.Add(-1)
 	select {
@@ -177,7 +169,7 @@ func TestRetiredGenerationDrainsHeldStreamsPastTheOverlap(t *testing.T) {
 
 	capped := &ProductionCarrier{peer: &productionNativePeerService{}, ssh: &managedssh.Host{}}
 	capped.peer.streams.Add(1)
-	if err := capped.drain(context.Background(), time.Hour, 300*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) || !capped.peer.refuseNew.Load() {
-		t.Fatal("drain outlived its cap or kept admitting", err)
+	if err := capped.drain(context.Background(), 300*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("drain outlived its cap", err)
 	}
 }

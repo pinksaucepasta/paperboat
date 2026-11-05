@@ -202,9 +202,6 @@ type Config struct {
 	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
 	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
 	AdmitOffline func(context.Context, OfflineAdmission) error
-	// AdmitNew is asked for each accepted connection; false closes it with the restart
-	// code (a retiring generation past its overlap). Held connections are never asked. Nil admits all.
-	AdmitNew func() bool
 }
 
 type Owner struct {
@@ -214,7 +211,6 @@ type Owner struct {
 	refreshAuthority func(context.Context) error
 	meterIncoming    func(net.Conn, MeterBinding) net.Conn
 	admitOffline     func(context.Context, OfflineAdmission) error
-	admitNew         func() bool
 	carrierMu        sync.Mutex
 	carrierNetworks  map[[32]byte]*carrierNetworkRef
 	ctx              context.Context
@@ -237,7 +233,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, admitNew: config.AdmitNew, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {
@@ -399,10 +395,6 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				_ = session.Close()
 				return
 			}
-			if !o.admitsNew() {
-				_ = session.CloseRestarting()
-				return
-			}
 			defer session.Close()
 			o.emit(Event{Kind: "accepted", PeerID: peer.EndpointID})
 			if serveErr := serve(o.ctx, session); !normalPeerServeTermination(serveErr) {
@@ -454,8 +446,6 @@ func boundTLS(base *tls.Config, peer tailnet.NetworkBinding, server bool) *tls.C
 	}
 	return result
 }
-
-func (o *Owner) admitsNew() bool { return o.admitNew == nil || o.admitNew() }
 
 func (o *Owner) add(session *Session) error {
 	o.mu.Lock()
