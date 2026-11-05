@@ -197,6 +197,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	case <-ready:
 		return nil
 	case <-time.After(regionalAcknowledgedRouteWait):
+		derpquic.Diag("regional_provisional_start", peerID)
 		return r.prepareProvisional(ctx)
 	}
 }
@@ -234,7 +235,9 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	var prepareErr error
 	for _, candidate := range nodes {
 		prepareCtx, cancel := context.WithTimeout(ctx, regionalProbeTimeout)
+		derpquic.Diag("regional_prepare_relay_start", candidate.NodeID)
 		err := r.engine.PrepareRelay(prepareCtx, regionalID(candidate.NodeID))
+		derpquic.Diag("regional_prepare_relay_end", fmt.Sprintf("%s err=%v", candidate.NodeID, err))
 		cancel()
 		if err == nil {
 			node, prepareErr = candidate, nil

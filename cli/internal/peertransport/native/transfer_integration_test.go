@@ -58,6 +58,9 @@ func TestNativeTransferDurableBidirectionalResume(t *testing.T) {
 
 func testNativeTransferResume(t *testing.T, relayed bool) {
 	t.Setenv("IN_TS_TEST", "true")
+	trace := &diagTimeline{start: time.Now()}
+	derpquic.DiagTrace = trace.add
+	t.Cleanup(func() { derpquic.DiagTrace = nil })
 	if relayed {
 		t.Setenv("TS_DEBUG_ALWAYS_USE_DERP", "true")
 	}
@@ -112,7 +115,7 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 		}
 		relayCtx, stopRelay := context.WithCancel(ctx)
 		done := make(chan error, 1)
-		go func() { done <- relay.Serve(relayCtx, socket, relayTLS) }()
+		go func() { done <- relay.Serve(relayCtx, &diagSocket{PacketConn: socket, trace: trace}, relayTLS) }()
 		defer func() {
 			stopRelay()
 			_ = relay.Close()
@@ -221,8 +224,24 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 		defer sessionMu.Unlock()
 		if session == nil {
 			var dialErr error
+			dialStarted := time.Now()
+			trace.add("test_dial_start", "")
 			session, dialErr = clientOwner.Dial(ctx, udp.Address(), "machine_transfer", peerquic.ClassInteractive)
 			if dialErr != nil {
+				chain := ""
+				for e := error(dialErr); e != nil; e = errors.Unwrap(e) {
+					chain += fmt.Sprintf(" <- %T: %v", e, e)
+					if j, ok := e.(interface{ Unwrap() []error }); ok {
+						for _, x := range j.Unwrap() {
+							chain += fmt.Sprintf(" [joined %T: %v]", x, x)
+						}
+					}
+				}
+				t.Logf("DIAG dial failed after %v: chain%s; client regional=%+v server regional=%+v", time.Since(dialStarted), chain, clientAuthority.RegionalStatus(), serverAuthority.RegionalStatus())
+				if relay != nil {
+					t.Logf("DIAG relay stats %+v", relay.Snapshot())
+				}
+				t.Logf("DIAG timeline (ms since test start):\n%s", trace.dump())
 				return nil, dialErr
 			}
 		}
@@ -516,5 +535,45 @@ func (c *transferDirectPacket) WriteTo(p []byte, addr net.Addr) (int, error) {
 func (c *transferDirectPacket) WriteToUDPAddrPort(p []byte, addr netip.AddrPort) (int, error) {
 	n, err := c.UDPConn.WriteToUDPAddrPort(p, addr)
 	c.count(p, n, err)
+	return n, err
+}
+
+// DIAG (throwaway): one timestamped timeline of relay, dial and relay-socket events.
+type diagTimeline struct {
+	start  time.Time
+	mu     sync.Mutex
+	events []string
+}
+
+func (d *diagTimeline) add(event, detail string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.events) < 2000 {
+		d.events = append(d.events, fmt.Sprintf("%8.1f %s %s", float64(time.Since(d.start).Microseconds())/1000, event, detail))
+	}
+}
+
+func (d *diagTimeline) dump() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return strings.Join(d.events, "\n")
+}
+
+type diagSocket struct {
+	net.PacketConn
+	trace *diagTimeline
+}
+
+func (s *diagSocket) ReadFrom(b []byte) (int, net.Addr, error) {
+	n, addr, err := s.PacketConn.ReadFrom(b)
+	if err == nil {
+		s.trace.add("relay_udp_in", fmt.Sprintf("%v %d", addr, n))
+	}
+	return n, addr, err
+}
+
+func (s *diagSocket) WriteTo(b []byte, addr net.Addr) (int, error) {
+	n, err := s.PacketConn.WriteTo(b, addr)
+	s.trace.add("relay_udp_out", fmt.Sprintf("%v %d err=%v", addr, len(b), err))
 	return n, err
 }

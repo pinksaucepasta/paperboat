@@ -1,6 +1,7 @@
 package derpquic
 
 import (
+	"fmt"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -74,9 +75,12 @@ func classify(err error) error {
 	return err
 }
 func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
+	Diag("client_gate_wait", c.config.Address)
 	if err := acquireConnect(ctx, c.ctx, c.connectGate); err != nil {
+		Diag("client_gate_failed", fmt.Sprintf("%s err=%v", c.config.Address, err))
 		return nil, err
 	}
+	Diag("client_gate_held", c.config.Address)
 	defer releaseConnect(c.connectGate)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -126,7 +130,9 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	config := c.config.TLS.Clone()
 	config.NextProtos = []string{ALPN}
 	config.MinVersion = tls.VersionTLS13
+	Diag("client_quic_dial", c.config.Address)
 	conn, err := quic.DialAddr(dialCtx, c.config.Address, config, quicConfig())
+	Diag("client_quic_done", fmt.Sprintf("%s err=%v", c.config.Address, err))
 	if err != nil {
 		err = classify(err)
 		var fatal interface{ Fatal() bool }
@@ -152,7 +158,9 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	if err = writeAuthRequest(stream, parts, c.config.Namespace, c.config.GenerationDisco); err != nil {
 		return fail(err)
 	}
+	Diag("client_auth_sent", c.config.Address)
 	kind, b, err := readFrame(stream)
+	Diag("client_ready", fmt.Sprintf("%s kind=%d err=%v", c.config.Address, kind, err))
 	if err != nil {
 		return fail(err)
 	}

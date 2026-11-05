@@ -166,6 +166,9 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 	defer s.Close()
 	for {
 		c, e := ln.Accept(ctx)
+		if e == nil {
+			Diag("server_accept", c.RemoteAddr().String())
+		}
 		if e != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -200,6 +203,7 @@ func (s *Server) serveConn(c *quic.Conn) {
 	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
 	stream, err := c.AcceptStream(ctx)
 	cancel()
+	Diag("server_stream", fmt.Sprintf("%v err=%v", c.RemoteAddr(), err))
 	if err != nil {
 		return
 	}
@@ -223,14 +227,17 @@ func (s *Server) servePeer(p *peerConn) {
 	}()
 	stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 	kind, b, err := readFrame(stream)
+	Diag("server_auth_frame", fmt.Sprintf("%v kind=%d err=%v", c.RemoteAddr(), kind, err))
 	if err != nil || kind != frameAuth && kind != frameAuthGeneration && kind != frameAuthBatch {
 		s.reject(p, ErrProtocol)
 		return
 	}
 	if err = s.authenticate(p, kind, b); err != nil {
+		Diag("server_admit", fmt.Sprintf("%v err=%v", c.RemoteAddr(), err))
 		s.reject(p, err)
 		return
 	}
+	Diag("server_admit", fmt.Sprintf("%v ok", c.RemoteAddr()))
 	stream.SetReadDeadline(time.Time{})
 	stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if writeFrame(stream, frameReady, nil) != nil {

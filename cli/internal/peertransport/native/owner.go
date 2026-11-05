@@ -272,14 +272,18 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	// and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
 	if !o.authority.PeerIsLocal(peerID) {
 		regionalEnd := diagnostics.ReconnectStep(ctx, "regional_prepare")
+		derpquic.Diag("dial_regional_prepare_start", peerID)
 		err := o.authority.PrepareRegional(ctx, peerID)
+		derpquic.Diag("dial_regional_prepare_end", fmt.Sprintf("%s err=%v", peerID, err))
 		regionalEnd(err)
 		if err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
 			return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 		}
 	}
 	carrierEnd := diagnostics.ReconnectStep(ctx, "carrier_dial")
+	derpquic.Diag("dial_carrier_start", peerID)
 	socket, err := client.Dial(ctx)
+	derpquic.Diag("dial_carrier_end", fmt.Sprintf("%s err=%v", peerID, err))
 	carrierEnd(err)
 	if err != nil {
 		return nil, o.failedPeerDial(ctx, peerID, client, err)
