@@ -42,13 +42,14 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
-	var hostdRendered []byte
-	if intent == unixPreparedUpdate {
-		// This helper is the previous build: the candidate renders its own hostd unit.
-		rendered, err := renderCandidateByExecutable(ctx, request)
-		if err != nil {
-			return err
-		}
+	// The installing process is often another build (a signed update's helper is the previous
+	// build; pb update --from runs the invoking CLI), so the candidate renders its own hostd unit.
+	rendered, err := renderCandidateByExecutable(ctx, request)
+	if err != nil {
+		return err
+	}
+	hostdRendered := rendered.Hostd
+	if intent != unixEnrollmentInstall {
 		hostdRendered = rendered.HostdPending
 	}
 	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall, hostdRendered)
@@ -165,15 +166,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 				return errors.Join(err, removeJournal(paths.journal))
 			}
 		}
-		stage := func(ctx context.Context, carrier bool) (StagedCandidate, error) {
-			return StageCandidate(ctx, request, carrier)
-		}
-		if intent == unixPreparedUpdate {
-			stage = func(ctx context.Context, carrier bool) (StagedCandidate, error) {
-				return stageCandidateByExecutable(ctx, request, carrier)
-			}
-		}
-		carrierUpgrade, err = stageUnixUpgrade(ctx, request, paths, !coldCarrier && !replaceCarrier, stage)
+		carrierUpgrade, err = stageUnixUpgrade(ctx, request, paths, !coldCarrier && !replaceCarrier)
 		if err != nil {
 			return err
 		}
