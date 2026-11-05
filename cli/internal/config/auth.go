@@ -44,10 +44,13 @@ type Account struct {
 }
 
 type Profile struct {
-	Version            int       `json:"version"`
-	Issuer             string    `json:"issuer"`
-	Account            Account   `json:"account,omitempty"`
-	CLIClientSessionID string    `json:"cli_client_session_id"`
+	Version            int     `json:"version"`
+	Issuer             string  `json:"issuer"`
+	Account            Account `json:"account,omitempty"`
+	CLIClientSessionID string  `json:"cli_client_session_id"`
+	// APIToken marks a session started with an API token (pb login --api-token-file): hosts hold no standing
+	// rules for it, so its execs use per-operation descriptors.
+	APIToken           bool      `json:"api_token,omitempty"`
 	AccessExpiresAt    time.Time `json:"access_expires_at"`
 	AccessSecretRef    string    `json:"access_secret_ref"`
 	RefreshSecretRef   string    `json:"refresh_secret_ref"`

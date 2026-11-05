@@ -71,7 +71,7 @@ func apiTokenLogin(c *command.Context, path string) error {
 	} else if !errors.Is(e, config.ErrNoCredentials) {
 		return e
 	}
-	if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: client, Issuer: issuer, Credential: credential, SessionID: t.CLIClientSessionID, ExpectedAccountID: me.ID, PreviousSessionID: &previous, AllowAccountChange: true}); err != nil {
+	if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: client, Issuer: issuer, Credential: credential, SessionID: t.CLIClientSessionID, ExpectedAccountID: me.ID, PreviousSessionID: &previous, AllowAccountChange: true, APIToken: true}); err != nil {
 		return fmt.Errorf("activate the API token session; retry `pb login --api-token-file`: %w", err)
 	}
 	if err = cfg.Save(); err != nil {

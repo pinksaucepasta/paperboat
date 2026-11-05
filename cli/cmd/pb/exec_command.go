@@ -87,10 +87,12 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		err = errors.New("machine has no active runtime generation")
 		return fail(255, "runtime_unavailable", false, false, err)
 	}
-	// The daemon owns operation-descriptor issuance. This placeholder carries
-	// only inventory authority and is replaced with fresh endpoints/credentials
-	// inside the authenticated local API broker.
-	descriptor := api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+	// The daemon decides each stream's admission (the host's rules, or an API-token session's operation
+	// descriptor). This placeholder carries only inventory authority; every dial, including a cancel or a
+	// reattach, sends it fresh, so the CLI itself never asks the server.
+	pending := func() api.ExecDescriptor {
+		return api.ExecDescriptor{OperationID: request.OperationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
+	}
 	if request.CWD == "" {
 		request.CWD = machine.WorkspaceRoot
 	}
@@ -124,7 +126,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		return connection, nil
 	}
-	connection, err := dial(descriptor)
+	connection, err := dial(pending())
 	initialUncertain := false
 	if err != nil {
 		var uncertain *tunnel.ExecStartUncertainError
@@ -137,7 +139,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			}})
 			err = initial.Run(c.Context, func(context.Context) error {
 				var attemptErr error
-				connection, attemptErr = dial(descriptor)
+				connection, attemptErr = dial(pending())
 				return attemptErr
 			})
 		}
@@ -184,11 +186,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		defer cancel()
 		var failures []error
 		for attempt := 0; attempt < 2; attempt++ {
-			retryDescriptor, descriptorErr := client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
-			if descriptorErr != nil {
-				return execCancelOutcome{err: errors.Join(append(failures, descriptorErr)...)}
-			}
-			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, retryDescriptor, client.Workspace()), request)
+			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, pending(), client.Workspace()), request)
 			if dialErr != nil {
 				failures = append(failures, dialErr)
 				observeExecFailure(ctx, dialErr)
@@ -385,12 +383,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		previousFailure := err
 		var replacement tunnel.ExecConn
-		err = recovery.Run(c.Context, func(ctx context.Context) error {
-			fresh, err := client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
-			if err != nil {
-				return err
-			}
-			replacement, err = dial(fresh)
+		err = recovery.Run(c.Context, func(context.Context) error {
+			var err error
+			replacement, err = dial(pending())
 			return err
 		})
 		if err != nil || replacement == nil {

@@ -255,6 +255,10 @@ func localDaemonCommand() *cobra.Command {
 			if err != nil {
 				return coordinatorFailure("The daemon credential store could not be opened; run pb doctor before retrying.", err)
 			}
+			source.APIToken = func() (bool, error) {
+				current, err := store.Load(cfg.ServerURL)
+				return current.APIToken, err
+			}
 			var managedConfig *localdaemon.ManagedSSHConfig
 			profile, profileErr := store.Load(cfg.ServerURL)
 			if profileErr != nil && profileErr != config.ErrNoCredentials {
