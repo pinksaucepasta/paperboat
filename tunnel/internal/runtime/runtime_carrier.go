@@ -474,7 +474,11 @@ func (w *RuntimeCarrierWorker) Shutdown(ctx context.Context) error {
 	}
 	observeCtx, cancelObserve := context.WithTimeout(ctx, w.Timeout)
 	defer cancelObserve()
-	return errors.Join(err, w.Source.ObserveRuntimeCarriers(observeCtx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), observations))
+	observeErr := w.Source.ObserveRuntimeCarriers(observeCtx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), observations)
+	if errors.Is(observeErr, control.ErrRuntimeCarrierStale) {
+		observeErr = nil // the current carriers were stored; replaced ones need no report
+	}
+	return errors.Join(err, observeErr)
 }
 
 func browserTerminalFence(admission datacarrier.ExpectedAdmission) edgehttp.BrowserTerminalRouteFence {

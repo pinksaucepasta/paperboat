@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,5 +66,39 @@ func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
 				t.Fatal("invalid snapshot accepted")
 			}
 		})
+	}
+}
+
+// Production 2026-11-05: a host's policy change replaced its runtime carrier just before the edge
+// reported it, and the server answered 409 runtime_carrier_stale after storing the rest. That is
+// the protocol's expected answer, so it must not record a control failure; a 503 still does.
+func TestRuntimeCarrierStaleObservationIsNotAControlFailure(t *testing.T) {
+	status := http.StatusConflict
+	var failures []error
+	var outcomes []string
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: "https://control.test", Credential: testControlCredential, Timeout: time.Second, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != runtimewire.EdgeObservePath {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		return response(status, `{"error":{"code":"runtime_carrier_stale"}}`), nil
+	})}, ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
+		return "", "", func(outcome, code string) { outcomes = append(outcomes, outcome+":"+code) }
+	}, ControlFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations := []runtimewire.Observation{{RouteID: "runtime_route", SessionID: "session_1", AttachmentGeneration: 1, Ready: true}}
+	if err := client.ObserveRuntimeCarriers(context.Background(), "edge_1", "edge_epoch_1", observations); !errors.Is(err, ErrRuntimeCarrierStale) {
+		t.Fatalf("stale observation error = %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("stale observation recorded control failures: %v", failures)
+	}
+	status = http.StatusServiceUnavailable
+	if err := client.ObserveRuntimeCarriers(context.Background(), "edge_1", "edge_epoch_1", observations); errors.Is(err, ErrRuntimeCarrierStale) || err == nil {
+		t.Fatalf("unavailable observation error = %v", err)
+	}
+	if len(failures) != 1 || strings.Join(outcomes, ",") != "rejected:invalid,failed:control_request_failed" {
+		t.Fatalf("outcomes = %v, failures = %d", outcomes, len(failures))
 	}
 }

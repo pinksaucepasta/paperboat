@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
@@ -27,6 +28,10 @@ var (
 	ErrControlInvalid       = errors.New("private control configuration is invalid")
 	ErrControlUnavailable   = errors.New("private control is unavailable")
 	ErrNodeObservationStale = errors.New("node observation is stale")
+	// ErrRuntimeCarrierStale: the server stored the current carrier observations and some
+	// reported carriers were already replaced (409 runtime_carrier_stale); the next pull
+	// replaces them here, so it is an expected answer, not a control failure.
+	ErrRuntimeCarrierStale = errors.New("runtime carrier observation is stale")
 )
 
 type HTTPConfig struct {
@@ -478,6 +483,9 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		if path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict {
 			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrNodeObservationStale}
 		}
+		if path == runtimewire.EdgeObservePath && response.StatusCode == http.StatusConflict {
+			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrRuntimeCarrierStale}
+		}
 		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
 	if output == nil || response.StatusCode == http.StatusNoContent {
@@ -532,7 +540,7 @@ func (c *HTTPClient) startRequest(ctx context.Context, operation string) (contex
 			} else if errors.Is(err, ErrControlInvalid) || errors.Is(err, ErrNodeObservationStale) || errors.As(err, &status) && status.DiagnosticStatus() >= 400 && status.DiagnosticStatus() < 500 {
 				outcome, code = "rejected", "invalid"
 			}
-			if c.controlFailure != nil {
+			if c.controlFailure != nil && !errors.Is(err, ErrRuntimeCarrierStale) {
 				c.controlFailure(ctx, controlReference(ctx), err)
 				code = "control_request_failed"
 			}
