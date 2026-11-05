@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -585,5 +586,181 @@ func TestDistributionHubCloseWipesOwnedCredential(t *testing.T) {
 	}
 	if !bytes.Equal(credential, []byte("distribution-credential-012345678901234567890123456789")) {
 		t.Fatal("closing hub modified caller credential")
+	}
+}
+
+// cancelAwareCredentials answers node credential lookups the way a database query does: with the request's own
+// context error once it is cancelled, otherwise with a fixed outcome.
+type cancelAwareCredentials struct{ outage error }
+
+func (c cancelAwareCredentials) RuntimeNode(ctx context.Context, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "", c.outage
+}
+func (c cancelAwareCredentials) RuntimeCredential(context.Context, string) (string, error) {
+	return "", c.outage
+}
+func (cancelAwareCredentials) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
+
+// An edge cancels its on-demand certificate request when the client TLS handshake behind it ends. The hub must
+// answer 499 and report nothing (production logged these as 503 control_unavailable after every new preview
+// certificate, on .6, .7 and .8); a real credential outage on a live request is still 503 and reported.
+func TestDistributionRequestCancelledByTheEdgeIsNotAControlPlaneFailure(t *testing.T) {
+	store := distributionFaultStore{records: make(chan supportreport.Record, 4)}
+	reporter, err := supportreport.New(store, supportreport.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reporter.Close()
+	reporter.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runCtx, stopReporter := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { reporter.Run(runCtx); close(done) }()
+	defer func() { stopReporter(); <-done }()
+
+	const credential = "distribution-credential-012345678901234567890123456789"
+	identity, err := NewSignedDistributionNodeIdentityResolver(distributionTestKeyLookup{keys: map[string]ed25519.PublicKey{}}, newTestNonces(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(outage error, cancelled bool) int {
+		hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+			Credential: []byte(credential), NodeCredentials: cancelAwareCredentials{outage: outage}, Identity: identity})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, strings.NewReader(`{"hostname":"fresh-preview.example.test"}`))
+		request.Header.Set("Authorization", "Bearer a-self-hosted-edge-runtime-credential-0123456789")
+		request.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
+		ctx, cancel := context.WithCancel(reporter.Context(runCtx, supportreport.NewReference()))
+		if cancelled {
+			cancel()
+		} else {
+			defer cancel()
+		}
+		response := httptest.NewRecorder()
+		hub.Handler().ServeHTTP(response, request.WithContext(ctx))
+		return response.Code
+	}
+	if code := send(errors.New("database unavailable"), true); code != statusClientClosedRequest {
+		t.Fatalf("a request the edge cancelled answered %d, want 499", code)
+	}
+	select {
+	case record := <-store.records:
+		t.Fatalf("a request the edge cancelled was reported as a failure: %+v", record)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if code := send(errors.New("database unavailable"), false); code != http.StatusServiceUnavailable {
+		t.Fatalf("a credential outage on a live request answered %d, want 503", code)
+	}
+	select {
+	case record := <-store.records:
+		if record.Code != "control_unavailable" {
+			t.Fatalf("outage reported as %+v", record)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a real credential outage was not reported")
+	}
+}
+
+// Both edges request a new preview's exact leaf during its first handshakes. Production 2026.11.05.8 answered every
+// request that arrived during the issuance 503 (17 in two bursts), so those handshakes failed. Now a request that
+// finds the leaf already being issued waits for that issuance (certmagic's on-demand wait) and gets the certificate:
+// two concurrent requests, one issuance, both succeed, nothing reported. Only a wait that runs out is a 409 (typed,
+// not reported); a real issuer outage stays a reported 503.
+func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
+	store := distributionFaultStore{records: make(chan supportreport.Record, 4)}
+	reporter, err := supportreport.New(store, supportreport.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reporter.Close()
+	reporter.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runCtx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { reporter.Run(runCtx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	const credential = "distribution-credential-012345678901234567890123456789"
+	newHub := func(onDemand func(context.Context, DistributionNodeIdentity, string) error) *DistributionHub {
+		hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+			Credential: []byte(credential),
+			Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
+				return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: "epoch_0001"}, nil
+			}),
+			OnDemand: onDemand,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return hub
+	}
+	send := func(hub *DistributionHub, edge string, ctx context.Context) int {
+		body, _ := json.Marshal(distributionRequest{Hostname: "fresh-preview.example.test"})
+		request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, bytes.NewReader(body)).WithContext(ctx)
+		request.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Paperboat-Edge-Node-ID", edge)
+		response := httptest.NewRecorder()
+		hub.Handler().ServeHTTP(response, request)
+		return response.Code
+	}
+	// One issuance at a time, like the coordinator's shared issuance lock: the first caller issues for 600 ms.
+	var mu sync.Mutex
+	issuing, issued, issuances := false, false, 0
+	hub := newHub(func(context.Context, DistributionNodeIdentity, string) error {
+		mu.Lock()
+		if issued {
+			mu.Unlock()
+			return nil
+		}
+		if issuing {
+			mu.Unlock()
+			return ErrIssuanceLocked
+		}
+		issuing, issuances = true, issuances+1
+		mu.Unlock()
+		time.Sleep(600 * time.Millisecond)
+		mu.Lock()
+		issuing, issued = false, true
+		mu.Unlock()
+		return nil
+	})
+	codes := make(chan int, 2)
+	for _, edge := range []string{"edge_01", "edge_02"} {
+		go func() { codes <- send(hub, edge, reporter.Context(runCtx, supportreport.NewReference())) }()
+	}
+	for range 2 {
+		if code := <-codes; code != http.StatusNoContent {
+			t.Fatalf("a concurrent first request answered %d, want 204 after the in-flight issuance", code)
+		}
+	}
+	if issuances != 1 {
+		t.Fatalf("issuances = %d, want 1", issuances)
+	}
+	stalled := newHub(func(context.Context, DistributionNodeIdentity, string) error { return ErrIssuanceLocked })
+	short, stop := context.WithTimeout(reporter.Context(runCtx, supportreport.NewReference()), time.Second)
+	defer stop()
+	if code := send(stalled, "edge_01", short); code != http.StatusConflict {
+		t.Fatalf("a wait that ran out answered %d, want 409", code)
+	}
+	select {
+	case record := <-store.records:
+		t.Fatalf("waiting for an issuance was reported as a failure: %+v", record)
+	case <-time.After(300 * time.Millisecond):
+	}
+	broken := newHub(func(context.Context, DistributionNodeIdentity, string) error { return ErrIssuerUnavailable })
+	if code := send(broken, "edge_01", reporter.Context(runCtx, supportreport.NewReference())); code != http.StatusServiceUnavailable {
+		t.Fatalf("issuer unavailable answered %d, want 503", code)
+	}
+	select {
+	case record := <-store.records:
+		if record.Code != "control_unavailable" {
+			t.Fatalf("issuer outage reported as %+v", record)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a real issuance failure was not reported")
 	}
 }

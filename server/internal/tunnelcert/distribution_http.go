@@ -245,6 +245,10 @@ func (h *DistributionHub) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorized, authErr := h.authorized(r)
 		if authErr != nil {
+			if clientClosed(r, authErr) {
+				w.WriteHeader(statusClientClosedRequest)
+				return
+			}
 			captureDistributionAuthorizationFailure(r, "control_unavailable", authErr)
 			writeDistributionError(w, http.StatusServiceUnavailable)
 			return
@@ -257,6 +261,8 @@ func (h *DistributionHub) Handler() http.Handler {
 		if err != nil {
 			if pureDistributionError(err, ErrDistributionIdentityInvalid) {
 				writeDistributionError(w, http.StatusUnauthorized)
+			} else if clientClosed(r, err) {
+				w.WriteHeader(statusClientClosedRequest)
 			} else {
 				captureDistributionAuthorizationFailure(r, "control_unavailable", err)
 				writeDistributionError(w, http.StatusServiceUnavailable)
@@ -577,8 +583,10 @@ func (h *DistributionHub) handleRequest(w http.ResponseWriter, r *http.Request) 
 		writeDistributionError(w, http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.onDemand(r.Context(), identity, hostname); err != nil {
-		if pureDistributionError(err, ErrInvalid) || pureDistributionError(err, ErrGenerationConflict) || pureDistributionError(err, ErrCertificateRevoked) {
+	if err := h.awaitOnDemand(r.Context(), identity, hostname); err != nil {
+		// Only a wait that ran out is "not yet" here: a 409 like the other expected outcomes, never a reported outage.
+		if pureDistributionError(err, ErrInvalid) || pureDistributionError(err, ErrGenerationConflict) || pureDistributionError(err, ErrCertificateRevoked) ||
+			issuancePending(err) {
 			writeDistributionError(w, http.StatusConflict)
 			return
 		}
@@ -953,5 +961,46 @@ func distributionContextError(ctx context.Context) error {
 		return ctx.Err()
 	default:
 		return nil
+	}
+}
+
+// statusClientClosedRequest answers a request whose client went away first (nginx's 499). An edge's on-demand
+// certificate request runs inside a client's TLS handshake and is cancelled when that handshake ends; that is not
+// a control-plane failure and must not be reported as a 503.
+const statusClientClosedRequest = 499
+
+func clientClosed(r *http.Request, err error) bool {
+	return r.Context().Err() != nil && errors.Is(err, r.Context().Err())
+}
+
+// onDemandWait bounds how long a request waits for an issuance another request already started.
+const onDemandWait = 25 * time.Second
+
+func issuancePending(err error) bool {
+	return pureDistributionError(err, ErrIssuanceLocked) || pureDistributionError(err, ErrCertificateNotReady) || pureDistributionError(err, ErrDNSChallengePending)
+}
+
+// awaitOnDemand asks for the leaf; when another request (the other edge, or another server instance) is already
+// issuing it, it waits for that issuance and asks again, so every concurrent first handshake gets the one
+// certificate. The issuance lock is in the shared database, so the wait polls it with backoff rather than an
+// in-process channel. Prior art: certmagic's on-demand obtain waits on the in-flight issuance for the same name
+// (handshake.go obtainOnDemandCertificate, obtainCertWaitChans, bounded wait). Only a wait that runs out is returned.
+func (h *DistributionHub) awaitOnDemand(ctx context.Context, identity DistributionNodeIdentity, hostname string) error {
+	ctx, cancel := context.WithTimeout(ctx, onDemandWait)
+	defer cancel()
+	delay := 250 * time.Millisecond
+	for {
+		err := h.onDemand(ctx, identity, hostname)
+		if err == nil || !issuancePending(err) {
+			return err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+		delay = min(2*delay, 2*time.Second)
 	}
 }
