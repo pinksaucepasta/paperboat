@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -296,10 +297,13 @@ func TestSaturatedDiskFlushDoesNotBlockProducersOrShutdown(t *testing.T) {
 	}
 }
 
-// Native roles shut down together and retain their final diagnostics. A queued
-// burst must fit the shutdown durability budget, even with thousands of events.
+// Native roles shut down together and retain their final diagnostics. A queued burst, even of thousands
+// of events, becomes durable within the product's shutdown bound: the daemon closes its recorder with
+// Close (diskOperationTimeout), and a pb process within its shared shutdown deadline. The writer drains a
+// burst in bounded appends with one fsync each, so every event survives, in the order it was recorded.
 func TestQueuedDiagnosticBurstDrainsWithinShutdownBudget(t *testing.T) {
-	ring, err := NewDiskRing(DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid(), QueueCapacity: 4096})
+	const events = 2048
+	ring, err := NewDiskRing(DiskConfig{Directory: filepath.Join(t.TempDir(), "diagnostics"), OwnerUID: os.Geteuid(), QueueCapacity: 2 * events})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,8 +312,8 @@ func TestQueuedDiagnosticBurstDrainsWithinShutdownBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2048; i++ {
-		if err := ring.Record(concurrencyEvent(t, "burst")); err != nil {
+	for i := 0; i < events; i++ {
+		if err := ring.Record(concurrencyEvent(t, strconv.Itoa(i))); err != nil {
 			unlock()
 			t.Fatal(err)
 		}
@@ -317,10 +321,8 @@ func TestQueuedDiagnosticBurstDrainsWithinShutdownBudget(t *testing.T) {
 	if err := unlock(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	if err := ring.CloseContext(ctx); err != nil {
-		t.Fatalf("queued shutdown diagnostics did not become durable within 1s: %v", err)
+	if err := ring.Close(); err != nil {
+		t.Fatalf("queued shutdown diagnostics did not become durable within the shutdown bound: %v", err)
 	}
 	stats := ring.Stats()
 	if stats.DroppedRecords != 0 || stats.FailedRecords != 0 {
@@ -330,7 +332,14 @@ func TestQueuedDiagnosticBurstDrainsWithinShutdownBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := bytes.Count(data, []byte{'\n'}); got != 2048 {
-		t.Fatalf("persisted %d events; want 2048", got)
+	lines := bytes.Split(bytes.TrimSuffix(data, []byte{'\n'}), []byte{'\n'})
+	if len(lines) != events {
+		t.Fatalf("persisted %d events; want %d", len(lines), events)
+	}
+	for i, line := range lines {
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil || event.Fields["state"] != strconv.Itoa(i) {
+			t.Fatalf("event %d persisted as %q (%v); want the events in the order they were recorded", i, line, err)
+		}
 	}
 }
