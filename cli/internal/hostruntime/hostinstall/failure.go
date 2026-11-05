@@ -22,6 +22,11 @@ var ErrInsufficientSpace = errors.New("there is not enough free disk space to st
 // committed; the previous version was restored.
 var ErrUpdateNotReady = errors.New("the new version did not become ready, so the previous version was restored")
 
+// UpdateNotReady is the rollback of a new version that failed validation; cause is the failed step.
+func UpdateNotReady(cause error) error {
+	return hostInstallFailure("the new version did not become ready; restoring the previous version", ErrUpdateNotReady, cause)
+}
+
 // diskFull reports a write that failed because the disk or the user's quota is full.
 func diskFull(err error) bool {
 	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)

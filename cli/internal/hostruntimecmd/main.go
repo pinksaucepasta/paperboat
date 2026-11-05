@@ -229,7 +229,8 @@ func finishRuntimeCommand(ctx context.Context, operation string, output io.Write
 	}
 	outputFailed := false
 	message := "pb: " + runtimeFailureMessage(err)
-	if longRunningRuntimeService(serviceOperation) || serviceOperation == "service" && runtimeFailureMessage(err) == genericRuntimeFailure {
+	// A not-ready rollback is classified, but its caller says the failing step "is printed above": print it.
+	if longRunningRuntimeService(serviceOperation) || serviceOperation == "service" && (runtimeFailureMessage(err) == genericRuntimeFailure || errors.Is(err, hostinstall.ErrUpdateNotReady)) {
 		// Services run under the service manager with nobody to ask; the journal
 		// is the only place their real cause can be found. The privileged install
 		// step's caller says "its reason is printed above", so an unclassified
