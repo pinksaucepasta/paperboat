@@ -154,10 +154,19 @@ func TestInspectorEphemeralCaptureAndReplay(t *testing.T) {
 	}
 	body, err := io.ReadAll(response.Body)
 	_ = response.Body.Close()
-	_ = stream.Close()
 	if err != nil || string(body) != `{"ok":true,"token":"zzz"}` {
 		t.Fatalf("client bytes altered: %q err=%v", body, err)
 	}
+	// The body ends at its Content-Length, before the forwarder commits the capture; the forwarder
+	// closes the stream only after it has (CI run 41982334603 listed an empty page in between).
+	finished := make(chan struct{})
+	go func() { _, _ = io.Copy(io.Discard, stream); close(finished) }()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("the forwarder did not end the exchange's stream")
+	}
+	_ = stream.Close()
 	if hits.Load() != 1 || methods[0] != "GET" || uris[0] != "/items?session=secret" || auths[0] != "Bearer client-secret" {
 		t.Fatalf("origin saw %+v %+v %+v hits=%d", methods, uris, auths, hits.Load())
 	}
