@@ -21,7 +21,10 @@ SELECT m.environment_id,p.account_id,a.tunnel_id,a.route_generation,a.route_id,a
  publication.hostname,p.target_scheme,p.target_address,a.edge_node_id,a.edge_process_epoch,a.connector_id,a.connector_session_id,
  a.process_generation,a.config_generation,a.route_generation,p.id,coalesce(p.owner_team_id,''),
  LEAST($3::timestamptz+interval '10 seconds',a.expires_at,p.lease_deadline,p.user_deadline,identity.expires_at,n.registry_expires_at,n.last_heartbeat_at+interval '15 seconds')
-FROM preview_routes a
+FROM (SELECT preview_id,account_id,tunnel_id,route_generation,route_id,host_id,edge_node_id,edge_process_epoch,connector_id,
+ connector_session_id,process_generation,config_generation,operation_id,lease_generation,state,edge_ready,origin_ready,expires_at,
+ machine_identity_public_key FROM preview_routes
+ UNION ALL ` + handoverPreviewRoutesSQL + `) a
 JOIN preview_leases p ON p.id=a.preview_id AND p.account_id=a.account_id
 JOIN users owner ON owner.id=p.account_id AND owner.status='active'
 JOIN user_machines m ON m.id=a.host_id AND m.id=p.owner_machine_id AND m.user_id=p.account_id
@@ -45,6 +48,30 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
  AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds' AND n.drain_deadline IS NULL
  AND paperboat.node_preview_eligible(n.id,p.account_id,p.id)
  ORDER BY p.id,publication.hostname LIMIT 4097`
+
+// handoverPreviewRoutesSQL lists, during a worker handover's bounded overlap (migrations 227, 228), the
+// replaced carrier of a preview's assignment and the new carrier before the edge has observed the route on it:
+// the edge keeps the route on the old carrier until the new one serves it, so both stay authorized
+// (make-before-break; Teleport keeps every agent connection of a node, lib/reversetunnel/local_cluster.go).
+// Columns as preview_routes; preview_routes itself lists the new carrier once observed.
+const handoverPreviewRoutesSQL = `SELECT p.id,p.account_id,COALESCE(c.admission->'binding'->>'tunnel_id',''),r.revision,x.route_id,
+ p.owner_machine_id,x.edge_node_id,x.edge_process_epoch,COALESCE(c.admission->'binding'->>'connector_id',''),c.session_id,
+ c.process_generation,COALESCE((c.admission->'binding'->>'config_generation')::bigint,0),x.route_id,1::bigint,
+ CASE WHEN p.ready_at IS NOT NULL THEN 'ready' ELSE 'edge_ready' END,true,p.ready_at IS NOT NULL,c.expires_at,ra.public_identity_key
+FROM endpoint_edge_assignments x
+JOIN endpoint_routes r ON r.id=x.route_id
+JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='preview' AND e.desired_state='active'
+JOIN preview_leases p ON p.id=e.preview_lease_id
+JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
+ AND ra.edge_process_epoch=x.edge_process_epoch AND ra.previous_until>now() AND ra.previous_admission->'binding'->>'session_id'=x.previous_carrier_session_id
+JOIN control_tunnel_nodes n ON n.id=x.edge_node_id AND n.process_epoch=x.edge_process_epoch AND n.last_heartbeat_at>now()-interval '30 seconds'
+CROSS JOIN LATERAL (
+ SELECT ra.previous_admission AS admission,x.previous_carrier_session_id AS session_id,
+  (ra.previous_admission->'binding'->>'process_generation')::bigint AS process_generation,ra.previous_until AS expires_at
+ UNION ALL
+ SELECT ra.admission,ra.session_id,ra.worker_generation,ra.expires_at WHERE ra.session_id=x.carrier_session_id AND ra.ready AND NOT x.observed_ready
+) c
+WHERE x.desired='active' AND EXISTS(SELECT 1 FROM user_machines m WHERE m.id=e.agent_machine_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL)`
 
 func (s SQLIngressSource) publicPreviews(ctx context.Context, node, epoch string) ([]wire.IngressDecision, error) {
 	return s.projectPreviews(ctx, node, epoch, nil)

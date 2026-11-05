@@ -1074,16 +1074,18 @@ type Endpoint struct {
 }
 
 type EndpointEdgeAssignment struct {
-	RouteID          string
-	EndpointID       string
-	EdgeNodeID       string
-	EdgeProcessEpoch string
-	CarrierSessionID string
-	Generation       int64
-	Desired          string
-	ObservedReady    bool
-	ObservedAt       sql.NullTime
-	ChangedAt        time.Time
+	RouteID                  string
+	EndpointID               string
+	EdgeNodeID               string
+	EdgeProcessEpoch         string
+	CarrierSessionID         string
+	Generation               int64
+	Desired                  string
+	ObservedReady            bool
+	ObservedAt               sql.NullTime
+	ChangedAt                time.Time
+	PreviousCarrierSessionID sql.NullString
+	PreviousGeneration       sql.NullInt64
 }
 
 type EndpointRoute struct {
@@ -2236,6 +2238,8 @@ type RuntimeCarrierAttachment struct {
 	Active                 bool
 	PreviewSessionID       string
 	AgentCapabilities      []string
+	PreviousAdmission      []byte
+	PreviousUntil          sql.NullTime
 }
 
 type SelfhostInstallation struct {

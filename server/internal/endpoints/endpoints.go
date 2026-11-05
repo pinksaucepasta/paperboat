@@ -78,6 +78,9 @@ INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edg
 SELECT route_id,endpoint_id,edge_node_id,edge_process_epoch,session_id FROM desired
 ON CONFLICT(route_id,edge_node_id) DO UPDATE SET
  generation=x.generation+1,observed_ready=false,
+ -- A handover to another carrier on the same edge keeps the old one for the overlap (migration 228).
+ previous_carrier_session_id=CASE WHEN x.desired='active' AND x.edge_process_epoch=EXCLUDED.edge_process_epoch AND x.carrier_session_id<>EXCLUDED.carrier_session_id THEN x.carrier_session_id ELSE x.previous_carrier_session_id END,
+ previous_generation=CASE WHEN x.desired='active' AND x.edge_process_epoch=EXCLUDED.edge_process_epoch AND x.carrier_session_id<>EXCLUDED.carrier_session_id THEN x.generation ELSE x.previous_generation END,
  edge_process_epoch=EXCLUDED.edge_process_epoch,carrier_session_id=EXCLUDED.carrier_session_id,desired='active'
  -- Every attach and tunnel sync reconciles; an assignment that already matches is left untouched.
  WHERE x.desired<>'active' OR x.edge_process_epoch<>EXCLUDED.edge_process_epoch OR x.carrier_session_id<>EXCLUDED.carrier_session_id

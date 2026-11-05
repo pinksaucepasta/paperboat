@@ -338,6 +338,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if errA != nil || errB != nil || len(routesA) == 0 || !bytes.Equal(encodedA, encodedB) {
 		t.Fatalf("route answer moved between idle pulls: %v %v\n%s\n%s", errA, errB, encodedA, encodedB)
 	}
+	checkWorkerHandover(t, f, control, route)
 	// Tunnel routes reach the edge with its route snapshot, never as preview admissions.
 	values, err := f.service.Pull(f.ctx, f.edge, both)
 	if err != nil {

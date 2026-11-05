@@ -288,7 +288,9 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 			}
 			_, err = tx.Exec(ctx, `INSERT INTO runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,agent_capabilities)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17)
-ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,agent_capabilities=EXCLUDED.agent_capabilities,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END`, route, proof.MachineID, proof.UserID, request.InstallationGeneration, request.WorkerGeneration, request.ProcessID, rowGeneration, edge.node, edge.epoch, publicKey, revision, binding.SessionID, previewSessionID, encoded, admission.ExpiresAt, same, capabilities)
+ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,account_id=EXCLUDED.account_id,installation_generation=EXCLUDED.installation_generation,worker_generation=EXCLUDED.worker_generation,process_id=EXCLUDED.process_id,generation=EXCLUDED.generation,edge_process_epoch=EXCLUDED.edge_process_epoch,public_identity_key=EXCLUDED.public_identity_key,route_revision=EXCLUDED.route_revision,session_id=EXCLUDED.session_id,preview_session_id=EXCLUDED.preview_session_id,admission=EXCLUDED.admission,expires_at=EXCLUDED.expires_at,agent_capabilities=EXCLUDED.agent_capabilities,ready=CASE WHEN $16 THEN runtime_carrier_attachments.ready ELSE false END,observed_at=CASE WHEN $16 THEN runtime_carrier_attachments.observed_at ELSE NULL END,
+previous_admission=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.session_id AND runtime_carrier_attachments.ready AND runtime_carrier_attachments.expires_at>now() AND runtime_carrier_attachments.edge_process_epoch=EXCLUDED.edge_process_epoch AND runtime_carrier_attachments.public_identity_key=EXCLUDED.public_identity_key AND runtime_carrier_attachments.installation_generation=EXCLUDED.installation_generation THEN runtime_carrier_attachments.admission ELSE runtime_carrier_attachments.previous_admission END,
+previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.session_id AND runtime_carrier_attachments.ready AND runtime_carrier_attachments.expires_at>now() AND runtime_carrier_attachments.edge_process_epoch=EXCLUDED.edge_process_epoch AND runtime_carrier_attachments.public_identity_key=EXCLUDED.public_identity_key AND runtime_carrier_attachments.installation_generation=EXCLUDED.installation_generation THEN LEAST(runtime_carrier_attachments.expires_at,now()+$18::interval) ELSE runtime_carrier_attachments.previous_until END`, route, proof.MachineID, proof.UserID, request.InstallationGeneration, request.WorkerGeneration, request.ProcessID, rowGeneration, edge.node, edge.epoch, publicKey, revision, binding.SessionID, previewSessionID, encoded, admission.ExpiresAt, same, capabilities, previousCarrierGrace.String())
 			if err != nil {
 				return err
 			}
@@ -452,6 +454,10 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 	}
 	return append(out, routes...), nil
 }
+
+// previousCarrierGrace bounds how long a carrier a worker handover replaced stays authorized next to the new one,
+// the edge's own bound for it (tunnel datacarrier supersededGrace): the old worker serves until the new one does.
+const previousCarrierGrace = 30 * time.Second
 
 // observationRefresh is how stale an unchanged carrier observation may get before it is written again.
 // Readiness accepts an observation up to 2 minutes old (runtime_carrier_valid, migration 188) because a dead

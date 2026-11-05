@@ -80,9 +80,9 @@ SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.gen
  r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),
  COALESCE(r.public_tcp_listener_id,''),COALESCE(r.public_tcp_port,0),r.protocol,
  publication.publication_id,publication.publication_generation,
- x.edge_node_id,x.edge_process_epoch,(ra.admission->'binding'->>'connector_id'),ra.session_id,ra.worker_generation,
- (ra.admission->'binding'->>'config_generation')::bigint,x.generation,viewer_policy.viewer_policy_generation,
- LEAST($1::timestamptz + interval '10 seconds',t.expires_at,identity.expires_at,ra.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds')
+ x.edge_node_id,x.edge_process_epoch,(c.admission->'binding'->>'connector_id'),c.session_id,c.process_generation,
+ (c.admission->'binding'->>'config_generation')::bigint,c.generation,viewer_policy.viewer_policy_generation,
+ LEAST($1::timestamptz + interval '10 seconds',t.expires_at,identity.expires_at,c.expires_at,node.registry_expires_at,node.last_heartbeat_at+interval '15 seconds')
 FROM endpoint_edge_assignments x
 JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.desired_state='active'
 JOIN tunnels t ON t.id=e.tunnel_id
@@ -102,8 +102,17 @@ LEFT JOIN LATERAL (
    AND (r.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
 ) publication ON true
 JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
- AND ra.edge_process_epoch=x.edge_process_epoch AND ra.session_id=x.carrier_session_id
+ AND ra.edge_process_epoch=x.edge_process_epoch
  AND ra.agent_capabilities @> ARRAY['endpoints','tunnel_endpoints']::text[]
+-- The assignment's carrier, and during a worker handover's bounded overlap the carrier it replaced: the edge
+-- keeps the route there until the new carrier serves it (migrations 227, 228; preview_ingress.go).
+CROSS JOIN LATERAL (
+ SELECT ra.admission,ra.session_id,ra.worker_generation AS process_generation,x.generation,ra.expires_at WHERE ra.session_id=x.carrier_session_id
+ UNION ALL
+ SELECT ra.previous_admission,x.previous_carrier_session_id,(ra.previous_admission->'binding'->>'process_generation')::bigint,
+  x.previous_generation,ra.previous_until
+ WHERE ra.previous_until>$1 AND ra.previous_admission->'binding'->>'session_id'=x.previous_carrier_session_id
+) c
 JOIN user_machines m ON m.id=ra.machine_id AND m.user_id=t.account_id
 JOIN control_environments environment ON environment.id=m.environment_id AND environment.owner_user_id=t.account_id AND environment.workspace_id=m.id
 JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
