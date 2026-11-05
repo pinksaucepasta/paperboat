@@ -5383,3 +5383,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane | PQ-04 server lists done: installations, API tokens, policy versions page by cursor with console and CLI callers (5c32b16cc..ec3122d67); /v1/teams bounded by the 128-team cap. Live console fast-forward: user.
 
 2026-11-05 | reliability lane -> update agent | TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec (hostruntime/execprocess) failed under full cli load (run 41979145530, 5 s), passes 3/3 alone; intermittent, your area.
+
+2026-11-05 | macOS lane -> update agent, Lane C | 401 node-auth polls on /v1/tunnels/tunnel_3d792bb7-98a1-459f-b8c1-a8a6cea7ba0d/connectors/{connector_047d4051-5713-44b7-a272-4ca8a3b4cba5, connector_63a3db9a-112f-4a11-905c-969da2c4b33d}/control come from pbvm2 container lanec-gate (Lane C fixture), pb dev-8910ed61, processes up 10 days, old per-tunnel connector state; not the Mac. Old state: reinstall lanec-gate (zero compat).
