@@ -43,7 +43,7 @@ while True:
 
 create_tunnel() { # ct name [--private]
   TUNNEL_CT=$1
-  TUNNEL_ID=$(in_ct "$1" ".local/bin/pb tunnel create $2 --port $HTTP_PORT $3 --wait --timeout 90s --json" | json_field 'd["tunnel"]["id"]') || return 1
+  TUNNEL_ID=$(in_ct "$1" ".local/bin/pb tunnel create $2 --port $HTTP_PORT ${3:-} --wait --timeout 90s --json" | json_field 'd["tunnel"]["id"]') || return 1
   [ -n "$TUNNEL_ID" ]
 }
 
