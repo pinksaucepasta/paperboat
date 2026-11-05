@@ -57,3 +57,17 @@ func TestExitErrorAttachesLineOnlyForContainerExit(t *testing.T) {
 		t.Fatalf("container exit did not carry its last line: %#v", err)
 	}
 }
+
+// A runtime that fails to start prints its reason, then shutdown records; the reason is what the
+// journal must carry (oracle, 2026-11-05: address_in_use was hidden behind reporting_shutdown).
+func TestLastOutputLinePrefersTheRuntimeFailureLineOverShutdownRecords(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho '{\"level\":\"ERROR\"}'\necho 'service failure stage=configure cause=address_in_use error_type=Errno'\necho 'paperboat-tunnel stopped; support reference x'\necho '{\"msg\":\"reporting_shutdown\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if got := lastOutputLine("paperboat-pbh-test-tunnel"); got != "service failure stage=configure cause=address_in_use error_type=Errno" {
+		t.Fatalf("explaining line = %q", got)
+	}
+}

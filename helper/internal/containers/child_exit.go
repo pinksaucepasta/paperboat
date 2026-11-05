@@ -13,10 +13,11 @@ var errContainerExited = errors.New("runtime container exited")
 
 // childTailBytes bounds how much of a runtime container's output is kept to
 // explain its exit.
-const childTailBytes = 2 << 10
+const childTailBytes = 8 << 10
 
-// ChildExit reports that a runtime container stopped. LastLine is its last
-// non-empty output line, bounded to childTailBytes, so the service journal
+// ChildExit reports that a runtime container stopped. LastLine is the line that
+// says why (a runtime's "service failure" line, else its last non-empty output
+// line), bounded to childTailBytes, so the service journal
 // shows why the container exited even after the follow stream has stopped.
 type ChildExit struct {
 	Err      error
@@ -45,7 +46,7 @@ func lastOutputLine(name string) string {
 	logs.Stdout, logs.Stderr = tail, tail
 	logs.WaitDelay = 2 * time.Second
 	_ = logs.Run()
-	return tail.lastLine()
+	return tail.explainingLine()
 }
 
 // lineTail keeps only the last childTailBytes written to it.
@@ -72,4 +73,18 @@ func (t *lineTail) lastLine() string {
 		text = text[i+1:]
 	}
 	return text
+}
+
+// explainingLine is the runtime's own "service failure ..." line when the tail holds one: a runtime
+// that fails to start prints it before its shutdown records, which would otherwise be the last lines.
+func (t *lineTail) explainingLine() string {
+	t.mu.Lock()
+	text := string(t.buf)
+	t.mu.Unlock()
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "service failure") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return t.lastLine()
 }
