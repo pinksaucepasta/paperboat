@@ -342,11 +342,18 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	return err
 }
 
+// refreshAfterSSHTrustHost is replaced in tests.
+var refreshAfterSSHTrustHost = refreshLocalInventory
+
 func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	client, machine, _, err := resolveSSHCommandTarget(actionContext(command, args), args[0])
 	if err != nil {
 		return friendlyCommandError(err)
 	}
+	return trustSSHHost(command, client, machine)
+}
+
+func trustSSHHost(command *cobra.Command, client *api.Client, machine api.UserMachine) error {
 	generation := uint64(machine.InstallationGeneration)
 	active, err := client.ManagedSSHHostKeys(command.Context(), machine.ID, generation)
 	if err != nil {
@@ -383,6 +390,11 @@ func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	_, err = client.PromoteManagedSSHHostKeys(command.Context(), machine.ID, pending.SetID, fingerprint, newIdempotencyKey(), generation)
 	if err != nil {
 		return friendlyCommandError(err)
+	}
+	// pb ssh reads host keys from the daemon's machine list (F5-07): refresh it so the next pb ssh offers the
+	// trusted set at once instead of the old one (C066).
+	if err := refreshAfterSSHTrustHost(command.Context()); err != nil {
+		fmt.Fprintf(command.ErrOrStderr(), "pb: trusted, but this computer's machine list did not refresh yet; `pb ssh %s` can need a few seconds.\n", machine.Alias)
 	}
 	if jsonOutput {
 		return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": map[string]string{"id": machine.ID, "alias": machine.Alias}, "fingerprint": fingerprint, "trusted": true})
