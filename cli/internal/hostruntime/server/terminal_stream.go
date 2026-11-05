@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
@@ -188,11 +189,13 @@ func (d *Dispatcher) resumeTerminal(authorization Authorization, request termina
 		return failure("not_found_or_forbidden")
 	}
 	if err != nil {
+		errorreport.Current().ObserveFailure(context.Background(), "paperboat-daemon", "sessions", "resume_attachment", "terminal_resume_failed", err)
 		return domainResult(nil, err)
 	}
 	authorization.Resume.resumed.Store(true)
 	response := newTerminalAttachResponse(request.AttachmentID, value)
 	if response.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, request.AttachmentID, value.Snapshot.Generation); err != nil {
+		errorreport.Current().ObserveFailure(context.Background(), "paperboat-daemon", "sessions", "input_sequence", "terminal_resume_failed", err)
 		return domainResult(nil, err)
 	}
 	return result(response)
