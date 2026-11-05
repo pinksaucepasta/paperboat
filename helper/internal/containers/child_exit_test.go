@@ -1,7 +1,9 @@
 package containers
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,5 +71,29 @@ func TestLastOutputLinePrefersTheRuntimeFailureLineOverShutdownRecords(t *testin
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if got := lastOutputLine("paperboat-pbh-test-tunnel"); got != "service failure stage=configure cause=address_in_use error_type=Errno" {
 		t.Fatalf("explaining line = %q", got)
+	}
+}
+
+func TestWriteLogTailWritesOnlyTheLastLinesDockerReturns(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\n[ \"$1 $2 $3 $4 $5\" = 'logs --timestamps --tail 50 next' ] || exit 9\nfor i in $(seq 1 3); do echo \"line $i\"; done\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var w bytes.Buffer
+	writeLogTail(&w, "next")
+	for i := 1; i <= 3; i++ {
+		if !strings.Contains(w.String(), fmt.Sprintf("pbh: handover replacement output: line %d\n", i)) {
+			t.Fatalf("journal output = %q", w.String())
+		}
+	}
+	w.Reset()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeLogTail(&w, "next")
+	if w.Len() != 0 {
+		t.Fatalf("a failed log read wrote %q", w.String())
 	}
 }

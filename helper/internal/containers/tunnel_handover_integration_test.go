@@ -1,6 +1,7 @@
 package containers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -65,11 +66,12 @@ func TestDockerTunnelInstallHandsOverWithoutStoppingTheServingContainer(t *testi
 			}
 			script := "sleep 120"
 			if mode == "dies first" {
-				script = "exit 3"
+				script = "echo replacement failed on purpose; exit 3"
 			}
 			image := replacementImage(t, ctx, base, script)
 			launcher := Launcher{StateDir: dir, Images: Images{Tunnel: image}}
-			err = launcher.handOver(ctx, "tunnel", image, name, owner)
+			var journal bytes.Buffer
+			err = launcher.handOver(ctx, "tunnel", image, name, owner, &journal)
 			if mode == "dies first" {
 				var exit *ChildExit
 				if !errors.As(err, &exit) {
@@ -83,6 +85,9 @@ func TestDockerTunnelInstallHandsOverWithoutStoppingTheServingContainer(t *testi
 				}
 				if _, exists, _ := inspectContainer(ctx, next); exists {
 					t.Fatal("the failed replacement was left behind")
+				}
+				if journal.Len() == 0 {
+					t.Fatal("the failed replacement's output was removed without reaching the journal")
 				}
 				return
 			}

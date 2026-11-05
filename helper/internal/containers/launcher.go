@@ -112,7 +112,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	switch {
 	case adopted:
 	case capability == "tunnel" && exists && info.Running:
-		if err := l.handOver(ctx, capability, image, name, owner); err != nil {
+		if err := l.handOver(ctx, capability, image, name, owner, output); err != nil {
 			return err
 		}
 	default:
@@ -183,7 +183,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 // process releases them once the new one is warm, drains and exits on its own; then the new
 // container takes the name. A replacement that exits or never takes over is removed, and the
 // serving container keeps serving.
-func (l *Launcher) handOver(ctx context.Context, capability, image, name, owner string) error {
+func (l *Launcher) handOver(ctx context.Context, capability, image, name, owner string, output io.Writer) error {
 	next := name + "-next"
 	if err := removeOwned(ctx, next, owner); err != nil {
 		return err
@@ -203,12 +203,14 @@ func (l *Launcher) handOver(ctx context.Context, capability, image, name, owner 
 		replacement, nextErr := containerRunning(wait, next, owner)
 		if err == nil && nextErr == nil && !replacement {
 			last := lastOutputLine(next)
+			writeLogTail(output, next)
 			cleanup, stop := context.WithTimeout(context.Background(), 12*time.Second)
 			defer stop()
 			return errors.Join(&ChildExit{Err: fmt.Errorf("%w before taking over; the serving container keeps serving", errContainerExited), LastLine: last}, removeOwned(cleanup, next, owner))
 		}
 		select {
 		case <-wait.Done():
+			writeLogTail(output, next)
 			cleanup, stop := context.WithTimeout(context.Background(), 12*time.Second)
 			defer stop()
 			return errors.Join(fmt.Errorf("tunnel handover did not finish: %w", wait.Err()), err, nextErr, removeOwned(cleanup, next, owner))

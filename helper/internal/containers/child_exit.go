@@ -3,7 +3,9 @@ package containers
 import (
 	"context"
 	"errors"
+	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,4 +89,32 @@ func (t *lineTail) explainingLine() string {
 		}
 	}
 	return t.lastLine()
+}
+
+// handoverLogLines is how much of a failed replacement's output reaches the journal.
+const (
+	handoverLogLines = 50
+	handoverLogBytes = 64 << 10
+)
+
+// writeLogTail writes the last handoverLogLines lines of a container's output (timestamped,
+// stdout and stderr merged) to w before the container is removed. A failed handover, an exit or a
+// deadline, must never leave no evidence (oracle, 2026-11-05: three deadline failures and the
+// replacement's output was gone). Best effort: a failed log read writes nothing.
+func writeLogTail(w io.Writer, name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	logs := exec.CommandContext(ctx, "docker", "logs", "--timestamps", "--tail", strconv.Itoa(handoverLogLines), name)
+	logs.WaitDelay = 2 * time.Second
+	out, _ := logs.CombinedOutput()
+	if len(out) > handoverLogBytes {
+		out = out[len(out)-handoverLogBytes:]
+	}
+	text := strings.TrimRight(string(out), "\n")
+	if text == "" {
+		return
+	}
+	for _, line := range strings.Split(text, "\n") {
+		_, _ = io.WriteString(w, "pbh: handover replacement output: "+line+"\n")
+	}
 }
