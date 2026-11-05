@@ -32,7 +32,26 @@ var (
 	// reported carriers were already replaced (409 runtime_carrier_stale); the next pull
 	// replaces them here, so it is an expected answer, not a control failure.
 	ErrRuntimeCarrierStale = errors.New("runtime carrier observation is stale")
+	// ErrCertificateNotIssued: the server has no certificate to issue for the requested host
+	// (409 on the on-demand request), the usual answer for a handshake with a stray name.
+	ErrCertificateNotIssued = errors.New("no certificate for this host")
 )
+
+// expectedAnswer reports whether a failed control request is the server's answer to the request
+// (a refusal, "stale", or the caller giving up) rather than control-plane unavailability. Only
+// unavailability is recorded as a control failure; an answer about the edge's own identity or a
+// malformed request (401 on node identity, 400) still is, because it is an edge bug.
+func expectedAnswer(err error) bool {
+	var refused *BrowserTerminalRefused
+	for _, answer := range []error{context.Canceled, ErrNodeObservationStale, ErrRuntimeCarrierStale, ErrCertificateNotIssued,
+		ErrBrowserUnauthenticated, ErrBrowserDenied, ErrLazyHostOffline, ErrLazyOriginUnavailable, ErrLazyGenerationConflict,
+		ErrLazyCooldown, ErrLazyCapacity, ErrPrivateAccessGrantUnauthorized, ErrPrivateAccessGrantForbidden, ErrInspectorAccessDenied} {
+		if errors.Is(err, answer) {
+			return true
+		}
+	}
+	return errors.As(err, &refused)
+}
 
 type HTTPConfig struct {
 	BaseURL        string
@@ -507,6 +526,12 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		if path == runtimewire.EdgeObservePath && response.StatusCode == http.StatusConflict {
 			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrRuntimeCarrierStale}
 		}
+		if path == CertificateDistributionRequestPath && response.StatusCode == http.StatusConflict {
+			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrCertificateNotIssued}
+		}
+		if path == InspectorAccessPath && response.StatusCode == http.StatusForbidden {
+			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrInspectorAccessDenied}
+		}
 		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
 	if output == nil || response.StatusCode == http.StatusNoContent {
@@ -561,7 +586,11 @@ func (c *HTTPClient) startRequest(ctx context.Context, operation string) (contex
 			} else if errors.Is(err, ErrControlInvalid) || errors.Is(err, ErrNodeObservationStale) || errors.As(err, &status) && status.DiagnosticStatus() >= 400 && status.DiagnosticStatus() < 500 {
 				outcome, code = "rejected", "invalid"
 			}
-			if c.controlFailure != nil && !errors.Is(err, ErrRuntimeCarrierStale) {
+			if expectedAnswer(err) {
+				if outcome == "failed" {
+					outcome, code = "rejected", "invalid"
+				}
+			} else if c.controlFailure != nil {
 				c.controlFailure(ctx, controlReference(ctx), err)
 				code = "control_request_failed"
 			}

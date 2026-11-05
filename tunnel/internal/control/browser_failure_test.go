@@ -130,7 +130,7 @@ func TestPrivateGrantTransportCauseIsPrivateAndRecovers(t *testing.T) {
 	}
 	_, err = authorizer.AuthorizePrivateAccessGrant(context.Background(), "PRIVATE-GRANT", input)
 	var failure *RequestFailure
-	if !errors.Is(err, ErrPrivateAccessGrantForbidden) || !errors.As(err, &failure) || failure.Status != 403 || failures != 2 {
+	if !errors.Is(err, ErrPrivateAccessGrantForbidden) || !errors.As(err, &failure) || failure.Status != 403 || failures != 1 {
 		t.Fatal("transport recovery/rejection owner lost")
 	}
 }

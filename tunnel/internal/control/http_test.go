@@ -368,7 +368,7 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatal("control did not recover", err)
 	}
-	if len(failures) != 2 || strings.Join(outcomes, ",") != "failed:control_request_failed,rejected:control_request_failed,success:ok" {
+	if len(failures) != 1 || strings.Join(outcomes, ",") != "failed:control_request_failed,rejected:invalid,success:ok" {
 		t.Fatalf("attempt ownership: %v %d", outcomes, len(failures))
 	}
 	original := &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}

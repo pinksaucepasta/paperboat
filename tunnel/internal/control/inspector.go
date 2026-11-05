@@ -13,6 +13,8 @@ const InspectorAccessPath = "/v1/edge/inspector/access"
 var (
 	ErrInspectorAccessInvalid     = errors.New("invalid inspector edge access request")
 	ErrInspectorAccessUnavailable = errors.New("inspector edge access unavailable")
+	// ErrInspectorAccessDenied: the server answered 403 inspector_not_authorized.
+	ErrInspectorAccessDenied = errors.New("inspector edge access denied")
 )
 
 type InspectorAccessRequest struct {
