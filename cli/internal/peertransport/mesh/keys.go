@@ -38,17 +38,3 @@ func DiscoPrivateForNode(k key.NodePrivate) key.DiscoPrivate { return discoPriva
 func DiscoPublicForNode(k key.NodePrivate) DiscoPublic {
 	return DiscoPublic{discoPrivateForNode(k).Public()}
 }
-
-// DiscoPrivateForGeneration isolates discovery and UDP-relay allocations while
-// retaining the existing machine/network identity. No control-plane peer is made.
-func DiscoPrivateForGeneration(k key.NodePrivate, namespace [32]byte) key.DiscoPrivate {
-	raw := k.Raw32()
-	mac := hmac.New(sha256.New, raw[:])
-	mac.Write([]byte("paperboat/carrier-generation/disco/v1"))
-	mac.Write(namespace[:])
-	out := mac.Sum(nil)
-	out[0] &= 248
-	out[31] &= 127
-	out[31] |= 64
-	return key.DiscoPrivateFromRaw32(go4mem.B(out))
-}

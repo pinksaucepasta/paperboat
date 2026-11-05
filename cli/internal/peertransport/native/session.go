@@ -119,7 +119,7 @@ var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
 func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) (*Session, error) {
 	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
-	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID, true)
+	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID)
 	if err != nil {
 		return nil, err
 	}

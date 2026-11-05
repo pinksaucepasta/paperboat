@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -26,21 +25,26 @@ import (
 // account. It neither boots a feature worker nor owns terminal, exec, or
 // transfer state.
 type ProductionCarrier struct {
+	ssh *managedssh.Host
+	// assemble opens the state files and builds the serving parts; it runs
+	// only under the role lock, so one carrier at a time owns that state.
+	assemble func() (*servingCarrier, error)
+	// roleLock is the file lock of the serving role (empty on Windows: one carrier).
+	roleLock string
+	// standby is an update's candidate: it prepares nothing that touches state
+	// or the network until StartNetwork, after the serving carrier released the role.
+	standby bool
+	mu      sync.Mutex
+	runCtx  context.Context
+	serving *servingCarrier
+}
+
+// servingCarrier is what a carrier runs while it holds the serving role.
+type servingCarrier struct {
 	peer          *productionNativePeerService
 	authorization Service
 	usage         *hostBandwidthService
-	ssh           *managedssh.Host
 	unlock        func() error
-	// standby is an update's candidate: it prepares everything except the
-	// machine's network, which StartNetwork brings up once the serving carrier
-	// released it. primaryLock is the serving carrier's slot 0 lock, taken first.
-	standby       bool
-	primaryLock   string
-	mu            sync.Mutex
-	runCtx        context.Context
-	networkUp     bool
-	released      bool
-	unlockPrimary func() error
 }
 
 // CarrierGeneration places a carrier process among the account's carrier
@@ -53,17 +57,18 @@ type CarrierGeneration struct {
 	Active func(context.Context) (bool, error)
 }
 
-// carrierSlots bounds the generations serving at once (one active, the rest
-// draining), and so the state files they keep. Each slot's files have one
-// writer, its lock holder; a later generation in the slot takes over what is
-// still pending (usage, audit backlog).
-const carrierSlots = 4
+// carrierRole names the serving role's state files and lock: the files have one
+// writer, the carrier holding the role, and the next carrier resumes them.
+const carrierRole = "carrier-0"
+
+// roleLockWait bounds how long a carrier that is meant to serve waits for the previous one to leave.
+const roleLockWait = 30 * time.Second
 
 // NewProductionCarrier loads an already enrolled machine identity. Initial
 // enrollment and current SSH target publication remain installer/worker work.
-// Only the active generation in slot 0 starts the machine's network; every
-// other generation is standby (an update's candidate) until StartNetwork.
-func NewProductionCarrier(ctx context.Context, version string, environ func(string) string, dispatch *server.NativeDispatchClient, ssh *managedssh.Host, generation CarrierGeneration) (_ *ProductionCarrier, resultErr error) {
+// The active generation serves at once; any other is standby (an update's
+// candidate) until StartNetwork.
+func NewProductionCarrier(ctx context.Context, version string, environ func(string) string, dispatch *server.NativeDispatchClient, ssh *managedssh.Host, generation CarrierGeneration) (*ProductionCarrier, error) {
 	if ctx == nil || environ == nil || dispatch == nil || ssh == nil {
 		return nil, ErrProductionInvalid
 	}
@@ -71,42 +76,31 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	if err != nil {
 		return nil, err
 	}
-	slot, unlock := 0, func() error { return nil }
-	if generation.Name != "" {
-		slot, unlock, err = lockCarrierSlot(filepath.Join(base.config.StateRoot, "runtime"))
-		if err != nil {
-			return nil, err
-		}
-	}
-	defer func() {
-		if resultErr != nil {
-			resultErr = errors.Join(resultErr, unlock())
-		}
-	}()
-	standby := false
+	carrier := &ProductionCarrier{ssh: ssh}
 	if generation.Name != "" {
 		active, err := generation.Active(ctx)
 		if err != nil {
 			return nil, err
 		}
-		standby = !active || slot != 0
+		carrier.standby = !active
+		carrier.roleLock = filepath.Join(base.config.StateRoot, "runtime", carrierRole+".lock")
 	}
-	name := fmt.Sprintf("carrier-%d", slot)
-	config, controlURL, transport := base.config, base.controlURL, base.transport
-	identity, machineIdentity := base.identity, base.machineIdentity
-	tokens, operationID := base.tokens, base.operationID
-	events, peerEnrollment := base.events, base.peerEnrollment
-	if err := allowPendingPeerEnrollment(ctx, peerEnrollment); err != nil {
+	if err := allowPendingPeerEnrollment(ctx, base.peerEnrollment); err != nil {
 		return nil, err
 	}
-	// Each process owns its persisted key cache.
-	keys, err := productionJWKSCache(controlURL, transport, filepath.Join(config.StateRoot, "authorization", name+"-jwks.json"))
+	carrier.assemble = func() (*servingCarrier, error) { return assembleServing(ctx, base, environ, dispatch, ssh) }
+	return carrier, nil
+}
+
+func assembleServing(ctx context.Context, base *carrierIdentity, environ func(string) string, dispatch *server.NativeDispatchClient, ssh *managedssh.Host) (_ *servingCarrier, resultErr error) {
+	config, controlURL, transport := base.config, base.controlURL, base.transport
+	keys, err := productionJWKSCache(controlURL, transport, filepath.Join(config.StateRoot, "authorization", carrierRole+"-jwks.json"))
 	if err != nil {
 		return nil, err
 	}
 	usageControl := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	usageControl.SetMachineAuth(machineIdentity)
-	usage, err := bandwidth.Open(filepath.Join(config.StateRoot, name+"-bandwidth-usage.json"), usageControl, newBandwidthObservation(ctx))
+	usageControl.SetMachineAuth(base.machineIdentity)
+	usage, err := bandwidth.Open(filepath.Join(config.StateRoot, carrierRole+"-bandwidth-usage.json"), usageControl, newBandwidthObservation(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -116,42 +110,40 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 			resultErr = errors.Join(resultErr, usageService.Shutdown(context.WithoutCancel(ctx)))
 		}
 	}()
-	audit, err := auditCarrierSSH(filepath.Join(config.StateRoot, name+"-offline-audit.json"), ssh)
+	audit, err := auditCarrierSSH(filepath.Join(config.StateRoot, carrierRole+"-offline-audit.json"), ssh)
 	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	peer, err := newProductionNativePeerService(productionNativePeerConfig{
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
-		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
-		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
-		networkEvents: events.Subscribe(carrierRenewalTopics...),
+		stateRoot: config.StateRoot, machineID: base.identity.MachineID, generation: uint64(base.generation),
+		transport: transport, identity: base.machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
+		networkEvents: base.events.Subscribe(carrierRenewalTopics...),
 	})
 	if err != nil {
 		return nil, err
 	}
-	carrier := &ProductionCarrier{peer: peer, authorization: serviceGroup{events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh, unlock: unlock}
-	carrier.standby = standby
-	if slot != 0 {
-		carrier.primaryLock = filepath.Join(config.StateRoot, "runtime", "carrier-0.lock")
-	}
-	return carrier, nil
+	group := serviceGroup{base.events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(base.peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, base.identity.MachineID, config.StateRoot, transport, base.tokens, base.operationID)}
+	return &servingCarrier{peer: peer, authorization: group, usage: usageService}, nil
 }
 
-// lockCarrierSlot takes the first free slot of carrierSlots.
-func lockCarrierSlot(root string) (int, func() error, error) {
-	var failures error
-	for slot := range carrierSlots {
-		unlock, err := lockCarrierFile(filepath.Join(root, fmt.Sprintf("carrier-%d.lock", slot)))
+// awaitRoleLock takes the serving role's lock, waiting until ctx ends for the previous holder to leave.
+func awaitRoleLock(ctx context.Context, path string) (func() error, error) {
+	for {
+		unlock, err := lockCarrierFile(path)
 		if err == nil {
-			return slot, unlock, nil
+			return unlock, nil
 		}
-		failures = errors.Join(failures, err)
+		select {
+		case <-ctx.Done():
+			return nil, errors.Join(ErrCarrierRoleBusy, ctx.Err(), err)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
-	return 0, nil, errors.Join(ErrCarrierSlotsBusy, failures)
 }
 
-// ErrCarrierSlotsBusy means carrierSlots older generations still drain open streams.
-var ErrCarrierSlotsBusy = errors.New("every carrier generation slot is serving; wait for an older generation's open streams to close")
+// ErrCarrierRoleBusy means another carrier still serves the machine's network.
+var ErrCarrierRoleBusy = errors.New("another carrier still serves this machine; it releases the network at the end of an update")
 
 // auditCarrierSSH queues the SSH sessions the carrier serves (F5-12) in its own backlog file, as for the JWKS cache.
 func auditCarrierSSH(path string, ssh *managedssh.Host) (*offlineaudit.Queue, error) {
@@ -172,83 +164,80 @@ func (c *ProductionCarrier) Start(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return ErrProductionInvalid
 	}
-	if err := c.authorization.Start(ctx); err != nil {
-		return errors.Join(err, c.usage.Shutdown(context.WithoutCancel(ctx)))
-	}
 	c.runCtx = ctx
 	if c.standby {
 		return nil
 	}
-	if err := c.startPeer(ctx); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		return errors.Join(err, c.authorization.Shutdown(cleanupCtx), c.usage.Shutdown(cleanupCtx))
-	}
-	return nil
+	wait, cancel := context.WithTimeout(ctx, roleLockWait)
+	defer cancel()
+	return c.serve(wait)
 }
 
-func (c *ProductionCarrier) startPeer(ctx context.Context) error {
-	if err := c.peer.Start(ctx); err != nil {
-		return err
-	}
-	c.networkUp = true
-	return nil
-}
-
-// StartNetwork brings a standby carrier's network up on the machine's own
-// identity once the serving carrier released it (ReleaseNetwork frees slot 0's
-// lock). It waits for that release until ctx ends, and is idempotent.
+// StartNetwork has a standby carrier take the serving role and bring up the
+// machine's network on the same identity once the serving carrier released it
+// (ReleaseNetwork). It waits for that until ctx ends, and is idempotent.
 func (c *ProductionCarrier) StartNetwork(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.networkUp {
-		return nil
-	}
-	if c.runCtx == nil {
+	if c == nil || ctx == nil || c.runCtx == nil {
 		return ErrProductionInvalid
 	}
-	for c.primaryLock != "" && c.unlockPrimary == nil {
-		unlock, err := lockCarrierFile(c.primaryLock)
-		if err == nil {
-			c.unlockPrimary = unlock
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return errors.Join(ctx.Err(), err)
-		case <-time.After(20 * time.Millisecond):
+	return c.serve(ctx)
+}
+
+// ReleaseNetwork takes the serving carrier's network down, closes its state files
+// and frees the role for the standby carrier. The process exits afterwards.
+func (c *ProductionCarrier) ReleaseNetwork(ctx context.Context) error {
+	err := c.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier generation", "stage", "network_released", "failed", err != nil)
+	return err
+}
+
+// serve takes the role, assembles the serving parts and starts them.
+func (c *ProductionCarrier) serve(wait context.Context) (err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.serving != nil {
+		return nil
+	}
+	unlock := func() error { return nil }
+	if c.roleLock != "" {
+		if unlock, err = awaitRoleLock(wait, c.roleLock); err != nil {
+			return err
 		}
 	}
-	if err := c.startPeer(c.runCtx); err != nil {
-		return errors.Join(err, c.unlockPrimaryRole())
+	serving, err := c.assemble()
+	if err != nil {
+		return errors.Join(err, unlock())
 	}
+	serving.unlock = unlock
+	if err := serving.start(c.runCtx); err != nil {
+		return errors.Join(err, serving.stop(context.WithoutCancel(c.runCtx)))
+	}
+	c.serving = serving
 	diagnosticlog.TryInfo("carrier generation", "stage", "network_started")
 	return nil
 }
 
-// ReleaseNetwork takes the serving carrier's network down and frees the
-// primary role for the standby carrier. The process exits afterwards.
-func (c *ProductionCarrier) ReleaseNetwork(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.released = true
-	err := c.peer.Shutdown(ctx)
-	c.networkUp = false
-	if c.unlock != nil {
-		err = errors.Join(err, c.unlock())
-		c.unlock = nil
+func (s *servingCarrier) start(ctx context.Context) error {
+	if err := s.authorization.Start(ctx); err != nil {
+		return err
 	}
-	diagnosticlog.TryInfo("carrier generation", "stage", "network_released", "failed", err != nil)
-	return errors.Join(err, c.unlockPrimaryRole())
+	return s.peer.Start(ctx)
 }
 
-func (c *ProductionCarrier) unlockPrimaryRole() error {
-	if c.unlockPrimary == nil {
-		return nil
-	}
-	err := c.unlockPrimary()
-	c.unlockPrimary = nil
-	return err
+// stop closes the network and the services before the role is released, so the next holder owns quiet state.
+func (s *servingCarrier) stop(ctx context.Context) error {
+	// Close listeners and bridges before their identity refresh and usage owner.
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
+	peerErr := s.peer.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
+	authErr := s.authorization.Shutdown(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
+	// The next holder resumes the checkpoint; waiting for the control plane to take the bytes would hold the role.
+	usageErr := s.usage.checkpoint(ctx)
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
+	result := errors.Join(peerErr, authErr, usageErr, s.unlock())
+	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
+	return result
 }
 
 // PrepareSSHRetirement fences new SSH only when all accepted bridges ended.
@@ -265,27 +254,12 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return ErrProductionInvalid
 	}
-	// Close listeners and bridges before their identity refresh and usage owner.
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
-	peerErr := c.peer.Shutdown(ctx)
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
-	authErr := c.authorization.Shutdown(ctx)
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
-	// A replacement in the same slot resumes a checkpoint. A released carrier's replacement already runs in
-	// another slot, so its file waits for a later process in this slot: deliver its sessions' bytes now.
-	var usageErr error
-	if c.released {
-		usageErr = c.usage.Shutdown(ctx)
-	} else {
-		usageErr = c.usage.checkpoint(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	serving := c.serving
+	c.serving = nil
+	if serving == nil {
+		return nil
 	}
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
-	// The primary role is released only after the primary listener closed.
-	unlockErr := c.unlockPrimaryRole()
-	if c.unlock != nil {
-		unlockErr = errors.Join(unlockErr, c.unlock())
-	}
-	result := errors.Join(peerErr, authErr, usageErr, unlockErr)
-	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
-	return result
+	return serving.stop(ctx)
 }

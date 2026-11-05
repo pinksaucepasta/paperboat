@@ -51,7 +51,7 @@ func TestCarrierShutdownCheckpointsUsageWithoutWaitingForControlPlane(t *testing
 	}
 	metered.Close()
 	right.Close()
-	carrier := &ProductionCarrier{peer: &productionNativePeerService{}, authorization: serviceGroup{}, usage: &hostBandwidthService{recorder: recorder}}
+	carrier := &ProductionCarrier{serving: &servingCarrier{peer: &productionNativePeerService{}, authorization: serviceGroup{}, usage: &hostBandwidthService{recorder: recorder}, unlock: func() error { return nil }}}
 	done := make(chan error, 1)
 	go func() { done <- carrier.Shutdown(t.Context()) }()
 	select {
