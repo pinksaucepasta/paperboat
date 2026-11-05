@@ -93,13 +93,13 @@ while :; do
   # cancel the run being watched. Retry within the deadline instead.
   state=$(gh run view "$id" --json status,jobs) || {
     [ $SECONDS -lt $deadline ] || { echo "ci-test: gave up waiting after 90 min: $url" >&2; exit 1; }
-    echo "ci-test: polling the run failed; retrying in 60 s" >&2; sleep 60; continue; }
+    echo "ci-test: polling the run failed; retrying in 180 s" >&2; sleep 180; continue; }
   for line in $(jq -r '.jobs[] | select(.status == "completed") | "\(.name | gsub(" "; "_"))=\(.conclusion)"' <<<"$state"); do
     case $seen in *"|$line|"*) ;; *) seen="$seen|$line|"; echo "ci-test: ${line%%=*}: ${line#*=}" | tr _ ' ' >&2 ;; esac
   done
   [ "$(jq -r .status <<<"$state")" = completed ] && break
   [ $SECONDS -lt $deadline ] || { echo "ci-test: gave up waiting after 90 min: $url" >&2; exit 1; }
-  sleep 60  # one GitHub API call per run per minute: many lanes poll at once, 5000/h is shared
+  sleep 120  # one GitHub API call per run per 2 min: ~20 lanes poll at once and 5000/h is shared (hit 11-05)
 done
 
 for attempt in $(seq 30); do
