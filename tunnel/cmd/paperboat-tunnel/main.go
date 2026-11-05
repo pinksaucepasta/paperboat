@@ -268,6 +268,9 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Source:            certificateRegistry,
 		OnDemandRequester: onDemandRequester,
 		OnDemandMatcher:   certificateRegistry,
+		// A first handshake for a new name waits for its leaf, as certmagic does: an ACME
+		// issuance takes seconds, and the server waits for one already in flight.
+		HandshakeTimeout: 25 * time.Second,
 	})
 	if err != nil {
 		_ = certificateReceiver.Close()

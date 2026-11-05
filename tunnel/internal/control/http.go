@@ -55,6 +55,10 @@ func expectedAnswer(err error) bool {
 	return errors.As(err, &refused)
 }
 
+// OnDemandCertificateTimeout bounds one on-demand certificate request (the TLS handshake waits
+// for it; certmagic waits up to 2 min, the selector caps its wait at 30 s).
+const OnDemandCertificateTimeout = 30 * time.Second
+
 type HTTPConfig struct {
 	BaseURL        string
 	Credential     string
@@ -70,9 +74,12 @@ type HTTPConfig struct {
 }
 
 type HTTPClient struct {
-	base           *url.URL
-	credential     string
-	client         *http.Client
+	base       *url.URL
+	credential string
+	client     *http.Client
+	// onDemand sends the on-demand certificate request: the server waits there for an issuance
+	// already in flight (an ACME leaf takes seconds), longer than the control timeout.
+	onDemand       *http.Client
 	controlFailure func(context.Context, string, error)
 	controlTrace   func(context.Context, string) (string, string, func(string, string))
 	nodeReady      <-chan struct{}
@@ -121,7 +128,9 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	}
 	client.Timeout = config.Timeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrControlUnavailable }
-	return &HTTPClient{base: base, credential: config.Credential, client: client, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
+	onDemand := *client
+	onDemand.Timeout = max(config.Timeout, OnDemandCertificateTimeout)
+	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
 }
 
 // ErrNodeNotReady: the request was not sent because the edge process is not ready yet.
@@ -519,7 +528,11 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		// Register is not resent: replaying it resets this process's readiness on the server.
 		request.Header["Idempotency-Key"] = nil
 	}
-	response, err := c.client.Do(request)
+	httpClient := c.client
+	if path == CertificateDistributionRequestPath {
+		httpClient = c.onDemand
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
