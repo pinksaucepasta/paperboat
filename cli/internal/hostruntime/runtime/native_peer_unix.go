@@ -81,6 +81,9 @@ type productionNativePeerService struct {
 	promote chan struct{}
 	// retired stops the supervisor from starting another generation: a retired carrier only drains.
 	retired atomic.Bool
+	// refuseNew ends a retired generation's overlap: a new connection is closed with the restart
+	// code, so its client dials the generation its signed configuration names.
+	refuseNew atomic.Bool
 }
 
 type productionNativePeerGeneration struct {
@@ -377,6 +380,9 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	generation.run = runCtx
 	generation.serve = func(serveCtx context.Context, session *native.Session) error {
+		if s.refuseNew.Load() {
+			return session.CloseRestarting()
+		}
 		return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
 	}
 	if err := generation.listenPrimary(); err != nil {

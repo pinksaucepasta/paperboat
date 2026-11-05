@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/quic-go/quic-go"
 )
 
@@ -36,7 +37,7 @@ func reconnectRequired(peerID string, err error, locallyClosing bool) error {
 		return &ReconnectRequiredError{PeerID: peerID, Err: err}
 	}
 	var applicationErr *quic.ApplicationError
-	if errors.As(err, &applicationErr) && applicationErr.Remote && applicationErr.ErrorCode == 0 {
+	if errors.As(err, &applicationErr) && applicationErr.Remote && (applicationErr.ErrorCode == 0 || applicationErr.ErrorCode == peerquic.RestartingCode) {
 		return &ReconnectRequiredError{PeerID: peerID, Err: err}
 	}
 	// Transport errors include protocol and TLS/crypto violations. They are

@@ -375,10 +375,16 @@ func readHeader(reader io.Reader) ([]byte, error) {
 	_, err := io.ReadFull(reader, encoded)
 	return encoded, err
 }
-func (s *Session) Close() error {
+func (s *Session) Close() error { return s.close(s.quic.Close) }
+
+// CloseRestarting tells the peer this generation is retiring: it reconnects at
+// once on the generation its signed configuration names.
+func (s *Session) CloseRestarting() error { return s.close(s.quic.CloseRestarting) }
+
+func (s *Session) close(closeQUIC func() error) error {
 	s.closing.Store(true)
 	s.once.Do(func() {
-		s.err = errors.Join(s.err, s.quic.Close())
+		s.err = errors.Join(s.err, closeQUIC())
 		if s.carrier != nil {
 			s.carrier.Close()
 		}

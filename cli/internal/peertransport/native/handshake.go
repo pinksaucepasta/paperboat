@@ -76,7 +76,24 @@ func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), er
 func (o *Owner) watchPeerClose(s *Session) {
 	<-s.quic.Connection.Context().Done()
 	var closed *quic.ApplicationError
-	if !s.closing.Load() && errors.As(context.Cause(s.quic.Connection.Context()), &closed) && closed.Remote && closed.ErrorCode == 0 {
+	if s.closing.Load() || !errors.As(context.Cause(s.quic.Connection.Context()), &closed) || !closed.Remote {
+		return
+	}
+	if closed.ErrorCode == peerquic.RestartingCode {
+		// The retiring generation's route is stale and the signed configuration
+		// names the current one: the reconnect dials it, not the old route.
+		o.mu.Lock()
+		route := o.routes[s.peerID]
+		o.mu.Unlock()
+		if route != nil {
+			o.dropRoute(s.peerID, route)
+		}
+		o.authority.RequestUrgentRefresh()
+	}
+	o.mu.Lock()
+	carrier := s.carrierNetwork != nil
+	o.mu.Unlock()
+	if !carrier && (closed.ErrorCode == 0 || closed.ErrorCode == peerquic.RestartingCode) {
 		o.mu.Lock()
 		if o.restarted == nil {
 			o.restarted = make(map[string]bool)

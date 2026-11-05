@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -141,5 +142,42 @@ func TestCarrierGenerationReportsKeepTheLatestAndNeverFollowTheWithdrawal(t *tes
 	case got := <-g.reports:
 		t.Fatalf("an offer %v was reported after the withdrawal", got.Signature)
 	default:
+	}
+}
+
+// A retired generation keeps its held stream, admits new connections only for
+// the overlap, and exits once its last stream ends, or at its cap.
+func TestRetiredGenerationDrainsHeldStreamsPastTheOverlap(t *testing.T) {
+	c := &ProductionCarrier{peer: &productionNativePeerService{}, ssh: &managedssh.Host{}}
+	c.peer.streams.Add(1)
+	done := make(chan error, 1)
+	go func() { done <- c.drain(context.Background(), 100*time.Millisecond, 10*time.Second) }()
+	time.Sleep(20 * time.Millisecond)
+	if c.peer.refuseNew.Load() {
+		t.Fatal("new connections refused during the overlap")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !c.peer.refuseNew.Load() {
+		t.Fatal("new connections still admitted after the overlap")
+	}
+	select {
+	case err := <-done:
+		t.Fatal("drain cut a held stream", err)
+	default:
+	}
+	c.peer.streams.Add(-1)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the generation did not exit after its last stream")
+	}
+
+	capped := &ProductionCarrier{peer: &productionNativePeerService{}, ssh: &managedssh.Host{}}
+	capped.peer.streams.Add(1)
+	if err := capped.drain(context.Background(), time.Hour, 300*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) || !capped.peer.refuseNew.Load() {
+		t.Fatal("drain outlived its cap or kept admitting", err)
 	}
 }

@@ -48,6 +48,7 @@ func (o *Owner) carrierSession(peerID string, peer tailnet.NetworkBinding, offer
 	}
 	session.carrier.OnDone(release)
 	session.setCarrierNetwork(network)
+	go o.watchPeerClose(session)
 	return session, nil
 }
 
