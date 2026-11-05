@@ -482,7 +482,6 @@ func (o *Owner) close(closeSession func(*Session) error) error {
 	}
 	o.closed = true
 	diagnosticlog.TryInfo("native owner close", "stage", "cancel_start", "sessions", len(o.sessions))
-	o.cancel()
 	sessions := make([]*Session, 0, len(o.sessions))
 	for session := range o.sessions {
 		sessions = append(sessions, session)
@@ -506,6 +505,9 @@ func (o *Owner) close(closeSession func(*Session) error) error {
 		wait = max(wait, session.quic.ClosingPeriod())
 	}
 	time.Sleep(wait)
+	// Cancel only now: it closes the listeners, whose own Close would race each
+	// session's close with a plain code 0 (a restart close reached its client as 0).
+	o.cancel()
 	o.closeCarrierNetworks()
 	result := errors.Join(failures...)
 	result = errors.Join(result, o.authority.Close())
