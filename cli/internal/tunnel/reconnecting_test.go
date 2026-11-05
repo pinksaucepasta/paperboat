@@ -490,6 +490,51 @@ func TestReconnectingConnStalledLinkEndsAtOnceWhenTheReattachIsRefused(t *testin
 	}
 }
 
+// handoverConn is a stalled link whose host hands the terminal to a newer attachment: the attachment's arrival
+// sends the old link a last message (clearing its stall), then the host ends it.
+type handoverConn struct {
+	*blockingReconnectConn
+	observer atomic.Pointer[func(bool)]
+}
+
+func (c *handoverConn) ObserveLinkState(observer func(bool)) {
+	c.observer.Store(&observer)
+	go observer(true)
+}
+
+func (c *handoverConn) handOver() {
+	if observer := c.observer.Load(); observer != nil {
+		(*observer)(false)
+	}
+	_ = c.Close()
+}
+
+// F3-15 N4/N13 (pbvm2 -> pbvm3, dev-ab41be003, 2026-11-05): after a 45 s drop and a 60 s black hole the terminal
+// printed nothing for 120 s and 150 s. The stalled-link probe reattached once the network was back
+// (13:40:08.484, 13:43:16.359), but the host's handover to it cleared the old link's stall, so the probe discarded
+// its fresh link (probe_discarded) and the host then ended the old one: no link was left and nothing redialed.
+// A probe that has attached supersedes the old link on the host; it is adopted, as ET and mosh let the newest
+// client connection win.
+func TestReconnectingConnAdoptsTheProbeWhenTheHostHandsTheTerminalToIt(t *testing.T) {
+	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	fresh := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 0}
+	c := NewReconnectingConn(context.Background(), old, 600, time.Millisecond, func(context.Context) (Conn, error) {
+		old.handOver() // the host takes the terminal from the old link as this attachment completes
+		return fresh, nil
+	})
+	defer c.Close()
+	got := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(c); got <- b }()
+	select {
+	case b := <-got:
+		if string(b) != "resumed" {
+			t.Fatalf("output after the handover = %q, want the fresh link's", b)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("terminal left without a link after its probe reattached")
+	}
+}
+
 // A target ready after several refusals must be retried promptly instead of
 // sitting in a 30 s exponential-backoff sleep after its update has finished.
 func TestReconnectingConnRetriesReadyTargetPromptly(t *testing.T) {

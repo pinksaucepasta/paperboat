@@ -564,12 +564,13 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 		return
 	}
 	defer c.probing.Store(false)
-	still := func() bool {
+	current := func() bool {
 		c.mu.RLock()
 		current := c.current
 		c.mu.RUnlock()
-		return c.linkStalled.Load() && current == stalled && c.ctx.Err() == nil
+		return current == stalled && c.ctx.Err() == nil
 	}
+	still := func() bool { return c.linkStalled.Load() && current() }
 	backoff := reattach.Backoff(c.delay, c.delay)
 	for attempt := 1; attempt <= c.maxRetries && still(); attempt++ {
 		next, err := c.dialReconnect(c.ctx, "probeStalled", connection)
@@ -584,7 +585,10 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 			return
 		}
 		if err == nil && next != nil {
-			if !still() {
+			// An attached probe has the terminal: the host hands it over from the old link, whose last message
+			// clears its stall before the host ends it. Discarding the probe then left no link at all and the
+			// terminal silent (F3-15 N4/N13, probe_discarded). Like ET and mosh, the newest attachment wins.
+			if !current() {
 				c.recordOldLink(connection, "probeStalled", "probe_discarded", nil)
 				_ = next.Close()
 				return
