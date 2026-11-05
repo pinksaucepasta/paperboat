@@ -241,6 +241,17 @@ func testNativeRegionalFailover(t *testing.T, delegated, deadEdge bool) {
 		}
 		defer generation.Close()
 		if deadEdge {
+			// Setup spends three ~5 s WireGuard re-initiation waits; control would have renewed the signed
+			// observations (15 s max age) by now, so renew them here, on every authority the move consults.
+			refresh()
+			renewed := append([]tailnet.RegionalNode(nil), generationNodes...)
+			for i := range renewed {
+				renewed[i].ObservedAt = time.Now().Unix()
+				renewed[i].CapacityObservedAt = renewed[i].ObservedAt
+				renewed[i].ExpiresAt = renewed[i].ObservedAt + 60
+			}
+			applyTestConfiguration(t, nextAuthority, signer, serverConfig)
+			applyRegionalAuthority(t, nextAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, renewed)
 			logs := captureDiagnosticLog(t)
 			a.stop()
 			started := time.Now()
