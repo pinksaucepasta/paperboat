@@ -17,11 +17,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 )
 
-// Edge phases of a worker handover: the route is on the old carrier only; on both (the new carrier has
-// it, the old one is the fallback); on the new carrier only.
+// Edge phases of a worker handover: the route is on the old carrier only; on both (from the new worker's
+// attach the edge may hold the route on the new carrier before it reports anything, and prefers it; the old
+// one is the fallback), so both must be authorized; on the new carrier only.
 const (
 	handoverOld int32 = iota
-	handoverEither
+	handoverBoth
 	handoverNew
 )
 
@@ -143,7 +144,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 			slowest = max(slowest, took)
 			for _, route := range []string{lease, tunnelRoute} {
 				onOld, onNew := got[route][old.Binding.SessionID], fresh != "" && got[route][fresh]
-				if err != nil || (p == handoverOld && !onOld) || (p == handoverEither && !onOld && !onNew) || (p == handoverNew && !onNew) {
+				if err != nil || (p == handoverOld && !onOld) || (p == handoverBoth && (!onOld || !onNew)) || (p == handoverNew && !onNew) {
 					failures = append(failures, route+" in phase "+string('0'+rune(p))+": "+at.Format("05.000"))
 				}
 			}
@@ -162,10 +163,12 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 		t.Fatal("the next worker reused the old carrier session")
 	}
 	next.Store(fresh.Binding.SessionID)
+	// pbvm1 vm1-1a6479a4-124638: the edge had the preview route on the new carrier at once and was denied
+	// there for 8 s until the server learned the carrier was up, so every request fell back to the old one.
+	phase.Store(handoverBoth)
 	step()
-	// The new carrier is up at the edge and has the routes: either carrier may get a request.
+	// The new carrier is up at the edge.
 	serve(fresh, false)
-	phase.Store(handoverEither)
 	step()
 	// The edge observed the routes on the new carrier and sends every request there.
 	serve(fresh, true)

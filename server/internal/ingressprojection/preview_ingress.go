@@ -51,7 +51,9 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
 
 // handoverPreviewRoutesSQL lists, during a worker handover's bounded overlap (migrations 227, 228), the
 // replaced carrier of a preview's assignment and the new carrier before the edge has observed the route on it:
-// the edge keeps the route on the old carrier until the new one serves it, so both stay authorized
+// the edge keeps the route on the old carrier until the new one serves it, so both stay authorized. The new
+// carrier is authorized from its attach: the edge may hold the route on it before it reports the carrier up
+// (pbvm1 vm1-1a6479a4-124638: 8 s of denials there).
 // (make-before-break; Teleport keeps every agent connection of a node, lib/reversetunnel/local_cluster.go).
 // Columns as preview_routes; preview_routes itself lists the new carrier once observed.
 const handoverPreviewRoutesSQL = `SELECT p.id,p.account_id,COALESCE(c.admission->'binding'->>'tunnel_id',''),r.revision,x.route_id,
@@ -69,7 +71,7 @@ CROSS JOIN LATERAL (
  SELECT ra.previous_admission AS admission,x.previous_carrier_session_id AS session_id,
   (ra.previous_admission->'binding'->>'process_generation')::bigint AS process_generation,ra.previous_until AS expires_at
  UNION ALL
- SELECT ra.admission,ra.session_id,ra.worker_generation,ra.expires_at WHERE ra.session_id=x.carrier_session_id AND ra.ready AND NOT x.observed_ready
+ SELECT ra.admission,ra.session_id,ra.worker_generation,ra.expires_at WHERE ra.session_id=x.carrier_session_id AND NOT x.observed_ready
 ) c
 WHERE x.desired='active' AND EXISTS(SELECT 1 FROM user_machines m WHERE m.id=e.agent_machine_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL)`
 
