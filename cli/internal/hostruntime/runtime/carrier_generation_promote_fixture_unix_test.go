@@ -248,9 +248,8 @@ func echoApps(t *testing.T, mark byte) *nativesession.Service {
 }
 
 // startPrimary runs the old primary generation on a pinned port: the client's
-// signed endpoint stays valid for it. admit gates its new connections, as the
-// production peer's AdmitNew does at the end of the overlap.
-func (f *promoteFixture) startPrimary(t *testing.T, ctx context.Context, admit func() bool) *native.Owner {
+// signed endpoint stays valid for it.
+func (f *promoteFixture) startPrimary(t *testing.T, ctx context.Context) *native.Owner {
 	t.Helper()
 	tlsConfig, _, self, err := loadNativePeerTLS(f.root, "machine_target", 1)
 	if err != nil {
@@ -264,7 +263,7 @@ func (f *promoteFixture) startPrimary(t *testing.T, ctx context.Context, admit f
 	if err := authority.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
-	primary, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitNew: admit})
+	primary, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig})
 	if err != nil {
 		t.Fatal(err)
 	}
