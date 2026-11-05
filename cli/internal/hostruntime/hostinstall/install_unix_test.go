@@ -462,7 +462,7 @@ func TestManagedDirectoriesProvisionProtectedCanonicalBinaryParent(t *testing.T)
 		t.Skip("root-owned installation fixture requires bounded root test executable")
 	}
 	root := t.TempDir()
-	paths := installPaths{root: filepath.Join(root, "install"), worker: filepath.Join(root, "install", "bin", "pb"), hostdSocket: filepath.Join(root, "hostd", "control.sock"), updaterSocket: filepath.Join(root, "updated-control", "control.sock"), updateState: filepath.Join(root, "update-state")}
+	paths := installPaths{root: filepath.Join(root, "install"), worker: filepath.Join(root, "install", "bin", "pb"), hostdSocket: filepath.Join(root, "hostd", "control.sock"), updaterSocket: filepath.Join(root, "updated-control", "control.sock"), updateState: filepath.Join(root, "update-state"), runtimeState: filepath.Join(root, "runtime")}
 	if err := ensureManagedDirectories(paths, Request{UID: 1001, GID: 1001}); err != nil {
 		t.Fatal(err)
 	}
