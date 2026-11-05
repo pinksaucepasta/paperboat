@@ -165,9 +165,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 		return nil, err
 	}
 	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic(), RelayNodeID: relay}
-	for _, endpoint := range network.Endpoints() {
-		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
-	}
+	exchange.Endpoints = offerEndpoints(network.Endpoints())
 	current, err := s.exchangeCarrierCandidates(ctx, exchange)
 	if err != nil {
 		return nil, err

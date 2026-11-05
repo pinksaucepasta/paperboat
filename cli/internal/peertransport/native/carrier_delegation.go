@@ -161,9 +161,7 @@ func (o *Owner) SignCarrierCandidates(identity *CarrierIdentity, instance, disco
 	claims := identity.Current().Claims
 	claims.DiscoPublicKey, claims.OwnerInstance, claims.Endpoints = disco, instance, nil
 	claims.RelayNodeIDs = append([]string(nil), relays...)
-	for _, endpoint := range endpoints {
-		claims.Endpoints = append(claims.Endpoints, endpoint.String())
-	}
+	claims.Endpoints = offerEndpoints(endpoints)
 	_, err := o.signDelegation(identity, claims, nil)
 	return err
 }
@@ -183,9 +181,7 @@ func (o *Owner) RenewCarrierIdentity(identity *CarrierIdentity, network *tailnet
 	claims := identity.Current().Claims
 	claims.ExpiresUnix, claims.Certificate, claims.DiscoPublicKey, claims.Endpoints = expires, der, network.DiscoPublic(), nil
 	claims.RelayNodeIDs = network.RelayNodeIDs()
-	for _, endpoint := range network.Endpoints() {
-		claims.Endpoints = append(claims.Endpoints, endpoint.String())
-	}
+	claims.Endpoints = offerEndpoints(network.Endpoints())
 	return o.signDelegation(identity, claims, &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: identity.private})
 }
 
