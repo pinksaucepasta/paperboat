@@ -62,6 +62,7 @@ type RegionalTLS struct {
 	Directory                 string
 	HTTPSAddress, HTTPAddress string
 	Handler                   http.Handler
+	ShutdownTimeout           time.Duration // graceful: GOAWAY, then held requests finish
 	Logger                    *slog.Logger
 }
 
@@ -89,7 +90,7 @@ func (r *RegionalTLS) Run(ctx context.Context) error {
 	go r.activate(ctx, m)
 	select {
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdown, cancel := context.WithTimeout(context.Background(), max(r.ShutdownTimeout, 5*time.Second))
 		defer cancel()
 		return errors.Join(https.Shutdown(shutdown), challenge.Shutdown(shutdown))
 	case err := <-failed:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,6 +70,22 @@ func TestServerNodesHeartbeatHealthAndRemovalOnPostgres(t *testing.T) {
 	}
 	if err := Heartbeat(ctx, store, a); err != nil || !health()[a.ID] {
 		t.Fatalf("a stale node did not recover by heartbeating: %v", err)
+	}
+	if err := Heartbeat(ctx, store, b); !errors.Is(err, ErrDraining) {
+		t.Fatalf("a draining node's heartbeat did not report the drain: %v", err)
+	}
+	drained := make(chan struct{})
+	var calls atomic.Int32
+	runCtx, stop := context.WithCancel(ctx)
+	go Run(runCtx, store, b, func(error) {}, func() { calls.Add(1); close(drained) })
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not report the drain")
+	}
+	stop()
+	if calls.Load() != 1 {
+		t.Fatalf("drained called %d times", calls.Load())
 	}
 	exec(`UPDATE paperboat.control_server_nodes SET state='removed' WHERE id=$1`, b.ID)
 	if err := Heartbeat(ctx, store, b); !errors.Is(err, ErrRemoved) {

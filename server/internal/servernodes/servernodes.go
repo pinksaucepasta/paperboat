@@ -41,18 +41,25 @@ type Status struct {
 // ErrRemoved means an operator removed this node; it must not rejoin by heartbeating.
 var ErrRemoved = errors.New("this server node was removed")
 
+// ErrDraining means an operator drains this node: the beat is recorded, and the node shuts down gracefully.
+var ErrDraining = errors.New("this server node is draining")
+
 // Heartbeat records the node as seen now. A removed node is never brought back by its own heartbeat.
 func Heartbeat(ctx context.Context, d *db.DB, n Node) error {
-	tag, err := d.Pool().Exec(ctx, `INSERT INTO paperboat.control_server_nodes (id, region, version, commit, started_at, last_seen_at)
+	var state string
+	err := d.Pool().QueryRow(ctx, `INSERT INTO paperboat.control_server_nodes (id, region, version, commit, started_at, last_seen_at)
 VALUES ($1,$2,$3,$4,$5,now())
 ON CONFLICT (id) DO UPDATE SET region=excluded.region, version=excluded.version, commit=excluded.commit,
   started_at=excluded.started_at, last_seen_at=now()
-WHERE control_server_nodes.state <> 'removed'`, n.ID, n.Region, n.Version, n.Commit, n.StartedAt)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
+WHERE control_server_nodes.state <> 'removed'
+RETURNING state`, n.ID, n.Region, n.Version, n.Commit, n.StartedAt).Scan(&state)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		return ErrRemoved
+	case err != nil:
+		return err
+	case state == "draining":
+		return ErrDraining
 	}
 	return nil
 }
@@ -77,20 +84,23 @@ FROM paperboat.control_server_nodes WHERE state <> 'removed' ORDER BY region, id
 	return out, rows.Err()
 }
 
-// Run heartbeats until ctx ends. Every node runs it (not a leader job). A failed beat is retried at the
-// next tick; a removed node stops beating.
-func Run(ctx context.Context, d *db.DB, n Node, failed func(error)) {
+// Run heartbeats until ctx ends. Every node runs it (not a leader job). A failed beat is retried at the next
+// tick; a removed node stops beating; drained is called once when an operator drains the node.
+func Run(ctx context.Context, d *db.DB, n Node, failed func(error), drained func()) {
 	ticker := time.NewTicker(HeartbeatInterval)
 	defer ticker.Stop()
+	var drainOnce sync.Once
 	for {
 		beat, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := Heartbeat(beat, d, n)
 		cancel()
-		if errors.Is(err, ErrRemoved) {
+		switch {
+		case errors.Is(err, ErrRemoved):
 			failed(err)
 			return
-		}
-		if err != nil && ctx.Err() == nil {
+		case errors.Is(err, ErrDraining):
+			drainOnce.Do(drained)
+		case err != nil && ctx.Err() == nil:
 			failed(err)
 		}
 		select {
