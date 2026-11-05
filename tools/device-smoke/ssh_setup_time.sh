@@ -4,6 +4,8 @@
 # its own rules. Pairs two FRESH throwaway containers on HOST (as ssh_other_user.sh), warms one connection, then
 # times 7 runs each of plain `ssh <alias>.<domain> true` and `pb ssh <alias> -- true`; PASS when both p50 < 1000 ms.
 # Prints one JSON line {"check":"ssh-setup-time",...}; machines revoked by exact id, containers removed on exit.
+# FRESH_MINT (a pb on HOST signed in to a throwaway account) enrolls there instead of HOST's own pb; CLEANUP_ACCOUNT is
+# then that account's id for the revocation.
 set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -13,7 +15,7 @@ IDS=
 finish() {
   local status=$1 detail=$2 id
   ssh "$HOST" "sudo -n docker rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
-  for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
+  for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" ${CLEANUP_ACCOUNT:+--account "$CLEANUP_ACCOUNT"} --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
   python3 -c 'import json,sys;print(json.dumps({"check":"ssh-setup-time","status":sys.argv[1],"machine_ids":sys.argv[2].split(),"detail":sys.argv[3]}))' "$status" "$IDS" "$detail"
   [ "$status" = PASS ]
   exit $?
@@ -32,9 +34,9 @@ fresh() { # fresh CONTAINER NAME PACKAGES
   sudo -n docker cp /tmp/$T-pb \$ct:/home/pbt/pb
   sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
   \$X bash -c 'cd ~ && ./pb install >/dev/null'
-  NAME=\$name TOKEN=/tmp/\$ct-token python3 - <<'PY'
+  NAME=\$name TOKEN=/tmp/\$ct-token PB_MINT=${FRESH_MINT:-} python3 - <<'PY'
 import json, os, re, subprocess
-added = json.loads(subprocess.run([os.path.expanduser("~/.local/bin/pb"), "machine", "add", "--name", os.environ["NAME"], "--json"], capture_output=True, text=True, check=True).stdout)
+added = json.loads(subprocess.run([os.environ.get("PB_MINT") or os.path.expanduser("~/.local/bin/pb"), "machine", "add", "--name", os.environ["NAME"], "--json"], capture_output=True, text=True, check=True).stdout)
 url = re.search(r"'(https?://[^']+)'", added["data"]["linux_macos_command"]).group(1)
 script = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True, check=True).stdout
 token = re.search(r"PAPERBOAT_ENROLLMENT_TOKEN='([A-Za-z0-9]+)'", script).group(1)
