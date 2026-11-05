@@ -72,6 +72,8 @@ func decodePeerNetworkRegister(body peerNetworkRegisterBody) ([]byte, []byte, []
 }
 func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, peersessions.ErrGenerationLimit):
+		writeError(w, r, http.StatusConflict, "peer_network_generation_limit", "Four pb daemon generations of this sign-in may still hold connections. Wait for an older one to finish draining (pb doctor lists them), or stop it, then retry.")
 	case errors.Is(err, peersessions.ErrGenerationEvicted):
 		writeError(w, r, http.StatusForbidden, "peer_network_generation_evicted", "A newer pb daemon generation replaced this one; the streams it still held have ended.")
 	case errors.Is(err, peersessions.ErrGenerationWithdrawn):

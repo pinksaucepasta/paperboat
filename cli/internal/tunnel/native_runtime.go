@@ -60,7 +60,7 @@ func (c cliNativeNetworkAPI) RegisterPeerNetwork(ctx context.Context, request ap
 	request.DaemonGeneration = c.generation
 	result, err := client.RegisterPeerNetwork(ctx, request)
 	for _, evicted := range result.EvictedEndpoints {
-		diagnosticlog.TryWarn("an older pb daemon generation was replaced; the streams it still held have ended", "endpoint", evicted, "limit", "4 daemon generations per sign-in")
+		diagnosticlog.TryInfo("a dead or drained-out pb daemon generation was removed", "endpoint", evicted, "limit", "4 daemon generations per sign-in")
 	}
 	c.observeRefusal(err)
 	return result, err

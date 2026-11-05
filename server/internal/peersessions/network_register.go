@@ -18,12 +18,14 @@ import (
 
 // MaximumDaemonGenerations bounds the live network identities of one CLI session: the running daemon generation
 // and the older ones still draining what they hold, as the carrier generations are bounded (carrierSlots).
-// Registering one more revokes the oldest (generation_evicted).
+// Registering one more evicts a generation that can hold nothing (makeGenerationRoom) or is refused.
 const MaximumDaemonGenerations = 4
 
 // ErrGenerationEvicted refuses a daemon generation that a newer one pushed out of MaximumDaemonGenerations;
-// ErrGenerationWithdrawn one that withdrew or outlived its drain (runtimeattachment.DrainLimit).
+// ErrGenerationWithdrawn one that withdrew or outlived its drain (runtimeattachment.DrainLimit). ErrGenerationLimit
+// refuses registering a generation while MaximumDaemonGenerations others may still hold sessions.
 var (
+	ErrGenerationLimit     = errors.New("register generation: the most generations allowed are live and may still hold connections")
 	ErrGenerationEvicted   = fmt.Errorf("%w: a newer daemon generation replaced this one", ErrDenied)
 	ErrGenerationWithdrawn = fmt.Errorf("%w: this daemon generation has finished", ErrDenied)
 )
@@ -72,7 +74,7 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 	}
 	var evicted []string
 	if in.Role == "cli" {
-		if evicted, err = evictOldGenerations(ctx, tx, in, now); err != nil {
+		if evicted, err = makeGenerationRoom(ctx, tx, in, now); err != nil {
 			return NetworkRegistrationResult{}, err
 		}
 	}
@@ -97,7 +99,7 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 		return NetworkRegistrationResult{}, err
 	}
 	for _, endpoint := range evicted {
-		slog.Warn("daemon generation evicted: its held streams end", "endpoint_id", endpoint, "by", in.EndpointID, "limit", MaximumDaemonGenerations)
+		slog.Info("dead or drained-out generation evicted", "endpoint_id", endpoint, "by", in.EndpointID, "limit", MaximumDaemonGenerations)
 	}
 	return NetworkRegistrationResult{KeyGeneration: currentGen, VirtualAddress: address, EvictedEndpoints: evicted}, nil
 }
@@ -165,28 +167,51 @@ func upsertNetworkIdentity(ctx context.Context, tx *sql.Tx, in NetworkRegistrati
 	return currentGen, address, false, rotated || revoked, err
 }
 
-// evictOldGenerations keeps the registering generation and the newest others of its session up to
-// MaximumDaemonGenerations, and revokes the rest (oldest first). Their machines drop them, which ends what they
-// still drain; each refused generation learns why (ErrGenerationEvicted) on its next renewal.
-func evictOldGenerations(ctx context.Context, tx *sql.Tx, in NetworkRegistration, now time.Time) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `UPDATE paperboat.peer_network_identities n SET revoked_at=$4,revocation_reason='generation_evicted',updated_at=$4
- WHERE n.user_id=$1 AND n.endpoint_id IN (SELECT endpoint_id FROM paperboat.peer_network_identities
-  WHERE user_id=$1 AND owner_endpoint_id=$2 AND role='cli' AND revoked_at IS NULL
-  ORDER BY (endpoint_id=$3) DESC, created_at DESC, endpoint_id DESC OFFSET $5)
- RETURNING n.endpoint_id`, in.UserID, in.OwnerEndpointID, in.EndpointID, now, MaximumDaemonGenerations)
+// deadGenerationAfter is how long a generation may go without renewing before it counts as dead: a live one,
+// draining or not, renews its configuration about every minute (admission.DefaultLifetime is 2 min).
+const deadGenerationAfter = 15 * time.Minute
+
+// makeGenerationRoom keeps at most MaximumDaemonGenerations live generations of the owner with the registering one.
+// It revokes only generations that can hold no session: past their drain_until, or dead (not renewed for
+// deadGenerationAfter), oldest first. When the others may all still hold sessions it refuses the registration
+// (ErrGenerationLimit) instead of cutting one.
+func makeGenerationRoom(ctx context.Context, tx *sql.Tx, in NetworkRegistration, now time.Time) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT endpoint_id,(drain_until<$4 OR updated_at<$5) FROM paperboat.peer_network_identities
+ WHERE user_id=$1 AND owner_endpoint_id=$2 AND role=$3 AND revoked_at IS NULL AND endpoint_id<>$6
+ ORDER BY created_at,endpoint_id FOR UPDATE`, in.UserID, in.OwnerEndpointID, in.Role, now, now.Add(-deadGenerationAfter), in.EndpointID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var evicted []string
+	var others int
+	var evictable []string
 	for rows.Next() {
 		var endpoint string
-		if err := rows.Scan(&endpoint); err != nil {
+		var gone sql.NullBool
+		if err := rows.Scan(&endpoint, &gone); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		evicted = append(evicted, endpoint)
+		others++
+		if gone.Bool {
+			evictable = append(evictable, endpoint)
+		}
 	}
-	return evicted, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	excess := others - (MaximumDaemonGenerations - 1)
+	if excess <= 0 {
+		return nil, nil
+	}
+	if excess > len(evictable) {
+		return nil, ErrGenerationLimit
+	}
+	evicted := evictable[:excess]
+	if _, err := tx.ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET revoked_at=$3,revocation_reason='generation_evicted',updated_at=$3 WHERE user_id=$1 AND endpoint_id=ANY($2)`, in.UserID, evicted, now); err != nil {
+		return nil, err
+	}
+	return evicted, nil
 }
 
 // BeginDrain records that a daemon generation stopped accepting and drains what it holds, for at most

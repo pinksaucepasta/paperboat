@@ -19,8 +19,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/retention"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // Each user daemon generation of one CLI session has its own network identity, and the machine it has access to
@@ -118,14 +118,17 @@ func TestDaemonGenerationsShareTheSessionAndRetirePostgres(t *testing.T) {
 	}
 	keys := map[int][]byte{}
 	operations := 0
-	register := func(i int, expected int64) NetworkRegistrationResult {
-		t.Helper()
+	tryRegister := func(i int, expected int64) (NetworkRegistrationResult, error) {
 		if keys[i] == nil {
 			private, public := networkX25519Key(t)
 			keys[i] = append(public, networkDiscoPublic(t, private)...)
 		}
 		operations++
-		result, err := service.Register(ctx, NetworkRegistration{OperationID: fmt.Sprintf("operation_gen_%d_%s", operations, suffix), UserID: userID, EndpointID: endpoint(i), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: expected, WireGuardPublicKey: keys[i][:32], DiscoPublicKey: keys[i][32:], QUICCertificateFingerprint: cliFingerprint[:]})
+		return service.Register(ctx, NetworkRegistration{OperationID: fmt.Sprintf("operation_gen_%d_%s", operations, suffix), UserID: userID, EndpointID: endpoint(i), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: expected, WireGuardPublicKey: keys[i][:32], DiscoPublicKey: keys[i][32:], QUICCertificateFingerprint: cliFingerprint[:]})
+	}
+	register := func(i int, expected int64) NetworkRegistrationResult {
+		t.Helper()
+		result, err := tryRegister(i, expected)
 		if err != nil {
 			t.Fatalf("register generation %d: %v", i, err)
 		}
@@ -212,18 +215,31 @@ func TestDaemonGenerationsShareTheSessionAndRetirePostgres(t *testing.T) {
 		t.Fatalf("withdrawn generation configuration: %v", err)
 	}
 
-	// Generations 1..4 are live; a fifth live one evicts the oldest (1).
+	// Generations 1..4 are live and draining: a fifth is refused rather than cutting what one still holds.
 	for i := 2; i <= 4; i++ {
 		register(i, 0)
 	}
+	for i := 1; i <= 4; i++ {
+		if err := service.BeginDrain(ctx, userID, cliID, endpoint(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tryRegister(5, 0); !errors.Is(err, ErrGenerationLimit) {
+		t.Fatalf("a fifth generation beside four draining ones: %v", err)
+	}
+	if got := machinePeers(); len(got) != MaximumDaemonGenerations || slices.Contains(got, endpoint(5)) {
+		t.Fatalf("machine peers after a refused registration: %v", got)
+	}
+	// One of them is dead (no renewal for deadGenerationAfter): it holds nothing, so the fifth evicts it.
+	exec(`UPDATE paperboat.peer_network_identities SET updated_at=$3 WHERE user_id=$1 AND endpoint_id=$2`, userID, endpoint(3), service.now().Add(-deadGenerationAfter-time.Minute))
 	fifth := register(5, 0)
-	if !slices.Equal(fifth.EvictedEndpoints, []string{endpoint(1)}) {
+	if !slices.Equal(fifth.EvictedEndpoints, []string{endpoint(3)}) {
 		t.Fatalf("evicted = %v", fifth.EvictedEndpoints)
 	}
-	if err := cliConfig(1); !errors.Is(err, ErrGenerationEvicted) {
+	if err := cliConfig(3); !errors.Is(err, ErrGenerationEvicted) {
 		t.Fatalf("evicted generation configuration: %v", err)
 	}
-	if got := machinePeers(); len(got) != MaximumDaemonGenerations || slices.Contains(got, endpoint(1)) {
+	if got := machinePeers(); len(got) != MaximumDaemonGenerations || slices.Contains(got, endpoint(3)) || !slices.Contains(got, endpoint(5)) {
 		t.Fatalf("machine peers after eviction: %v", got)
 	}
 
