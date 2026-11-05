@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
 // A redial of a held terminal re-attaches under the access session it already has, with no credential, and leaves the
@@ -25,5 +29,26 @@ func TestResumeConnectInfoReattachesWithoutACredential(t *testing.T) {
 		if _, ok := resumeConnectInfo(unusable, func(*resolver.TerminalTarget) {}); ok {
 			t.Fatalf("a descriptor with nothing to resume under was resumed: %+v", unusable)
 		}
+	}
+}
+
+// A host that never answers the resume costs resumeAttemptBudget, not the redial's own deadline (the dial deadline is
+// 60 s), and the failure leaves the redial's context alone so the caller falls back to a grant.
+func TestResumeDialIsBoundedAndLeavesTheRedialContextAlone(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var seen time.Time
+	_, err := dialResume(parent, func(ctx context.Context) (tunnel.Conn, error) {
+		seen, _ = ctx.Deadline()
+		return nil, errors.New("no answer")
+	})
+	if err == nil {
+		t.Fatal("the dial error was dropped")
+	}
+	if left := time.Until(seen); seen.IsZero() || left > resumeAttemptBudget {
+		t.Fatalf("resume dial deadline is %v away, want at most %v", left, resumeAttemptBudget)
+	}
+	if parent.Err() != nil {
+		t.Fatalf("the redial context ended with the resume attempt: %v", parent.Err())
 	}
 }

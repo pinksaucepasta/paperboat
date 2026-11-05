@@ -612,7 +612,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if previous := attached.Load(); previous != nil {
 			if resumeInfo, ok := resumeConnectInfo(*previous, prepareTarget); ok {
 				resumeEnd := diagnostics.ReconnectStep(reconnectCtx, "local_peer_resume")
-				resumed, resumeErr := d.tunnel.Dial(reconnectCtx, resumeInfo)
+				resumed, resumeErr := dialResume(reconnectCtx, func(dialCtx context.Context) (tunnel.Conn, error) {
+					return d.tunnel.Dial(dialCtx, resumeInfo)
+				})
 				resumeEnd(resumeErr)
 				if resumeErr == nil {
 					linked(resumed)
@@ -998,6 +1000,17 @@ func closeAbandonedSession(closer terminalSessionCloser, machineID, sessionID st
 // resumeConnectInfo is the descriptor of a redial that re-attaches the terminal under the access session it holds, with
 // no credential: the daemon supplies the host's resume secret. It reports false for a descriptor with no access session
 // to resume under (offline attach). The previous descriptor is not changed.
+// resumeAttemptBudget bounds the resume attempt: a host that does not answer it costs this long, not the dial
+// deadline, before the grant path below takes over.
+const resumeAttemptBudget = 5 * time.Second
+
+// dialResume runs the resume dial under resumeAttemptBudget. Its error means "ask for a grant" unless ctx itself ended.
+func dialResume(ctx context.Context, dial func(context.Context) (tunnel.Conn, error)) (tunnel.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, resumeAttemptBudget)
+	defer cancel()
+	return dial(ctx)
+}
+
 func resumeConnectInfo(previous resolver.ConnectInfo, prepare func(*resolver.TerminalTarget)) (resolver.ConnectInfo, bool) {
 	if previous.Terminal == nil || previous.Terminal.Auth.ResourceID == "" || previous.Terminal.Auth.Offline {
 		return resolver.ConnectInfo{}, false
