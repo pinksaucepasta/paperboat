@@ -23,8 +23,11 @@ func bindMount(path string, readOnly bool) string {
 }
 
 func (l *Launcher) startContainer(ctx context.Context, capability, image string) error {
+	return l.startContainerNamed(ctx, capability, image, "paperboat-pbh-"+installationOwner(l.StateDir)+"-"+capability)
+}
+
+func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, name string) error {
 	owner := installationOwner(l.StateDir)
-	name := "paperboat-pbh-" + owner + "-" + capability
 	args := []string{"run", "-d", "--name", name, "--label", ownerLabel + "=" + owner, "--network", "host", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--mount", bindMount(l.StateDir, false)}
 	seen := map[string]bool{}
 	for _, path := range l.ReadOnlyFiles {
