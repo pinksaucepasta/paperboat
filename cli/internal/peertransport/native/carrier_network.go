@@ -9,46 +9,81 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 )
 
+// ready closes once network or err is set; waiters on the same namespace share one creation.
 type carrierNetworkRef struct {
 	network *tailnet.CarrierNetwork
+	err     error
+	ready   chan struct{}
 	users   int
 }
 
 // A generation shares one engine across terminals, and releases it when its
 // last pending dial or established connection ends. Certificate expiry bounds
 // new admission; it never interrupts an established, renewed terminal.
+// The network is created outside carrierMu, so a slow or dead generation delays only the dials that
+// name it, each for as long as its own ctx.
 func (o *Owner) getCarrierNetwork(ctx context.Context, offer CarrierOffer) (*tailnet.CarrierNetwork, func(), error) {
 	o.carrierMu.Lock()
-	defer o.carrierMu.Unlock()
 	if err := o.ctx.Err(); err != nil {
+		o.carrierMu.Unlock()
 		return nil, nil, err
 	}
 	namespace := offer.Namespace()
-	entry := o.carrierNetworks[namespace]
+	entry, creating := o.carrierNetworks[namespace], false
 	if entry == nil {
-		network, err := o.authority.NewCarrierNetwork(ctx, namespace, nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		entry = &carrierNetworkRef{network: network}
+		entry, creating = &carrierNetworkRef{ready: make(chan struct{})}, true
 		o.carrierNetworks[namespace] = entry
-		network.Watch(o.ctx, func(peers []string) { o.closeCarrierPeers(peers, network) })
 	}
 	entry.users++
+	o.carrierMu.Unlock()
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
 			o.carrierMu.Lock()
 			entry.users--
 			last := entry.users == 0
-			if last {
+			if last && o.carrierNetworks[namespace] == entry {
 				delete(o.carrierNetworks, namespace)
 			}
 			o.carrierMu.Unlock()
-			if last {
+			if last && entry.network != nil {
 				entry.network.Close()
 			}
 		})
+	}
+	if creating {
+		network, err := o.newCarrierNetwork(ctx, namespace, nil)
+		if err == nil {
+			err = o.ctx.Err()
+			if err != nil {
+				network.Close()
+			}
+		}
+		o.carrierMu.Lock()
+		if err != nil {
+			entry.err = err
+			if o.carrierNetworks[namespace] == entry {
+				delete(o.carrierNetworks, namespace)
+			}
+		} else {
+			entry.network = network
+		}
+		o.carrierMu.Unlock()
+		close(entry.ready)
+		if err != nil {
+			return nil, nil, err
+		}
+		network.Watch(o.ctx, func(peers []string) { o.closeCarrierPeers(peers, network) })
+	} else {
+		select {
+		case <-entry.ready:
+		case <-ctx.Done():
+			release()
+			return nil, nil, ctx.Err()
+		}
+		if entry.err != nil {
+			return nil, nil, entry.err
+		}
 	}
 	return entry.network, release, nil
 }
@@ -57,7 +92,9 @@ func (o *Owner) closeCarrierNetworks() {
 	o.carrierMu.Lock()
 	var networks []*tailnet.CarrierNetwork
 	for _, entry := range o.carrierNetworks {
-		networks = append(networks, entry.network)
+		if entry.network != nil {
+			networks = append(networks, entry.network)
+		}
 	}
 	o.carrierMu.Unlock()
 	for _, network := range networks {

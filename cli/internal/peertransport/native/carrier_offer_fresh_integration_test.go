@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -24,6 +26,18 @@ import (
 // reaches the generation from its signed configuration alone: no old connection, no candidate exchange,
 // and the old primary already gone.
 func TestFreshClientDialsTheGenerationItsConfigurationOffers(t *testing.T) {
+	freshOfferScenario(t, false)
+}
+
+// An offered generation whose network never comes up (the machine's carrier generation is gone) costs one
+// bounded attempt: Dial still connects through the normal path inside the caller's budget, and the offer is
+// not tried again by the next Dial (tailscale bounds each path attempt on its own and never lets one stuck
+// path use the caller's whole deadline, ~/ref/tailscale/wgengine/magicsock/magicsock.go).
+func TestStuckOfferedGenerationFallsBackToTheNormalPath(t *testing.T) {
+	freshOfferScenario(t, true)
+}
+
+func freshOfferScenario(t *testing.T, offerStuck bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
@@ -111,7 +125,9 @@ func TestFreshClientDialsTheGenerationItsConfigurationOffers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { stopGen(); generation.Close(); apps.Wait() }()
-	primary.Close() // the update restarts the old primary: nothing may depend on it
+	if !offerStuck {
+		primary.Close() // the update restarts the old primary: nothing may depend on it
+	}
 
 	offer, err := identity.Offer.MarshalBinary()
 	if err != nil {
@@ -121,11 +137,32 @@ func TestFreshClientDialsTheGenerationItsConfigurationOffers(t *testing.T) {
 	clientConfig.IssuedAt = time.Now().Unix()
 	clientConfig.Peers[0].CarrierOffer = offer
 	applyTestConfiguration(t, clientAuthority, signer, clientConfig)
+	var creations atomic.Int32
+	if offerStuck {
+		clientOwner.SetNewCarrierNetwork(func(c context.Context, _ [32]byte, _ func(mesh.ConnPacketConn)) (*tailnet.CarrierNetwork, error) {
+			creations.Add(1)
+			<-c.Done()
+			return nil, c.Err()
+		})
+	}
 	for _, consumer := range []string{"exec", "ssh"} {
 		started := time.Now()
-		fresh, err := clientOwner.Dial(ctx, descriptor, server.EndpointID, peerquic.ClassInteractive)
+		dialCtx := ctx
+		if offerStuck {
+			var stop context.CancelFunc
+			dialCtx, stop = context.WithTimeout(ctx, 10*time.Second)
+			defer stop()
+		}
+		fresh, err := clientOwner.Dial(dialCtx, descriptor, server.EndpointID, peerquic.ClassInteractive)
 		if err != nil {
 			t.Fatal("fresh dial with an offered generation failed", err)
+		}
+		if offerStuck {
+			if took := time.Since(started); took > 8*time.Second || creations.Load() != 1 {
+				t.Fatal("a stuck offer used the caller's budget or was tried again", took, creations.Load())
+			}
+			fresh.Close()
+			continue
 		}
 		stream := openConsumer(t, ctx, fresh, consumer)
 		_ = stream.SetDeadline(time.Now().Add(5 * time.Second))

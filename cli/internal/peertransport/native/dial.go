@@ -135,13 +135,18 @@ func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.C
 		o.authority.DeclineCarrierOffer(peerID, raw)
 		return nil
 	}
-	network, release, err := o.getCarrierNetwork(ctx, offer)
-	if err != nil {
-		return nil
+	// One bounded attempt: a generation that is gone must not use the caller's whole budget (every dial
+	// repeated it, five terminals timed out in a row). A failure with the caller still waiting retires the offer.
+	attempt, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
+	defer cancel()
+	network, release, err := o.getCarrierNetwork(attempt, offer)
+	var transport *peerquic.Session
+	if err == nil {
+		if transport, err = o.connectOffered(attempt, network, peerID, peer, offer, class); err != nil {
+			release()
+		}
 	}
-	transport, err := o.connectOffered(ctx, network, peerID, peer, offer, class)
 	if err != nil {
-		release()
 		if ctx.Err() == nil {
 			o.authority.DeclineCarrierOffer(peerID, raw)
 		}

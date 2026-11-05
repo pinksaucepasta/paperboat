@@ -206,25 +206,26 @@ type Config struct {
 }
 
 type Owner struct {
-	authority        *tailnet.Authority
-	tls              *tls.Config
-	observe          func(Event)
-	refreshAuthority func(context.Context) error
-	meterIncoming    func(net.Conn, MeterBinding) net.Conn
-	admitOffline     func(context.Context, OfflineAdmission) error
-	prepareCarrier   func(context.Context, string, CarrierExchange) (CarrierOffer, error)
-	carrierMu        sync.Mutex
-	carrierNetworks  map[[32]byte]*carrierNetworkRef
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.Mutex
-	closed           bool
-	sessions         map[*Session]struct{}
-	handshakes       map[string]*peerHandshake
-	restarted        map[string]bool          // peers that closed a dialed session on purpose; guarded by mu
-	routes           map[string]*carrierRoute // client: each machine's active carrier generation; guarded by mu
-	relayPaths       map[string]time.Time     // peer relay paths found by a failed handshake, kept until; guarded by mu
-	workers          sync.WaitGroup
+	authority         *tailnet.Authority
+	tls               *tls.Config
+	observe           func(Event)
+	refreshAuthority  func(context.Context) error
+	meterIncoming     func(net.Conn, MeterBinding) net.Conn
+	admitOffline      func(context.Context, OfflineAdmission) error
+	prepareCarrier    func(context.Context, string, CarrierExchange) (CarrierOffer, error)
+	carrierMu         sync.Mutex
+	carrierNetworks   map[[32]byte]*carrierNetworkRef
+	newCarrierNetwork func(context.Context, [32]byte, func(mesh.ConnPacketConn)) (*tailnet.CarrierNetwork, error)
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.Mutex
+	closed            bool
+	sessions          map[*Session]struct{}
+	handshakes        map[string]*peerHandshake
+	restarted         map[string]bool          // peers that closed a dialed session on purpose; guarded by mu
+	routes            map[string]*carrierRoute // client: each machine's active carrier generation; guarded by mu
+	relayPaths        map[string]time.Time     // peer relay paths found by a failed handshake, kept until; guarded by mu
+	workers           sync.WaitGroup
 }
 
 func NewOwner(config Config) (*Owner, error) {
@@ -235,7 +236,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, prepareCarrier: config.PrepareCarrier, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, prepareCarrier: config.PrepareCarrier, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), newCarrierNetwork: config.Authority.NewCarrierNetwork, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {
