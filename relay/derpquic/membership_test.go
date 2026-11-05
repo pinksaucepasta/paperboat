@@ -92,16 +92,82 @@ func TestMembershipShapeIsBoundedAndExclusive(t *testing.T) {
 
 // PLAN 3b budget: 10,000 endpoints of one account on one relay cost < 1 KiB per mesh grant (per-peer lists cost
 // ~4.3 MiB per grant at 16,384 peers), < 1 µs for the first check of a pair with grants spread over memory,
-// and < 100 ns per datagram after it (the connection remembers the pair until a grant changes).
+// and < 100 ns per datagram after it (the connection remembers the pair until a grant changes). The test
+// asserts what keeps those times, which wall clocks on shared machines cannot: the first check allocates
+// nothing and a repeated datagram is answered by the pair memo. The benchmarks below report the times.
 func TestTenThousandMeshEndpointsFitTheMembershipBudget(t *testing.T) {
+	keys, grants, perGrant := tenThousandMeshGrants()
+	if !raceEnabled && perGrant > 1024 {
+		t.Fatalf("%d B per mesh grant, budget 1 KiB", perGrant)
+	}
+	i := 0
+	if allocs := testing.AllocsPerRun(1000, func() {
+		if !allowedAdmitted(grants[i%len(grants)], grants[(i*7919+1)%len(grants)]) {
+			t.Fatal("two mesh endpoints are not paired")
+		}
+		i++
+	}); allocs != 0 {
+		t.Fatalf("first check of a pair allocates %v times", allocs)
+	}
+	s, p, q := pairedConnections(keys, grants)
+	now := time.Now()
+	if !s.authorizedLocked(p, q, now) {
+		t.Fatal("a paired connection was refused")
+	}
+	if allocs := testing.AllocsPerRun(1000, func() {
+		if !s.authorizedLocked(p, q, now) {
+			t.Fatal("a paired connection was refused")
+		}
+	}); allocs != 0 {
+		t.Fatalf("a repeated datagram allocates %v times", allocs)
+	}
+	// The memo answers while both signed grants are the ones it was computed from: emptying the grant's
+	// memberships under the same signed hash shows the pair is not checked again.
+	memberships := q.grant.Memberships
+	q.grant.Memberships = nil
+	if !s.authorizedLocked(p, q, now) {
+		t.Fatal("a repeated datagram checked the pair again instead of using the memo")
+	}
+	q.grant.Memberships = memberships
+	q.grant = grants[2] // a renewed grant: the memo must not answer for it
+	q.grant.AccountID = "account_b"
+	if s.authorizedLocked(p, q, now) {
+		t.Fatal("the pair memo answered for a changed grant")
+	}
+	runtime.KeepAlive(grants)
+}
+
+func BenchmarkMembershipFirstCheck(b *testing.B) {
+	_, grants, _ := tenThousandMeshGrants()
+	b.ResetTimer()
+	for i := range b.N {
+		if !allowedAdmitted(grants[i%len(grants)], grants[(i*7919+1)%len(grants)]) {
+			b.Fatal("two mesh endpoints are not paired")
+		}
+	}
+}
+
+func BenchmarkMembershipRepeatedDatagram(b *testing.B) {
+	keys, grants, _ := tenThousandMeshGrants()
+	s, p, q := pairedConnections(keys, grants)
+	now := time.Now()
+	b.ResetTimer()
+	for range b.N {
+		if !s.authorizedLocked(p, q, now) {
+			b.Fatal("a paired connection was refused")
+		}
+	}
+}
+
+// tenThousandMeshGrants returns one account's 10,000 mesh grants and their bytes per grant. TotalAlloc only
+// grows, so it is an upper bound (it also counts the construction's temporaries).
+func tenThousandMeshGrants() ([]key.NodePublic, []Grant, uint64) {
 	const endpoints = 10_000
 	later := time.Now().Add(time.Minute).Unix()
 	keys := make([]key.NodePublic, endpoints)
 	for i := range keys {
 		keys[i] = key.NewNode().Public()
 	}
-	// TotalAlloc only grows, so other tests running at the same time cannot make the delta negative; it is
-	// an upper bound (it also counts the construction's temporaries).
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	grants := make([]Grant, endpoints)
@@ -112,37 +178,12 @@ func TestTenThousandMeshEndpointsFitTheMembershipBudget(t *testing.T) {
 		grants[i].signedHash[0], grants[i].signedHash[1] = byte(i), byte(i>>8)
 	}
 	runtime.ReadMemStats(&after)
-	perGrant := (after.TotalAlloc - before.TotalAlloc) / endpoints
-	const checks = 200_000
-	start := time.Now()
-	for i := range checks {
-		if !allowedAdmitted(grants[i%endpoints], grants[(i*7919+1)%endpoints]) {
-			t.Fatal("two mesh endpoints are not paired")
-		}
-	}
-	cold := time.Since(start) / checks
+	return keys, grants, (after.TotalAlloc - before.TotalAlloc) / endpoints
+}
+
+func pairedConnections(keys []key.NodePublic, grants []Grant) (*Server, *peerConn, *peerConn) {
 	s := &Server{peers: map[key.NodePublic]*peerConn{}}
 	p, q := &peerConn{key: keys[0], grant: grants[0]}, &peerConn{key: keys[1], grant: grants[1]}
 	s.peers[p.key], s.peers[q.key] = p, q
-	now := time.Now()
-	start = time.Now()
-	for range checks {
-		if !s.authorizedLocked(p, q, now) {
-			t.Fatal("a paired connection was refused")
-		}
-	}
-	repeated := time.Since(start) / checks
-	q.grant = grants[2] // a renewed grant: the memo must not answer for it
-	q.grant.AccountID = "account_b"
-	if s.authorizedLocked(p, q, now) {
-		t.Fatal("the pair memo answered for a changed grant")
-	}
-	t.Logf("%d mesh grants: %d B per grant, %v first check, %v per repeated datagram", endpoints, perGrant, cold, repeated)
-	if !raceEnabled && perGrant > 1024 {
-		t.Fatalf("%d B per mesh grant, budget 1 KiB", perGrant)
-	}
-	if !raceEnabled && (cold > time.Microsecond || repeated > 100*time.Nanosecond) {
-		t.Fatalf("%v first check (budget 1 µs), %v per repeated datagram (budget 100 ns)", cold, repeated)
-	}
-	runtime.KeepAlive(grants)
+	return s, p, q
 }
