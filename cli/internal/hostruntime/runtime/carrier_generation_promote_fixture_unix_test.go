@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -336,8 +337,8 @@ func (f *promoteFixture) applyAuthority(t *testing.T, ctx context.Context, autho
 
 // startGeneration starts the update's delegated generation from the same
 // enrolled state on its own authority, as the separate carrier process does.
-// ports, when set, records the generation's UDP binds.
-func (f *promoteFixture) startGeneration(t *testing.T, ctx context.Context, ports *udpPortRecorder) (*productionNativePeerService, *productionNativePeerGeneration) {
+// ports, when set, binds the generation's UDP sockets.
+func (f *promoteFixture) startGeneration(t *testing.T, ctx context.Context, ports *promotionListener) (*productionNativePeerService, *productionNativePeerGeneration) {
 	t.Helper()
 	tlsConfig, _, self, err := loadNativePeerTLS(f.root, "machine_target", 1)
 	if err != nil {
@@ -465,18 +466,20 @@ func (l *pinnedPacketListener) ListenPacket(ctx context.Context, network, addres
 	return socket, err
 }
 
-// udpPortRecorder records each IPv4 port a generation binds.
-type udpPortRecorder struct{ bound chan uint16 }
+// promotionListener binds the generation's own network as asked and, once armed at promotion, every IPv4
+// bind on one probed port. magicsock prefers its configured 41642 on each rebind (fork magicsock.go
+// bindSocket), so an unpinned promoted primary that first took a random port moved to 41642 when another
+// test freed it, away from the address the client was given (CI run 42031682022; 2f460a8cc for the old primary).
+type promotionListener struct {
+	primary *pinnedPacketListener
+	armed   atomic.Bool
+}
 
-func (l *udpPortRecorder) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
-	socket, err := (&net.ListenConfig{}).ListenPacket(ctx, network, address)
-	if err == nil && network == "udp4" {
-		select {
-		case l.bound <- socket.LocalAddr().(*net.UDPAddr).AddrPort().Port():
-		default:
-		}
+func (l *promotionListener) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
+	if l.armed.Load() {
+		return l.primary.ListenPacket(ctx, network, address)
 	}
-	return socket, err
+	return (&net.ListenConfig{}).ListenPacket(ctx, network, address)
 }
 
 // primaryAddress is this host's first global IPv4 address: signed endpoints are never loopback.

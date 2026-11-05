@@ -42,7 +42,7 @@ func TestDelegatedGenerationTakesThePrimaryRoleAfterTheOldPrimaryDrains(t *testi
 	}
 	echo(t, held, "held-before-update")
 
-	ports := &udpPortRecorder{bound: make(chan uint16, 16)}
+	ports := &promotionListener{primary: newPinnedPacketListener(t)}
 	s, g := f.startGeneration(t, ctx, ports)
 	offer, err := g.carrier.Current().MarshalBinary()
 	if err != nil {
@@ -72,9 +72,7 @@ func TestDelegatedGenerationTakesThePrimaryRoleAfterTheOldPrimaryDrains(t *testi
 
 	// The generation takes the primary role; its refresh at promotion admits a second client.
 	fresh := f.freshClient(t, ctx)
-	for len(ports.bound) != 0 {
-		<-ports.bound
-	}
+	ports.armed.Store(true)
 	f.mu.Lock()
 	f.primaryTaken = true
 	f.mu.Unlock()
@@ -83,7 +81,7 @@ func TestDelegatedGenerationTakesThePrimaryRoleAfterTheOldPrimaryDrains(t *testi
 	}
 	var port uint16
 	select {
-	case port = <-ports.bound:
+	case port = <-ports.primary.bound:
 	case <-ctx.Done():
 		t.Fatal("the promoted generation bound no primary socket")
 	}
