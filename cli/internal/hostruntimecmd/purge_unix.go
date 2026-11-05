@@ -4,7 +4,6 @@ package hostruntimecmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,6 @@ import (
 
 	documentation "github.com/pinksaucepasta/paperboat/docs"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
@@ -296,9 +294,6 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 				result = errors.Join(result, withPurgeStage("shared_runtime", err))
 			}
 		}
-		if s.keepCLI == "" && result == nil {
-			result = errors.Join(result, withPurgeStage("shared_policy", s.removeLegacyAvailabilityPolicy(ctx)))
-		}
 	}
 	if s.plan.platform == "darwin" && s.keepCLI == "" {
 		if err := s.removeUnneededSharedManuals(); err != nil {
@@ -315,77 +310,6 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 		result = errors.Join(result, withPurgeStage("final_inventory", unixLeftoverError{items: leftovers}))
 	}
 	return runtimeFailureIfAny("removing the Paperboat installation failed", result)
-}
-
-func (s unixSweep) removeLegacyAvailabilityPolicy(ctx context.Context) (resultErr error) {
-	root := "/var/lib/paperboat"
-	if s.plan.platform == "darwin" {
-		root = "/Library/Application Support/Paperboat"
-	}
-	path := s.at(filepath.Join(root, "availability-policy.json"))
-	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	boundary := s.at("/")
-	relative, err := filepath.Rel(boundary, filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	current := boundary
-	for _, part := range append([]string{""}, strings.Split(relative, string(filepath.Separator))...) {
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if err != nil {
-			return err
-		}
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || int(stat.Uid) != os.Geteuid() || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
-			return errors.New("legacy availability directory custody is unsafe")
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return err
-	}
-	file := os.NewFile(uintptr(fd), path)
-	defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(stat.Uid) != os.Geteuid() || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || stat.Nlink != 1 || info.Size() > 16<<10 {
-		return errors.New("legacy availability policy custody is unsafe")
-	}
-	decoder := json.NewDecoder(io.LimitReader(file, (16<<10)+1))
-	decoder.DisallowUnknownFields()
-	var state hostservice.State
-	var extra any
-	if decoder.Decode(&state) != nil || decoder.Decode(&extra) != io.EOF || state.Schema != hostservice.ProtocolV1 {
-		return errors.New("legacy availability policy is not owned")
-	}
-	named, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !os.SameFile(info, named) {
-		return errors.New("legacy availability policy changed")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
-		return err
-	}
-	return nil
 }
 
 // Only the shared parents of this account's authoritative payload slot can
