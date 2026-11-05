@@ -157,13 +157,16 @@ func (o *Owner) StartCarrierNetwork(ctx context.Context, identity *CarrierIdenti
 	// A cold relay from a slow host took over 9 s (dadape relay1d).
 	for _, id := range network.RelayNodeIDs() {
 		go func() {
-			warm, cancel := context.WithTimeout(ctx, CarrierMoveBudget)
+			warm, cancel := context.WithTimeout(ctx, relayWarmBudget)
 			defer cancel()
 			_ = network.WarmRelay(warm, id)
 		}()
 	}
 	return network, nil
 }
+
+// relayWarmBudget bounds connecting one signed relay as a generation starts.
+const relayWarmBudget = 25 * time.Second
 
 func (s *Session) setCarrierNetwork(network *tailnet.CarrierNetwork) {
 	s.owner.mu.Lock()

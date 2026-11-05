@@ -40,7 +40,6 @@ import (
 
 type productionNativePeerConfig struct {
 	controlURL, issuer, stateRoot, machineID string
-	ownerCatalog                             string
 	generation                               uint64
 	transport                                http.RoundTripper
 	identity                                 managedSSHIdentitySource
@@ -65,8 +64,6 @@ type productionNativePeerConfig struct {
 	// that name: its own disco key, sockets, relay routes and signed offer under
 	// the machine identity, never the primary listener another generation holds.
 	carrierGeneration string
-	// prepareGeneration readies another carrier generation for a client moving to it.
-	prepareGeneration func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)
 }
 
 type productionNativePeerService struct {
@@ -305,7 +302,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, PrepareCarrier: prepareCarrierPeer(prepareTerminalCarrierPeer(s.config.stateRoot, s.config.ownerCatalog), s.config.prepareGeneration), AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}

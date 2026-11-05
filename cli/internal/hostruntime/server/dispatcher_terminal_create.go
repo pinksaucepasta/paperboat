@@ -88,8 +88,6 @@ type terminalRequest struct {
 	// failing when the session already exists. Responses to such creates carry
 	// an "existing" flag so the client can pick the right attach boundary.
 	ExistingSnapshot bool `json:"existing_snapshot,omitempty"`
-	// ResumeSecret proves a resume attach; see TerminalResume.
-	ResumeSecret []byte `json:"resume_secret,omitempty"`
 }
 
 type TerminalJoin struct {

@@ -90,28 +90,6 @@ func (q *TerminalInputQueue) freedLocked() {
 	}
 }
 
-// WaitEmpty fences a planned transport move after every submitted key has a
-// result from the existing input journal. It never resends an uncertain key.
-func (q *TerminalInputQueue) WaitEmpty(ctx context.Context) error {
-	for {
-		q.mu.Lock()
-		if len(q.pending) == 0 {
-			q.mu.Unlock()
-			return nil
-		}
-		if q.room == nil {
-			q.room = make(chan struct{})
-		}
-		room := q.room
-		q.mu.Unlock()
-		select {
-		case <-room:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
 // Complete removes input the host has answered, whatever its status.
 func (q *TerminalInputQueue) Complete(sequence uint64) {
 	if q == nil {

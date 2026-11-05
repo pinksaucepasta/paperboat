@@ -3,7 +3,9 @@ package native
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
@@ -83,7 +85,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		o.mu.Lock()
 		route := o.routes[peerID]
 		o.mu.Unlock()
-		if session := o.dialRoute(dialCtx, peerID, nil, class); session != nil {
+		if session := o.dialRoute(dialCtx, peerID, class); session != nil {
 			return session, nil
 		}
 		if route != nil && dialCtx.Err() == nil {
@@ -169,7 +171,7 @@ func (o *Owner) connectOffered(ctx context.Context, network *tailnet.CarrierNetw
 	var errs error
 	for _, relay := range relays {
 		attempt, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
-		err := waitRelay(attempt, nil, func() error { return network.PreparePeerRelay(attempt, peerID, relay) })
+		err := waitRelay(attempt, func() error { return network.PreparePeerRelay(attempt, peerID, relay) })
 		var transport *peerquic.Session
 		if err == nil {
 			transport, err = o.dialCarrierPacket(attempt, network, peerID, o.carrierTLS(peerID, peer, offer), class)
@@ -183,4 +185,19 @@ func (o *Owner) connectOffered(ctx context.Context, network *tailnet.CarrierNetw
 		}
 	}
 	return nil, errs
+}
+
+// moveErrorType names a move failure with bounded metadata only.
+func moveErrorType(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrStreamRejected):
+		return "rejected"
+	case errors.Is(err, ErrInvalid):
+		return "invalid"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	}
+	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
 }

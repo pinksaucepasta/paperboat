@@ -18,7 +18,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
@@ -50,8 +49,6 @@ type CarrierGeneration struct {
 	// Active says whether the account's descriptor names this generation now;
 	// an update's candidate is not active until the update marks it.
 	Active func(context.Context) (bool, error)
-	// PreparePeer readies another generation for a client of this one moving to it.
-	PreparePeer func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)
 }
 
 // carrierSlots bounds the generations serving at once (one active, the rest
@@ -126,10 +123,10 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	}
 	peer, err := newProductionNativePeerService(productionNativePeerConfig{
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
-		ownerCatalog: environ("PAPERBOAT_SESSION_OWNER_CATALOG"), stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
+		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
 		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
 		networkEvents:     events.Subscribe(carrierRenewalTopics...),
-		carrierGeneration: delegated, prepareGeneration: generation.PreparePeer,
+		carrierGeneration: delegated,
 	})
 	if err != nil {
 		return nil, err
@@ -283,44 +280,12 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 
 // Drain lets a retired generation finish: new SSH is fenced, and it returns
 // once no SSH bridge or other application stream is open, or at
-// runtimewire.DrainLimit. Clients already open new connections on the
-// newer generation it offered (MoveTerminals).
+// runtimewire.DrainLimit. Clients open new connections on the newer
+// generation their signed configuration offers.
 func (c *ProductionCarrier) Drain(ctx context.Context) error {
 	c.peer.retired.Store(true)
 	ssh := make(chan error, 1)
 	go func() { ssh <- c.ssh.Drain(ctx) }()
 	streams := c.peer.drainStreams(ctx, runtimewire.DrainLimit)
 	return errors.Join(streams, <-ssh)
-}
-
-// GenerationOffer is this delegated generation's signed offer.
-func (c *ProductionCarrier) GenerationOffer() ([]byte, error) {
-	offer, err := c.peer.generationOffer()
-	if err != nil {
-		return nil, err
-	}
-	return offer.MarshalBinary()
-}
-
-// PreparePeer readies this delegated generation for a client moving to it.
-func (c *ProductionCarrier) PreparePeer(ctx context.Context, peerID string, exchange []byte) ([]byte, error) {
-	offer, err := c.peer.preparePeer(ctx, peerID, exchange)
-	if err != nil {
-		return nil, err
-	}
-	return offer.MarshalBinary()
-}
-
-func (c *ProductionCarrier) MoveTerminals(ctx context.Context, encoded []byte) error {
-	offer, err := native.ParseCarrierOffer(encoded)
-	if err != nil {
-		return err
-	}
-	c.peer.mu.Lock()
-	generation := c.peer.current
-	c.peer.mu.Unlock()
-	if generation == nil {
-		return ErrProductionInvalid
-	}
-	return generation.owner.OfferCarrier(ctx, offer)
 }

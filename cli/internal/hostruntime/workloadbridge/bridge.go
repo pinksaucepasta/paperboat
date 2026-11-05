@@ -54,7 +54,6 @@ type Server struct {
 	SessionOnly       bool
 	Identity          *OwnerIdentity
 	requests          atomic.Int64
-	CarrierControl    func(context.Context, CarrierRequest) (CarrierResponse, error)
 	Retire            func(context.Context) error
 	admission         sync.RWMutex
 	retired           atomic.Bool
@@ -237,7 +236,7 @@ func (s *Server) handler() http.Handler {
 		if parts[0] == "owner" && parts[1] == "retire" {
 			s.admission.Lock()
 			defer s.admission.Unlock()
-		} else if mutates(parts[0], parts[1]) || r.URL.Path == "/owner/carrier" {
+		} else if mutates(parts[0], parts[1]) {
 			s.admission.RLock()
 			defer s.admission.RUnlock()
 		}
@@ -302,8 +301,6 @@ func (s *Server) handler() http.Handler {
 					}
 				}
 				result = json.RawMessage(`{}`)
-			} else if parts[1] == "carrier" {
-				result, err = s.carrier(ctx, body)
 			} else if parts[1] != "health" {
 				err = session.ErrInvalidSession
 			} else {
@@ -324,7 +321,7 @@ func (s *Server) handler() http.Handler {
 }
 func mutatesRequest(path string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission" || path == "/owner/carrier")
+	return len(parts) == 2 && (mutates(parts[0], parts[1]) || path == "/owner/admission")
 }
 
 // activateWorker serializes custody changes without holding bridge state over

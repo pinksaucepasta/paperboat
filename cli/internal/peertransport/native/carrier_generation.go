@@ -4,13 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
-	"errors"
 	"net"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -21,96 +19,6 @@ type carrierPacket struct {
 
 func (p *carrierPacket) RemoteAddr() net.Addr { return p.remote }
 func (*carrierPacket) MaxPayload() uint16     { return tailnet.MaxPayload }
-
-// DialCarrier inherits the old authenticated machine binding. Delegation proves
-// the new key locally; it cannot create another peer or application authority.
-func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session, error) {
-	if s == nil || ctx == nil || s.owner == nil || s.quic == nil || s.quic.Connection.Context().Err() != nil {
-		return nil, ErrInvalid
-	}
-	if _, bounded := ctx.Deadline(); !bounded {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-	}
-	peer, err := s.owner.authority.Peer(s.peerID)
-	if err != nil || peer != s.binding {
-		return nil, tailnet.ErrAdmission
-	}
-	if err := offer.verify(peer, serverclock.Now()); err != nil {
-		return nil, err
-	}
-	if session := s.owner.dialRoute(ctx, s.peerID, &offer, peerquic.ClassInteractive); session != nil {
-		return session, nil
-	}
-	config := s.owner.carrierTLS(s.peerID, peer, offer)
-	network, release, err := s.owner.getCarrierNetwork(ctx, offer)
-	if err != nil {
-		return nil, err
-	}
-	kept := false
-	defer func() {
-		if !kept {
-			release()
-		}
-	}()
-	if err := network.WaitEndpoints(ctx); err != nil {
-		return nil, err
-	}
-	if err := network.AddPeer(s.peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
-		return nil, err
-	}
-	// Try each common relay edge in turn, each attempt bounded, so a dead or
-	// refusing relay costs about a second, not the whole offer budget. Direct
-	// paths are tried in every attempt; the relay is the guarantee.
-	relays := network.CommonRelays(offer.Claims.RelayNodeIDs, s.owner.authority.RegionalStatus().NodeID)
-	if len(relays) == 0 {
-		relays = []string{""}
-	}
-	// Connect every common relay at once: a dead edge costs nothing extra and
-	// a slow one (dadape: >800 ms cold) is ready by the time its turn comes.
-	warm := make(map[string]<-chan error, len(relays))
-	for _, relay := range relays {
-		if relay == "" {
-			continue
-		}
-		done := make(chan error, 1)
-		warm[relay] = done
-		go func(relay string) { done <- network.WarmRelay(ctx, relay) }(relay)
-	}
-	var transport *peerquic.Session
-	var attemptErr error
-	for i, relay := range relays {
-		transport, err = s.carrierAttempt(ctx, network, config, offer, peer, relay, warm[relay], i == len(relays)-1)
-		if err == nil {
-			break
-		}
-		attemptErr = errors.Join(attemptErr, err)
-		diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt", "failed", true, "error_type", moveErrorType(err))
-		if ctx.Err() != nil {
-			break
-		}
-	}
-	if transport == nil {
-		return nil, attemptErr
-	}
-
-	session, err := s.owner.carrierSession(s.peerID, peer, offer, transport, network, release)
-	if err != nil {
-		return nil, err
-	}
-	kept = true
-	if offer.Claims.AllApplications {
-		s.owner.setRoute(ctx, s.peerID, offer)
-	}
-	path := network.PeerPath(s.peerID)
-	s.owner.emit(Event{Kind: "carrier_moved", PeerID: s.peerID, Path: path})
-	if path == "direct" {
-		path = "direct-punched"
-	}
-	diagnosticlog.TryInfo("terminal carrier move", "stage", "connected", "path", path)
-	return session, nil
-}
 
 // carrierTLS authenticates the offer's delegated key under the peer's current
 // signed binding; a renewed delegation presents a newer certificate for it.
@@ -129,7 +37,7 @@ func (o *Owner) carrierTLS(peerID string, peer tailnet.NetworkBinding, offer Car
 
 // carrierSession owns transport and the network reference from here on.
 func (o *Owner) carrierSession(peerID string, peer tailnet.NetworkBinding, offer CarrierOffer, transport *peerquic.Session, network *tailnet.CarrierNetwork, release func()) (*Session, error) {
-	session, err := newSession(o, peerID, peer, transport, !offer.Claims.AllApplications)
+	session, err := newSession(o, peerID, peer, transport)
 	if err == nil {
 		err = o.add(session)
 	}
@@ -143,74 +51,14 @@ func (o *Owner) carrierSession(peerID string, peer tailnet.NetworkBinding, offer
 	return session, nil
 }
 
-// carrierRelayAttemptLimit bounds one relay edge's preparation so a dead relay
-// is detected in under a second and the other edge is tried.
-const carrierRelayAttemptLimit = 800 * time.Millisecond
-
-// carrierAttemptLimit bounds one whole candidate exchange and dial; the last
-// attempt keeps the remaining offer budget.
+// carrierAttemptLimit bounds one relay edge's preparation and dial.
 const carrierAttemptLimit = 3 * time.Second
 
-func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNetwork, config *tls.Config, offer CarrierOffer, peer tailnet.NetworkBinding, relay string, warm <-chan error, last bool) (*peerquic.Session, error) {
-	if !last {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, carrierAttemptLimit)
-		defer cancel()
-	}
-	diagnosticlog.TryInfo("terminal carrier move", "stage", "relay_attempt_start", "reason", relay)
-	prepare, stop := relayPrepareContext(ctx, last)
-	err := waitRelay(prepare, warm, func() error { return network.PreparePeerRelay(prepare, s.peerID, relay) })
-	stop()
-	if err != nil {
-		return nil, err
-	}
-	exchange := CarrierExchange{Offer: offer, DiscoPublicKey: network.DiscoPublic(), RelayNodeID: relay}
-	for _, endpoint := range network.Endpoints() {
-		exchange.Endpoints = append(exchange.Endpoints, endpoint.String())
-	}
-	current, err := s.exchangeCarrierCandidates(ctx, exchange)
-	if err != nil {
-		return nil, err
-	}
-	if current.Namespace() != offer.Namespace() || current.verify(peer, serverclock.Now()) != nil {
-		return nil, ErrInvalid
-	}
-	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
-		return nil, err
-	}
-	return s.owner.dialCarrierPacket(ctx, network, s.peerID, config, peerquic.ClassInteractive)
-}
-
-// relayPrepareContext cuts a relay's preparation short only when another edge
-// follows it; the last edge keeps the move's budget (dadape direct2b cut both
-// edges at 800 ms and fell back to a 16 s reconnect).
-func relayPrepareContext(ctx context.Context, last bool) (context.Context, context.CancelFunc) {
-	if last {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, carrierRelayAttemptLimit)
-}
-
-// waitRelay waits for the relay's warm connection, then selects it for the
-// peer. Both steps run off the caller so a relay step that does not honour
-// ctx (dadape direct3b sat 10 s) cannot hold the move past its bound.
-func waitRelay(ctx context.Context, warm <-chan error, selectRelay func() error) error {
+// waitRelay selects the relay for the peer off the caller, so a relay step that
+// does not honour ctx (dadape direct3b sat 10 s) cannot hold the dial past its bound.
+func waitRelay(ctx context.Context, selectRelay func() error) error {
 	done := make(chan error, 1)
-	go func() {
-		if warm != nil {
-			select {
-			case err := <-warm:
-				if err != nil {
-					done <- err
-					return
-				}
-			case <-ctx.Done():
-				done <- ctx.Err()
-				return
-			}
-		}
-		done <- selectRelay()
-	}()
+	go func() { done <- selectRelay() }()
 	select {
 	case err := <-done:
 		return err
@@ -219,7 +67,7 @@ func waitRelay(ctx context.Context, warm <-chan error, selectRelay func() error)
 	}
 }
 
-// ListenCarrier is a mutually authenticated terminal-only transport inside WG.
+// ListenCarrier is a generation's mutually authenticated transport inside WG.
 // The signed parent authority remains its admission and revocation owner.
 func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identity *CarrierIdentity, serve func(context.Context, *Session) error, ready chan<- struct{}) error {
 	if o == nil || ctx == nil || socket == nil || identity == nil || identity.tls == nil || serve == nil || ready == nil {
@@ -268,7 +116,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		transport.Close()
 		return err
 	}
-	session, err := newSession(o, peer.EndpointID, peer, transport, !identity.Current().Claims.AllApplications)
+	session, err := newSession(o, peer.EndpointID, peer, transport)
 	if err != nil {
 		transport.Close()
 		return err
@@ -294,8 +142,7 @@ func (o *Owner) carrierPeer(state tls.ConnectionState) (tailnet.NetworkBinding, 
 	return peer, err
 }
 
-// Preparation owns a single bounded attempt while the old terminal serves.
-// As with Owner.Dial, a lost pre-application handshake retries a fresh flow
+// dialCarrierPacket owns one bounded attempt. As with Owner.Dial, a lost pre-application handshake retries a fresh flow
 // without discarding discovery/relay allocation state or replaying input.
 func (o *Owner) dialCarrierPacket(ctx context.Context, network *tailnet.CarrierNetwork, peerID string, config *tls.Config, class peerquic.Class) (*peerquic.Session, error) {
 	for {

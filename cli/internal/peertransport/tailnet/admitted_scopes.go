@@ -37,7 +37,7 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 // TrackAdmittedCarrier retains the exact signed authority that admits a
 // carrier. Personal-network authority takes precedence; resource-only peers
 // retain their first eligible application authority until actual disconnect.
-func (a *Authority) TrackAdmittedCarrier(peerID string, wireguard bool) (func(), NetworkScope, error) {
+func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.usableLocked() {
@@ -73,11 +73,6 @@ func (a *Authority) TrackAdmittedCarrier(peerID string, wireguard bool) (func(),
 		releaseScope, err := a.retainScopeLocked(backing)
 		if err != nil {
 			return nil, NetworkScope{}, err
-		}
-		// A delegated raw UDP connection retains authorization, but cannot
-		// keep a stopped WireGuard carrier's crypto state marked live.
-		if !wireguard {
-			return releaseScope, backing, nil
 		}
 		if a.carrierPeers == nil {
 			a.carrierPeers = make(map[string]int)

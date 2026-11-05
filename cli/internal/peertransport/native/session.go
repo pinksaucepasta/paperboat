@@ -24,24 +24,21 @@ import (
 )
 
 type Session struct {
-	traceLabel      string
-	terminalCarrier bool
-	carrierNetwork  *tailnet.CarrierNetwork
-	carrierPath     func(string) (string, string)
-	terminalUsed    atomic.Bool
-	owner           *Owner
-	peerID          string
-	binding         tailnet.NetworkBinding
-	quic            *peerquic.Session
-	router          *peerquic.StreamRouter
-	routerMu        sync.Mutex
-	moveCarrier     func(context.Context, CarrierOffer) error
-	once            sync.Once
-	closing         atomic.Bool
-	err             error
-	scopeMu         sync.Mutex
-	http3Scope      *scopeKey
-	carrier         *admission.Lease
+	traceLabel     string
+	carrierNetwork *tailnet.CarrierNetwork
+	carrierPath    func(string) (string, string)
+	owner          *Owner
+	peerID         string
+	binding        tailnet.NetworkBinding
+	quic           *peerquic.Session
+	router         *peerquic.StreamRouter
+	routerMu       sync.Mutex
+	once           sync.Once
+	closing        atomic.Bool
+	err            error
+	scopeMu        sync.Mutex
+	http3Scope     *scopeKey
+	carrier        *admission.Lease
 }
 
 // MeterBinding contains only verified accounting metadata, never credentials.
@@ -70,9 +67,6 @@ func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessS
 	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, PeerAccountID: peerAccountID, Reverse: reverse, Path: func(direction string) (string, string) {
 		if s.carrierPath != nil {
 			return s.carrierPath(direction)
-		}
-		if s.terminalCarrier {
-			return "unknown", ""
 		}
 		path, err := s.owner.authority.PeerUsagePathDirection(s.peerID, direction)
 		if err != nil {
@@ -127,9 +121,9 @@ var ErrStreamRejected = errors.New("native application stream rejected")
 
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
-func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session, terminalCarrier bool) (*Session, error) {
-	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session, terminalCarrier: terminalCarrier}
-	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID, !terminalCarrier)
+func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) (*Session, error) {
+	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
+	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID)
 	if err != nil {
 		return nil, err
 	}
@@ -191,15 +185,12 @@ func (s *Session) Open(ctx context.Context) (net.Conn, error) {
 	return &streamConn{Stream: stream, session: s, local: directAddr("local"), remote: directAddr(s.peerID)}, nil
 }
 
-// ensureRouterLocked starts reading incoming streams, so carrier offers reach
-// this session even when it never accepts an application stream.
+// ensureRouterLocked starts reading incoming streams on the first Accept.
 func (s *Session) ensureRouterLocked() error {
 	if s.router != nil {
 		return nil
 	}
-	config := peerquic.DevelopmentStreamRouterConfig()
-	config.CandidateControl = s.receiveCarrierControl
-	router, err := peerquic.NewStreamRouter(s.quic, config)
+	router, err := peerquic.NewStreamRouter(s.quic, peerquic.DevelopmentStreamRouterConfig())
 	if err != nil {
 		return err
 	}
@@ -225,9 +216,6 @@ func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 // OpenAuthorized sends the canonical operation credential before exposing the
 // stream. Network admission and application authorization remain independent.
 func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, accessSessionID, capability string) (net.Conn, error) {
-	if s.terminalCarrier && (header.Consumer != "terminal" || header.Offline) {
-		return nil, tailnet.ErrAdmission
-	}
 	if !s.owner.authority.Allows(s.peerID, accessSessionID, capability, "dial") {
 		return nil, tailnet.ErrAdmission
 	}
@@ -253,9 +241,6 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
-	if s.terminalCarrier && (header.Consumer != "terminal" || header.Offline) {
-		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
-	}
 	capability := capabilityForConsumer(header.Consumer)
 	if capability == "" {
 		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
@@ -267,13 +252,6 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 			if header.Consumer == "ssh" {
 				return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, connection.Close())
 			}
-			return rejectAuthorizedStream(connection, err)
-		}
-		return admitted, header, nil
-	}
-	if header.Resume != "" {
-		admitted, err := s.acceptResume(ctx, connection, header)
-		if err != nil {
 			return rejectAuthorizedStream(connection, err)
 		}
 		return admitted, header, nil
@@ -290,9 +268,6 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), scopeResource, capability, "accept", time.Unix(header.DeadlineUnix, 0))
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
-	}
-	if header.Consumer == "terminal" {
-		s.terminalUsed.Store(true)
 	}
 	if err := acknowledgeAdmission(connection); err != nil {
 		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, scoped.Close())

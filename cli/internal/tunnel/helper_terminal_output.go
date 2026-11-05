@@ -34,7 +34,7 @@ func (c *helperTerminalConn) decodeHelperBinary(data []byte) (helperOutput, erro
 	if c.checkpointActive || frame.Channel != protocol.TerminalStdout && frame.Channel != protocol.TerminalStderr {
 		return helperOutput{}, errors.New("helper terminal output interrupted its screen checkpoint")
 	}
-	return helperOutput{byteCursor: true, data: frame.Data, endSequence: frame.StartSequence + uint64(len(frame.Data))}, nil
+	return helperOutput{data: frame.Data, endSequence: frame.StartSequence + uint64(len(frame.Data))}, nil
 }
 
 func (c *helperTerminalConn) TerminalCompressionTelemetry() TerminalCompressionTelemetry {
