@@ -53,10 +53,12 @@ func darwinServiceInstalled(path, executable string, uid int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if declaration.Label != hostservice.DaemonLabel || declaration.Program != "" || len(declaration.Arguments) < 2 || declaration.Arguments[0] != expected || declaration.Arguments[1] != "daemon" {
+	// The label and the --generation argument name the same generation as the definition's file.
+	generation := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), hostservice.DaemonLabel+"."), ".plist")
+	if declaration.Label != hostservice.DaemonLabel+"."+generation || declaration.Program != "" || len(declaration.Arguments) < 4 || declaration.Arguments[0] != expected || declaration.Arguments[1] != "daemon" || declaration.Arguments[2] != "--generation" || declaration.Arguments[3] != generation || !validGeneration(generation) {
 		return false, hostservice.ErrInvalidDefinition
 	}
-	for i := 2; i < len(declaration.Arguments); i += 2 {
+	for i := 4; i < len(declaration.Arguments); i += 2 {
 		if i+1 >= len(declaration.Arguments) {
 			return false, hostservice.ErrInvalidDefinition
 		}

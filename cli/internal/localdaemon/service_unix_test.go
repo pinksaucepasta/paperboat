@@ -35,6 +35,9 @@ func (r *serviceRunner) Run(_ context.Context, name string, arguments ...string)
 	return nil
 }
 
+// testDaemonGeneration names the daemon generation of every service fixture.
+var testDaemonGeneration = strings.Repeat("a", 32)
+
 func serviceExecutable(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(shorttemp.Dir(t), "pb")
@@ -51,16 +54,16 @@ func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 			configPath := filepath.Join(home, ".config", "paperboat", "config.json")
 			runner := &serviceRunner{}
 			err := installService(context.Background(), serviceConfig{
-				Platform: platform, Home: home, Executable: serviceExecutable(t), ConfigPath: configPath,
+				Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: serviceExecutable(t), ConfigPath: configPath,
 				ServerURL: "https://api.paperboat.test", Username: "test", Group: "staff", UID: 501,
 				Environment: map[string]string{"HOME": home}, Runner: runner,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			definition := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+			definition := generationDefinitionPath("linux", home, testDaemonGeneration)
 			if platform == "darwin" {
-				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
+				definition = generationDefinitionPath("darwin", home, testDaemonGeneration)
 			}
 			body, err := os.ReadFile(definition)
 			if err != nil {
@@ -74,13 +77,13 @@ func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 			}
 			joined := strings.Join(runner.calls, "\n")
 			if platform == "linux" {
-				for _, expected := range []string{"systemctl --user daemon-reload", "systemctl --user enable --now paperboatd.service", "systemctl --user is-active --quiet paperboatd.service"} {
+				for _, expected := range []string{"systemctl --user daemon-reload", "systemctl --user enable --now paperboatd-" + testDaemonGeneration + ".service", "systemctl --user is-active --quiet paperboatd-" + testDaemonGeneration + ".service"} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("calls missing %q:\n%s", expected, joined)
 					}
 				}
 			} else {
-				for _, expected := range []string{"launchctl bootstrap gui/501", "launchctl kickstart gui/501/" + hostservice.DaemonLabel, "launchctl print gui/501/" + hostservice.DaemonLabel} {
+				for _, expected := range []string{"launchctl bootstrap gui/501", "launchctl kickstart gui/501/" + hostservice.DaemonLabel + "." + testDaemonGeneration, "launchctl print gui/501/" + hostservice.DaemonLabel + "." + testDaemonGeneration} {
 					if !strings.Contains(joined, expected) {
 						t.Fatalf("calls missing %q:\n%s", expected, joined)
 					}
@@ -91,7 +94,7 @@ func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 }
 
 func TestInstallServiceRejectsRelativeConfigAndUnsupportedPlatform(t *testing.T) {
-	base := serviceConfig{Platform: "linux", Home: t.TempDir(), Executable: serviceExecutable(t), ConfigPath: "relative", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": "/tmp"}, Runner: &serviceRunner{}}
+	base := serviceConfig{Platform: "linux", Generation: testDaemonGeneration, Home: t.TempDir(), Executable: serviceExecutable(t), ConfigPath: "relative", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": "/tmp"}, Runner: &serviceRunner{}}
 	if err := installService(context.Background(), base); err == nil {
 		t.Fatal("relative config path was accepted")
 	}
@@ -107,7 +110,7 @@ func TestRemoveServiceStopsManagerBeforeDeletingDefinition(t *testing.T) {
 		t.Run(platform, func(t *testing.T) {
 			home := t.TempDir()
 			runner := &serviceRunner{}
-			config := serviceConfig{Platform: platform, Home: home, Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
+			config := serviceConfig{Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
 			installer, err := newServiceInstaller(config)
 			if err != nil {
 				t.Fatal(err)
@@ -123,10 +126,10 @@ func TestRemoveServiceStopsManagerBeforeDeletingDefinition(t *testing.T) {
 				t.Fatalf("definition remains: %v", err)
 			}
 			joined := strings.Join(runner.calls, "\n")
-			if platform == "linux" && !strings.Contains(joined, "systemctl --user disable --now paperboatd.service") {
+			if platform == "linux" && !strings.Contains(joined, "systemctl --user disable --now paperboatd-"+testDaemonGeneration+".service") {
 				t.Fatalf("linux calls=%s", joined)
 			}
-			if platform == "darwin" && !strings.Contains(joined, "launchctl bootout gui/501/"+hostservice.DaemonLabel) {
+			if platform == "darwin" && !strings.Contains(joined, "launchctl bootout gui/501/"+hostservice.DaemonLabel+"."+testDaemonGeneration) {
 				t.Fatalf("darwin calls=%s", joined)
 			}
 		})
@@ -137,9 +140,9 @@ func TestRemoveServiceWorksWithMissingDaemonArtifact(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
 		t.Run(platform, func(t *testing.T) {
 			home := t.TempDir()
-			definition := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+			definition := generationDefinitionPath("linux", home, testDaemonGeneration)
 			if platform == "darwin" {
-				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
+				definition = generationDefinitionPath("darwin", home, testDaemonGeneration)
 			}
 			if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
 				t.Fatal(err)
@@ -148,7 +151,7 @@ func TestRemoveServiceWorksWithMissingDaemonArtifact(t *testing.T) {
 				t.Fatal(err)
 			}
 			runner := &serviceRunner{}
-			cfg := serviceConfig{Platform: platform, Home: home, Executable: filepath.Join(home, "pb"), Username: "test", Group: "staff", UID: 501, Runner: runner}
+			cfg := serviceConfig{Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: filepath.Join(home, "pb"), Username: "test", Group: "staff", UID: 501, Runner: runner}
 			if _, err := newServiceInstaller(cfg); err == nil {
 				t.Fatal("missing daemon accepted for installation")
 			}
@@ -162,10 +165,10 @@ func TestRemoveServiceWorksWithMissingDaemonArtifact(t *testing.T) {
 			if strings.Contains(calls, "enable --now") || strings.Contains(calls, "bootstrap") || strings.Contains(calls, "kickstart") {
 				t.Fatalf("removal attempted startup: %s", calls)
 			}
-			if platform == "linux" && !strings.Contains(calls, "disable --now paperboatd.service") {
+			if platform == "linux" && !strings.Contains(calls, "disable --now paperboatd-"+testDaemonGeneration+".service") {
 				t.Fatalf("missing service stop: %s", calls)
 			}
-			if platform == "darwin" && !strings.Contains(calls, "bootout gui/501/"+hostservice.DaemonLabel) {
+			if platform == "darwin" && !strings.Contains(calls, "bootout gui/501/"+hostservice.DaemonLabel+"."+testDaemonGeneration) {
 				t.Fatalf("missing service stop: %s", calls)
 			}
 			count := len(runner.calls)
@@ -194,7 +197,7 @@ func TestRemoveServiceRemovesTheConfigSyncService(t *testing.T) {
 				t.Fatal(err)
 			}
 			runner := &serviceRunner{}
-			cfg := serviceConfig{Platform: platform, Home: home, Executable: filepath.Join(home, "pb"), Username: "test", Group: "staff", UID: 501, Runner: runner}
+			cfg := serviceConfig{Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: filepath.Join(home, "pb"), Username: "test", Group: "staff", UID: 501, Runner: runner}
 			if err := removeService(context.Background(), cfg); err != nil {
 				t.Fatal(err)
 			}

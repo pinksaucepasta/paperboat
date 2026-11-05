@@ -9,8 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"time"
 )
 
 func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
@@ -37,12 +36,26 @@ func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
 }
 
 func TestUpdateServiceDefinitionPath(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator), "Users", "paperboat")
-	if got, want := updateServiceDefinitionPath("darwin", home), filepath.Join(home, "Library", "LaunchAgents", service.DaemonLabel+".plist"); got != want {
-		t.Fatalf("darwin definition path = %q, want %q", got, want)
-	}
-	if got, want := updateServiceDefinitionPath("linux", home), filepath.Join(home, ".config", "systemd", "user", "paperboatd.service"); got != want {
-		t.Fatalf("linux definition path = %q, want %q", got, want)
+	for _, platform := range []string{"darwin", "linux"} {
+		home := t.TempDir()
+		older, newer := strings.Repeat("a", 32), strings.Repeat("b", 32)
+		for index, generation := range []string{older, newer} {
+			path := generationDefinitionPath(platform, home, generation)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("unit"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stamp := time.Now().Add(time.Duration(index-2) * time.Minute)
+			if err := os.Chtimes(path, stamp, stamp); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The probe addresses the generation the last install started: the newest definition.
+		if got, want := updateServiceDefinitionPath(platform, home), generationDefinitionPath(platform, home, newer); got != want {
+			t.Fatalf("%s definition path = %q, want %q", platform, got, want)
+		}
 	}
 }
 
@@ -101,10 +114,7 @@ func TestUpdateProbeMissingDeclaration(t *testing.T) {
 
 func updateProbeTestDeclaration(t *testing.T, home, platform string) string {
 	t.Helper()
-	path := filepath.Join(home, ".config/systemd/user/paperboatd.service")
-	if platform == "darwin" {
-		path = filepath.Join(home, "Library/LaunchAgents/com.pinksaucepasta.paperboatd.plist")
-	}
+	path := generationDefinitionPath(platform, home, testDaemonGeneration)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}

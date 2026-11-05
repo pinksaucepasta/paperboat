@@ -152,7 +152,7 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 	for _, process := range processes {
 		unit := process.unit
 		if s.plan.platform == "linux" && process.stale && strings.HasPrefix(unit, "paperboat") &&
-			generationToken(unit) == "" && unit != "paperboatd.service" && !containsString(restart, unit) {
+			generationToken(unit) == "" && !containsString(restart, unit) {
 			restart = append(restart, unit)
 		}
 	}
@@ -190,6 +190,11 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 		process := &processes[index]
 		digest, pinned := pinDigest(paths.pins, process.exe)
 		switch {
+		// A previous user-daemon generation runs the replaced fixed binary while it drains the
+		// forwarded connections it held at the upgrade (SIGQUIT); it is owned until the drain cap.
+		case process.stale && daemonGenerationUnit(process.unit) && process.started.Before(sources.Activated) && now.Before(sources.Activated.Add(inventoryDrainCap)):
+		case process.stale && daemonGenerationUnit(process.unit) && process.started.Before(sources.Activated):
+			findings = append(findings, inventoryFinding{process: process, note: noteOutlivedCap})
 		case process.stale:
 			findings = append(findings, inventoryFinding{process: process, note: " runs a replaced image"})
 		case !pinned:
@@ -312,13 +317,27 @@ func (s unixSweep) inventoryProcesses(ctx context.Context, paths inventoryPaths)
 }
 
 // ourUnit reports a unit or job this account's install owns: one carrying its
-// exact token, the shared guard's, or the account's own user daemon.
+// exact token, the shared guard's, or a generation of the account's own user daemon.
 func (s unixSweep) ourUnit(name string) bool {
 	switch name {
-	case "paperboat-machineguard.service", "io.paperboat.machineguard", "paperboatd.service", service.DaemonLabel:
+	case "paperboat-machineguard.service", "io.paperboat.machineguard":
+		return true
+	}
+	if daemonGenerationUnit(name) {
 		return true
 	}
 	return (strings.HasPrefix(name, "paperboat-") || strings.HasPrefix(name, "com.pinksaucepasta.paperboat.")) && ownsInstance(name, s.plan.instance)
+}
+
+// daemonGenerationUnit reports a user-daemon generation's systemd --user unit or launchd label.
+func daemonGenerationUnit(name string) bool {
+	generation, ok := strings.CutPrefix(name, service.DaemonUnitPrefix)
+	if ok {
+		generation, ok = strings.CutSuffix(generation, ".service")
+	} else {
+		generation, ok = strings.CutPrefix(name, service.DaemonLabel+".")
+	}
+	return ok && len(generation) == 32 && generationToken(generation) == generation
 }
 
 // replacedImage reports a process running an image other than the file now at

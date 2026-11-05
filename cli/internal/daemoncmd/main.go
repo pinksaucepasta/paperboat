@@ -227,11 +227,16 @@ func windowsSSHDServiceCommand() *cobra.Command {
 }
 
 func localDaemonCommand() *cobra.Command {
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:    "daemon",
 		Hidden: true,
 		Args:   commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) (resultErr error) {
+			generation, retired, err := daemonGeneration(command)
+			if err != nil || retired {
+				return err
+			}
+			_ = generation // the network identity of this generation (PeerTerminalConfig.Generation)
 			paths, err := currentLocalDaemonPaths()
 			if err != nil {
 				return err
@@ -450,6 +455,26 @@ func localDaemonCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	command.Flags().String("generation", "", "daemon generation this unit runs (the executable's SHA-256 prefix)")
+	return command
+}
+
+// daemonGeneration is the generation this daemon runs: its executable's (localdaemon.DaemonGeneration).
+// A unit names its generation with --generation; when that is not this executable's, a retired
+// generation's unit was restarted on the replaced binary and must stay down (exit 0).
+func daemonGeneration(command *cobra.Command) (generation string, retired bool, err error) {
+	executable, err := cliExecutable()
+	if err != nil {
+		return "", false, err
+	}
+	if generation, err = localdaemon.DaemonGeneration(executable); err != nil {
+		return "", false, err
+	}
+	if named, _ := command.Flags().GetString("generation"); named != "" && named != generation {
+		diagnosticlog.TryInfo("retired daemon generation stays down", "generation", named, "executable_generation", generation)
+		return "", true, nil
+	}
+	return generation, false, nil
 }
 
 func privilegedHostServiceCommand() *cobra.Command {

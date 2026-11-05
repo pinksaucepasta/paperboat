@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -35,7 +36,7 @@ func hostJobs(plan unixPurgePlan) func(context.Context) (map[int]string, error) 
 			if err != nil {
 				return nil, err
 			}
-			output, err = exec.CommandContext(ctx, "/usr/bin/systemctl", "--user", "--machine="+account.Username+"@", "show", "--property=Id,MainPID", "paperboatd.service").Output()
+			output, err = exec.CommandContext(ctx, "/usr/bin/systemctl", "--user", "--machine="+account.Username+"@", "show", "--property=Id,MainPID", service.DaemonUnitPrefix+"*").Output()
 			if err != nil {
 				return nil, fmt.Errorf("read the user daemon unit of %s: %w", account.Username, err)
 			}
@@ -51,14 +52,26 @@ func hostJobs(plan unixPurgePlan) func(context.Context) (map[int]string, error) 
 			return nil, fmt.Errorf("list launchd jobs: %w", err)
 		}
 		jobs := parseLaunchctlList(string(output))
-		// The user agent lives in the account's GUI domain, which exists only while it is logged in.
-		output, err = exec.CommandContext(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(plan.uid)+"/"+service.DaemonLabel).Output()
-		var exit *exec.ExitError
-		if err != nil && !errors.As(err, &exit) {
+		// The user agents live in the account's GUI domain, which exists only while it is logged in:
+		// one per daemon generation, named by the plists in the account's LaunchAgents.
+		account, err := user.LookupId(strconv.Itoa(plan.uid))
+		if err != nil {
 			return nil, err
 		}
-		if pid := parseLaunchctlPrintPID(string(output)); err == nil && pid > 0 {
-			jobs[pid] = service.DaemonLabel
+		plists, err := filepath.Glob(filepath.Join(account.HomeDir, "Library", "LaunchAgents", service.DaemonLabel+".*.plist"))
+		if err != nil {
+			return nil, err
+		}
+		for _, plist := range plists {
+			label := strings.TrimSuffix(filepath.Base(plist), ".plist")
+			output, err = exec.CommandContext(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(plan.uid)+"/"+label).Output()
+			var exit *exec.ExitError
+			if err != nil && !errors.As(err, &exit) {
+				return nil, err
+			}
+			if pid := parseLaunchctlPrintPID(string(output)); err == nil && pid > 0 {
+				jobs[pid] = label
+			}
 		}
 		return jobs, nil
 	}

@@ -15,11 +15,23 @@ func UninstallCurrentUserService(ctx context.Context, executable string) error {
 	return RemoveCurrentUserService(ctx, executable)
 }
 
+// errNoGeneration means no daemon generation is installed for this user.
+var errNoGeneration = errors.New("Paperboat local daemon service is not installed; run pb service install")
+
+// currentUserLifecycle addresses the newest installed daemon generation: the one the last install started.
 func currentUserLifecycle(executable string) (hostservice.NativeLifecycleController, string, error) {
 	config, err := currentUserServiceConfig(executable)
 	if err != nil {
 		return nil, "", err
 	}
+	generations, err := installedGenerations(config.Platform, config.Home)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(generations) == 0 {
+		return nil, "", errNoGeneration
+	}
+	config.Generation = generations[0]
 	definition, err := serviceDefinition(config)
 	if err != nil {
 		return nil, "", err
@@ -37,6 +49,9 @@ func currentUserLifecycle(executable string) (hostservice.NativeLifecycleControl
 
 func InspectCurrentUserService(ctx context.Context, executable string) (ServiceState, error) {
 	controller, path, err := currentUserLifecycle(executable)
+	if errors.Is(err, errNoGeneration) {
+		return ServiceState{}, nil
+	}
 	if err != nil {
 		return ServiceState{}, err
 	}
@@ -66,7 +81,7 @@ func startUserService(ctx context.Context, controller hostservice.NativeLifecycl
 			return err
 		}
 		if !installed {
-			return errors.New("Paperboat local daemon service is not installed; run pb service install")
+			return errNoGeneration
 		}
 		return controller.Start(ctx, path)
 	}
@@ -75,13 +90,16 @@ func startUserService(ctx context.Context, controller hostservice.NativeLifecycl
 		return err
 	}
 	if !state.Registered {
-		return errors.New("Paperboat local daemon service is not installed; run pb service install")
+		return errNoGeneration
 	}
 	return controller.Start(ctx, path)
 }
 
 func StopCurrentUserService(ctx context.Context, executable string) error {
 	controller, path, err := currentUserLifecycle(executable)
+	if errors.Is(err, errNoGeneration) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
