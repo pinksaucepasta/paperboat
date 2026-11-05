@@ -20,7 +20,7 @@ func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 		xsoSocket, xsoInpcb, xsoTCPCB = 0x001, 0x010, 0x020
 		genLen                        = 24 // sizeof(struct xinpgen)
 		inpcbLen, socketLen, tcpcbLen = 104, 104, 204
-		inpIPv4                       = 0x1 // INP_IPV4 in inp_vflag
+		inpIPv4, inpIPv6              = 0x1, 0x2 // INP_IPV4, INP_IPV6 in inp_vflag
 		tcpsEstablished               = 4
 	)
 	le := binary.LittleEndian
@@ -36,9 +36,22 @@ func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 		if socket == nil || tcpcb == nil || le.Uint64(socket[28:]) != le.Uint64(inpcb[8:]) {
 			return errPCBLayout
 		}
-		if inpcb[44]&inpIPv4 != 0 {
-			src := netip.AddrPortFrom(netip.AddrFrom4([4]byte(inpcb[76:80])), binary.BigEndian.Uint16(inpcb[18:]))
-			dst := netip.AddrPortFrom(netip.AddrFrom4([4]byte(inpcb[60:64])), binary.BigEndian.Uint16(inpcb[16:]))
+		// inp_dependfaddr / inp_dependladdr are 16-byte unions at 48 and 64: an IPv6 address, or an IPv4 one in
+		// the last 4 bytes (xnu in_pcb.h). The IPv6 case is read from the same offsets; it is unverified on a
+		// live Mac (the IPv4 layout was checked on macOS 26), so the macOS lane runs the ::1 check.
+		var src, dst netip.AddrPort
+		known := true
+		switch {
+		case inpcb[44]&inpIPv4 != 0:
+			src = netip.AddrPortFrom(netip.AddrFrom4([4]byte(inpcb[76:80])), binary.BigEndian.Uint16(inpcb[18:]))
+			dst = netip.AddrPortFrom(netip.AddrFrom4([4]byte(inpcb[60:64])), binary.BigEndian.Uint16(inpcb[16:]))
+		case inpcb[44]&inpIPv6 != 0:
+			src = netip.AddrPortFrom(netip.AddrFrom16([16]byte(inpcb[64:80])), binary.BigEndian.Uint16(inpcb[18:]))
+			dst = netip.AddrPortFrom(netip.AddrFrom16([16]byte(inpcb[48:64])), binary.BigEndian.Uint16(inpcb[16:]))
+		default:
+			known = false
+		}
+		if known {
 			if (socketTuple{Source: src, Destination: dst}) == tuple {
 				owners = append(owners, socketOwner{Tuple: tuple, UID: le.Uint32(socket[64:]), Established: le.Uint32(tcpcb[36:]) == tcpsEstablished})
 			}

@@ -98,6 +98,9 @@ func inetDiagRequest(tuple socketTuple, sequence uint32) []byte {
 	binary.NativeEndian.PutUint32(out[8:], sequence)
 	req := out[unix.NLMSG_HDRLEN:]
 	req[0], req[1] = unix.AF_INET, unix.IPPROTO_TCP
+	if tuple.Source.Addr().Is6() {
+		req[0] = unix.AF_INET6
+	}
 	binary.NativeEndian.PutUint32(req[4:], ^uint32(0)) // every state; the answer's state is checked
 	putSockID(req[8:], tuple)
 	return out
@@ -107,20 +110,33 @@ func inetDiagRequest(tuple socketTuple, sequence uint32) []byte {
 func putSockID(id []byte, tuple socketTuple) {
 	binary.BigEndian.PutUint16(id[0:], tuple.Source.Port())
 	binary.BigEndian.PutUint16(id[2:], tuple.Destination.Port())
-	source, destination := tuple.Source.Addr().As4(), tuple.Destination.Addr().As4()
-	copy(id[4:8], source[:])
-	copy(id[20:24], destination[:])
+	// Addresses are 16 bytes each; an IPv4 address fills the first 4.
+	if tuple.Source.Addr().Is6() {
+		source, destination := tuple.Source.Addr().As16(), tuple.Destination.Addr().As16()
+		copy(id[4:20], source[:])
+		copy(id[20:36], destination[:])
+	} else {
+		source, destination := tuple.Source.Addr().As4(), tuple.Destination.Addr().As4()
+		copy(id[4:8], source[:])
+		copy(id[20:24], destination[:])
+	}
 	binary.NativeEndian.PutUint32(id[40:], inetDiagNoCookie)
 	binary.NativeEndian.PutUint32(id[44:], inetDiagNoCookie)
 }
 
 func parseInetDiagMessage(data []byte) (socketOwner, error) {
-	if len(data) < inetDiagMsgLen || data[0] != unix.AF_INET {
+	if len(data) < inetDiagMsgLen || data[0] != unix.AF_INET && data[0] != unix.AF_INET6 {
 		return socketOwner{}, errAttributionInconsistent
 	}
 	id := data[4:52]
-	source := netip.AddrPortFrom(netip.AddrFrom4([4]byte(id[4:8])), binary.BigEndian.Uint16(id[0:]))
-	destination := netip.AddrPortFrom(netip.AddrFrom4([4]byte(id[20:24])), binary.BigEndian.Uint16(id[2:]))
+	address := func(b []byte) netip.Addr {
+		if data[0] == unix.AF_INET6 {
+			return netip.AddrFrom16([16]byte(b[:16]))
+		}
+		return netip.AddrFrom4([4]byte(b[:4]))
+	}
+	source := netip.AddrPortFrom(address(id[4:20]), binary.BigEndian.Uint16(id[0:]))
+	destination := netip.AddrPortFrom(address(id[20:36]), binary.BigEndian.Uint16(id[2:]))
 	return socketOwner{
 		Tuple:       socketTuple{Source: source, Destination: destination},
 		UID:         binary.NativeEndian.Uint32(data[64:]),

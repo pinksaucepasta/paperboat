@@ -24,7 +24,7 @@ var (
 	errAttributionNotFound     = attributionError{"no live connecting socket for the connection"}
 	errAttributionAmbiguous    = attributionError{"more than one connecting socket matches the connection"}
 	errAttributionInconsistent = attributionError{"the kernel answered for a different connection"}
-	errAttributionUnsupported  = attributionError{"only IPv4 loopback TCP connections are attributed"}
+	errAttributionUnsupported  = attributionError{"only loopback TCP connections are attributed"}
 	errAttributionNoDaemon     = attributionError{"the connecting OS user has no Paperboat daemon on this computer"}
 )
 
@@ -58,7 +58,7 @@ func clientTuple(accepted net.Conn) (socketTuple, error) {
 	tuple := socketTuple{Source: remote.AddrPort(), Destination: local.AddrPort()}
 	tuple.Source = netip.AddrPortFrom(tuple.Source.Addr().Unmap(), tuple.Source.Port())
 	tuple.Destination = netip.AddrPortFrom(tuple.Destination.Addr().Unmap(), tuple.Destination.Port())
-	if !tuple.Source.Addr().Is4() || !tuple.Source.Addr().IsLoopback() || !tuple.Destination.Addr().IsLoopback() {
+	if !tuple.Source.Addr().IsLoopback() || !tuple.Destination.Addr().IsLoopback() {
 		return socketTuple{}, errAttributionUnsupported
 	}
 	return tuple, nil

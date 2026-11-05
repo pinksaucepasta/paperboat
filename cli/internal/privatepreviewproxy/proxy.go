@@ -68,9 +68,6 @@ func Start(ctx context.Context, config Config) (*Proxy, error) {
 	if gate == nil {
 		gate = newPeerGate()
 	}
-	if listenNetwork == "tcp6" && gate.owner != nil {
-		return nil, ErrLoopbackUnrestricted
-	}
 	listener, err := net.Listen(listenNetwork, listenAddress)
 	if err != nil {
 		return nil, err

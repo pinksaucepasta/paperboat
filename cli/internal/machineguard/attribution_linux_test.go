@@ -148,7 +148,7 @@ func TestGatewayAttributionRefusesAmbiguousAndInconsistentAnswers(t *testing.T) 
 	}
 }
 
-func TestGatewayAttributesOnlyIPv4Loopback(t *testing.T) {
+func TestGatewayAttributesAnIPv6LoopbackConnection(t *testing.T) {
 	listener, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
 		t.Skip("no IPv6 loopback")
@@ -157,8 +157,8 @@ func TestGatewayAttributesOnlyIPv4Loopback(t *testing.T) {
 	client, accepted := gatewayPair(t, listener, &net.Dialer{})
 	defer client.Close()
 	defer accepted.Close()
-	if _, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); !errors.Is(err, errAttributionUnsupported) {
-		t.Fatalf("IPv6 connection = %v, want unsupported", err)
+	if uid, _, err := attributeConnection(accepted, lookupOwnersINETDiag, ownDaemon); err != nil || uid != uint32(os.Getuid()) {
+		t.Fatalf("IPv6 connection = uid %d, %v; want this process's uid", uid, err)
 	}
 }
 

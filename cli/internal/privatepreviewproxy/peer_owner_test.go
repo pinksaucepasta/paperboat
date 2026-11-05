@@ -138,16 +138,49 @@ func TestPrivateTCPProxyCarriesTheOwningUser(t *testing.T) {
 	}
 }
 
-func TestPrivateTCPProxyRefusesAnIPv6ListenerItCannotRestrict(t *testing.T) {
-	if platformPeerOwner == nil {
-		t.Skip("no peer attribution on this platform")
+// An IPv6 loopback listener serves its owner and refuses another uid (fake lookup), and the real kernel lookup
+// attributes this process's own ::1 connection.
+func TestPrivateTCPProxyOnIPv6LoopbackServesItsOwnerAndRefusesAnotherUser(t *testing.T) {
+	probe, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skip("IPv6 loopback unavailable")
 	}
-	_, err := Start(t.Context(), Config{ListenAddress: "[::1]:0", Dial: func(context.Context) (io.ReadWriteCloser, error) {
-		left, right := net.Pipe()
-		go right.Close()
-		return left, nil
-	}})
-	if !errors.Is(err, ErrLoopbackUnrestricted) {
-		t.Fatalf("IPv6 loopback listener: %v, want ErrLoopbackUnrestricted", err)
+	_ = probe.Close()
+	start := func(gate *peerGate) *Proxy {
+		proxy, err := Start(t.Context(), Config{ListenAddress: "[::1]:0", gate: gate, Dial: func(context.Context) (io.ReadWriteCloser, error) {
+			left, right := net.Pipe()
+			go func() { defer right.Close(); _, _ = io.Copy(right, right) }()
+			return left, nil
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = proxy.Close() })
+		return proxy
+	}
+	echo6 := func(proxy *Proxy) bool {
+		conn, err := net.Dial("tcp6", strings.TrimPrefix(proxy.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := conn.Write([]byte("x")); err != nil {
+			return false
+		}
+		_, err = io.ReadFull(conn, make([]byte, 1))
+		return err == nil
+	}
+	other := start(&peerGate{owner: func(net.Conn) (uint32, error) { return 502, nil }, uid: 501})
+	if echo6(other) || other.Refusals()[refusalOtherUser] != 1 {
+		t.Fatalf("another uid on ::1 was not refused: %v", other.Refusals())
+	}
+	if !echo6(start(&peerGate{owner: func(net.Conn) (uint32, error) { return 501, nil }, uid: 501})) {
+		t.Fatal("the owner on ::1 was refused")
+	}
+	if platformPeerOwner != nil {
+		if real := start(nil); !echo6(real) {
+			t.Fatalf("own ::1 connection through the real kernel lookup was refused: %v", real.Refusals())
+		}
 	}
 }

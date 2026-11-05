@@ -24,9 +24,6 @@ var platformPeerOwner func(net.Conn) (uint32, error)
 
 var errOtherUser = errors.New("connection is not from the owning OS user")
 
-// ErrLoopbackUnrestricted refuses a listener whose clients cannot be attributed to a user (IPv6 loopback).
-var ErrLoopbackUnrestricted = errors.New("this loopback address cannot be restricted to your OS user; use 127.0.0.1")
-
 type peerGate struct {
 	owner   func(net.Conn) (uint32, error)
 	uid     uint32

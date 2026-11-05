@@ -28,10 +28,17 @@ func pcbBuffer(inpcbLen int, conns ...[3]any) []byte {
 		le.PutUint64(inpcb[8:], uint64(0x1000+i))
 		binary.BigEndian.PutUint16(inpcb[16:], tuple.Destination.Port())
 		binary.BigEndian.PutUint16(inpcb[18:], tuple.Source.Port())
-		inpcb[44] = 0x1
-		dst, src := tuple.Destination.Addr().As4(), tuple.Source.Addr().As4()
-		copy(inpcb[60:], dst[:])
-		copy(inpcb[76:], src[:])
+		if tuple.Source.Addr().Is6() {
+			inpcb[44] = 0x2
+			dst, src := tuple.Destination.Addr().As16(), tuple.Source.Addr().As16()
+			copy(inpcb[48:], dst[:])
+			copy(inpcb[64:], src[:])
+		} else {
+			inpcb[44] = 0x1
+			dst, src := tuple.Destination.Addr().As4(), tuple.Source.Addr().As4()
+			copy(inpcb[60:], dst[:])
+			copy(inpcb[76:], src[:])
+		}
 		socket := make([]byte, 104)
 		le.PutUint32(socket, 104)
 		le.PutUint32(socket[4:], 0x001)
@@ -50,6 +57,16 @@ func pcbBuffer(inpcbLen int, conns ...[3]any) []byte {
 		}
 	}
 	return append(out, gen(0)...)
+}
+
+func TestParsePCBListAttributesAnIPv6LoopbackConnection(t *testing.T) {
+	tuple := socketTuple{Source: netip.MustParseAddrPort("[::1]:50000"), Destination: netip.MustParseAddrPort("[::1]:60000")}
+	other := socketTuple{Source: netip.MustParseAddrPort("[::1]:50001"), Destination: tuple.Destination}
+	v4 := socketTuple{Source: netip.MustParseAddrPort("127.0.0.1:50000"), Destination: netip.MustParseAddrPort("127.0.0.1:60000")}
+	owners, err := parsePCBList(pcbBuffer(104, [3]any{other, uint32(501), uint32(4)}, [3]any{tuple, uint32(502), uint32(4)}, [3]any{v4, uint32(503), uint32(4)}), tuple)
+	if err != nil || len(owners) != 1 || owners[0].UID != 502 || !owners[0].Established || owners[0].Tuple != tuple {
+		t.Fatalf("owners=%+v err=%v; want the one ::1 owner 502 (not the IPv4 connection on the same ports)", owners, err)
+	}
 }
 
 func TestParsePCBListAttributesOnlyAnExactKnownLayout(t *testing.T) {
