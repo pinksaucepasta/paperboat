@@ -175,7 +175,8 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		t.Skip("real UDP peer relay integration")
 	}
 	t.Setenv("IN_TS_TEST", "true")
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	// Setup plus the fault phases' own bounds (20+35+8+8+35s); each phase reports its own failure.
+	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Second)
 	defer cancel()
 
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)
@@ -387,6 +388,25 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		return
 	}
 
+	// The outage and restart phases wait up to 55s together, so after a slow
+	// setup they outlast the signed 60s relay authority (the restarted relay
+	// denied an expired pair, Denied:4). Renew it before each phase pair, as the
+	// production refresh loop does; expiration must not masquerade as a
+	// transport recovery failure.
+	renewRelayAuthority := func() {
+		refreshed := time.Now().UTC().Truncate(time.Second)
+		// The control plane advances the network generation on every refresh.
+		// Renewing timestamps at the old generation is a conflicting signed grant
+		// and correctly causes the relay to reject its next authentication frame.
+		clientConfig.Generation++
+		serverConfig.Generation++
+		applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+		applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
+		node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
+		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
+		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+	}
+	renewRelayAuthority()
 	clientFilter.allowDERP.Store(true)
 	serverFilter.allowDERP.Store(true)
 	oldUDP := udp
@@ -445,21 +465,7 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		t.Fatalf("recovered peer relay transfer with DERP data disabled: %v", err)
 	}
 
-	// This fault sequence includes a bounded 35s relay-reallocation wait and a
-	// second 35s recovery window. Renew the real signed 60s relay authority
-	// between phases, as the production refresh loop does; expiration must not
-	// masquerade as a transport recovery failure.
-	refreshed := time.Now().UTC().Truncate(time.Second)
-	// The control plane advances the network generation on every refresh.
-	// Renewing timestamps at the old generation is a conflicting signed grant
-	// and correctly causes the relay to reject its next authentication frame.
-	clientConfig.Generation++
-	serverConfig.Generation++
-	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
-	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
-	node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
-	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
-	applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+	renewRelayAuthority()
 
 	clientFilter.enabled.Store(true)
 	serverFilter.enabled.Store(true)
