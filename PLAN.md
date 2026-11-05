@@ -3054,6 +3054,15 @@ Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-w
   TLS goes through tunnelcert: ACME DNS-01 for the regional name, delivered through the DB-backed DistributionHub
   (F21-52). A node serves its regional name only after its certificate arrives; until then it is `registered` but
   not in the map.
+- **Regional TLS and DNS, as built** (2026-11-05, reliability lane): one platform certificate for
+  `*.<regional_domain>` covers every region name, issued by the existing coordinator with DNS-01 (one issuance, no
+  per-region certificate, no Let's Encrypt duplicate limit across nodes). Every node already holds the shared database
+  and master key from its bundle, so it reads the active certificate from the shared store and serves TLS itself
+  with a GetCertificate that picks up renewals without restart; nothing is pushed to nodes. A node turns `active`
+  when it serves that certificate. DNS: per region, A/AAAA records for the public addresses of its active, healthy
+  nodes through the existing Cloudflare provider, written by the leader (one writer), removed when a node leaves.
+  Prior art: headscale terminates its own TLS in the control server (hscontrol/app.go:1166 getTLSSettings);
+  Teleport auth servers share one backend for their state (lib/backend/pgbk/pgbk.go).
 - **Health and the map.** A node heartbeats its `control_server_nodes` row every 10 s with its state, version and
   replica lag. Discovery lists the regions that have at least one healthy node. Clients pick the nearest healthy
   region and fall back to the next (see the region map above).
