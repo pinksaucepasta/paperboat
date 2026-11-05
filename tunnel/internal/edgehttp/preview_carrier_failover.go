@@ -40,15 +40,43 @@ func (r *DataCarrierPreviewRegistry) retireLocked(old *dataCarrierPreviewRouteEn
 		old.close()
 		return
 	}
-	r.dropStandbyLocked(old.route.RouteID)
-	r.standby[old.route.RouteID] = old
+	entries := append(r.standby[old.route.RouteID], old)
+	if len(entries) > maxStandbys {
+		entries[0].close()
+		entries = entries[1:]
+	}
+	r.standby[old.route.RouteID] = entries
 }
 
+// maxStandbys bounds the replaced carriers a route keeps (each is a worker generation pb update replaced
+// that still serves streams); the oldest closes first.
+const maxStandbys = 8
+
+// dropStandbyLocked closes every standby of the route.
 func (r *DataCarrierPreviewRegistry) dropStandbyLocked(routeID string) {
-	if standby := r.standby[routeID]; standby != nil {
-		delete(r.standby, routeID)
+	for _, standby := range r.standby[routeID] {
 		standby.close()
 	}
+	delete(r.standby, routeID)
+}
+
+// removeStandbyLocked closes and removes the route's standbys that match, and reports whether any did.
+func (r *DataCarrierPreviewRegistry) removeStandbyLocked(routeID string, match func(*dataCarrierPreviewRouteEntry) bool) bool {
+	kept, removed := r.standby[routeID][:0:0], false
+	for _, standby := range r.standby[routeID] {
+		if match(standby) {
+			standby.close()
+			removed = true
+		} else {
+			kept = append(kept, standby)
+		}
+	}
+	if len(kept) == 0 {
+		delete(r.standby, routeID)
+	} else {
+		r.standby[routeID] = kept
+	}
+	return removed
 }
 
 // candidates returns the live carriers of host's route, one whose host is not draining first.
@@ -59,9 +87,10 @@ func (r *DataCarrierPreviewRegistry) candidates(host string) []previewCandidate 
 	}
 	out := []previewCandidate{{route: current, revoked: revoked}}
 	r.mu.RLock()
-	standby := r.standby[current.RouteID]
+	var standby *dataCarrierPreviewRouteEntry
 	var route DataCarrierPreviewRoute
-	if standby != nil {
+	if entries := r.standby[current.RouteID]; len(entries) != 0 {
+		standby = entries[len(entries)-1] // the newest replaced carrier
 		route = standby.route
 	}
 	r.mu.RUnlock()

@@ -19,8 +19,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 )
 
-// pb update: a browser terminal's upstream stream on the old worker's runtime carrier crosses the
-// handover with no close and no gap: the old runtime admission is held for the same machine's newer
+// pb update: a browser terminal's upstream stream on the old worker's runtime carrier crosses two
+// consecutive handovers with no close and no gap: the old runtime admission is held for the same machine's newer
 // attachment, and the replaced route stays the standby its open streams run on. A new request lands
 // on the new worker's carrier. The held stream ends when the old carrier closes (its drain ended or
 // reached DrainLimit), or at once when the route is withdrawn (revocation).
@@ -124,6 +124,24 @@ func TestHeldRuntimeStreamCrossesAWorkerHandover(t *testing.T) {
 			expect(100 * time.Millisecond)
 			if next == before {
 				t.Fatal("the held stream stalled after the handover")
+			}
+
+			// A second update while the first worker still holds the stream: the third worker takes the route,
+			// the second one (which holds nothing) leaves, and the first one's stream goes on.
+			thirdRuntime := newRuntime
+			thirdRuntime.Binding.SessionID, thirdRuntime.Binding.ProcessGeneration, thirdRuntime.AttachmentGeneration = "session_3", 3, 3
+			source.mu.Lock()
+			source.admissions = []runtimewire.Admission{thirdRuntime}
+			source.mu.Unlock()
+			thirdServer, _ := streamingCarrier(t, identity(thirdRuntime), expected, "third")
+			go func() { _ = w.Handle(ctx, thirdServer) }()
+			waitRuntime(t, func() bool { r, ok := routes.Lookup(host); return ok && r.Server == thirdServer })
+			_ = newServer.Close()
+			expect(300 * time.Millisecond)
+			before = next
+			expect(100 * time.Millisecond)
+			if next == before {
+				t.Fatal("the held stream stalled after the second handover")
 			}
 
 			if end == "revocation" {

@@ -88,9 +88,10 @@ type DataCarrierPreviewRegistry struct {
 	closed       bool
 	byRoute      map[string]*dataCarrierPreviewRouteEntry
 	byHost       map[string]*dataCarrierPreviewRouteEntry
-	// standby is the route a newer carrier of the same machine replaced (a worker handover),
-	// by route id: its open streams finish and a failed request may retry on it.
-	standby         map[string]*dataCarrierPreviewRouteEntry
+	// standby holds the routes newer carriers of the same machine replaced (worker handovers), by route
+	// id, oldest first: their open streams finish (a browser terminal held through two updates is on the
+	// one two back) and a failed request may retry on the newest.
+	standby         map[string][]*dataCarrierPreviewRouteEntry
 	aliasesByID     map[string]DataCarrierPreviewAlias
 	aliasIDsByRoute map[string]map[string]struct{}
 	desiredAliases  map[string]DataCarrierPreviewAlias
@@ -127,7 +128,7 @@ func NewDataCarrierPreviewRegistry(config DataCarrierPreviewRegistryConfig) (*Da
 	return &DataCarrierPreviewRegistry{
 		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, maximum: config.MaximumRoutes,
 		done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRouteEntry),
-		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string]*dataCarrierPreviewRouteEntry), aliasesByID: make(map[string]DataCarrierPreviewAlias),
+		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string][]*dataCarrierPreviewRouteEntry), aliasesByID: make(map[string]DataCarrierPreviewAlias),
 		aliasIDsByRoute: make(map[string]map[string]struct{}), desiredAliases: make(map[string]DataCarrierPreviewAlias),
 	}, nil
 }
@@ -151,11 +152,11 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 		return ErrDataCarrierPreviewRegistryClosed
 	}
 	old := r.byRoute[validated.RouteID]
-	if standby := r.standby[validated.RouteID]; old != nil && standby != nil {
-		// The standby's carrier re-reads its held admission, whose hold sets its own expiry.
+	for _, standby := range r.standby[validated.RouteID] {
+		// A standby's carrier re-reads its held admission, whose hold sets its own expiry.
 		previous := standby.route
 		previous.ExpiresAt = validated.ExpiresAt
-		if sameDataCarrierPreviewRoute(previous, validated) {
+		if old != nil && sameDataCarrierPreviewRoute(previous, validated) {
 			standby.route.ExpiresAt = validated.ExpiresAt
 			r.mu.Unlock()
 			return nil
@@ -306,10 +307,7 @@ func (r *DataCarrierPreviewRegistry) detachEntry(entry *dataCarrierPreviewRouteE
 		r.removeAliasesForRouteLocked(entry.route.RouteID)
 		entry.close()
 	}
-	if r.standby[entry.route.RouteID] == entry {
-		delete(r.standby, entry.route.RouteID)
-		entry.close()
-	}
+	r.removeStandbyLocked(entry.route.RouteID, func(standby *dataCarrierPreviewRouteEntry) bool { return standby == entry })
 }
 
 // Detach removes a route only when its exact identity and revision are still
@@ -323,9 +321,9 @@ func (r *DataCarrierPreviewRegistry) Detach(routeID string, identity datacarrier
 	if r.closed {
 		return nil
 	}
-	if standby := r.standby[routeID]; standby != nil && standby.route.Revision == revision && standby.route.Identity == identity {
-		delete(r.standby, routeID)
-		standby.close()
+	if r.removeStandbyLocked(routeID, func(standby *dataCarrierPreviewRouteEntry) bool {
+		return standby.route.Revision == revision && standby.route.Identity == identity
+	}) {
 		return nil
 	}
 	entry := r.byRoute[routeID]
@@ -358,9 +356,7 @@ func (r *DataCarrierPreviewRegistry) DetachAdmission(admission datacarrier.Expec
 	matches := func(route DataCarrierPreviewRoute) bool {
 		return route.OperationID == admission.OperationID && route.AttachmentGeneration == admission.AttachmentGeneration && route.Identity == admission.Identity && route.Revision == admission.RouteRevision && route.EdgeProcessEpoch == admission.EdgeProcessEpoch
 	}
-	if standby := r.standby[admission.RouteID]; standby != nil && matches(standby.route) {
-		delete(r.standby, admission.RouteID)
-		standby.close()
+	if r.removeStandbyLocked(admission.RouteID, func(standby *dataCarrierPreviewRouteEntry) bool { return matches(standby.route) }) {
 		return nil
 	}
 	entry := r.byRoute[admission.RouteID]
@@ -494,10 +490,12 @@ func (r *DataCarrierPreviewRegistry) Close() error {
 		for _, entry := range r.byRoute {
 			entry.close()
 		}
-		for _, entry := range r.standby {
-			entry.close()
+		for _, entries := range r.standby {
+			for _, entry := range entries {
+				entry.close()
+			}
 		}
-		r.standby = make(map[string]*dataCarrierPreviewRouteEntry)
+		r.standby = make(map[string][]*dataCarrierPreviewRouteEntry)
 		r.byRoute = make(map[string]*dataCarrierPreviewRouteEntry)
 		r.byHost = make(map[string]*dataCarrierPreviewRouteEntry)
 		r.aliasesByID = make(map[string]DataCarrierPreviewAlias)

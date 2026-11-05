@@ -149,6 +149,16 @@ func TestHeldBrowserTerminalCrossesAWorkerHandover(t *testing.T) {
 				t.Fatal(err)
 			}
 			read(held, "r4") // in order: the held browser never saw the new generation's record
+			// A second update: a third generation takes the route; the first one still serves the held browser.
+			thirdIdentity := testEdgePreviewIdentity(1, 3)
+			thirdIdentity.SessionID = "session_03"
+			if err := hub.ActivateRoute(oldRoute.RouteID, BrowserTerminalRouteFence{Identity: thirdIdentity, Revision: 1, AttachmentGeneration: 3}); err != nil {
+				t.Fatal(err)
+			}
+			if err := oldPublisher.Publish([]byte("r5")); err != nil {
+				t.Fatalf("the held terminal's output stopped at the second handover: %v", err)
+			}
+			read(held, "r5")
 
 			want := websocket.StatusCode(terminalend.CodeMoved)
 			if end == "revocation" {
