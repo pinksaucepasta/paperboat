@@ -11,6 +11,36 @@ import ssl
 import subprocess
 
 
+CONTAINER_CGROUPS = ('docker', 'libpod', 'containerd', 'kubepods', 'lxc', 'crio')
+
+
+def in_host_scope(pid, linux=None):
+    """Linux: the process is in this host's own PID namespace and outside container cgroups. A docker host lists
+    every container's processes; another user's container is not this account's product."""
+    if linux is None:
+        linux = os.uname().sysname == 'Linux'
+    if not linux:
+        return True
+    try:
+        if os.readlink(f'/proc/{pid}/ns/pid') != os.readlink('/proc/self/ns/pid'):
+            return False
+        with open(f'/proc/{pid}/cgroup') as cgroup:
+            return not any(word in cgroup.read() for word in CONTAINER_CGROUPS)
+    except OSError:
+        return False  # gone, or not readable: not provably this host's
+
+
+def product_process_count(listing, in_scope=in_host_scope):
+    """Count `pid comm` lines of paperboat processes in scope."""
+    count = 0
+    for line in listing:
+        pid, _, name = line.strip().partition(' ')
+        name = name.strip()
+        if pid.isdigit() and name and ('paperboat' in name.lower() or Path(name).name == 'pb') and in_scope(int(pid)):
+            count += 1
+    return count
+
+
 def run(args):
     return subprocess.run(args, capture_output=True, text=True, timeout=15,
                           stdin=subprocess.DEVNULL)
@@ -248,11 +278,10 @@ def inventory(account, inbox):
     LEFTOVER_FILES[:] = kept[:20]  # names only (never contents), so a failure says which file stayed
     add('files', len(kept))
     add('ssh_configuration', owned_ssh_configuration(home / '.ssh/config'))
-    processes = run(['ps', '-axo', 'comm'])
+    processes = run(['ps', '-axo', 'pid=,comm='])
     if processes.returncode:
         raise RuntimeError('could not inspect running processes')
-    add('processes', sum('paperboat' in value.lower() or Path(value.strip()).name == 'pb'
-                         for value in processes.stdout.splitlines()[1:]))
+    add('processes', product_process_count(processes.stdout.splitlines()))
     return categories
 
 
