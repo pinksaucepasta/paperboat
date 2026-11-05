@@ -119,6 +119,43 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
           python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
           make policy-checks static-analysis
+      - name: Build selfhost process fixtures
+        if: matrix.module == 'server'
+        run: |
+          go build -o "$RUNNER_TEMP/pbh" ../helper/cmd/pbh
+          go build -o "$RUNNER_TEMP/tunnel" ../tunnel/cmd/paperboat-tunnel
+          go test -c -o "$RUNNER_TEMP/relay-lifecycle.test" ../relay/nodelifecycle
+          echo "PBH_TEST_BINARY=$RUNNER_TEMP/pbh" >> "$GITHUB_ENV"
+          echo "PAPERBOAT_SELFHOST_TUNNEL_BINARY=$RUNNER_TEMP/tunnel" >> "$GITHUB_ENV"
+          echo "PAPERBOAT_SELFHOST_RELAY_TEST_BINARY=$RUNNER_TEMP/relay-lifecycle.test" >> "$GITHUB_ENV"
+      - name: Prepare Docker fixtures
+        if: matrix.module == 'helper'
+        run: |
+          docker info
+          docker pull alpine:3.22
+          echo 'PAPERBOAT_TEST_DOCKER_IMAGE=alpine:3.22' >> "$GITHUB_ENV"
+          echo 'PAPERBOAT_TEST_DOCKER_BASE_IMAGE=alpine:3.22' >> "$GITHUB_ENV"
+      - name: S3-compatible and ACME service containers
+        if: matrix.module == 'server'
+        run: |
+          mkdir -p "$RUNNER_TEMP/s3/diagnostics"
+          docker run -d --name lane-s3 -p 7070:7070 \
+            -e ROOT_ACCESS_KEY=lane-test-access -e ROOT_SECRET_KEY=lane-test-secret \
+            -v "$RUNNER_TEMP/s3:/data" versity/versitygw:latest --port :7070 posix /data
+          echo 'PAPERBOAT_TEST_S3_ENDPOINT=http://localhost:7070' >> "$GITHUB_ENV"
+          echo 'PAPERBOAT_TEST_S3_ACCESS_KEY=lane-test-access' >> "$GITHUB_ENV"
+          echo 'PAPERBOAT_TEST_S3_SECRET_KEY=lane-test-secret' >> "$GITHUB_ENV"
+          echo 'PAPERBOAT_TEST_S3_BUCKET=diagnostics' >> "$GITHUB_ENV"
+          docker run -d --name lane-dns --network host \
+            ghcr.io/letsencrypt/pebble-challtestsrv:latest -defaultIPv6 '' -defaultIPv4 127.0.0.1
+          docker run -d --name lane-pebble --network host -e PEBBLE_VA_NOSLEEP=1 \
+            ghcr.io/letsencrypt/pebble:latest -config test/config/pebble-config.json -dnsserver 127.0.0.1:8053
+          docker cp lane-pebble:/test/certs/pebble.minica.pem "$RUNNER_TEMP/pebble-ca.pem"
+          curl --retry 20 --retry-connrefused --retry-delay 1 -fk https://localhost:15000/roots/0 > "$RUNNER_TEMP/pebble-root.pem"
+          echo 'PAPERBOAT_TEST_ACME_DIRECTORY_URL=https://localhost:14000/dir' >> "$GITHUB_ENV"
+          echo 'PAPERBOAT_TEST_ACME_DNS_MANAGEMENT_URL=http://localhost:8055' >> "$GITHUB_ENV"
+          echo "PAPERBOAT_TEST_ACME_CA_FILE=$RUNNER_TEMP/pebble-ca.pem" >> "$GITHUB_ENV"
+          echo "PAPERBOAT_TEST_ACME_CERT_CA_FILE=$RUNNER_TEMP/pebble-root.pem" >> "$GITHUB_ENV"
       - name: go test -race
         run: |
           set -o pipefail
@@ -213,6 +250,23 @@ jobs:
               python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/migrations.jsonl" || failed=1
           done
           exit $failed
+      - name: Carrier window at real RTT (without race instrumentation)
+        if: matrix.module == 'tunnel' && !cancelled()
+        run: |
+          set -o pipefail
+          go test -json -count=1 -timeout 2m -run '^TestCarrierStreamWindowGrowsBeyondInitialAtRealRTT$' ./internal/datacarrier |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/window.jsonl" --verbose
+      - name: TRK36 nightly sustained soak
+        if: matrix.module == 'tunnel' && github.event_name == 'schedule'
+        env:
+          PAPERBOAT_TRK36_SOAK: '1'
+        run: |
+          set -o pipefail
+          go test -json -race -count=1 -timeout 10m -run '^TestTRK36SustainedPreviewTunnelSoak$' ./internal/runtime |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/soak.jsonl" --verbose
+      - name: Control plane storm
+        if: matrix.module == 'server' && !cancelled() && inputs.run == ''
+        run: tools/run-control-storm.sh
       - name: keep go test events for the skip audit
         if: inputs.run == '' && !cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
