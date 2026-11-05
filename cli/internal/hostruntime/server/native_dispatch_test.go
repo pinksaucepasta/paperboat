@@ -47,9 +47,16 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	lost := make(chan struct{})
 	released := make(chan struct{}, 4)
 	var fenced atomic.Bool
+	var fencedCalls atomic.Int32
+	staleCtx, stopStale := context.WithCancel(ctx)
+	defer stopStale()
 	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
 		Fence: func(context.Context) (func(), <-chan struct{}, error) {
 			if fenced.Load() {
+				// The stale caller gives up while its retry is in flight, before this refusal is answered.
+				if fencedCalls.Add(1) == 2 {
+					stopStale()
+				}
 				return nil, nil, hostdproto.ErrFenced
 			}
 			return func() { released <- struct{}{} }, lost, nil
@@ -131,9 +138,7 @@ func testNativeDispatchAcceptedStream(t *testing.T, consumer string) {
 	// Isolate the fenced worker from the expired-credential check above.
 	allowed.DeadlineUnix = time.Now().Add(2 * time.Second).Unix()
 	fenced.Store(true)
-	staleCtx, stopStale := context.WithTimeout(ctx, 300*time.Millisecond)
 	staleConnection, staleErr := client.Open(staleCtx, allowed)
-	stopStale()
 	if staleConnection != nil {
 		staleConnection.Close()
 	}

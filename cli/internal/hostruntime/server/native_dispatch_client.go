@@ -136,6 +136,7 @@ func (c *NativeDispatchClient) call(
 		if err == nil || operation != "stream" || !nativeDispatchTemporary(err) {
 			return connection, result, err
 		}
+		err = nativeDispatchCause(lastErr, err)
 		if ctx.Err() != nil {
 			return nil, result, errors.Join(err, ctx.Err())
 		}
@@ -144,6 +145,15 @@ func (c *NativeDispatchClient) call(
 			return nil, result, errors.Join(lastErr, err)
 		}
 	}
+}
+
+// nativeDispatchCause keeps the worker's answer (fenced, busy) over a later attempt's transport failure, which is
+// what a caller's deadline makes of the attempt it cuts short.
+func nativeDispatchCause(previous, err error) error {
+	if previous != nil && errors.Is(err, ErrNativeDispatchUnavailable) {
+		return previous
+	}
+	return err
 }
 
 func nativeDispatchTemporary(err error) bool {
