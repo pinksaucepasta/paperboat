@@ -152,6 +152,7 @@ func assertNativeDarwinCandidateReady(t *testing.T, candidate, expectedVersion s
 			return
 		}
 		if time.Now().After(deadline) {
+			generation, _ := DaemonGeneration(candidate)
 			domain := "gui/" + strconv.Itoa(os.Getuid()) + "/" + hostservice.DaemonLabel + "." + generation
 			output, _ := exec.Command("launchctl", "print", domain).CombinedOutput()
 			t.Fatalf("candidate daemon did not become ready: %v; launchd: %s", snapshotErr, output)
