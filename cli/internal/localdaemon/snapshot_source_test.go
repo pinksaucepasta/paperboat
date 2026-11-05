@@ -172,3 +172,51 @@ func TestFailingStepsReachTheSnapshotUntilTheyRecover(t *testing.T) {
 		t.Fatalf("step shown behind the control plane outage: %+v", outage.Health)
 	}
 }
+
+// pbmac 2026-11-05: pb status said Path none for a machine every connection to which failed, and pb doctor said
+// healthy. A machine whose last dial failed is a no_path error health item; an idle machine is not.
+func TestFailedDialMakesANoPathHealthItem(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 20, 0, 0, time.UTC)
+	machines := []api.UserMachine{
+		{ID: "machine_failed", Alias: "macl", State: "online", Online: true, InstallationGeneration: 1},
+		{ID: "machine_idle", Alias: "idle", State: "online", Online: true, InstallationGeneration: 1},
+	}
+	inventory, _ := newTestInventory(t, &scriptedMachineSource{results: []machineResult{{machines: machines}}}, func() time.Time { return now })
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	native := tunnel.NativeTransport{NoPath: map[string]time.Time{"machine_failed": now.Add(-time.Second)}}
+	source := snapshotSource{Inventory: inventory, transport: func() tunnel.NativeTransport { return native }}
+	snapshot, err := source.Snapshot(context.Background())
+	if err != nil || snapshot.Validate() != nil {
+		t.Fatalf("snapshot err=%v validate=%v", err, snapshot.Validate())
+	}
+	noPath := func(m localapi.MachineStatus) *localapi.HealthItem {
+		for index := range m.Health {
+			if m.Health[index].Code == localapi.NoPathCode {
+				return &m.Health[index]
+			}
+		}
+		return nil
+	}
+	for _, m := range snapshot.Machines {
+		switch item := noPath(m); m.ID {
+		case "machine_failed":
+			if item == nil || item.Severity != "error" || m.SelectedPath != "none" || item.Title != "No path to macl: the last connection attempt failed" {
+				t.Fatalf("failed machine = %+v", m)
+			}
+		case "machine_idle":
+			if item != nil {
+				t.Fatalf("idle machine got %+v", item)
+			}
+		}
+	}
+	// A path in use wins over an older failure.
+	native.Paths = map[string]string{"machine_failed": "direct"}
+	snapshot, _ = source.Snapshot(context.Background())
+	for _, m := range snapshot.Machines {
+		if m.ID == "machine_failed" && (noPath(m) != nil || m.SelectedPath != "direct") {
+			t.Fatalf("machine with a path = %+v", m)
+		}
+	}
+}

@@ -46,13 +46,7 @@ func writeStatus(output io.Writer, snapshot localapi.Snapshot) {
 		fmt.Fprintf(output, "Health: %s: %s  Recovery: %s\n", health.Severity, health.Title, health.Recovery)
 	}
 	for _, machine := range snapshot.Machines {
-		path := machine.SelectedPath
-		if machine.RelayRegion != "" {
-			path += "/" + machine.RelayRegion
-		}
-		if len(machine.TransportConsumers) > 0 {
-			path = transportConsumerSummary(machine.TransportConsumers)
-		}
+		path := statusPath(machine)
 		observed := "never"
 		if machine.LastObservedAt != nil {
 			observed = machine.LastObservedAt.Format(time.RFC3339)
@@ -67,6 +61,60 @@ func writeStatus(output io.Writer, snapshot localapi.Snapshot) {
 			fmt.Fprintf(output, "  Health: %s: %s  Recovery: %s\n", health.Severity, health.Title, health.Recovery)
 		}
 	}
+}
+
+// statusPath is the machine's path as pb status and pb doctor print it: direct, relay/<region>, wss, a
+// per-path consumer summary, or none.
+func statusPath(machine localapi.MachineStatus) string {
+	if len(machine.TransportConsumers) > 0 {
+		return transportConsumerSummary(machine.TransportConsumers)
+	}
+	if machine.RelayRegion != "" {
+		return machine.SelectedPath + "/" + machine.RelayRegion
+	}
+	return machine.SelectedPath
+}
+
+// machineNoPath is the machine's no_path health item: this computer recently failed to reach it.
+func machineNoPath(machine localapi.MachineStatus) (localapi.HealthItem, bool) {
+	for _, item := range machine.Health {
+		if item.Code == localapi.NoPathCode {
+			return item, true
+		}
+	}
+	return localapi.HealthItem{}, false
+}
+
+// doctorPeerPathsCheck reports, with no machine selected, the path to every machine in use: a machine this
+// computer failed to reach is a failure (pbmac 2026-11-05: pb doctor said healthy while pb status said
+// Path none and every connection failed).
+func doctorPeerPathsCheck(machines []localapi.MachineStatus) doctorpkg.Check {
+	check := doctorpkg.Check{Category: "transport", Code: "peer_paths", Status: doctorpkg.StatusPass}
+	var unreachable, paths []string
+	recovery := ""
+	for _, machine := range machines {
+		if item, ok := machineNoPath(machine); ok {
+			unreachable = append(unreachable, machine.Alias)
+			recovery = item.Recovery
+		} else if machine.SelectedPath != "none" {
+			paths = append(paths, machine.Alias+" "+machine.SelectedPath) // relay detail stays in pb status
+		}
+	}
+	switch {
+	case len(unreachable) == 1:
+		check.Status, check.Summary, check.Recovery = doctorpkg.StatusFail, "No path to "+unreachable[0]+": the last connection attempt failed.", recovery
+	case len(unreachable) > 1:
+		check.Status, check.Summary = doctorpkg.StatusFail, "No path to "+strings.Join(unreachable, ", ")+": the last connection attempts failed."
+		check.Recovery = "Check that these machines are online and that UDP and HTTPS to the relays are allowed, then run pb doctor <machine>. If it persists, run pb bugreport."
+	case len(paths) == 0:
+		check.Summary = "No connection to another machine is in use."
+	default:
+		check.Summary = "Paths: " + strings.Join(paths, ", ") + "."
+	}
+	if len(check.Summary) > 512 {
+		check.Summary = check.Summary[:509] + "..."
+	}
+	return check
 }
 
 func transportConsumerSummary(consumers []localapi.TransportConsumer) string {
@@ -213,6 +261,8 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
+	} else {
+		probes = append(probes, doctorpkg.Probe{Code: "peer_paths", Run: func(context.Context) doctorpkg.Check { return doctorPeerPathsCheck(snapshot.Machines) }})
 	}
 	return probes
 }
@@ -438,6 +488,9 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 			case "wss":
 				return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusWarning, Summary: "The active Paperboat path uses WebSocket fallback.", Recovery: "Check UDP and QUIC access; Paperboat will retry stronger paths automatically."}
 			default:
+				if item, ok := machineNoPath(machine); ok {
+					return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusFail, Summary: item.Title + ".", Recovery: item.Recovery}
+				}
 				return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusUnavailable, Summary: "No active Paperboat path is currently observed."}
 			}
 		}},

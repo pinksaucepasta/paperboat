@@ -279,6 +279,9 @@ type Peer struct {
 	SID string `json:"sid,omitempty"`
 }
 
+// NoPathCode is a machine's health item while this computer recently failed to reach it on any path.
+const NoPathCode = "no_path"
+
 type HealthItem struct {
 	Code        string     `json:"code"`
 	Severity    string     `json:"severity"`
