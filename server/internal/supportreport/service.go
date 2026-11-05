@@ -79,17 +79,20 @@ type item struct {
 	trace      sentry.Context
 }
 type Service struct {
-	store                 Store
-	client                *sentry.Client
-	release               string
-	environment           string
-	region, instance      string
-	queue                 chan item
-	dropped               atomic.Uint64
-	mu                    sync.Mutex
-	admission             sync.RWMutex
-	window                time.Time
-	count                 int
+	store            Store
+	client           *sentry.Client
+	release          string
+	environment      string
+	region, instance string
+	queue            chan item
+	dropped          atomic.Uint64
+	mu               sync.Mutex
+	admission        sync.RWMutex
+	window           time.Time
+	count            int
+	// rejections is its own budget, so frequent refusals never crowd out failure records.
+	rejectionWindow       time.Time
+	rejectionCount        int
 	signals               *signalState
 	logger                *slog.Logger
 	cleanupFailures       atomic.Uint64
@@ -430,23 +433,46 @@ func (s *Service) ObserveFailureWithStack(ctx context.Context, component, operat
 	return s.enqueueFault(ctx, fault, stack, false)
 }
 
+// maxRejectionsPerMinute bounds stored refusals per server process; failures keep their own 120.
+const maxRejectionsPerMinute = 600
+
+// RecordRejection stores a refusal (a 4xx the caller can act on) under the request's support reference, so a
+// reference shown in an error response always resolves for support. No Sentry event: it is not a server fault.
+// Rows expire and are capped per account by the support_reports retention jobs.
+func (s *Service) RecordRejection(ctx context.Context, component, operation, code string, err error) Fault {
+	fault := ProjectFault(ctx, component, operation, "http_handler", code, err)
+	fault.Outcome, fault.Severity = "rejected", "warning"
+	if s == nil || !ValidReference(fault.SupportReference) {
+		return fault
+	}
+	return s.enqueue(ctx, fault, nil, false, true)
+}
+
 func (s *Service) enqueueFault(ctx context.Context, fault Fault, stack *sentry.Stacktrace, unexpected bool) Fault {
+	return s.enqueue(ctx, fault, stack, unexpected, false)
+}
+
+func (s *Service) enqueue(ctx context.Context, fault Fault, stack *sentry.Stacktrace, unexpected, rejection bool) Fault {
 	now := time.Now().UTC()
 	identity, _ := ctx.Value(identityContextKey{}).(faultIdentity)
 	owner := identity.owner
 	request := serverdiagnostics.NormalizeRequestID(identity.request)
 	s.mu.Lock()
-	if now.Sub(s.window) >= time.Minute {
-		s.window = now
-		s.count = 0
+	window, count, limit := &s.window, &s.count, 120
+	if rejection {
+		window, count, limit = &s.rejectionWindow, &s.rejectionCount, maxRejectionsPerMinute
 	}
-	if s.count >= 120 {
+	if now.Sub(*window) >= time.Minute {
+		*window = now
+		*count = 0
+	}
+	if *count >= limit {
 		s.mu.Unlock()
 		s.dropped.Add(1)
 		s.sdkSubmissionsDropped.Add(1)
 		return fault
 	}
-	s.count++
+	*count++
 	s.mu.Unlock()
 	record := recordFromFault(fault, NewReference(), owner, request, s.release, now)
 	record.SourceFile, record.SourceFunction, record.SourceLine = sourceLocation(stack)

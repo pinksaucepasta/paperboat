@@ -376,3 +376,43 @@ func TestOperatorSupportLookupShowsTheUploadedBundle(t *testing.T) {
 		t.Fatalf("upload lookup failure: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// A refusal hands out a support reference; it must resolve on the server, so the refusal is stored under that
+// exact reference with its code and account (support_07c5d6a6 was a 409 that left nothing to look up).
+func TestRefusalIsStoredUnderTheReferenceItsResponseCarries(t *testing.T) {
+	store := &supportTestStore{}
+	service, _ := supportreport.New(store, supportreport.Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { service.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := supportMiddleware(service, logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bindSupportOwner(r.Context(), "usr_owner")
+		writeError(w, r, http.StatusConflict, "terminal_host_unavailable", "The machine running this session did not answer.")
+	}))
+	ref := supportreport.NewReference()
+	r := httptest.NewRequest("POST", "/v1/terminal-sessions/s1/share", nil)
+	r.Header.Set("Support-Reference", ref)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), ref) {
+		t.Fatalf("refusal response: %d %s", w.Code, w.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		store.mu.Lock()
+		records := append([]supportreport.Record(nil), store.records...)
+		store.mu.Unlock()
+		for _, record := range records {
+			if record.Reference == ref {
+				if record.Outcome != "rejected" || record.OwnerID != "usr_owner" || record.Code != "terminal_host_unavailable" || record.EventID != "" {
+					t.Fatalf("stored refusal: %+v", record)
+				}
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the refusal's support reference was not stored")
+}
