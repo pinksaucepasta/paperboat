@@ -109,7 +109,7 @@ jobs:
       - run: go vet ./...
       - name: go test -race
         run: |
-          run=(); [ -z "$RUN" ] || run=(-run "$RUN")
+          run=(); [ -z "$RUN" ] || run=(-v -run "$RUN")
           # Without a PostgreSQL DSN no package needs a database: one run covers them all.
           if [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ]; then
             go test -race -count="$COUNT" -timeout 30m "${run[@]}" ./...
@@ -188,5 +188,5 @@ jobs:
       - run: go vet ./...
       - name: go test -race
         run: |
-          run=(); [ -z "$RUN" ] || run=(-run "$RUN")
+          run=(); [ -z "$RUN" ] || run=(-v -run "$RUN")
           go test -race -count="$COUNT" -timeout 10m "${run[@]}" ./...
