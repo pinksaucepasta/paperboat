@@ -863,6 +863,9 @@ func (h *Host) Shutdown(ctx context.Context) error {
 		h.cleanupUnstarted = nil
 		return cleanup()
 	}
+	// New local connections go to the next generation, which shares the listener, before any slow drain
+	// (Tailscale ipnserver closes its listener first at shutdown).
+	h.http.StopAccepting()
 	if h.hostd == nil || h.workers == nil {
 		return worker.Shutdown(ctx)
 	}

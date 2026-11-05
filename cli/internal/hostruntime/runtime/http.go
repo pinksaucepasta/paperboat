@@ -38,6 +38,7 @@ type HTTPService struct {
 	serveErr error
 	running  bool
 	stopped  bool
+	retiring bool // StopAccepting closed the listener
 	// connections counts accepted HTTP connections that have not closed.
 	connections atomic.Int64
 }
@@ -85,7 +86,7 @@ func (s *HTTPService) Start(ctx context.Context) error {
 	go func() {
 		err := server.Serve(listener)
 		s.mu.Lock()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) && !(s.stopped && errors.Is(err, net.ErrClosed)) {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) && !((s.stopped || s.retiring) && errors.Is(err, net.ErrClosed)) {
 			s.serveErr = err
 		}
 		s.running = false
@@ -131,6 +132,19 @@ type prefixedConn struct {
 
 func (c *prefixedConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
 
+// StopAccepting closes this process's copy of the listener and leaves accepted connections running; Shutdown
+// later drains them. A retiring generation calls it first, so new connections on the socket it shares with
+// the next generation reach that one at once.
+func (s *HTTPService) StopAccepting() {
+	s.mu.Lock()
+	listener, running := s.listener, s.running
+	s.retiring = true
+	s.mu.Unlock()
+	if running {
+		_ = listener.Close()
+	}
+}
+
 func (s *HTTPService) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	if s.stopped {
@@ -139,13 +153,13 @@ func (s *HTTPService) Shutdown(ctx context.Context) error {
 		return err
 	}
 	s.stopped = true
-	server, listener, done, running := s.server, s.listener, s.done, s.running
+	server, listener, done, drain := s.server, s.listener, s.done, s.running || s.retiring
 	s.mu.Unlock()
 	if server == nil {
 		return nil
 	}
 	var shutdownErr error
-	if running {
+	if drain {
 		// http.Server.Shutdown drops a connection whose request is read after it starts (net/http
 		// conn.serve returns when shuttingDown after readRequest) and misses one Serve accepted but has
 		// not tracked yet, such as one still sending the protocol prefix. A retiring generation must
