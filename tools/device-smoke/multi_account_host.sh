@@ -59,11 +59,17 @@ echo "A_GOT=\$a"; echo "B_GOT=\$b"
 [ "\$b" = MARKER_B_$STAMP ] && echo USER_B_OK
 cross=\$(fetch pbu2 1001 $PORT.$N.\$DA)
 [ "\$cross" != MARKER_A_$STAMP ] && echo ISOLATED
+# Both users publish the same short name $N (keyed by uid): neither daemon may be degraded by the other's name
+# (the gateway alone passed while the second user's machine names were refused, F23-01 on pbmac).
+health() { as $H \$1 \$2 /home/\$1/.local/bin/pb status --json 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get("data",d);print(d.get("daemon_state"),*[h.get("code") for h in d.get("health",[])])'; }
+ha=\$(health pbt 1000); hb=\$(health pbu2 1001)
+echo "A_HEALTH=\$ha"; echo "B_HEALTH=\$hb"
+[ "\$ha" = ready ] && [ "\$hb" = ready ] && echo BOTH_READY
 EOF
 )
 IDS_A=$(sed -n 's/^A_MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
 IDS_B=$(sed -n 's/^B_MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
-if grep -qx USER_A_OK <<<"$out" && grep -qx USER_B_OK <<<"$out" && grep -qx ISOLATED <<<"$out"; then
-  finish PASS "two OS users on one host, two accounts, same machine name: each reached its own account's machine through the one gateway; the second user could not reach the first's"
+if grep -qx USER_A_OK <<<"$out" && grep -qx USER_B_OK <<<"$out" && grep -qx ISOLATED <<<"$out" && grep -qx BOTH_READY <<<"$out"; then
+  finish PASS "two OS users on one host, two accounts, same machine name: each reached its own account's machine through the one gateway, the second user could not reach the first's, and both daemons are ready with no local access item degraded"
 fi
 finish FAIL "$(tail -c 600 <<<"$out" | tr '\n' ' ')"

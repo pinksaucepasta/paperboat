@@ -264,9 +264,16 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("browser_aliases", err)
 	}
-	if err := nameClient.ReplaceNames(ctx, names); err != nil {
+	if err := nameClient.ReplaceNames(ctx, names); err != nil && !errors.Is(err, machineguard.ErrNamesRefused) {
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("machine_names", err)
+	} else {
+		// The guard published every other name: a refused name degrades only that item (multi-account hosts);
+		// it is retried and pb doctor names the step meanwhile.
+		c.namesRefused = err != nil
+		if err != nil {
+			diagnosticlog.TryWarn("some machine names were not published; the others work", "error", err)
+		}
 	}
 	// Claims are released only against the last complete inventory read (every machine, online or not), never
 	// against the routable peers: an offline machine keeps its address, and a withdrawal (expired services, a

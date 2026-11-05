@@ -177,7 +177,23 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 					recovery = dashboardEnrollmentGuidance + " Then run `pb doctor` again."
 				}
 			}
-			return doctorpkg.Check{Category: "local", Code: "daemon", Status: status, Summary: "The local daemon is " + snapshot.DaemonState + ".", Recovery: recovery}
+			summary := "The local daemon is " + snapshot.DaemonState + "."
+			// The daemon's own health names what is wrong (for example the local access step that failed or is
+			// retrying); doctor shows it instead of a bare state.
+			for _, item := range snapshot.Health {
+				if item.Severity != "warning" && item.Severity != "error" {
+					continue
+				}
+				summary += " " + strings.TrimSuffix(item.Title, ".") + "."
+				if item.Recovery != "" && snapshot.DaemonState != "starting" {
+					recovery = item.Recovery + "."
+				}
+				if status == doctorpkg.StatusPass {
+					status = doctorpkg.StatusWarning
+				}
+				break
+			}
+			return doctorpkg.Check{Category: "local", Code: "daemon", Status: status, Summary: summary, Recovery: strings.ReplaceAll(recovery, "..", ".")}
 		}},
 		{Code: "local_state", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorLocalState(ctx) }},
 		{Code: "clock", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorClock(ctx, command) }},

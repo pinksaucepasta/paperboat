@@ -89,3 +89,24 @@ func TestDoctorNamesAnUnsupportedVersionInsteadOfAFailedLogin(t *testing.T) {
 		}
 	}
 }
+
+// pb doctor names the failing or retrying local access step from the daemon's own health.
+func TestDoctorNamesTheDaemonHealthStep(t *testing.T) {
+	for _, c := range []struct {
+		state, severity, title string
+	}{
+		{"ready", "warning", "Browser URLs are unavailable: the browser certificate step failed and is retrying"},
+		{"degraded", "error", "Local machine access is unavailable: the machine names step failed"},
+	} {
+		snapshot := localapi.Snapshot{DaemonState: c.state, Health: []localapi.HealthItem{{Code: "x", Severity: c.severity, Title: c.title, Recovery: "Paperboat retries the step by itself"}}}
+		for _, probe := range doctorProbes(&cobra.Command{}, snapshot, nil) {
+			if probe.Code != "daemon" {
+				continue
+			}
+			check := probe.Run(context.Background())
+			if check.Status != doctorpkg.StatusWarning || !strings.Contains(check.Summary, c.title) || !strings.Contains(check.Recovery, "retries the step") {
+				t.Fatalf("%s: doctor did not name the step: %+v", c.state, check)
+			}
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -459,6 +460,8 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 				out.ErrorCode = "port_in_use"
 			} else if errors.Is(err, ErrListenerRefused) {
 				out.ErrorCode = "listener_refused"
+			} else if errors.Is(err, ErrNamesRefused) {
+				out.ErrorCode = "names_refused"
 			}
 		}
 		if err := conn.Send(out, file); err != nil {
@@ -696,6 +699,9 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if err != nil && len(in.Names) > 0 {
 			return nil, err
 		}
+		accepted := make(map[string]string, len(in.Names))
+		var refused []string
+	names:
 		for name, ip := range in.Names {
 			if (!validName(name, domain) && !validSubdomainName(name, domain)) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
 				return nil, errors.New("invalid machine name")
@@ -708,21 +714,30 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 				}
 			}
 			if !found {
-				return nil, errors.New("machine name has no protected ready listener")
+				refused = append(refused, name+" (no protected ready listener)")
+				continue
 			}
+			// Publications are keyed by (uid, hostname): every OS user keeps the same short names and the routed
+			// gateway sends each connection to its own user's daemon (multi-account hosts, PLAN 3b). Only another
+			// connection of the same user (or any other connection where the gateway is not routed) clashes.
 			for other, names := range g.names {
-				if other != conn {
-					if _, ok := names[name]; ok {
-						return nil, errors.New("machine hostname already published by another connection")
-					}
+				if other == conn || (gatewayRouting && g.connections[other] != uid) {
+					continue
+				}
+				if _, ok := names[name]; ok {
+					refused = append(refused, name+" (already published by another connection of this user)")
+					continue names
 				}
 			}
+			accepted[name] = ip
 		}
-		previous := g.names[conn]
-		if maps.Equal(previous, in.Names) {
-			return nil, nil
+		if !maps.Equal(g.names[conn], accepted) {
+			g.names[conn] = accepted
 		}
-		g.names[conn] = in.Names
+		if len(refused) > 0 {
+			slices.Sort(refused)
+			return nil, namesRefusal{reason: "machine names not published: " + strings.Join(refused, ", ")}
+		}
 		return nil, nil
 	default:
 		return nil, errors.New("unknown machine guard operation")

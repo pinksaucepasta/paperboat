@@ -538,6 +538,7 @@ type coordinatorNameClient struct {
 	gateway       map[int]string // gateway-address listeners by port
 	gatewayPorts  []int          // every gateway acquisition attempted, in order
 	failReplace   bool
+	refuseNames   int // ReplaceNames answers ErrNamesRefused this many times
 	closed        bool
 	// aliasesReplaced is set by ReplaceAliases: like the real guard, names are known only after it.
 	aliasesReplaced atomic.Bool
@@ -602,6 +603,10 @@ func (c *coordinatorNameClient) ReplaceNames(_ context.Context, names map[string
 		return net.ErrClosed
 	}
 	c.names = maps.Clone(names)
+	if c.refuseNames > 0 {
+		c.refuseNames--
+		return fmt.Errorf("machine names not published: %w", machineguard.ErrNamesRefused)
+	}
 	return nil
 }
 func (c *coordinatorNameClient) Close() error {

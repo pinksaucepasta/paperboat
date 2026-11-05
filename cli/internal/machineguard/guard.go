@@ -18,6 +18,16 @@ var ErrPortInUse = errors.New("protected port is already in use")
 // its machines keep working.
 var ErrListenerRefused = errors.New("protected listener refused")
 
+// ErrNamesRefused reports machine names the guard did not publish (no protected listener serves them yet, or
+// another connection of the same OS user publishes them). The guard keeps every other name: a clash degrades
+// only that item, never the whole reconcile (multi-account hosts, PLAN 3b).
+var ErrNamesRefused = errors.New("protected machine names refused")
+
+type namesRefusal struct{ reason string }
+
+func (e namesRefusal) Error() string      { return e.reason }
+func (namesRefusal) Is(target error) bool { return target == ErrNamesRefused }
+
 type listenerRefusal struct{ reason string }
 
 func (e listenerRefusal) Error() string      { return e.reason }
@@ -29,6 +39,9 @@ func responseError(out response) error {
 	}
 	if out.ErrorCode == "listener_refused" {
 		return listenerRefusal{reason: out.Error}
+	}
+	if out.ErrorCode == "names_refused" {
+		return namesRefusal{reason: out.Error}
 	}
 	if out.Error != "" {
 		return errors.New(out.Error)

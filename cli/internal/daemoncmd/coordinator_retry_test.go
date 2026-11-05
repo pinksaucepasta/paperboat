@@ -67,3 +67,46 @@ func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T
 		t.Fatalf("certificate issued %d times; want a retry", issued.Load())
 	}
 }
+
+// A machine name the guard refuses degrades only that item (multi-account hosts): the reconcile succeeds, native
+// access stays, doctor's pending step is machine_names, and the retry publishes the names once the guard accepts.
+func TestCoordinatorKeepsLocalAccessWhenTheGuardRefusesANameAndRetries(t *testing.T) {
+	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
+	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax = restoreBase, restoreMax })
+	names := &coordinatorNameClient{refuseNames: 1}
+	c, err := NewCoordinator(CoordinatorConfig{
+		NameClient:  names,
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+		IssueCertificate: func(context.Context, string, string, int) (tls.Certificate, error) {
+			return tls.Certificate{}, errors.New("no browser trust in this test")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.ctx, c.running = t.Context(), true
+	c.mu.Unlock()
+	t.Cleanup(c.resetReconcileRetry)
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
+		t.Fatalf("a refused name must not fail local access: %v", err)
+	}
+	c.mu.Lock()
+	routes := len(c.routes)
+	c.mu.Unlock()
+	if routes != 1 {
+		t.Fatalf("native access was withdrawn for a refused name: routes=%d", routes)
+	}
+	if step := c.PendingLocalAccessStep(); step != "machine_names" {
+		t.Fatalf("pending step=%q, want machine_names", step)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for c.PendingLocalAccessStep() == "machine_names" {
+		if time.Now().After(deadline) {
+			t.Fatal("the refused name was not retried")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

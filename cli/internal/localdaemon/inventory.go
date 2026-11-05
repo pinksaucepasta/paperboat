@@ -313,8 +313,8 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
 					Code:     "browser_urls_unavailable",
 					Severity: "warning",
-					Title:    "Browser URLs are unavailable: the " + strings.ReplaceAll(pending.Step, "_", " ") + " step failed and is retrying",
-					Recovery: "Machine names and native access work; Paperboat retries the step by itself",
+					Title:    pendingStepTitle(pending.Step),
+					Recovery: "The rest of local access works; Paperboat retries the step by itself",
 				})}
 			}
 			if reconcileErr != nil {
@@ -645,4 +645,13 @@ func localAccessTitle(title string, err error) string {
 		return title + ": the " + strings.ReplaceAll(step.LocalAccessStep(), "_", " ") + " step failed"
 	}
 	return title
+}
+
+// pendingStepTitle says what a retrying local access step leaves unavailable.
+func pendingStepTitle(step string) string {
+	what := "Some machine names are unavailable"
+	if step == "browser_certificate" {
+		what = "Browser URLs are unavailable"
+	}
+	return what + ": the " + strings.ReplaceAll(step, "_", " ") + " step failed and is retrying"
 }
