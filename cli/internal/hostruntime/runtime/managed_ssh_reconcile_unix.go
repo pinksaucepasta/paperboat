@@ -140,9 +140,7 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 		}
 		return errors.Join(err, cleanupErr)
 	}
-	if !active {
-		keys.Keys = nil
-	}
+	// Not active (pending): the keys are the server's current client keys, kept so trust-host works at once.
 	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys)
 	s.ready.Store(err == nil && active)
 	return err

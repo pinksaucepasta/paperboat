@@ -571,7 +571,11 @@ func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client mana
 	if err != nil {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
-	if set.State != "active" {
+	// A pending set (the machine's host keys changed and wait for pb ssh trust-host) keeps the current client
+	// keys from the server, so trust-host works at once (C066); clients refuse the changed host until then.
+	// Any other state installs none. The keys are always the server's current list, so a revocation still
+	// applies at once.
+	if set.State != "active" && set.State != "pending" {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, nil
 	}
 	keyBody := []byte("{}")
@@ -588,7 +592,7 @@ func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client mana
 	if err != nil {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
-	return keySet, true, nil
+	return keySet, set.State == "active", nil
 }
 
 func readSSHHostPublicKeysUnix() ([]string, error) {

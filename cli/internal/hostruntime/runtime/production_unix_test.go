@@ -300,21 +300,53 @@ func TestManagedSSHKeyReconcilerActivatesPromotedHostWithoutRestart(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
+	// C066 (A): while the new host-key set is pending, the client keys stay, so pb ssh works right after
+	// trust-host; the host is not ready until the set is promoted.
 	path := filepath.Join(home, ".ssh", "authorized_keys")
 	initial, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) || bytes.Contains(initial, []byte(key)) {
+	if err != nil || !bytes.Contains(initial, []byte(key)) {
 		t.Fatalf("pending authorized_keys=%q error=%v", initial, err)
 	}
 	deadline := time.Now().Add(time.Second)
+	for !service.ready.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("promoted host did not become ready")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if updated, readErr := os.ReadFile(path); readErr != nil || !bytes.Contains(updated, []byte(key)) {
+		t.Fatalf("promoted host lost the managed key: %q error=%v", updated, readErr)
+	}
+}
+
+// C066 (A), hard condition: a client key the server revokes while a host-key set is pending leaves at once;
+// the pending set never keeps a key the server no longer lists.
+func TestPendingHostKeySetStillAppliesClientKeyRevocation(t *testing.T) {
+	kept, revoked := managedSSHTestPublicKey(t), managedSSHTestPublicKey(t)
+	home := managedSSHRuntimeTestHome(t)
+	client := &rotatingManagedSSHClient{hostStates: []string{"pending"}, keys: [][]string{{kept, revoked}, {kept}}}
+	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 11, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
+	path := filepath.Join(home, ".ssh", "authorized_keys")
+	if initial, err := os.ReadFile(path); err != nil || !bytes.Contains(initial, []byte(revoked)) {
+		t.Fatalf("pending set dropped the current client keys: %q error=%v", initial, err)
+	}
+	deadline := time.Now().Add(time.Second)
 	for {
-		updated, readErr := os.ReadFile(path)
-		if readErr == nil && bytes.Contains(updated, []byte(key)) {
+		updated, err := os.ReadFile(path)
+		if err == nil && !bytes.Contains(updated, []byte(revoked)) && bytes.Contains(updated, []byte(kept)) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("promoted host did not activate managed key: %q error=%v", updated, readErr)
+			t.Fatalf("a key revoked during the pending set stayed: %q error=%v", updated, err)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if service.ready.Load() {
+		t.Fatal("a host with a pending host-key set reported ready")
 	}
 }
 
