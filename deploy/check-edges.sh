@@ -43,14 +43,16 @@ trap 'cleanup "$@"' EXIT
 trap 'exit 1' INT TERM
 
 # Follow each tunnel container's log from the window start until the gate stops; a replaced container's
-# follower ends by itself when that container exits, after its last line.
+# follower ends by itself when that container exits, after its last line. The followers run as root, so the
+# script's own kill cannot reach them: each runs under `timeout`, and the exit trap pkills them through sudo
+# (a surviving follower held the ssh session open for 30 min on 2026-11-05).
 for edge in "$@"; do
 	target=${edge%%=*}
-	on "$target" "since=$start; stop=$stopfile; seen=' '; pids=; end=\$((\$(date +%s) + 3600))
-trap 'kill \$pids 2>/dev/null' EXIT
+	on "$target" "since=$start; stop=$stopfile; seen=' '; end=\$((\$(date +%s) + 3600))
+trap 'sudo -n pkill -f \"[d]ocker logs --follow --since \$since\" 2>/dev/null' EXIT
 while [ ! -e \$stop ] && [ \$(date +%s) -lt \$end ]; do
 	for c in \$(sudo -n docker ps -q --no-trunc --filter name=-tunnel); do
-		case \"\$seen\" in *\" \$c \"*) ;; *) seen=\"\$seen\$c \"; sudo -n docker logs --follow --since \$since \$c 2>&1 & pids=\"\$pids \$!\" ;; esac
+		case \"\$seen\" in *\" \$c \"*) ;; *) seen=\"\$seen\$c \"; sudo -n timeout 3700 docker logs --follow --since \$since \$c 2>&1 & ;; esac
 	done
 	sleep 1
 done

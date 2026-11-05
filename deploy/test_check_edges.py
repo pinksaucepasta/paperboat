@@ -32,6 +32,8 @@ ps) echo container_new ;;
 logs) cat "$T/edge.log" ;;
 esac
 ''',
+    'timeout': '#!/bin/sh\necho "$*" >>"$T/timeout.log"\nshift\nexec "$@"\n',
+    'pkill': '#!/bin/sh\necho "$*" >>"$T/pkill.log"\n',
     'curl': '#!/bin/sh\ncat "$T/code"\n',
 }
 
@@ -54,6 +56,7 @@ class CheckEdgesTest(unittest.TestCase):
                        SQL=str(bin_dir / 'psql'), SETTLE='2', OBSERVE='1')
             result = subprocess.run(['sh', str(SCRIPT), '--deploy', deploy, 'local=192.0.2.1'], env=env,
                                     capture_output=True, text=True, timeout=120)
+            self.stub_logs = {n: (t / n).read_text() if (t / n).exists() else '' for n in ('timeout.log', 'pkill.log')}
             return result.returncode, result.stdout + result.stderr
 
     def test_clean_deploy_passes(self):
@@ -88,6 +91,12 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn('offline during the deploy=1', out)
         self.assertNotIn('machine_never_online', out)
+
+    def test_log_follower_is_bounded_and_killed_on_exit(self):
+        code, out = self.run_gate()
+        self.assertEqual(code, 0, out)
+        self.assertIn('docker logs --follow', self.stub_logs['timeout.log'])
+        self.assertIn('[d]ocker logs --follow --since', self.stub_logs['pkill.log'])
 
     def test_failed_deploy_command_fails(self):
         code, out = self.run_gate(deploy='exit 3')
