@@ -76,6 +76,10 @@ func TestCarrierProtectedCapabilityAndLifetimeLock(t *testing.T) {
 	uid := 1000000000 + int(binary.LittleEndian.Uint32(entropy[:])%1000000000)
 	paths := platformPaths(uid)
 	root := filepath.Dir(carrierConfigPath(paths.instance))
+	generation := strings.Repeat("a", 32)
+	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, Generation: generation, UID: uid, GID: uid, User: "fixture", Group: "fixture", RuntimeRoot: "/var/lib", Source: installsource.Source{Version: "fixture", Platform: runtime.GOOS, Architecture: runtime.GOARCH, SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, WorkerAddress: "127.0.0.1:2026", HostdEndpoint: paths.hostdSocket, ControlEndpoint: carrierControlEndpoint(paths.hostdSocket, generation), HostdTokenFile: paths.hostdToken, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
+	c.Executable = filepath.Join(filepath.Dir(paths.workerRollback), "pins", c.Source.SHA256, "pb")
+	c.Environment = map[string]string{"PAPERBOAT_RUNTIME_STATE_ROOT": c.RuntimeRoot, "PAPERBOAT_RUNTIME_LISTEN_ADDRESS": c.WorkerAddress, "PAPERBOAT_MACHINE_ID": "fixture"}
 	var created []string
 	for path := root; path != "/"; path = filepath.Dir(path) {
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
@@ -88,8 +92,8 @@ func TestCarrierProtectedCapabilityAndLifetimeLock(t *testing.T) {
 	t.Cleanup(func() {
 		for _, path := range created {
 			if path == root {
-				for _, leaf := range []string{"config.json", "dispatch.cap", "owner.lock", "qualification.test"} {
-					if err := os.Remove(filepath.Join(root, leaf)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				for _, leaf := range []string{carrierConfigPath(c.Instance), carrierGenerationPath(c.Instance, generation), c.DispatchCapabilityFile, c.LockPath, filepath.Join(root, "qualification.test")} {
+					if err := os.Remove(leaf); err != nil && !errors.Is(err, os.ErrNotExist) {
 						t.Error(err)
 					}
 				}
@@ -104,9 +108,6 @@ func TestCarrierProtectedCapabilityAndLifetimeLock(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	c := CarrierConfig{Schema: carrierSchema, Instance: paths.instance, UID: uid, GID: uid, User: "fixture", Group: "fixture", RuntimeRoot: "/var/lib", Source: installsource.Source{Version: "fixture", Platform: runtime.GOOS, Architecture: runtime.GOARCH, SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, WorkerAddress: "127.0.0.1:2026", HostdEndpoint: paths.hostdSocket, ControlEndpoint: paths.hostdSocket + ".carrier", HostdTokenFile: paths.hostdToken, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner.lock")}
-	c.Executable = filepath.Join(filepath.Dir(paths.workerRollback), "pins", c.Source.SHA256, "pb")
-	c.Environment = map[string]string{"PAPERBOAT_RUNTIME_STATE_ROOT": c.RuntimeRoot, "PAPERBOAT_RUNTIME_LISTEN_ADDRESS": c.WorkerAddress, "PAPERBOAT_MACHINE_ID": "fixture"}
 	capability := make([]byte, 32)
 	if _, err := rand.Read(capability); err != nil {
 		t.Fatal(err)

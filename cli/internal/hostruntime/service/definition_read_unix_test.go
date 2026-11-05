@@ -17,7 +17,8 @@ import (
 )
 
 func accountReadableCarrierFixture(root, account, group string, readable bool) (*Installer, error) {
-	return New(Config{Platform: runtime.GOOS, Kind: CarrierKind, Instance: "u65534", ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: account, Group: group, Arguments: []string{"daemon", "__runtime-carrier"}, AccountReadableDefinition: readable, Controller: SystemdController{Runner: ExecRunner{}}})
+	generation := "0123456789abcdef0123456789abcdef"
+	return New(Config{Platform: runtime.GOOS, Kind: CarrierKind, Instance: "u65534", Generation: generation, ConfigRoot: root, Executable: filepath.Join(root, "pb"), User: account, Group: group, Arguments: []string{"daemon", "__runtime-carrier", "--generation", generation}, AccountReadableDefinition: readable, Controller: SystemdController{Runner: ExecRunner{}}})
 }
 
 func TestCarrierDeclarationReadableWithoutPublicationAuthority(t *testing.T) {

@@ -32,7 +32,11 @@ func TestCarrierOnlyRollbackPreservesInstalledRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	paths := installPaths{instance: "u2147483000", worker: filepath.Join(root, "pb"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "install-journal"), updateState: filepath.Join(root, "update-state")}
+	request := generationRequest("a")
+	request.UID, request.GID, request.Source = 2147483000, 2147483000, source
+	// Real native names: the canonical carrier generation is derived from them.
+	paths := platformPaths(request.UID)
+	paths.worker, paths.workerNext, paths.metadata, paths.journal, paths.updateState = filepath.Join(root, "pb"), filepath.Join(root, "next"), filepath.Join(root, "metadata"), filepath.Join(root, "install-journal"), filepath.Join(root, "update-state")
 	if err := os.WriteFile(paths.worker, image, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +53,7 @@ func TestCarrierOnlyRollbackPreservesInstalledRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := unixCarrierInstallation{request: Request{Source: source}, paths: paths}
+	state := unixCarrierInstallation{request: request, paths: paths}
 	if err := state.Restore(context.Background(), body); err != nil {
 		t.Fatal(err)
 	}
