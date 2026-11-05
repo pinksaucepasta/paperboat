@@ -836,6 +836,20 @@ type ControlRouteOperation struct {
 	CreatedAt      time.Time
 }
 
+type ControlServerNode struct {
+	ID            string
+	Region        string
+	State         string
+	EndpointHost  sql.NullString
+	TlsSpkiSha256 []byte
+	EnrolledBy    sql.NullString
+	Version       string
+	Commit        string
+	StartedAt     time.Time
+	LastSeenAt    time.Time
+	CreatedAt     time.Time
+}
+
 type ControlSigningKeyRevocation struct {
 	KeyID       string
 	Reason      string
