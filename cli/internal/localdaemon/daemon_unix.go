@@ -22,7 +22,9 @@ import (
 )
 
 type DaemonConfig struct {
-	Paths            localapi.Paths
+	Paths localapi.Paths
+	// Lock is the daemon lock this generation already holds (WaitDaemonLock); Run takes one when nil.
+	Lock             DaemonLock
 	Source           MachineSource
 	OwnerUID         int
 	OwnerGID         int
@@ -64,10 +66,15 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 	if config.Source == nil || config.OwnerUID < 0 || config.OwnerGID < 0 || config.Paths.SocketPath == "" || config.Paths.LockPath == "" {
 		return ErrInvalidInventoryConfig
 	}
-	lock, err := acquireProcessLock(config.Paths.LockPath, config.OwnerUID)
-	if err != nil {
-		return err
+	lock := config.Lock
+	if lock == nil {
+		held, err := acquireProcessLock(config.Paths.LockPath, config.OwnerUID)
+		if err != nil {
+			return err
+		}
+		lock = held
 	}
+	var err error
 	defer func() { runErr = daemonCleanupFailure(runErr, lock.Close()) }()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
 		defer func() { runErr = daemonCleanupFailure(runErr, closer.Close()) }()

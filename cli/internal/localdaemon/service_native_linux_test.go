@@ -148,7 +148,7 @@ func assertNativeLinuxCandidateReady(t *testing.T, candidate, expectedVersion st
 			return
 		}
 		if time.Now().After(deadline) {
-			output, _ := exec.Command("systemctl", "--user", "status", unit, "--no-pager").CombinedOutput()
+			output, _ := exec.Command("systemctl", "--user", "status", "paperboatd-*", "--no-pager").CombinedOutput()
 			t.Fatalf("candidate daemon did not become ready: %v; systemd: %s", snapshotErr, output)
 		}
 		time.Sleep(100 * time.Millisecond)

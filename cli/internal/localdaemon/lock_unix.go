@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
@@ -58,6 +60,36 @@ func acquireProcessLock(path string, uid int) (*processLock, error) {
 		return closeWith(errors.Join(fmt.Errorf("record local daemon PID: %w", err), unlockErr))
 	}
 	return &processLock{file: file}, nil
+}
+
+// lockHandover bounds how long a new daemon generation waits for the one before it to release the
+// daemon lock: pb install starts the new unit, then sends the old one SIGQUIT.
+const lockHandover = time.Minute
+
+// DaemonLock is the held daemon lock: it also decides whether a stale local API socket may go.
+type DaemonLock interface {
+	io.Closer
+	localapi.StaleSocketAuthority
+}
+
+// WaitDaemonLock takes the daemon lock, waiting up to lockHandover while another generation holds it.
+func WaitDaemonLock(ctx context.Context, path string, uid int) (DaemonLock, error) {
+	ctx, cancel := context.WithTimeout(ctx, lockHandover)
+	defer cancel()
+	for {
+		lock, err := acquireProcessLock(path, uid)
+		if !errors.Is(err, localapi.ErrAlreadyRunning) {
+			if err != nil {
+				return nil, err
+			}
+			return lock, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, errors.Join(err, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func (l *processLock) CanRemoveStaleSocket(_ context.Context, _ string) bool {
