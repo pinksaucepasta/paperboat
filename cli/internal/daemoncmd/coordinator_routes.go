@@ -290,6 +290,19 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 			removedRoutes = append(removedRoutes, route)
 		}
 	}
+	wantedMachines := make(map[string]bool, len(wanted))
+	for _, route := range wanted {
+		wantedMachines[route.machineID] = true
+	}
+	kept := c.draining[:0]
+	for _, route := range c.draining {
+		if route.idle() || !wantedMachines[route.machineID] {
+			removedRoutes = append(removedRoutes, route) // finished, or its machine was withdrawn: cut it
+		} else {
+			kept = append(kept, route)
+		}
+	}
+	c.draining = kept
 	var removedWeb []guardedWebRoute
 	for key, route := range c.webRoutes {
 		if _, ok := wantedWeb[key]; !ok {
@@ -333,8 +346,10 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 	webRoutes := c.webRoutes
 	c.routes = make(map[string]*guardedRoute)
 	c.webRoutes = make(map[string]guardedWebRoute)
+	// A reset (guard, alias or name error) stops accepting but keeps established forwards: the next
+	// successful reconcile cuts those of machines that are gone, and Stop cuts all.
 	for _, route := range routes {
-		route.cancelNow()
+		c.draining = append(c.draining, route)
 	}
 	cleanup := c.launchCleanupLocked(func() error {
 		var causes []error
@@ -343,7 +358,7 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 			causes = append(causes, lifecycleCleanup(client.Close()))
 		}
 		for _, route := range routes {
-			causes = append(causes, route.close())
+			causes = append(causes, route.stopAccepting())
 		}
 		for _, route := range webRoutes {
 			causes = append(causes, lifecycleCleanup(route.proxy.Stop(ctx)))
