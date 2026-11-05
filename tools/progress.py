@@ -71,8 +71,13 @@ def render(sections):
     groups = {"reliability": ("F21", "P"), "sdk": ("F24",), "release": ("R",), "website": ("W",)}
     def rows_of(ids):
         return [r for s in sections if s["id"] in ids for r in s["feature"]]
-    feats = [r for s in sections if s["id"].startswith("F")
-             and s["id"] not in groups["reliability"] + groups["sdk"] for r in s["feature"]]
+    product = [r for s in sections if s["id"].startswith("F")
+               and s["id"] not in groups["reliability"] + groups["sdk"] for r in s["feature"]]
+    # A row that is n/a on macOS and Windows is server or console work, not an OS feature: it gets its
+    # own card so every OS card counts the same features (user 2026-11-05).
+    neutral = lambda r: all(m in ("n/a", "—") for m in r["platforms"][1:3])
+    feats = [r for r in product if not neutral(r)]
+    server = [r for r in product if neutral(r)]
     cmds = [r for s in sections for r in s["command"]]
     cards = []
     for index, name in ((0, "Linux"), (1, "macOS"), (2, "Windows")):
@@ -82,6 +87,10 @@ def render(sections):
             lines.append(f'<div class="row"><span>{label}</span><b>{d}/{t}</b>'
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
+    if server:
+        d, b, t = count(server, 0)
+        cards.append(f'<div class="card"><h2>Server and console features</h2><div class="row"><span>Done</span>'
+                     f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     for title, ids in (("Reliability, scale and efficiency", groups["reliability"]),
                        ("SDK and agent tools", groups["sdk"]),
                        ("Release safety", groups["release"]),
