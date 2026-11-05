@@ -149,6 +149,9 @@ type Database struct {
 	// across statements, LISTEN) and migrations use that direct pool, because a transaction-pooled connection can
 	// hand the next statement of a session to another backend.
 	DirectDSN string `json:"direct_dsn"`
+	// ReplicaDSN is this region's read replica (empty: reads use the primary). Only reads that allow it use it,
+	// and only once the replica has replayed past the client's Paperboat-Commit-Position (PLAN 3b replicas).
+	ReplicaDSN string `json:"replica_dsn"`
 	// StartupParams sends search_path, jit and the timeouts as connection startup parameters. Unset means true. False is
 	// the PgBouncer setting: the role defaults carry them (db-role-defaults) and the pooled pool uses unnamed statements.
 	// Set it false behind a pooler that rejects startup parameters, after `paperboat-server db-role-defaults` has

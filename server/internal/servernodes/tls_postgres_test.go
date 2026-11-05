@@ -69,7 +69,7 @@ VALUES ($1,$2,$3,'v','c',now(),now())`, id, p, state); err != nil {
 		}
 	}
 	inMap := func() string {
-		list, err := Regions(ctx, store, "example.test")
+		list, err := Regions(ctx, store.Pool(), "example.test")
 		if err != nil {
 			t.Fatal(err)
 		}

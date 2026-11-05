@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
@@ -61,12 +62,14 @@ type ReadinessChecker interface {
 }
 
 type Options struct {
-	Activity                 *activity.Service
-	TeamIdentity             *teamidentity.Service
-	AuditStreams             *auditstream.Service
-	ClientUpdatePolicy       ClientUpdatePolicyAPI
-	OperatorInfrastructure   *operatorinfra.Service
-	ServerNodes              *servernodes.Enroller
+	Activity               *activity.Service
+	TeamIdentity           *teamidentity.Service
+	AuditStreams           *auditstream.Service
+	ClientUpdatePolicy     ClientUpdatePolicyAPI
+	OperatorInfrastructure *operatorinfra.Service
+	ServerNodes            *servernodes.Enroller
+	// Database serves replica-safe reads and the commit position of writes (commit_position.go).
+	Database                 *db.DB
 	OperatorBackups          *backupreport.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
@@ -686,6 +689,7 @@ func NewRouter(opts Options) http.Handler {
 	tokenFailures := ratelimit.New(opts.Config.RateLimits.TokenFailuresPerMinute, opts.Config.RateLimits.TokenFailuresBurst, opts.Config.RateLimits.MaxClients)
 	handler = apiTokenAuth(opts.APITokens, tokenFailures, handler)
 	handler = workspaceQueryContext(handler)
+	handler = commitPosition(opts.Database, opts.Config.RegionalDomain != "", handler)
 	handler = secureHeaders(handler)
 	handler = compressResponses(handler)
 	handler = cors(opts.Config.HTTP.AllowedOrigins, handler)

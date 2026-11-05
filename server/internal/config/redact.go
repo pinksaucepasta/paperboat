@@ -25,6 +25,9 @@ func (c Config) RedactedJSON() string {
 	if redacted.Database.DirectDSN != "" {
 		redacted.Database.DirectDSN = "[redacted]"
 	}
+	if redacted.Database.ReplicaDSN != "" {
+		redacted.Database.ReplicaDSN = "[redacted]"
+	}
 	if redacted.Secrets.SentryDSN != "" {
 		redacted.Secrets.SentryDSN = "[redacted]"
 	}

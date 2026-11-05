@@ -3019,6 +3019,12 @@ Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-w
 - **Write routing.** No forwarding layer: a far-region instance writes to the primary over the WAN. Keep a request
   to one transaction (one round-trip set); budget about RTT x statements per write path and measure enroll, pair,
   grant and revoke from the farthest region before adding regions.
+- **Built 2026-11-05 (reliability lane, part 5a):** `database.replica_dsn` opens the region's replica pool; every
+  instance samples its lag every 5 s (out at once above 2 s or on a failed sample, back after 30 s under);
+  `db.ReadPool(ctx, position)` picks the replica only when in rotation and replayed past the client's position.
+  With `regional_domain` set, successful writes answer `Paperboat-Commit-Position` (exposed and allowed in CORS) and
+  reads pass the client's header to ReadPool. First replica readers: the discovery region map and the operator
+  server-node list. Clients sending the header back waits for Lane A (CLI) and Lane C (console).
 - **Primary failover.** The database provider promotes a replica (PlanetScale, F21-15). During it, writes return a
   typed 503 `control_plane_read_only` with Retry-After; replica reads keep serving; machines keep their last verified
   state (F21-01 offline-until-revoked). Instances reconnect the primary pool with backoff; no app-level election.

@@ -44,7 +44,7 @@ func TestServerNodesHeartbeatHealthAndRemovalOnPostgres(t *testing.T) {
 		}
 	}
 	health := func() map[string]bool {
-		list, err := List(ctx, store)
+		list, err := List(ctx, store.Pool())
 		if err != nil {
 			t.Fatal(err)
 		}

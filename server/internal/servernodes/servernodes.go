@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
@@ -57,8 +58,8 @@ WHERE control_server_nodes.state <> 'removed'`, n.ID, n.Region, n.Version, n.Com
 }
 
 // List returns every node that is not removed, healthy when seen within HealthyWithin and not draining.
-func List(ctx context.Context, d *db.DB) ([]Status, error) {
-	rows, err := d.Pool().Query(ctx, `SELECT id, region, state, version, commit, started_at, last_seen_at,
+func List(ctx context.Context, pool *pgxpool.Pool) ([]Status, error) {
+	rows, err := pool.Query(ctx, `SELECT id, region, state, version, commit, started_at, last_seen_at,
   state='active' AND last_seen_at > now() - make_interval(secs => $1)
 FROM paperboat.control_server_nodes WHERE state <> 'removed' ORDER BY region, id`, HealthyWithin.Seconds())
 	if err != nil {
@@ -109,8 +110,8 @@ type Region struct {
 
 // Regions lists the regions with a fresh serving node: healthy when one is active, draining when the only
 // fresh nodes drain. Registered nodes (no certificate yet) and stale or removed ones are not listed.
-func Regions(ctx context.Context, d *db.DB, domain string) ([]Region, error) {
-	rows, err := d.Pool().Query(ctx, `SELECT region, bool_or(state='active') FROM paperboat.control_server_nodes
+func Regions(ctx context.Context, pool *pgxpool.Pool, domain string) ([]Region, error) {
+	rows, err := pool.Query(ctx, `SELECT region, bool_or(state='active') FROM paperboat.control_server_nodes
 WHERE state IN ('active','draining') AND last_seen_at > now() - make_interval(secs => $1)
 GROUP BY region ORDER BY region`, HealthyWithin.Seconds())
 	if err != nil {
@@ -154,7 +155,7 @@ func (c *RegionCache) Get(ctx context.Context) []Region {
 	}
 	read, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if regions, err := Regions(read, c.DB, c.Domain); err == nil {
+	if regions, err := Regions(read, c.DB.ReadPool(read, ""), c.Domain); err == nil {
 		c.last, c.at = regions, time.Now()
 	}
 	if c.last == nil {

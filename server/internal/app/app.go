@@ -749,6 +749,7 @@ func New(opts Options) (*App, error) {
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
 		ServerNodes:              &servernodes.Enroller{DB: store, Config: opts.Config},
+		Database:                 store,
 		OperatorBackups:          backupService,
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,

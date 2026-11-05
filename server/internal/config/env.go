@@ -140,6 +140,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_DATABASE_DRIVER", &c.Database.Driver)
 	setString("PAPERBOAT_DATABASE_DSN", &c.Database.DSN)
 	setString("PAPERBOAT_DATABASE_DIRECT_DSN", &c.Database.DirectDSN)
+	setString("PAPERBOAT_DATABASE_REPLICA_DSN", &c.Database.ReplicaDSN)
 	if v, ok := lookup("PAPERBOAT_DATABASE_STARTUP_PARAMS"); ok && strings.TrimSpace(v) != "" {
 		parsed, err := strconv.ParseBool(v)
 		if err != nil {

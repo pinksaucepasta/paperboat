@@ -148,6 +148,7 @@ func (a *App) Run(ctx context.Context) error {
 		case <-workerContext.Done():
 		}
 	}()
+	go a.db.RunReplicaLag(runContext)
 	if r := a.cfg.Reporting; r.Region != "" {
 		// Every node heartbeats its own row (not a leader job), so the shared record lists all equal nodes.
 		node := servernodes.Node{ID: r.Region + "-" + r.Instance, Region: r.Region, Version: buildinfo.Version, Commit: buildinfo.Commit, StartedAt: a.telemetryStartedAt}

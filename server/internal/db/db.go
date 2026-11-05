@@ -27,8 +27,10 @@ type DB struct {
 	pool     *pgxpool.Pool
 	// direct carries session state (see Direct); it is never used for ordinary queries.
 	direct *pgxpool.Pool
-	sql    *sql.DB
-	q      *dbsqlc.Queries
+	// replica is this region's read replica, nil when none is configured (see ReadPool).
+	replica *replicaState
+	sql     *sql.DB
+	q       *dbsqlc.Queries
 	// migrationConfig opens the migrations' own pool on the direct DSN (no statement or lock timeouts).
 	migrationConfig *pgxpool.Config
 
@@ -104,7 +106,23 @@ func Open(cfg config.Database) (*DB, error) {
 		pool.Close()
 		return nil, fmt.Errorf("open direct postgres: %w", err)
 	}
-	return &DB{observer: observer, pool: pool, direct: direct, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}, nil
+	d := &DB{observer: observer, pool: pool, direct: direct, sql: stdlib.OpenDBFromPool(pool), q: dbsqlc.New(pool), migrationConfig: migrationConfig}
+	if dsn := strings.TrimSpace(cfg.ReplicaDSN); dsn != "" {
+		replicaConfig, err := newPoolConfig(cfg, dsn, cmp.Or(cfg.MaxConns, 20), observer)
+		if err == nil {
+			replicaConfig.ConnConfig.DefaultQueryExecMode = poolConfig.ConnConfig.DefaultQueryExecMode
+			replicaConfig.ConnConfig.Tracer = poolConfig.ConnConfig.Tracer
+			var replica *pgxpool.Pool
+			if replica, err = pgxpool.NewWithConfig(context.Background(), replicaConfig); err == nil {
+				d.replica = &replicaState{pool: replica}
+			}
+		}
+		if err != nil {
+			_ = d.Close()
+			return nil, fmt.Errorf("open postgres read replica: %w", err)
+		}
+	}
+	return d, nil
 }
 
 // newPoolConfig parses dsn for a pool. Its connections start with the session settings unless cfg says the role
@@ -171,6 +189,9 @@ func (d *DB) Close() error {
 	sqlErr := d.sql.Close()
 	d.pool.Close()
 	d.direct.Close()
+	if d.replica != nil {
+		d.replica.pool.Close()
+	}
 	return sqlErr
 }
 

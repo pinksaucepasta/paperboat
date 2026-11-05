@@ -16,7 +16,7 @@ func registerServerNodes(mux *http.ServeMux, opts Options) {
 		return
 	}
 	mux.Handle("GET /v1/admin/server-nodes", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nodes, err := servernodes.List(r.Context(), enroller.DB)
+		nodes, err := servernodes.List(r.Context(), replicaRead(r, enroller.DB))
 		if err != nil {
 			writeError(w, r, 503, "server_nodes_unavailable", "Server nodes could not be read. Retry shortly.", err)
 			return
