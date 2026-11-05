@@ -16,7 +16,7 @@ import (
 // the primary role. One identity is on the network at any time.
 func TestStandbyCarrierStartsItsNetworkOnlyAfterTheServingCarrierReleased(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "carrier-0.lock")
-	unlockServing, err := lockTerminalCarrier(lock)
+	unlockServing, err := lockCarrierFile(lock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestStandbyCarrierStartsItsNetworkOnlyAfterTheServingCarrierReleased(t *tes
 	if err := carrier.ReleaseNetwork(ctx); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := lockTerminalCarrier(lock)
+	unlock, err := lockCarrierFile(lock)
 	if err != nil {
 		t.Fatal("the primary role was not released with the network", err)
 	}

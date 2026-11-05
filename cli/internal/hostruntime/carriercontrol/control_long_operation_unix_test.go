@@ -34,7 +34,7 @@ func TestCarrierControlAnswersOperationsLongerThanFiveSeconds(t *testing.T) {
 	sha := strings.Repeat("a", 64)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	server := &Server{Endpoint: endpoint, Token: token, SHA256: sha, SSH: ssh, Ready: make(chan error, 1), MoveTerminals: func(ctx context.Context, _ []byte) error {
+	server := &Server{Endpoint: endpoint, Token: token, SHA256: sha, SSH: ssh, Ready: make(chan error, 1), ReleaseNetwork: func(ctx context.Context) error {
 		select {
 		case <-time.After(6 * time.Second):
 			return nil
@@ -51,8 +51,8 @@ func TestCarrierControlAnswersOperationsLongerThanFiveSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.MoveTerminals(ctx, []byte("offer")); err != nil {
-		t.Fatal("a 6 s terminal move lost its answer:", err)
+	if err := client.ReleaseNetwork(ctx); err != nil {
+		t.Fatal("a 6 s network release lost its answer:", err)
 	}
 	cancel()
 	<-done

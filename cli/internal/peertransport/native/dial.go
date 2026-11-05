@@ -9,8 +9,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/quic-go/quic-go"
 )
 
@@ -78,36 +76,6 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	// after one second. Do not return an intermediate 503 while recovery runs.
 	dialCtx, cancel := relayWithheldDeadline(ctx, o.authority)
 	defer cancel()
-	// Private HTTP/3 negotiates its own ALPN, which a generation does not serve.
-	if class != peerquic.ClassPreview {
-		o.mu.Lock()
-		route := o.routes[peerID]
-		o.mu.Unlock()
-		if session := o.dialRoute(dialCtx, peerID, nil, class); session != nil {
-			return session, nil
-		}
-		declined := false
-		if route != nil && dialCtx.Err() == nil {
-			// The route's generation did not answer: do not try it again from the configuration.
-			if raw, err := route.offer.MarshalBinary(); err == nil {
-				o.authority.DeclineCarrierOffer(peerID, raw)
-				declined = true
-			}
-		}
-		session, offerDeclined := o.dialOffered(dialCtx, peerID, class)
-		if session != nil {
-			return session, nil
-		}
-		// A machine that moved to a new generation answers only that generation (its discovery key is the
-		// generation's, which the primary engine drops as unknown), so the primary dial below cannot
-		// succeed until the configuration names the new offer. Fetch it and offer once more inside this
-		// dial's budget instead of waiting for the next operation's refresh (macOS first-ssh no-path).
-		if (declined || offerDeclined) && dialCtx.Err() == nil && o.refreshOffer(dialCtx) {
-			if session, _ := o.dialOffered(dialCtx, peerID, class); session != nil {
-				return session, nil
-			}
-		}
-	}
 	for {
 		session, err := o.dialAttempt(dialCtx, descriptor, peerID, class)
 		if err == nil {
@@ -124,92 +92,4 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 			return nil, err
 		}
 	}
-}
-
-// dialOffered opens a new connection on the carrier generation the peer's signed configuration names, so a
-// client that was not connected when the machine moved needs neither the old carrier nor a candidate
-// exchange. The client's meow over a common relay admits it on the generation, as a fresh peer is admitted
-// on the primary (mesh onMeow; Tailscale learns a peer's DERP route from its packets the same way,
-// ~/ref/tailscale/wgengine/magicsock/derp.go addDerpPeerRoute). Without a common relay the generation
-// cannot learn this client's discovery key, so the caller dials the primary as before. Success sets the
-// route, so later dials skip the configuration.
-// declined reports that an offer was tried or refused and is withdrawn from the configuration's view.
-func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.Class) (session *Session, declined bool) {
-	raw := o.authority.PeerCarrierOffer(peerID)
-	if raw == nil {
-		return nil, false
-	}
-	peer, err := o.authority.Peer(peerID)
-	if err != nil {
-		return nil, false
-	}
-	offer, err := ParseCarrierOffer(raw)
-	if err != nil || !offer.Claims.AllApplications || offer.verify(peer, serverclock.Now()) != nil {
-		o.authority.DeclineCarrierOffer(peerID, raw)
-		return nil, true
-	}
-	// One bounded attempt: a generation that is gone must not use the caller's whole budget (every dial
-	// repeated it, five terminals timed out in a row). A failure with the caller still waiting retires the offer.
-	attempt, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
-	defer cancel()
-	network, release, err := o.getCarrierNetwork(attempt, offer)
-	var transport *peerquic.Session
-	if err == nil {
-		if transport, err = o.connectOffered(attempt, network, peerID, peer, offer, class); err != nil {
-			release()
-		}
-	}
-	if err != nil {
-		declined = ctx.Err() == nil
-		if declined {
-			o.authority.DeclineCarrierOffer(peerID, raw)
-		}
-		diagnosticlog.TryInfo("carrier route", "stage", "offered_dial", "failed", true, "error_type", moveErrorType(err))
-		return nil, declined
-	}
-	session, err = o.carrierSession(peerID, peer, offer, transport, network, release)
-	if err != nil {
-		return nil, false
-	}
-	o.setRoute(ctx, peerID, offer)
-	diagnosticlog.TryInfo("carrier route", "stage", "offered_dial", "path", network.PeerPath(peerID))
-	return session, false
-}
-
-// refreshOffer asks the control plane for the current signed configuration, bounded like an offered attempt.
-func (o *Owner) refreshOffer(ctx context.Context) bool {
-	if o.refreshAuthority == nil {
-		return false
-	}
-	refresh, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
-	defer cancel()
-	return o.refreshAuthority(refresh) == nil
-}
-
-// connectOffered tries each common relay once, each attempt bounded by carrierAttemptLimit.
-func (o *Owner) connectOffered(ctx context.Context, network *tailnet.CarrierNetwork, peerID string, peer tailnet.NetworkBinding, offer CarrierOffer, class peerquic.Class) (*peerquic.Session, error) {
-	relays := network.CommonRelays(offer.Claims.RelayNodeIDs, o.authority.RegionalStatus().NodeID)
-	if len(relays) == 0 {
-		return nil, ErrInvalid
-	}
-	if err := network.AddPeer(peerID, offer.Claims.DiscoPublicKey, offer.Claims.Endpoints); err != nil {
-		return nil, err
-	}
-	var errs error
-	for _, relay := range relays {
-		attempt, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
-		err := waitRelay(attempt, nil, func() error { return network.PreparePeerRelay(attempt, peerID, relay) })
-		var transport *peerquic.Session
-		if err == nil {
-			transport, err = o.dialCarrierPacket(attempt, network, peerID, o.carrierTLS(peerID, peer, offer), class)
-		}
-		cancel()
-		if err == nil {
-			return transport, nil
-		}
-		if errs = errors.Join(errs, err); ctx.Err() != nil {
-			break
-		}
-	}
-	return nil, errs
 }

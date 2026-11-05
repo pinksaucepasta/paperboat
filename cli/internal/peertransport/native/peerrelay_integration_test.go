@@ -1,7 +1,6 @@
 package native_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -145,10 +144,7 @@ func (f *directFilter) relayCounter(p []byte) *atomic.Uint64 {
 	return nil
 }
 
-func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) { testAutomaticPeerRelay(t, false) }
-func TestDelegatedCarrierUsesPeerRelayWithDirectBlocked(t *testing.T) {
-	testAutomaticPeerRelay(t, true)
-}
+func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) { testAutomaticPeerRelay(t) }
 
 // Under CPU contention the peer relay path is found only after a fresh peer's
 // first WireGuard initiation, which wireguard-go repeats after 5s. Retiring the
@@ -167,10 +163,10 @@ func TestPeerRelayOnlyDialUnderCPUStarvation(t *testing.T) {
 			}
 		}
 	}()
-	testAutomaticPeerRelay(t, true)
+	testAutomaticPeerRelay(t)
 }
 
-func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
+func testAutomaticPeerRelay(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real UDP peer relay integration")
 	}
@@ -286,31 +282,7 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		t.Fatal(err)
 	}
 	defer clientOwner.Close()
-	metered := make(chan native.MeterBinding, 1)
-	var generation *tailnet.CarrierNetwork
-	var identity *native.CarrierIdentity
-	serverOwner, err := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS, MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
-		if binding.StreamID == "delegated-relay" {
-			metered <- binding
-		}
-		return conn
-	}, PrepareCarrier: func(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
-		if identity == nil || !bytes.Equal(request.Offer.Claims.Certificate, identity.Offer.Claims.Certificate) {
-			return native.CarrierOffer{}, native.ErrInvalid
-		}
-		if err := generation.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
-			return native.CarrierOffer{}, err
-		}
-		if err := generation.PreparePeerRelay(ctx, peer, request.RelayNodeID); err != nil {
-			return native.CarrierOffer{}, err
-		}
-		socket, err := generation.Dial(ctx, peer)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		socket.Close()
-		return identity.Offer, nil
-	}})
+	serverOwner, err := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,10 +305,8 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
 		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
 	}
-	var descriptor mesh.Addr
 	var previousClient, previousServer uint64
 	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
-		descriptor = address
 		readyCtx, cancelReady := context.WithTimeout(ctx, 8*time.Second)
 		if readyErr := serverAuthority.PrepareRegional(readyCtx, ""); readyErr != nil {
 			cancelReady()
@@ -365,49 +335,6 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		previousClient, previousServer = sent, received
 		renewRelayAuthority()
 	})
-
-	if delegatedOnly {
-		renewRelayAuthority()
-		var err error
-		identity, err = serverOwner.PrepareCarrierIdentity()
-		if err != nil {
-			t.Fatal(err)
-		}
-		generation, err = startDelegatedRelayEcho(t, ctx, serverOwner, identity)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer generation.Close()
-		old, err := clientOwner.Dial(ctx, descriptor, "machine_slice", peerquic.ClassInteractive)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer old.Close()
-		next, err := old.DialCarrier(ctx, identity.Offer)
-		if err != nil {
-			t.Fatalf("delegated carrier failed with direct UDP blocked: %v; peerrelay=%+v derp=%+v handshake=%d/%d data=%d/%d", err, udp.Snapshot(), relay.Snapshot(), clientFilter.relayHandshake.Load(), serverFilter.relayHandshake.Load(), clientFilter.relayData.Load(), serverFilter.relayData.Load())
-		}
-		defer next.Close()
-		stream := openCarrierTerminal(t, ctx, next, "delegated-relay")
-		defer stream.Close()
-		beforeA, beforeB := clientFilter.relayData.Load(), serverFilter.relayData.Load()
-		carrierEcho(t, stream)
-		if clientFilter.relayData.Load() <= beforeA || serverFilter.relayData.Load() <= beforeB {
-			t.Fatal("delegated terminal did not use the UDP peer relay in both directions")
-		}
-		select {
-		case binding := <-metered:
-			if mode, _ := binding.Path("upload"); mode != "relay" {
-				t.Fatal("delegated terminal metering claimed a direct path", mode)
-			}
-		case <-ctx.Done():
-			t.Fatal("delegated terminal was not metered")
-		}
-		if path := generation.PeerPath("cli_slice"); path != "peer_relay" {
-			t.Fatal("delegated carrier reported the wrong path", path)
-		}
-		return
-	}
 
 	renewRelayAuthority()
 	clientFilter.allowDERP.Store(true)

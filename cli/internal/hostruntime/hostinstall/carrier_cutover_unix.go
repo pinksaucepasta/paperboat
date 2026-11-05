@@ -25,7 +25,6 @@ import (
 // control/controlclient/direct.go register reuses persist.PrivateNodeKey).
 type unixCarrierUpgrade struct {
 	candidate, previous CarrierConfig
-	terminals           *terminalHandover
 	capability          []byte
 }
 
@@ -73,15 +72,7 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 		return nil, err
 	}
 	diagnosticlog.TryInfo("carrier cutover", "stage", "candidate_ready")
-	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
-	if err != nil {
-		return nil, err
-	}
-	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
-	if moveErr != nil {
-		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
-	}
-	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals, capability: append([]byte(nil), capability...)}, nil
+	return &unixCarrierUpgrade{candidate: candidate, previous: retained, capability: append([]byte(nil), capability...)}, nil
 }
 
 // switchNetwork hands the machine's network to the candidate: the serving
@@ -129,19 +120,18 @@ func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
 		return nil
 	}
 	clear(u.capability)
-	err := u.terminals.finish(ctx, failed)
 	if failed {
-		return err
+		return nil
 	}
 	// The update is committed; reconciliation retries a retirement that fails here.
 	if _, retireErr := retireCarrierGeneration(context.WithoutCancel(ctx), u.previous); retireErr != nil {
 		diagnosticlog.TryWarn("carrier retirement deferred", "stage", "retire_previous")
 	}
-	return err
+	return nil
 }
 
 // retireCarrierGeneration stops a non-active generation from starting at boot and
-// asks its running process to finish its open streams and exit (service.QuitCarrier).
+// asks a process still running to exit (service.QuitCarrier).
 // It reports whether the process still runs. Repeating it is harmless.
 func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error) {
 	installer, err := carrierInstallerPending(c)

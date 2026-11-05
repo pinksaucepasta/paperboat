@@ -201,31 +201,25 @@ type Config struct {
 	RefreshAuthority func(context.Context) error
 	MeterIncoming    func(net.Conn, MeterBinding) net.Conn
 	// AdmitOffline records and gates sessions started without Paperboat; nil refuses them all.
-	AdmitOffline   func(context.Context, OfflineAdmission) error
-	PrepareCarrier func(context.Context, string, CarrierExchange) (CarrierOffer, error)
+	AdmitOffline func(context.Context, OfflineAdmission) error
 }
 
 type Owner struct {
-	authority         *tailnet.Authority
-	tls               *tls.Config
-	observe           func(Event)
-	refreshAuthority  func(context.Context) error
-	meterIncoming     func(net.Conn, MeterBinding) net.Conn
-	admitOffline      func(context.Context, OfflineAdmission) error
-	prepareCarrier    func(context.Context, string, CarrierExchange) (CarrierOffer, error)
-	carrierMu         sync.Mutex
-	carrierNetworks   map[[32]byte]*carrierNetworkRef
-	newCarrierNetwork func(context.Context, [32]byte, func(mesh.ConnPacketConn)) (*tailnet.CarrierNetwork, error)
-	ctx               context.Context
-	cancel            context.CancelFunc
-	mu                sync.Mutex
-	closed            bool
-	sessions          map[*Session]struct{}
-	handshakes        map[string]*peerHandshake
-	restarted         map[string]bool          // peers that closed a dialed session on purpose; guarded by mu
-	routes            map[string]*carrierRoute // client: each machine's active carrier generation; guarded by mu
-	relayPaths        map[string]time.Time     // peer relay paths found by a failed handshake, kept until; guarded by mu
-	workers           sync.WaitGroup
+	authority        *tailnet.Authority
+	tls              *tls.Config
+	observe          func(Event)
+	refreshAuthority func(context.Context) error
+	meterIncoming    func(net.Conn, MeterBinding) net.Conn
+	admitOffline     func(context.Context, OfflineAdmission) error
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.Mutex
+	closed           bool
+	sessions         map[*Session]struct{}
+	handshakes       map[string]*peerHandshake
+	restarted        map[string]bool      // peers that closed a dialed session on purpose; guarded by mu
+	relayPaths       map[string]time.Time // peer relay paths found by a failed handshake, kept until; guarded by mu
+	workers          sync.WaitGroup
 }
 
 func NewOwner(config Config) (*Owner, error) {
@@ -236,7 +230,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, prepareCarrier: config.PrepareCarrier, carrierNetworks: make(map[[32]byte]*carrierNetworkRef), newCarrierNetwork: config.Authority.NewCarrierNetwork, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, admitOffline: config.AdmitOffline, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {
@@ -313,7 +307,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", tailnet.ErrAdmission)
 	}
-	session, err := newSession(o, peerID, peer, quicSession, false)
+	session, err := newSession(o, peerID, peer, quicSession)
 	if err != nil {
 		_ = quicSession.Close()
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
@@ -397,7 +391,7 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				}
 				return
 			}
-			session, err := newSession(o, peer.EndpointID, peer, quicSession, false)
+			session, err := newSession(o, peer.EndpointID, peer, quicSession)
 			if err != nil {
 				_ = quicSession.Close()
 				o.emit(Event{Kind: "accept_failed", PeerID: peer.EndpointID, Err: err})
@@ -495,7 +489,6 @@ func (o *Owner) Close() error {
 		go func() { defer closing.Done(); failures[i] = session.Close() }()
 	}
 	closing.Wait()
-	o.closeCarrierNetworks()
 	result := errors.Join(failures...)
 	result = errors.Join(result, o.authority.Close())
 	o.workers.Wait()

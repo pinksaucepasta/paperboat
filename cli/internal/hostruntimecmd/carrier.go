@@ -94,7 +94,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 	if err := carrier.Start(runCtx); err != nil {
 		return err
 	}
-	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, MoveTerminals: carrier.MoveTerminals, StartNetwork: carrier.StartNetwork, Ready: make(chan error, 1)}
+	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, StartNetwork: carrier.StartNetwork, Ready: make(chan error, 1)}
 	released := make(chan struct{})
 	privateControl.ReleaseNetwork = func(ctx context.Context) error {
 		defer close(released)

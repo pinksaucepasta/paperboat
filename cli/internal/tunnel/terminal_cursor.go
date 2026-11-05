@@ -1,32 +1,32 @@
 package tunnel
 
-// Carrier output keeps byte/cursor boundaries while the supervisor queues it.
+// Terminal output keeps byte/cursor boundaries while the supervisor queues it.
 // The local API must never acknowledge a producer cursor ahead of bytes read
 // from that queue: a local daemon crash would otherwise skip undelivered data.
-type carrierOutputBoundary struct {
+type outputBoundary struct {
 	end      uint64
 	sequence uint64
 	linear   bool
 }
 
-type carrierTerminalSource struct {
+type cursorTerminalSource struct {
 	*helperTerminalConn
-	owner *carrierTerminal
+	owner *cursorTerminal
 }
 
-func (s *carrierTerminalSource) Read(data []byte) (int, error) {
+func (s *cursorTerminalSource) Read(data []byte) (int, error) {
 	n, err := s.helperTerminalConn.Read(data)
 	if n > 0 {
 		c := s.owner
 		c.outputMu.Lock()
 		c.produced += uint64(n)
-		c.boundaries = append(c.boundaries, carrierOutputBoundary{end: c.produced, sequence: s.readSequence, linear: s.readLinear})
+		c.boundaries = append(c.boundaries, outputBoundary{end: c.produced, sequence: s.readSequence, linear: s.readLinear})
 		c.outputMu.Unlock()
 	}
 	return n, err
 }
 
-func (c *carrierTerminal) Read(data []byte) (int, error) {
+func (c *cursorTerminal) Read(data []byte) (int, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}

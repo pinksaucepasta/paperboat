@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func lockTerminalCarrier(path string) (func() error, error) {
+func lockCarrierFile(path string) (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}

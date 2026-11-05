@@ -54,7 +54,6 @@ type Server struct {
 	SessionOnly       bool
 	Identity          *OwnerIdentity
 	requests          atomic.Int64
-	CarrierControl    func(context.Context, CarrierRequest) (CarrierResponse, error)
 	Retire            func(context.Context) error
 	admission         sync.RWMutex
 	retired           atomic.Bool
@@ -302,8 +301,6 @@ func (s *Server) handler() http.Handler {
 					}
 				}
 				result = json.RawMessage(`{}`)
-			} else if parts[1] == "carrier" {
-				result, err = s.carrier(ctx, body)
 			} else if parts[1] != "health" {
 				err = session.ErrInvalidSession
 			} else {

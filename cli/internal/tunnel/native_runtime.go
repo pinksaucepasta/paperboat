@@ -397,7 +397,7 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 				connection.Close()
 				return nil, ErrPeerTerminalInvalid
 			}
-			return newCarrierTerminal(ctx, helper, session, application, target, now, sequence, sequenceSink)
+			return newCursorTerminal(ctx, helper, sequence, sequenceSink), nil
 		}
 		return connection, nil
 	}

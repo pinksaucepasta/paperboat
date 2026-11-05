@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,8 +32,6 @@ type IndependentSessionOwner struct {
 	bridge       *workloadbridge.Server
 	descriptor   sessionowner.Descriptor
 	discardEmpty atomic.Bool
-	carrierMu    sync.Mutex
-	carrier      *terminalCarrier
 	lifetime     context.Context
 	catalogRoot  string
 }
@@ -109,7 +106,6 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 	}
 	owner := &IndependentSessionOwner{sessions: manager, executions: executions, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
 	owner.bridge = &workloadbridge.Server{
-		CarrierControl:  owner.controlCarrier,
 		ArchiveMetadata: archiveReader,
 		Endpoint:        d.Endpoint, Token: token, Sessions: manager, SessionOnly: true,
 		Executions: &execprocess.RemoteServer{Manager: executions, MaximumReaders: 4096},
@@ -131,9 +127,6 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 			if err := manager.Retire(ctx); err != nil {
 				return err
 			}
-			if err := owner.stopCarrier(ctx); err != nil {
-				return err
-			}
 			owner.discardEmpty.Store(len(manager.List()) == 0)
 			return nil
 		}, Ready: make(chan error, 1), MaximumConcurrent: 256,
@@ -148,7 +141,7 @@ func (o *IndependentSessionOwner) Run(ctx context.Context) error { return o.brid
 // confirms quiescence over authenticated IPC; explicit uninstall can terminate
 // the service's remaining shells as part of removing Paperboat.
 func (o *IndependentSessionOwner) Close(ctx context.Context) error {
-	if err := errors.Join(o.stopCarrier(ctx), o.sessions.Shutdown(ctx), o.executions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
+	if err := errors.Join(o.sessions.Shutdown(ctx), o.executions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
 		return err
 	}
 	if !o.discardEmpty.Load() {

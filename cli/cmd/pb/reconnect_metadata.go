@@ -16,7 +16,6 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 	frame, _ := runtime.CallersFrames([]uintptr{record.PC}).Next()
 	owners := map[string]string{
 		"terminal output hop":     "/internal/diagnostics.",
-		"terminal carrier move":   "/internal/peertransport/native.",
 		"update preparation step": "/internal/diagnostics.",
 		"terminal runtime sample": "/internal/diagnostics.",
 		"native underlay packet":  "/internal/peertransport/mesh.",
@@ -54,22 +53,12 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 		"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
 		"trigger": true, "application_close": true, "stage": true, "failed": true,
-		"sessions": true, "path_category": true, "predicate_present": true, "allowed": true,
+		"sessions": true, "predicate_present": true, "allowed": true,
 		"resource_present": true, "reason": true, "error_type": true, "capability": true,
 		"peer_found": true, "resource_found": true, "capability_found": true, "direction_found": true,
 		"duration_ms": true,
 	}
 	record.Attrs(func(attr slog.Attr) bool {
-		if record.Message == "terminal carrier move" && attr.Key == "path" {
-			if attr.Value.Kind() != slog.KindString {
-				return true
-			}
-			switch attr.Value.String() {
-			case "direct-punched", "peer_relay", "regional_relay":
-				fields["path_category"] = attr.Value.String()
-			}
-			return true
-		}
 		if !keys[attr.Key] {
 			return true
 		}

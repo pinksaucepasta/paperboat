@@ -167,7 +167,6 @@ type helperTerminalConn struct {
 	readMu             sync.Mutex
 	readSequence       uint64
 	readLinear         bool
-	skipThrough        uint64 // written by attachPrepared before the first Read after a carrier move
 	current            *helperOutput
 	out                chan helperOutput
 	done               chan struct{}
@@ -180,7 +179,6 @@ type helperTerminalConn struct {
 	responses map[string]chan helperFrame
 
 	attachmentID              string
-	resumeSecret              []byte // the host's current resume secret for this attachment; never logged
 	streamID                  uint32
 	generation                uint64
 	inputSeq                  atomic.Uint64
@@ -280,9 +278,6 @@ func helperCapabilities() []string {
 // an already-running one, so the common fresh-session startup needs two round
 // trips (create, attach) instead of three (snapshot, create, attach).
 func (c *helperTerminalConn) initialize(ctx context.Context) error {
-	if secret, ok := ctx.Value(terminalResumeKey{}).([]byte); ok {
-		return c.resume(ctx, secret)
-	}
 	if c.target.Shared() {
 		return c.initializeShared(ctx)
 	}
@@ -375,7 +370,6 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) error {
 	var response struct {
 		Result struct {
-			ResumeSecret  []byte `json:"resume_secret"`
 			StreamID      uint32 `json:"stream_id"`
 			AttachmentID  string `json:"attachment_id"`
 			InputSequence uint64 `json:"input_sequence"`
@@ -396,7 +390,6 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	}
 	c.attachmentID = response.Result.AttachmentID
 	c.target.InputAttachmentID = response.Result.AttachmentID
-	c.resumeSecret = response.Result.ResumeSecret
 	c.streamID = response.Result.StreamID
 	c.inputSeq.Store(response.Result.InputSequence)
 	decided, resend, unconfirmed := c.inputQueue.Reconcile(response.Result.InputSequence)
@@ -672,9 +665,7 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 			}
 			return 0, io.EOF
 		}
-		if !c.skipDelivered(&output) {
-			c.current = &output
-		}
+		c.current = &output
 	}
 	start := uint64(0)
 	if c.current.endSequence >= uint64(len(c.current.data)) {
@@ -700,26 +691,6 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 		}
 	}
 	return n, nil
-}
-
-// skipDelivered trims output a carrier move's old link already delivered. It
-// reports whether nothing of the chunk is left. A non-linear chunk that only
-// partly overlaps is kept whole: its bytes cannot be split by sequence.
-func (c *helperTerminalConn) skipDelivered(output *helperOutput) bool {
-	skip := c.skipThrough
-	if skip == 0 || output.endSequence == 0 {
-		return false
-	}
-	if output.endSequence <= skip {
-		return true
-	}
-	c.skipThrough = 0
-	if output.byteCursor && output.endSequence >= uint64(len(output.data)) {
-		if start := output.endSequence - uint64(len(output.data)); start < skip {
-			output.data = output.data[skip-start:]
-		}
-	}
-	return false
 }
 
 func (c *helperTerminalConn) queueAck(sequence uint64) {

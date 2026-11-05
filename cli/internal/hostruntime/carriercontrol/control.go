@@ -20,7 +20,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 )
 
 const schema = "paperboat.carrier-control/v1"
@@ -38,7 +37,6 @@ type request struct {
 	SourceSHA256 string `json:"source_sha256,omitempty"`
 	WorkerID     string `json:"worker_id,omitempty"`
 	WorkerEpoch  uint64 `json:"worker_epoch,omitempty"`
-	Offer        []byte `json:"offer,omitempty"`
 }
 
 type response struct {
@@ -58,7 +56,7 @@ func validHash(value string) bool {
 }
 
 func (r request) valid() bool {
-	if r.Schema != schema || !validHash(r.SHA256) || len(r.Offer) != 0 && r.Operation != "move-terminals" {
+	if r.Schema != schema || !validHash(r.SHA256) {
 		return false
 	}
 	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" {
@@ -68,8 +66,6 @@ func (r request) valid() bool {
 		return false
 	}
 	switch r.Operation {
-	case "move-terminals":
-		return r.SourceSHA256 == "" && len(r.Offer) > 0 && len(r.Offer) <= 8<<10
 	case "health", "retire-ssh", "resume-ssh", "open-ssh", "release-network", "start-network":
 		return r.SourceSHA256 == ""
 	case "retire-source":
@@ -106,11 +102,10 @@ func decode(reader io.Reader, value any) error {
 }
 
 type Server struct {
-	Endpoint      string
-	Token         []byte
-	SHA256        string
-	SSH           *managedssh.Host
-	MoveTerminals func(context.Context, []byte) error
+	Endpoint string
+	Token    []byte
+	SHA256   string
+	SSH      *managedssh.Host
 	// ReleaseNetwork takes the machine's network down on the serving carrier;
 	// StartNetwork brings it up on the standby one (one identity at a time).
 	ReleaseNetwork func(context.Context) error
@@ -154,12 +149,6 @@ func (s *Server) handler() http.Handler {
 		} else {
 			var operationErr error
 			switch req.Operation {
-			case "move-terminals":
-				if s.MoveTerminals == nil {
-					operationErr = ErrUnavailable
-				} else {
-					operationErr = s.MoveTerminals(r.Context(), req.Offer)
-				}
 			case "release-network":
 				operationErr = ErrUnavailable
 				if s.ReleaseNetwork != nil {
@@ -368,10 +357,7 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 		return response{}, ErrInvalid
 	}
 	timeout := 5 * time.Second
-	switch req.Operation {
-	case "move-terminals":
-		timeout = native.CarrierMoveBudget + 5*time.Second
-	case "release-network", "start-network":
+	if req.Operation == "release-network" || req.Operation == "start-network" {
 		timeout = networkHandoffBudget
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -441,14 +427,8 @@ func (c *Client) ReleaseNetwork(ctx context.Context) error { return c.call(ctx, 
 // StartNetwork has the standby carrier bring the machine's network up on the same identity.
 func (c *Client) StartNetwork(ctx context.Context) error { return c.call(ctx, "start-network", "") }
 
-func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
-	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "move-terminals", Offer: offer})
-	return err
-}
-
 // networkHandoffBudget bounds one half of the network handoff; the pause a client sees is far shorter.
 const networkHandoffBudget = 15 * time.Second
 
-// controlWriteTimeout exceeds every client-side operation bound (move-terminals
-// CarrierMoveBudget + 5 s).
-const controlWriteTimeout = native.CarrierMoveBudget + 10*time.Second
+// controlWriteTimeout exceeds every client-side operation bound.
+const controlWriteTimeout = networkHandoffBudget + 5*time.Second

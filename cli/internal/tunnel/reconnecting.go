@@ -84,7 +84,7 @@ const (
 )
 
 type reconnectingOptions struct {
-	plannedMovesOnly  bool
+	passive           bool
 	outputQueueChunks int
 	outputBatchWindow time.Duration
 	observer          func(ReconnectEvent)
@@ -130,16 +130,16 @@ const flowControlStallThreshold = 50 * time.Millisecond
 // ReconnectingConn supervises unexpected transport loss while one session
 // loop retains ownership of stdin. Failed writes are never replayed.
 type ReconnectingConn struct {
-	plannedMovesOnly bool
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.RWMutex
-	current          Conn
-	available        chan struct{}
-	redial           atomic.Bool
-	probed           atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
-	probing          atomic.Bool
-	linkStalled      atomic.Bool
+	passive     bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.RWMutex
+	current     Conn
+	available   chan struct{}
+	redial      atomic.Bool
+	probed      atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
+	probing     atomic.Bool
+	linkStalled atomic.Bool
 	// refused is a permanent refusal the stalled-link probe met (access revoked); supervise ends with it.
 	refused           atomic.Pointer[error]
 	reconnect         ReconnectFunc
@@ -207,7 +207,7 @@ func NewObservedReconnectingConn(ctx context.Context, initial Conn, maxRetries i
 		option(&options)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	c := &ReconnectingConn{ctx: runCtx, cancel: cancel, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: min(delay, time.Second), out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer, plannedMovesOnly: options.plannedMovesOnly}
+	c := &ReconnectingConn{ctx: runCtx, cancel: cancel, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: min(delay, time.Second), out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer, passive: options.passive}
 	go c.supervise(initial)
 	return c
 }
@@ -233,7 +233,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 				if stalled {
 					c.recordOldLink(connection, "supervise", "stalled", nil)
 					c.notify(ReconnectStalled)
-					if !c.plannedMovesOnly {
+					if !c.passive {
 						go c.probeStalled(stalledConn, connection)
 					}
 				} else {
@@ -314,7 +314,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		// pollReconnect loop (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210), so a held terminal outlives
 		// many peer restarts; a link that dies right after each reattach keeps spending one budget (51db8129).
 		// ET dials immediately on loss, then sleeps only after a failed attempt.
-		if c.plannedMovesOnly || recovery == nil || time.Since(attachedAt) >= reattachRefillAfter {
+		if c.passive || recovery == nil || time.Since(attachedAt) >= reattachRefillAfter {
 			recovery = reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: func(int) time.Duration {
 				if firstAttempt {
 					firstAttempt = false

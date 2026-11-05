@@ -19,7 +19,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/offlineaudit"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
@@ -123,7 +122,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 	}
 	peer, err := newProductionNativePeerService(productionNativePeerConfig{
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
-		ownerCatalog: environ("PAPERBOAT_SESSION_OWNER_CATALOG"), stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
+		stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
 		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
 		networkEvents: events.Subscribe(carrierRenewalTopics...),
 	})
@@ -142,7 +141,7 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 func lockCarrierSlot(root string) (int, func() error, error) {
 	var failures error
 	for slot := range carrierSlots {
-		unlock, err := lockTerminalCarrier(filepath.Join(root, fmt.Sprintf("carrier-%d.lock", slot)))
+		unlock, err := lockCarrierFile(filepath.Join(root, fmt.Sprintf("carrier-%d.lock", slot)))
 		if err == nil {
 			return slot, unlock, nil
 		}
@@ -209,7 +208,7 @@ func (c *ProductionCarrier) StartNetwork(ctx context.Context) error {
 		return ErrProductionInvalid
 	}
 	for c.primaryLock != "" && c.unlockPrimary == nil {
-		unlock, err := lockTerminalCarrier(c.primaryLock)
+		unlock, err := lockCarrierFile(c.primaryLock)
 		if err == nil {
 			c.unlockPrimary = unlock
 			break
@@ -289,18 +288,4 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	result := errors.Join(peerErr, authErr, usageErr, unlockErr)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
 	return result
-}
-
-func (c *ProductionCarrier) MoveTerminals(ctx context.Context, encoded []byte) error {
-	offer, err := native.ParseCarrierOffer(encoded)
-	if err != nil {
-		return err
-	}
-	c.peer.mu.Lock()
-	generation := c.peer.current
-	c.peer.mu.Unlock()
-	if generation == nil {
-		return ErrProductionInvalid
-	}
-	return generation.owner.OfferCarrier(ctx, offer)
 }
