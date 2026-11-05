@@ -1190,7 +1190,6 @@ SELECT r.* FROM control_routes r
 JOIN control_environments e ON e.id = r.environment_id
 JOIN control_connector_generations c ON c.environment_id = r.environment_id AND c.connector_id = r.connector_id
 JOIN user_machines m ON m.id = c.machine_id AND m.environment_id = r.environment_id
-JOIN control_tunnel_nodes n ON n.id = c.edge_node_id AND n.id = r.applied_node_id
 WHERE r.environment_id = sqlc.arg(environment_id)
   AND r.kind = 'runtime_https_wss'
   AND paperboat.runtime_carrier_current(r.id,true)
@@ -1199,7 +1198,7 @@ WHERE r.environment_id = sqlc.arg(environment_id)
   AND r.applied_revision >= r.desired_revision
   AND r.applied_generation = c.generation
   AND e.desired_state = 'active' AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND c.state = 'admitted'
-  AND n.state = 'ready' AND n.ready = true
+  AND r.applied_node_id = c.edge_node_id
 ORDER BY r.id
 LIMIT 1;
 
@@ -1209,7 +1208,6 @@ SELECT DISTINCT ON (r.environment_id) r.environment_id, r.public_host FROM contr
 JOIN control_environments e ON e.id = r.environment_id
 JOIN control_connector_generations c ON c.environment_id = r.environment_id AND c.connector_id = r.connector_id
 JOIN user_machines m ON m.id = c.machine_id AND m.environment_id = r.environment_id
-JOIN control_tunnel_nodes n ON n.id = c.edge_node_id AND n.id = r.applied_node_id
 WHERE r.environment_id = ANY(sqlc.arg(environment_ids)::text[])
   AND r.kind = 'runtime_https_wss'
   AND paperboat.runtime_carrier_current(r.id,true)
@@ -1218,7 +1216,7 @@ WHERE r.environment_id = ANY(sqlc.arg(environment_ids)::text[])
   AND r.applied_revision >= r.desired_revision
   AND r.applied_generation = c.generation
   AND e.desired_state = 'active' AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND c.state = 'admitted'
-  AND n.state = 'ready' AND n.ready = true
+  AND r.applied_node_id = c.edge_node_id
 ORDER BY r.environment_id, r.id;
 
 -- name: GetActiveHelperRouteForMachine :one
@@ -1226,7 +1224,6 @@ SELECT r.* FROM control_routes r
 JOIN control_environments e ON e.id = r.environment_id
 JOIN control_connector_generations c ON c.environment_id = r.environment_id AND c.connector_id = r.connector_id
 JOIN user_machines m ON m.id = c.machine_id AND m.environment_id = r.environment_id
-JOIN control_tunnel_nodes n ON n.id = c.edge_node_id AND n.id = r.applied_node_id
 WHERE m.id = sqlc.arg(machine_id)
   AND m.user_id = sqlc.arg(account_id)
   AND r.kind = 'runtime_https_wss'
@@ -1236,7 +1233,7 @@ WHERE m.id = sqlc.arg(machine_id)
   AND r.applied_revision >= r.desired_revision
   AND r.applied_generation = c.generation
   AND e.desired_state = 'active' AND m.revoked_at IS NULL AND m.deleted_at IS NULL
-  AND c.state = 'admitted' AND n.state = 'ready' AND n.ready = true
+  AND c.state = 'admitted' AND r.applied_node_id = c.edge_node_id
 ORDER BY r.id
 LIMIT 1;
 

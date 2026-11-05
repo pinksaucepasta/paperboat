@@ -621,6 +621,12 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test/v1/runtime/"+customer.Hostname {
 		t.Fatalf("customer infrastructure URL=%q error=%v", actual, err)
 	}
+	// While the active carrier's edge restarts, a valid carrier on another edge still serves (support_50a7f460).
+	exec(`UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1`, route)
+	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test/v1/runtime/"+customer.Hostname {
+		t.Fatalf("valid carrier that is not the active one: URL=%q error=%v", actual, err)
+	}
+	exec(`UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1`, route)
 	exec(`UPDATE control_tunnel_nodes SET ready=false WHERE id=$1`, backupNode)
 	if _, err := service.Attach(ctx, proof, request); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("customer outage used managed fallback: %v", err)

@@ -640,3 +640,16 @@ func TestPreviewCreateRequiresPublicOwnerSessionKind(t *testing.T) {
 		}
 	}
 }
+
+// support_50a7f460: a create that reached no machine because no edge could take it yet (an edge restart)
+// or the machine was offline is a state the caller retries, answered 409, never a 5xx.
+func TestPreviewDispatchUnreachedMachineIsNotAServerError(t *testing.T) {
+	for code, retryAfter := range map[string]string{"machine_route_moving": "2", "machine_unavailable": ""} {
+		dispatch := &previewdispatch.DispatchError{Code: code, Retryable: true, Cause: previewdispatch.ErrRouteUnavailable}
+		w := httptest.NewRecorder()
+		writePreviewDispatchError(w, httptest.NewRequest(http.MethodPost, "/v1/previews", nil), dispatch, dispatch)
+		if w.Code != http.StatusConflict || w.Header().Get("Retry-After") != retryAfter || !strings.Contains(w.Body.String(), `"`+code+`"`) {
+			t.Fatalf("%s: status=%d Retry-After=%q body=%s", code, w.Code, w.Header().Get("Retry-After"), w.Body.String())
+		}
+	}
+}

@@ -67,13 +67,14 @@ func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) 
 	if len(selfHosted) == 0 {
 		return out, nil
 	}
+	// The active carrier's edge first; any other valid carrier serves while that edge restarts.
 	rows, err = database.Pool().Query(ctx, `SELECT DISTINCT ON (r.environment_id) r.environment_id,n.endpoint_host
  FROM unnest($1::text[],$2::text[]) AS w(environment_id,public_host)
  JOIN paperboat.control_routes r ON r.environment_id=w.environment_id AND r.public_host=w.public_host
  JOIN paperboat.runtime_carrier_attachments a ON a.route_id=r.id
  JOIN paperboat.control_tunnel_nodes n ON n.id=a.edge_node_id
- WHERE a.active AND paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,true)
- ORDER BY r.environment_id,a.edge_node_id`, selfHosted, selfHostedHosts)
+ WHERE paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,true)
+ ORDER BY r.environment_id,a.active DESC,a.edge_node_id`, selfHosted, selfHostedHosts)
 	if err != nil {
 		return nil, err
 	}

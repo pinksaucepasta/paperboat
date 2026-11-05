@@ -587,11 +587,13 @@ func writePreviewDispatchError(w http.ResponseWriter, r *http.Request, err error
 		return
 	}
 	switch dispatch.Code {
+	// Nothing reached the machine and the control plane is healthy: a machine or route state the caller
+	// retries, never a 5xx (support_50a7f460: an edge restart answered 503).
 	case "machine_unavailable":
-		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusServiceUnavailable, dispatch.Code, "control_unavailable", "The selected machine was unavailable before the preview request was sent. Reconnect it, then create a new preview with a new Idempotency-Key.", "changed", false, "reconnect_machine", err)
+		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The selected machine was unavailable before the preview request was sent. Reconnect it, then create a new preview with a new Idempotency-Key.", "changed", false, "reconnect_machine", err)
 	case "machine_route_moving":
 		w.Header().Set("Retry-After", "2")
-		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusServiceUnavailable, dispatch.Code, "control_unavailable", "The machine was moving to another edge and was not reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
+		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusConflict, dispatch.Code, "control_unavailable", "The machine was moving to another edge and was not reached; this attempt is marked failed. Create the preview again in a few seconds with a new Idempotency-Key.", "changed", true, "retry", err)
 	case "route_unavailable":
 		writePreviewTunnelErrorWithDiagnosticCode(w, r, http.StatusServiceUnavailable, dispatch.Code, "control_unavailable", "The selected machine route is unavailable. Refresh the machine connection, then create a new preview with a new Idempotency-Key.", "changed", false, "refresh_machine", err)
 	case "lease_expired":

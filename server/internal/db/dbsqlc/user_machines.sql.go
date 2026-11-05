@@ -3918,12 +3918,11 @@ SELECT o.id,o.user_machine_id,o.terminal_session_id,o.operation,o.attempts,
     JOIN control_environments e ON e.id = r.environment_id
     JOIN control_connector_generations c ON c.environment_id = r.environment_id AND c.connector_id = r.connector_id
     JOIN user_machines connector_machine ON connector_machine.id = c.machine_id AND connector_machine.environment_id = r.environment_id
-    JOIN control_tunnel_nodes n ON n.id = c.edge_node_id AND n.id = r.applied_node_id
     WHERE r.environment_id = m.environment_id AND r.kind = 'runtime_https_wss'
       AND r.desired_state IN ('attached','replacing') AND r.applied_revision >= r.desired_revision
       AND r.applied_generation = c.generation AND e.desired_state = 'active'
       AND connector_machine.revoked_at IS NULL AND connector_machine.deleted_at IS NULL
-      AND c.state = 'admitted' AND n.state = 'ready' AND n.ready = true
+      AND c.state = 'admitted' AND r.applied_node_id = c.edge_node_id AND paperboat.runtime_carrier_current(r.id,true)
     ORDER BY r.id LIMIT 1), '')::text AS provider_route_http_base_url
 FROM user_machine_terminal_session_operations o
 JOIN user_machines m ON m.id=o.user_machine_id
@@ -4030,12 +4029,11 @@ SELECT o.id,o.user_machine_id,o.terminal_session_id,o.operation,o.attempts,
     JOIN control_environments e ON e.id = r.environment_id
     JOIN control_connector_generations c ON c.environment_id = r.environment_id AND c.connector_id = r.connector_id
     JOIN user_machines connector_machine ON connector_machine.id = c.machine_id AND connector_machine.environment_id = r.environment_id
-    JOIN control_tunnel_nodes n ON n.id = c.edge_node_id AND n.id = r.applied_node_id
     WHERE r.environment_id = m.environment_id AND r.kind = 'runtime_https_wss'
       AND r.desired_state IN ('attached','replacing') AND r.applied_revision >= r.desired_revision
       AND r.applied_generation = c.generation AND e.desired_state = 'active'
       AND connector_machine.revoked_at IS NULL AND connector_machine.deleted_at IS NULL
-      AND c.state = 'admitted' AND n.state = 'ready' AND n.ready = true
+      AND c.state = 'admitted' AND r.applied_node_id = c.edge_node_id AND paperboat.runtime_carrier_current(r.id,true)
     ORDER BY r.id LIMIT 1), '')::text AS provider_route_http_base_url
 FROM user_machine_terminal_session_operations o
 JOIN user_machines m ON m.id=o.user_machine_id
