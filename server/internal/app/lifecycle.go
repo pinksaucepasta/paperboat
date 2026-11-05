@@ -13,6 +13,7 @@ import (
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
@@ -147,6 +148,11 @@ func (a *App) Run(ctx context.Context) error {
 		case <-workerContext.Done():
 		}
 	}()
+	if r := a.cfg.Reporting; r.Region != "" {
+		// Every node heartbeats its own row (not a leader job), so the shared record lists all equal nodes.
+		node := servernodes.Node{ID: r.Region + "-" + r.Instance, Region: r.Region, Version: buildinfo.Version, Commit: buildinfo.Commit, StartedAt: a.telemetryStartedAt}
+		go servernodes.Run(runContext, a.db, node, func(err error) { a.logger.Warn("server node heartbeat failed", "error", err) })
+	}
 	go func() {
 		err := a.worker.Run(workerContext)
 		if runContext.Err() == nil && workerContext.Err() != nil {
