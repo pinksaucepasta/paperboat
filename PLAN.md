@@ -3054,15 +3054,15 @@ Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-w
   TLS goes through tunnelcert: ACME DNS-01 for the regional name, delivered through the DB-backed DistributionHub
   (F21-52). A node serves its regional name only after its certificate arrives; until then it is `registered` but
   not in the map.
-- **Regional TLS and DNS, as built** (2026-11-05, reliability lane): one platform certificate for
-  `*.<regional_domain>` covers every region name, issued by the existing coordinator with DNS-01 (one issuance, no
-  per-region certificate, no Let's Encrypt duplicate limit across nodes). Every node already holds the shared database
-  and master key from its bundle, so it reads the active certificate from the shared store and serves TLS itself
-  with a GetCertificate that picks up renewals without restart; nothing is pushed to nodes. A node turns `active`
-  when it serves that certificate. DNS: per region, A/AAAA records for the public addresses of its active, healthy
-  nodes through the existing Cloudflare provider, written by the leader (one writer), removed when a node leaves.
-  Prior art: headscale terminates its own TLS in the control server (hscontrol/app.go:1166 getTLSSettings);
-  Teleport auth servers share one backend for their state (lib/backend/pgbk/pgbk.go).
+- **Regional TLS and DNS, as built** (2026-11-05, reliability lane): each regional node serves its own TLS for
+  `<region>.<regional_domain>` with ACME (Go autocert, HTTP-01 on :80, HTTPS on :443). The ACME cache lives in the
+  shared database (`control_server_node_acme_cache`, encrypted with the shared encryption key), so the nodes of a
+  region share one certificate and any of them answers a challenge another started; renewals need no restart. A node
+  turns `active`, and so enters the region map, only once it holds the certificate. The edge-oriented platform
+  certificate coordinator was not reused: it requires edge targets for every issuance. DNS: per region, A/AAAA
+  records for the public addresses of its active, healthy nodes, written by the leader (one writer).
+  Prior art: headscale serves its own TLS with autocert (hscontrol/app.go:1166 getTLSSettings); Teleport auth
+  servers share one backend for their state (lib/backend/pgbk/pgbk.go).
 - **Health and the map.** A node heartbeats its `control_server_nodes` row every 10 s with its state, version and
   replica lag. Discovery lists the regions that have at least one healthy node. Clients pick the nearest healthy
   region and fall back to the next (see the region map above).

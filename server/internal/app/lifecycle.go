@@ -152,6 +152,15 @@ func (a *App) Run(ctx context.Context) error {
 		// Every node heartbeats its own row (not a leader job), so the shared record lists all equal nodes.
 		node := servernodes.Node{ID: r.Region + "-" + r.Instance, Region: r.Region, Version: buildinfo.Version, Commit: buildinfo.Commit, StartedAt: a.telemetryStartedAt}
 		go servernodes.Run(runContext, a.db, node, func(err error) { a.logger.Warn("server node heartbeat failed", "error", err) })
+		if a.cfg.RegionalDomain != "" {
+			regional := &servernodes.RegionalTLS{DB: a.db, Node: node, Domain: a.cfg.RegionalDomain, Key: a.cfg.Secrets.EncryptionKey,
+				HTTPSAddress: ":443", HTTPAddress: ":80", Handler: a.server.Handler, Logger: a.logger}
+			go func() {
+				if err := regional.Run(runContext); err != nil && runContext.Err() == nil {
+					a.logger.Error("server node cannot serve its regional name; check that ports 80 and 443 are free and reachable", "name", regional.Name(), "error", err)
+				}
+			}()
+		}
 	}
 	go func() {
 		err := a.worker.Run(workerContext)
