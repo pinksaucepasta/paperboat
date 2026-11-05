@@ -244,7 +244,19 @@ func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 	if err := verifyCarrierNativeCustody(c, i); err != nil {
 		return err
 	}
+	// Only the generation's own build renders its unit. Any other build (the next
+	// one staging, the previous one draining, an update helper) checks custody
+	// alone: comparing its own render refused every update that changed the unit.
+	if !runningAs(c.Executable) {
+		return nil
+	}
 	return i.VerifyPublishedDefinition()
+}
+
+// runningAs reports whether this process is executable (a generation's pin).
+func runningAs(executable string) bool {
+	self, err := os.Executable()
+	return err == nil && filepath.Clean(self) == executable
 }
 func verifyCarrierNativeCustody(c CarrierConfig, i *service.Installer) error {
 	pinParent, err := openProtectedPinDirectory(filepath.Dir(c.Executable))

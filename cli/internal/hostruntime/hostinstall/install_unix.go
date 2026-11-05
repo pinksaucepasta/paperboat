@@ -42,7 +42,16 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
-	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall)
+	var hostdRendered []byte
+	if intent == unixPreparedUpdate {
+		// This helper is the previous build: the candidate renders its own hostd unit.
+		rendered, err := renderCandidateByExecutable(ctx, request)
+		if err != nil {
+			return err
+		}
+		hostdRendered = rendered.HostdPending
+	}
+	hostd, updater, err := installersWithMaintenance(request, paths, true, intent != unixEnrollmentInstall, hostdRendered)
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
@@ -160,14 +169,17 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if candidateOwner, err = newCandidateSessionOwner(request); err != nil {
 			return err
 		}
-		if err := prepareSessionOwner(ctx, request, paths); err != nil {
-			return err
+		stage := func(ctx context.Context, carrier bool) (StagedCandidate, error) {
+			return StageCandidate(ctx, request, carrier)
 		}
-		if !coldCarrier && !replaceCarrier {
-			carrierUpgrade, err = stageUnixCarrierUpgrade(ctx, request, paths)
-			if err != nil {
-				return err
+		if intent == unixPreparedUpdate {
+			stage = func(ctx context.Context, carrier bool) (StagedCandidate, error) {
+				return stageCandidateByExecutable(ctx, request, carrier)
 			}
+		}
+		carrierUpgrade, err = stageUnixUpgrade(ctx, request, paths, !coldCarrier && !replaceCarrier, stage)
+		if err != nil {
+			return err
 		}
 		prepareCutover := func(ctx context.Context) error {
 			if intent == unixPreparedUpdate {

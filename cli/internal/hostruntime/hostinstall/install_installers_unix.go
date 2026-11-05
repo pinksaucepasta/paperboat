@@ -26,10 +26,13 @@ func pendingInstallers(request Request, paths installPaths) (*service.Installer,
 }
 
 func installersWithMissing(request Request, paths installPaths, allowMissingExecutable bool) (*service.Installer, *service.Installer, error) {
-	return installersWithMaintenance(request, paths, allowMissingExecutable, false)
+	return installersWithMaintenance(request, paths, allowMissingExecutable, false, nil)
 }
 
-func installersWithMaintenance(request Request, paths installPaths, allowMissingExecutable, maintenancePending bool) (*service.Installer, *service.Installer, error) {
+// installersWithMaintenance builds the hostd and updater installers; hostdRendered
+// is the candidate build's own render of its hostd unit when the caller is another
+// build (a signed update's helper), nil to render it here.
+func installersWithMaintenance(request Request, paths installPaths, allowMissingExecutable, maintenancePending bool, hostdRendered []byte) (*service.Installer, *service.Installer, error) {
 	layout, err := componentLayout(paths)
 	if err != nil {
 		return nil, nil, err
@@ -46,7 +49,7 @@ func installersWithMaintenance(request Request, paths installPaths, allowMissing
 	}
 	hostdConfig := service.ComponentConfig{
 		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID, Generation: generation,
-		HostdTokenFile: paths.hostdToken, Environment: workerEnvironment(request), Controller: hostdController,
+		HostdTokenFile: paths.hostdToken, Environment: workerEnvironment(request), Controller: hostdController, Rendered: hostdRendered,
 	}
 	sourceBody, err := json.Marshal(request.Source)
 	if err != nil {

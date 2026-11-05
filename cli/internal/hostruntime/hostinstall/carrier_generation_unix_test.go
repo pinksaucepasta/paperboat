@@ -94,7 +94,7 @@ func TestMalformedSourceOrGenerationRefusedWithoutPanic(t *testing.T) {
 		if _, err := deriveUnixCarrierConfig(request, paths); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("carrier derivation with SHA-256 %q: %v", digest, err)
 		}
-		if _, _, err := installersWithMaintenance(request, paths, true, false); !errors.Is(err, ErrInvalidRequest) {
+		if _, _, err := installersWithMaintenance(request, paths, true, false, nil); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("installers with SHA-256 %q: %v", digest, err)
 		}
 		if err := startBaselineHostd(context.Background(), generationRequest("b"), &request.Source); !errors.Is(err, ErrInvalidRequest) {

@@ -28,6 +28,8 @@ type ComponentConfig struct {
 	Environment          map[string]string
 	EncryptedCredentials map[string]string
 	Controller           Controller
+	// Rendered: see Config.Rendered (hostd only).
+	Rendered []byte
 }
 
 // ComponentController returns the one service-manager controller permitted for
@@ -96,7 +98,7 @@ func newHostdInstaller(config ComponentConfig, allowMissingExecutable bool) (*In
 		Platform: config.Layout.Platform, Kind: HostdKind, Instance: config.Layout.Instance, Generation: config.Generation, ConfigRoot: "/", Executable: binary,
 		User: config.User, Group: config.Group, Arguments: []string{"daemon", "__runtime-hostd"}, Environment: environment,
 		EncryptedCredentials: config.EncryptedCredentials,
-		UpgradeMode:          UpgradeReload, Controller: config.Controller,
+		UpgradeMode:          UpgradeReload, Controller: config.Controller, Rendered: config.Rendered,
 	}
 	if allowMissingExecutable {
 		return newInstaller(serviceConfig, true)
