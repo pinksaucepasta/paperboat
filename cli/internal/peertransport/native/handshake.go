@@ -6,7 +6,6 @@ import (
 	"net"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -101,25 +100,9 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	// Other sessions to the peer still own the client (an exec loop's, not released yet), so it cannot be retired, but
 	// the peer restarted and took its WireGuard keys with it: data on the old keys is dropped until WireGuard's own 15 s
 	// no-reply rekey (pbvm4 update: 7 handshake failures at 1 s, then success at +12 s). Reset the peer's WireGuard
-	// state so the next flow handshakes at once; the client and its sessions stay. A session to the peer that is still
-	// alive means the close was not a restart.
-	live := o.peerLiveSessions(peerID)
-	if live == 0 {
-		o.authority.ResetPeerPath(client)
-	}
-	diagnosticlog.TryInfo("native packet lifecycle", "stage", "peer_close_handled", "live_sessions", live)
+	// state so the next flow handshakes at once; the client and its sessions stay. Another session that still looks
+	// alive does not mean the peer did not restart: the same restart closed it, and its close is a few milliseconds
+	// behind (pbvm4: 2 of 5 updates paused 16 s when this was skipped).
+	o.authority.ResetPeerPath(client)
 	return client, nil
-}
-
-// peerLiveSessions counts the sessions to peerID still running: ones the peer did not close.
-func (o *Owner) peerLiveSessions(peerID string) int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	live := 0
-	for session := range o.sessions {
-		if session.peerID == peerID && session.quic.Connection.Context().Err() == nil {
-			live++
-		}
-	}
-	return live
 }
