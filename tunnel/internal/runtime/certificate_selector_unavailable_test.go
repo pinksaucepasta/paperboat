@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"math/big"
 	"net"
 	"sync/atomic"
@@ -103,4 +104,30 @@ type countingOnDemand struct{ count atomic.Int32 }
 func (c *countingOnDemand) RequestCertificate(context.Context, string) error {
 	c.count.Add(1)
 	return errors.New("refused")
+}
+
+// An on-demand request the server answers "not issued yet" (409) still completes TLS on the platform
+// wildcard, as any failed on-demand request does, and the next handshake asks again.
+func TestCertificateSelectorFallsBackWhenCertificateNotIssuedYet(t *testing.T) {
+	cert, pool := wildcardTestCertificate(t, "*.preview.example.test")
+	requests := &notIssuedYetOnDemand{}
+	selector, err := NewCertificateSelector(CertificateSelectorConfig{Source: missingSource{}, Wildcard: wildcardOnly{cert}, OnDemandRequester: requests, HandshakeTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := handshake(t, selector.TLSConfig(), pool, "pending.preview.example.test"); err != nil {
+			t.Fatalf("handshake %d while the certificate is not issued yet: %v", attempt, err)
+		}
+	}
+	if n := requests.count.Load(); n != 2 {
+		t.Fatalf("on-demand certificate requests = %d, want 2 (one per handshake)", n)
+	}
+}
+
+type notIssuedYetOnDemand struct{ count atomic.Int32 }
+
+func (c *notIssuedYetOnDemand) RequestCertificate(context.Context, string) error {
+	c.count.Add(1)
+	return control.ErrCertificateNotIssuedYet
 }

@@ -32,9 +32,11 @@ var (
 	// reported carriers were already replaced (409 runtime_carrier_stale); the next pull
 	// replaces them here, so it is an expected answer, not a control failure.
 	ErrRuntimeCarrierStale = errors.New("runtime carrier observation is stale")
-	// ErrCertificateNotIssued: the server has no certificate to issue for the requested host
-	// (409 on the on-demand request), the usual answer for a handshake with a stray name.
-	ErrCertificateNotIssued = errors.New("no certificate for this host")
+	// ErrCertificateNotIssuedYet: the on-demand certificate request got 409. The server has no
+	// leaf to give for that host now: not one it issues (a stray name, a revoked or changed domain),
+	// or one still being issued, not ready, or waiting for DNS. The handshake falls back to the
+	// platform wildcard and a later handshake asks again.
+	ErrCertificateNotIssuedYet = errors.New("no certificate for this host yet")
 )
 
 // expectedAnswer reports whether a failed control request is the server's answer to the request
@@ -43,7 +45,7 @@ var (
 // malformed request (401 on node identity, 400) still is, because it is an edge bug.
 func expectedAnswer(err error) bool {
 	var refused *BrowserTerminalRefused
-	for _, answer := range []error{context.Canceled, ErrNodeObservationStale, ErrRuntimeCarrierStale, ErrCertificateNotIssued,
+	for _, answer := range []error{context.Canceled, ErrNodeObservationStale, ErrRuntimeCarrierStale, ErrCertificateNotIssuedYet,
 		ErrBrowserUnauthenticated, ErrBrowserDenied, ErrLazyHostOffline, ErrLazyOriginUnavailable, ErrLazyGenerationConflict,
 		ErrLazyCooldown, ErrLazyCapacity, ErrPrivateAccessGrantUnauthorized, ErrPrivateAccessGrantForbidden, ErrInspectorAccessDenied} {
 		if errors.Is(err, answer) {
@@ -530,7 +532,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrRuntimeCarrierStale}
 		}
 		if path == CertificateDistributionRequestPath && response.StatusCode == http.StatusConflict {
-			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrCertificateNotIssued}
+			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrCertificateNotIssuedYet}
 		}
 		if path == InspectorAccessPath && response.StatusCode == http.StatusForbidden {
 			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrInspectorAccessDenied}
