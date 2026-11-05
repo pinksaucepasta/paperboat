@@ -6,7 +6,8 @@
 # <host> is an ssh alias with Go 1.27.3 in ~/.local/go1.27.3 or ~/go-sdk (pbvm2, pbvm3, ubuntu@anvit). The VMs have 3-4 GB
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`.
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
-# available there, so PostgreSQL suites skip (use tools/ci-test.sh for those); gcc is installed, so -race works.
+# on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
+# gcc is installed on all three, so -race works.
 set -euo pipefail
 
 usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -52,5 +53,15 @@ shift 2
 export PATH=$HOME/.local/go1.27.3/bin:$HOME/go-sdk/bin:$PATH GOTOOLCHAIN=local
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
-exec nice go test -p 2 "$@"
+# A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
+if [ ! -f "$HOME/.pb-test-pg-dsn" ]; then exec nice go test -p 2 "$@"; fi
+base=$(cat "$HOME/.pb-test-pg-dsn") pkgs=() args=() failed=0
+for a in "$@"; do case $a in ./* | ...) pkgs+=("$a") ;; *) args+=("$a") ;; esac; done
+mod=$(go list -f '{{.Module.Path}}' "${pkgs[@]}" | head -n1)
+for pkg in $(go list "${pkgs[@]}"); do
+  db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
+  psql "${base%%lane_test*}postgres?sslmode=disable" -qc "drop database if exists \"$db\" with (force)" -c "create database \"$db\"" || { failed=1; continue; }
+  PAPERBOAT_TEST_DATABASE_DSN="${base/lane_test\?/$db?}" nice go test "${args[@]}" "$pkg" || failed=1
+done
+exit $failed
 REMOTE
