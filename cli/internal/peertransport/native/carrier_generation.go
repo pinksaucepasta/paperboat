@@ -246,7 +246,11 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close()
+		// Owner.Close joins this worker before the carrier closes its network.
+		time.Sleep(time.Until(listener.ClosingDeadline()))
+	}()
 	close(ready)
 	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	defer stop()

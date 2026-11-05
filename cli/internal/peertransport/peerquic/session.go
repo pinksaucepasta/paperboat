@@ -144,6 +144,8 @@ type Listener struct {
 	mu        sync.Mutex
 	closed    bool
 	accepted  map[*Session]struct{}
+	// closingUntil is the latest ended connection's closing period; guarded by mu.
+	closingUntil time.Time
 }
 
 func Listen(iceConn net.Conn, tlsConfig *tls.Config, class Class) (*Listener, error) {
@@ -242,8 +244,12 @@ func (l *Listener) Accept(ctx context.Context) (*Session, error) {
 	l.accepted[session] = struct{}{}
 	l.mu.Unlock()
 	context.AfterFunc(connection.Context(), func() {
+		until := time.Now().Add(closingPeriod(connection))
 		l.mu.Lock()
 		delete(l.accepted, session)
+		if until.After(l.closingUntil) {
+			l.closingUntil = until
+		}
 		l.mu.Unlock()
 	})
 	return session, nil
@@ -272,10 +278,26 @@ func (l *Listener) Close() error {
 			go func() { defer closing.Done(); failures[index] = session.Close() }()
 		}
 		closing.Wait()
+		l.mu.Lock()
+		for _, session := range sessions {
+			if next := time.Now().Add(closingPeriod(session.Connection)); next.After(l.closingUntil) {
+				l.closingUntil = next
+			}
+		}
+		l.mu.Unlock()
 		diagnosticlog.TryInfo("peer QUIC close", "trace_id", l.pto.id, "stage", "listener_packet_close")
 		l.closeErr = errors.Join(listenerErr, errors.Join(failures...), l.transport.Conn.Close(), l.transport.Close())
 	})
 	return l.closeErr
+}
+
+// ClosingDeadline is when the latest locally closed connection's closing
+// period ends. Closing the socket keeps a CONNECTION_CLOSE already queued in a
+// userspace path; tearing that network down before this deadline drops it.
+func (l *Listener) ClosingDeadline() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.closingUntil
 }
 
 func (s *Session) Close() error {
@@ -312,6 +334,28 @@ func (s *Session) Close() error {
 		s.closeErr = errors.Join(connectionErr, packetErr, transportErr)
 	})
 	return s.closeErr
+}
+
+// closingPeriod is RFC 9000 section 10.2's closing state, three PTOs (quic-go
+// keeps its closed-connection handler as long: connection.go ReplaceWithClosed).
+// CloseWithError only queues the CONNECTION_CLOSE in a userspace path
+// (netstack, then WireGuard); a carrier shutdown closing that network at once
+// dropped it under CPU load and left the peer waiting for its idle timeout.
+// Closing only the socket keeps the queued frame, so no Close waits: the
+// carrier waits for Listener.ClosingDeadline before its network closes, and
+// socket flow accounting frees at once (RetireIdleClient). Nothing was sent
+// after a remote close or a timeout.
+func closingPeriod(connection *quic.Conn) time.Duration {
+	var application *quic.ApplicationError
+	var transport *quic.TransportError
+	cause := context.Cause(connection.Context())
+	if !(errors.As(cause, &application) && !application.Remote) && !(errors.As(cause, &transport) && !transport.Remote) {
+		return 0
+	}
+	stats := connection.ConnectionStats()
+	// RFC 9002 section 6.2.1; 25 ms is the default max_ack_delay quic-go uses.
+	pto := stats.SmoothedRTT + max(4*stats.MeanDeviation, time.Millisecond) + 25*time.Millisecond
+	return min(3*pto, time.Second)
 }
 
 func (s *Session) PTOCount() uint32 {
