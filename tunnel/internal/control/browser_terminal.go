@@ -152,19 +152,18 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 			clearControlBytes(message)
 			if !ok {
 				var ended websocket.CloseError
-				if errors.As(err, &ended) && ended.Code == websocket.StatusPolicyViolation {
+				answered := errors.As(err, &ended) && ended.Code == websocket.StatusPolicyViolation
+				if answered {
 					endReason.Store(controlReason(ended))
 				}
-				if !closing.Load() && ctx.Err() == nil && websocket.CloseStatus(err) != websocket.StatusNormalClosure && c.HTTP.controlFailure != nil {
-					status := 0
-					if websocket.CloseStatus(err) == websocket.StatusPolicyViolation {
-						status = http.StatusForbidden
-					}
+				// A policy-violation close is the server ending the admission with a reason (revoked,
+				// ended, policy): an answer, not a control failure.
+				if !answered && !closing.Load() && ctx.Err() == nil && websocket.CloseStatus(err) != websocket.StatusNormalClosure && c.HTTP.controlFailure != nil {
 					category := "transport"
 					if err == nil {
 						category = "response_invalid"
 					}
-					c.HTTP.controlFailure(ctx, controlReference(ctx), failure(category, status, err))
+					c.HTTP.controlFailure(ctx, controlReference(ctx), failure(category, 0, err))
 				}
 				return
 			}

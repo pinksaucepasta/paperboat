@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -227,6 +228,62 @@ func TestBrowserTerminalAdmissionFailureNamesItsStep(t *testing.T) {
 			var failure *RequestFailure
 			if !errors.As(err, &failure) || failure.Category != name {
 				t.Fatalf("got %#v, want category %s", err, name)
+			}
+		})
+	}
+}
+
+// Production 2026-11-05 07:08:28: the server ended a live browser terminal admission with a
+// policy-violation close (the session ended). That is the server's answer, carried to the browser as
+// EndReason, not a control failure. A control connection that just drops still is one.
+func TestBrowserTerminalLiveAdmissionEndRecordsOnlyUnexplainedDrops(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		end      func(*websocket.Conn)
+		failures int
+	}{
+		{"server ended it", func(c *websocket.Conn) { _ = c.Close(websocket.StatusPolicyViolation, "ended: the terminal closed") }, 0},
+		{"connection dropped", func(c *websocket.Conn) { _ = c.CloseNow() }, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				connection, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer connection.CloseNow()
+				if _, _, err := connection.Read(r.Context()); err != nil {
+					return
+				}
+				_ = connection.Write(r.Context(), websocket.MessageText, []byte(`{"credential":"host-credential","terminal_session_id":"term_1","attachment_id":"attach_1"}`))
+				_ = connection.Write(r.Context(), websocket.MessageText, []byte("ok"))
+				tc.end(connection)
+			}))
+			defer server.Close()
+			var mu sync.Mutex
+			failures := 0
+			httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Timeout: 3 * time.Second, Client: server.Client(),
+				ControlFailure: func(context.Context, string, error) { mu.Lock(); failures++; mu.Unlock() }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &BrowserTerminalClient{HTTP: httpClient, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			admission, err := client.Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer admission.Close()
+			select {
+			case <-admission.Closed:
+			case <-ctx.Done():
+				t.Fatal("admission did not end")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if failures != tc.failures {
+				t.Fatalf("control failures = %d, want %d", failures, tc.failures)
 			}
 		})
 	}
