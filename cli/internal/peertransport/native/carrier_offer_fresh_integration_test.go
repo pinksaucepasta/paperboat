@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,7 +27,7 @@ import (
 // reaches the generation from its signed configuration alone: no old connection, no candidate exchange,
 // and the old primary already gone.
 func TestFreshClientDialsTheGenerationItsConfigurationOffers(t *testing.T) {
-	freshOfferScenario(t, false)
+	freshOfferScenario(t, false, false)
 }
 
 // An offered generation whose network never comes up (the machine's carrier generation is gone) costs one
@@ -34,10 +35,17 @@ func TestFreshClientDialsTheGenerationItsConfigurationOffers(t *testing.T) {
 // not tried again by the next Dial (tailscale bounds each path attempt on its own and never lets one stuck
 // path use the caller's whole deadline, ~/ref/tailscale/wgengine/magicsock/magicsock.go).
 func TestStuckOfferedGenerationFallsBackToTheNormalPath(t *testing.T) {
-	freshOfferScenario(t, true)
+	freshOfferScenario(t, true, false)
 }
 
-func freshOfferScenario(t *testing.T, offerStuck bool) {
+// A machine that moved on to a newer generation is reachable only through it, and the client's configuration still
+// names the generation before (gone). The dial must fetch the current configuration and use the new offer inside its
+// own budget, with the old primary stopped (macOS first-ssh no-path: the second dial worked 200 ms after a refresh).
+func TestStaleOfferIsRefreshedAndRedialedWithinOneDial(t *testing.T) {
+	freshOfferScenario(t, false, true)
+}
+
+func freshOfferScenario(t *testing.T, offerStuck, staleOffer bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
@@ -82,7 +90,14 @@ func freshOfferScenario(t *testing.T, offerStuck bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientOwner, _ := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
+	var refresh func() // the control plane's answer to a refresh, set once the new generation exists
+	clientOwner, _ := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS, RefreshAuthority: func(context.Context) error {
+		if refresh == nil {
+			return errors.New("no refresh in this scenario")
+		}
+		refresh()
+		return nil
+	}})
 	defer clientOwner.Close()
 	primary, _ := native.NewOwner(native.Config{Authority: serverAuthority, TLS: serverTLS})
 	descriptor := startRelayEchoServer(t, primary, serverAuthority, serverRegions[0])
@@ -119,6 +134,24 @@ func freshOfferScenario(t *testing.T, offerStuck bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var goneOffer []byte // the generation before this one, stopped: what a stale configuration still names
+	if staleOffer {
+		gone, err := nextOwner.PrepareCarrierIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		gone.Offer.Claims.AllApplications = true
+		goneCtx, stopGone := context.WithCancel(ctx)
+		goneNetwork, err := nextOwner.StartCarrierNetwork(goneCtx, gone, "", apps.Serve)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if goneOffer, err = gone.Current().MarshalBinary(); err != nil {
+			t.Fatal(err)
+		}
+		stopGone()
+		goneNetwork.Close()
+	}
 	genCtx, stopGen := context.WithCancel(ctx)
 	generation, err := nextOwner.StartCarrierNetwork(genCtx, identity, "", apps.Serve)
 	if err != nil {
@@ -136,6 +169,15 @@ func freshOfferScenario(t *testing.T, offerStuck bool) {
 	clientConfig.Generation++
 	clientConfig.IssuedAt = time.Now().Unix()
 	clientConfig.Peers[0].CarrierOffer = offer
+	if staleOffer {
+		clientConfig.Peers[0].CarrierOffer = goneOffer
+		refresh = func() {
+			clientConfig.Generation++
+			clientConfig.IssuedAt = time.Now().Unix()
+			clientConfig.Peers[0].CarrierOffer = offer
+			applyTestConfiguration(t, clientAuthority, signer, clientConfig)
+		}
+	}
 	applyTestConfiguration(t, clientAuthority, signer, clientConfig)
 	var creations atomic.Int32
 	if offerStuck {
@@ -148,7 +190,7 @@ func freshOfferScenario(t *testing.T, offerStuck bool) {
 	for _, consumer := range []string{"exec", "ssh"} {
 		started := time.Now()
 		dialCtx := ctx
-		if offerStuck {
+		if offerStuck || staleOffer {
 			var stop context.CancelFunc
 			dialCtx, stop = context.WithTimeout(ctx, 10*time.Second)
 			defer stop()

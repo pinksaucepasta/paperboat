@@ -86,14 +86,26 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		if session := o.dialRoute(dialCtx, peerID, nil, class); session != nil {
 			return session, nil
 		}
+		declined := false
 		if route != nil && dialCtx.Err() == nil {
 			// The route's generation did not answer: do not try it again from the configuration.
 			if raw, err := route.offer.MarshalBinary(); err == nil {
 				o.authority.DeclineCarrierOffer(peerID, raw)
+				declined = true
 			}
 		}
-		if session := o.dialOffered(dialCtx, peerID, class); session != nil {
+		session, offerDeclined := o.dialOffered(dialCtx, peerID, class)
+		if session != nil {
 			return session, nil
+		}
+		// A machine that moved to a new generation answers only that generation (its discovery key is the
+		// generation's, which the primary engine drops as unknown), so the primary dial below cannot
+		// succeed until the configuration names the new offer. Fetch it and offer once more inside this
+		// dial's budget instead of waiting for the next operation's refresh (macOS first-ssh no-path).
+		if (declined || offerDeclined) && dialCtx.Err() == nil && o.refreshOffer(dialCtx) {
+			if session, _ := o.dialOffered(dialCtx, peerID, class); session != nil {
+				return session, nil
+			}
 		}
 	}
 	for {
@@ -121,19 +133,20 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 // ~/ref/tailscale/wgengine/magicsock/derp.go addDerpPeerRoute). Without a common relay the generation
 // cannot learn this client's discovery key, so the caller dials the primary as before. Success sets the
 // route, so later dials skip the configuration.
-func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.Class) *Session {
+// declined reports that an offer was tried or refused and is withdrawn from the configuration's view.
+func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.Class) (session *Session, declined bool) {
 	raw := o.authority.PeerCarrierOffer(peerID)
 	if raw == nil {
-		return nil
+		return nil, false
 	}
 	peer, err := o.authority.Peer(peerID)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	offer, err := ParseCarrierOffer(raw)
 	if err != nil || !offer.Claims.AllApplications || offer.verify(peer, serverclock.Now()) != nil {
 		o.authority.DeclineCarrierOffer(peerID, raw)
-		return nil
+		return nil, true
 	}
 	// One bounded attempt: a generation that is gone must not use the caller's whole budget (every dial
 	// repeated it, five terminals timed out in a row). A failure with the caller still waiting retires the offer.
@@ -147,19 +160,30 @@ func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.C
 		}
 	}
 	if err != nil {
-		if ctx.Err() == nil {
+		declined = ctx.Err() == nil
+		if declined {
 			o.authority.DeclineCarrierOffer(peerID, raw)
 		}
 		diagnosticlog.TryInfo("carrier route", "stage", "offered_dial", "failed", true, "error_type", moveErrorType(err))
-		return nil
+		return nil, declined
 	}
-	session, err := o.carrierSession(peerID, peer, offer, transport, network, release)
+	session, err = o.carrierSession(peerID, peer, offer, transport, network, release)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	o.setRoute(ctx, peerID, offer)
 	diagnosticlog.TryInfo("carrier route", "stage", "offered_dial", "path", network.PeerPath(peerID))
-	return session
+	return session, false
+}
+
+// refreshOffer asks the control plane for the current signed configuration, bounded like an offered attempt.
+func (o *Owner) refreshOffer(ctx context.Context) bool {
+	if o.refreshAuthority == nil {
+		return false
+	}
+	refresh, cancel := context.WithTimeout(ctx, carrierAttemptLimit)
+	defer cancel()
+	return o.refreshAuthority(refresh) == nil
 }
 
 // connectOffered tries each common relay once, each attempt bounded by carrierAttemptLimit.

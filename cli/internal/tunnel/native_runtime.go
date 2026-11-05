@@ -649,7 +649,7 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 		_ = authority.Close()
 		return nil, err
 	}
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS, Observe: observeCLINativePeerEvent})
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS, Observe: observeCLINativePeerEvent, RefreshAuthority: func(ctx context.Context) error { return authority.RefreshForAdmission(ctx, networkAPI) }})
 	if err != nil {
 		_ = authority.Close()
 		return nil, err
