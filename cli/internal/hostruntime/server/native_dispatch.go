@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
@@ -70,6 +71,7 @@ type nativeDispatchLifetimeKey struct{}
 type nativeDispatchRequestLifetime struct{ stopRequest func() bool }
 type nativeHTTPAdmissionKey struct{}
 type nativeHTTPAdmission func(context.Context) (func(), <-chan struct{}, error)
+type nativeTransferDrainKey struct{}
 type NativeDispatchHandler struct {
 	handler  http.Handler
 	cancel   context.CancelFunc
@@ -77,6 +79,10 @@ type NativeDispatchHandler struct {
 	mu       sync.Mutex
 	closing  bool
 	workers  sync.WaitGroup
+	// transfers counts open file_transfer streams; draining closes when this generation retires.
+	transfers    atomic.Int64
+	draining     chan struct{}
+	drainingOnce sync.Once
 }
 
 func (h *NativeDispatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +118,32 @@ func (h *NativeDispatchHandler) Close(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// DrainTransfers is a retiring generation's graceful stop for file transfers (nginx's QUIT,
+// ngx_process_cycle.c ngx_worker_process_cycle; Teleport sshserver.go Shutdown): every accepted transfer stream
+// keeps sending its file here, each connection closing once it holds no unfinished transfer, while new streams
+// already reach the next generation. It returns when none is open or ctx ends; Close then cuts what remains.
+// Revocation still closes a stream at once (httpAdmission binds it to the authorization).
+func (h *NativeDispatchHandler) DrainTransfers(ctx context.Context) error {
+	h.drainingOnce.Do(func() { close(h.draining) })
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for h.transfers.Load() > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
 func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandler, error) {
 	if len(config.Token) < 32 || len(config.Token) > 128 || config.MaximumConcurrent < 1 || config.HandshakeTimeout <= 0 || config.HandshakeTimeout > 30*time.Second || config.Fence == nil || config.Authorize == nil || config.ServeStream == nil {
 		return nil, ErrStreamAuthorization
 	}
 	capacity := make(chan struct{}, config.MaximumConcurrent)
 	lifetime, cancel := context.WithCancel(context.Background())
-	owner := &NativeDispatchHandler{cancel: cancel, lifetime: lifetime}
+	owner := &NativeDispatchHandler{cancel: cancel, lifetime: lifetime, draining: make(chan struct{})}
 	owner.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, NativeDispatchPath) {
 			http.Error(w, "invalid dispatch operation", http.StatusBadRequest)
@@ -237,6 +262,9 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 					// The authenticated association can remain idle. Each HTTP
 					// exchange must independently admit under this worker's lease.
 					lifetime = context.WithValue(lifetime, nativeHTTPAdmissionKey{}, nativeHTTPAdmission(config.Fence))
+					lifetime = context.WithValue(lifetime, nativeTransferDrainKey{}, (<-chan struct{})(owner.draining))
+					owner.transfers.Add(1)
+					defer owner.transfers.Add(-1)
 				}
 				stop := context.AfterFunc(lifetime, func() { _ = connection.Close() })
 				defer stop()

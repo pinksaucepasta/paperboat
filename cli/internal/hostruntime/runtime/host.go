@@ -129,6 +129,7 @@ type Host struct {
 	executions          execprocess.Service
 	dispatcher          *server.Dispatcher
 	transfers           *filetransfer.Service
+	nativeDispatch      *server.NativeDispatchHandler
 	managedSSHSelection interface{ Disable(context.Context) error }
 	health              *runtimeHealthSource
 	cleanupUnstarted    func() error
@@ -622,7 +623,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if provider, ok := dependencies.ManagedSSHService.(capabilityHealthProvider); ok {
 		healthSource.dynamic["ssh.v1"] = provider
 	}
-	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, dispatcher: dispatcher, transfers: transferService, health: healthSource, cleanupUnstarted: func() error {
+	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, dispatcher: dispatcher, transfers: transferService, nativeDispatch: nativeDispatch, health: healthSource, cleanupUnstarted: func() error {
 		var dispatchErr error
 		if nativeDispatch != nil {
 			dispatchErr = nativeDispatch.Close(context.Background())
@@ -873,9 +874,23 @@ func (h *Host) Shutdown(ctx context.Context) error {
 }
 
 // DrainLocal stops accepting on the loopback listener and waits, until ctx
-// ends, for in-flight local requests. A retiring worker generation calls it
-// before Shutdown while the next generation already serves the same socket.
-func (h *Host) DrainLocal(ctx context.Context) error { return h.http.Shutdown(ctx) }
+// ends, for in-flight local requests and the file transfers its native streams
+// carry (up to managedssh.CarrierDrainTimeout, as managed SSH drains). A
+// retiring worker generation calls it before Shutdown while the next
+// generation already serves the same socket.
+func (h *Host) DrainLocal(ctx context.Context) error {
+	transfers := make(chan error, 1)
+	go func() {
+		if h.nativeDispatch == nil {
+			transfers <- nil
+			return
+		}
+		drainCtx, cancel := context.WithTimeout(ctx, managedssh.CarrierDrainTimeout)
+		defer cancel()
+		transfers <- h.nativeDispatch.DrainTransfers(drainCtx)
+	}()
+	return errors.Join(h.http.Shutdown(ctx), <-transfers)
+}
 
 // ShutdownHostd drains the stable daemon after the external runtime worker has
 // stopped. It deliberately does not touch the in-process Runtime, which was

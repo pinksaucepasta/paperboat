@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -86,8 +87,63 @@ func ServeHTTPConnection(ctx context.Context, connection net.Conn, handler http.
 			actual.ServeHTTP(w, r.WithContext(context.WithValue(requestCtx, releaseHTTPMutationKey{}, releaseMutation)))
 		})
 	}
+	if draining, ok := ctx.Value(nativeTransferDrainKey{}).(<-chan struct{}); ok {
+		handler = drainingTransferConnection(handler, draining)
+	}
 	return serveHTTPConnection(ctx, connection, handler, server)
 }
+
+type transferHoldKey struct{}
+
+// holdTransferConnection marks the response being written as one more chunk of an unfinished transfer, so a
+// retiring generation keeps this connection for the next chunk.
+func holdTransferConnection(ctx context.Context) {
+	if hold, ok := ctx.Value(transferHoldKey{}).(*atomic.Bool); ok {
+		hold.Store(true)
+	}
+}
+
+// drainingTransferConnection closes the connection after a response once its generation drains, unless that
+// response left a transfer unfinished: the transfer keeps sending its chunks here, and every other request
+// (complete, a next file, a new send) opens a stream that reaches the next generation. Connection: close
+// tells the client before it reuses the connection, so nothing is cut.
+func drainingTransferConnection(handler http.Handler, draining <-chan struct{}) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hold := new(atomic.Bool)
+		writer := &drainingResponse{ResponseWriter: w, close: func() bool {
+			select {
+			case <-draining:
+				return !hold.Load()
+			default:
+				return false
+			}
+		}}
+		handler.ServeHTTP(writer, r.WithContext(context.WithValue(r.Context(), transferHoldKey{}, hold)))
+	})
+}
+
+type drainingResponse struct {
+	http.ResponseWriter
+	close       func() bool
+	wroteHeader bool
+}
+
+func (w *drainingResponse) WriteHeader(status int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		if w.close() {
+			w.Header().Set("Connection", "close")
+		}
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *drainingResponse) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+func (w *drainingResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // ServeInspectorHTTPConnection serves exactly one bounded inspector exchange on
 // an already authenticated stream. It never opens a listener or a target socket.

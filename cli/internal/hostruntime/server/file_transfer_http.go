@@ -449,6 +449,9 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 			return
 		}
+		if updated.CommittedOffset < updated.Size {
+			holdTransferConnection(request.Context())
+		}
 		writer.Header().Set(HeaderUploadOffset, strconv.FormatInt(updated.CommittedOffset, 10))
 		writer.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
