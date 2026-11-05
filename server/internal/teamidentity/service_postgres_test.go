@@ -206,6 +206,12 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatalf("bob member=%v err=%v", bobActive, err)
 	}
 
+	if err = tx(func(ctx context.Context, tx *db.Tx) error {
+		return teams.RecordSSOSignInTx(ctx, tx, "org_test", bob, "bob@"+domain)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// Both team tokens must stop authenticating; personal and other members' tokens survive.
 	tokens := apitokens.New(store, audit.NewWriter(store), config.Default().APITokens, "")
 	type credential struct {
