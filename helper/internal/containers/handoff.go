@@ -24,9 +24,9 @@ func resolvedImage(ctx context.Context, image string) (string, error) {
 	return id, nil
 }
 
-// PrepareHandoff transfers unchanged containers to the next supervisor. A
-// changed image still follows the ordinary replacement and readiness path.
-// The returned roles keep their process epoch, including admitted connections.
+// PrepareHandoff transfers unchanged containers, and a serving tunnel container of any image, to
+// the next supervisor. A relay with a changed image still follows the ordinary replacement and
+// readiness path. The returned roles keep their process epoch, including admitted connections.
 func PrepareHandoff(ctx context.Context, dir string, images Images) (map[string]bool, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, errors.New("installation directory must be absolute")
@@ -50,8 +50,10 @@ func PrepareHandoff(ctx context.Context, dir string, images Images) (map[string]
 		if exists && info.Owner != owner {
 			return nil, errors.New("runtime container belongs to another installation; handoff refused")
 		}
-		if exists && info.Running && info.ImageID == id {
-			preserve[role] = id
+		// A serving tunnel container is kept even for a new image: the next supervisor hands its
+		// sockets to the replacement (Launcher.handOver) instead of stopping it.
+		if exists && info.Running && (info.ImageID == id || role == "tunnel") {
+			preserve[role] = info.ImageID
 			roles[role] = true
 		}
 	}

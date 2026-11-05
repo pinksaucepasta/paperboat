@@ -55,6 +55,22 @@ func WaitInstallationReady(ctx context.Context, dir string, previous map[string]
 	if len(clients) == 0 {
 		return errors.New("installation has no configured runtimes")
 	}
+	images, err := LoadImages(dir)
+	if err != nil {
+		return err
+	}
+	// A handover keeps the process epoch, so the epoch cannot show which image serves: the
+	// container under the role's name must run the installed image.
+	want := map[string]string{}
+	for role := range clients {
+		image, err := images.Image(role)
+		if err != nil {
+			return err
+		}
+		if want[role], err = resolvedImage(ctx, image); err != nil {
+			return err
+		}
+	}
 	owner := installationOwner(dir)
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
@@ -68,7 +84,7 @@ func WaitInstallationReady(ctx context.Context, dir string, previous map[string]
 			if exists && info.Owner != owner {
 				return errors.New("runtime container belongs to another installation")
 			}
-			if !exists || !info.Running {
+			if !exists || !info.Running || info.ImageID != want[role] {
 				ready = false
 				continue
 			}

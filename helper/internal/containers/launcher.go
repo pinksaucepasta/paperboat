@@ -18,6 +18,10 @@ import (
 
 const ownerLabel = "io.paperboat.pbh-owner"
 const StartupTimeout = 45 * time.Second
+
+// HandoverTimeout bounds a tunnel handover: the replacement's startup, then the serving process's
+// whole shutdown budget (its drain is half of it) until it exits (tunnel -shutdown-timeout, 30 s).
+const HandoverTimeout = StartupTimeout + 30*time.Second
 const commandTimeout = 15 * time.Second
 
 type Launcher struct {
@@ -100,7 +104,13 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 		return errors.New("runtime container belongs to another installation; nothing changed")
 	}
 	adopted := exists && info.Running && info.ImageID == imageID
-	if !adopted {
+	switch {
+	case adopted:
+	case capability == "tunnel" && exists && info.Running:
+		if err := l.handOver(ctx, capability, image, name, owner); err != nil {
+			return err
+		}
+	default:
 		if err := removeOwned(ctx, name, owner); err != nil {
 			return err
 		}
@@ -161,6 +171,52 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 			}
 		}
 	}
+}
+
+// handOver replaces a serving tunnel container without a gap. The new image starts beside it as
+// <name>-next and inherits its sockets and process epoch (tunnel/internal/handover). The serving
+// process releases them once the new one is warm, drains and exits on its own; then the new
+// container takes the name. A replacement that exits or never takes over is removed, and the
+// serving container keeps serving.
+func (l *Launcher) handOver(ctx context.Context, capability, image, name, owner string) error {
+	next := name + "-next"
+	if err := removeOwned(ctx, next, owner); err != nil {
+		return err
+	}
+	if err := l.startContainerNamed(ctx, capability, image, next); err != nil {
+		return err
+	}
+	wait, cancel := context.WithTimeout(ctx, HandoverTimeout)
+	defer cancel()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		serving, err := containerRunning(wait, name, owner)
+		if err == nil && !serving {
+			break
+		}
+		replacement, nextErr := containerRunning(wait, next, owner)
+		if err == nil && nextErr == nil && !replacement {
+			last := lastOutputLine(next)
+			cleanup, stop := context.WithTimeout(context.Background(), 12*time.Second)
+			defer stop()
+			return errors.Join(&ChildExit{Err: fmt.Errorf("%w before taking over; the serving container keeps serving", errContainerExited), LastLine: last}, removeOwned(cleanup, next, owner))
+		}
+		select {
+		case <-wait.Done():
+			cleanup, stop := context.WithTimeout(context.Background(), 12*time.Second)
+			defer stop()
+			return errors.Join(fmt.Errorf("tunnel handover did not finish: %w", wait.Err()), err, nextErr, removeOwned(cleanup, next, owner))
+		case <-ticker.C:
+		}
+	}
+	if err := removeOwned(ctx, name, owner); err != nil {
+		return err
+	}
+	if _, err := docker(ctx, "rename", next, name); err != nil {
+		return errors.New("rename the replacement runtime container failed; it keeps serving as " + next)
+	}
+	return nil
 }
 
 func waitReady(ctx context.Context, name, owner string, client *nodeClient, previousEpoch string) error {

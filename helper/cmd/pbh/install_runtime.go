@@ -87,7 +87,8 @@ func restartInstallation(ctx context.Context, dir string, c selfhost.Config, cla
 	if err := installService(ctx); err != nil {
 		return err
 	}
-	ready, cancel := context.WithTimeout(ctx, containers.StartupTimeout)
+	// A tunnel hands over: the replacement starts, then the serving process drains and exits.
+	ready, cancel := context.WithTimeout(ctx, containers.HandoverTimeout)
 	defer cancel()
 	if err := waitClaimTLS(ready, dir, c); err != nil {
 		return err
