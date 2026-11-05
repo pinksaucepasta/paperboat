@@ -216,6 +216,7 @@ Goal: every main-path row on L and M `[x]`, as fast as possible.
 - Add new foreign keys and CHECK constraints NOT VALID; VALIDATE in a later migration.
 - Prefer one table's DDL per migration; run data backfills in bounded batches.
 - Start DDL migrations with `SET lock_timeout = '5s'`; retry lock timeouts/deadlocks with bounded backoff.
+- A column the previous server reads is dropped one deploy after the code stops reading it (post-deploy migration), never in the same deploy ([GitLab post-deployment migrations](https://docs.gitlab.com/development/database/post_deployment_migrations/); 2026-11-06 .06.2 dropped columns .06.1 still read: 19 × 503 in 2 s).
 - Before touching tables whose triggers lock shared 443 names, take `SELECT pg_advisory_xact_lock(1885686843)` first.
 
 ## Testing
