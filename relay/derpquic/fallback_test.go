@@ -233,12 +233,9 @@ func TestFallbackCarrierReachabilityRecoveryAndFatalDenial(t *testing.T) {
 	preferred.connectErr = nil
 	preferred.mu.Unlock()
 	eventually(t, func() bool { a, _ := c.current(); return a == preferred })
-	fallback.mu.Lock()
-	closed := fallback.closed
-	fallback.mu.Unlock()
-	if closed == 0 {
-		t.Fatal("recovery did not close WSS")
-	}
+	// Recovery publishes QUIC before it disconnects WSS, so a receive blocked on
+	// WSS sees the switch and retries instead of surfacing the close.
+	eventually(t, func() bool { fallback.mu.Lock(); defer fallback.mu.Unlock(); return fallback.closed > 0 })
 
 	deniedFallback := &fakeCarrier{}
 	denied := NewFallbackCarrier(&fakeCarrier{connectErr: ErrAdmission}, deniedFallback, time.Millisecond)
