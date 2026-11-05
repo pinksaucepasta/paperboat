@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"io"
 	"net"
@@ -348,6 +349,9 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	started := time.Now()
 	defer func() {
 		diagnosticlog.TryInfo("carrier control call", "stage", req.Operation, "failed", err != nil, "duration_ms", time.Since(started).Milliseconds())
+		if err != nil {
+			err = fmt.Errorf("carrier control %s: %w", req.Operation, err)
+		}
 	}()
 	if !req.valid() {
 		return response{}, ErrInvalid

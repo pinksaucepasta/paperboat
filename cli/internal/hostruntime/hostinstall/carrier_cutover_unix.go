@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -94,11 +95,14 @@ func (u *unixCarrierUpgrade) switchNetwork(ctx context.Context) error {
 	releaseErr := previous.ReleaseNetwork(ctx)
 	diagnosticlog.TryInfo("carrier cutover", "stage", "network_released", "failed", releaseErr != nil, "duration_ms", time.Since(started).Milliseconds())
 	if releaseErr != nil {
-		return releaseErr
+		return fmt.Errorf("releasing the network from the running carrier: %w", releaseErr)
 	}
 	startErr := next.StartNetwork(ctx)
 	diagnosticlog.TryInfo("carrier cutover", "stage", "network_started", "failed", startErr != nil, "duration_ms", time.Since(started).Milliseconds())
-	return startErr
+	if startErr != nil {
+		return fmt.Errorf("starting the network on the new carrier: %w", startErr)
+	}
+	return nil
 }
 
 // carrierServingWait is how long the commit waits for the new carrier to answer (a crashed one is restarted by its unit).

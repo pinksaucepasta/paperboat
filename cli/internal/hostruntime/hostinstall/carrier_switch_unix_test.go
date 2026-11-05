@@ -65,6 +65,10 @@ func TestSwitchNetworkReleasesBeforeStartingAndStopsOnFailure(t *testing.T) {
 		if got := strings.Join(calls, ","); got != want || (err != nil) != releaseFails {
 			t.Fatalf("releaseFails=%v: calls %q err %v, want calls %q", releaseFails, got, err, want)
 		}
+		// The install's only printed line is this error: it names the step and the control operation.
+		if releaseFails && (!strings.Contains(err.Error(), "releasing the network") || !strings.Contains(err.Error(), "release-network")) {
+			t.Fatalf("the failure does not name its step and operation: %v", err)
+		}
 	}
 }
 
