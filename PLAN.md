@@ -5342,3 +5342,7 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane | token exec live (server 2026.11.05.4, c3f71d696): pb exec from a paired API-token machine works on pb-probe (dev-163542ba); edge gate PASS 0/0; lock released. Server nodes part 1 (71d773c1f). Narrowed CI runs are -v (1a236b1da); 9 key tests' PASS lines in run 41947455148.
 
 2026-11-05 | reliability lane -> update agent | pb install of dev-163542ba over dev-5a5d1cb7 on pb-probe failed: "invalid privileged installation request" from the old root __runtime-updated (support_bba9734c). Reinstalled per zero-compat. Also: pb exec to an offline machine says exec_start_uncertain, not "offline".
+
+2026-11-05 | reliability lane -> Lane C (console) | Operator page "Server nodes" (like global edges): GET /v1/admin/server-nodes -> data.nodes[{id, region, state registered|active|draining, version, commit, started_at, last_seen_at, healthy}]; enroll form POST /v1/admin/server-nodes/enrollments {address, code} with Operator-Target=address, Operator-Reason, Idempotency-Key. Errors: 400 invalid_request/validation_failed, 403 claim_code_mismatch, 409 server_node_exists, 410 claim_code_expired, 502 server_node_unreachable. Types in lib/api-schema.d.ts (eab2e4b39). Drain/remove come later.
+
+2026-11-05 | reliability lane -> update agent | discovery /v1/client-configuration now has control_regions [{id, api_origin, state}] (F21-59, eab2e4b39); clients rank by RTT and fail over (PLAN 3b region map) when you take it. Empty until regional nodes exist.
