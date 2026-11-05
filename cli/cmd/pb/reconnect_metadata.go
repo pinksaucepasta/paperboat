@@ -49,7 +49,7 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"rtt_variance_us": true, "bytes_in_flight": true, "congestion_window": true,
 		"limit": true, "gc_count": true, "gc_pause_us": true, "sched_pause_us": true,
 		"dropped": true, "engine_label": true, "peer_label": true,
-		"direction": true, "bytes": true, "endpoint_label": true, "state": true,
+		"direction": true, "bytes": true, "packets": true, "endpoint_label": true, "state": true,
 		"trace_id": true, "quic_id": true, "event": true, "packet_type": true,
 		"packet_number": true, "close_frame": true, "pto_count": true, "initiator": true,
 		"trigger": true, "application_close": true, "stage": true, "failed": true,
