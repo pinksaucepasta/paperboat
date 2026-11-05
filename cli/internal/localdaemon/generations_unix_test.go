@@ -229,3 +229,35 @@ func TestUpdateDeclarationReadsBackTheRenderedArgumentsAndEnvironment(t *testing
 		})
 	}
 }
+
+// A computer still on the earlier single paperboatd unit cannot hand over: the install refuses before
+// starting or stopping anything, names the reinstall step, and the old daemon keeps running.
+func TestSingleUnitDaemonRefusesCleanlyAndKeepsTheOldOneRunning(t *testing.T) {
+	for platform, legacy := range map[string]string{"linux": ".config/systemd/user/paperboatd.service", "darwin": "Library/LaunchAgents/com.pinksaucepasta.paperboatd.plist"} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, legacy)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("earlier single unit"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runner := &generationRunner{running: map[string]bool{}}
+			config := serviceConfig{Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
+			restore, err := replaceService(context.Background(), config, "")
+			if !errors.Is(err, ErrSingleUnitDaemon) || !strings.Contains(err.Error(), "pb uninstall") || restore != nil {
+				t.Fatalf("err = %v (restore set: %v), want the named reinstall step", err, restore != nil)
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("a refused install touched the service manager: %q", runner.calls)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("the earlier unit was changed: %v", err)
+			}
+			if _, err := os.Stat(generationDefinitionPath(platform, home, testDaemonGeneration)); !os.IsNotExist(err) {
+				t.Fatalf("a generation unit was written: %v", err)
+			}
+		})
+	}
+}

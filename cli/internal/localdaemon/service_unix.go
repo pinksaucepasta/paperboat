@@ -70,6 +70,9 @@ func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serv
 }
 
 func replaceService(ctx context.Context, config serviceConfig, version string) (func(context.Context) error, error) {
+	if err := refuseSingleUnitDaemon(config.Platform, config.Home); err != nil {
+		return nil, err
+	}
 	installer, err := newServiceInstaller(config)
 	if err != nil {
 		return nil, err
