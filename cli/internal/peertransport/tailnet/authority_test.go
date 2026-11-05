@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authority-tests
 	"tailscale.com/tstest/integration"
@@ -762,13 +764,20 @@ func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 	apply(cli, c)
 	_, in = exchange()
 	m.Generation++
-	m.ExpiresAt = time.Now().Unix() + 1
+	m.ExpiresAt = time.Now().Unix() + 60
 	apply(machine, m)
-	// The snapshot expires for new admission, while the admitted packet flow remains usable.
-	time.Sleep(time.Until(time.Unix(m.ExpiresAt, 0)) + 20*time.Millisecond)
+	// The configuration's expiry passes while the admitted packet flow remains usable (offline until revoked,
+	// F21-01). Expiry is judged on the server clock, so the test moves that clock past ExpiresAt instead of
+	// waiting: an expiry of now+1 s could pass before the apply on a loaded runner ("authority expired").
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	serverclock.Observe(time.Unix(m.ExpiresAt+5, 0).UTC().Format(http.TimeFormat), time.Now(), time.Now())
+	if serverclock.Now().Unix() <= m.ExpiresAt {
+		t.Fatal("the server clock did not pass the configuration's expiry")
+	}
 	if _, err := in.Write([]byte("admitted")); err != nil {
 		t.Fatal("credential expiry closed admitted socket", err)
 	}
+	serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now())
 	m.Generation++
 	m.IssuedAt = time.Now().Unix()
 	m.ExpiresAt = m.IssuedAt + 60
