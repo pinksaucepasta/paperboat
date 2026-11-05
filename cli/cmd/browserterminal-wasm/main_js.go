@@ -12,7 +12,6 @@ import (
 	"syscall/js"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 )
@@ -22,8 +21,6 @@ const (
 	websocketWriteLimit = 1 << 20
 	websocketWriteWait  = 10 * time.Second
 	terminalInputLimit  = protocol.MaxBinaryFrame - 13
-	maximumColumns      = 500
-	maximumRows         = 200
 )
 
 var browserRuntime = struct {
@@ -132,14 +129,6 @@ func getConnection(id string) *browserTerminal {
 	browserRuntime.Lock()
 	defer browserRuntime.Unlock()
 	return browserRuntime.connections[id]
-}
-
-func randomID(noun string) (string, error) {
-	id, err := uuid.NewRandom()
-	if err != nil {
-		return "", err
-	}
-	return noun + "_" + id.String(), nil
 }
 
 func stringProperty(value js.Value, name string) string {

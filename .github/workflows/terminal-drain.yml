@@ -1,0 +1,71 @@
+name: Terminal drain
+
+# pb update's browser terminal drain across real processes: the edge (tunnel) and the machine (cli: one PTY session,
+# three worker generations, the console's browser terminal client built from cmd/browserterminal-wasm protocol.go and
+# flow.go). tunnel/internal/runtime TestBrowserTerminalDrainAcrossUpdates starts the machine test binary and fails
+# unless the browser sees no close and no pause through two handovers and exactly one 4301 reattach at the drain cap.
+# One runner, a few minutes; it runs on pushes that touch either side.
+
+on:
+  push:
+    paths:
+      - 'tunnel/**'
+      - 'cli/internal/hostruntime/**'
+      - 'cli/cmd/browserterminal-wasm/**'
+      - 'shared/runtimeattachment/**'
+      - 'shared/terminalend/**'
+      - 'go.work'
+      - 'go.work.sum'
+      - '.github/workflows/terminal-drain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-drain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drain:
+    name: browser terminal drain (edge + machine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache: false
+      - id: paths
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      # Lane test's nightly run on main writes these build caches; this job only reads them.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.paths.outputs.build }}
+            ${{ steps.paths.outputs.mod }}
+          key: lane-test-go-cli-${{ hashFiles('go.work.sum', '*/go.sum', 'sdk/go/go.sum') }}
+          restore-keys: lane-test-go-cli-
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.paths.outputs.build }}
+            ${{ steps.paths.outputs.mod }}
+          key: lane-test-go-tunnel-${{ hashFiles('go.work.sum', '*/go.sum', 'sdk/go/go.sum') }}
+          restore-keys: lane-test-go-tunnel-
+      - name: build the machine side
+        working-directory: cli
+        run: go test -c -o "$RUNNER_TEMP/drain-machine.test" ./cmd/browserterminal-wasm
+      - name: run the edge with the machine
+        working-directory: tunnel
+        env:
+          PAPERBOAT_DRAIN_MACHINE_TEST_BINARY: ${{ runner.temp }}/drain-machine.test
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout 10m -run '^TestBrowserTerminalDrainAcrossUpdates$' -v ./internal/runtime | tee "$RUNNER_TEMP/drain.log"
+          # A skipped test passes silently: require the check itself to have run on both sides.
+          grep -q -- '--- PASS: TestBrowserTerminalDrainAcrossUpdates' "$RUNNER_TEMP/drain.log"
+          grep -q -- '--- PASS: TestBrowserTerminalDrainMachine' "$RUNNER_TEMP/drain.log"

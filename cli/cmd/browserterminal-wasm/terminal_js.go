@@ -269,87 +269,12 @@ func (connection *browserTerminal) emitAttached(attachState terminalAttachState,
 	})
 }
 
-func readScreenCheckpoint(stream io.Reader, streamID uint32) ([]byte, uint64, error) {
-	checkpoint := screenCheckpoint{data: make([]byte, 0, 64<<10)}
-	for {
-		kind, payload, err := readApplicationFrame(stream)
-		if err != nil || kind != appKindBinary {
-			return nil, 0, errors.New("missing terminal screen checkpoint")
-		}
-		frame, err := protocol.DecodeTerminalOutput(payload)
-		if err != nil {
-			return nil, 0, errors.New("invalid terminal screen checkpoint")
-		}
-		if done, err := checkpoint.add(frame, streamID); err != nil {
-			return nil, 0, err
-		} else if done {
-			return checkpoint.data, checkpoint.sequence, nil
-		}
-	}
-}
-
 func (connection *browserTerminal) sendHello(writer io.Writer) error {
 	requestID, err := randomID("request")
 	if err != nil {
 		return err
 	}
 	return writeStructuredFrame(writer, protocol.Frame{Type: "hello", RequestID: requestID, Version: protocol.ProtocolVersion, Payload: helloPayload(connection.config.Mode)})
-}
-
-type terminalAttachState struct {
-	StreamID         uint32
-	AttachmentID     string
-	InputSequence    uint64
-	Generation       uint64
-	Columns          int
-	Rows             int
-	FirstAttachment  bool
-	State            string
-	ReplayFrom       uint64
-	ReplayTo         uint64
-	EarliestSequence uint64
-	LatestSequence   uint64
-}
-
-func parseAttachResponse(payload []byte) (terminalAttachState, error) {
-	var envelope struct {
-		Result struct {
-			StreamID        uint32 `json:"stream_id"`
-			AttachmentID    string `json:"attachment_id"`
-			InputSequence   uint64 `json:"input_sequence"`
-			FirstAttachment bool   `json:"first_attachment"`
-			Session         struct {
-				Snapshot struct {
-					State      string `json:"state"`
-					Generation uint64 `json:"generation"`
-					Dimensions struct {
-						Columns int `json:"columns"`
-						Rows    int `json:"rows"`
-					} `json:"dimensions"`
-					EarliestSequence uint64 `json:"earliest_sequence"`
-					LatestSequence   uint64 `json:"latest_sequence"`
-				} `json:"snapshot"`
-				Replay struct {
-					FromSequence uint64 `json:"from_sequence"`
-					ToSequence   uint64 `json:"to_sequence"`
-				} `json:"replay"`
-			} `json:"session"`
-		} `json:"result"`
-	}
-	if json.Unmarshal(payload, &envelope) != nil {
-		return terminalAttachState{}, errors.New("invalid terminal attach response")
-	}
-	result := envelope.Result
-	if result.StreamID == 0 || result.AttachmentID == "" || result.Session.Snapshot.Generation == 0 || result.Session.Snapshot.Dimensions.Columns < 1 || result.Session.Snapshot.Dimensions.Columns > maximumColumns || result.Session.Snapshot.Dimensions.Rows < 1 || result.Session.Snapshot.Dimensions.Rows > maximumRows {
-		return terminalAttachState{}, errors.New("terminal attach response is missing its stream or geometry")
-	}
-	return terminalAttachState{
-		StreamID: result.StreamID, AttachmentID: result.AttachmentID, InputSequence: result.InputSequence, Generation: result.Session.Snapshot.Generation,
-		Columns: result.Session.Snapshot.Dimensions.Columns, Rows: result.Session.Snapshot.Dimensions.Rows,
-		FirstAttachment: result.FirstAttachment,
-		State:           result.Session.Snapshot.State, ReplayFrom: result.Session.Replay.FromSequence, ReplayTo: result.Session.Replay.ToSequence,
-		EarliestSequence: result.Session.Snapshot.EarliestSequence, LatestSequence: result.Session.Snapshot.LatestSequence,
-	}, nil
 }
 
 func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
