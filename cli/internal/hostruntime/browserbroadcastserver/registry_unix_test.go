@@ -778,11 +778,11 @@ func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
 	if _, err := registry.Join(joinCtx, sessionID, generation, "browser_a"); err != nil {
 		t.Fatal(err)
 	}
-	// The edge stream is not read: ~3 MB echoed by cat (lines under the tty's 4096-byte line limit) exceeds the
-	// 1 MiB attachment queue.
-	chunk := bytes.Repeat([]byte("x"), 4000)
+	// The edge stream is not read: ~3 MB echoed by cat exceeds the 1 MiB attachment queue. Lines stay under
+	// darwin's 1024-byte canonical limit (Linux 4096): a longer line drops its newline and cat never sees it.
+	chunk := bytes.Repeat(append(bytes.Repeat([]byte("x"), 999), '\n'), 4)
 	for sequence := uint64(1); sequence <= 800; sequence++ {
-		if _, err := manager.Write(sessionID, session.InputKey{ClientID: "browser_a", AttachmentID: "browser_a", Generation: generation, InputSequence: sequence}, append(chunk, '\n')); err != nil {
+		if _, err := manager.Write(sessionID, session.InputKey{ClientID: "browser_a", AttachmentID: "browser_a", Generation: generation, InputSequence: sequence}, chunk); err != nil {
 			t.Fatal(err)
 		}
 	}
