@@ -60,16 +60,3 @@ func postPeerStream(t *testing.T, server *Server, request PeerStreamRequest) *ht
 	server.peerStream(response, input, localRequestID(), Peer{PID: os.Getpid()})
 	return response
 }
-
-// A resume the daemon has no secret for is answered resume_unavailable (409), the CLI's cue to ask for a grant.
-func TestPeerStreamResumeWithoutASecretIsNamedResumeUnavailable(t *testing.T) {
-	server := &Server{config: ServerConfig{PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
-		return nil, ResumeUnavailableError{}
-	})}}
-	request := PeerStreamRequest{Workspace: "personal", Schema: PeerStreamSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, Consumer: "terminal", OperationID: "operation_1", MaximumBytes: 1024, Resume: true, Deadline: serverclock.Now().Add(time.Minute).UTC()}
-	response := postPeerStream(t, server, request)
-	remote, ok := decodeRemoteErrorReader(response.Code, response.Body).(*RemoteError)
-	if response.Code != http.StatusConflict || !ok || remote.Code != "resume_unavailable" {
-		t.Fatalf("status=%d remote=%#v", response.Code, remote)
-	}
-}

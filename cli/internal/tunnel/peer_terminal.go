@@ -193,11 +193,6 @@ func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability s
 	if target.Auth.Offline {
 		return func(*tailnet.Authority) bool { return true }
 	}
-	if target.Resume {
-		// A re-attach names the access session it already holds; the host decides (that session's scope or its
-		// standing rule), and a refusal sends the caller back to a grant. A refresh here would only delay it.
-		return func(network *tailnet.Authority) bool { _, err := network.Descriptor(machineID); return err == nil }
-	}
 	return func(network *tailnet.Authority) bool {
 		_, err := network.Descriptor(machineID)
 		if err != nil {

@@ -29,15 +29,8 @@ func TestInputOwnerKeepsQueueAndAttachmentAcrossRedial(t *testing.T) {
 	if other.InputQueue == first.InputQueue || stranger.InputQueue == first.InputQueue || stranger.InputAttachmentID != "" {
 		t.Fatal("input state crossed sessions or owners")
 	}
-	// An owner whose stream is still open is kept (a terminal held for hours resumes); one whose stream ended expires.
-	open := &resolver.TerminalTarget{SessionID: "ses_1"}
-	owners.adopt("owner_a", "machine_1", open, now.Add(inputOwnerTTL+2*time.Second))
-	if open.InputQueue != first.InputQueue {
-		t.Fatal("an owner with an open stream was dropped")
-	}
-	owners.finish("owner_a", "machine_1", open, now.Add(inputOwnerTTL+3*time.Second))
 	late := &resolver.TerminalTarget{SessionID: "ses_1"}
-	owners.adopt("owner_a", "machine_1", late, now.Add(2*inputOwnerTTL+4*time.Second))
+	owners.adopt("owner_a", "machine_1", late, now.Add(inputOwnerTTL+2*time.Second))
 	if late.InputQueue == first.InputQueue {
 		t.Fatal("an expired owner was reused")
 	}

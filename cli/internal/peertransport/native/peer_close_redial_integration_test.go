@@ -22,6 +22,18 @@ import (
 // same node key. The client's cached lease still holds the old WireGuard session, so the first QUIC
 // flight of the redial was lost and the handshake failed after 1 s before the retry took 6 ms.
 func TestRedialAfterPeerClosedSessionDoesNotLoseFirstHandshake(t *testing.T) {
+	redialAfterPeerClose(t, false)
+}
+
+// The same restart while another flow still owns the cached client (the exec probe loop's dial in flight, or a session
+// not released yet): the client cannot be retired, and the redial must still hand the restarted peer a handshake, not
+// data on the old keys. pbvm4 update check: 7 handshake failures at 1 s each, then success at +12 s, when WireGuard's
+// own no-reply rekey fired.
+func TestRedialAfterPeerCloseWhileAnotherFlowOwnsTheClient(t *testing.T) {
+	redialAfterPeerClose(t, true)
+}
+
+func redialAfterPeerClose(t *testing.T, anotherFlow bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	region := regions.Regions[1]
@@ -57,6 +69,18 @@ func TestRedialAfterPeerClosedSessionDoesNotLoseFirstHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	echoOnce(t, ctx, held)
+	if anotherFlow {
+		// A live flow on the same cached client, as the exec probe loop holds while the redial runs.
+		client, err := sender.Client(descriptor, "machine_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		flow, err := client.Dial(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer flow.Close()
+	}
 	// The WireGuard keys must be older than wireguard-go's RekeyTimeout so a lost-key send cannot hide
 	// behind its handshake rate limit, as in production where the keys are minutes old.
 	time.Sleep(5200 * time.Millisecond)

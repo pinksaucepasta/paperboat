@@ -514,31 +514,14 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	if transferClient != nil {
 		startInbox(transferClient.Client, info.Terminal.SessionID)
 	}
-	// attached is the latest attach's descriptor: a redial re-attaches under its access session with the daemon's resume
-	// secret, before asking Paperboat for anything.
-	var attached atomic.Pointer[resolver.ConnectInfo]
-	attached.Store(&info)
-	prepareTarget := func(target *resolver.TerminalTarget) {
-		target.Debug = c.Bool("debug")
-		target.RestartIfNotRunning = false
-		target.ReplayHistory = false
-		target.AfterSequence = int(lastTerminalSequence.Load())
-		target.SequenceSink = recordTerminalSequence
-		target.ReplayGapSink = recordReplayGap
-		target.Env = forwardedTerminalEnv(config.TerminalEnv)
-		target.Cols, target.Rows = remoteSize()
-		target.InputOwner = inputOwner
-	}
-	// resolveFresh asks Paperboat for a grant to this terminal's machine, waiting for its route (seconds right after a
-	// machine update).
-	resolveFresh := func(reconnectCtx context.Context) (resolver.ConnectInfo, error) {
+	conn = tunnel.NewObservedReconnectingConn(ctx, conn, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
 		freshCred, credErr := d.auth.Credential()
 		if credErr != nil {
-			return resolver.ConnectInfo{}, credErr
+			return nil, credErr
 		}
 		freshResolver, resolverErr := newResolver()
 		if resolverErr != nil {
-			return resolver.ConnectInfo{}, resolverErr
+			return nil, resolverErr
 		}
 		reconnectRequest := resolver.ConnectRequest{Machine: info.MachineID, Credential: freshCred, TerminalSessionID: terminalSessionID}
 		if target.kind == environmentUserMachine && info.MachineGeneration > 0 {
@@ -552,17 +535,39 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			if errors.As(resolveErr, &apiErr) && apiErr.Code == "machine_revoked" {
 				resolveErr = tunnel.Revoked(resolveErr)
 			}
-			return resolver.ConnectInfo{}, resolveErr
+			return nil, resolveErr
 		}
 		if freshInfo.Terminal != nil {
-			prepareTarget(freshInfo.Terminal)
+			freshInfo.Terminal.Debug = c.Bool("debug")
+			freshInfo.Terminal.RestartIfNotRunning = false
+			freshInfo.Terminal.ReplayHistory = false
+			freshInfo.Terminal.AfterSequence = int(lastTerminalSequence.Load())
+			freshInfo.Terminal.SequenceSink = recordTerminalSequence
+			freshInfo.Terminal.ReplayGapSink = recordReplayGap
+			freshInfo.Terminal.Env = forwardedTerminalEnv(config.TerminalEnv)
+			freshInfo.Terminal.Cols, freshInfo.Terminal.Rows = remoteSize()
+			freshInfo.Terminal.InputOwner = inputOwner
 		}
-		return freshInfo, nil
-	}
-	// refreshTransfers renews the file-transfer lease and inbox of an attached terminal. It has its own cancellable
-	// owner and cannot hold the attachment back.
-	refreshTransfers := func(freshInfo resolver.ConnectInfo) func(context.Context) error {
-		return func(refreshCtx context.Context) error {
+		dialEnd := diagnostics.ReconnectStep(reconnectCtx, "local_peer_open")
+		freshConn, dialErr := d.tunnel.Dial(reconnectCtx, freshInfo)
+		dialEnd(dialErr)
+		if dialErr != nil {
+			if !tunnel.FallbackEligible(dialErr) {
+				return nil, tunnel.StopReconnect(dialErr)
+			}
+			return nil, dialErr
+		}
+		// The old link may still deliver while this one attaches; replayed output it already showed is dropped.
+		if link, ok := freshConn.(interface{ SkipDelivered(func() int) }); ok {
+			link.SkipDelivered(func() int { return int(lastTerminalSequence.Load()) })
+		}
+		if c.Bool("debug") {
+			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
+		}
+		// Terminal output is ready now. Transfer authorization and inbox setup
+		// have their own cancellable owner and cannot hold this attachment back.
+		pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+		transferRefresh.start(ctx, func(refreshCtx context.Context) error {
 			stopInbox()
 			pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
 			if transferLease != nil {
@@ -594,62 +599,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			pastePolicy.Update(freshTransfer, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
 			startInbox(freshTransfer.Client, freshInfo.Terminal.SessionID)
 			return nil
-		}
-	}
-	linked := func(freshConn tunnel.Conn) {
-		// The old link may still deliver while this one attaches; replayed output it already showed is dropped.
-		if link, ok := freshConn.(interface{ SkipDelivered(func() int) }); ok {
-			link.SkipDelivered(func() int { return int(lastTerminalSequence.Load()) })
-		}
-		if c.Bool("debug") {
-			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
-		}
-	}
-	conn = tunnel.NewObservedReconnectingConn(ctx, conn, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
-		// A held attachment needs no new grant: the daemon re-attaches it with the host's resume secret, so a redial after a
-		// clean close (a machine update) waits for no helper route and no network refresh. It keeps its access session;
-		// the transfer lease is renewed behind the terminal. Any refusal falls back to a grant below.
-		if previous := attached.Load(); previous != nil {
-			if resumeInfo, ok := resumeConnectInfo(*previous, prepareTarget); ok {
-				resumeEnd := diagnostics.ReconnectStep(reconnectCtx, "local_peer_resume")
-				resumed, resumeErr := d.tunnel.Dial(reconnectCtx, resumeInfo)
-				resumeEnd(resumeErr)
-				if resumeErr == nil {
-					linked(resumed)
-					pastePolicy.Update(nil, previous.Terminal.SessionID, fileTransferLimits(previous.FileTransfer))
-					transferRefresh.start(ctx, func(refreshCtx context.Context) error {
-						freshInfo, err := resolveFresh(refreshCtx)
-						if err != nil {
-							return err
-						}
-						return refreshTransfers(freshInfo)(refreshCtx)
-					}, observeTransferFailure)
-					return resumed, nil
-				}
-				if reconnectCtx.Err() != nil {
-					return nil, resumeErr
-				}
-			}
-		}
-		freshInfo, resolveErr := resolveFresh(reconnectCtx)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		dialEnd := diagnostics.ReconnectStep(reconnectCtx, "local_peer_open")
-		freshConn, dialErr := d.tunnel.Dial(reconnectCtx, freshInfo)
-		dialEnd(dialErr)
-		if dialErr != nil {
-			if !tunnel.FallbackEligible(dialErr) {
-				return nil, tunnel.StopReconnect(dialErr)
-			}
-			return nil, dialErr
-		}
-		linked(freshConn)
-		attached.Store(&freshInfo)
-		// Terminal output is ready now. Transfer authorization and inbox setup have their own cancellable owner and
-		// cannot hold this attachment back.
-		pastePolicy.Update(nil, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-		transferRefresh.start(ctx, refreshTransfers(freshInfo), observeTransferFailure)
+		}, observeTransferFailure)
+
 		return freshConn, nil
 	}, d.telemetry, nil, tunnel.TelemetryContext{MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID}, tunnel.WithReconnectingOutput(
 		d.cfg.Connect.TerminalOutputQueueChunks,
@@ -993,18 +944,4 @@ func closeAbandonedSession(closer terminalSessionCloser, machineID, sessionID st
 		return fmt.Errorf("close the terminal session that did not attach: %w", err)
 	}
 	return nil
-}
-
-// resumeConnectInfo is the descriptor of a redial that re-attaches the terminal under the access session it holds, with
-// no credential: the daemon supplies the host's resume secret. It reports false for a descriptor with no access session
-// to resume under (offline attach). The previous descriptor is not changed.
-func resumeConnectInfo(previous resolver.ConnectInfo, prepare func(*resolver.TerminalTarget)) (resolver.ConnectInfo, bool) {
-	if previous.Terminal == nil || previous.Terminal.Auth.ResourceID == "" || previous.Terminal.Auth.Offline {
-		return resolver.ConnectInfo{}, false
-	}
-	target := *previous.Terminal
-	target.Resume, target.Auth.Token = true, ""
-	prepare(&target)
-	previous.Terminal = &target
-	return previous, true
 }

@@ -377,7 +377,7 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 			sequence.Store(int64(value))
 		}
 	}
-	group := &cliNativeStreamGroup{session: session, target: target, application: application, consumer: consumer, now: now, resume: target.Resume}
+	group := &cliNativeStreamGroup{session: session, target: target, application: application, consumer: consumer, now: now}
 	if application.helper != nil {
 		authEnd := diagnostics.ReconnectStep(ctx, "application_authenticate")
 		message, err := authenticateNativeStreamGroup(ctx, group, target, "native")

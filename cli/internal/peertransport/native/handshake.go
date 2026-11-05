@@ -91,8 +91,31 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	closed := o.restarted[peerID]
 	delete(o.restarted, peerID)
 	o.mu.Unlock()
-	if !closed || !o.authority.RetireIdleClient(client) {
+	if !closed {
 		return client, nil
 	}
-	return o.authority.Client(descriptor, peerID)
+	if o.authority.RetireIdleClient(client) {
+		return o.authority.Client(descriptor, peerID)
+	}
+	// Other sessions to the peer still own the client (an exec loop's, not released yet), so it cannot be retired, but
+	// the peer restarted and took its WireGuard keys with it: data on the old keys is dropped until WireGuard's own 15 s
+	// no-reply rekey (pbvm4 update: 7 handshake failures at 1 s, then success at +12 s). Reset the peer's WireGuard
+	// state so the next flow handshakes at once; the client and its sessions stay. A session to the peer that is still
+	// alive means the close was not a restart.
+	if !o.peerHasLiveSession(peerID) {
+		o.authority.ResetPeerPath(client)
+	}
+	return client, nil
+}
+
+// peerHasLiveSession reports whether a session to peerID is still running: one the peer did not close.
+func (o *Owner) peerHasLiveSession(peerID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for session := range o.sessions {
+		if session.peerID == peerID && session.quic.Connection.Context().Err() == nil {
+			return true
+		}
+	}
+	return false
 }

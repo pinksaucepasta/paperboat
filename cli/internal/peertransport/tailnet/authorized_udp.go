@@ -458,6 +458,20 @@ func (a *Authority) RetireIdleClient(client *UDPClient) bool {
 	return false
 }
 
+// ResetPeerPath drops the engine's WireGuard state for client's peer so its next flow repeats admission and starts a
+// handshake, while the client and the sessions that use it stay. For a peer that restarted: it took its keys with it.
+func (a *Authority) ResetPeerPath(client *UDPClient) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, lease := range a.clients {
+		if lease.client == client && a.clientEngine != nil {
+			a.clientEngine.InvalidateAuthorizedPeer(lease.node)
+			diagnosticlog.TryInfo("native packet lifecycle", "stage", "reset_peer_path")
+			return
+		}
+	}
+}
+
 // Static typed reasons preserve authority classification without private values.
 type authorityClosedError struct{}
 

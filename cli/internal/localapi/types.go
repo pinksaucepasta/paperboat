@@ -36,13 +36,6 @@ func (e CredentialExpiredError) Error() string {
 }
 func (CredentialExpiredError) LocalAPICode() string { return "credential_expired" }
 
-// ResumeUnavailableError: the daemon holds no resume secret for the terminal a resume request names (it restarted,
-// the entry expired, or the host ended the attachment). The CLI then asks Paperboat for a grant and attaches normally.
-type ResumeUnavailableError struct{}
-
-func (ResumeUnavailableError) Error() string        { return "no resume secret is held for this terminal" }
-func (ResumeUnavailableError) LocalAPICode() string { return "resume_unavailable" }
-
 type FileTransferRequest struct {
 	Schema            string    `json:"schema"`
 	MachineID         string    `json:"machine_id"`
@@ -96,9 +89,6 @@ type PeerStreamRequest struct {
 	// Offline is set by the daemon when Paperboat could not be reached for a descriptor: the
 	// stream carries no credential and the host admits it from its own signed scopes (F21-11).
 	Offline bool `json:"offline,omitempty"`
-	// Resume re-attaches a terminal this daemon held with the attachment's resume secret, which the daemon keeps per
-	// input owner: no credential, no server grant. The daemon answers resume_unavailable when it holds none.
-	Resume bool `json:"resume,omitempty"`
 }
 
 // OfflineConsumers are the streams the daemon may open without Paperboat.
@@ -214,7 +204,7 @@ func (r PeerStreamRequest) Validate(now time.Time) error {
 	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
 		return ErrInvalidConfig
 	}
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != (r.Offline || r.Resume) || r.Offline && !OfflineConsumers[r.Consumer] || r.Resume && (r.Offline || r.Consumer != "terminal") || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != r.Offline || r.Offline && !OfflineConsumers[r.Consumer] || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	if !r.Deadline.After(now) {
@@ -230,7 +220,7 @@ func (r PeerStreamRequest) ValidatePending(now time.Time) error {
 	if api.ValidateWorkspaceSelector(r.Workspace) != nil {
 		return ErrInvalidConfig
 	}
-	if r.Credential != "" || r.Resume {
+	if r.Credential != "" {
 		return r.Validate(now)
 	}
 	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "file_transfer_key") || !safeValue(r.OperationID) || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {

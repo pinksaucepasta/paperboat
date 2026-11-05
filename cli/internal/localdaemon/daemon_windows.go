@@ -200,7 +200,7 @@ type peerStreamBroker struct {
 }
 
 func (b peerStreamBroker) OpenPeerStream(ctx context.Context, peer localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
-	if request.Credential == "" && !request.Resume {
+	if request.Credential == "" {
 		if b.issue == nil {
 			return nil, ErrInvalidInventoryConfig
 		}

@@ -607,11 +607,6 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		if writeServerRefusal(writer, requestID, err) || writeCredentialExpired(writer, requestID, err) {
 			return
 		}
-		var noResume ResumeUnavailableError
-		if errors.As(err, &noResume) {
-			writeError(writer, http.StatusConflict, requestID, noResume.LocalAPICode(), noResume.Error())
-			return
-		}
 		if s.config.SignedOut != nil && s.config.SignedOut(request.Context()) {
 			writeError(writer, http.StatusUnauthorized, requestID, AuthenticationRequiredCode, "this machine is signed out of Paperboat")
 			return
