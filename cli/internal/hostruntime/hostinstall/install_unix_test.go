@@ -151,9 +151,6 @@ func TestPlatformPathsUseAuthoritativeServiceLayout(t *testing.T) {
 	if paths.root != layout.InstallRoot || paths.worker != layout.Binary || paths.workerNext != layout.BinaryStaged || paths.workerRollback != layout.BinaryRollback || paths.updateState != layout.UpdateStateRoot || paths.hostdSocket != layout.HostdSocket {
 		t.Fatalf("platform paths diverge from service layout: paths=%+v layout=%+v", paths, layout)
 	}
-	if filepath.Dir(paths.workerPrevious) != layout.ReleasesRoot {
-		t.Fatalf("previous slot escaped authoritative release root: %q", paths.workerPrevious)
-	}
 }
 
 func TestLoadEnrolledOwnerRequiresRoot(t *testing.T) {
@@ -175,7 +172,6 @@ func TestPendingInstallersAllowRecoveryBeforeBinaryPublication(t *testing.T) {
 		worker:                filepath.Join(root, "bin", "pb"),
 		workerNext:            filepath.Join(root, "releases", "pb.next"),
 		workerRollback:        filepath.Join(root, "releases", "pb.rollback"),
-		workerPrevious:        filepath.Join(root, "releases", "pb.previous"),
 		journal:               filepath.Join(root, "installer", "install-journal.json"),
 		metadata:              filepath.Join(root, "installer", "install-metadata.json"),
 		hostdToken:            filepath.Join(root, "runtime", "hostd.token"),

@@ -228,7 +228,7 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 type installPaths struct {
 	instance                                             string
 	root, installerState, runtimeState                   string
-	worker, workerNext, workerRollback, workerPrevious   string
+	worker, workerNext, workerRollback                   string
 	journal, metadata                                    string
 	hostdToken, hostdSocket, updaterSocket, updateState  string
 	environmentCredentialDirectory                       string

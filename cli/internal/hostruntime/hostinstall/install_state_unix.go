@@ -72,10 +72,8 @@ func platformPaths(uid int) installPaths {
 	// Release slots are kept in a dedicated root-owned directory so the
 	// updater can atomically stage, promote, and roll back without touching the
 	// command path or relying on a caller-controlled location.
-	releases := layout.ReleasesRoot
 	p.workerNext = layout.BinaryStaged
 	p.workerRollback = layout.BinaryRollback
-	p.workerPrevious = filepath.Join(releases, "pb.previous")
 	p.journal = filepath.Join(installerState, "install-journal.json")
 	p.metadata = filepath.Join(installerState, "install-metadata.json")
 	p.hostdToken = filepath.Join(runtimeState, "hostd.token")
@@ -446,19 +444,6 @@ func loadJournal(path string) (installJournal, error) {
 	return journal, nil
 }
 
-func replacePrevious(rollback, previous string) error {
-	if _, err := os.Lstat(rollback); installNotExistOnly(err) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if err := os.Remove(previous); err != nil && !installNotExistOnly(err) {
-		return err
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=verified-previous-retention
-	return os.Link(rollback, previous)
-}
-
 func removeJournal(path string) (resultErr error) {
 	err := os.Remove(path)
 	if installNotExistOnly(err) {
@@ -483,7 +468,7 @@ func removeInstalledFiles(ctx context.Context, paths installPaths) error {
 		carrierSocket = paths.hostdSocket + ".carrier"
 	}
 	for _, path := range []string{
-		paths.worker, paths.workerNext, paths.workerRollback, paths.workerPrevious,
+		paths.worker, paths.workerNext, paths.workerRollback,
 		paths.metadata,
 		paths.hostdToken, paths.hostdSocket, carrierSocket, paths.updaterSocket,
 		filepath.Join(paths.runtimeState, "hostd", "fence.json"),

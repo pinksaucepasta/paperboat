@@ -21,7 +21,7 @@ func TestNativeCommitRetainsRollbackUntilMetadataCommit(t *testing.T) {
 		t.Skip("protected install transaction requires root")
 	}
 	root := t.TempDir()
-	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerPrevious: filepath.Join(root, "previous"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
+	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
 	for path, body := range map[string]string{paths.worker: "new bytes", paths.workerRollback: "old bytes", paths.metadata: "old protected metadata"} {
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -35,12 +35,6 @@ func TestNativeCommitRetainsRollbackUntilMetadataCommit(t *testing.T) {
 	journal.Stage = "services_started"
 	if err = writeJournal(paths.journal, journal); err != nil {
 		t.Fatal(err)
-	}
-	if err = replacePrevious(paths.workerRollback, paths.workerPrevious); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Stat(paths.workerRollback); err != nil {
-		t.Fatal("rollback bytes retired before metadata commit", err)
 	}
 	if err = writeInstallMetadata(paths.metadata, Request{Source: source}); err != nil {
 		t.Fatal(err)
@@ -66,7 +60,7 @@ func TestNativeCommitFinishesWithExistingUpdateState(t *testing.T) {
 	for _, held := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nativeLockHeld=%t", held), func(t *testing.T) {
 			root := t.TempDir()
-			paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerPrevious: filepath.Join(root, "previous"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
+			paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
 			for path, body := range map[string]string{paths.worker: "new bytes", paths.workerRollback: "old bytes", paths.metadata: "old metadata"} {
 				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 					t.Fatal(err)
@@ -114,9 +108,15 @@ func TestNativeCommitFinishesWithExistingUpdateState(t *testing.T) {
 					t.Fatalf("pending state retained at %s: %v", filepath.Base(path), err)
 				}
 			}
-			previous, err := os.ReadFile(paths.workerPrevious)
-			if err != nil || string(previous) != "old bytes" {
-				t.Fatalf("previous image missing: %v", err)
+			// The committed install keeps no image of another version.
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if body, _ := os.ReadFile(filepath.Join(root, entry.Name())); string(body) == "old bytes" {
+					t.Fatalf("commit kept the previous image at %s", entry.Name())
+				}
 			}
 		})
 	}

@@ -69,11 +69,6 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 	} else if !installNotExistOnly(statErr) {
 		return statErr
 	}
-	for _, pair := range [][2]string{{paths.workerRollback, paths.workerPrevious}} {
-		if err := replacePrevious(pair[0], pair[1]); err != nil {
-			return err
-		}
-	}
 	request.SessionOwnerGeneration = generation
 	if err := writeInstallMetadata(paths.metadata, request); err != nil {
 		return err
