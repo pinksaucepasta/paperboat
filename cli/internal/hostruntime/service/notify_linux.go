@@ -14,16 +14,7 @@ import (
 type ProcessNotifier struct {
 	watchdog time.Duration
 	socket   string
-	now      func() time.Time
-	mu       sync.Mutex
-	readyAt  time.Time
-	reset    bool
 }
-
-// stableAfterReady is how long a ready process must keep running before systemd's restart backoff is reset
-// (RESTART_RESET=1, systemd >= 258; older ones ignore it). Resetting at READY would keep a process that
-// crashes right after start at the shortest restart delay forever.
-const stableAfterReady = time.Minute
 
 type serviceManagerEnvironment struct {
 	socket   string
@@ -48,7 +39,7 @@ func NewProcessNotifier() (*ProcessNotifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ProcessNotifier{watchdog: environment.watchdog, socket: environment.socket, now: time.Now}, nil
+	return &ProcessNotifier{watchdog: environment.watchdog, socket: environment.socket}, nil
 }
 
 func (n *ProcessNotifier) WatchdogInterval() time.Duration {
@@ -59,14 +50,7 @@ func (n *ProcessNotifier) WatchdogInterval() time.Duration {
 }
 
 func (n *ProcessNotifier) Starting() error { return n.status("starting") }
-func (n *ProcessNotifier) Ready() error {
-	if n != nil {
-		n.mu.Lock()
-		n.readyAt = n.now()
-		n.mu.Unlock()
-	}
-	return n.notify(daemon.SdNotifyReady + "\nSTATUS=ready")
-}
+func (n *ProcessNotifier) Ready() error    { return n.notify(daemon.SdNotifyReady + "\nSTATUS=ready") }
 func (n *ProcessNotifier) Degraded(reason string) error {
 	if !safeNotificationStatus(reason) {
 		return ErrInvalidDefinition
@@ -77,26 +61,7 @@ func (n *ProcessNotifier) Draining() error { return n.status("draining") }
 func (n *ProcessNotifier) Stopping() error {
 	return n.notify(daemon.SdNotifyStopping + "\nSTATUS=stopping")
 }
-
-// Watchdog also resets systemd's restart backoff, once, when the process has been ready for stableAfterReady.
-func (n *ProcessNotifier) Watchdog() error {
-	if n == nil {
-		return n.notify(daemon.SdNotifyWatchdog)
-	}
-	n.mu.Lock()
-	reset := !n.reset && !n.readyAt.IsZero() && n.now().Sub(n.readyAt) >= stableAfterReady
-	n.mu.Unlock()
-	if !reset {
-		return n.notify(daemon.SdNotifyWatchdog)
-	}
-	err := n.notify(daemon.SdNotifyWatchdog + "\nRESTART_RESET=1")
-	if err == nil {
-		n.mu.Lock()
-		n.reset = true
-		n.mu.Unlock()
-	}
-	return err
-}
+func (n *ProcessNotifier) Watchdog() error { return n.notify(daemon.SdNotifyWatchdog) }
 
 func (n *ProcessNotifier) status(value string) error { return n.notify("STATUS=" + value) }
 
