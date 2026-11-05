@@ -35,6 +35,10 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
+	// Migrate its own database: run alone (-run), no earlier test has.
+	if e := db.Migrate(ctx, store); e != nil {
+		t.Fatal(e)
+	}
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner, machine, environment := "ds-http-owner-"+suffix, "ds-http-machine-"+suffix, "ds-http-env-"+suffix
 	exec := func(q string, args ...any) {
