@@ -397,7 +397,8 @@ func TestEdgeControlResumesACutAttachmentAndRefusesARevokedOne(t *testing.T) {
 	authorizer := &testBrowserAuthorizer{decision: decision}
 	var usageMu sync.Mutex
 	var resumed []string
-	detached := map[string]time.Time{}
+	detaches := 0
+	attached := map[string]bool{}
 	attachedUntil := map[string]time.Time{}
 	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}, AdmissionLifetime: time.Minute,
 		RecordUsageResumed: func(_ context.Context, attachment, terminal, node string, _, until time.Time) error {
@@ -407,14 +408,16 @@ func TestEdgeControlResumesACutAttachmentAndRefusesARevokedOne(t *testing.T) {
 				return ErrForbidden
 			}
 			resumed = append(resumed, attachment)
-			attachedUntil[attachment] = until
+			attached[attachment], attachedUntil[attachment] = true, until
 			return nil
 		},
+		// The store's rule: a detach ends the attachment only up to the attached_until it wrote.
 		RecordUsageDetached: func(_ context.Context, attachment string, until time.Time) error {
 			usageMu.Lock()
 			defer usageMu.Unlock()
-			if current, ok := attachedUntil[attachment]; !ok || !current.After(until) {
-				detached[attachment] = until // only a connection that still owns it detaches it
+			detaches++
+			if !attachedUntil[attachment].After(until) {
+				attached[attachment] = false
 			}
 			return nil
 		},
@@ -471,12 +474,18 @@ func TestEdgeControlResumesACutAttachmentAndRefusesARevokedOne(t *testing.T) {
 	if kind, heartbeat, err := second.Read(ctx); err != nil || kind != websocket.MessageText || string(heartbeat) != "ok" {
 		t.Fatalf("resumed channel heartbeat %q, %v", heartbeat, err)
 	}
-	usageMu.Lock()
-	if len(resumed) != 1 || resumed[0] != attachment {
-		t.Fatalf("usage resumed %v", resumed)
+	// Whichever comes first, the cut connection's detach or the resume, the attachment ends attached.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		usageMu.Lock()
+		done := detaches >= 1
+		usageMu.Unlock()
+		if done || time.Now().After(deadline) {
+			break
+		}
 	}
-	if _, ok := detached[attachment]; ok {
-		t.Fatal("the cut connection detached the resumed attachment")
+	usageMu.Lock()
+	if len(resumed) != 1 || resumed[0] != attachment || detaches != 1 || !attached[attachment] {
+		t.Fatalf("usage resumed %v, detaches %d, attached %v", resumed, detaches, attached[attachment])
 	}
 	usageMu.Unlock()
 
