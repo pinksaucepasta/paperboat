@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"golang.org/x/sys/unix"
 )
 
@@ -286,10 +287,16 @@ func darwinRules(ctx context.Context, leases []*guardedLease, loopbackCIDR ...st
 		if err != nil {
 			return "", errors.New("invalid caller UID")
 		}
-		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from any to %s port %d user %d no state\n", lease.ip, lease.port, uid)
+		// Any uid may connect to the routed gateway, as on Linux: the guard attributes each connection and refuses
+		// users without a daemon with the refusal page (F23-02).
+		client := fmt.Sprintf(" user %d", uid)
+		if gatewayRouting && lease.ip == splitdns.BrowserGatewayIP {
+			client = ""
+		}
+		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from any to %s port %d%s no state\n", lease.ip, lease.port, client)
 		fmt.Fprintf(&b, "pass out quick on lo0 inet proto tcp from %s port %d to any user %d no state\n", lease.ip, lease.port, broker)
 		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from any to %s port %d user %d flags S/SA keep state\n", lease.ip, lease.port, broker)
-		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from %s port %d to any user %d no state\n", lease.ip, lease.port, uid)
+		fmt.Fprintf(&b, "pass in quick on lo0 inet proto tcp from %s port %d to any%s no state\n", lease.ip, lease.port, client)
 	}
 	for _, prefix := range prefixes {
 		fmt.Fprintf(&b, "block drop out quick inet from any to %s\nblock drop out quick inet from %s to any\nblock drop in quick inet from any to %s\nblock drop in quick inet from %s to any\n", prefix, prefix, prefix, prefix)
