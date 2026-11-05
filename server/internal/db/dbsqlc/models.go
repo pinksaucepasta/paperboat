@@ -850,6 +850,12 @@ type ControlServerNode struct {
 	CreatedAt     time.Time
 }
 
+type ControlServerNodeAcmeCache struct {
+	Key       string
+	Sealed    []byte
+	UpdatedAt time.Time
+}
+
 type ControlSigningKeyRevocation struct {
 	KeyID       string
 	Reason      string

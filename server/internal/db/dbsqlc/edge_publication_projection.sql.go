@@ -12,6 +12,7 @@ import (
 const listEdgeDNSPublicationResourcesV1 = `-- name: ListEdgeDNSPublicationResourcesV1 :many
 SELECT owner_id AS id, max(resource_generation)::bigint AS generation FROM edge_dns_publications
 WHERE (state<>'verified' OR desired_addresses<>'[]'::jsonb OR provider_records<>'[]'::jsonb)
+ AND owner_id NOT LIKE 'server_region:%' -- regional server-node names are published by servernodes.RegionalDNS
  AND owner_id > $1::text
 GROUP BY owner_id ORDER BY owner_id LIMIT $2
 `
@@ -26,7 +27,7 @@ type ListEdgeDNSPublicationResourcesV1Row struct {
 	Generation int64
 }
 
-// Owners whose DNS records are still to be withdrawn (managed names are covered by wildcards; nothing is published).
+// Edge owners whose DNS records are still to be withdrawn (managed names are covered by wildcards).
 func (q *Queries) ListEdgeDNSPublicationResourcesV1(ctx context.Context, arg ListEdgeDNSPublicationResourcesV1Params) ([]ListEdgeDNSPublicationResourcesV1Row, error) {
 	rows, err := q.db.Query(ctx, listEdgeDNSPublicationResourcesV1, arg.AfterID, arg.BatchSize)
 	if err != nil {
