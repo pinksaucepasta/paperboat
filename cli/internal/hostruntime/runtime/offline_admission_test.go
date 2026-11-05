@@ -17,8 +17,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 )
 
-// Every offline decision is recorded before the host acts: a start with a scope is admitted, a
-// start without one or on a dispatching host is refused and recorded as a refusal (F21-11).
+// Every host-rules decision is recorded before the host acts: a start with a scope is admitted (on a carrier too:
+// its worker serves the admitted peer), a start without one is refused and recorded as a refusal (F21-11), each
+// with its origin: online while Paperboat answers (every exec of a signed-in computer, D1), else offline.
 func TestOfflineAdmissionRecordsEveryDecisionFirst(t *testing.T) {
 	queue, err := offlineaudit.Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
 	if err != nil {
@@ -27,26 +28,27 @@ func TestOfflineAdmissionRecordsEveryDecisionFirst(t *testing.T) {
 	request := func(allowed bool) native.OfflineAdmission {
 		return native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_1"}, Header: streamauth.Header{OperationID: "op_1"}, Capability: "exec", Allowed: allowed}
 	}
-	if err := offlineAdmission(queue, false, offlineHost)(context.Background(), request(true)); err != nil {
+	onlineHost := func() bool { return true }
+	if err := offlineAdmission(queue, offlineHost)(context.Background(), request(true)); err != nil {
 		t.Fatalf("a scoped offline start was refused: %v", err)
 	}
-	if err := offlineAdmission(queue, false, offlineHost)(context.Background(), request(false)); err == nil {
+	if err := offlineAdmission(queue, offlineHost)(context.Background(), request(false)); err == nil {
 		t.Fatal("an offline start without a scope was admitted")
 	}
-	if err := offlineAdmission(queue, true, offlineHost)(context.Background(), request(true)); err == nil {
-		t.Fatal("a dispatching host admitted an offline start")
+	if err := offlineAdmission(queue, onlineHost)(context.Background(), request(true)); err != nil {
+		t.Fatalf("a scoped host-rules start was refused while online: %v", err)
 	}
-	if offlineAdmission(nil, false, offlineHost) != nil {
+	if offlineAdmission(nil, offlineHost) != nil {
 		t.Fatal("a host without an audit queue would admit offline sessions")
 	}
 	events := queue.Oldest(10)
-	want := []struct{ kind, reason string }{{offlineaudit.KindStarted, ""}, {offlineaudit.KindRefused, offlineaudit.ReasonNoScope}, {offlineaudit.KindRefused, offlineaudit.ReasonPeerUnknown}}
+	want := []struct{ kind, reason, origin string }{{offlineaudit.KindStarted, "", offlineaudit.OriginOffline}, {offlineaudit.KindRefused, offlineaudit.ReasonNoScope, offlineaudit.OriginOffline}, {offlineaudit.KindStarted, "", offlineaudit.OriginOnline}}
 	if len(events) != len(want) {
 		t.Fatalf("recorded %+v", events)
 	}
 	for i, w := range want {
-		if events[i].Kind != w.kind || events[i].Reason != w.reason || events[i].PeerAccountID != "acct" || events[i].OperationID != "op_1" {
-			t.Fatalf("event %d = %+v, want %s/%s", i, events[i], w.kind, w.reason)
+		if events[i].Kind != w.kind || events[i].Reason != w.reason || events[i].Origin != w.origin || events[i].PeerAccountID != "acct" || events[i].OperationID != "op_1" {
+			t.Fatalf("event %d = %+v, want %s/%s/%s", i, events[i], w.kind, w.reason, w.origin)
 		}
 	}
 }
@@ -92,16 +94,12 @@ func TestManagedSSHSessionsAreQueuedForAuditOnlineAndOffline(t *testing.T) {
 	serve(managedssh.Peer{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_online"})
 	serve(managedssh.Peer{AccountID: "acct", EndpointID: "cli_1", OperationID: "op_offline", Offline: true})
 	admission := native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_2"}, Header: streamauth.Header{OperationID: "op_denied"}, Capability: "managed_ssh"}
-	if err := offlineAdmission(queue, false, offlineHost)(context.Background(), admission); err == nil {
+	if err := offlineAdmission(queue, offlineHost)(context.Background(), admission); err == nil {
 		t.Fatal("an offline SSH start without a scope was admitted")
 	}
 	admission.Allowed = true
-	if err := offlineAdmission(queue, false, offlineHost)(context.Background(), admission); err != nil {
+	if err := offlineAdmission(queue, offlineHost)(context.Background(), admission); err != nil {
 		t.Fatalf("a scoped offline SSH start was refused: %v", err)
-	}
-	// F5-08: a carrier (dispatching) serves SSH itself, so it admits a scoped offline SSH start too.
-	if err := offlineAdmission(queue, true, offlineHost)(context.Background(), admission); err != nil {
-		t.Fatalf("a carrier refused a scoped offline SSH start: %v", err)
 	}
 
 	events := queue.Oldest(20)

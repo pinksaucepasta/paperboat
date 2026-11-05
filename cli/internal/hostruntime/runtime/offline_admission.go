@@ -14,11 +14,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 )
 
-// offlineAdmission records every offline session decision before the host acts on it (F21-11):
-// a start that cannot be recorded is refused, so audit fails closed. A multi-account host
-// dispatches streams to per-account workers that hold no peer state of their own here, so it
-// refuses offline sessions, except SSH: the carrier serves SSH itself under its own signed rules.
-func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func() bool) func(context.Context, native.OfflineAdmission) error {
+// offlineAdmission records every session decided from the host's signed rules before the host acts on it
+// (F21-11, D1): a start that cannot be recorded is refused, so audit fails closed. Its origin says whether
+// Paperboat was answering. A carrier decides for its worker too: the worker serves the admitted peer
+// (NativeDispatchClient.OpenOffline), so the per-account rule here is the only decision.
+func offlineAdmission(queue *offlineaudit.Queue, online func() bool) func(context.Context, native.OfflineAdmission) error {
 	if queue == nil {
 		return nil
 	}
@@ -26,16 +26,13 @@ func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func()
 		if request.Capability == sshCapability {
 			return admitOfflineSSH(queue, request, online())
 		}
-		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
-		var refusal error
-		switch {
-		case dispatching:
-			refusal, event.Reason = errors.New("this host does not start offline sessions"), offlineaudit.ReasonPeerUnknown
-		case !request.Allowed:
-			refusal, event.Reason = errors.New("no signed scope allows this session"), offlineaudit.ReasonNoScope
+		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID, Origin: offlineaudit.OriginOffline}
+		if online() {
+			event.Origin = offlineaudit.OriginOnline
 		}
-		if refusal != nil {
-			event.Kind = offlineaudit.KindRefused
+		var refusal error
+		if !request.Allowed {
+			refusal, event.Reason, event.Kind = errors.New("no signed scope allows this session"), offlineaudit.ReasonNoScope, offlineaudit.KindRefused
 		}
 		err := queue.Record(event)
 		if errors.Is(err, offlineaudit.ErrFull) && refusal == nil {

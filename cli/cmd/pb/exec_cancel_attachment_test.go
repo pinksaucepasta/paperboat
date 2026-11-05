@@ -55,8 +55,9 @@ func TestExecCancellationRetainsResultAfterOriginalAttachmentEnds(t *testing.T) 
 		attempt := opens.Add(1)
 		if attempt == 1 {
 			operation.Store(request.OperationID)
-		} else if request.OperationID != operation.Load().(string) || r.Credential != "renewed_1" {
-			t.Error("cancellation changed execution identity or skipped fresh authorization")
+		} else if request.OperationID != operation.Load().(string) || r.Credential != "" {
+			// The cancel attachment is a pending request like the first dial: the daemon admits it.
+			t.Error("cancellation changed execution identity or carried a CLI-fetched credential")
 			return nil, errors.New("invalid cancellation binding")
 		}
 		client, server := net.Pipe()
@@ -122,7 +123,7 @@ func TestExecCancellationRetainsResultAfterOriginalAttachmentEnds(t *testing.T) 
 	case err := <-done:
 		var exit interface{ ExitCode() int }
 		var remote *tunnel.RemoteExecError
-		if opens.Load() != 2 || descriptors.Load() != 1 || !errors.As(err, &exit) || exit.ExitCode() != 130 || !errors.As(err, &remote) || remote.Code != "exec_canceled" || output.String() != "before" {
+		if opens.Load() != 2 || descriptors.Load() != 0 || !errors.As(err, &exit) || exit.ExitCode() != 130 || !errors.As(err, &remote) || remote.Code != "exec_canceled" || output.String() != "before" {
 			t.Fatalf("known cancellation was replaced by carrier loss: opens=%d err=%v output=%q", opens.Load(), err, output.String())
 		}
 	case <-time.After(5 * time.Second):

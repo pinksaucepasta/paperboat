@@ -140,8 +140,9 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 				t.Error("initial request was not a start")
 			}
 		} else {
-			if request.OperationID != operation.Load().(string) || request.FromSequence != 2 || r.Credential != fmt.Sprintf("renewed_%d", n-1) {
-				t.Errorf("recovery binding: operation=%t cursor=%d descriptor=%t", request.OperationID == operation.Load().(string), request.FromSequence, r.Credential == fmt.Sprintf("renewed_%d", n-1))
+			// A reattach is a pending request like the first dial: the daemon decides its admission.
+			if request.OperationID != operation.Load().(string) || request.FromSequence != 2 || r.Credential != "" {
+				t.Errorf("recovery binding: operation=%t cursor=%d pending=%t", request.OperationID == operation.Load().(string), request.FromSequence, r.Credential == "")
 			}
 		}
 		if n == 2 {
@@ -200,10 +201,10 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	defer finish()
 	err = command.ExecuteContext(commandCtx)
 	if transient {
-		if err != nil || opens.Load() != 3 || descriptors.Load() != 2 || out.String() != "beforeafter" {
+		if err != nil || opens.Load() != 3 || descriptors.Load() != 0 || out.String() != "beforeafter" {
 			t.Fatalf("replacement handshake consumed recovery: opens=%d descriptors=%d output=%q err=%v", opens.Load(), descriptors.Load(), out.String(), err)
 		}
-	} else if err == nil || opens.Load() != 2 || descriptors.Load() != 1 || out.String() != "before" {
+	} else if err == nil || opens.Load() != 2 || descriptors.Load() != 0 || out.String() != "before" {
 		t.Fatalf("authoritative rejection was retried: opens=%d descriptors=%d output=%q err=%v", opens.Load(), descriptors.Load(), out.String(), err)
 	}
 }

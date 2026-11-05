@@ -63,7 +63,7 @@ func execDescriptorSource(t *testing.T, serverNow func() time.Time, lifetime tim
 		_, _ = fmt.Fprintf(writer, `{"data":{"operation_id":"operation_1","environment":{"id":"environment_1","kind":"machine","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{"quic":"quic://example.test:443","wss":"wss://example.test/v1/runtime"},"auth":{"method":"bearer","token":"operation-token","expires_at":%q,"scopes":["exec:operate"]},"expires_at":%q}}`, expires, expires)
 	}))
 	t.Cleanup(server.Close)
-	return AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	return AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1", APIToken: apiTokenSession}
 }
 
 func execPendingRequest() localapi.PeerStreamRequest {

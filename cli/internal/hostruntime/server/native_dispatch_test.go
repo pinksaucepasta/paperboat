@@ -291,3 +291,76 @@ func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
 		t.Fatal("permanent authorization rejection became retryable")
 	}
 }
+
+type admittedPeerFixture struct{ account, endpoint string }
+
+func (p admittedPeerFixture) OfflinePeer() (string, string, string, string, time.Time) {
+	return p.account, p.endpoint, "exec", "operation", time.Time{}
+}
+
+// A carrier admits a signed-in computer's exec from its own signed per-account rules (D1) and hands it to its
+// worker with the peer it proved; the worker serves it for that peer alone (its requests are then authorized as
+// an offline stream), never for a stream that names no peer or a peer beside a server credential.
+func TestNativeDispatchServesACarrierAdmittedExecForItsPeer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	served := make(chan [2]string, 1)
+	var disabled atomic.Bool
+	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
+		Fence:     func(context.Context) (func(), <-chan struct{}, error) { return func() {}, make(chan struct{}), nil },
+		Authorize: func(context.Context, streamauth.Header) (string, error) { return "access-session", nil },
+		AdmitOffline: func(context.Context, streamauth.Header) error {
+			if disabled.Load() {
+				return ErrStreamAuthorization
+			}
+			return nil
+		},
+		ServeStream: func(_ context.Context, h streamauth.Header, conn net.Conn) error {
+			peer, ok := conn.(OfflinePeerConn)
+			if !ok {
+				return errors.New("an offline stream reached the worker without its peer")
+			}
+			account, endpoint, consumer, operation, _ := peer.OfflinePeer()
+			if consumer != h.Consumer || operation != h.OperationID {
+				return errors.New("peer bound to another stream")
+			}
+			served <- [2]string{account, endpoint}
+			_, err := conn.Write([]byte("ok"))
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close(ctx)
+	worker := httptest.NewServer(handler)
+	defer worker.Close()
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offline, err := streamauth.NewOffline("operation", "exec", "stream", time.Now().Add(time.Minute), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := client.OpenOffline(ctx, offline, admittedPeerFixture{"account_peer", "cli_peer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := io.ReadAll(connection)
+	connection.Close()
+	if err != nil || string(reply) != "ok" || <-served != [2]string{"account_peer", "cli_peer"} {
+		t.Fatalf("carrier-admitted exec: reply=%q err=%v", reply, err)
+	}
+	if _, err := client.Open(ctx, offline); err == nil {
+		t.Fatal("an offline stream without its admitted peer was served")
+	}
+	online, _ := streamauth.New("operation", "exec", "stream", "allowed", time.Now().Add(time.Minute), 1<<20)
+	if _, err := client.OpenOffline(ctx, online, admittedPeerFixture{"account_peer", "cli_peer"}); err == nil {
+		t.Fatal("a peer named beside a server credential was accepted")
+	}
+	disabled.Store(true)
+	if _, err := client.OpenOffline(ctx, offline, admittedPeerFixture{"account_peer", "cli_peer"}); err == nil {
+		t.Fatal("a worker served a capability it has turned off")
+	}
+}

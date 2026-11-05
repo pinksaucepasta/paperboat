@@ -136,3 +136,33 @@ func TestCachedNativeRuntimeRefreshDoesNotHoldAdmittedOperations(t *testing.T) {
 		t.Fatal("refresh against an unavailable server admitted the operation")
 	}
 }
+
+// pbvm4 quiet1-3: every `pb exec` refreshed the signed peer network (median ~300 ms) because its descriptor had just
+// minted a grant. A host-rules exec (D1) carries no grant, so 10 consecutive execs to one target reuse the cached
+// runtime with no network refresh at all.
+func TestConsecutiveHostRulesExecsMakeNoNetworkRefresh(t *testing.T) {
+	issuer, accountID, endpointID := "https://api.example.test", "account_connected", "cli_connected"
+	identity, _, _ := connectedEndpointAuthority(t, connectedStore(t), issuer, accountID, endpointID, "machine_connected")
+	defer identity.Clear()
+	networkAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: connectedStore(t), Issuer: issuer, Self: tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}, Keys: connectedNetworkKeys{public: identity.RootPublic}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer networkAuthority.Close()
+	var requests atomic.Int32
+	current := &cliNativeRuntime{accountID: accountID, endpointID: endpointID, identityFingerprint: identity.LocalCertificate.Fingerprint(), authority: networkAuthority, done: make(chan struct{})}
+	peer := &PeerTerminalTunnel{nativeRuntime: current, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(request *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"code":"peer_network_unavailable","message":"unavailable"}}`))}, nil
+	})}}}
+	target := &resolver.TerminalTarget{Auth: resolver.AuthTarget{Offline: true}}
+	for i := range 10 {
+		got, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, hostRulesAdmission(target, "machine_connected", nativeCapability("exec")))
+		if err != nil || got != current {
+			t.Fatalf("exec %d: runtime reused=%v err=%v", i, got == current, err)
+		}
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("10 host-rules execs made %d network refreshes, want 0", n)
+	}
+}

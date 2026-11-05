@@ -34,6 +34,9 @@ type AuthenticatedMachineSource struct {
 	SSHLocalCode    string
 	HTTPClient      *http.Client
 	SourceMachineID string
+	// APIToken reports whether this computer signed in with an API token (pb login --api-token-file). Such a
+	// session has no standing rules on hosts (F24-07), so its execs keep a per-operation descriptor.
+	APIToken func() (bool, error)
 	// AutoApprovePeerEnrollments is invoked after the authenticated machine
 	// list is loaded. Production wires this to the account-root signer so a
 	// one-shot enrollment never requires a separate trust-approval command.
@@ -51,8 +54,8 @@ func (s *AuthenticatedMachineSource) SetManagedSSHReadiness(ready bool, code str
 	s.SSHLocalCode = code
 }
 
-// IssuePeerStream obtains a fresh, operation-scoped authorization just before
-// transport admission. It deliberately never caches the returned credential.
+// IssuePeerStream sends SSH and exec to the host's signed rules, or for an API-token session's exec obtains a
+// fresh, operation-scoped authorization just before transport admission (never cached).
 func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
 	if strings.TrimSpace(s.ServerURL) == "" || s.Auth == nil || request.Credential != "" || request.Offline {
 		return request, ErrInvalidInventoryConfig
@@ -63,13 +66,22 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	var expires time.Time
 	var token string
 	var quicEndpoint, wssEndpoint string
-	if request.Consumer == "ssh" {
-		// D1 (F5-07): the host admits every SSH stream from its own signed access rules, online or offline,
-		// so an SSH connection makes no control-plane request.
-		return hostRulesPeerStream(request)
-	}
-	if request.Consumer != "exec" {
+	if request.Consumer != "ssh" && request.Consumer != "exec" {
 		return request, errors.New("daemon descriptor issuance is unavailable for this consumer")
+	}
+	tokenSession := false
+	if request.Consumer == "exec" && s.APIToken != nil {
+		var err error
+		if tokenSession, err = s.APIToken(); err != nil {
+			return request, inventorySourceFailure("credential", err)
+		}
+	}
+	if !tokenSession {
+		// D1 (F5-07): the host admits every SSH and exec stream of a signed-in computer from its own signed
+		// access rules, online or offline, so a connection makes no control-plane request (tailscale
+		// ssh/tailssh/tailssh.go decides each connection from the netmap's SSH policy, no control round trip).
+		// The host's rule is the reusable grant: valid until the server withdraws it, which ends live streams.
+		return hostRulesPeerStream(request)
 	}
 	var descriptor api.ExecDescriptor
 	for attempt := 0; attempt < 2; attempt++ {
@@ -312,8 +324,8 @@ func applyListedSSH(machines []api.UserMachine) []api.UserMachine {
 // received from the host's signed state still ends it at once.
 const offlineStreamLifetime = 12 * time.Hour
 
-// hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH stream,
-// and exec or terminal streams while Paperboat is unreachable.
+// hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH and exec
+// stream of a signed-in computer, and an API-token session's exec while Paperboat is unreachable.
 func hostRulesPeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
 	if !localapi.OfflineConsumers[request.Consumer] {
 		return request, errors.New("this session needs Paperboat online")

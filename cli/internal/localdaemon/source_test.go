@@ -180,7 +180,7 @@ func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 		_, _ = fmt.Fprintf(writer, `{"data":{"operation_id":"operation_1","environment":{"id":"environment_1","kind":"machine","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{"quic":"quic://example.test:443","wss":"wss://example.test/v1/runtime"},"auth":{"method":"bearer","token":"operation-token","expires_at":%q,"scopes":["exec:operate"]},"expires_at":%q}}`, expires, expires)
 	}))
 	defer server.Close()
-	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1", APIToken: apiTokenSession}
 	request := localapi.PeerStreamRequest{Workspace: "team-audit", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
 	result, err := source.IssuePeerStream(context.Background(), request)
 	if !reflect.DeepEqual(workspaces, []string{"team-audit", "team-audit"}) {
@@ -245,7 +245,7 @@ func TestIssuePeerStreamPreservesRefreshFailureAfterRejection(t *testing.T) {
 	}))
 	defer server.Close()
 	cause := syscall.EIO
-	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: failedRefreshAuth{cause}, SourceMachineID: "source_1"}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: failedRefreshAuth{cause}, SourceMachineID: "source_1", APIToken: apiTokenSession}
 	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
 	_, err := source.IssuePeerStream(t.Context(), request)
 	if !errors.Is(err, cause) || !errors.Is(err, api.ErrUnauthenticated) {
@@ -292,8 +292,8 @@ func TestAuthenticatedMachineSourceRefreshesRejectedAccessToken(t *testing.T) {
 	}
 }
 
-// With Paperboat unreachable (no answer, or a 503 from the API itself) the daemon opens exec and
-// ssh without a descriptor for the host to admit from its own signed scopes; a refusal or any
+// With Paperboat unreachable (no answer, or a 503 from the API itself) the daemon opens an API-token session's exec
+// without a descriptor for the host to admit from its own signed scopes; a refusal or any
 // other answer stays final, and a client cannot ask for an offline stream itself (F21-11).
 func TestIssuePeerStreamGoesOfflineOnlyWhenPaperboatIsUnreachable(t *testing.T) {
 	status := http.StatusServiceUnavailable
@@ -303,7 +303,7 @@ func TestIssuePeerStreamGoesOfflineOnlyWhenPaperboatIsUnreachable(t *testing.T) 
 		_, _ = w.Write([]byte(`{"error":{"code":"unavailable","message":"down"}}`))
 	}))
 	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
-	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1", APIToken: apiTokenSession}
 	result, err := source.IssuePeerStream(context.Background(), request)
 	if err != nil || !result.Offline || result.Credential != "" || result.AccessSessionID != "" || result.Validate(time.Now().UTC()) != nil {
 		t.Fatalf("a 503 from Paperboat: result=%+v err=%v", result, err)
@@ -334,5 +334,44 @@ func TestIssuePeerStreamSendsSSHToTheHostRulesWithoutARequest(t *testing.T) {
 	result, err := source.IssuePeerStream(context.Background(), request)
 	if err != nil || !result.Offline || result.Credential != "" || result.Validate(time.Now().UTC()) != nil {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func apiTokenSession() (bool, error) { return true, nil }
+
+// pbvm4 quiet1-3: each `pb exec -- true` POSTed an exec descriptor (~250 ms with CLI start) and then refreshed the
+// signed network for the new grant (~300 ms). A signed-in computer's exec now uses the host's standing rule, like
+// SSH (D1): 10 consecutive execs to one target make no control-plane request. An API-token session has no standing
+// rules (F24-07) and keeps one descriptor per operation.
+func TestConsecutiveExecsToOneTargetMakeNoControlRequest(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body struct {
+			OperationID string `json:"operation_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		expires := time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":{"operation_id":%q,"environment":{"id":"environment_1","kind":"machine","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{"quic":"quic://example.test:443","wss":"wss://example.test/v1/runtime"},"auth":{"method":"bearer","token":"operation-token","expires_at":%q,"scopes":["exec:operate"]},"expires_at":%q}}`, body.OperationID, expires, expires)
+	}))
+	defer server.Close()
+	for _, token := range []bool{false, true} {
+		requests = 0
+		source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1", APIToken: func() (bool, error) { return token, nil }}
+		for i := range 10 {
+			request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: fmt.Sprintf("operation_%d", i), Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024}
+			result, err := source.IssuePeerStream(context.Background(), request)
+			if err != nil || result.Offline == token || result.Validate(time.Now().UTC()) != nil {
+				t.Fatalf("token=%v exec %d: result=%+v err=%v", token, i, result, err)
+			}
+		}
+		if want := map[bool]int{false: 0, true: 10}[token]; requests != want {
+			t.Fatalf("token=%v: 10 execs made %d descriptor requests, want %d", token, requests, want)
+		}
+	}
+	failing := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, APIToken: func() (bool, error) { return false, errors.New("profile unreadable") }}
+	if _, err := failing.IssuePeerStream(context.Background(), execPendingRequest()); err == nil {
+		t.Fatal("an unreadable profile chose an admission path")
 	}
 }

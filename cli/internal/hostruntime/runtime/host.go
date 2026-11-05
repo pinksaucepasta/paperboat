@@ -425,12 +425,23 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			dispatchConfig.Authorize = nativeNetworkAuthorizer(dependencies.Authorizer)
 		}
 		dispatchAuthorize := dispatchConfig.Authorize
+		enabled := func(consumer string) bool {
+			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "config_compare": "config.compare.v1", "private_tcp": "private.access.v1", "private_http": "private.access.v1", "inspector": "inspector.v1"}[consumer]
+			return capability != "" && (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled(capability))
+		}
 		dispatchConfig.Authorize = func(ctx context.Context, header streamauth.Header) (string, error) {
-			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "config_compare": "config.compare.v1", "private_tcp": "private.access.v1", "private_http": "private.access.v1", "inspector": "inspector.v1"}[header.Consumer]
-			if capability == "" || (dependencies.Capabilities != nil && !dependencies.Capabilities.Enabled(capability)) {
+			if !enabled(header.Consumer) {
 				return "", server.ErrStreamAuthorization
 			}
 			return dispatchAuthorize(ctx, header)
+		}
+		// The carrier admitted the stream from its signed per-account rules and recorded it; this worker only
+		// checks that it serves the capability. Its requests are then authorized for that peer alone.
+		dispatchConfig.AdmitOffline = func(_ context.Context, header streamauth.Header) error {
+			if !enabled(header.Consumer) {
+				return server.ErrStreamAuthorization
+			}
+			return nil
 		}
 		if dispatchConfig.SSHTarget == nil && dependencies.ManagedSSH != nil {
 			dispatchConfig.SSHTarget = func(context.Context) (managedssh.HostTarget, error) {
