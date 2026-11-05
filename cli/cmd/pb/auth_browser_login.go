@@ -201,7 +201,9 @@ func browserLogin(c *command.Context) error {
 					}
 					if state.ExpectedAccountID != "" && me.ID != state.ExpectedAccountID {
 						state.Credential = nil
-						return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved account differs from the account being reauthenticated; use --change-account"))
+						approved := firstNonEmpty(me.Email, me.DisplayName, me.ID)
+						current := firstNonEmpty(old.Account.Email, old.Account.DisplayName, state.ExpectedAccountID)
+						return abortBrowserLogin(c.Context, issuer, state, save, browserLoginFailure{message: "This computer is signed in as " + current + ", but the approval came from " + approved + ". Approve with " + current + ", or run pb login --change-account to switch this computer to " + approved + "."})
 					}
 					if joined := t.Enrollment; joined != nil {
 						state.Enrollment = &config.LoginEnrollment{BootstrapToken: joined.BootstrapToken, WorkspaceID: joined.WorkspaceID, Admission: joined.Admission, ExpiresAt: joined.ExpiresAt}
