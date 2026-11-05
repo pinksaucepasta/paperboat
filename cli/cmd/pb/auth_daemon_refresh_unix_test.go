@@ -13,7 +13,7 @@ import (
 )
 
 func TestRefreshLocalInventoryAsksTheDaemon(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "api.sock")
+	socket := filepath.Join(commandRuntimeTestRoot(t), "api.sock") // darwin caps unix socket paths at 104 bytes
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
