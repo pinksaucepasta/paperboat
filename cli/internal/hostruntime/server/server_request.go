@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, authorizer Authorizer, connectionCtx context.Context, conn Connection, terminalState *terminalConnectionState) {
@@ -111,6 +113,10 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			_ = respond(errorFrame(frame.RequestID, code, operationErrorMessage(code), errors.Is(err, context.DeadlineExceeded)))
 			return
 		}
+		if resuming {
+			// A refused resume falls back to the grant path; this says which check refused it.
+			diagnosticlog.TryInfo("terminal resume", "stage", "executed", "reason", outcome.ErrorCode)
+		}
 		if outcome.ErrorCode != "" {
 			s.recordOperation(componentForCapability(frame.Capability), metricResult(outcome.ErrorCode, false))
 			_ = respond(errorFrameWithDetails(frame.RequestID, outcome.ErrorCode, "operation failed", transientOutcome(outcome.ErrorCode), outcome.Result))
@@ -118,6 +124,9 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		}
 		stream, hasStream, streamErr := s.openStream(connectionCtx, authorization, frame, outcome, replay)
 		if streamErr != nil {
+			if resuming {
+				errorreport.Current().ObserveFailure(connectionCtx, "paperboat-daemon", "sessions", "resume_stream_open", "terminal_resume_failed", streamErr)
+			}
 			reportStreamOpenFailure(connectionCtx, frame.Capability, streamErr)
 			_ = respond(errorFrame(frame.RequestID, "unavailable", "output stream could not be opened", true))
 			return
