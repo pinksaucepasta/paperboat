@@ -40,6 +40,23 @@ type DataCarrierPool struct {
 	maximumCarriers int
 	retries         map[int]carrierSlotRetry
 	fallbackUntil   time.Time
+	// healthClock drives the health monitor; nil is real time. Tests step it.
+	healthClock healthClock
+}
+
+// healthClock is the health monitor's time source, injectable like networkrecovery.Clock so its miss
+// and staleness rules can be tested without sleeping.
+type healthClock interface {
+	Now() time.Time
+	NewTicker(time.Duration) (<-chan time.Time, func())
+}
+
+type realHealthClock struct{}
+
+func (realHealthClock) Now() time.Time { return time.Now() }
+func (realHealthClock) NewTicker(d time.Duration) (<-chan time.Time, func()) {
+	ticker := time.NewTicker(d)
+	return ticker.C, ticker.Stop
 }
 
 // Identity returns a copy of the exact authenticated session binding used by
@@ -295,9 +312,13 @@ func (p *DataCarrierPool) acceptCarrier(carrier *DataCarrier, target DataCarrier
 // connection. Each probe is below 1 KiB and never reaches an application origin.
 func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout time.Duration) {
 	defer p.workers.Done()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	lastResponse := time.Now()
+	clock := p.healthClock
+	if clock == nil {
+		clock = realHealthClock{}
+	}
+	ticks, stop := clock.NewTicker(interval)
+	defer stop()
+	lastResponse := clock.Now()
 	misses := 0
 	for {
 		select {
@@ -305,9 +326,9 @@ func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout
 			return
 		case <-carrier.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
-		deadline := time.Now().Add(timeout)
+		deadline := clock.Now().Add(timeout)
 		staleAt := lastResponse.Add(3 * interval)
 		if staleAt.Before(deadline) {
 			deadline = staleAt
@@ -320,12 +341,12 @@ func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout
 		}
 		if err == nil {
 			misses = 0
-			lastResponse = time.Now()
+			lastResponse = clock.Now()
 			continue
 		}
 		misses++
-		if misses >= 3 || !time.Now().Before(staleAt) {
-			diagnosticlog.TryInfo("data carrier closed: health pings missed", "misses", misses, "since_last_response_ms", time.Since(lastResponse).Milliseconds())
+		if misses >= 3 || !clock.Now().Before(staleAt) {
+			diagnosticlog.TryInfo("data carrier closed: health pings missed", "misses", misses, "since_last_response_ms", clock.Now().Sub(lastResponse).Milliseconds())
 			_ = carrier.closeFor(CloseHealthPingMissed)
 			p.removeClosed()
 			return
