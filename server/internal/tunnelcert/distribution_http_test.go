@@ -751,6 +751,25 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 		t.Fatalf("waiting for an issuance was reported as a failure: %+v", record)
 	case <-time.After(300 * time.Millisecond):
 	}
+	// Cancellation that lands inside the callback: the edge leaving is a 499, our own wait running out a 409; neither is reported.
+	blocked := newHub(func(ctx context.Context, _ DistributionNodeIdentity, _ string) error { <-ctx.Done(); return ctx.Err() })
+	gone, leave := context.WithCancel(reporter.Context(runCtx, supportreport.NewReference()))
+	time.AfterFunc(100*time.Millisecond, leave)
+	if code := send(blocked, "edge_01", gone); code != statusClientClosedRequest {
+		t.Fatalf("an edge that left during issuance answered %d, want 499", code)
+	}
+	wait := onDemandWait
+	onDemandWait = 200 * time.Millisecond
+	code := send(blocked, "edge_01", reporter.Context(runCtx, supportreport.NewReference()))
+	onDemandWait = wait
+	if code != http.StatusConflict {
+		t.Fatalf("a wait that ran out inside issuance answered %d, want 409", code)
+	}
+	select {
+	case record := <-store.records:
+		t.Fatalf("a cancelled issuance was reported as a failure: %+v", record)
+	case <-time.After(300 * time.Millisecond):
+	}
 	broken := newHub(func(context.Context, DistributionNodeIdentity, string) error { return ErrIssuerUnavailable })
 	if code := send(broken, "edge_01", reporter.Context(runCtx, supportreport.NewReference())); code != http.StatusServiceUnavailable {
 		t.Fatalf("issuer unavailable answered %d, want 503", code)

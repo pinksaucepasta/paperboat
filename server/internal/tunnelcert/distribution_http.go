@@ -584,6 +584,10 @@ func (h *DistributionHub) handleRequest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.awaitOnDemand(r.Context(), identity, hostname); err != nil {
+		if clientClosed(r, err) {
+			w.WriteHeader(statusClientClosedRequest)
+			return
+		}
 		// Only a wait that ran out is "not yet" here: a 409 like the other expected outcomes, never a reported outage.
 		if pureDistributionError(err, ErrInvalid) || pureDistributionError(err, ErrGenerationConflict) || pureDistributionError(err, ErrCertificateRevoked) ||
 			issuancePending(err) {
@@ -974,7 +978,7 @@ func clientClosed(r *http.Request, err error) bool {
 }
 
 // onDemandWait bounds how long a request waits for an issuance another request already started.
-const onDemandWait = 25 * time.Second
+var onDemandWait = 25 * time.Second
 
 func issuancePending(err error) bool {
 	return pureDistributionError(err, ErrIssuanceLocked) || pureDistributionError(err, ErrCertificateNotReady) || pureDistributionError(err, ErrDNSChallengePending)
@@ -985,12 +989,18 @@ func issuancePending(err error) bool {
 // certificate. The issuance lock is in the shared database, so the wait polls it with backoff rather than an
 // in-process channel. Prior art: certmagic's on-demand obtain waits on the in-flight issuance for the same name
 // (handshake.go obtainOnDemandCertificate, obtainCertWaitChans, bounded wait). Only a wait that runs out is returned.
-func (h *DistributionHub) awaitOnDemand(ctx context.Context, identity DistributionNodeIdentity, hostname string) error {
-	ctx, cancel := context.WithTimeout(ctx, onDemandWait)
+func (h *DistributionHub) awaitOnDemand(parent context.Context, identity DistributionNodeIdentity, hostname string) error {
+	ctx, cancel := context.WithTimeout(parent, onDemandWait)
 	defer cancel()
 	delay := 250 * time.Millisecond
 	for {
 		err := h.onDemand(ctx, identity, hostname)
+		if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			if parent.Err() != nil {
+				return parent.Err() // the edge went away: the handler answers 499
+			}
+			return ErrCertificateNotReady // our own wait ran out inside the call: still "not yet"
+		}
 		if err == nil || !issuancePending(err) {
 			return err
 		}
