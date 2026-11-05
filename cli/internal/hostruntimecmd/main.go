@@ -9,6 +9,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"io"
 	"os"
+	"runtime"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -106,7 +108,13 @@ func execute(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return 0
 	}
 	if args[0] == "hostd" {
-		if err := runHostd(ctx, args[1:], stdout); err != nil {
+		started := time.Now()
+		err := runHostd(ctx, args[1:], stdout)
+		if runtime.GOOS == "darwin" {
+			// launchd restarts at a fixed interval; hostd paces its own restarts (paceHostdExit).
+			paceHostdExit(ctx, hostdStartupPacingPath(os.Getenv), time.Since(started), err != nil, sleepContext)
+		}
+		if err != nil {
 			return finishRuntimeCommand(ctx, args[0], stderr, err, 1)
 		}
 		return 0
