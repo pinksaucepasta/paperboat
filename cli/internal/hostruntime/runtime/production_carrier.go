@@ -164,7 +164,7 @@ func (c *ProductionCarrier) awaitPrimary(ctx context.Context) {
 		unlock := func() error { return nil }
 		if c.slot != 0 {
 			var err error
-			if unlock, err = lockTerminalCarrier(c.primaryLock); err != nil {
+			if unlock, err = lockCarrier(c.primaryLock); err != nil {
 				continue
 			}
 		}
@@ -184,7 +184,7 @@ func (c *ProductionCarrier) awaitPrimary(ctx context.Context) {
 func lockCarrierSlot(root string) (int, func() error, error) {
 	var failures error
 	for slot := range carrierSlots {
-		unlock, err := lockTerminalCarrier(filepath.Join(root, fmt.Sprintf("carrier-%d.lock", slot)))
+		unlock, err := lockCarrier(filepath.Join(root, fmt.Sprintf("carrier-%d.lock", slot)))
 		if err == nil {
 			return slot, unlock, nil
 		}
