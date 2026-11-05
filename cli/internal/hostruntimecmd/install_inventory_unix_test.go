@@ -263,6 +263,20 @@ func TestInstallInventoryRemovesAFailedUpdatesCandidateSessionOwner(t *testing.T
 	}
 }
 
+// soft-g-11051952: a downgrade to dev-ab41be003, a build older than pb.previous's removal, left that build's
+// releases/pb.previous; the install inventory listed only today's slot names and missed it. Every release
+// slot other than pins/ is a leftover once no installation is pending, whatever an older build called it.
+func TestInstallInventoryRemovesAnyReleaseSlotAnOlderBuildLeft(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	slots := []string{invRoot + "/releases/pb.previous", invRoot + "/releases/pb.some-older-slot"}
+	h := newInventoryHost(t, digestA, activated, activated.Add(time.Minute), append(append([]string(nil), versionFiles(digestA)...), slots...),
+		managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second)))
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	h.assertExactlyActive(versionFiles(digestA), slots, 4001)
+}
+
 // A previous generation draining held streams is owned until the drain cap,
 // with its files; past the cap it is killed and the install fails naming it.
 func TestInstallInventoryDrainingGenerationIsBoundedByItsCap(t *testing.T) {
