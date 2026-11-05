@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/netip"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
 	"tailscale.com/tailcfg"
@@ -96,7 +97,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	if len(tokens) > MaxRegionalCandidates || regional == nil {
 		return ErrRegionalAuthority
 	}
-	nodes, _, err := regional.Eligible("relay", "derp_quic", nil, time.Now())
+	nodes, _, err := regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
 	if err != nil {
 		return err
 	}
@@ -154,7 +155,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			Type      string `json:"typ"`
 			KeyID     string `json:"kid"`
 		}
-		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > time.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= time.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt {
+		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt {
 			next = nil
 			grants = nil
 			return ErrAuthority
@@ -308,7 +309,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	// No regional node is usable until signed candidates and grants arrive.
 	var nodes []RegionalNode
 	if a.regional != nil {
-		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, time.Now())
+		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -329,7 +330,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 			continue
 		}
 		g, ok := a.relay.grants[node.NodeID]
-		if !ok || g.ExpiresAt <= time.Now().Unix() {
+		if !ok || g.ExpiresAt <= serverclock.Now().Unix() {
 			continue
 		}
 		// A grant the relay would refuse makes only that relay unusable: the engine still starts with the
@@ -481,7 +482,7 @@ func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certif
 			return ErrAuthority
 		}
 		verifier := derpquic.Verifier{Issuer: a.options.Issuer, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Keys: map[string]ed25519.PublicKey{h.KeyID: pub}}
-		if _, err := verifier.Verify(token, tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, time.Now()); err != nil {
+		if _, err := verifier.Verify(token, tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}, serverclock.Now()); err != nil {
 			return err
 		}
 	}
@@ -505,8 +506,11 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 			if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
 				return "", ErrAuthority
 			}
-			if node.NodeID == "" || grant.ExpiresAt <= time.Now().Unix() || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
+			if node.NodeID == "" || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
 				return "", ErrAuthority
+			}
+			if grant.ExpiresAt <= serverclock.Now().Unix() {
+				return "", ErrRelayGrantExpired
 			}
 			return a.relay.tokens[node.NodeID], nil
 		}

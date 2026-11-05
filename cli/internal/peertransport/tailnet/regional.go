@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"sort"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if err != nil || !found || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
 		return ErrRegionalAuthority
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.current == nil || c.AuthorizationGeneration != a.current.Generation {

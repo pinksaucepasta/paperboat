@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
@@ -372,10 +373,10 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	a := r.authority
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.current == nil || a.closed || a.current.ExpiresAt <= time.Now().Unix() {
+	if a.current == nil || a.closed || a.current.ExpiresAt <= serverclock.Now().Unix() {
 		return nil, nil, 0, ErrExpiredAuthority
 	}
-	nodes, _, err := a.regional.Eligible("relay", "derp_quic", nil, time.Now())
+	nodes, _, err := a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -389,7 +390,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 		if old, ok := next[id]; ok && old.NodeID != n.NodeID {
 			return nil, nil, 0, ErrRegionalAuthority
 		}
-		if g.ExpiresAt > time.Now().Unix() && g.NodeGeneration == n.NodeGeneration && g.ProcessEpoch == n.ProcessEpoch {
+		if g.ExpiresAt > serverclock.Now().Unix() && g.NodeGeneration == n.NodeGeneration && g.ProcessEpoch == n.ProcessEpoch {
 			next[id] = n
 			eligible = append(eligible, n)
 		}
@@ -399,7 +400,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	for _, p := range a.current.Peers {
 		active := false
 		for _, scope := range p.Scopes {
-			if scope.Port == NetworkPort && scopeLive(scope, time.Now().Unix()) {
+			if scope.Port == NetworkPort && scopeLive(scope, serverclock.Now().Unix()) {
 				active = true
 				break
 			}
@@ -409,7 +410,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 			peers[k] = p
 		}
 	}
-	return eligible, peers, r.authorityGeneration(a.current.Self, peers, time.Now().Unix()), nil
+	return eligible, peers, r.authorityGeneration(a.current.Self, peers, serverclock.Now().Unix()), nil
 }
 func (r *regionalRecovery) receive(ctx context.Context) {
 	for {

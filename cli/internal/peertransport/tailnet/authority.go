@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-fault-injection
@@ -45,6 +46,10 @@ const NetworkPort = 443
 var ErrAuthority = errors.New("peer network authority is invalid")
 var ErrStaleAuthority = errors.New("peer network authority is stale")
 var ErrExpiredAuthority = errors.New("peer network authority expired; reconnect to Paperboat")
+
+// ErrRelayGrantExpired is a relay grant past its expiry on the server clock (F21-02); the next network
+// refresh brings a fresh one.
+var ErrRelayGrantExpired = errors.New("relay grant expired; waiting for a fresh grant from Paperboat")
 
 type NetworkBinding struct {
 	AccountID                  string `json:"account_id"`
@@ -439,7 +444,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cfg, hash, err := a.verify(ctx, token, time.Now(), false)
+	cfg, hash, err := a.verify(ctx, token, serverclock.Now(), false)
 	if err != nil {
 		return err
 	}
@@ -510,10 +515,10 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		a.dropLocked()
 		return err
 	}
-	if time.Now().Unix() >= cfg.ExpiresAt {
+	if serverclock.Now().Unix() >= cfg.ExpiresAt {
 		return ErrExpiredAuthority
 	}
-	return a.installLocked(cfg, selected, time.Now())
+	return a.installLocked(cfg, selected, serverclock.Now())
 }
 
 func (a *Authority) installLocked(cfg NetworkConfiguration, selected key.NodePrivate, verifiedAt time.Time) error {
@@ -566,7 +571,7 @@ func (a *Authority) Restore(ctx context.Context) error {
 	if token == "" {
 		return ErrNothingToRestore
 	}
-	cfg, got, err := a.verify(ctx, token, time.Now(), true)
+	cfg, got, err := a.verify(ctx, token, serverclock.Now(), true)
 	if err != nil || got != hash || cfg.Generation != generation || cfg.Self.VirtualAddress != address || cfg.Self.KeyGeneration != keyGeneration {
 		return errors.Join(ErrAuthority, err)
 	}
@@ -644,7 +649,7 @@ func (a *Authority) Close() error {
 func (a *Authority) OutOfSync() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.current != nil && time.Now().Unix() >= a.current.ExpiresAt
+	return a.current != nil && serverclock.Now().Unix() >= a.current.ExpiresAt
 }
 
 // LastVerifiedAt is when the configuration in force was verified and installed; zero without one.
@@ -663,7 +668,7 @@ func (a *Authority) usableLocked() bool {
 	}
 	// Past exp the last verified configuration stays in force while Paperboat is unreachable (offline until
 	// revoked, F21-01): scopes end at their own expiry or by a newer configuration, never by the refresh hint.
-	a.expired = time.Now().Unix() >= a.current.ExpiresAt
+	a.expired = serverclock.Now().Unix() >= a.current.ExpiresAt
 	return true
 }
 
@@ -689,7 +694,7 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 						}
 					}
 				}
-				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction && scopeLive(s, time.Now().Unix()) {
+				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction && scopeLive(s, serverclock.Now().Unix()) {
 					return true
 				}
 			}
@@ -719,7 +724,7 @@ func (a *Authority) Peer(endpointID string) (NetworkBinding, error) {
 		return NetworkBinding{}, ErrAuthority
 	}
 	for _, peer := range a.current.Peers {
-		if peer.Identity.EndpointID == endpointID && peerAdmissionExpiry(peer) > time.Now().Unix() {
+		if peer.Identity.EndpointID == endpointID && peerAdmissionExpiry(peer) > serverclock.Now().Unix() {
 			return peer.Identity, nil
 		}
 	}
@@ -736,7 +741,7 @@ func (a *Authority) PeerForQUICKey(public ed25519.PublicKey) (NetworkBinding, er
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(public)
 	for _, peer := range a.current.Peers {
-		if peer.Identity.QUICPublicKey == encoded && peerAdmissionExpiry(peer) > time.Now().Unix() {
+		if peer.Identity.QUICPublicKey == encoded && peerAdmissionExpiry(peer) > serverclock.Now().Unix() {
 			return peer.Identity, nil
 		}
 	}

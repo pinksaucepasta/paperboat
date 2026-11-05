@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // TrackAdmittedScope retains only an actually accepted native operation. Signed
@@ -22,7 +22,7 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 			continue
 		}
 		for _, scope := range peer.Scopes {
-			if scope.ResourceID != resourceID || scope.Capability != capability || scope.Direction != direction || !scopeLive(scope, time.Now().Unix()) {
+			if scope.ResourceID != resourceID || scope.Capability != capability || scope.Direction != direction || !scopeLive(scope, serverclock.Now().Unix()) {
 				continue
 			}
 			switch scope.ResourceKind {
@@ -49,7 +49,7 @@ func (a *Authority) TrackAdmittedCarrier(peerID string, wireguard bool) (func(),
 		}
 		var backing NetworkScope
 		for _, scope := range peer.Scopes {
-			if !scopeLive(scope, time.Now().Unix()) {
+			if !scopeLive(scope, serverclock.Now().Unix()) {
 				continue
 			}
 			switch scope.ResourceKind {

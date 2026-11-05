@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/quic-go/quic-go"
 )
 
@@ -19,7 +19,7 @@ func (c *CarrierNetwork) RelayNodeIDs() []string {
 	var ids []string
 	for _, node := range c.authority.relay.nodes {
 		grant := c.authority.relay.grants[node.NodeID]
-		if grant.ExpiresAt > time.Now().Unix() && grant.ProcessEpoch == node.ProcessEpoch && grant.NodeGeneration == node.NodeGeneration {
+		if grant.ExpiresAt > serverclock.Now().Unix() && grant.ProcessEpoch == node.ProcessEpoch && grant.NodeGeneration == node.NodeGeneration {
 			ids = append(ids, node.NodeID)
 		}
 	}

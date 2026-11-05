@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type NetworkAPI interface {
@@ -294,7 +295,7 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 				report(denial)
 			}
 			if err == nil {
-				if _, usable := a.regionalRenewalDelay(time.Now()); usable {
+				if _, usable := a.regionalRenewalDelay(serverclock.Now()); usable {
 					unusable = 0
 				} else {
 					unusable++
@@ -354,7 +355,7 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	// earliest one ends, so its relays are not withdrawn between renewals.
 	if recovering {
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
-		if due, ok := a.regionalRenewalDelay(time.Now()); ok {
+		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {
 			delay = due
 		}
 	}

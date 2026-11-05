@@ -7,9 +7,9 @@ import (
 	"net/netip"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // MaxFlows bounds queued and leased sockets per engine. The initial two-peer,
@@ -63,7 +63,7 @@ func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string,
 			}
 			address, _ := netip.ParseAddrPort(remote.String())
 			binding := s.admitted[address.Addr()]
-			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" || s.admission != nil && s.admission[address.Addr()] <= time.Now().Unix() {
+			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" || s.admission != nil && s.admission[address.Addr()] <= serverclock.Now().Unix() {
 				s.mu.Unlock()
 				_ = packet.Close()
 				return

@@ -6,11 +6,12 @@ import (
 	"math"
 	"net/netip"
 	"sort"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
@@ -274,7 +275,7 @@ func (a *Authority) Descriptor(peerID string) (mesh.Addr, error) {
 		}
 		live := false
 		for _, scope := range peer.Scopes {
-			live = live || scopeLive(scope, time.Now().Unix())
+			live = live || scopeLive(scope, serverclock.Now().Unix())
 		}
 		if !live {
 			return "", authorityPeerAdmissionError{}

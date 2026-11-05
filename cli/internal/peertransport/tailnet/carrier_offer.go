@@ -3,7 +3,8 @@ package tailnet
 import (
 	"bytes"
 	"crypto/sha256"
-	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // MaxCarrierOfferBytes bounds a peer entry's carrier offer: the native offer's own encoding bound.
@@ -20,7 +21,7 @@ func (a *Authority) PeerCarrierOffer(endpointID string) []byte {
 		return nil
 	}
 	for _, peer := range a.current.Peers {
-		if peer.Identity.EndpointID != endpointID || peerAdmissionExpiry(peer) <= time.Now().Unix() || len(peer.CarrierOffer) == 0 {
+		if peer.Identity.EndpointID != endpointID || peerAdmissionExpiry(peer) <= serverclock.Now().Unix() || len(peer.CarrierOffer) == 0 {
 			continue
 		}
 		if declined, ok := a.declinedOffers[endpointID]; ok && declined == sha256.Sum256(peer.CarrierOffer) {
