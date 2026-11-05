@@ -338,6 +338,7 @@ func TestWorkerReplaceCleansFailedCandidateWithoutStoppingCurrentWorker(t *testi
 }
 
 func TestOptionalStartFailureIsCleanedBeforeContinuing(t *testing.T) {
+	componentRetryWithin(t, time.Hour)
 	failed := &failingStartService{startErr: errors.New("optional unavailable")}
 	required := &testService{}
 	d, err := New(Config{
@@ -459,11 +460,15 @@ func (r *stepRecorder) waitFor(t *testing.T, done func([]stepReport) bool) []ste
 	}
 }
 
-func shortComponentRetry(t *testing.T) {
+func shortComponentRetry(t *testing.T) { componentRetryWithin(t, time.Millisecond) }
+
+// componentRetryWithin sets the optional component retry schedule for one test; a test that must see no retry
+// uses an hour, so its outcome never depends on how fast the machine runs.
+func componentRetryWithin(t *testing.T, first time.Duration) {
 	t.Helper()
-	first, maximum := componentRetryFirst, componentRetryMaximum
-	componentRetryFirst, componentRetryMaximum = time.Millisecond, 4*time.Millisecond
-	t.Cleanup(func() { componentRetryFirst, componentRetryMaximum = first, maximum })
+	previousFirst, previousMaximum := componentRetryFirst, componentRetryMaximum
+	componentRetryFirst, componentRetryMaximum = first, 4*first
+	t.Cleanup(func() { componentRetryFirst, componentRetryMaximum = previousFirst, previousMaximum })
 }
 
 // A restartable optional component that fails to start is retried with backoff, without a worker or hostd
@@ -474,7 +479,7 @@ func TestRestartableOptionalComponentIsRetriedUntilItStarts(t *testing.T) {
 	steps := newStepRecorder()
 	d, err := New(Config{
 		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
-		Components: []Component{{Name: "peer_transport", Retry: true, Service: flaky}, {Name: "required", Required: true, Service: &testService{}}},
+		Components: []Component{{Name: "peer_transport", Service: flaky}, {Name: "required", Required: true, Service: &testService{}}},
 		Report:     steps.report,
 	})
 	if err != nil {
@@ -499,45 +504,14 @@ func TestRestartableOptionalComponentIsRetriedUntilItStarts(t *testing.T) {
 	}
 }
 
-// An optional component that cannot be restarted is reported failing, with no retry, instead of being skipped
-// silently.
-func TestNonRestartableOptionalFailureIsReportedNotRetried(t *testing.T) {
-	shortComponentRetry(t)
-	failed := &failingStartService{startErr: errors.New("optional unavailable")}
-	steps := newStepRecorder()
-	d, err := New(Config{
-		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
-		Components: []Component{{Name: "preview_recovery", Service: failed}, {Name: "required", Required: true, Service: &testService{}}},
-		Report:     steps.report,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	// The report is made synchronously during Start; a non-restartable component launches no retry.
-	steps.mu.Lock()
-	reports := append([]stepReport(nil), steps.reports...)
-	steps.mu.Unlock()
-	if len(reports) != 1 || reports[0].component != "preview_recovery" || reports[0].err == nil || reports[0].retryAfter != 0 {
-		t.Fatalf("reports %+v, want one failure without a retry", reports)
-	}
-	if err := d.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if failed.starts != 1 {
-		t.Fatalf("a non-restartable component was started %d times", failed.starts)
-	}
-}
-
 // Shutdown during a retry's backoff stops the retry; the component is never started again.
 func TestShutdownStopsAPendingComponentRetry(t *testing.T) {
+	componentRetryWithin(t, time.Hour)
 	failed := &failingStartService{startErr: errors.New("registration refused")}
 	steps := newStepRecorder()
 	d, err := New(Config{
 		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
-		Components: []Component{{Name: "peer_transport", Retry: true, Service: failed}, {Name: "required", Required: true, Service: &testService{}}},
+		Components: []Component{{Name: "peer_transport", Service: failed}, {Name: "required", Required: true, Service: &testService{}}},
 		Report:     steps.report,
 	})
 	if err != nil {

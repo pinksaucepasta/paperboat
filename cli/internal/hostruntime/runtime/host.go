@@ -570,8 +570,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	stableComponents = append(stableComponents, stablehostd.Component{Name: "protocol", Required: true, Service: protocolServer})
 	if nativePeerService != nil {
-		// Restartable after a failed Start (native_peer_unix.go Start resets its state), so it is retried.
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "peer_transport", Required: false, Retry: true, Service: nativePeerService})
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "peer_transport", Required: false, Service: nativePeerService})
 	}
 	if dependencies.PreviewRecovery != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "preview_recovery", Required: false, Service: dependencies.PreviewRecovery})

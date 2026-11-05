@@ -50,7 +50,8 @@ func (e *ReplacementCommittedError) Unwrap() error {
 // Service is deliberately the small lifecycle contract shared by stable
 // ingress/workload services and replaceable coordination services. Shutdown
 // must be idempotent and clean partial allocations even when Start returned an
-// error; hostd always invokes it for a failed start.
+// error; hostd always invokes it for a failed start. Start must work again after a
+// failed Start and that Shutdown: hostd retries a failed optional component.
 type Service interface {
 	Start(context.Context) error
 	Shutdown(context.Context) error
@@ -59,10 +60,7 @@ type Service interface {
 type Component struct {
 	Name     string
 	Required bool
-	// Retry restarts a failed optional component with backoff until it starts. Set it only for a service whose
-	// Start works again after a failed Start and its rollback Shutdown.
-	Retry   bool
-	Service Service
+	Service  Service
 }
 
 // Workloads is the only owner of live workload managers.  It is intentionally
@@ -85,8 +83,9 @@ type Config struct {
 	Workloads       Workloads
 	Components      []Component
 	ShutdownTimeout time.Duration
-	// Report receives each optional component's failure (with the wait before its next attempt, 0 when it is
-	// not retried) and its recovery (nil error), so a skipped component is a failing step, not a silent one.
+	// Report receives each optional component's failure (with the wait before its next attempt, or 0 when a
+	// failed rollback stops the retries) and its recovery (nil error), so a skipped component is a failing
+	// step, not a silent one.
 	Report func(component string, err error, retryAfter time.Duration)
 }
 
@@ -209,13 +208,9 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// optionalFailedLocked reports a skipped optional component and, when it is restartable, retries it in the
-// background. Called with d.mu held.
+// optionalFailedLocked retries a skipped optional component in the background, reporting it until it starts.
+// Called with d.mu held.
 func (d *Daemon) optionalFailedLocked(ctx context.Context, component Component, err error) {
-	if !component.Retry {
-		d.report(component.Name, err, 0)
-		return
-	}
 	if d.retryCtx == nil {
 		d.retryCtx, d.retryCancel = context.WithCancel(context.WithoutCancel(ctx))
 	}
