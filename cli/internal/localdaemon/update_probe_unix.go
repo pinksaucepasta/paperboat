@@ -115,6 +115,9 @@ func RestartCurrentUserForUpdate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseSingleUnitDaemon(runtime.GOOS, home); err != nil {
+		return err
+	}
 	declared, err := readUpdateDeclaration(runtime.GOOS, home, os.Geteuid())
 	if err != nil {
 		return err

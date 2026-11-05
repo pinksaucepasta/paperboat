@@ -14,6 +14,25 @@ import (
 	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
+// ErrSingleUnitDaemon refuses an install or update over the single paperboatd unit that predates
+// per-generation units: that daemon cannot hand over, so nothing is started or stopped and the
+// install rolls back, leaving it running. No migration: the user reinstalls (zero compatibility).
+var ErrSingleUnitDaemon = errors.New("this computer still runs the earlier single Paperboat daemon service, which cannot hand over to this version; the previous installation is left running. Reinstall Paperboat: run `pb uninstall`, then install it again")
+
+// refuseSingleUnitDaemon fails with ErrSingleUnitDaemon while that earlier unit is installed.
+func refuseSingleUnitDaemon(platform, home string) error {
+	path := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+	if platform == "darwin" {
+		path = filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return ErrSingleUnitDaemon
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func generationDefinitionPath(platform, home, generation string) string {
 	if platform == "darwin" {
 		return filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+"."+generation+".plist")
