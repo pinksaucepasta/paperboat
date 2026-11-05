@@ -54,6 +54,15 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   protocol: { phase: "transport-error", message: "The machine sent something this page could not use. You can retry." },
 }
 
+/**
+ * The wait before reconnecting after outcome: undefined means the backoff decides. An immediate outcome
+ * reconnects at once only for the first such close since the last attach (`immediateSpent` false); a
+ * generation that keeps answering it would otherwise loop with no bound.
+ */
+export function reconnectWait(outcome: CloseOutcome, immediateSpent: boolean): number | undefined {
+  return outcome.immediate && !immediateSpent ? 0 : undefined
+}
+
 function isCloseCode(code: string | undefined): code is CloseCode {
   return !!code && Object.hasOwn(terminalCloseCodes, code)
 }

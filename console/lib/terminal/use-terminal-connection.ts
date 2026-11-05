@@ -29,7 +29,7 @@ import {
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
 import { createLivenessProbe } from "@/lib/terminal/liveness-probe"
-import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 
 /**
@@ -216,6 +216,8 @@ export function useTerminalConnection({
   const resizeTimerRef = useRef<number | undefined>(undefined)
   const ticketAbortRef = useRef<AbortController | null>(null)
   const retryDelayRef = useRef(1000)
+  // An immediate reconnect (close-codes.ts reconnectWait) was used since the last attach.
+  const immediateSpentRef = useRef(false)
   const disposedRef = useRef(false)
   const busyRef = useRef(false)
   const startedOnceRef = useRef(false)
@@ -759,7 +761,8 @@ export function useTerminalConnection({
         setLastClose([event.code ?? event.state, event.close, event.transport_cause].filter(Boolean).join(" "))
         if (outcome.phase === "reconnect") {
           setError(reconnectReason(outcome.message))
-          scheduleReconnect(outcome.immediate ? 0 : undefined)
+          scheduleReconnect(reconnectWait(outcome, immediateSpentRef.current))
+          if (outcome.immediate) immediateSpentRef.current = true
           return
         }
         window.clearTimeout(reconnectTimerRef.current)
@@ -795,6 +798,7 @@ export function useTerminalConnection({
         setPhaseValue("attached")
         setConnectedEdge(ticketEdgeRef.current)
         retryDelayRef.current = 1000
+        immediateSpentRef.current = false
         setError("")
         const nextRole: TerminalRole = event.role === "owner" || event.role === "interactive" ? event.role : "viewer"
         roleRef.current = nextRole

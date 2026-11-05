@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ApiError, retryAfterMs } from "@/lib/api"
-import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 
 const refusal = (status: number, code: string) => new ApiError(status, code, "stub")
 
@@ -18,6 +18,20 @@ describe("terminal close codes", () => {
   test("a moved close (pb update, 4301) reattaches at once with no message", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "moved" })).toBe("moved")
     expect(terminalCloseCodes.moved).toEqual({ phase: "reconnect", message: "", silent: true, immediate: true })
+  })
+  test("only the first moved close after an attach skips the backoff, so a generation that keeps answering moved cannot loop", () => {
+    const moved = terminalCloseCodes.moved
+    let spent = false
+    const close = () => {
+      const wait = reconnectWait(moved, spent)
+      if (moved.immediate) spent = true
+      return wait
+    }
+    expect(close()).toBe(0)
+    expect(close()).toBeUndefined() // the second in a row waits for the backoff
+    spent = false // a successful attach
+    expect(close()).toBe(0)
+    expect(reconnectWait(terminalCloseCodes.edge_unavailable, false)).toBeUndefined()
   })
   test("in-channel host codes map onto the table, unknown ones fall back by state", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "credential_expired" })).toBe("expired")
