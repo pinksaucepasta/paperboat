@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import platform
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -57,6 +58,15 @@ def wait_status(endpoint, wanted, what, seconds=120):
 
 def sudo(*args):
     subprocess.run(['sudo', '-n', *args], check=True, timeout=180)
+
+
+def hostd_label():
+    """macOS: the loaded host service label com.pinksaucepasta.paperboat.hostd.u<uid>.<generation>, looked up like the Linux unit."""
+    printed = subprocess.run(['sudo', '-n', 'launchctl', 'print', 'system'], capture_output=True, text=True, timeout=30)
+    labels = sorted(set(re.findall(r'com\.pinksaucepasta\.paperboat\.hostd\.u%d(?:\.[0-9a-f]+)?\b' % os.getuid(), printed.stdout)))
+    if printed.returncode or len(labels) != 1:
+        raise RuntimeError('expected exactly one loaded host service label, found %r' % labels)
+    return labels[0]
 
 
 def hostd_unit():
@@ -115,7 +125,7 @@ def main():
             finally:
                 shutil.rmtree(installed, ignore_errors=True)
             if platform.system() == 'Darwin':
-                restart_host = lambda: sudo('launchctl', 'kickstart', '-k', 'system/com.pinksaucepasta.paperboat.hostd.u%d' % os.getuid())
+                restart_host = lambda: sudo('launchctl', 'kickstart', '-k', 'system/' + hostd_label())
             else:
                 restart_host = lambda: sudo('systemctl', 'restart', hostd_unit())
             survive(endpoint, identifier, 'a host-service restart', restart_host)
