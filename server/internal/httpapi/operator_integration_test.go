@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorreporting"
+	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
@@ -253,7 +254,8 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	}
 	defer store.Pool().Exec(ctx, `DELETE FROM backup_reports WHERE database_id=$1`, "http-"+user.ID)
 	infrastructureService := operatorinfra.NewService(store, strings.Repeat("infra-test-key", 3))
-	router := NewRouter(Options{OperatorInfrastructure: infrastructureService, OperatorBackups: backupService, OperatorReporting: reportingService, Config: cfg, Auth: service, OperatorAuth: operatorService, Operator: operator.NewService(store), OperatorActions: operatoractions.NewService(store), OperatorAudit: audit.NewWriter(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	serverNodes := &servernodes.Enroller{DB: store, Config: cfg, Dial: func(_ context.Context, a string) (string, error) { return a, nil }}
+	router := NewRouter(Options{ServerNodes: serverNodes, OperatorInfrastructure: infrastructureService, OperatorBackups: backupService, OperatorReporting: reportingService, Config: cfg, Auth: service, OperatorAuth: operatorService, Operator: operator.NewService(store), OperatorActions: operatoractions.NewService(store), OperatorAudit: audit.NewWriter(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	request := func(method, path, body string, csrf bool, extra ...map[string]string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Origin", "http://localhost:3000")
@@ -279,6 +281,11 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	path := "/v1/admin/accounts/" + user.ID
 	if r := request("GET", path, "", false); r.Code != 403 {
 		t.Fatalf("ordinary login elevated: %d %s", r.Code, r.Body.String())
+	}
+	for _, c := range [][2]string{{"GET", "/v1/admin/server-nodes"}, {"POST", "/v1/admin/server-nodes/enrollments"}} {
+		if r := request(c[0], c[1], `{"address":"127.0.0.1:1","code":"x"}`, false); r.Code != 403 || !strings.Contains(r.Body.String(), `"forbidden"`) {
+			t.Fatalf("non-operator reached %s %s: %d %s", c[0], c[1], r.Code, r.Body.String())
+		}
 	}
 	credentials, _ := json.Marshal(map[string]string{"email": operatorEmail, "password": operatorPassword})
 	if r := request("POST", "/v1/operator/setup", string(credentials), false); r.Code != 200 {
@@ -414,6 +421,7 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	if err = store.Pool().QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE actor_user_id=$1 AND event_type='operator.read'`, operatorID).Scan(&n); err != nil || n != 1 {
 		t.Fatal("read audit missing", err, n)
 	}
+	checkServerNodeRoutes(t, ctx, store, request)
 	if _, err = store.Pool().Exec(ctx, `UPDATE operator_sessions SET expires_at=now()-interval '1 second' WHERE operator_id=$1`, operatorID); err != nil {
 		t.Fatal(err)
 	}

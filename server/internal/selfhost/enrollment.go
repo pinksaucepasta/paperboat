@@ -140,7 +140,9 @@ func (s *Service) claimTarget(ctx context.Context, address string) (host, addres
 	}
 	return host, net.JoinHostPort(ips[0].String(), port), nil
 }
-func pinnedTransport(pin []byte, address string) *http.Transport {
+
+// PinnedTransport dials address and accepts only a TLS 1.3 server certificate whose SPKI SHA-256 is pin.
+func PinnedTransport(pin []byte, address string) *http.Transport {
 	return &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, address)
 	}, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, VerifyConnection: func(cs tls.ConnectionState) error {
@@ -251,7 +253,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if e != nil {
 		return nil, e
 	}
-	transport := pinnedTransport(pin, address)
+	transport := PinnedTransport(pin, address)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	target := (&url.URL{Scheme: "https", Host: net.JoinHostPort(host, "8443")}).String()

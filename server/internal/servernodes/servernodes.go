@@ -24,9 +24,14 @@ type Node struct {
 
 // Status is one node as any node's panel sees it.
 type Status struct {
-	ID, Region, State, Version, Commit string
-	StartedAt, LastSeenAt              time.Time
-	Healthy                            bool
+	ID         string    `json:"id"`
+	Region     string    `json:"region"`
+	State      string    `json:"state"`
+	Version    string    `json:"version"`
+	Commit     string    `json:"commit"`
+	StartedAt  time.Time `json:"started_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	Healthy    bool      `json:"healthy"`
 }
 
 // ErrRemoved: an operator removed this node; it must not rejoin by heartbeating.

@@ -50,6 +50,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runDBRoleDefaults(args[2:], stdout, stderr)
 	case "admin":
 		return runAdmin(args[2:], stdout, stderr)
+	case "enroll-node":
+		return runEnrollNode(args[2:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -279,5 +281,6 @@ Usage:
   paperboat-server migrate
   paperboat-server db-role-defaults [-config path]
   paperboat-server admin usage-key provision [flags]
+  paperboat-server enroll-node -region R -instance slot-NN -host H -config-out PATH
 `)
 }

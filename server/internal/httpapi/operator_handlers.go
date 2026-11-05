@@ -28,6 +28,8 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/client-update-policy":                       {"admin", "", "client-update-policy"},
 	"PUT /v1/admin/client-update-policy":                       {"admin", "", "client-update-policy"},
 	"POST /v1/admin/selfhost/enrollments":                      {"admin", "body:address", "selfhost"},
+	"POST /v1/admin/server-nodes/enrollments":                  {"admin", "body:address", "server-nodes"},
+	"GET /v1/admin/server-nodes":                               {"operations", "", "server-nodes"},
 	"GET /v1/admin/selfhost/installations":                     {"operations", "", "selfhost"},
 	"GET /v1/admin/selfhost/installations/{installationID}":    {"operations", "installationID", ""},
 	"DELETE /v1/admin/selfhost/installations/{installationID}": {"admin", "installationID", "selfhost"},
@@ -271,6 +273,7 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerOperatorMutations(mux, opts)
 	registerOperatorDiagnostics(mux, opts)
 	registerOperatorInfrastructure(mux, opts)
+	registerServerNodes(mux, opts)
 	if opts.Operator == nil {
 		return
 	}

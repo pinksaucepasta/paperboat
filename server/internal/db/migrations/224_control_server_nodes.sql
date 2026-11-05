@@ -5,7 +5,11 @@ SET LOCAL lock_timeout = '5s';
 CREATE TABLE paperboat.control_server_nodes (
     id text PRIMARY KEY CHECK (octet_length(id) BETWEEN 1 AND 128),
     region text NOT NULL CHECK (region ~ '^[a-z][a-z0-9-]{0,23}$'),
-    state text NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'draining', 'removed')),
+    -- registered: enrolled by an operator, not yet serving; a node that holds database credentials itself is active.
+    state text NOT NULL DEFAULT 'active' CHECK (state IN ('registered', 'active', 'draining', 'removed')),
+    endpoint_host text CHECK (octet_length(endpoint_host) BETWEEN 1 AND 253),
+    tls_spki_sha256 bytea CHECK (octet_length(tls_spki_sha256) = 32),
+    enrolled_by text,
     version text NOT NULL CHECK (octet_length(version) BETWEEN 1 AND 64),
     commit text NOT NULL CHECK (octet_length(commit) BETWEEN 1 AND 64),
     started_at timestamptz NOT NULL,

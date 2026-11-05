@@ -72,6 +72,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/retention"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -747,6 +748,7 @@ func New(opts Options) (*App, error) {
 		ClientUpdatePolicy:       clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
+		ServerNodes:              &servernodes.Enroller{DB: store, Config: opts.Config},
 		OperatorBackups:          backupService,
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,

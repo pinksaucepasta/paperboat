@@ -45,6 +45,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
+	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
@@ -65,6 +66,7 @@ type Options struct {
 	AuditStreams             *auditstream.Service
 	ClientUpdatePolicy       ClientUpdatePolicyAPI
 	OperatorInfrastructure   *operatorinfra.Service
+	ServerNodes              *servernodes.Enroller
 	OperatorBackups          *backupreport.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
