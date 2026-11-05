@@ -294,10 +294,12 @@ func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string
 			findings = append(findings, inventoryFinding{path: strings.TrimPrefix(pin, s.root)})
 		}
 	}
-	for _, slot := range paths.releaseSlots {
-		present, existsErr := s.exists(slot)
-		err = errors.Join(err, existsErr)
-		if present {
+	// Every release slot but pins/ belongs to an unfinished transaction, and none is pending here: listing
+	// the directory, not today's slot names, also finds one an older build left (pb.previous).
+	slots, globErr := filepath.Glob(s.at(filepath.Join(filepath.Dir(paths.pins), "*")))
+	err = errors.Join(err, globErr)
+	for _, slot := range slots {
+		if slot = strings.TrimPrefix(slot, s.root); slot != paths.pins {
 			findings = append(findings, inventoryFinding{path: slot})
 		}
 	}
