@@ -56,7 +56,7 @@ FROM generate_series(1, 5000) i;
 
 INSERT INTO user_machines(id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online,
   enrolled_at, last_seen_at, alias, owner_team_id, installation_generation, worker_generation, connector_state,
-  configured_capabilities, observed_capabilities, created_at, updated_at, host_service_version)
+  configured_capabilities, observed_capabilities, created_at, updated_at, host_service_version, deleted_at)
 SELECT pg_temp.pid('machine', mi), owner, pg_temp.pid('env', mi),
        CASE mi % 3 WHEN 0 THEN 'darwin' ELSE 'linux' END, CASE mi % 2 WHEN 0 THEN 'arm64' ELSE 'amd64' END, '/home/perf',
        CASE WHEN mi % 10 = 0 THEN 'offline' WHEN mi % 97 = 0 THEN 'revoked' ELSE 'online' END,
@@ -64,7 +64,9 @@ SELECT pg_temp.pid('machine', mi), owner, pg_temp.pid('env', mi),
        'm' || mi, team, 1, 1, 'ready',
        ARRAY['file_receive','preview_launch','terminal_host','session_host','ssh_host'],
        ARRAY['file_receive','preview_launch','terminal_host','session_host','ssh_host'],
-       now() - ((mi % 400) || ' days')::interval, now() - ((mi % 60) || ' seconds')::interval, '2026.10.20.1'
+       now() - ((mi % 400) || ' days')::interval, now() - ((mi % 60) || ' seconds')::interval, '2026.10.20.1',
+       -- A revoked machine is a tombstone (migration 211 user_machines_revoked_tombstone).
+       CASE WHEN mi % 10 <> 0 AND mi % 97 = 0 THEN now() - interval '1 day' END
 FROM perf_machine_plan;
 UPDATE user_machines SET revoked_at = now() - interval '1 day' WHERE state = 'revoked' AND id LIKE 'machine_%';
 

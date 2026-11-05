@@ -171,6 +171,14 @@ jobs:
           PAPERBOAT_TEST_PGBOUNCER_DSN="postgres://pgb_app:pgb_app_test@127.0.0.1:6432/lane_pgbouncer_test?sslmode=disable" \
           PAPERBOAT_TEST_DATABASE_DSN="postgres://pgb_app:pgb_app_test@127.0.0.1:5432/lane_pgbouncer_test?sslmode=disable" \
             go test -race -count=1 -v -run '^TestServerRunsBehindTransactionPoolingPgBouncerOnPostgres$' ./internal/db
+      # F21-15: every endpoint in server/internal/perf/budgets.json within its latency and query budget, on its own
+      # seeded database (it skipped everywhere before, and its seed had drifted). No -race: it measures latency.
+      - name: server performance budgets (seeded PostgreSQL)
+        if: matrix.module == 'server' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'Performance'))
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -qc "create database lane_perf_test"
+          PAPERBOAT_PERF_DATABASE_DSN="postgres://postgres:postgres@localhost:5432/lane_perf_test?sslmode=disable" \
+            go test -count=1 -timeout 30m -v -run '^TestPerformanceBudgetsOnSeededPostgres$' ./internal/app
       - name: cli tests that need root (under sudo)
         if: matrix.module == 'cli' && !cancelled()
         run: |

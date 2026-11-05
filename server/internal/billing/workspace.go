@@ -106,8 +106,9 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		return out, err
 	}
 	var customer, subscription, item, product sql.NullString
-	var start, end, grace, paidUntil sql.NullTime
-	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,renewal_grace_until,billing_workspace_paid_until(billing_workspaces) FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL) FOR UPDATE`, out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision, &grace, &paidUntil)
+	var start, end, grace, paidUntil, scheduledAt sql.NullTime
+	var scheduled sql.NullInt32
+	err := tx.QueryRow(ctx, `SELECT id,provider_customer_id,provider_subscription_id,provider_item_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,revision,renewal_grace_until,billing_workspace_paid_until(billing_workspaces),scheduled_quantity,scheduled_quantity_at FROM billing_workspaces WHERE (team_id=$1 AND $1<>'' AND user_id IS NULL) OR (user_id=$2 AND $1='' AND team_id IS NULL) FOR UPDATE`, out.TeamID, out.UserID).Scan(&out.ID, &customer, &subscription, &item, &product, &out.State, &out.Quantity, &start, &end, &out.CancelAtPeriodEnd, &out.Revision, &grace, &paidUntil, &scheduled, &scheduledAt)
 	out.CustomerID, out.SubscriptionID, out.ItemID, out.ProductCode = customer.String, subscription.String, item.String, product.String
 	if start.Valid {
 		out.PeriodStart = &start.Time
@@ -125,11 +126,14 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		return out, err
 	}
 	if out.TeamID != "" {
-		out.SeatsUsed, err = teams.SeatUsageTx(ctx, tx, out.TeamID)
-		if err != nil {
-			return out, err
+		if scheduled.Valid {
+			n := int(scheduled.Int32)
+			out.ScheduledQuantity = &n
 		}
-		err = tx.QueryRow(ctx, `SELECT scheduled_quantity,scheduled_quantity_at FROM billing_workspaces WHERE id=$1`, out.ID).Scan(&out.ScheduledQuantity, &out.ScheduledAt)
+		if scheduledAt.Valid {
+			out.ScheduledAt = &scheduledAt.Time
+		}
+		out.SeatsUsed, err = teams.SeatUsageTx(ctx, tx, out.TeamID)
 	}
 	return out, err
 }
