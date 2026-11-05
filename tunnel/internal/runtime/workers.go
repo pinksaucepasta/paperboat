@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
@@ -662,7 +663,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			// A failed remaining group must not retain routes withdrawn from
 			// this complete snapshot. Publish their removal before retrying it.
 			if len(selectedAssignments) != 0 && len(activeAssignments) == 0 && len(probeFailures) != 0 && len(w.canonicalAssignments) == 0 {
-				return errors.Join(probeFailures...)
+				return probeFailure(probeFailures)
 			}
 		}
 		supersededSelection := append(append([]control.RouteAssignment(nil), activeAssignments...), failedAssignments...)
@@ -807,7 +808,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 				return err
 			}
 			if len(probeFailures) != 0 && len(readyAssignments) == 0 {
-				return errors.Join(probeFailures...)
+				return probeFailure(probeFailures)
 			}
 			observedAssignments := activeAssignments
 			if len(probeFailures) != 0 {
@@ -1175,7 +1176,9 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 	}
 	if len(failures) != 0 && len(ready) != 0 && w.Reporter != nil {
 		for _, failure := range failures {
-			w.Reporter.ObserveFailure(ctx, "route_group_probe", failure)
+			if !errors.Is(failure, edgehttp.ErrDataCarrierRouteUnavailable) {
+				w.Reporter.ObserveFailure(ctx, "route_group_probe", failure)
+			}
 		}
 	}
 	sort.Slice(effective, func(i, j int) bool {
@@ -1191,6 +1194,20 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 		return ready[i].AssignmentID < ready[j].AssignmentID
 	})
 	return effective, ready, failures, failedAssignments
+}
+
+// probeFailure returns the probe failures that are reconcile failures. A route
+// whose exact carrier has not connected to this edge process yet (every edge
+// restart, a machine that is offline) is pending: it stays on the unavailable
+// page, is probed again next reconcile, and must not mark control unavailable.
+func probeFailure(failures []error) error {
+	var failed []error
+	for _, failure := range failures {
+		if !errors.Is(failure, edgehttp.ErrDataCarrierRouteUnavailable) {
+			failed = append(failed, failure)
+		}
+	}
+	return errors.Join(failed...)
 }
 
 func isCanonicalAssignment(assignment control.RouteAssignment) bool {
