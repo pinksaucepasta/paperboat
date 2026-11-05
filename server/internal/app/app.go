@@ -944,12 +944,16 @@ func New(opts Options) (*App, error) {
 	if edgeControlService != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
-	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_mint_withdrawals", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
-		return mintWithdrawals.ListenFor(ctx, 24*time.Second)
-	}), progress))
-	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_machine_events", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
-		return machineEventHub.ListenFor(ctx, 24*time.Second)
-	}), progress))
+	// Every process listens for its own key withdrawals and event waits, leader or not: a retired
+	// server keeps serving held connections after it hands over leadership (F21-04), and the new
+	// one serves waits before it wins it.
+	processListeners := workers.NewSupervisor(
+		observedWorker(supportService, "worker_mint_withdrawals", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+			return mintWithdrawals.ListenFor(ctx, 24*time.Second)
+		}), progress),
+		observedWorker(supportService, "worker_machine_events", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+			return machineEventHub.ListenFor(ctx, 24*time.Second)
+		}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
@@ -1000,6 +1004,7 @@ func New(opts Options) (*App, error) {
 		db:                   store,
 		server:               newHTTPServer(opts.Config.HTTP, router),
 		worker:               workers.NewLeaderSupervisor(workerLeader(store, telemetryMetrics, opts.Logger), serverWorkers...),
+		listeners:            processListeners,
 		certificateRuntime:   certificateRuntime,
 		telemetryMetrics:     telemetryMetrics,
 		telemetryHealth:      telemetryHealth,

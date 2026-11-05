@@ -49,6 +49,7 @@ type App struct {
 	db                   *db.DB
 	server               *http.Server
 	worker               *workers.Supervisor
+	listeners            *workers.Supervisor // per process, outlives a drain
 	certificateRuntime   *tunnelv1.CertificateRuntime
 	telemetryEvents      *telemetry.EventLog
 	telemetryMetrics     *telemetry.Metrics

@@ -150,6 +150,13 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}()
 	go a.db.RunReplicaLag(runContext)
+	listeners := cmp.Or(a.listeners, workers.NewSupervisor())
+	go func() {
+		// Each listener reports its own failures (observedWorker); Run ends with runContext.
+		if err := listeners.Run(runContext); err != nil && runContext.Err() == nil {
+			a.logger.Error("per-process listeners stopped", "error", err)
+		}
+	}()
 	// An operator's drain (servernodes.Drain) shuts this node down the way SIGTERM does: not ready, event waits
 	// answered, GOAWAY, held requests finish within the shutdown timeout.
 	nodeDrained := make(chan struct{})
@@ -225,7 +232,7 @@ func (a *App) Run(ctx context.Context) error {
 			runErr = errors.Join(runErr, fmt.Errorf("stop workers: %w", workerShutdownCtx.Err()))
 		}
 	}
-	workerJoinErr := a.worker.Wait(workerShutdownCtx)
+	workerJoinErr := errors.Join(a.worker.Wait(workerShutdownCtx), listeners.Wait(workerShutdownCtx))
 	if workerJoinErr != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("join workers: %w", workerJoinErr))
 	}
