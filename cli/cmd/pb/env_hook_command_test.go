@@ -74,7 +74,8 @@ func TestEnvLoadFunctionLoadsIntoTheCurrentShellInEveryShell(t *testing.T) {
 			script := envHookLine(shell, filepath.Join(dir, "pb")) + "\n" +
 				echo + "pb env load; " + echo + "pb status --x; pb env load extra; pb env"
 			command := exec.Command(path, "-c", script)
-			command.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FAKE_COUNTER="+filepath.Join(dir, "count"), "FAKE_PRINTER="+printer)
+			// pb is not on PATH (as on a Mac, ~/.local/bin): the function must still reach it.
+			command.Env = append(os.Environ(), "FAKE_COUNTER="+filepath.Join(dir, "count"), "FAKE_PRINTER="+printer)
 			out, err := command.CombinedOutput()
 			want := "<1>[" + hostileLoadValue + "]<2>[" + hostileLoadValue + "]" +
 				"passthrough: status --x\npassthrough: env load extra\npassthrough: env\n"

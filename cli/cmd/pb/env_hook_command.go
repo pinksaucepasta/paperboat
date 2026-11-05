@@ -105,8 +105,8 @@ func envHookShell(args []string) (string, error) {
 	return "", localArgumentError("name the shell: pb env hook bash, zsh or fish")
 }
 
-// envHookLine is the whole hook. It runs pb by absolute path because
-// non-interactive ssh shells often lack pb on PATH, and does nothing when pb
+// envHookLine is the whole hook. It and its pb function run pb by absolute path
+// because ssh shells often lack pb on PATH (macOS: ~/.local/bin), and does nothing when pb
 // is gone. It also defines a pb function (the nvm/conda way) that handles
 // only `pb env load`, loading into the current shell, and passes every other
 // call to the real pb unchanged.
@@ -115,11 +115,11 @@ func envHookLine(shell, pb string) string {
 	if shell == "fish" {
 		return fmt.Sprintf("test -x %s; and %s env hook --emit fish 2>/dev/null | source; "+
 			"function pb; if test (count $argv) -eq 2; and test \"$argv[1]\" = env; and test \"$argv[2]\" = load; "+
-			"command pb env hook --emit fish | source; else; command pb $argv; end; end %s", quoted, quoted, envHookMarker)
+			"%s env hook --emit fish | source; else; %s $argv; end; end %s", quoted, quoted, quoted, quoted, envHookMarker)
 	}
 	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s 2>/dev/null)\"; "+
-		"pb() { if [ $# -eq 2 ] && [ \"$1\" = env ] && [ \"$2\" = load ]; then eval \"$(command pb env hook --emit %s)\"; "+
-		"else command pb \"$@\"; fi; } %s", quoted, quoted, shell, shell, envHookMarker)
+		"pb() { if [ $# -eq 2 ] && [ \"$1\" = env ] && [ \"$2\" = load ]; then eval \"$(%s env hook --emit %s)\"; "+
+		"else %s \"$@\"; fi; } %s", quoted, quoted, shell, quoted, shell, quoted, envHookMarker)
 }
 
 // envHookExecutable prefers the stable pb on PATH over this process's
