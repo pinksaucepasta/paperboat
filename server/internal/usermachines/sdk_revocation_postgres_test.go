@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/nativeprivateaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	wire "github.com/pinksaucepasta/paperboat/shared/machineservices"
+	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
 )
 
 // Destination teardown and feed-outage timers are Lane R's separate admission checks.
@@ -107,11 +108,11 @@ func TestSDKLiveSessionRevocation(t *testing.T) {
 	if err != nil || len(foreign) != 0 {
 		t.Fatal("host read another environment's revocations")
 	}
-	if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, make([]string, controlplane.MaxLiveOperationJTIs+1)); err == nil {
+	if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, make([]string, operationrevocation.MaxLiveJTIs+1)); err == nil {
 		t.Fatal("unbounded live credential list accepted")
 	}
 	for _, invalid := range [][]string{nil, {""}, {"duplicate_jti", "duplicate_jti"}, {strings.Repeat("x", 129)}} {
-		if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, invalid); !errors.Is(err, controlplane.ErrLiveOperationJTIsInvalid) {
+		if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, invalid); !errors.Is(err, operationrevocation.ErrLiveJTIsInvalid) {
 			t.Fatal("invalid host watch list was not rejected")
 		}
 	}

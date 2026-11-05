@@ -2,8 +2,11 @@ package auth
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
 )
 
 var ErrRevocationsInvalid = errors.New("invalid revocation document")
@@ -39,7 +42,8 @@ func (c *RevocationCache) Revoked(claims Claims) bool {
 }
 
 func (c *RevocationCache) Watch(jti string) (*atomic.Bool, <-chan struct{}, func(), error) {
-	if c == nil || jti == "" {
+	// An ID the revocation feed cannot carry could never be revoked, so it is not admitted.
+	if c == nil || !operationrevocation.ValidJTI(jti) {
 		return nil, nil, nil, ErrRevocationsInvalid
 	}
 	watcher := &revocationWatcher{signal: make(chan struct{})}
@@ -64,6 +68,18 @@ func (c *RevocationCache) Watch(jti string) (*atomic.Bool, <-chan struct{}, func
 			c.mu.Unlock()
 		})
 	}, nil
+}
+
+// Live returns the sorted IDs of credentials with a live watch, for the server to check.
+func (c *RevocationCache) Live() []string {
+	c.mu.RLock()
+	live := make([]string, 0, len(c.watchers))
+	for jti := range c.watchers {
+		live = append(live, jti)
+	}
+	c.mu.RUnlock()
+	sort.Strings(live)
+	return live
 }
 
 func (c *RevocationCache) Replace(jtis []string) error {

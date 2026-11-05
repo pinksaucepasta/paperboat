@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
 )
 
 type revocationTokenSource interface {
@@ -49,23 +50,43 @@ func newRevocationRefreshService(endpoint string, tokens revocationTokenSource, 
 	return &revocationRefreshService{endpoint: parsed, tokens: tokens, proofs: proofs, operationID: operationID, cache: cache, client: &http.Client{Transport: errorreport.TransportOperation(transport, parsed.String(), "revocation_refresh"), Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}, interval: interval}, nil
 }
 
+// refresh asks which live operation credentials are revoked, in chunks of the server's bound,
+// and replaces the cache with the union so every revoked live operation ends.
 func (s *revocationRefreshService) refresh(ctx context.Context) error {
+	live := s.cache.Live()
+	revoked := make([]string, 0)
+	for start := 0; start == 0 || start < len(live); start += operationrevocation.MaxLiveJTIs {
+		chunk, err := s.fetch(ctx, live[start:min(start+operationrevocation.MaxLiveJTIs, len(live))])
+		if err != nil {
+			return err
+		}
+		revoked = append(revoked, chunk...)
+	}
+	return s.cache.Replace(revoked)
+}
+
+func (s *revocationRefreshService) fetch(ctx context.Context, live []string) ([]string, error) {
 	operationID, err := s.operationID()
 	if err != nil || len(operationID) < 8 || len(operationID) > 128 {
-		return errors.Join(ErrProductionInvalid, err)
+		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	body := []byte("{}")
+	body, err := json.Marshal(struct {
+		ActiveJTIs []string `json:"active_jtis"`
+	}{ActiveJTIs: live})
+	if err != nil {
+		return nil, err
+	}
 	token, err := s.tokens.Token(ctx)
 	if err != nil || token == "" || len(token) > 16<<10 {
-		return errors.Join(ErrProductionInvalid, err)
+		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	proof, err := s.proofs.Proof(ctx, operationID, http.MethodPost, s.endpoint.Path, body)
 	if err != nil || len(proof) == 0 || len(proof) > 16<<10 {
-		return errors.Join(ErrProductionInvalid, err)
+		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
@@ -73,12 +94,12 @@ func (s *revocationRefreshService) refresh(ctx context.Context) error {
 	request.Header.Set("Accept", "application/json")
 	response, err := s.client.Do(request)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer response.Body.Close()
 	encoded, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
 	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 || len(encoded) > 1<<20 {
-		return errors.Join(ErrProductionInvalid, err)
+		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.DisallowUnknownFields()
@@ -87,9 +108,9 @@ func (s *revocationRefreshService) refresh(ctx context.Context) error {
 	}
 	var extra any
 	if decoder.Decode(&document) != nil || decoder.Decode(&extra) != io.EOF {
-		return ErrProductionInvalid
+		return nil, ErrProductionInvalid
 	}
-	return s.cache.Replace(document.JTIs)
+	return document.JTIs, nil
 }
 
 // revocationMaximumRetry caps the wait between failed revocation refreshes.

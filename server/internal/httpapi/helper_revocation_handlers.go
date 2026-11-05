@@ -10,11 +10,12 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
 )
 
 func helperRevocations(edge *controlplane.EdgeService, identities *controlplane.EnrollmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		maxBody := int64(controlplane.MaxLiveOperationJTIs * 160)
+		maxBody := int64(operationrevocation.MaxLiveJTIs * 160)
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 		if err != nil || int64(len(body)) > maxBody {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")
@@ -42,7 +43,7 @@ func helperRevocations(edge *controlplane.EdgeService, identities *controlplane.
 			return
 		}
 		jtis, err := edge.OperationRevocations(r.Context(), identity.EnvironmentID, input.ActiveJTIs)
-		if errors.Is(err, controlplane.ErrLiveOperationJTIsInvalid) {
+		if errors.Is(err, operationrevocation.ErrLiveJTIsInvalid) {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "active_jtis must contain the bounded list of live operation credential IDs.")
 			return
 		}
