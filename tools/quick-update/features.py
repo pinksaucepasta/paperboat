@@ -22,7 +22,7 @@ now=lambda:datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='mill
 R(f'mkdir -p ~/gap5/{name}')
 if cand!='-':subprocess.run(PUT(cand,f'gap5/{name}/candidate'),check=True)
 subprocess.run(PUT(str(pathlib.Path(__file__).with_name('probe.py')),'gap5/probe.py'),check=True)
-R(f'chmod 755 ~/gap5/{name}/candidate 2>/dev/null; sudo docker cp ~/gap5/probe.py {CT}:/tmp/probe.py')
+R(f'chmod 755 ~/gap5/{name}/candidate 2>/dev/null; sudo docker cp ~/gap5/probe.py {CT}:/tmp/probe.py && sudo docker exec {CT} chown pbt /tmp/probe.py')
 R(f"{U} sh -c 'mkdir -p /home/pbt/{name} && head -c 20000000 /dev/urandom > /home/pbt/{name}/big.bin'")
 R(f"{U} bash -c 'nohup python3 /tmp/probe.py {TG} {pv} {tn} /home/pbt/{name}/p /home/pbt/{name}/stop > /home/pbt/{name}/probe.out 2>&1 &'")
 # Held browser terminal: a guest joins one owner session by code through the console's own page (WASM browser
@@ -31,7 +31,7 @@ NOWEB=os.environ.get('NO_WEB')=='1';webp=None
 if not NOWEB:
  W=pathlib.Path(__file__).resolve().parent;TOK=os.environ['QV_WEBTOKEN'];wname='smoke-web-'+name
  subprocess.run(PUT(str(W/'mksession.py'),'gap5/mksession.py'),check=True)
- sid=R(f'sudo docker cp ~/gap5/mksession.py {CT}:/tmp/mksession.py && {U} python3 /tmp/mksession.py {TG} {wname}').strip().splitlines()[-1]
+ sid=R(f'sudo docker cp ~/gap5/mksession.py {CT}:/tmp/mksession.py && sudo docker exec {CT} chown pbt /tmp/mksession.py && {U} python3 /tmp/mksession.py {TG} {wname}').strip().splitlines()[-1]
  (run/'web-session').write_text(sid)
  subprocess.run([sys.executable,str(W/'code.py'),TOK,SRV,sid,str(run/'web.code')],check=True,stdout=subprocess.DEVNULL)
  wenv={**os.environ,'SESSION':sid,'CODEFILE':str(run/'web.code'),'OUT':str(run/'web-events.jsonl'),'STOP':str(run/'web.stop'),'MAX_S':'1500'}  # PW_MODULE, PW_CHROMIUM, PB_CONSOLE_ORIGIN come from the environment
