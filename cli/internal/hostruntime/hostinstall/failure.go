@@ -18,6 +18,10 @@ var ErrLegacyCarrierRunning = errors.New("This first update requires the existin
 // file being staged. Staging removes its partial file, so nothing was changed.
 var ErrInsufficientSpace = errors.New("there is not enough free disk space to stage the installation")
 
+// ErrNoPendingInstallation is a rollback that found no installation journal: the install already committed (a bound
+// install commits inside install-supplied), so there is nothing to undo.
+var ErrNoPendingInstallation = errors.New("the installation already committed, so there is nothing to roll back")
+
 // ErrUpdateNotReady is an installation whose new version did not come up healthy before it was
 // committed; the previous version was restored.
 var ErrUpdateNotReady = errors.New("the new version did not become ready, so the previous version was restored")

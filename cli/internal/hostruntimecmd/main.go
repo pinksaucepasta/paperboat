@@ -31,6 +31,10 @@ const InsufficientSpaceExitCode = 78
 // across Unix elevation.
 const UpdateNotReadyExitCode = 79
 
+// NoPendingInstallationExitCode preserves "rollback found no journal: the install already committed"
+// across Unix elevation.
+const NoPendingInstallationExitCode = 80
+
 const usage = `pb daemon internal host runtime.
 
 Usage:
@@ -274,6 +278,9 @@ func serviceFailureExitCode(err error) int {
 	}
 	if errors.Is(err, hostinstall.ErrUpdateNotReady) {
 		return UpdateNotReadyExitCode
+	}
+	if errors.Is(err, hostinstall.ErrNoPendingInstallation) {
+		return NoPendingInstallationExitCode
 	}
 	return 1
 }

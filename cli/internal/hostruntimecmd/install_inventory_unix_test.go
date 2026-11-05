@@ -212,6 +212,33 @@ func TestInstallInventoryUnfinishedInstallationFailsLoudly(t *testing.T) {
 	}
 }
 
+// An install that commits while the inventory runs removes its journal. The inventory must read the journal again
+// after its removal pass and must not name one that is gone: a successful install exits 0.
+func TestInstallInventoryDoesNotNameAJournalThatWasCommittedMeanwhile(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	journal := "/var/lib/paperboat-installer/users/u1001/install-journal.json"
+	files := append([]string(nil), versionFiles(digestB)...)
+	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files,
+		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, unit: "paperboat-machineguard.service"},
+	)
+	h.fake.termExits[4002] = true
+	reads := 0
+	h.sweep.sources = func(context.Context) (hostinstall.InventorySources, error) {
+		reads++
+		sources := h.sources
+		if reads == 1 {
+			sources.Pending = journal // the journal exists when the inventory starts, the commit removes it before the next read
+		}
+		return sources, nil
+	}
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatalf("err = %v, want a clean inventory once the journal is gone", err)
+	}
+	if reads < 2 {
+		t.Fatalf("sources read %d times, want a fresh read after the removal pass", reads)
+	}
+}
+
 // Rolling back from B to A restores A's slot (and its old activation time):
 // B's processes, units and files are leftovers; A's session owner and the
 // generations its catalogue still references stay.

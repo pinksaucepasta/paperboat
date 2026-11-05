@@ -199,7 +199,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		}
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	case "rollback-supplied":
-		journal, err := loadJournal(paths.journal)
+		journal, err := readRollbackJournal(paths)
 		if err != nil {
 			return err
 		}
@@ -243,6 +243,16 @@ func LockSuppliedOperation(path string, uid int) (*os.File, error) {
 		return nil, hostInstallFailure("Paperboat installation lock could not be acquired; retry when the current installation finishes", err, f.Close())
 	}
 	return f, nil
+}
+
+// readRollbackJournal is the journal a rollback undoes. A bound install removes it when it commits, and a rollback
+// that arrives later finds none: that is ErrNoPendingInstallation, never the raw lstat of the removed file.
+func readRollbackJournal(paths installPaths) (installJournal, error) {
+	journal, err := loadJournal(paths.journal)
+	if installNotExistOnly(err) {
+		return installJournal{}, hostInstallFailure("there is no pending installation to roll back; the new version stays installed", ErrNoPendingInstallation)
+	}
+	return journal, err
 }
 
 // suppliedActiveRequest binds lifecycle admission to the current fixed executable slot;

@@ -109,6 +109,10 @@ func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
 	}
 	if !check && len(findings) > 0 {
 		s.removeFindings(ctx, findings)
+		// An install that finished meanwhile removed its journal: read the sources again, never name a gone journal.
+		if sources, err = s.sources(ctx); err != nil {
+			return withPurgeStage("final_inventory", err)
+		}
 		if findings, err = s.versionLeftovers(ctx, sources); err != nil {
 			return withPurgeStage("final_inventory", err)
 		}

@@ -138,6 +138,8 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrInsufficientSpace
 				case UpdateNotReadyExitCode:
 					return hostinstall.ErrUpdateNotReady
+				case NoPendingInstallationExitCode:
+					return hostinstall.ErrNoPendingInstallation
 				}
 			}
 			// The privileged step prints its own reason first; administrator approval is only one cause.
