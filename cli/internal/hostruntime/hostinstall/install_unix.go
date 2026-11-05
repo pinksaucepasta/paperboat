@@ -104,6 +104,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	// it back if any later step fails, so a failed update leaves no component on the new version.
 	var guardRestore guardUndo
 	var carrierUpgrade *unixCarrierUpgrade
+	var candidateOwner candidateSessionOwner
 	resultErr = lifecycle.Replace(ctx, func(ctx context.Context) error {
 		if err := publishUnixControlLifetime(ctx, paths, hostd, coldCarrier); err != nil {
 			return err
@@ -155,6 +156,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			if err := updated.PrepareUnixNativeInstall(paths.updateState); err != nil {
 				return errors.Join(err, removeJournal(paths.journal))
 			}
+		}
+		if candidateOwner, err = newCandidateSessionOwner(request); err != nil {
+			return err
 		}
 		if err := prepareSessionOwner(ctx, request, paths); err != nil {
 			return err
@@ -248,6 +252,10 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		return commitPreparedInstallationLocked(ctx, request, paths, true)
 	})
 	resultErr = errors.Join(resultErr, carrierUpgrade.finish(ctx, resultErr != nil))
+	if resultErr != nil {
+		// A failed attempt leaves no session owner of its own version.
+		resultErr = errors.Join(resultErr, candidateOwner.withdraw(context.WithoutCancel(ctx), paths.metadata, request.UID))
+	}
 	if resultErr != nil {
 		return errors.Join(resultErr, finishMachineGuard(ctx, guardRestore, resultErr))
 	}
