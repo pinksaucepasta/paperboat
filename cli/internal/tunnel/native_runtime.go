@@ -31,7 +31,7 @@ import (
 
 type nativeRuntimeClock struct{}
 
-func (nativeRuntimeClock) Now() time.Time { return time.Now().UTC() }
+func (nativeRuntimeClock) Now() time.Time { return serverclock.Now().UTC() }
 
 type cliNativeNetworkAPI struct {
 	issuer string
@@ -649,6 +649,14 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 	return runtime, nil
 }
 
+// issueCLILeaf stamps this endpoint's QUIC leaf on the server clock, the clock every peer judges it by
+// (F21-02): a local clock 10 min ahead made leaves that start 9 min in the target's future.
+func issueCLILeaf(identity clientauthority.Authority) (tls.Certificate, error) {
+	now := serverclock.Now().UTC()
+	lifetime := min(identity.LocalCertificate.Claims.ExpiresAt.Sub(now), 24*time.Hour)
+	return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, now, lifetime)
+}
+
 // newCLINativeAuthority builds the daemon's signed-network authority and registers its identity; it
 // returns the peer and relay TLS configurations the engine needs.
 func newCLINativeAuthority(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority, localMachineID string) (*tailnet.Authority, *tls.Config, *tls.Config, error) {
@@ -673,28 +681,16 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	now := serverclock.Now().UTC()
-	lifetime := identity.LocalCertificate.Claims.ExpiresAt.Sub(now)
-	if lifetime > 24*time.Hour {
-		lifetime = 24 * time.Hour
-	}
-	issueLeaf := func() (tls.Certificate, error) {
-		remaining := identity.LocalCertificate.Claims.ExpiresAt.Sub(serverclock.Now().UTC())
-		if remaining > 24*time.Hour {
-			remaining = 24 * time.Hour
-		}
-		return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, serverclock.Now().UTC(), remaining)
-	}
-	leaf, err := endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, now, lifetime)
+	leaf, err := issueCLILeaf(identity)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	getCertificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		value, issueErr := issueLeaf()
+		value, issueErr := issueCLILeaf(identity)
 		return &value, issueErr
 	}
 	getClientCertificate := func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-		value, issueErr := issueLeaf()
+		value, issueErr := issueCLILeaf(identity)
 		return &value, issueErr
 	}
 	peerTLS := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{leaf}, GetCertificate: getCertificate, GetClientCertificate: getClientCertificate} //nolint:gosec
