@@ -102,22 +102,30 @@ func (c *BrowserAccessClient) call(ctx context.Context, action string, input, ou
 		return ErrControlInvalid
 	}
 	endpoint := c.HTTP.base.ResolveReference(&url.URL{Path: "/v1/edge/browser-access/" + action})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
-	if err != nil {
-		return ErrControlInvalid
-	}
-	request.Header.Set("Authorization", "Bearer "+c.HTTP.credential)
-	request.Header.Set("X-Paperboat-Edge-Node-ID", c.NodeID)
-	request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.ProcessEpoch)
-	request.Header.Set("Content-Type", "application/json")
-	c.HTTP.applyTraceHeaders(ctx, request.Header)
 	client := c.HTTP.client
 	if action == "activate" {
 		bounded := *client
 		bounded.Timeout = 10 * time.Second
 		client = &bounded
 	}
-	response, err := client.Do(request)
+	// A resend after a rollout cut is safe for every action: authorize is a read, activate joins
+	// the activation already claimed, a resent begin leaves one unused transaction that expires,
+	// and the server redeems a handoff once, so a resent redeem can only be refused.
+	var response *http.Response
+	for attempt := 1; ; attempt++ {
+		request, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+		if buildErr != nil {
+			return ErrControlInvalid
+		}
+		request.Header.Set("Authorization", "Bearer "+c.HTTP.credential)
+		request.Header.Set("X-Paperboat-Edge-Node-ID", c.NodeID)
+		request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.ProcessEpoch)
+		request.Header.Set("Content-Type", "application/json")
+		c.HTTP.applyTraceHeaders(ctx, request.Header)
+		if response, err = client.Do(request); err == nil || !resendAfterCut(ctx, attempt, err) {
+			break
+		}
+	}
 	if err != nil {
 		if action == "activate" && (errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded) {
 			return &RequestFailure{Path: "/v1/edge/browser-access/activate", Category: "transport", SupportReference: controlReference(ctx), Err: ErrLazyActivationTimeout, Cause: err}

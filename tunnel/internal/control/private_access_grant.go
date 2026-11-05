@@ -96,21 +96,28 @@ func (c *PrivateAccessGrantClient) authorize(ctx context.Context, grant string, 
 		return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
 	}
 	endpoint := c.http.base.ResolveReference(&url.URL{Path: PrivateAccessGrantAuthorizePath})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
-	if err != nil {
-		return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
+	var response *http.Response
+	// A resend after a rollout cut is deduplicated: the server binds the request's idempotency key
+	// to its fingerprint and replays the decision for the same body.
+	for attempt := 1; ; attempt++ {
+		request, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
+		if buildErr != nil {
+			return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
+		}
+		request.Header.Set("Authorization", "Bearer "+c.http.credential)
+		request.Header.Set("X-Paperboat-Edge-Node-ID", c.nodeID)
+		request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.processEpoch)
+		request.Header.Set("X-Paperboat-Private-Access-Grant", grant)
+		if admittedID != "" {
+			request.Header.Set("X-Paperboat-Admitted-Decision", admittedID)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json")
+		c.http.applyTraceHeaders(ctx, request.Header)
+		if response, err = c.http.client.Do(request); err == nil || !resendAfterCut(ctx, attempt, err) {
+			break
+		}
 	}
-	request.Header.Set("Authorization", "Bearer "+c.http.credential)
-	request.Header.Set("X-Paperboat-Edge-Node-ID", c.nodeID)
-	request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.processEpoch)
-	request.Header.Set("X-Paperboat-Private-Access-Grant", grant)
-	if admittedID != "" {
-		request.Header.Set("X-Paperboat-Admitted-Decision", admittedID)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	c.http.applyTraceHeaders(ctx, request.Header)
-	response, err := c.http.client.Do(request)
 	if err != nil {
 		return PrivateAccessGrantDecision{}, failure("transport", 0, ErrPrivateAccessGrantUnavailable, err)
 	}

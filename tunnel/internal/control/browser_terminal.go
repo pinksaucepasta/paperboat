@@ -76,9 +76,18 @@ func (c *BrowserTerminalClient) admit(ctx context.Context, ticket, origin, host 
 	c.HTTP.applyTraceHeaders(ctx, header)
 	client := *c.HTTP.client
 	client.Timeout = 0 // the authorized terminal can outlive ordinary API timeouts
-	dialCtx, stopDial := context.WithTimeout(ctx, 10*time.Second)
-	connection, response, err := websocket.Dial(dialCtx, endpoint.String(), &websocket.DialOptions{HTTPClient: &client, HTTPHeader: header, CompressionMode: websocket.CompressionDisabled})
-	stopDial()
+	// The ticket travels only after the upgrade, so a handshake a rollout cut is dialed again.
+	var connection *websocket.Conn
+	var response *http.Response
+	var err error
+	for attempt := 1; ; attempt++ {
+		dialCtx, stopDial := context.WithTimeout(ctx, 10*time.Second)
+		connection, response, err = websocket.Dial(dialCtx, endpoint.String(), &websocket.DialOptions{HTTPClient: &client, HTTPHeader: header, CompressionMode: websocket.CompressionDisabled})
+		stopDial()
+		if err == nil || response != nil || !resendAfterCut(ctx, attempt, err) {
+			break
+		}
+	}
 	if err != nil {
 		status := 0
 		if response != nil {
