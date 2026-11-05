@@ -52,8 +52,10 @@ func newLeaseFixture(t *testing.T) leaseFixture {
 // account makes an active user with n machines <user>_m1..n.
 func (f leaseFixture) account(user string, n int) {
 	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
-	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
-SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupied',true FROM generate_series(1,$2) g`, user, n)
+	for from := 1; from <= n; from += 5000 {
+		f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
+SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupied',true FROM generate_series($2::int,$3::int) g`, user, from, min(from+4999, n))
+	}
 	// The machines (up to 65,024 in the exhaustion test) would otherwise stay in the shared test database and slow every
 	// later test (the team machine list timed out at 30 s). Triggers and cascades are off for this delete only.
 	f.t.Cleanup(func() {
