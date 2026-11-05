@@ -111,23 +111,24 @@ def main():
             assert shown['team_id'] == team_id and shown['state'] == 'pending'
             return item['invitation_id']
 
-        invitation = invite()
-        declined = call('team', 'decline', invitation, '--json', teammate=True)
-        assert declined['state'] == 'cancelled'
-        invitation = invite()
-        call('team', 'cancel-invite', team_id, invitation,
-             '--generation', str(current()['generation']), '--json')
-        assert call('team', 'invitation', invitation)['state'] == 'cancelled'
-        invitation = invite()
-        accepted = call('team', 'accept', invitation, '--json', teammate=True)
-        assert accepted['team_id'] == team_id
-        assert any(m['account_id'] == recipient['account']['id'] and m['active']
-                   for m in current()['members'])
-        assert any(t['team_id'] == team_id for t in
-                   call('team', 'list', '--json', teammate=True))
-        if args.roles:
-            check_roles(call, current, invite, team_id, owner['account']['id'],
-                        recipient['account']['id'])
+        if not args.delete:  # a cancelled throwaway has no seats: only get, list and delete are checked
+            invitation = invite()
+            declined = call('team', 'decline', invitation, '--json', teammate=True)
+            assert declined['state'] == 'cancelled'
+            invitation = invite()
+            call('team', 'cancel-invite', team_id, invitation,
+                 '--generation', str(current()['generation']), '--json')
+            assert call('team', 'invitation', invitation)['state'] == 'cancelled'
+            invitation = invite()
+            accepted = call('team', 'accept', invitation, '--json', teammate=True)
+            assert accepted['team_id'] == team_id
+            assert any(m['account_id'] == recipient['account']['id'] and m['active']
+                       for m in current()['members'])
+            assert any(t['team_id'] == team_id for t in
+                       call('team', 'list', '--json', teammate=True))
+            if args.roles:
+                check_roles(call, current, invite, team_id, owner['account']['id'],
+                            recipient['account']['id'])
     except BaseException as error:
         primary_error = error
         raise
@@ -159,8 +160,8 @@ def main():
                               'owned_state_retained': True}), flush=True)
     print(json.dumps({'check': 'team-roles' if args.roles else 'team-lifecycle', 'status': 'PASS',
                       'create_get_list_delete': True, 'fixture_team': fixture,
-                      'invite_accept_decline_cancel': True,
-                      'roles_remove_leave_transfer': args.roles,
+                      'invite_accept_decline_cancel': not args.delete, 'deleted': created,
+                      'roles_remove_leave_transfer': args.roles and not args.delete,
                       'independent_verified_recipient': True, 'enrollment_preserved': True}))
 
 
