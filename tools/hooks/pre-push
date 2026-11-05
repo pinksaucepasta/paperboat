@@ -8,6 +8,7 @@ Only modules with changes are checked; a push that touches none is instant. PB_P
 """
 import fcntl
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +52,14 @@ def touched(paths):
     return [m for m in MODULES if any(p.startswith(m + "/") for p in paths)]
 
 
+# A push unblocks every lane, so its compiles take the priority lane of the shared oracle queue when present.
+SLOT = Path(__file__).resolve().parents[1] / "oracle-slot.sh"
+
+
 def run(argv, cwd, env=None):
+    if argv[:1] == ["go"] and SLOT.exists() and shutil.which("flock"):
+        argv = [str(SLOT), *argv]
+        env = {**(env or os.environ), "PB_SLOT_PRIORITY": "1"}
     result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, env=tree_env(env))
     return result.returncode, (result.stdout + result.stderr).strip()
 
