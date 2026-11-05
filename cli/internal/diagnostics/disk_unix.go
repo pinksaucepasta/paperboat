@@ -25,6 +25,15 @@ const (
 	defaultQueueCapacity = 256
 )
 
+// batchLinger is how long the writer gathers records before it takes the writer lock and syncs once. A busy
+// process (per-packet events, 38-117 a second on a loaded host) otherwise held the lock for every sync, and
+// every other pb command waited out diskOperationTimeout for it ("diagnostics could not be saved"). A variable
+// only so a test can measure the old behaviour; no production code assigns it.
+var batchLinger = 100 * time.Millisecond
+
+// syncDiagnosticFile makes an appended batch durable; a variable so a test can give it a slow disk.
+var syncDiagnosticFile = func(file *os.File) error { return file.Sync() }
+
 // diskOperationTimeout bounds every disk operation. It is a variable only so a test of a
 // maximum-size history can lift it under the race detector; no production code assigns it.
 var diskOperationTimeout = 2 * time.Second
@@ -243,8 +252,9 @@ func (r *DiskRing) run() {
 		encoded := record.encoded
 		count := uint64(1)
 		var barrier chan struct{}
-		// Drain the already queued burst into one bounded, atomic append+fsync.
+		// Gather the burst for batchLinger into one bounded, atomic append+fsync.
 		// A flush barrier is acknowledged only after every preceding record is durable.
+		linger := time.NewTimer(batchLinger)
 	drain:
 		for len(encoded) < MaximumRecordBytes {
 			select {
@@ -262,10 +272,11 @@ func (r *DiskRing) run() {
 				}
 				encoded = append(encoded, next.encoded...)
 				count++
-			default:
+			case <-linger.C:
 				break drain
 			}
 		}
+		linger.Stop()
 		r.persistRecords(encoded, count)
 		if barrier != nil {
 			close(barrier)
@@ -351,7 +362,7 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 	if written != len(encoded) && writeErr == nil {
 		writeErr = io.ErrShortWrite
 	}
-	syncErr := file.Sync()
+	syncErr := syncDiagnosticFile(file)
 	var rollbackErr error
 	if writeErr != nil || syncErr != nil {
 		if truncateErr := file.Truncate(before.Size()); truncateErr != nil {
