@@ -28,7 +28,9 @@ var runCandidate = func(ctx context.Context, executable string, args []string, r
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, executable, args...)
-	command.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "PAPERBOAT_INVOKING_UID=" + strconv.Itoa(request.UID)}
+	// The installing process's own (root) environment: without HOME the candidate could not
+	// save its diagnostics (pbvm1: "Local diagnostics could not be saved" on every update).
+	command.Env = append(os.Environ(), "PAPERBOAT_INVOKING_UID="+strconv.Itoa(request.UID))
 	command.Stdin = bytes.NewReader(body)
 	var stdout bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, os.Stderr
