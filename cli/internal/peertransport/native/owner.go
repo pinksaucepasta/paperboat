@@ -239,6 +239,19 @@ func (o *Owner) emit(event Event) {
 	}
 }
 
+// PathNotReadyError refuses a dial before any path to the peer exists: the signed configuration gives none of its direct
+// endpoints yet and no relay became ready (just after pairing or a restart). Retrying a few seconds later works.
+type PathNotReadyError struct{ cause error }
+
+func (e *PathNotReadyError) Error() string {
+	return "the machine is still starting: its direct endpoints are not known yet and no relay is ready; retry in a few seconds"
+}
+func (e *PathNotReadyError) Unwrap() error { return e.cause }
+
+// pathReadyBudget bounds how long a dial waits for a relay when the peer has no direct endpoints: a relay handshake takes
+// well under a second, a cold one from a slow host a few (dadape relay1d); past it nothing is coming.
+const pathReadyBudget = 5 * time.Second
+
 func (o *Owner) dialFailure(ctx context.Context, peerID, stage, code string, err error) error {
 	failure := classifyPeerOperationFailure(ctx, stage, code, err)
 	if ctx == nil || ctx.Err() == nil || !peerFailureLeavesMatch(failure, false) {
@@ -265,13 +278,28 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	}
 	// A peer whose own endpoints the signed configuration gives is reachable directly with no relay
 	// (PLAN 3b "Direct paths without a relay"); only a peer without them needs a usable relay first.
-	// A peer on this host never needs one: regional recovery bound to it probed a relay pair with itself
-	// and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
-	if !o.authority.PeerIsLocal(peerID) {
+	// A peer on this host with its endpoints never needs one: regional recovery bound to it probed a relay pair with
+	// itself and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
+	// A peer without its endpoints is reachable only through a relay, so with none ready within pathReadyBudget the dial
+	// is refused with what is missing (PathNotReadyError) instead of waiting for its deadline (F20-02/04).
+	hasEndpoints := o.authority.PeerHasEndpoints(peerID)
+	if !hasEndpoints && !o.authority.HasRelay() {
+		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", &PathNotReadyError{})
+	}
+	if !o.authority.PeerIsLocal(peerID) || !hasEndpoints {
+		prepareCtx := ctx
+		if !hasEndpoints {
+			var cancel context.CancelFunc
+			prepareCtx, cancel = context.WithTimeout(ctx, pathReadyBudget)
+			defer cancel()
+		}
 		regionalEnd := diagnostics.ReconnectStep(ctx, "regional_prepare")
-		err := o.authority.PrepareRegional(ctx, peerID)
+		err := o.authority.PrepareRegional(prepareCtx, peerID)
 		regionalEnd(err)
-		if err != nil && (ctx.Err() != nil || !o.authority.PeerHasEndpoints(peerID)) {
+		if err != nil && ctx.Err() == nil && !hasEndpoints {
+			return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", &PathNotReadyError{cause: err})
+		}
+		if err != nil && (ctx.Err() != nil || !hasEndpoints) {
 			return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 		}
 	}

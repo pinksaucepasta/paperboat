@@ -69,8 +69,6 @@ type NetworkConfigResult struct {
 	// RelayDeniedQuotaExhausted); BillingURL then says where to add bandwidth.
 	RelayDenied string `json:"relay_denied,omitempty"`
 	BillingURL  string `json:"billing_url,omitempty"`
-	// EndpointReports tells the engine this server keeps the endpoints it reports (N5); it reports only then.
-	EndpointReports bool `json:"endpoint_reports"`
 }
 
 type NetworkService struct {
@@ -295,14 +293,13 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	// The generation is allocated first, on its own connection, so a build never holds a
 	// snapshot while waiting for a second pool connection (a burst would exhaust the pool).
 	var generation int64
-	var endpointsCapable bool
 	// The reported endpoints ride on the same row write (endpointsUpdate).
 	endpoints, err := normalizeEndpoints(in.Endpoints)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
 	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds()).
-		Scan(&generation, &endpointsCapable)
+		Scan(&generation)
 	if err == sql.ErrNoRows {
 		return NetworkConfigResult{}, ErrDenied
 	}
@@ -573,7 +570,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		})
 		peers = append(peers, *p)
 	}
-	claims := configurationClaims(s.issuer, now, expiry, generation, self, peers, endpointsCapable)
+	claims := configurationClaims(s.issuer, now, expiry, generation, self, peers)
 	token, err := s.signer.SignNetworkConfiguration(claims)
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -601,7 +598,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err = tx.Commit(); err != nil {
 		return NetworkConfigResult{}, err
 	}
-	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants, EndpointReports: true}
+	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
 	if withheld {
 		result.RelayDenied, result.BillingURL = RelayDeniedQuotaExhausted, s.billingURL
 	}

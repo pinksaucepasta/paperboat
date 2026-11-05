@@ -7,9 +7,8 @@ import (
 )
 
 // Endpoint reports tell the server this engine's own candidate addresses, so peers can reach it directly with
-// no relay (PLAN 3b "Direct paths without a relay"). A report rides on the configuration request, only once
-// the server announced endpoint_reports, debounced and spaced so a flapping network does not become a
-// stream of requests.
+// no relay (PLAN 3b "Direct paths without a relay"). A report rides on the configuration request from the first
+// one, then debounced and spaced so a flapping network does not become a stream of requests.
 const (
 	endpointReportDebounce = 5 * time.Second
 	endpointReportSpacing  = 30 * time.Second
@@ -75,9 +74,6 @@ func (a *Authority) endpointsReported(endpoints []string) {
 // change, and at least endpointReportSpacing after the previous report. Further changes while one is pending
 // ride on it.
 func (a *Authority) endpointsChanged() {
-	if !a.endpointReports.Load() {
-		return
-	}
 	a.reportMu.Lock()
 	defer a.reportMu.Unlock()
 	// Initial reachability is not a steady-state address change. The urgent lane

@@ -380,6 +380,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 			if len(regions) != 0 {
 				firstRegion = regions[0]
 			}
+			a.clientRelay = len(regions) != 0
 			a.clientEngine = &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, PeerContacts: a.peerContactsLocked(), OnLocalEndpoints: a.endpointsChanged, Region: firstRegion, Logf: func(string, ...any) {}}
 			if err := a.clientEngine.Start(); err != nil {
 				a.clientEngine = nil

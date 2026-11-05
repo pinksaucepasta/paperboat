@@ -165,9 +165,9 @@ type Authority struct {
 	done         chan struct{}
 	server       *UDPServer
 	clientEngine *mesh.Server
-	// endpointReports is the server's last endpoint_reports answer; reportMu guards the report schedule
-	// (endpoint_report.go).
-	endpointReports atomic.Bool
+	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
+	clientRelay bool
+	// reportMu guards the endpoint report schedule (endpoint_report.go).
 	// membershipGrants is the server's last membership_grants answer: renewals then ask for them.
 	membershipGrants atomic.Bool
 	reportMu         sync.Mutex

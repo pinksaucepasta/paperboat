@@ -31,16 +31,13 @@ type PeerNetworkConfigurationResult struct {
 	// BillingURL is the console page for adding bandwidth. Direct connections are unaffected.
 	RelayDenied string `json:"relay_denied"`
 	BillingURL  string `json:"billing_url"`
-	// EndpointReports says the server stores the endpoints a request reports (PLAN 3b "Direct paths without
-	// a relay"); request bodies decode strictly, so a client reports them only after this is true.
-	EndpointReports bool `json:"endpoint_reports"`
 	// MembershipGrants says the server can issue relay grants with memberships instead of per-peer lists
 	// (PLAN 3b "Relay pair authorization by membership"); a client asks for them only after this is true.
 	MembershipGrants bool `json:"membership_grants"`
 }
 
 // PeerNetworkConfigurationRequest asks for the signed peer-network configuration. Endpoints are the engine's
-// own candidate addresses, sent only once the server announced EndpointReports and only when they changed:
+// own candidate addresses, sent from the first request and then only when they changed:
 // nil omits the field (the server keeps its stored set), an empty slice clears it.
 type PeerNetworkConfigurationRequest struct {
 	OperationID    string                 `json:"operation_id"`

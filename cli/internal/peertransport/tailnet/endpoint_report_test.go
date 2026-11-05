@@ -12,10 +12,9 @@ import (
 	"tailscale.com/types/key"
 )
 
-// N5: the server stores the engine's own endpoints only once it says so (endpoint_reports): request bodies
-// decode strictly, so reporting before that would fail every configuration call. After it, each renewal
-// carries the engine's normalized candidates.
-func TestEndpointsAreReportedOnlyAfterTheServerTakesThem(t *testing.T) {
+// N5: the engine reports its normalized candidates from its first configuration request (so peers reach it directly
+// at once, F20-02/04), then only when they change.
+func TestEndpointsAreReportedFromTheFirstRequest(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	engine := &mesh.Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::30"), AllowedPeers: map[key.NodePublic]netip.Addr{}, Logf: func(string, ...any) {}}
 	if err := engine.Start(); err != nil {
@@ -35,7 +34,7 @@ func TestEndpointsAreReportedOnlyAfterTheServerTakesThem(t *testing.T) {
 	t.Cleanup(func() { a.mu.Lock(); a.clientEngine = nil; a.mu.Unlock() })
 	var mu sync.Mutex
 	var seen []api.PeerNetworkConfigurationRequest
-	client := networkAPIFunc{reports: true, requests: func(r api.PeerNetworkConfigurationRequest) {
+	client := networkAPIFunc{requests: func(r api.PeerNetworkConfigurationRequest) {
 		mu.Lock()
 		seen = append(seen, r)
 		mu.Unlock()
@@ -53,14 +52,11 @@ func TestEndpointsAreReportedOnlyAfterTheServerTakesThem(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if seen[0].Endpoints != nil {
-		t.Fatalf("the first request reported %v before the server said it takes reports", *seen[0].Endpoints)
+	if seen[0].Endpoints == nil || len(*seen[0].Endpoints) == 0 || !validPeerEndpoints(*seen[0].Endpoints) {
+		t.Fatalf("the first request reported %v, want the engine's normalized candidates", seen[0].Endpoints)
 	}
-	if seen[1].Endpoints == nil || len(*seen[1].Endpoints) == 0 || !validPeerEndpoints(*seen[1].Endpoints) {
-		t.Fatalf("the second request reported %v, want the engine's normalized candidates", seen[1].Endpoints)
-	}
-	if seen[2].Endpoints != nil {
-		t.Fatalf("an unchanged set was reported again: %v", *seen[2].Endpoints)
+	if seen[1].Endpoints != nil || seen[2].Endpoints != nil {
+		t.Fatalf("an unchanged set was reported again: %v %v", seen[1].Endpoints, seen[2].Endpoints)
 	}
 	// The engine's candidates are gone: say so explicitly, so peers stop dialing the stale ones.
 	a.mu.Lock()
@@ -71,14 +67,13 @@ func TestEndpointsAreReportedOnlyAfterTheServerTakesThem(t *testing.T) {
 	}
 }
 
-// A changed endpoint set schedules one renewal, debounced, and none while the server does not take reports.
+// Before the first non-empty report, a changed endpoint set renews at once (urgent), with no debounce timer.
 func TestEndpointChangesScheduleOneReport(t *testing.T) {
 	a, _, _, _ := networkTestAuthority(t)
 	a.endpointsChanged()
 	if a.reportTimer != nil {
-		t.Fatal("a report was scheduled although the server does not take reports")
+		t.Fatal("a startup endpoint change waited for the debounce")
 	}
-	a.endpointReports.Store(true)
 	a.endpointsReported([]string{"192.0.2.1:1234"})
 	a.endpointsChanged()
 	first := a.reportTimer
@@ -130,8 +125,7 @@ func (m membershipOffer) PeerNetworkConfiguration(_ context.Context, r api.PeerN
 	return api.PeerNetworkConfigurationResult{Configuration: token, MembershipGrants: *m.offer}, err
 }
 
-// The first report after endpoint_reports goes out even with no candidate, so the server marks this client
-// as accepting delivered peer endpoints.
+// The first report goes out even with no candidate: a machine whose candidates are gone says so.
 func TestTheFirstEndpointReportIsSentEvenWhenEmpty(t *testing.T) {
 	a, _, _, _ := networkTestAuthority(t)
 	if due := a.endpointReportDue(); due == nil || len(*due) != 0 {
@@ -143,42 +137,8 @@ func TestTheFirstEndpointReportIsSentEvenWhenEmpty(t *testing.T) {
 	}
 }
 
-// A freshly started engine is marked as accepting peer endpoints only once it sends `endpoints`; until then its
-// configuration carries none and a dial with no usable relay fails. Once the server offers endpoint_reports,
-// the next request goes out at once (urgent spacing), not after the change debounce or the renewal budget: the
-// first renewal spent the only token here.
-func TestTheFirstEndpointReportFollowsTheOfferAtOnce(t *testing.T) {
-	useBudget(t, &tokenBucket{refill: time.Hour, burst: 1})
-	a, c, signer, _ := networkTestAuthority(t)
-	requests := make(chan api.PeerNetworkConfigurationRequest, 8)
-	client := networkAPIFunc{reports: true, requests: func(r api.PeerNetworkConfigurationRequest) { requests <- r }, configuration: func(context.Context, string) (string, error) {
-		c.Generation++
-		c.IssuedAt = time.Now().Unix()
-		c.ExpiresAt = c.IssuedAt + 60
-		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
-		return networkToken(t, signer, c), nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx, client, nil) }()
-	defer func() { cancel(); <-done }()
-	first := <-requests
-	if first.Endpoints != nil {
-		t.Fatal("the first request reported before the offer")
-	}
-	select {
-	case second := <-requests:
-		if second.Endpoints == nil {
-			t.Fatal("the request after the offer carried no endpoints")
-		}
-	case <-time.After(2500 * time.Millisecond):
-		t.Fatal("no report within 2.5 s of the offer")
-	}
-}
-
 func TestStartupEndpointChangesDoNotWaitForSteadyStateBudget(t *testing.T) {
 	a, _, _, _ := networkTestAuthority(t)
-	a.endpointReports.Store(true)
 	a.endpointsReported(nil)
 	a.endpointsChanged()
 	select {
@@ -200,7 +160,6 @@ func TestAuthorityDropClearsThePreviousEngineEndpointBudget(t *testing.T) {
 	a.mu.Lock()
 	a.dropLocked()
 	a.mu.Unlock()
-	a.endpointReports.Store(true)
 	a.endpointsChanged()
 	defer func() {
 		if a.reportTimer != nil {

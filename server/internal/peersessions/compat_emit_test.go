@@ -26,7 +26,7 @@ func TestEmitCompatNetworkConfiguration(t *testing.T) {
 	self, peer := binding("machine_self", "100.64.0.1"), binding("machine_peer", "100.64.0.2")
 	expiry := now.Add(5 * time.Minute)
 	peers := []networkPeer{{Identity: peer, Scopes: []networkScope{personalNetworkScope(self, peer, expiry.Unix())}}}
-	raw, err := json.MarshalIndent(configurationClaims("https://api.compat.example.test", now, expiry, 1, self, peers, false), "", "  ")
+	raw, err := json.MarshalIndent(configurationClaims("https://api.compat.example.test", now, expiry, 1, self, peers), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

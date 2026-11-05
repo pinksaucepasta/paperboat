@@ -31,8 +31,7 @@ type peerNetworkConfigBody struct {
 	OperationID          string                             `json:"operation_id"`
 	AdmittedScopes       []peersessions.AdmittedScope       `json:"admitted_scopes,omitempty"`
 	AdmittedCertificates []peersessions.AdmittedCertificate `json:"admitted_certificates,omitempty"`
-	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent once a config
-	// answer said endpoint_reports.
+	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent from the first request.
 	Endpoints []string `json:"endpoints,omitempty"`
 	// Authority names the peer-state semantics the daemon understands: "" (every scope expires with the document)
 	// or peersessions.AuthorityUntilRevoked (PLAN 3b offline-capable authority, F21-01/F21-11).

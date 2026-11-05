@@ -44,17 +44,16 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 const endpointPublishInterval = time.Minute
 
 // endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
-// stores the reported set ($4, NULL when none was sent) and marks the identity capable when a set was sent. When
+// stores the reported set ($4, NULL when none was sent). When
 // the latest set differs from the delivered one it is published now if the last publication is older than $5
 // seconds, else held back until then (endpoints_due_at); a set equal to the delivered one clears a held-back one.
 // NULL and an empty set are the same set. The delivered set's change publishes peer_network (migration 186).
 const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1,
  endpoints=coalesce($4::text[],endpoints),
- endpoints_capable=endpoints_capable OR $4::text[] IS NOT NULL,
  published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
  endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN $1 ELSE endpoints_published_at END,
  endpoints_due_at=CASE WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END
- WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation,endpoints_capable`
+ WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`
 
 const (
 	endpointsDiffer = `coalesce($4::text[],endpoints,'{}') IS DISTINCT FROM coalesce(published_endpoints,'{}')`
@@ -101,20 +100,17 @@ func publishedEndpoints(raw []byte) ([]string, error) {
 }
 
 // deliverEndpoints moves each peer's delivered endpoints from its identity, where loading and the mesh log keep
-// them, onto its entry, and only for a recipient that declared it accepts them: an engine that never sent an
-// endpoints field refuses the unknown field in the signed configuration.
-func deliverEndpoints(peers []networkPeer, capable bool) {
+// them, onto its entry, for every recipient from its very first configuration: a dial right after an engine starts
+// goes direct when no relay is usable yet (F20-02/04).
+func deliverEndpoints(peers []networkPeer) {
 	for i := range peers {
-		if capable {
-			peers[i].Endpoints = peers[i].Identity.Endpoints
-		}
-		peers[i].Identity.Endpoints = nil
+		peers[i].Endpoints, peers[i].Identity.Endpoints = peers[i].Identity.Endpoints, nil
 	}
 }
 
 // configurationClaims are the signed network configuration's claims for one recipient.
-func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer, endpointsCapable bool) map[string]any {
-	deliverEndpoints(peers, endpointsCapable)
+func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer) map[string]any {
+	deliverEndpoints(peers)
 	self.Endpoints = nil
 	return map[string]any{"version": 1, "iss": issuer, "aud": "paperboat-network", "iat": now.Unix(), "exp": expiry.Unix(), "generation": generation, "self": bindingMap(self), "peers": peers}
 }

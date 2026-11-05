@@ -122,6 +122,17 @@ func (a *Authority) relayControl(id tailcfg.DERPRegionID, peer key.NodePublic, p
 // PrepareRegional starts a single authority-owned recovery worker. A client
 // briefly waits for an acknowledged common route before its bootstrap handshake. A host
 // prepares independently so initial discovery does not depend on a working pair.
+// HasRelay reports whether this engine has any relay to use: a region its client engine started with, a fixed relay node
+// or relay recovery.
+func (a *Authority) HasRelay() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.relay.mu.Lock()
+	defer a.relay.mu.Unlock()
+	_, configured := a.regionalRecoveryLocked()
+	return configured || a.relay.node.NodeID != "" || a.clientRelay
+}
+
 func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	a.mu.Lock()
 	if a.closed || !a.usableLocked() {

@@ -32,8 +32,7 @@ type networkTestKeys map[string]ed25519.PublicKey
 type networkAPIFunc struct {
 	register      func(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error)
 	configuration func(context.Context, string) (string, error)
-	// reports answers endpoint_reports; requests, when set, sees every configuration request.
-	reports  bool
+	// requests, when set, sees every configuration request.
 	requests func(api.PeerNetworkConfigurationRequest)
 }
 
@@ -45,7 +44,7 @@ func (n networkAPIFunc) PeerNetworkConfiguration(ctx context.Context, request ap
 		n.requests(request)
 	}
 	token, err := n.configuration(ctx, request.OperationID)
-	return api.PeerNetworkConfigurationResult{Configuration: token, EndpointReports: n.reports}, err
+	return api.PeerNetworkConfigurationResult{Configuration: token}, err
 }
 
 func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {

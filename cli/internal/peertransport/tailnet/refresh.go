@@ -165,9 +165,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		return err
 	}
 	request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
-	if a.endpointReports.Load() {
-		request.Endpoints = a.endpointReportDue()
-	}
+	request.Endpoints = a.endpointReportDue()
 	request.MembershipGrants = a.membershipGrants.Load()
 	request.Authority = api.PeerNetworkAuthorityUntilRevoked
 	result, err := client.PeerNetworkConfiguration(ctx, request)
@@ -195,14 +193,6 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 	a.setRelayDenial(result.RelayDenial())
 	if a.membershipGrants.Swap(result.MembershipGrants) != result.MembershipGrants && result.MembershipGrants {
 		a.RequestRefresh() // ask for membership grants on the next renewal
-	}
-	if a.endpointReports.Swap(result.EndpointReports) != result.EndpointReports && result.EndpointReports {
-		// The server takes reports from now on: report at once, not after the change debounce or the
-		// renewal budget. Until this endpoint has sent `endpoints` the server does not mark it as accepting
-		// peer endpoints, so its configuration has none and a dial with no usable relay fails (pbvm2: 30 s
-		// ping timeout and a 16.7 s first exec from a daemon whose engine had just started; a promoted
-		// carrier generation waited 24 s for a budget token behind the process's other engine).
-		a.RequestUrgentRefresh()
 	}
 	if result.CandidateSet == "" {
 		a.relay.mu.Lock()

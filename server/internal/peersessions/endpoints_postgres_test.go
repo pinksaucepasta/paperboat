@@ -93,9 +93,8 @@ func (f endpointsFixture) configure(t *testing.T, op string, n int, endpoints []
 	return result
 }
 
-// An engine reports its own candidate endpoints with its configuration request (PLAN 3b, N5, step 1): the answer
-// says the server keeps them (endpoint_reports), the normalized set is stored on the identity, a request without
-// endpoints keeps the stored set, a new set replaces it.
+// An engine reports its own candidate endpoints with its configuration request (PLAN 3b, N5, step 1): the normalized
+// set is stored on the identity, a request without endpoints keeps the stored set, a new set replaces it.
 func TestReportedEndpointsAreStoredOnTheIdentityOnPostgres(t *testing.T) {
 	f := newEndpointsFixture(t)
 	store, ctx, account := f.store, f.ctx, f.account
@@ -115,8 +114,8 @@ func TestReportedEndpointsAreStoredOnTheIdentityOnPostgres(t *testing.T) {
 		t.Helper()
 		return f.configure(t, op, 0, endpoints)
 	}
-	if result := configure("first", nil); !result.EndpointReports || stored() != "<none>" {
-		t.Fatalf("before any report: endpoint_reports %v, stored %s", result.EndpointReports, stored())
+	if configure("first", nil); stored() != "<none>" {
+		t.Fatalf("before any report: stored %s", stored())
 	}
 	configure("report", []string{"203.0.113.7:41641", "10.0.0.5:41641", "203.0.113.7:41641"})
 	if got := stored(); got != "{10.0.0.5:41641,203.0.113.7:41641}" {
@@ -160,13 +159,13 @@ func (f endpointsFixture) peerEndpoints(t *testing.T) (map[string][]string, bool
 	return out, strings.Contains(string(raw), `"endpoints"`)
 }
 
-// A peer's reported endpoints reach the other engines on its peer entry (PLAN 3b, N5, step 2), and only those
-// that declared they accept them (an endpoints field, even empty, on any of their requests): an engine that never
-// sent one gets a configuration without the field, as before, because it refuses unknown signed fields. A change
+// A peer's reported endpoints reach every other engine on its peer entry (PLAN 3b, N5, step 2), from that engine's
+// very first configuration (F20-02/04: a daemon dialing the machine it runs on right after pairing went through a relay
+// that was not usable, because its first configuration carried none). A change
 // of the set publishes peer_network at most once a minute per identity, the latest set winning: a NAT flapping
 // between mappings inside the minute moves no topic, and the set it settles on is published by the
 // server once the minute has passed, with one topic move.
-func TestPeerEndpointsReachOnlyCapableRecipientsCoalescedOnPostgres(t *testing.T) {
+func TestPeerEndpointsReachEveryRecipientCoalescedOnPostgres(t *testing.T) {
 	f := newEndpointsFixture(t)
 	peer := f.account + "_m_1"
 	start := time.Now().UTC()
@@ -182,18 +181,11 @@ func TestPeerEndpointsReachOnlyCapableRecipientsCoalescedOnPostgres(t *testing.T
 	if after := f.topic(t); after != before+1 {
 		t.Fatalf("the first reported set moved the peer_network topic %d -> %d, want one move", before, after)
 	}
-	f.configure(t, "legacy_again", 0, nil)
-	if _, present := f.peerEndpoints(t); present {
-		t.Fatal("a recipient that never sent endpoints was given peers' endpoints")
-	}
-	f.configure(t, "declares", 0, []string{})
+	// A recipient that has reported nothing of its own gets its peers' endpoints from its first configuration.
+	f.configure(t, "first_request", 0, nil)
 	got, _ := f.peerEndpoints(t)
 	if want := []string{"10.0.0.5:41641", "203.0.113.7:41641"}; fmt.Sprint(got[peer]) != fmt.Sprint(want) {
-		t.Fatalf("capable recipient got %v for %s, want %v", got[peer], peer, want)
-	}
-	f.configure(t, "renewal", 0, nil)
-	if got, _ := f.peerEndpoints(t); len(got[peer]) != 2 {
-		t.Fatalf("a renewal without the field unmarked the recipient: %v", got[peer])
+		t.Fatalf("a recipient's first configuration got %v for %s, want %v", got[peer], peer, want)
 	}
 
 	// The NAT flaps inside the minute: every set is stored, none is published.
