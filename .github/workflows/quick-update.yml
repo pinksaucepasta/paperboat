@@ -112,4 +112,6 @@ jobs:
             ${{ runner.temp }}/qu-out/table.txt
             ${{ runner.temp }}/qu-out/summary.json
             ${{ runner.temp }}/qu-out/update.raw
+            ${{ runner.temp }}/qu-out/events.jsonl
+            ${{ runner.temp }}/qu-out/gen-watch.txt
           if-no-files-found: ignore

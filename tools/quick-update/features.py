@@ -56,6 +56,9 @@ sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)));import excess  # t
 build=excess.build_info(excess.pb_version(R('~/.local/bin/pb version --json',check=False)),
  excess.pb_version(R(f'~/gap5/{name}/candidate version --json',check=False)) if cand!='-' else dict(version='none (no update)',commit='-'),pathlib.Path(__file__).with_name('probe.py'))
 (run/'build.json').write_text(json.dumps(build))
+# Every 0.2 s while the update runs: which hostd and carrier generations are up (unit name and state), so a
+# failure can be placed against the new generation's start and the old one's exit.
+R(f"(for i in $(seq 1 750); do echo \"$(date -u +%H:%M:%S.%3N) $(systemctl list-units --no-legend --plain 'paperboat-hostd-*' 'paperboat-carrier-*' | awk '{{print $1\":\"$3\"/\"$4}}' | tr '\\n' ' ')\"; sleep 0.2; done > ~/gap5/{name}/gen-watch.txt 2>&1 < /dev/null &)",check=False)
 t0=now();(run/'update-start.utc').write_text(t0)
 if cand=='-':
  time.sleep(60);r=subprocess.CompletedProcess([],0,stdout='none')

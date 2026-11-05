@@ -44,6 +44,6 @@ if [ $rc -eq 0 ]; then { python3 -I "$here/table.py" "$QV_OUT/run"; echo; echo "
 else echo "run.sh: features.py failed rc=$rc" >&2; tail -5 "$QV_OUT/features.out" >&2
   echo "browser terminal events (phases and errors only):" >&2; head -6 "$QV_OUT/run/web-events.jsonl" 2>/dev/null | cut -c1-300 >&2; tail -5 "$QV_OUT/run/web.out" 2>/dev/null | cut -c1-300 >&2; fi
 # The artifact is the table and the update output only: diagnostics stay private (the repository is public).
-cp "$QV_OUT/run/summary.json" "$QV_OUT/run/update.raw" "$QV_OUT/" 2>/dev/null || true
+cp "$QV_OUT/run/summary.json" "$QV_OUT/run/update.raw" "$QV_OUT/run/events.jsonl" "$QV_OUT/run/gen-watch.txt" "$QV_OUT/" 2>/dev/null || true
 [ $rc -ne 0 ] || rc=$inv
 exit $rc

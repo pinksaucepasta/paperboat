@@ -57,15 +57,22 @@ def stdin_echo(feat,size,every):
    ok=r.returncode==0 and hashlib.sha256(r.stdout).digest()==hashlib.sha256(data).digest()
   except subprocess.TimeoutExpired:ok=False
   ev(feat,ok,int((time.time()-s0)*1000));time.sleep(max(0,every-(time.time()-s0)))
+def send_error(stdout):
+ # A failed send's JSON error code, stage and category only: its message and target can name files or machines.
+ try:e=json.loads(stdout.strip().splitlines()[-1]).get('error') or {}
+ except (ValueError,IndexError,AttributeError):return 'unparsed'
+ return ':'.join(str(e.get(k,'')) for k in ('code','stage','category'))
 def send(path):
  # pb send prints only its final result (the server gets committed bytes at most every 5 s), so a stall inside a send
  # is not visible apart from the send's total time: a small file back to back, each call's latency is the measure
  # (excess.py). Seeing it needs a CLI progress line per committed 1 MiB chunk (filetransfer.Client.Committed).
  while not stop():
-  s=time.time()
-  try:ok=subprocess.run([pb,'send',path,'--to',tgt,'--json'],capture_output=True,text=True,timeout=60).returncode==0
-  except subprocess.TimeoutExpired:ok=False
-  ev('send',ok,int((time.time()-s)*1000));time.sleep(0.2)
+  s=time.time();err=None
+  try:
+   r=subprocess.run([pb,'send',path,'--to',tgt,'--json'],capture_output=True,text=True,timeout=60);ok=r.returncode==0
+   if not ok:err=send_error(r.stdout)
+  except subprocess.TimeoutExpired:ok,err=False,'timeout'
+  ev('send',ok,int((time.time()-s)*1000),**({'err':err} if err else {}));time.sleep(0.2)
 ticker="i=0; while [ $i -lt 100000 ]; do date +%s.%N; i=$((i+1)); sleep 0.1; done"
 T=[threading.Thread(target=loop,args=('exec_short',[pb,'exec',tgt,'--','true'],0.2)),
    threading.Thread(target=stream,args=('exec_long',[pb,'exec',tgt,'--','sh','-c',ticker])),
