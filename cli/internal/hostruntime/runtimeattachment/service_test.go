@@ -773,3 +773,34 @@ func TestRetiringWorkerKeepsItsCarrierForHeldBrowserTerminals(t *testing.T) {
 		})
 	}
 }
+
+// The stable host retries a failed optional component: after a failed Start, the rollback Shutdown must not
+// mark the service leaving or close its sessions, so the retried Start serves normally.
+func TestRuntimeAttachmentRestartsAfterAFailedStart(t *testing.T) {
+	service, err := New(Config{
+		ControlURL: "https://api.example.test", StateRoot: t.TempDir(), MachineID: "machine-test",
+		WorkerGeneration: 1, InstallationGeneration: 1, ListenAddress: "127.0.0.1:38080",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := service.Start(canceled); err == nil {
+		t.Fatal("Start with a canceled context did not fail")
+	}
+	if err := service.Shutdown(context.Background()); err != nil {
+		t.Fatalf("rollback Shutdown after a failed Start: %v", err)
+	}
+	if service.leaving.Load() {
+		t.Fatal("a never-started runtime attachment was marked leaving by its rollback")
+	}
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	if err := service.Start(ctx); err != nil {
+		t.Fatalf("retried Start: %v", err)
+	}
+	if err := service.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown after the retry: %v", err)
+	}
+}

@@ -302,6 +302,14 @@ func (s *Service) DrainBrowserTerminals(ctx context.Context) error {
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	started := s.done != nil
+	s.mu.Unlock()
+	if !started {
+		// A failed Start started nothing: no carrier to hand over, and the sessions stay open for the stable
+		// host's next Start.
+		return nil
+	}
 	s.handOver(ctx)
 	// Canceling closes the carriers.
 	s.mu.Lock()

@@ -312,3 +312,30 @@ func TestEngineTunnelRoutesCarryTheirInspectorIdentity(t *testing.T) {
 		t.Fatalf("route inspector identity = %+v", identity)
 	}
 }
+
+// engine_tunnels: a failed Start sets no state, so the stable host's retry starts it and Shutdown stops it.
+func TestEngineTunnelsRestartAfterAFailedStart(t *testing.T) {
+	service, err := New(Config{
+		ControlURL: "https://api.example.test", StateRoot: t.TempDir(), MachineID: "machine-test",
+		WorkerGeneration: 1, InstallationGeneration: 1, ListenAddress: "127.0.0.1:38080",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}, Prober: tunnelmanager.NetworkOriginProber{}}
+	var missing context.Context
+	if err := engine.Start(missing); err == nil {
+		t.Fatal("Start without a context did not fail")
+	}
+	if err := engine.Shutdown(context.Background()); err != nil {
+		t.Fatalf("rollback Shutdown after a failed Start: %v", err)
+	}
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("retried Start: %v", err)
+	}
+	if err := engine.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown after the retry: %v", err)
+	}
+}
