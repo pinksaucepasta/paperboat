@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { meQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import {
@@ -26,7 +26,8 @@ const selectClass =
 export function PolicyTest({ workspace, policy, draft }: { workspace: string; policy: Policy; draft?: string }) {
   const role = useWorkspace()?.role
   const me = useApiQuery(meQuery).data
-  const tokens = useApiQuery(apiTokensQuery(workspace))
+  const tokens = useInfiniteQuery(apiTokensQuery(workspace))
+  const live = (tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []).filter((t) => !t.revoked_at)
   const admin = role === "owner" || role === "admin"
   const users = admin ? policy.names.users : me ? [me.email] : []
   const team = workspace !== "personal"
@@ -142,7 +143,7 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
             {!portValid && <span className="text-xs text-destructive">A port from 1 to 65535.</span>}
           </Field>
         )}
-        {tokens.isSuccess && tokens.data.some((t) => !t.revoked_at) && (
+        {tokens.isSuccess && (live.length > 0 || tokens.hasNextPage) && (
           <Field className="gap-1.5">
             <FieldLabel htmlFor="test-token" className="flex justify-between">
               API token <span className="font-normal text-muted-foreground">Optional</span>
@@ -154,14 +155,23 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
               onChange={(event) => setToken(event.target.value)}
             >
               <option value="">None</option>
-              {tokens.data
-                .filter((t) => !t.revoked_at)
-                .map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
+              {live.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
             </select>
+            {tokens.hasNextPage && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="self-start"
+                onClick={() => tokens.fetchNextPage()}
+                disabled={tokens.isFetchingNextPage}
+              >
+                {tokens.isFetchingNextPage ? "Loading…" : "Load more tokens"}
+              </Button>
+            )}
           </Field>
         )}
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">

@@ -1,6 +1,6 @@
 "use client"
 
-import { queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { ApiError, confirmSession, idempotencyKey, send } from "@/lib/api"
 
 // Workspace policy and API tokens. Contract: shared/policy/README.md ("HTTP API", "API tokens").
@@ -234,12 +234,20 @@ export function explainPolicy(
   return call<Explanation>("Testing access", `${ws(workspace)}/policy/explain`, { method: "POST", json: fields })
 }
 
+/** A workspace's API tokens, newest first, one server page at a time (load more until the server's total). */
 export const apiTokensQuery = (workspace: string) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: ["api-tokens", workspace],
-    queryFn: async ({ signal }) =>
-      (await call<{ api_tokens: APIToken[] }>("Loading API tokens", `${ws(workspace)}/api-tokens`, { signal }))
-        .api_tokens,
+    queryFn: async ({ pageParam, signal }) => {
+      const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
+      return call<{ api_tokens: APIToken[]; total: number; next_cursor?: string }>(
+        "Loading API tokens",
+        `${ws(workspace)}/api-tokens?${query}`,
+        { signal },
+      )
+    },
+    initialPageParam: "",
+    getNextPageParam: (page) => page.next_cursor || undefined,
     enabled: Boolean(workspace),
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })

@@ -144,11 +144,35 @@ func TestAPITokenLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if list, err := s.List(ctx, f.member, f.team); err != nil || len(list) != 2 {
-		t.Fatalf("member list: %d %v", len(list), err)
+	if list, err := s.List(ctx, f.member, f.team, 0, ""); err != nil || len(list.Items) != 2 || list.Total != 2 {
+		t.Fatalf("member list: %d of %d %v", len(list.Items), list.Total, err)
 	}
-	if list, err := s.List(ctx, f.owner, f.team); err != nil || len(list) != 3 {
-		t.Fatalf("owner list: %d %v", len(list), err)
+	if list, err := s.List(ctx, f.owner, f.team, 0, ""); err != nil || len(list.Items) != 3 || list.Total != 3 {
+		t.Fatalf("owner list: %d of %d %v", len(list.Items), list.Total, err)
+	}
+	// Paging one at a time walks all three tokens, newest first, with no repeats, keeping the total; a cursor of
+	// another workspace is refused.
+	seen, cursor := map[string]bool{}, ""
+	var newest []time.Time
+	for i := 0; i < 5; i++ {
+		page, err := s.List(ctx, f.owner, f.team, 1, cursor)
+		if err != nil || page.Total != 3 || len(page.Items) != 1 || seen[page.Items[0].ID] {
+			t.Fatalf("page %d: %+v %v", i, page, err)
+		}
+		seen[page.Items[0].ID] = true
+		newest = append(newest, page.Items[0].CreatedAt)
+		if cursor = page.NextCursor; cursor == "" {
+			break
+		}
+		if _, err := s.List(ctx, f.owner, workspace.Scope{}, 1, cursor); !errors.Is(err, ErrInvalidPage) {
+			t.Fatalf("a team cursor paged the personal list: %v", err)
+		}
+	}
+	if len(seen) != 3 || newest[0].Before(newest[len(newest)-1]) {
+		t.Fatalf("walked %d tokens, order %v", len(seen), newest)
+	}
+	if _, err := s.List(ctx, f.owner, f.team, 201, ""); !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf("limit 201 accepted: %v", err)
 	}
 	if _, err := s.Revoke(ctx, f.member, f.team, ownerToken.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("member revokes owner's token: %v", err)

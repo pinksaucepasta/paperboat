@@ -3,9 +3,12 @@ package apitokens
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -131,10 +134,25 @@ func mapInsertError(err error) error {
 	return err
 }
 
-// List returns actor's own tokens in ws, or every member's when actor owns or administers ws.
-func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope) ([]Token, error) {
-	var tokens []Token
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+// Page is one keyset page of a workspace's tokens, newest first; Total counts every token the cursor pages through.
+type Page struct {
+	Items      []Token
+	NextCursor string
+	Total      int
+}
+
+// List pages actor's own tokens in ws, or every member's when actor owns or administers ws, newest first
+// (limit 0 is 50, at most 200). The cursor names the last token sent and is bound to the workspace.
+func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope, limit int, cursor string) (Page, error) {
+	if limit == 0 {
+		limit = 50
+	}
+	after, err := decodeListCursor(ws, cursor)
+	if limit < 1 || limit > 200 || err != nil {
+		return Page{}, ErrInvalidPage
+	}
+	var page Page
+	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := workspace.ValidateTx(ctx, tx, actor, ws); err != nil {
 			return err
 		}
@@ -142,18 +160,53 @@ func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope) ([
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT `+tokenColumns+` FROM api_tokens t JOIN users u ON u.id=t.account_id
-		 WHERE coalesce(t.team_id,'')=$1 AND ($2 OR t.account_id=$3) ORDER BY t.created_at DESC, t.id`, ws.TeamID, admin, actor)
+		const visible = ` FROM api_tokens t JOIN users u ON u.id=t.account_id WHERE coalesce(t.team_id,'')=$1 AND ($2 OR t.account_id=$3)`
+		if err := tx.QueryRow(ctx, `SELECT count(*)`+visible, ws.TeamID, admin, actor).Scan(&page.Total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+tokenColumns+visible+`
+		 AND ($4::timestamptz IS NULL OR (t.created_at, t.id) < ($4, $5)) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`,
+			ws.TeamID, admin, actor, after.at, after.id, limit+1)
 		if err != nil {
 			return err
 		}
-		tokens, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Token, error) { return scanToken(row) })
+		page.Items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Token, error) { return scanToken(row) })
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list api tokens: %w", err)
+		return Page{}, fmt.Errorf("list api tokens: %w", err)
 	}
-	return tokens, nil
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = encodeListCursor(ws, last.CreatedAt, last.ID)
+	}
+	return page, nil
+}
+
+type listPosition struct {
+	at *time.Time
+	id string
+}
+
+func encodeListCursor(ws workspace.Scope, at time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join([]string{"api-tokens", ws.TeamID, at.UTC().Format(time.RFC3339Nano), id}, "\x00")))
+}
+
+func decodeListCursor(ws workspace.Scope, cursor string) (listPosition, error) {
+	if cursor == "" {
+		return listPosition{}, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	fields := strings.Split(string(raw), "\x00")
+	if err != nil || len(cursor) > 512 || len(fields) != 4 || fields[0] != "api-tokens" || fields[1] != ws.TeamID {
+		return listPosition{}, ErrInvalidPage
+	}
+	at, err := time.Parse(time.RFC3339Nano, fields[2])
+	if err != nil || fields[3] == "" {
+		return listPosition{}, ErrInvalidPage
+	}
+	return listPosition{at: &at, id: fields[3]}, nil
 }
 
 // Revoke revokes token id in ws when actor created it or owns or administers ws. Revoking a

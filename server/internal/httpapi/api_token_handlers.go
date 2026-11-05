@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,16 +160,29 @@ func apiTokenList(tokens *apitokens.Service) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		list, err := tokens.List(r.Context(), account, ws)
+		limit := 0
+		if v := r.URL.Query().Get("limit"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				writeAPITokenError(w, r, tokens, apitokens.ErrInvalidPage)
+				return
+			}
+			limit = n
+		}
+		page, err := tokens.List(r.Context(), account, ws, limit, r.URL.Query().Get("cursor"))
 		if err != nil {
 			writeAPITokenError(w, r, tokens, err)
 			return
 		}
-		out := make([]apiTokenJSON, 0, len(list))
-		for _, t := range list {
+		out := make([]apiTokenJSON, 0, len(page.Items))
+		for _, t := range page.Items {
 			out = append(out, apiTokenView(t))
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"api_tokens": out}})
+		data := map[string]any{"api_tokens": out, "total": page.Total}
+		if page.NextCursor != "" {
+			data["next_cursor"] = page.NextCursor
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: data})
 	}
 }
 
@@ -204,6 +218,8 @@ func writeAPITokenError(w http.ResponseWriter, r *http.Request, tokens *apitoken
 		writeError(w, r, http.StatusBadRequest, "validation_failed", apitokens.ErrInvalidIdempotencyKey.Error())
 	case expectedHTTPErrorOnly(err, apitokens.ErrIdempotencyConflict):
 		writeError(w, r, http.StatusConflict, "idempotency_conflict", "This Idempotency-Key was already used for a different API token request. Use a new key.")
+	case expectedHTTPErrorOnly(err, apitokens.ErrInvalidPage):
+		writeError(w, r, http.StatusBadRequest, "validation_failed", "Use limit 1-200 and the next_cursor of this list.")
 	case expectedHTTPErrorOnly(err, apitokens.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "No such API token in this workspace.")
 	case expectedHTTPErrorOnly(err, workspace.ErrInvalid), expectedHTTPErrorOnly(err, workspace.ErrForbidden):

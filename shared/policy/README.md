@@ -205,7 +205,7 @@ above, validated like rules) narrows it; a scope never widens it.
 | Method and path | Who | Request | Response |
 |---|---|---|---|
 | `POST /v1/workspaces/{ws}/api-tokens` | members | `{"name", "expires_in_days", "scope"?}` | `{"api_token": APIToken, "secret": "pbat_…"}` (secret shown once) |
-| `GET /v1/workspaces/{ws}/api-tokens` | members (own), owners/admins (all) | — | `{"api_tokens": [APIToken]}` |
+| `GET /v1/workspaces/{ws}/api-tokens?limit=&cursor=` | members (own), owners/admins (all) | — | `{"api_tokens": [APIToken], "total", "next_cursor"?}`: newest first, limit 1-200 (default 50); pass `next_cursor` back as `cursor` for the next page |
 | `DELETE /v1/workspaces/{ws}/api-tokens/{id}` | its creator, owners/admins | — | `{"api_token": APIToken}` (revoked) |
 
 ```text

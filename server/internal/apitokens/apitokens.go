@@ -39,6 +39,8 @@ var (
 	ErrNameTaken       = errors.New("api token name taken")
 	ErrLimit           = errors.New("api token limit reached")
 	ErrNotFound        = errors.New("api token not found")
+	// ErrInvalidPage is a page limit out of range or a cursor of another list.
+	ErrInvalidPage = errors.New("invalid api token page")
 )
 
 // ScopeError is a scope that failed validation; Errors uses the policy error codes.

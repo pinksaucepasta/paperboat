@@ -1,7 +1,7 @@
 "use client"
 
 import { KeyIcon } from "@phosphor-icons/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import {
@@ -41,7 +41,9 @@ const expiries = [7, 30, 90] as const
 /** Settings → API tokens: credentials for scripts and agents that act as you in this workspace. */
 export function ApiTokens() {
   const workspace = useWorkspace()
-  const tokens = useApiQuery(apiTokensQuery(workspace?.id ?? ""))
+  const tokens = useInfiniteQuery(apiTokensQuery(workspace?.id ?? ""))
+  const items = tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []
+  const total = tokens.data?.pages[0]?.total ?? 0
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<APIToken | null>(null)
   const now = useNow(60_000)
@@ -66,13 +68,13 @@ export function ApiTokens() {
           Create token
         </Button>
       </header>
-      {tokens.data.length === 0 ? (
+      {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No tokens. A token lets a script or agent act as you in {workspace.name}.
         </p>
       ) : (
         <ul className="flex flex-col border-t border-divider">
-          {tokens.data.map((token) => {
+          {items.map((token) => {
             const expired = Date.parse(token.expires_at) < now
             return (
               <li
@@ -115,6 +117,18 @@ export function ApiTokens() {
             )
           })}
         </ul>
+      )}
+      {items.length > 0 && (
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <span>
+            {items.length} of {total} tokens
+          </span>
+          {tokens.hasNextPage && (
+            <Button variant="secondary" onClick={() => tokens.fetchNextPage()} disabled={tokens.isFetchingNextPage}>
+              {tokens.isFetchingNextPage ? "Loading…" : "Load more"}
+            </Button>
+          )}
+        </div>
       )}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent className="gap-4 sm:max-w-md">
@@ -165,9 +179,7 @@ function CreateToken({ workspace }: { workspace: string }) {
           </code>
           <CopyButton value={create.data.secret} />
         </div>
-        <span className="text-xs text-muted-foreground">
-          Send it as Authorization: Bearer on API requests.
-        </span>
+        <span className="text-xs text-muted-foreground">Send it as Authorization: Bearer on API requests.</span>
       </div>
     )
 
