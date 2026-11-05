@@ -92,7 +92,7 @@ type Service struct {
 	source        workerupdate.TUFSource
 	scheduler     *autoupdate.Scheduler
 	control       controlServer
-	controlMu     sync.Mutex
+	controlMu     controlMutex
 	managerMu     sync.RWMutex
 	config        Config
 	managerConfig workerupdate.Config

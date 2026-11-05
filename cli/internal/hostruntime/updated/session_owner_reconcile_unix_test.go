@@ -69,7 +69,7 @@ func TestCarrierReconcileRunsAfterOwnerReconcileFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	called := make(chan struct{}, 1)
-	var mu sync.Mutex
+	var mu controlMutex
 	stop := startSessionOwnerReconcile(ctx, func(context.Context) (sessionowner.Coordinator, error) {
 		return sessionowner.Coordinator{}, sessionowner.ErrInvalid
 	}, func(context.Context) error {
@@ -81,5 +81,56 @@ func TestCarrierReconcileRunsAfterOwnerReconcileFailure(t *testing.T) {
 	case <-called:
 	case <-time.After(time.Second):
 		t.Fatal("owner reconciliation failure prevented independent carrier reconciliation")
+	}
+}
+
+// dadape: an owner pass waiting on old owners that will not retire held
+// controlMu until its 2-minute deadline, delaying the update's owner start.
+// The pass yields: a control request that needs the lock cancels it.
+func TestOwnerReconcileYieldsControlLockToOwnerStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waiting := make(chan struct{})
+	passEnded := make(chan error, 1)
+	startErr := errors.New("owner start reached protected factory")
+	var passes sync.Once
+	s := &Service{}
+	s.config.SessionOwners = func(ctx context.Context) (sessionowner.Coordinator, error) {
+		first := false
+		passes.Do(func() { first = true })
+		if !first {
+			return sessionowner.Coordinator{}, startErr
+		}
+		// The background pass: an old owner that never confirms retirement.
+		close(waiting)
+		<-ctx.Done()
+		passEnded <- ctx.Err()
+		return sessionowner.Coordinator{}, ctx.Err()
+	}
+	stop := startSessionOwnerReconcile(ctx, s.config.SessionOwners, nil, &s.controlMu)
+	defer stop()
+	<-waiting
+	startDone := make(chan error, 1)
+	go func() {
+		_, err := s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "session-owner-start", Generation: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+		startDone <- err
+	}()
+	select {
+	case err := <-startDone:
+		if !errors.Is(err, startErr) {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-startDone
+		t.Fatal("owner start waited behind the background owner pass")
+	}
+	select {
+	case err := <-passEnded:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("background pass ended with %v, want yield", err)
+		}
+	default:
+		t.Fatal("background pass still holds its wait after yielding the lock")
 	}
 }

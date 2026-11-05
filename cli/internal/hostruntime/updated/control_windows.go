@@ -44,7 +44,7 @@ type windowsController struct {
 	socketPath    string
 	resolve       workerupdate.Resolver
 	scheduler     *autoupdate.Scheduler
-	mu            sync.Mutex
+	mu            controlMutex
 	checkMu       sync.Mutex
 	activationMu  sync.Mutex
 	config        WindowsConfig

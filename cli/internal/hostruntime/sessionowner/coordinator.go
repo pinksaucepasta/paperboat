@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -208,7 +209,12 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 		}
 		var retained uint64
 		err = c.Catalog.Retire(ctx, d, func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, ownerRetireTimeout)
+			defer cancel()
 			if err := client.Retire(ctx); err != nil {
+				if ctx.Err() != nil {
+					return fmt.Errorf("session owner %s did not confirm retirement within %s: %w", d.Generation, ownerRetireTimeout, err)
+				}
 				return err
 			}
 			identity, err := client.OwnerIdentity(ctx)
@@ -232,6 +238,10 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 	}
 	return result
 }
+
+// ownerRetireTimeout bounds one old owner's retirement exchange. An owner
+// that does not confirm in time keeps running and is retried next pass.
+const ownerRetireTimeout = 5 * time.Second
 
 // stagingWindow bounds how long a newly published generation is treated as an
 // update's staged candidate. Like nginx's new workers starting before the old
