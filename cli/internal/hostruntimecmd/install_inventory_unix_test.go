@@ -277,6 +277,74 @@ func TestInstallInventoryRemovesAnyReleaseSlotAnOlderBuildLeft(t *testing.T) {
 	h.assertExactlyActive(versionFiles(digestA), slots, 4001)
 }
 
+// What lives under releases/ on a healthy install is pins/<sha>/pb only: the active version's, the
+// catalogue's retained session owners' and a draining generation's. All stay, and so does the active
+// binary (bin/pb, outside releases/) that the fixed roles run.
+func TestInstallInventoryKeepsTheActiveReleaseAndEveryReferencedPin(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	keep := append(append(append([]string(nil), versionFiles(digestA)...), versionFiles(digestB)...), invPin(digestC))
+	keep = append(keep, sessionOwnerFiles(digestC)...)
+	h := newInventoryHost(t, digestA, activated, activated.Add(time.Hour), keep,
+		managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
+		managedProcess(4002, invRoot+"/bin/pb", "paperboat-updated-u1001.service", activated.Add(time.Second)),
+		managedProcess(4003, invPin(digestB), "paperboat-carrier-u1001-"+digestB[:32]+".service", activated.Add(-time.Hour)), // draining
+		managedProcess(4004, invPin(digestC), "paperboat-session-owner-u1001-"+digestC[:32]+".service", activated.Add(-48*time.Hour)),
+	)
+	h.sources.Retained[digestC] = activated.Add(-48 * time.Hour)
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	h.assertExactlyActive(keep, nil, 4001, 4002, 4003, 4004)
+}
+
+// A generation an older build started from a release slot (not a pin) keeps that slot while it drains
+// within its cap; past the cap the slot and its process go and the inventory fails naming it.
+func TestInstallInventoryKeepsASlotADrainingGenerationRunsFrom(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	slot := invRoot + "/releases/pb.previous"
+	files := append(append([]string(nil), versionFiles(digestA)...), slot)
+	drainer := managedProcess(4002, slot, "paperboat-hostd-u1001.service", activated.Add(-time.Hour))
+	active := managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second))
+
+	within := newInventoryHost(t, digestA, activated, activated.Add(inventoryDrainCap-time.Minute), files, active, drainer)
+	if err := within.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	within.assertExactlyActive(files, nil, 4001, 4002)
+
+	past := newInventoryHost(t, digestA, activated, activated.Add(inventoryDrainCap+time.Minute), files, active, drainer)
+	past.fake.termExits[4002] = true
+	err := past.sweep.settleInventory(context.Background(), false)
+	var leftovers unixLeftoverError
+	if !errors.As(err, &leftovers) || len(leftovers.items) != 1 || !strings.Contains(leftovers.items[0], "process 4002") {
+		t.Fatalf("err = %v, want the over-cap generation named", err)
+	}
+	assertGone(t, past.root, slot)
+}
+
+// While a transaction is pending (journal, or a signed update's receipt), its slots and the candidate
+// running from them are in use: nothing under releases/ is removed and no candidate is stopped.
+func TestInstallInventoryKeepsSlotsDuringAPendingTransaction(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	slots := []string{invRoot + "/releases/pb.staged", invRoot + "/releases/pb.rollback"}
+	files := append(append(append([]string(nil), versionFiles(digestA)...), versionFiles(digestB)...), slots...)
+	h := newInventoryHost(t, digestA, activated, activated.Add(time.Minute), files,
+		managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
+		managedProcess(4002, invRoot+"/releases/pb.staged", "paperboat-updated-u1001.service", activated.Add(30*time.Second)),
+		managedProcess(4003, invPin(digestB), "paperboat-carrier-u1001-"+digestB[:32]+".service", activated.Add(30*time.Second)),
+	)
+	h.sources.Pending = "/var/lib/paperboat-updated-u1001/native-install.json"
+	err := h.sweep.settleInventory(context.Background(), false)
+	var leftovers unixLeftoverError
+	if !errors.As(err, &leftovers) || len(leftovers.items) != 1 || !strings.HasPrefix(leftovers.items[0], h.sources.Pending) {
+		t.Fatalf("err = %v, want only the pending transaction named", err)
+	}
+	assertPresent(t, h.root, files...)
+	if len(h.fake.signals) != 0 || len(h.fake.commands) != 0 {
+		t.Fatalf("a pending transaction's candidate was touched: %v %v", h.fake.signals, h.fake.commands)
+	}
+}
+
 // A previous generation draining held streams is owned until the drain cap,
 // with its files; past the cap it is killed and the install fails naming it.
 func TestInstallInventoryDrainingGenerationIsBoundedByItsCap(t *testing.T) {

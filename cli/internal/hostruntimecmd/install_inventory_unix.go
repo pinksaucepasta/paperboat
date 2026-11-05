@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
@@ -35,8 +36,7 @@ const inventoryDrainCap = runtimewire.DrainLimit
 // inventoryPaths are the generation-specific locations of one account, as
 // canonical host paths.
 type inventoryPaths struct {
-	pins         string
-	releaseSlots []string
+	pins string
 	// generationGlobs match per-generation descriptors, locks and endpoints.
 	generationGlobs []string
 	guardBinaries   []string
@@ -50,9 +50,6 @@ func newInventoryPaths(plan unixPurgePlan) (inventoryPaths, error) {
 	carrier := filepath.Join(layout.InstallRoot, "carrier")
 	p := inventoryPaths{
 		pins: filepath.Join(layout.ReleasesRoot, "pins"),
-		releaseSlots: []string{
-			layout.BinaryStaged, layout.BinaryRollback,
-		},
 		generationGlobs: []string{
 			filepath.Join(carrier, "generation-*.json"),
 			filepath.Join(carrier, "owner-*.lock"),
@@ -185,23 +182,38 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 	if sources.Active != "" {
 		owned[sources.Active] = true
 	}
+	// referenced holds release slots (not pins) a live owned process executes; nothing else under
+	// releases/ but pins/ may stay.
+	referenced := map[string]bool{}
+	releases := filepath.Dir(paths.pins)
 	var findings []inventoryFinding
 	now := s.now()
 	for index := range processes {
 		process := &processes[index]
 		digest, pinned := pinDigest(paths.pins, process.exe)
+		slot := ""
+		if !pinned && strings.HasPrefix(process.exe, releases+"/") {
+			slot = filepath.Join(releases, strings.SplitN(strings.TrimPrefix(process.exe, releases+"/"), "/", 2)[0])
+		}
 		switch {
 		case process.stale:
 			findings = append(findings, inventoryFinding{process: process, note: " runs a replaced image"})
-		case !pinned:
-			if underAnyRoot(process.exe, paths.releaseSlots) {
-				findings = append(findings, inventoryFinding{process: process})
-			}
-		case owned[digest]:
-		case retainedOwner(sources, digest) && sessionOwnerProcess(*process):
+		case !pinned && slot == "":
+			// bin/pb or the guard, with its current image: the active version
+		case pinned && owned[digest]:
+		case pinned && retainedOwner(sources, digest) && sessionOwnerProcess(*process):
 		case sources.Pending != "":
+			// a transaction in progress runs its candidate and slots; the next inventory decides
+			if slot != "" {
+				referenced[slot] = true
+			}
 		case process.started.Before(sources.Activated) && now.Before(sources.Activated.Add(inventoryDrainCap)):
-			owned[digest] = true // a draining previous generation keeps its files
+			// a draining previous generation keeps the binary it runs from, and its generation's files
+			if pinned {
+				owned[digest] = true
+			} else {
+				referenced[slot] = true
+			}
 		case process.started.Before(sources.Activated):
 			findings = append(findings, inventoryFinding{process: process, note: noteOutlivedCap})
 		default:
@@ -217,7 +229,7 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 			retained[digest] = true
 		}
 	}
-	files, err := s.versionFiles(paths, owned, retained)
+	files, err := s.versionFiles(paths, owned, retained, referenced)
 	return append(findings, files...), err
 }
 
@@ -237,7 +249,7 @@ func sessionOwnerProcess(process unixProcess) bool {
 
 // versionFiles lists definitions, generation files, pins and release slots of
 // generations that no owned digest names.
-func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string]bool) ([]inventoryFinding, error) {
+func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained, referenced map[string]bool) ([]inventoryFinding, error) {
 	var findings []inventoryFinding
 	ownedName := func(path string) bool {
 		name := filepath.Base(path)
@@ -287,12 +299,14 @@ func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string
 			findings = append(findings, inventoryFinding{path: strings.TrimPrefix(pin, s.root)})
 		}
 	}
-	// Every release slot but pins/ belongs to an unfinished transaction, and none is pending here: listing
-	// the directory, not today's slot names, also finds one an older build left (pb.previous).
+	// releases/ holds pins/ (each pin judged above by its digest) and the slots of a transaction. With no
+	// transaction pending a slot is removed only when nothing references it: no live owned process (the
+	// current generation or one draining within its cap) executes it. Listing the directory, not today's
+	// slot names, also finds what an older build left there (pb.previous).
 	slots, globErr := filepath.Glob(s.at(filepath.Join(filepath.Dir(paths.pins), "*")))
 	err = errors.Join(err, globErr)
 	for _, slot := range slots {
-		if slot = strings.TrimPrefix(slot, s.root); slot != paths.pins {
+		if slot = strings.TrimPrefix(slot, s.root); slot != paths.pins && !referenced[slot] {
 			findings = append(findings, inventoryFinding{path: slot})
 		}
 	}
@@ -405,8 +419,28 @@ func (s unixSweep) now() time.Time {
 	return time.Now()
 }
 
-// runInstallInventory is the root side of `__runtime-service inventory`.
+// runInstallInventory is the root side of `__runtime-service inventory` and of a root install
+// operation's end. It holds the native installation lock, so it never runs while an update or install
+// stages and executes release slots (the user-side inventory otherwise could race an updater activation).
 func runInstallInventory(ctx context.Context, uid int, check bool) error {
+	layout, err := service.UserLayout(runtime.GOOS, uid)
+	if err != nil {
+		return err
+	}
+	if _, statErr := os.Lstat(layout.UpdateStateRoot); statErr == nil {
+		lock, err := updated.LockUnixNativeInstall(ctx, layout.UpdateStateRoot)
+		if err != nil {
+			return withPurgeStage("final_inventory", err)
+		}
+		defer lock.Close()
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return withPurgeStage("final_inventory", statErr)
+	}
+	return runInstallInventoryLocked(ctx, uid, check)
+}
+
+// runInstallInventoryLocked is the inventory for a caller that already holds the installation lock.
+func runInstallInventoryLocked(ctx context.Context, uid int, check bool) error {
 	plan, err := newUnixPurgePlan(runtime.GOOS, uid)
 	if err != nil {
 		return err

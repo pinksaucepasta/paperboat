@@ -33,7 +33,7 @@ import (
 var (
 	lockInstallation = updated.LockUnixNativeInstall
 	healGuard        = hostinstall.HealMachineGuard
-	settleInventory  = runInstallInventory
+	settleInventory  = runInstallInventoryLocked // healMachineGuard holds the installation lock
 	healRetryWait    = 30 * time.Second
 )
 

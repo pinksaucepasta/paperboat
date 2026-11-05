@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -26,7 +27,8 @@ type InventorySources struct {
 	// Retained maps each catalogue-referenced source digest to when its
 	// descriptor was written.
 	Retained map[string]time.Time
-	// Pending names the installation journal when a transaction is unfinished.
+	// Pending names the record of an unfinished transaction: the installation journal, or a signed
+	// update's native-install receipt. Its release slots and candidate are still in use.
 	Pending string
 }
 
@@ -37,10 +39,13 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 	}
 	paths := platformPaths(uid)
 	sources := InventorySources{Retained: map[string]time.Time{}}
-	if _, err := os.Lstat(paths.journal); err == nil {
-		sources.Pending = paths.journal
-	} else if !installNotExistOnly(err) {
-		return sources, err
+	for _, record := range []string{paths.journal, filepath.Join(paths.updateState, "native-install.json")} {
+		if _, err := os.Lstat(record); err == nil {
+			sources.Pending = record
+			break
+		} else if !installNotExistOnly(err) {
+			return sources, err
+		}
 	}
 	digest, activated, err := fileDigest(paths.worker)
 	if installNotExistOnly(err) {
