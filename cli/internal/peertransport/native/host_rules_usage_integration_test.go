@@ -34,6 +34,20 @@ func (s *usageSink) ReportNativeUsage(_ context.Context, reports []api.NativeUsa
 	return nil
 }
 
+type closeSignalConn struct {
+	net.Conn
+	closed chan<- struct{}
+}
+
+func (c closeSignalConn) Close() error {
+	err := c.Conn.Close()
+	select {
+	case c.closed <- struct{}{}:
+	default:
+	}
+	return err
+}
+
 // Every managed SSH stream is admitted from the host's own rules (D1, 46cc2833d), so it carries no access session.
 // Its usage must still name the peer the native session proved, or the server cannot attribute it and every SSH
 // byte goes unrecorded. 1 MiB each way over a host-rules SSH stream is reported under ssh, for the peer, exactly.
@@ -64,12 +78,14 @@ func TestHostRulesSSHStreamUsageNamesItsPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// As the host runtime wires it (runtime/native_peer_unix.go).
+	// As the host runtime wires it (runtime/native_peer_unix.go). hostClosed fires when the echo closes its end, after
+	// io.Copy returned: QUIC hands the client the last bytes before the host's Write returns and is metered.
+	hostClosed := make(chan struct{}, 1)
 	meter := func(conn net.Conn, binding native.MeterBinding) net.Conn {
-		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
+		return closeSignalConn{Conn: usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
-		})
+		}), closed: hostClosed}
 	}
 	clientOwner, err := native.NewOwner(native.Config{Authority: clientAuthority, TLS: clientTLS})
 	if err != nil {
@@ -104,6 +120,11 @@ func TestHostRulesSSHStreamUsageNamesItsPeer(t *testing.T) {
 		t.Fatalf("ssh echo: %v", err)
 	}
 	_ = stream.Close()
+	select {
+	case <-hostClosed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the host never finished serving the ssh stream")
+	}
 	closeCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := usage.Close(closeCtx); err != nil {
