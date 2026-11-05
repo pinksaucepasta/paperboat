@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/netip"
 	"strings"
@@ -47,9 +48,10 @@ var ErrAuthority = errors.New("peer network authority is invalid")
 var ErrStaleAuthority = errors.New("peer network authority is stale")
 var ErrExpiredAuthority = errors.New("peer network authority expired; reconnect to Paperboat")
 
-// ErrRelayGrantExpired is a relay grant past its expiry on the server clock (F21-02); the next network
-// refresh brings a fresh one.
-var ErrRelayGrantExpired = errors.New("relay grant expired; waiting for a fresh grant from Paperboat")
+// ErrRelayGrantExpired is a relay grant past its expiry on the server clock (F21-02), e.g. after a long control
+// outage. It wraps derpquic.ErrExpired so the carrier retries (bounded by magicsock's relay reconnect backoff)
+// instead of latching a final refusal, and relayCredential asks for a fresh grant on demand.
+var ErrRelayGrantExpired = fmt.Errorf("relay grant expired; waiting for a fresh grant from Paperboat: %w", derpquic.ErrExpired)
 
 type NetworkBinding struct {
 	AccountID                  string `json:"account_id"`
