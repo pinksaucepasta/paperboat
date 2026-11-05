@@ -9,7 +9,7 @@ import (
 )
 
 func testGeneration(kind string) string {
-	if kind == HostdKind || kind == CarrierKind {
+	if kind == HostdKind || kind == CarrierKind || kind == DaemonKind {
 		return strings.Repeat("a", 32)
 	}
 	return ""
@@ -95,5 +95,54 @@ func TestQuitCarrierSignalsOnlyTheRetiredGenerationsMainProcess(t *testing.T) {
 	}
 	if _, err := CarrierController("linux", "u501", "", 501, &commandRecorder{}); !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatal("carrier controller without a generation", err)
+	}
+}
+
+// A user's daemon upgrade must not cut the forwarded connections it holds: each daemon generation
+// has its own user unit, and the retired one gets SIGQUIT in the user's own service manager.
+func TestDaemonGenerationsHaveTheirOwnUserUnits(t *testing.T) {
+	generation := testGeneration(DaemonKind)
+	for platform, want := range map[string]string{
+		"linux":  "systemctl --user kill --kill-whom=main --signal=SIGQUIT paperboatd-" + generation + ".service",
+		"darwin": "launchctl kill SIGQUIT gui/501/" + DaemonLabel + "." + generation,
+	} {
+		runner := &commandRecorder{}
+		controller, err := DaemonController(platform, generation, 501, runner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := QuitCarrier(context.Background(), controller); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(runner.calls, []string{want}) {
+			t.Fatalf("%s quit calls=%q want %q", platform, runner.calls, want)
+		}
+		cfg := Config{Platform: platform, Kind: DaemonKind, Generation: generation, ConfigRoot: t.TempDir(), Executable: executable(t), User: "alice", Group: "staff", Arguments: []string{"daemon", "--generation", generation}, Controller: controller}
+		first, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := first.render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if platform == "linux" && !strings.Contains(string(body), "Restart=on-failure") || platform == "darwin" && !strings.Contains(string(body), "<key>SuccessfulExit</key>") {
+			t.Fatalf("%s: a drained daemon generation that exits 0 would be restarted:\n%s", platform, body)
+		}
+		cfg.Generation = strings.Repeat("b", 32)
+		second, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second.DefinitionPath() == first.DefinitionPath() || !strings.Contains(second.DefinitionPath(), cfg.Generation) {
+			t.Fatalf("%s: two daemon generations share one unit: %s", platform, first.DefinitionPath())
+		}
+		cfg.Generation = ""
+		if _, err := New(cfg); !errors.Is(err, ErrInvalidDefinition) {
+			t.Fatalf("%s: daemon unit without a generation admitted", platform)
+		}
+	}
+	if _, err := DaemonController("linux", "", 501, &commandRecorder{}); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatal("daemon controller without a generation", err)
 	}
 }

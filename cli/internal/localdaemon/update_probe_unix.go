@@ -94,7 +94,11 @@ func currentUserDaemonClient(ctx context.Context) (*localapi.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	status, err := updateDaemonController().Inspect(ctx, "")
+	controller, err := updateDaemonController(home)
+	if err != nil {
+		return nil, err
+	}
+	status, err := controller.Inspect(ctx, "")
 	if err != nil || !status.Running {
 		return nil, err
 	}
@@ -113,18 +117,30 @@ func RestartCurrentUserForUpdate(ctx context.Context) error {
 	if _, err := updateServiceEnvironment(runtime.GOOS, home, os.Geteuid()); err != nil {
 		return err
 	}
-	controller := updateDaemonController()
+	controller, err := updateDaemonController(home)
+	if err != nil {
+		return err
+	}
 	if err := controller.Stop(ctx, ""); err != nil {
 		return err
 	}
 	return controller.Start(ctx, updateServiceDefinitionPath(runtime.GOOS, home))
 }
 
-func updateDaemonController() service.NativeLifecycleController {
-	if runtime.GOOS == "darwin" {
-		return service.LaunchdController{Runner: service.ExecRunner{}, UID: os.Geteuid(), Label: service.DaemonLabel, UserDomain: true}
+// updateDaemonController addresses the newest installed daemon generation, the one the last install started.
+func updateDaemonController(home string) (service.NativeLifecycleController, error) {
+	generations, err := installedGenerations(runtime.GOOS, home)
+	if err != nil {
+		return nil, err
 	}
-	return service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboatd.service", User: true}
+	if len(generations) == 0 {
+		return nil, os.ErrNotExist
+	}
+	controller, err := service.DaemonController(runtime.GOOS, generations[0], os.Geteuid(), service.ExecRunner{})
+	if err != nil {
+		return nil, err
+	}
+	return controller.(service.NativeLifecycleController), nil
 }
 
 func updateServiceEnvironment(platform, home string, uid int) (map[string]string, error) {
@@ -188,9 +204,12 @@ func updateServiceEnvironment(platform, home string, uid int) (map[string]string
 	return environment, nil
 }
 
+// updateServiceDefinitionPath is the newest installed daemon generation's definition, or a path
+// that does not exist when none is installed.
 func updateServiceDefinitionPath(platform, home string) string {
-	if platform == "darwin" {
-		return filepath.Join(home, "Library", "LaunchAgents", service.DaemonLabel+".plist")
+	generations, _ := installedGenerations(platform, home)
+	if len(generations) == 0 {
+		return generationDefinitionPath(platform, home, "none")
 	}
-	return filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+	return generationDefinitionPath(platform, home, generations[0])
 }

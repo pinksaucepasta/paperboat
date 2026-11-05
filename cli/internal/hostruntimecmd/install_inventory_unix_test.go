@@ -150,7 +150,7 @@ func TestInstallInventoryUpgradeRemovesThePreviousVersion(t *testing.T) {
 		managedProcess(4001, invPin(digestB), "paperboat-hostd-u1001-"+digestB[:32]+".service", activated.Add(time.Second)),
 		// The old guard and the old updater still run images the upgrade replaced.
 		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, started: activated.Add(-time.Hour), unit: "paperboat-machineguard.service"},
-		unixProcess{pid: 4003, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: activated.Add(-time.Hour), unit: "paperboatd.service"},
+		unixProcess{pid: 4003, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: activated.Add(-time.Hour), unit: "paperboat-updated-u1001.service"},
 		managedProcess(4004, invGuard, "paperboat-machineguard.service", activated.Add(time.Second)),
 	)
 	h.fake.termExits[4002], h.fake.termExits[4003] = true, true
@@ -159,7 +159,7 @@ func TestInstallInventoryUpgradeRemovesThePreviousVersion(t *testing.T) {
 	}
 	h.assertExactlyActive(versionFiles(digestB), old, 4001, 4004)
 	// The guard's unit restarts only on failure: the inventory starts it again on the current image.
-	if !containsString(h.fake.commands, "/usr/bin/systemctl start paperboat-machineguard.service") || containsString(h.fake.commands, "/usr/bin/systemctl start paperboatd.service") {
+	if !containsString(h.fake.commands, "/usr/bin/systemctl start paperboat-machineguard.service") {
 		t.Fatalf("replaced fixed roles not restarted exactly once each: %v", h.fake.commands)
 	}
 	for _, unit := range []string{"paperboat-hostd-u1001-" + digestA[:32] + ".service", "paperboat-carrier-u1001-" + digestA[:32] + ".service"} {
@@ -262,6 +262,35 @@ func TestInstallInventoryDrainingGenerationIsBoundedByItsCap(t *testing.T) {
 		t.Fatalf("over-cap generation still runs: %v", past.fake.signals)
 	}
 	assertGone(t, past.root, versionFiles(digestA)...)
+}
+
+// A user's previous daemon generation runs the replaced binary while it drains the forwarded
+// connections it held at the upgrade: owned until the drain cap, then killed and named.
+func TestInstallInventoryDrainingDaemonGenerationIsBoundedByItsCap(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	files := versionFiles(digestB)
+	active := managedProcess(4001, invRoot+"/bin/pb", "paperboatd-"+digestB[:32]+".service", activated.Add(time.Second))
+	draining := unixProcess{pid: 4002, ppid: 1, exe: invRoot + "/bin/pb", stale: true, started: activated.Add(-time.Hour), unit: "paperboatd-" + digestA[:32] + ".service"}
+
+	within := newInventoryHost(t, digestB, activated, activated.Add(inventoryDrainCap-time.Minute), files, active, draining)
+	if err := within.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	within.assertExactlyActive(files, nil, 4001, 4002)
+
+	past := newInventoryHost(t, digestB, activated, activated.Add(inventoryDrainCap+time.Minute), files, active, draining)
+	past.fake.termExits[4002] = true
+	err := past.sweep.settleInventory(context.Background(), false)
+	var leftovers unixLeftoverError
+	if !errors.As(err, &leftovers) || len(leftovers.items) != 1 || !strings.Contains(leftovers.items[0], "process 4002") || !strings.Contains(leftovers.items[0], "outlived its drain cap") {
+		t.Fatalf("err = %v, want the over-cap daemon generation named", err)
+	}
+	if _, alive := past.fake.alive[4002]; alive {
+		t.Fatalf("over-cap daemon generation still runs: %v", past.fake.signals)
+	}
+	if containsString(past.fake.commands, "/usr/bin/systemctl start paperboatd-"+digestA[:32]+".service") {
+		t.Fatalf("a drained daemon generation was restarted: %v", past.fake.commands)
+	}
 }
 
 // Second account on the same host: its install and upgrade remove only its own
@@ -409,7 +438,8 @@ func TestServiceManagerOutputsNameMainProcesses(t *testing.T) {
 	plan, _ := newUnixPurgePlan("linux", 1001)
 	sweep := unixSweep{plan: plan}
 	for name, want := range map[string]bool{
-		"paperboat-hostd-u1001-" + digestA[:32] + ".service": true, "paperboat-machineguard.service": true, "paperboatd.service": true,
+		"paperboat-hostd-u1001-" + digestA[:32] + ".service": true, "paperboat-machineguard.service": true,
+		"paperboatd-" + digestA[:32] + ".service": true, "com.pinksaucepasta.paperboatd." + digestA[:32]: true, "paperboatd.service": false, "paperboatd-x.service": false,
 		"paperboat-hostd-u1002.service": false, "paperboat-hostd-u10010.service": false, "session-3.scope": false, "user@1001.service": false,
 	} {
 		if sweep.ourUnit(name) != want {
