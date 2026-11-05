@@ -37,9 +37,8 @@ func (d *DB) ReserveProofNonce(ctx context.Context, signer, nonce, method string
 	if !proofNoncePattern.MatchString(nonce) {
 		return false, nil
 	}
-	if _, err := d.SQL().ExecContext(ctx, `DELETE FROM paperboat.proof_nonces WHERE signer=$1 AND expires_at<now()`, signer); err != nil {
-		return false, err
-	}
+	// Only this nonce's row is touched: concurrent requests of one signer that each deleted its expired
+	// nonces deadlocked (support_fb7b442e). PruneProofNonces bounds the table.
 	result, err := d.SQL().ExecContext(ctx, `INSERT INTO paperboat.proof_nonces(signer,nonce,expires_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, signer, nonce, expires)
 	if err != nil {
 		return false, err
@@ -48,8 +47,9 @@ func (d *DB) ReserveProofNonce(ctx context.Context, signer, nonce, method string
 	return err == nil && n == 1, err
 }
 
-// PruneProofNonces deletes reservations past their proof's expiry.
+// PruneProofNonces deletes reservations past their proof's expiry. It skips rows another transaction
+// holds, so overlapping prunes (two server instances during a rollout) never wait on each other.
 func (d *DB) PruneProofNonces(ctx context.Context) error {
-	_, err := d.SQL().ExecContext(ctx, `DELETE FROM paperboat.proof_nonces WHERE expires_at<now()`)
+	_, err := d.SQL().ExecContext(ctx, `DELETE FROM paperboat.proof_nonces WHERE (signer,nonce) IN (SELECT signer,nonce FROM paperboat.proof_nonces WHERE expires_at<now() FOR UPDATE SKIP LOCKED)`)
 	return err
 }
