@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"sync"
 )
 
 // parsePCBList finds the sockets with tuple in a macOS net.inet.tcp.pcblist_n buffer (F23-01/F23-02).
@@ -17,7 +18,7 @@ import (
 func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 	const (
 		xsoSocket, xsoInpcb, xsoTCPCB = 0x001, 0x010, 0x020
-		genLen                        = 24  // sizeof(struct xinpgen)
+		genLen                        = 24 // sizeof(struct xinpgen)
 		inpcbLen, socketLen, tcpcbLen = 104, 104, 204
 		inpIPv4                       = 0x1 // INP_IPV4 in inp_vflag
 		tcpsEstablished               = 4
@@ -85,3 +86,37 @@ func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 }
 
 var errPCBLayout = errors.New("unrecognized macOS pcblist_n layout")
+
+// snapshotFlight coalesces concurrent kernel snapshots (singleflight): every lookup that arrives while a snapshot
+// is being taken shares it, so a burst of new gateway connections costs one pcb-list scan, not one each. A
+// connection accepted just after that snapshot began may be missing from it; attributeOwner then retries, and the
+// retry takes a fresh snapshot.
+type snapshotFlight struct {
+	mu    sync.Mutex
+	call  *snapshotCall
+	fetch func() ([]byte, error)
+}
+
+type snapshotCall struct {
+	done chan struct{}
+	buf  []byte
+	err  error
+}
+
+func (f *snapshotFlight) get() ([]byte, error) {
+	f.mu.Lock()
+	if call := f.call; call != nil {
+		f.mu.Unlock()
+		<-call.done
+		return call.buf, call.err
+	}
+	call := &snapshotCall{done: make(chan struct{})}
+	f.call = call
+	f.mu.Unlock()
+	call.buf, call.err = f.fetch()
+	f.mu.Lock()
+	f.call = nil
+	f.mu.Unlock()
+	close(call.done)
+	return call.buf, call.err
+}

@@ -4,13 +4,21 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // pcbBuffer builds a pcblist_n buffer with one connection per tuple, owned by uid in state tcpState.
 func pcbBuffer(inpcbLen int, conns ...[3]any) []byte {
 	le := binary.LittleEndian
-	gen := func(count uint32) []byte { b := make([]byte, 24); le.PutUint32(b, 24); le.PutUint32(b[4:], count); return b }
+	gen := func(count uint32) []byte {
+		b := make([]byte, 24)
+		le.PutUint32(b, 24)
+		le.PutUint32(b[4:], count)
+		return b
+	}
 	out := gen(uint32(len(conns)))
 	for i, c := range conns {
 		tuple, uid, state := c[0].(socketTuple), c[1].(uint32), c[2].(uint32)
@@ -68,5 +76,47 @@ func TestParsePCBListAttributesOnlyAnExactKnownLayout(t *testing.T) {
 	full := pcbBuffer(104, [3]any{tuple, uint32(502), uint32(4)})
 	if _, err := parsePCBList(full[:len(full)-30], tuple); !errors.Is(err, errPCBLayout) {
 		t.Fatalf("a truncated buffer must fail closed, err=%v", err)
+	}
+}
+
+func TestSnapshotFlightServesConcurrentLookupsFromOneScan(t *testing.T) {
+	var scans atomic.Int32
+	release := make(chan struct{})
+	flight := &snapshotFlight{fetch: func() ([]byte, error) {
+		scans.Add(1)
+		<-release
+		return []byte("snapshot"), nil
+	}}
+	const waiters = 50
+	var wg sync.WaitGroup
+	results := make(chan string, waiters)
+	for i := 0; i < waiters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buf, err := flight.get()
+			if err != nil {
+				t.Error(err)
+			}
+			results <- string(buf)
+		}()
+	}
+	for scans.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond) // let every waiter join the in-flight scan
+	close(release)
+	wg.Wait()
+	close(results)
+	for r := range results {
+		if r != "snapshot" {
+			t.Fatalf("a waiter got %q", r)
+		}
+	}
+	if n := scans.Load(); n != 1 {
+		t.Fatalf("%d concurrent lookups took %d scans; want 1", waiters, n)
+	}
+	if _, err := flight.get(); err != nil || scans.Load() != 2 {
+		t.Fatalf("a lookup after the burst must take a fresh scan: scans=%d err=%v", scans.Load(), err)
 	}
 }
