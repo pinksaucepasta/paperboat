@@ -97,7 +97,7 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 	service.now = func() time.Time { return now }
 	wgPrivate, wgPublic := networkX25519Key(t)
 	disco := networkDiscoPublic(t, wgPrivate)
-	initial, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_first_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: first[:]})
+	initial, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_first_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: first[:]})
 	if err != nil || initial.KeyGeneration != 1 {
 		t.Fatalf("initial network registration: %+v %v", initial, err)
 	}
@@ -105,15 +105,15 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := insertCertificate(2)
-	rebound, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_second_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: second[:]})
+	rebound, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_second_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: second[:]})
 	if err != nil || rebound.KeyGeneration != 1 || rebound.VirtualAddress != initial.VirtualAddress {
 		t.Fatalf("certificate rebind changed network key: %+v %v", rebound, err)
 	}
 	var stored []byte
-	if err := store.SQL().QueryRowContext(ctx, `SELECT quic_certificate_fingerprint FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, userID, cliID).Scan(&stored); err != nil || string(stored) != string(second[:]) {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT quic_certificate_fingerprint FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, userID, daemonEndpoint(cliID)).Scan(&stored); err != nil || string(stored) != string(second[:]) {
 		t.Fatalf("new certificate fingerprint was not bound: %v", err)
 	}
-	if _, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_old_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: first[:]}); err != ErrDenied {
+	if _, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_rebind_old_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: wgPublic, DiscoPublicKey: disco, QUICCertificateFingerprint: first[:]}); err != ErrDenied {
 		t.Fatalf("revoked certificate regained network authority: %v", err)
 	}
 }

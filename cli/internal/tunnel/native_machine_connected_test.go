@@ -215,7 +215,7 @@ func (d *connectedMachineAccess) exercise(t *testing.T, ctx context.Context, sto
 		t.Fatal(err)
 	}
 	runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
-	tunnel := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, Now: time.Now}, authorities: clientauthority.NewCache(), nativeRuntime: runtime}
+	tunnel := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Generation: testDaemonGeneration, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, Now: time.Now}, authorities: clientauthority.NewCache(), nativeRuntime: runtime}
 	defer tunnel.authorities.Close()
 	access, err := preview.NewNativePrivateTCPAccess(preview.NativePrivateTCPAccessConfig{Grants: api.New(issuer, config.Credential{AccessToken: "machine-test-token"}, httpClient), DialSession: tunnel.DialPrivateSession, Now: time.Now})
 	if err != nil {
@@ -294,7 +294,7 @@ func (d *connectedMachineAccess) exerciseProxy(t *testing.T, ctx context.Context
 		t.Fatal(err)
 	}
 	runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
-	tunnel := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, Now: time.Now}, authorities: clientauthority.NewCache(), nativeRuntime: runtime}
+	tunnel := &PeerTerminalTunnel{config: PeerTerminalConfig{Issuer: issuer, Generation: testDaemonGeneration, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, HTTPClient: httpClient, Now: time.Now}, authorities: clientauthority.NewCache(), nativeRuntime: runtime}
 	defer tunnel.authorities.Close()
 	access, err := preview.NewNativePrivateTCPAccess(preview.NativePrivateTCPAccessConfig{Grants: api.New(issuer, config.Credential{AccessToken: "machine-test-token"}, httpClient), DialSession: tunnel.DialPrivateSession, Now: time.Now})
 	if err != nil {
