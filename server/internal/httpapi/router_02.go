@@ -192,9 +192,14 @@ func writePanicError(w http.ResponseWriter, r *http.Request, logger *slog.Logger
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	// ctx is the request's: a server error written after the client hung up is that, not an outage.
+	ctx context.Context
 }
 
 func (r *statusRecorder) WriteHeader(status int) {
+	if status >= 500 && r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) {
+		status = statusClientClosedRequest
+	}
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
 }

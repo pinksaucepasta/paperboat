@@ -948,7 +948,7 @@ func requestID(next http.Handler) http.Handler {
 func accessLog(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, ctx: r.Context()}
 		next.ServeHTTP(rec, r)
 		serverdiagnostics.LoggerWithRequest(r.Context(), logger).Info("http_request",
 			"support_reference", supportReference(r.Context()),
