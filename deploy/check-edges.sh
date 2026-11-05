@@ -22,8 +22,8 @@ host=${url#https://}; host=${host%%/*}
 fail=0
 for edge in "$@"; do
 	target=${edge%%=*} ip=${edge#*=}
-	# Failures in the first 20 s after the container started are the new process registering; skip them.
-	logs='c=$(sudo docker ps --format "{{.Names}}" | grep -m1 -- "-tunnel$"); up=$(( $(date +%s) - $(date -d "$(sudo docker inspect -f "{{.State.StartedAt}}" "$c")" +%s) - 20 )); [ $up -gt 90 ] && up=90; [ $up -lt 1 ] && up=1; sudo docker logs --since ${up}s "$c" 2>&1 | grep -c -E "tunnel_control_request_failed|tunnel_route_reconcile_failed" || true'
+	# The window includes the container's startup: a restart must not log a control failure either.
+	logs='c=$(sudo docker ps --format "{{.Names}}" | grep -m1 -- "-tunnel$"); up=$(( $(date +%s) - $(date -d "$(sudo docker inspect -f "{{.State.StartedAt}}" "$c")" +%s) + 1 )); [ $up -gt 90 ] && up=90; sudo docker logs --since ${up}s "$c" 2>&1 | grep -c -E "tunnel_control_request_failed|tunnel_route_reconcile_failed" || true'
 	if [ "$target" = local ]; then n=$(sh -c "$logs"); else n=$(ssh "$target" "$logs"); fi
 	code=000
 	for _ in 1 2 3 4 5 6; do # the new route reaches each edge within a few seconds

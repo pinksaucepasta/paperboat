@@ -151,6 +151,9 @@ type NodeWorker struct {
 	Now          func() time.Time
 	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
 	OnAnswer func(control.NodeAnswer) error
+	// Registered, when set, is closed once the first registration and heartbeat succeed.
+	// Control requests the server checks against this process's node row wait on it.
+	Registered chan struct{}
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -170,6 +173,9 @@ func (w *NodeWorker) Start(ctx context.Context) error {
 	}
 	if err := w.apply(answer); err != nil {
 		return err
+	}
+	if w.Registered != nil {
+		close(w.Registered)
 	}
 	workerCtx, cancel := context.WithCancel(ctx)
 	w.cancel, w.done = cancel, make(chan struct{})
