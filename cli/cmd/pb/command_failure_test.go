@@ -172,7 +172,9 @@ func TestDoctorNativeTimeoutPreservesJoinedSystemCauseAndReference(t *testing.T)
 		<-loadCtx.Done()
 		return tunnel.NativeProbe{}, syscall.EIO
 	})[0]
-	check := probe.Run(ctx)
+	// The probe's own context does not derive from the parent here, so the parent's deadline reaches it only
+	// through the AfterFunc cancel; that order raced in macOS run 41993423157 and reported "system_error".
+	check := probe.Run(supportref.WithContext(t.Context(), reference))
 	if fault.SupportReference != reference || fault.Cause != "deadline_exceeded" || !strings.Contains(strings.Join(fault.ErrorChain, ":"), "Errno") || !strings.Contains(check.Summary, "timed out") {
 		t.Fatalf("joined timeout fault=%#v check=%#v", fault, check)
 	}

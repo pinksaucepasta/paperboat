@@ -277,17 +277,22 @@ func doctorNativeReachabilityProbe(parent context.Context, timeout time.Duration
 			cancel()
 		}
 		result, err := load(ctx)
-		if ctx.Err() != nil {
+		if stopped := ctx.Err(); stopped != nil {
+			// The AfterFunc can cancel ctx before the parent's own deadline reaches it; the parent's
+			// error is the reason then, so a parent timeout is reported as a timeout.
+			if parentErr := parent.Err(); parentErr != nil {
+				stopped = parentErr
+			}
 			cause := err
 			if cause == nil {
-				cause = ctx.Err()
-			} else if cause != ctx.Err() {
-				cause = errors.Join(cause, ctx.Err())
+				cause = stopped
+			} else if cause != stopped {
+				cause = errors.Join(cause, stopped)
 			}
 			if !errorreport.HTTPAttemptObserved(cause) {
 				errorreport.Current().ObserveFailure(ctx, "pb", "doctor", "peer_connect", "command_failed", cause)
 			}
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if errors.Is(stopped, context.DeadlineExceeded) {
 				return doctorpkg.Check{Category: "transport", Code: "peer_reachability", Status: doctorpkg.StatusUnavailable, Summary: "Native peer reachability check timed out.", Recovery: "Check the selected machine and network, then run pb doctor again."}
 			}
 			return doctorpkg.Check{Category: "transport", Code: "peer_reachability", Status: doctorpkg.StatusUnavailable, Summary: "Native peer reachability check was canceled.", Recovery: "Run pb doctor again when the selected machine and network are available."}
