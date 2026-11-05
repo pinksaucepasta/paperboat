@@ -24,6 +24,7 @@
 #                        while a terminal and a long exec are running, then verify
 #                        they recover and the version changed.
 #   --update-version V   version the --update build reports (required with --update)
+#   --teammate DEVICE    the independent teammate's device for inbox-approval (default ubuntu24; a SMOKE_CT_MAP name works)
 #
 # Output: a PASS/FAIL table and .build-free JSON at
 #   tools/device-smoke/results/<UTC timestamp>.json
@@ -59,6 +60,7 @@ ONLY_LIST=""
 UPDATE_DIR=""
 UPDATE_VERSION=""
 WINDOWS_INSTALL_JSON=""
+TEAMMATE=ubuntu24
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -72,7 +74,8 @@ while [ $# -gt 0 ]; do
     --only-list) ONLY_LIST=$2; shift 2 ;;
     --update) UPDATE_DIR=$2; shift 2 ;;
     --update-version) UPDATE_VERSION=$2; shift 2 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    --teammate) TEAMMATE=$2; shift 2 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -727,11 +730,11 @@ $parent"
 test_inbox_approval() {
   skipped inbox-approval && return
   local device id tag source_id phase output parent command success status t0
-  if ! stage_terminal_fixtures ubuntu24; then
+  if ! stage_terminal_fixtures "$TEAMMATE"; then
     for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "could not stage teammate source"; done
     return
   fi
-  if ! source_id=$(on ubuntu24 "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;r=registration();print(r[\"machine_id\"],r[\"account_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}\ [A-Za-z0-9_-]{3,128}$ ]]; then
+  if ! source_id=$(on "$TEAMMATE" "python3 -c 'import sys;sys.path.insert(0,\"/tmp/$RUN_ID\");from install_lifecycle import registration;r=registration();print(r[\"machine_id\"],r[\"account_id\"])'") || ! [[ "$source_id" =~ ^[A-Za-z0-9_-]{3,128}\ [A-Za-z0-9_-]{3,128}$ ]]; then
     for device in "${TLIST[@]}"; do record "inbox-approval:$device" FAIL 0 "teammate source identity unavailable"; done
     return
   fi
@@ -743,12 +746,12 @@ test_inbox_approval() {
       record "$id" FAIL 0 "could not stage recipient fixture"
       continue
     fi
-    printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --source-machine-id ${source_id% *} --source-account-id ${source_id#* } && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
+    printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --team $SMOKE_TEAM --source-machine-id ${source_id% *} --source-account-id ${source_id#* } && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
     phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state inbox_sender_required" 2>&1); status=$?
     output="$phase"
     if [ "$status" = 0 ]; then
       command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"--phase",sys.argv[1]]))' "$phase" "/tmp/$RUN_ID/inbox_sender.py")
-      output=$(on ubuntu24 "timeout 400 $command" 2>&1); status=$?
+      output=$(on "$TEAMMATE" "timeout 400 $command" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="inbox-sender" and r["status"]=="PASS" and r["approval_acknowledged"] and r["decline_acknowledged"]' "$output" 2>/dev/null; then success=1; fi
       command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state inbox_sender_required)
       on "$device" "$command" >/dev/null 2>&1 || success=0

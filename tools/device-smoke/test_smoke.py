@@ -165,8 +165,16 @@ class UninstallInventoryPreservation(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 44 if absent_secret else 0,
                                                'COMMAND\n' if arguments[:2] == ['ps', '-axo'] else '', '')
 
+        fixture = pathlib.Path(account.pw_dir).parent
+
         def path(value):
-            return paths.get(str(value), pathlib.Path(value))
+            # The host running the tests may hold real Paperboat state (oracle runs pbh): any path outside the
+            # fixture that the test does not map reads as absent, so the result never depends on the host.
+            if str(value) in paths:
+                return paths[str(value)]
+            value = pathlib.Path(value)
+            inside = not value.is_absolute() or value == fixture or fixture in value.parents
+            return value if inside else fixture / 'absent-host-path' / value.relative_to('/')
 
         def glob(pattern):
             parent = str(pathlib.Path(pattern).parent)
@@ -812,8 +820,10 @@ class ScheduledUpdateCheck(unittest.TestCase):
         receipt = self.run_check(world)
         self.assertTrue(receipt['status'] == 'PASS' and receipt['to'] == '2026.10.26.0' and receipt['disabled_stayed_put'], receipt)
         self.assertEqual((world.enabled, world.local_time), (True, '04:00'))
-        self.assertFalse(any(args[:2] == ('update', '--from') or args[:1] == ('update',) and len(args) > 1 and args[1] in ('install', 'download')
-                             for args in world.invoked), 'the check must not run an update command')
+        self.assertFalse(any(args[:2] == ('update', '--from') or args[:1] == ('update',) and len(args) > 1 and args[1] == 'install'
+                             for args in world.invoked), 'the check must not install an update itself')
+        # It downloads the release ahead (update_scheduled.py, F14-06) so the schedule step is not racing a download.
+        self.assertIn(('update', 'download'), [args[:2] for args in world.invoked])
         self.assertGreaterEqual(receipt['seconds_after_configured_time'], 0)
 
     def test_a_schedule_that_never_fires_fails_and_still_restores_the_settings(self):
