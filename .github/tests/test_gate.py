@@ -25,6 +25,9 @@ class SmokePrerequisiteTest(unittest.TestCase):
                 (root / f"tools/{name}.py").write_text("")
                 (root / f"tools/test_{name}.py").write_text(
                     "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
+            (root / "tools/quick-update").mkdir()
+            (root / "tools/quick-update/test_fixture.py").write_text(
+                "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
             (root / "deploy/test_fixture.py").write_text(
                 "import unittest\n\nclass Fixture(unittest.TestCase):\n    def test_ok(self):\n        pass\n")
             shutil.copy2(GATE, root / "tools/gate.sh")
