@@ -42,8 +42,18 @@ type Plane struct {
 	headers     []http.Header
 	failures    atomic.Int32
 	failStatus  atomic.Int32
+	cuts        atomic.Int32
 	proofs      chan Proof
+	server      *httptest.Server
 }
+
+// CutNext closes the connection of the next n waits without an answer: a wait written onto a
+// kept-alive connection the proxy closed during a reload.
+func (p *Plane) CutNext(n int32) { p.cuts.Store(n) }
+
+// KeepAlives turns connection reuse off and on. Off is what a proxy reload does to the old
+// configuration's client connections: idle ones close, held ones close after their answer.
+func (p *Plane) KeepAlives(on bool) { p.server.Config.SetKeepAlivesEnabled(on) }
 
 // Publish bumps a topic's generation and releases waiting requests.
 func (p *Plane) Publish(topic machineevents.Topic) {
@@ -94,6 +104,13 @@ func (p *Plane) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.requests = append(p.requests, request.Topics)
 	p.headers = append(p.headers, r.Header.Clone())
 	p.mu.Unlock()
+	if p.cuts.Load() > 0 {
+		p.cuts.Add(-1)
+		if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+			_ = conn.Close()
+		}
+		return
+	}
 	for {
 		// A scripted failure also ends a wait that is already held, so a test that calls FailNext and
 		// then publishes gets the outage it asked for whichever request was in flight.
@@ -138,6 +155,7 @@ func StartWith(t *testing.T, fallback time.Duration, transport func(*httptest.Se
 	t.Helper()
 	plane := &Plane{generations: map[string]int64{}, wake: make(chan struct{}, 64), proofs: make(chan Proof, 64)}
 	server := httptest.NewTLSServer(plane)
+	plane.server = server
 	t.Cleanup(server.Close)
 	signer := auth{proofs: plane.proofs}
 	var operations atomic.Int64

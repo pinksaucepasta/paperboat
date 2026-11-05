@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -54,5 +56,31 @@ func TestWaitMachineEvents(t *testing.T) {
 	}
 	if _, err = client.WaitMachineEvents(context.Background(), "", nil); err == nil {
 		t.Fatal("empty machine id accepted")
+	}
+}
+
+// A server rollout's proxy reload closes kept-alive connections; a wait written onto one as it
+// closes gets no answer. A wait is a read, so it is resent on a fresh connection, not failed.
+func TestWaitMachineEventsSurvivesARolloutCut(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if requests.Add(1) == 2 {
+			if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "user-token"}, server.Client())
+	for i := range 2 {
+		if _, err := client.WaitMachineEvents(context.Background(), "machine_1", nil); err != nil {
+			t.Fatalf("wait %d: %v", i+1, err)
+		}
+	}
+	if requests.Load() != 3 {
+		t.Fatalf("server saw %d waits, want 3 (one resent)", requests.Load())
 	}
 }

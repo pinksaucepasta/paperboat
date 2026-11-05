@@ -28,6 +28,9 @@ func (c *Client) WaitMachineEvents(ctx context.Context, machineID string, known 
 	if err != nil {
 		return nil, err
 	}
+	// A wait is a read: net/http resends it on a fresh connection when a server rollout closed the
+	// kept-alive one it was written onto. A nil value is not sent on the wire.
+	request.Header["Idempotency-Key"] = nil
 	response, err := c.http.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("call POST %s: %w", path, err)
