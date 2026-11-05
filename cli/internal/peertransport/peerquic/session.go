@@ -300,7 +300,18 @@ func (l *Listener) ClosingDeadline() time.Time {
 	return l.closingUntil
 }
 
-func (s *Session) Close() error {
+// RestartingCode closes a connection whose carrier generation is retiring, as
+// tailscale's derp FrameRestarting (~/ref/tailscale/derp/derp.go:128): the peer
+// reconnects at once, replaying its terminal from its sequence, on the generation
+// its signed configuration names.
+const RestartingCode quic.ApplicationErrorCode = 1
+
+func (s *Session) Close() error { return s.close(0) }
+
+// CloseRestarting closes with RestartingCode.
+func (s *Session) CloseRestarting() error { return s.close(RestartingCode) }
+
+func (s *Session) close(code quic.ApplicationErrorCode) error {
 	if s == nil || s.Connection == nil {
 		return nil
 	}
@@ -314,7 +325,7 @@ func (s *Session) Close() error {
 		// Initiate it asynchronously and bound the flush wait so carrier cleanup
 		// cannot stall on a peer that is already unreachable.
 		connectionDone := make(chan error, 1)
-		go func() { connectionDone <- s.Connection.CloseWithError(0, "") }()
+		go func() { connectionDone <- s.Connection.CloseWithError(code, "") }()
 		var connectionErr error
 		select {
 		case connectionErr = <-connectionDone:

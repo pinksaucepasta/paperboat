@@ -458,7 +458,13 @@ func (o *Owner) add(session *Session) error {
 }
 func (o *Owner) remove(session *Session) { o.mu.Lock(); delete(o.sessions, session); o.mu.Unlock() }
 
-func (o *Owner) Close() error {
+func (o *Owner) Close() error { return o.close((*Session).Close) }
+
+// CloseRestarting closes like Close, each session with the restart code: a
+// retiring generation's clients reconnect at once on the current one.
+func (o *Owner) CloseRestarting() error { return o.close((*Session).CloseRestarting) }
+
+func (o *Owner) close(closeSession func(*Session) error) error {
 	o.mu.Lock()
 	if o.closed {
 		o.mu.Unlock()
@@ -480,9 +486,16 @@ func (o *Owner) Close() error {
 	var closing sync.WaitGroup
 	for i, session := range sessions {
 		closing.Add(1)
-		go func() { defer closing.Done(); failures[i] = session.Close() }()
+		go func() { defer closing.Done(); failures[i] = closeSession(session) }()
 	}
 	closing.Wait()
+	// Closing the networks next drops a CONNECTION_CLOSE still queued in them
+	// (a restart close never reached its client): keep them for its closing period.
+	var wait time.Duration
+	for _, session := range sessions {
+		wait = max(wait, session.quic.ClosingPeriod())
+	}
+	time.Sleep(wait)
 	o.closeCarrierNetworks()
 	result := errors.Join(failures...)
 	result = errors.Join(result, o.authority.Close())

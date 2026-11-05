@@ -30,6 +30,9 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 	apps := g.apps
 	g.run = run
 	g.serve = func(serveCtx context.Context, session *native.Session) error {
+		if s.refuseNew.Load() {
+			return session.CloseRestarting()
+		}
 		return apps.Serve(nativePeerApplicationContext(serveCtx, daemon), session)
 	}
 	g.network, err = g.owner.StartCarrierNetwork(run, identity, name, g.serve)
@@ -187,6 +190,18 @@ func (g *productionNativePeerGeneration) sendCarrierReports(ctx context.Context)
 			}
 		}
 	}
+}
+
+// restartSessions closes the current generation's connections with the restart
+// code, so what a retired generation still holds reattaches on the current one.
+func (s *productionNativePeerService) restartSessions() error {
+	s.mu.Lock()
+	generation := s.current
+	s.mu.Unlock()
+	if generation == nil || generation.owner == nil {
+		return nil
+	}
+	return generation.owner.CloseRestarting()
 }
 
 // drainStreams waits until no application stream is served, polling, for at

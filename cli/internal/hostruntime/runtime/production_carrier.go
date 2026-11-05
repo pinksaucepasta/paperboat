@@ -278,14 +278,29 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	return result
 }
 
-// Drain lets a retired generation finish: new SSH is fenced, and it returns
-// once no SSH bridge or other application stream is open, or at
-// runtimewire.DrainLimit. Clients open new connections on the newer
-// generation their signed configuration offers.
+// Drain lets a retired generation finish, as nginx's old workers and Teleport's
+// sshserver Shutdown do (~/ref/nginx/src/os/unix/ngx_process_cycle.c,
+// ~/ref/teleport/lib/srv/regular/sshserver.go:449): it serves every connection it
+// holds until the last stream ends, or the same cap as SSH. For generationOverlap
+// it also admits new connections while clients learn the new generation from
+// their signed configuration; after that it refuses them with the restart code.
+// What remains at the end reattaches on the new generation with sequence replay.
 func (c *ProductionCarrier) Drain(ctx context.Context) error {
+	return c.drain(ctx, generationOverlap, runtimewire.DrainLimit)
+}
+
+func (c *ProductionCarrier) drain(ctx context.Context, overlapFor, limit time.Duration) error {
 	c.peer.retired.Store(true)
+	overlap := time.AfterFunc(overlapFor, func() { c.peer.refuseNew.Store(true) })
+	defer overlap.Stop()
 	ssh := make(chan error, 1)
 	go func() { ssh <- c.ssh.Drain(ctx) }()
-	streams := c.peer.drainStreams(ctx, runtimewire.DrainLimit)
-	return errors.Join(streams, <-ssh)
+	streams := c.peer.drainStreams(ctx, limit)
+	c.peer.refuseNew.Store(true)
+	return errors.Join(streams, <-ssh, c.peer.restartSessions())
 }
+
+// generationOverlap bounds how long a retired generation admits new connections:
+// the signed configuration naming the new one reaches peers on change
+// notification within seconds.
+const generationOverlap = 30 * time.Second
