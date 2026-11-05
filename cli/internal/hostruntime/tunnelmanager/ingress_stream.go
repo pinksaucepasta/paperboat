@@ -70,6 +70,7 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	ctx = context.WithValue(ctx, ingressExpiryKey{}, current.ExpiresAt)
 	lease, err := admission.Admit(ctx, current.ExpiresAt, nil)
 	if err != nil {
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "admission")
 		return fail(err)
 	}
 	stopIO := lease.Bind(stream)
