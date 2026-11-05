@@ -69,7 +69,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	}
 
 	return installDarwin(ctx, executable, darwinInstallConfig{
-		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath,
+		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, NewsyslogPath: darwinNewsyslogPath,
 		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, StateDir: DefaultStateDir,
 		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, RollbackState: &oldState, Undo: undo,
 	})
@@ -77,6 +77,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 
 type darwinInstallConfig struct {
 	HelperPath, LaunchPath, Label, Socket, Account string
+	NewsyslogPath                                  string // set for the real install; tests leave it empty
 	StateDir                                       string
 	LaunchMarker                                   string
 	RollbackState                                  *loopbackState
@@ -173,6 +174,13 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	rollback.record(cfg.LaunchPath)
 	if err != nil {
 		return err
+	}
+	if cfg.NewsyslogPath != "" {
+		err = darwinWrite(cfg.NewsyslogPath, []byte(darwinNewsyslogConf), 0644)
+		rollback.record(cfg.NewsyslogPath)
+		if err != nil {
+			return err
+		}
 	}
 	if _, err = darwinRun(ctx, "", "/usr/bin/plutil", "-lint", cfg.LaunchPath); err != nil {
 		return err

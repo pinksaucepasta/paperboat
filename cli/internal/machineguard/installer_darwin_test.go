@@ -30,6 +30,7 @@ func TestDarwinInstallerLaunchdLifecycle(t *testing.T) {
 	account := "_paperboat_review_" + id
 	cfg := darwinInstallConfig{
 		HelperPath: helper, LaunchPath: plist, Label: label, Socket: socket, Account: account,
+		NewsyslogPath:   filepath.Join(t.TempDir(), "io.paperboat.conf"),
 		LaunchArguments: []string{"-test.run=TestDarwinInstallerReadinessChild", "--", "readiness-child", socket},
 		InstallAccount:  false,
 	}
@@ -55,6 +56,10 @@ func TestDarwinInstallerLaunchdLifecycle(t *testing.T) {
 		t.Fatalf("first install: %v", err)
 	}
 	assertDarwinInstallerReady(t, socket)
+	// Install bounds the launchd logs with its newsyslog rotation.
+	if conf, err := os.ReadFile(cfg.NewsyslogPath); err != nil || string(conf) != darwinNewsyslogConf {
+		t.Fatalf("install did not write the newsyslog rotation: %v", err)
+	}
 	if err := installDarwin(ctx, executable, cfg); err != nil {
 		t.Fatalf("restart install: %v", err)
 	}

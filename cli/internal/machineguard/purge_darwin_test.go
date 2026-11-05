@@ -46,11 +46,12 @@ func newDarwinPurgeFixture(t *testing.T) *darwinPurgeFixture {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	fixture := &darwinPurgeFixture{
 		paths: darwinPurgePaths{
-			LaunchPath: filepath.Join(root, "LaunchDaemons", "io.paperboat.machineguard.plist"),
-			HelperPath: filepath.Join(root, "PrivilegedHelperTools", "io.paperboat.machineguard"),
-			StateDir:   filepath.Join(root, "Application Support", "Paperboat", "machineguard"),
-			SocketDir:  filepath.Join(root, "Application Support", "Paperboat", "machineguard-control"),
-			Anchor:     "com.apple/000.paperboat-machineguard",
+			LaunchPath:    filepath.Join(root, "LaunchDaemons", "io.paperboat.machineguard.plist"),
+			HelperPath:    filepath.Join(root, "PrivilegedHelperTools", "io.paperboat.machineguard"),
+			NewsyslogPath: filepath.Join(root, "newsyslog.d", "io.paperboat.conf"),
+			StateDir:      filepath.Join(root, "Application Support", "Paperboat", "machineguard"),
+			SocketDir:     filepath.Join(root, "Application Support", "Paperboat", "machineguard-control"),
+			Anchor:        "com.apple/000.paperboat-machineguard",
 		},
 		dsclRecord: map[string]string{},
 	}
@@ -315,7 +316,7 @@ func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 	f.paths.LegacyLaunchPath = filepath.Join(filepath.Dir(f.paths.LaunchPath), "io.paperboat.deviceguard.plist")
 	f.paths.LegacyHelperPath = filepath.Join(filepath.Dir(f.paths.HelperPath), "io.paperboat.deviceguard")
 	f.paths.LegacyAnchor = "com.apple/000.paperboat-deviceguard"
-	for _, path := range []string{f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath} {
+	for _, path := range []string{f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath, f.paths.NewsyslogPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +339,8 @@ func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 	if err := f.purge(context.Background()); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
-	for _, path := range []string{f.paths.StateDir, f.paths.SocketDir, f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath} {
+	// The log rotation installed with the guard is removed with it.
+	for _, path := range []string{f.paths.StateDir, f.paths.SocketDir, f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath, f.paths.NewsyslogPath} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists (err=%v)", path, err)
 		}

@@ -36,3 +36,17 @@ func darwinGuardLaunchPlist(label string, programArguments []string) (string, er
 </dict></plist>
 `, darwinLaunchMarker, label, argumentXML.String(), logPath.String(), logPath.String()), nil
 }
+
+// darwinNewsyslogPath bounds every Paperboat launchd log: newsyslog (the macOS rotation, as Homebrew services
+// and Tailscale's standalone package use) rotates at 1 MB, keeps 3 and gzips them. Install writes it; purge
+// removes it.
+const darwinNewsyslogPath = "/etc/newsyslog.d/io.paperboat.conf"
+
+// darwinNewsyslogConf covers the guard's log (io.paperboat.*) and the per-user jobs' logs
+// (com.pinksaucepasta.paperboat.*). G: glob, Z: gzip, N: send no signal (launchd jobs write to the file that
+// launchd opened; the next start opens a new one).
+const darwinNewsyslogConf = `# Managed by Paperboat machine guard: rotate Paperboat launchd logs at 1 MB, keep 3, gzip.
+# logfilename                                   mode count size when flags
+/var/log/io.paperboat.*.log                     644  3     1024 *    GZN
+/var/log/com.pinksaucepasta.paperboat.*.log     644  3     1024 *    GZN
+`

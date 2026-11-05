@@ -22,3 +22,18 @@ func TestDarwinGuardLaunchPlistLogsLikeTheOtherJobs(t *testing.T) {
 		}
 	}
 }
+
+// Paperboat launchd logs are bounded by newsyslog: both log prefixes, 1 MB, keep 3, gzip, glob, no signal.
+func TestDarwinNewsyslogBoundsEveryPaperboatLaunchdLog(t *testing.T) {
+	for _, want := range []string{
+		"/var/log/io.paperboat.*.log                     644  3     1024 *    GZN",
+		"/var/log/com.pinksaucepasta.paperboat.*.log     644  3     1024 *    GZN",
+	} {
+		if !strings.Contains(darwinNewsyslogConf, want) {
+			t.Fatalf("newsyslog conf lacks %q:\n%s", want, darwinNewsyslogConf)
+		}
+	}
+	if darwinNewsyslogPath != "/etc/newsyslog.d/io.paperboat.conf" {
+		t.Fatalf("newsyslog path %s", darwinNewsyslogPath)
+	}
+}

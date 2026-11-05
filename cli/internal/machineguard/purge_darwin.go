@@ -37,6 +37,7 @@ func Purge(ctx context.Context) error {
 		Paths: darwinPurgePaths{
 			LaunchPath:       darwinLaunchPath,
 			HelperPath:       darwinHelperPath,
+			NewsyslogPath:    darwinNewsyslogPath,
 			StateDir:         DefaultStateDir,
 			SocketDir:        filepath.Dir(DefaultSocket),
 			Anchor:           darwinAnchor,
@@ -54,7 +55,7 @@ func Purge(ctx context.Context) error {
 }
 
 type darwinPurgePaths struct {
-	LaunchPath, HelperPath                           string
+	LaunchPath, HelperPath, NewsyslogPath            string
 	StateDir, SocketDir                              string
 	Anchor                                           string
 	LegacyLaunchPath, LegacyHelperPath, LegacyAnchor string
@@ -140,7 +141,7 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 		defer func() { resultErr = errors.Join(resultErr, legacyLock.Close()) }()
 	}
 
-	result = errors.Join(result, removeOwnedPath(paths.LaunchPath), removeOwnedPath(paths.HelperPath))
+	result = errors.Join(result, removeOwnedPath(paths.LaunchPath), removeOwnedPath(paths.HelperPath), removeOwnedPath(paths.NewsyslogPath))
 	if paths.LegacyLaunchPath != "" {
 		result = errors.Join(result, removeOwnedPath(paths.LegacyLaunchPath), removeOwnedPath(paths.LegacyHelperPath))
 	}
