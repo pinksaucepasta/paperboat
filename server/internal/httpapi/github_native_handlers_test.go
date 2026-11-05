@@ -91,8 +91,13 @@ func TestGitHubOAuthCallbackSeparatesRejectionAndOperationalFailure(t *testing.T
 			store.mu.Lock()
 			defer store.mu.Unlock()
 			if !tc.wantCapture {
-				if len(store.records) != 0 {
-					t.Fatalf("expected rejection created support records: %+v", store.records)
+				// An expected rejection is stored only as a rejection under the response's reference, so the
+				// reference resolves; it never becomes a failure record.
+				if len(store.records) != 1 || store.records[0].Outcome != "rejected" || store.records[0].Reference != reference {
+					t.Fatalf("expected rejection should be one rejected record under its reference: %+v", store.records)
+				}
+				if strings.Contains(strings.Join(store.records[0].ErrorChain, " "), privateDetail) {
+					t.Fatal("rejection record disclosed provider detail")
 				}
 				if !strings.Contains(logs.String(), "outcome=rejected") {
 					t.Fatalf("expected OAuth rejection lacked a local warning: %s", logs.String())

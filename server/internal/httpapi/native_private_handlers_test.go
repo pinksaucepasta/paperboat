@@ -77,10 +77,19 @@ func TestNativePrivateGrantKeepsOperationalCauseAndExpectedDenialStatus(t *testi
 	<-reportsDone
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if len(store.records) != 1 {
-		t.Fatalf("support records = %d; want one unexpected-failure record", len(store.records))
+	// The expected denial is stored as a rejection (its support reference resolves); exactly one record is
+	// the unexpected failure.
+	var failures []supportreport.Record
+	for _, r := range store.records {
+		if r.Outcome == "rejected" {
+			continue
+		}
+		failures = append(failures, r)
 	}
-	record := store.records[0]
+	if len(failures) != 1 {
+		t.Fatalf("support failure records = %d; want one unexpected-failure record (all: %+v)", len(failures), store.records)
+	}
+	record := failures[0]
 	if record.Cause != "connection_refused" || record.Errno != int(syscall.ECONNREFUSED) || !strings.Contains(response.Body.String(), record.Reference) {
 		t.Fatalf("support record lost original cause or request correlation: %+v", record)
 	}

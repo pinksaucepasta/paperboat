@@ -132,8 +132,9 @@ func TestSupportSignalsConnectedHTTPOutcomesAndParent(t *testing.T) {
 		if records[i].Code == "provider_unavailable" {
 			unavailable = &records[i]
 		}
-		if records[i].Code == "forbidden" {
-			t.Fatal("expected HTTP rejection was unexpectedly captured")
+		// An expected rejection is stored so its support reference resolves, but only as a rejection.
+		if records[i].Code == "forbidden" && records[i].Outcome != "rejected" {
+			t.Fatalf("expected HTTP rejection was captured as a failure: %+v", records[i])
 		}
 		if records[i].Code == "authorization_unavailable" && records[i].Cause == "connection_reset" {
 			if records[i].HTTPStatus != 503 || records[i].CorrelationID != ref {
@@ -160,8 +161,8 @@ func TestSupportSignalsConnectedHTTPOutcomesAndParent(t *testing.T) {
 				t.Fatalf("team default outage cause/reference/status was not retained: %+v", records[i])
 			}
 		}
-		if records[i].Code == "machine_identity_invalid" {
-			t.Fatal("expected machine proof rejection was unexpectedly captured")
+		if records[i].Code == "machine_identity_invalid" && records[i].Outcome != "rejected" {
+			t.Fatalf("expected machine proof rejection was captured as a failure: %+v", records[i])
 		}
 	}
 	if unavailable == nil || unavailable.Cause != "network_timeout" || unavailable.Severity != "error" || unavailable.HTTPStatus != 503 || unavailable.CorrelationID != ref {
