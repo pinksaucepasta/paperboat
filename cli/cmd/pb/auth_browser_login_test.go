@@ -655,6 +655,7 @@ func TestBrowserLoginPollDecodeFailureRetainsCauseAndPendingGrant(t *testing.T) 
 type loginDeviceFixture struct {
 	authorize  map[string]any
 	enrollment map[string]any
+	approvedBy string // set: /v1/me answers this other account (an approval by the wrong account)
 }
 
 func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
@@ -674,6 +675,10 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 			}
 			writeAPIData(t, w, token)
 		case "/v1/me":
+			if f.approvedBy != "" {
+				writeAPIData(t, w, map[string]string{"id": "usr_other", "email": f.approvedBy, "status": "active"})
+				return
+			}
 			writeAPIData(t, w, map[string]string{"id": "usr_browser", "email": "browser@example.test", "status": "active"})
 		case "/v1/e2ee/bootstrap":
 			acceptBrowserPeerEnrollment(t, w, r, "usr_browser", "cls_browser")
