@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -68,7 +69,7 @@ func NewNativePrivateTCPAccess(config NativePrivateTCPAccessConfig) (*NativePriv
 		return nil, ErrPrivateTCPClientInvalid
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = func() time.Time { return serverclock.Now().UTC() }
 	}
 	if config.MaximumBytes == 0 {
 		config.MaximumBytes = 1 << 40
@@ -102,10 +103,8 @@ func (a *NativePrivateTCPAccess) openGrant(ctx context.Context, operationID stri
 	}
 	stopCancel := context.AfterFunc(ctx, func() { _ = connection.Close(); _ = session.Close() })
 	defer stopCancel()
-	deadline := a.config.Now().Add(10 * time.Second)
-	if grant.ExpiresAt.Before(deadline) {
-		deadline = grant.ExpiresAt
-	}
+	// A socket deadline runs on the local clock; the grant's expiry is the server's (F21-02).
+	deadline := time.Now().Add(min(10*time.Second, grant.ExpiresAt.Sub(a.config.Now())))
 	if err = connection.SetReadDeadline(deadline); err != nil {
 		_ = connection.Close()
 		_ = session.Close()

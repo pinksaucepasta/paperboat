@@ -22,7 +22,6 @@ func TestBindingRequiresExactCurrentLoopbackTarget(t *testing.T) {
 		"protocol substitution": func(v *Binding) { v.Protocol = "http" },
 		"network target":        func(v *Binding) { v.TargetAddress = "192.0.2.1:22" },
 		"hostname target":       func(v *Binding) { v.TargetAddress = "localhost:22" },
-		"expired":               func(v *Binding) { v.ExpiresAt = now },
 	} {
 		t.Run(name, func(t *testing.T) {
 			value := validBinding(now)
@@ -31,6 +30,12 @@ func TestBindingRequiresExactCurrentLoopbackTarget(t *testing.T) {
 				t.Fatalf("invalid binding accepted: %#v", value)
 			}
 		})
+	}
+	// Past its expiry a binding is refused by name, so the host logs why (F21-02).
+	expired := validBinding(now)
+	expired.ExpiresAt = now
+	if !errors.Is(expired.Validate(now), ErrExpired) {
+		t.Fatalf("expired binding error = %v, want ErrExpired", expired.Validate(now))
 	}
 }
 
@@ -44,7 +49,7 @@ func TestBindingExpiryGatesAdmissionButNotAdmittedShape(t *testing.T) {
 		t.Fatal("issuer lifetime rejected", err)
 	}
 	after := binding.ExpiresAt.Add(time.Second)
-	if err := binding.Validate(after); !errors.Is(err, ErrInvalid) {
+	if err := binding.Validate(after); !errors.Is(err, ErrExpired) {
 		t.Fatal("expired binding admitted new work", err)
 	}
 	if err := binding.ValidateShape(); err != nil {

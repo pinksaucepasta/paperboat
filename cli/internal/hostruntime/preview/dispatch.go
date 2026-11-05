@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -229,7 +230,7 @@ func NewDispatchManager(config DispatchManagerConfig) (*DispatchManager, error) 
 		return nil, ErrDispatchInvalid
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = func() time.Time { return serverclock.Now().UTC() }
 	}
 	parent := config.RunContext
 	if parent == nil {

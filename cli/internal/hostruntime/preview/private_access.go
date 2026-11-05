@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"golang.org/x/net/idna"
 )
 
@@ -102,7 +103,7 @@ func newPrivateAccessGrantClient(controlURL string, auth privateAccessMachineAut
 		transport = httptransport.Default()
 	}
 	return &privateAccessGrantClient{
-		endpoint: endpoint, auth: auth, now: func() time.Time { return time.Now().UTC() },
+		endpoint: endpoint, auth: auth, now: func() time.Time { return serverclock.Now().UTC() },
 		client: &http.Client{Transport: errorreport.TransportOperation(transport, endpoint.String(), "private_authorization"), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrPrivateAccessInvalid }},
 	}, nil
 }
@@ -211,7 +212,7 @@ func newPrivateAccessSource(grants *privateAccessGrantClient) (*PrivateAccessSou
 		return nil, ErrPrivateAccessInvalid
 	}
 	return &PrivateAccessSource{
-		grants: grants, now: func() time.Time { return time.Now().UTC() },
+		grants: grants, now: func() time.Time { return serverclock.Now().UTC() },
 		ownerRoutes: make(map[string]privateAccessRoute), discoveredRoutes: make(map[string]privateAccessRoute),
 	}, nil
 }

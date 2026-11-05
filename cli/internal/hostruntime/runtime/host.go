@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -461,7 +462,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 				if dispatchConfig.Current == nil || dispatchConfig.DialPrivate == nil {
 					return server.ErrNativePrivateBinding
 				}
-				binding, err := nativeprivate.Decode([]byte(header.Target), time.Now().UTC())
+				binding, err := nativeprivate.Decode([]byte(header.Target), serverclock.Now().UTC())
 				if err != nil {
 					return err
 				}

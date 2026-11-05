@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 func TestIngressForwarderOutlivesAdmissionAndRevokesActiveBody(t *testing.T) {
@@ -21,6 +22,18 @@ func TestIngressForwarderOutlivesAdmissionAndRevokesActiveBody(t *testing.T) {
 }
 func TestIngressForwarderRevocationClosesActiveOrigin(t *testing.T) {
 	testIngressForwarderAuthority(t, 10*time.Second, true)
+}
+
+// F21-02: the edge's ingress decision is stamped on the server clock and lives seconds. A host 10 min ahead read
+// it as expired, 10 min behind as issued in the future; both refused every tunnel request.
+func TestIngressForwarderAdmitsEdgeDecisionsUnderClockSkew(t *testing.T) {
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	for name, hostAhead := range map[string]time.Duration{"host 10 min ahead": 10 * time.Minute, "host 10 min behind": -10 * time.Minute} {
+		t.Run(name, func(t *testing.T) {
+			serverclock.Observe(time.Now().Add(-hostAhead).UTC().Format(http.TimeFormat), time.Now(), time.Now())
+			testIngressForwarderAuthority(t, time.Second, false)
+		})
+	}
 }
 func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -60,7 +73,7 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 	defer active.Close(context.Background())
 	defer edge.Close()
 	route := hoststate.TunnelConfigRoute{ID: "route-1", Protocol: "http", OriginScheme: "http", OriginAddress: origin.Listener.Addr().String(), TLSVerification: "not_applicable", PreserveHost: true, ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, MaxConcurrentStreams: 2, DesiredState: "active"}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC() // the edge stamps decisions on its (the server's) clock
 	d := connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{EnvironmentID: "env-1", AccountID: identity.AccountID, TunnelID: identity.TunnelID, Lifecycle: "durable", ResourceGeneration: 1, RouteID: route.ID, RouteGeneration: 1, TargetID: route.ID, TargetGeneration: 1, HostID: identity.HostID, InstallationGeneration: 1, Audience: "public", ConnectionMethod: "edge", Protocol: "http", Hostname: "app.example.test", PathPrefix: "/", OriginScheme: "http", OriginAddress: route.OriginAddress, TLSVerification: route.TLSVerification, PublicationID: route.ID, PublicationGeneration: 1}, DecisionID: "decision-1", PolicyGeneration: 1, EdgeNodeID: "edge-1", EdgeProcessEpoch: "epoch-1234567890123456789012345678", ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, Action: "view", IssuedAt: now, ExpiresAt: now.Add(lifetime)}
 	f := OriginStreamForwarder{Transport: &OriginHTTPTransport{}, IngressAuthority: func(context.Context, connectorprotocol.StreamOpen, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		if revoked.Load() {
@@ -82,7 +95,7 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 		if err := connectorprotocol.WriteStreamOpen(s, preface); err != nil {
 			t.Fatal(err)
 		}
-		if err := connectorprotocol.WriteIngressDecision(s, decision, time.Now().UTC()); err != nil {
+		if err := connectorprotocol.WriteIngressDecision(s, decision, serverclock.Now().UTC()); err != nil {
 			t.Fatal(err)
 		}
 		return s
@@ -120,7 +133,7 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 		select {
 		case <-stopped:
 			t.Fatal("credential expiry canceled admitted origin")
-		case <-time.After(time.Until(d.ExpiresAt) + 100*time.Millisecond):
+		case <-time.After(serverclock.Until(d.ExpiresAt) + 100*time.Millisecond):
 		}
 	}
 	revoked.Store(true)

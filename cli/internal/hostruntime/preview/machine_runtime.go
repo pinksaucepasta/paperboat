@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var (
@@ -223,7 +224,7 @@ func (r *MachinePreviewRuntime) ResolvePreviewCarrier(ctx context.Context, reque
 	if r == nil || ctx == nil {
 		return nil, ErrMachinePreviewRuntimeInvalid
 	}
-	if _, err := request.Validate(r.machineID, time.Now().UTC()); err != nil {
+	if _, err := request.Validate(r.machineID, serverclock.Now().UTC()); err != nil {
 		return nil, err
 	}
 	return r.NewCarrier(ctx, request.Target, request.OwnerMachineID, request.OwnerSessionID)

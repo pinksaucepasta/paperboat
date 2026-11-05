@@ -1,13 +1,16 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -23,15 +26,17 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	if ctx == nil || client == nil || current == nil || dial == nil || header.Consumer != "private_tcp" {
 		return ErrNativePrivateBinding
 	}
-	binding, err := nativeprivate.Decode([]byte(header.Target), time.Now().UTC())
+	binding, err := nativeprivate.Decode([]byte(header.Target), serverclock.Now().UTC())
 	if err != nil || binding.Protocol != "tcp" || binding.TargetScheme != "tcp" {
+		recordNativeAdmissionFailure("private_binding", cmp.Or(err, nativeprivate.ErrInvalid))
 		return ErrNativePrivateBinding
 	}
 	validUntil, revoked, err := current(ctx, binding)
 	if err != nil {
 		return classifyNativePrivateFailure("peer_authority", "peer_authority_failed", err)
 	}
-	if !validUntil.After(time.Now().UTC()) {
+	if !validUntil.After(serverclock.Now().UTC()) {
+		recordNativeAdmissionFailure("private_access", errNativePrivateAccessExpired)
 		return ErrNativePrivateBinding
 	}
 	if binding.ExpiresAt.Before(validUntil) {

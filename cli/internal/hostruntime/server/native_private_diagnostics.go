@@ -52,6 +52,10 @@ func classifyNativePrivateFailure(stage, code string, err error) error {
 	return &nativePrivateFailure{stage: stage, code: code, err: err}
 }
 
+// errNativePrivateAccessExpired is the host's current access record for a private stream already ended on
+// the server clock: the refusal reason the host logs (F21-02).
+var errNativePrivateAccessExpired = errors.New("native private access expired")
+
 func expectedNativePrivateTermination(err error) bool {
 	return allErrorLeavesMatch(err, func(leaf error) bool {
 		return leaf == context.Canceled || leaf == io.EOF || leaf == io.ErrClosedPipe || leaf == net.ErrClosed

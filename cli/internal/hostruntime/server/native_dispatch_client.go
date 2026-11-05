@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -287,7 +288,7 @@ func (c *NativeDispatchClient) Current(ctx context.Context, binding nativeprivat
 	if err != nil {
 		return time.Time{}, nil, err
 	}
-	if !response.ValidUntil.After(time.Now()) {
+	if !response.ValidUntil.After(serverclock.Now()) {
 		return time.Time{}, nil, ErrNativePrivateBinding
 	}
 	lease, err := admission.Admit(ctx, response.ValidUntil, nil)

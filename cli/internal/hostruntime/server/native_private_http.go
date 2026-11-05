@@ -1,22 +1,25 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"
 	"sync/atomic"
-	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+
+	"net/url"
 
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/quic-go/quic-go/http3"
-	"net/url"
 )
 
 // ServeNativePrivateHTTP3 hands one authenticated preview-class native
@@ -49,7 +52,7 @@ func ServeNativePrivateHTTP3WithBindingDial(ctx context.Context, session *native
 			return
 		}
 		encoded, decodeErr := base64.RawURLEncoding.DecodeString(request.Header.Get("X-Paperboat-Native-Authorization"))
-		header, parseErr := streamauth.Parse(encoded, time.Now().UTC())
+		header, parseErr := streamauth.Parse(encoded, serverclock.Now().UTC())
 		var accessSessionID string
 		meterAuthorize := func(ctx context.Context, header streamauth.Header) (string, error) {
 			var err error
@@ -69,8 +72,9 @@ func ServeNativePrivateHTTP3WithBindingDial(ctx context.Context, session *native
 			http.Error(writer, "private HTTP authority unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		binding, bindingErr := nativeprivate.Decode([]byte(header.Target), time.Now().UTC())
+		binding, bindingErr := nativeprivate.Decode([]byte(header.Target), serverclock.Now().UTC())
 		if bindingErr != nil || binding.Protocol != "http" {
+			recordNativeAdmissionFailure("private_binding", cmp.Or(bindingErr, nativeprivate.ErrInvalid))
 			http.Error(writer, "private HTTP access denied", http.StatusForbidden)
 			return
 		}
@@ -84,7 +88,8 @@ func ServeNativePrivateHTTP3WithBindingDial(ctx context.Context, session *native
 			http.Error(writer, "private HTTP authority unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if !validUntil.After(time.Now().UTC()) {
+		if !validUntil.After(serverclock.Now().UTC()) {
+			recordNativeAdmissionFailure("private_access", errNativePrivateAccessExpired)
 			http.Error(writer, "private HTTP access denied", http.StatusForbidden)
 			return
 		}

@@ -1,15 +1,11 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/inspector"
-	"github.com/pinksaucepasta/paperboat/shared/admission"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +13,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -228,7 +230,7 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				lifetime, cancel := context.WithCancel(r.Context())
 				if header.Consumer != "terminal" && header.Consumer != "exec" && header.Consumer != "file_transfer" {
 					cancel()
-					lifetime, cancel = context.WithDeadline(r.Context(), time.Unix(header.DeadlineUnix, 0))
+					lifetime, cancel = context.WithTimeout(r.Context(), serverclock.Until(time.Unix(header.DeadlineUnix, 0)))
 				}
 				defer cancel()
 				if header.Consumer == "file_transfer" {
@@ -252,12 +254,13 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 			// The canonical binding alone determines the target; IPC never accepts
 			// a caller-selected network, hostname or filesystem path.
 			encoded, encodeErr := json.Marshal(binding)
-			verified, verifyErr := nativeprivate.Decode(encoded, time.Now().UTC())
+			verified, verifyErr := nativeprivate.Decode(encoded, serverclock.Now().UTC())
 			if operation == "current" {
 				verified = binding
 				verifyErr = binding.ValidateShape()
 			}
 			if encodeErr != nil || verifyErr != nil {
+				recordNativeAdmissionFailure("private_binding", errors.Join(encodeErr, verifyErr))
 				http.Error(w, "invalid dispatch binding", http.StatusBadRequest)
 				return
 			}
@@ -267,7 +270,8 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				http.Error(w, "dispatch authority unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			if err != nil || operation == "private" && !response.ValidUntil.After(time.Now()) {
+			if err != nil || operation == "private" && !response.ValidUntil.After(serverclock.Now()) {
+				recordNativeAdmissionFailure("private_access", cmp.Or(err, errNativePrivateAccessExpired))
 				http.Error(w, "dispatch binding denied", http.StatusForbidden)
 				return
 			}
@@ -380,10 +384,12 @@ func BridgeNativeDispatch(left, right net.Conn) error { return bridgeNativePriva
 func recordNativeAdmissionFailure(stage string, err error) {
 	reason := "application_failed"
 	switch {
-	case errors.Is(err, streamauth.ErrExpired):
+	case errors.Is(err, streamauth.ErrExpired), errors.Is(err, nativeprivate.ErrExpired), errors.Is(err, errNativePrivateAccessExpired):
 		reason = "deadline_passed"
 	case errors.Is(err, streamauth.ErrInvalid):
 		reason = "header_invalid"
+	case errors.Is(err, nativeprivate.ErrInvalid):
+		reason = "binding_invalid"
 	}
 	if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 		reason = "maintenance_busy"

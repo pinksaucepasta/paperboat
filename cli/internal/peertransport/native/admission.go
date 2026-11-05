@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/quic-go/quic-go"
 )
 
@@ -53,7 +54,7 @@ func (s *Session) openAdmitted(
 	ctx context.Context, header streamauth.Header, encoded []byte,
 	resource, capability string,
 ) (net.Conn, error) {
-	ctx, cancel := context.WithDeadline(ctx, time.Unix(header.DeadlineUnix, 0))
+	ctx, cancel := context.WithTimeout(ctx, serverclock.Until(time.Unix(header.DeadlineUnix, 0))) // local timer, server deadline (F21-02)
 	defer cancel()
 	for {
 		if err := ctx.Err(); err != nil {

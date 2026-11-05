@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -290,7 +291,7 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	var verifiedUntil time.Time
 	if m.validate != nil {
 		verifiedUntil, err = m.validate(r.Context(), tunnelID, routeID)
-		if err != nil || !verifiedUntil.After(time.Now().UTC()) {
+		if err != nil || !verifiedUntil.After(serverclock.Now().UTC()) {
 			logPrivateTCPAccessFailure(r.Context(), "validate", err)
 			writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
 			return

@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type ingressBindingKey struct{}
@@ -32,7 +33,7 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	fail := func(err error) (context.Context, context.CancelFunc, error) { cancel(); return nil, nil, err }
 	// A peer cannot hold origin admission indefinitely with a partial preface.
 	stopRead := time.AfterFunc(10*time.Second, func() { _ = stream.Close() })
-	decision, err := connectorprotocol.ReadIngressDecision(stream, time.Now().UTC())
+	decision, err := connectorprotocol.ReadIngressDecision(stream, serverclock.Now().UTC())
 	stopRead.Stop()
 	if err != nil {
 		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "decision_read")
@@ -49,7 +50,7 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 			return fail(connectorprotocol.ErrIngressDenied)
 		}
 	}
-	lookup, stopLookup := context.WithDeadline(ctx, decision.ExpiresAt)
+	lookup, stopLookup := context.WithTimeout(ctx, serverclock.Until(decision.ExpiresAt)) // local timer, server expiry (F21-02)
 	current, err := f.IngressAuthority(lookup, open, decision)
 	stopLookup()
 	if err != nil {
@@ -57,7 +58,7 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 		captureIngressFailure(ctx, "peer_authority", err)
 		return fail(ingressOperationFailure{cause: err})
 	}
-	if decision.Authorize(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
+	if decision.Authorize(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, serverclock.Now().UTC()) != nil {
 		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "authority_binding")
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
@@ -193,7 +194,7 @@ func (f OriginStreamForwarder) refreshIngress(ctx context.Context, open connecto
 	}
 	// Refresh grants time only; all independent authority dimensions remain
 	// identical for the existing application stream.
-	if err := current.Revalidate(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, time.Now().UTC()); err != nil {
+	if err := current.Revalidate(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, serverclock.Now().UTC()); err != nil {
 		return next, err
 	}
 	return next, nil

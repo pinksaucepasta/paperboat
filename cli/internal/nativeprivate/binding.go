@@ -21,6 +21,9 @@ const (
 
 var ErrInvalid = errors.New("invalid native private target binding")
 
+// ErrExpired is a well-formed binding past its server-issued expiry, judged on the server clock (F21-02).
+var ErrExpired = errors.New("native private target binding expired")
+
 type Binding struct {
 	UserID             string `json:"user_id,omitempty"`
 	CLIClientSessionID string `json:"cli_client_session_id,omitempty"`
@@ -46,10 +49,13 @@ type Binding struct {
 }
 
 func (b Binding) Validate(now time.Time) error {
-	if !b.ExpiresAt.After(now) {
-		return ErrInvalid
+	if err := b.ValidateShape(); err != nil {
+		return err
 	}
-	return b.ValidateShape()
+	if !b.ExpiresAt.After(now) {
+		return ErrExpired
+	}
+	return nil
 }
 
 // ValidateShape checks a previously admitted binding without reapplying its
@@ -87,8 +93,11 @@ func Decode(raw []byte, now time.Time) (Binding, error) {
 	var binding Binding
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&binding) != nil || decoder.Decode(&struct{}{}) != io.EOF || binding.Validate(now) != nil {
+	if decoder.Decode(&binding) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return Binding{}, ErrInvalid
+	}
+	if err := binding.Validate(now); err != nil {
+		return Binding{}, err
 	}
 	return binding, nil
 }

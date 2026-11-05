@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
 	"net/url"
@@ -235,7 +236,7 @@ func (c *accessorDiscoveryClient) fetchSnapshot(ctx context.Context) ([]accessor
 	}
 	seen := make(map[string]struct{}, len(out.Admissions))
 	for _, admission := range out.Admissions {
-		if admission.validate(time.Now().UTC()) != nil {
+		if admission.validate(serverclock.Now().UTC()) != nil {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
 		// A route is admitted once per edge of the account's pair (primary and fallback).

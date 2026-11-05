@@ -3,11 +3,11 @@ package server
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var ErrStreamAuthorization = errors.New("peer stream authorization failed")
@@ -40,7 +40,7 @@ func CredentialStreamAuthorizer(factory AuthorizerFactory) func(context.Context,
 			}
 		}
 		if header.Consumer == "private_http" || header.Consumer == "private_tcp" {
-			if _, err := RevalidateNativePrivate(authorization, header.Target, authorization.MachineID, time.Now().UTC()); err != nil {
+			if _, err := RevalidateNativePrivate(authorization, header.Target, authorization.MachineID, serverclock.Now().UTC()); err != nil {
 				return Authorization{}, errors.Join(ErrStreamAuthorization, err)
 			}
 		}
