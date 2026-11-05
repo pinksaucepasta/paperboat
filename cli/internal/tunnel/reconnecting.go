@@ -116,16 +116,18 @@ const flowControlStallThreshold = 50 * time.Millisecond
 // ReconnectingConn supervises unexpected transport loss while one session
 // loop retains ownership of stdin. Failed writes are never replayed.
 type ReconnectingConn struct {
-	plannedMovesOnly  bool
-	ctx               context.Context
-	cancel            context.CancelFunc
-	mu                sync.RWMutex
-	current           Conn
-	available         chan struct{}
-	redial            atomic.Bool
-	probed            atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
-	probing           atomic.Bool
-	linkStalled       atomic.Bool
+	plannedMovesOnly bool
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.RWMutex
+	current          Conn
+	available        chan struct{}
+	redial           atomic.Bool
+	probed           atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
+	probing          atomic.Bool
+	linkStalled      atomic.Bool
+	// refused is a permanent refusal the stalled-link probe met (access revoked); supervise ends with it.
+	refused           atomic.Pointer[error]
 	reconnect         ReconnectFunc
 	maxRetries        int
 	delay             time.Duration
@@ -256,6 +258,11 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		<-readDone
 		joinEnd(nil)
 		c.recordCompression(conn)
+		if refused := c.refused.Swap(nil); refused != nil {
+			c.notify(ReconnectFailed)
+			c.done <- reconnectResult{1, *refused}
+			return
+		}
 		if next := c.probed.Swap(nil); next != nil {
 			c.recordOldLink(connection, "supervise", "probe_adopted", nil)
 			c.redial.Store(false)
@@ -568,6 +575,12 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 		next, err := c.dialReconnect(c.ctx, "probeStalled", connection)
 		var stop stopReconnectError
 		if errors.As(err, &stop) {
+			// Final (access revoked): end the terminal with it now. Keeping the silent link only delayed it
+			// until the transport gave up, about 150 s of silence (F3-15 N13).
+			if still() {
+				c.refused.Store(&err)
+				_ = stalled.Close()
+			}
 			return
 		}
 		if err == nil && next != nil {
