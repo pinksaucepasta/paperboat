@@ -462,6 +462,12 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
+	if path == "/v1/nodes/heartbeat" {
+		// The heartbeat is a replayable UPDATE. Marking it idempotent lets net/http
+		// resend it once on a fresh connection when a server rollout closes the
+		// kept-alive one mid-request; a nil value is not sent on the wire.
+		request.Header["Idempotency-Key"] = nil
+	}
 	response, err := c.client.Do(request)
 	if err != nil {
 		return &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
