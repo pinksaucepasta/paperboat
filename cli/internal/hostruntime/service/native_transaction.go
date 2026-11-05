@@ -80,14 +80,14 @@ func (c *NativeTransactionalComponent) Inspect(ctx context.Context) (NativeCompo
 		if state.Registered || state.Enabled || state.Running || state.Ready {
 			return NativeComponentStatus{}, ErrLifecycleUncertain
 		}
-		return NativeComponentStatus{ID: c.id}, nil
+		return NativeComponentStatus{ID: c.id, Unit: c.installer.definitionPath}, nil
 	}
 	if err != nil {
 		return NativeComponentStatus{}, err
 	}
 	return NativeComponentStatus{
 		ID: c.id, Installed: true, Enabled: state.Enabled,
-		Running: state.Running, Ready: state.Ready, Definition: definition,
+		Running: state.Running, Ready: state.Ready, Definition: definition, Unit: c.installer.definitionPath,
 	}, nil
 }
 

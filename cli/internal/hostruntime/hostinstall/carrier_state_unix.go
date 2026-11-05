@@ -30,6 +30,9 @@ type unixCarrierBaseline struct {
 	Carrier     *CarrierConfig                  `json:"carrier,omitempty"`
 	Metadata    []byte                          `json:"metadata,omitempty"`
 	Worker      *installsource.Source           `json:"worker,omitempty"`
+	// Candidate is the source the interrupted operation installed: its generation's
+	// units are the ones the journal describes (recoveryRequest).
+	Candidate *installsource.Source `json:"candidate,omitempty"`
 }
 
 func deriveUnixCarrierConfig(r Request, paths installPaths) (CarrierConfig, error) {
@@ -49,7 +52,8 @@ func (s unixCarrierInstallation) Capture(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	baseline := unixCarrierBaseline{CarrierOnly: s.carrierOnly}
+	candidate := s.request.Source
+	baseline := unixCarrierBaseline{CarrierOnly: s.carrierOnly, Candidate: &candidate}
 	carrier, err := readCarrierConfigFile(ctx, s.paths.instance)
 	if err == nil {
 		if err = carrier.Source.Verify(carrier.Executable); err != nil {

@@ -188,18 +188,21 @@ func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int, aut
 	}
 	// A crash may publish metadata before the lifecycle receipt is removed.
 	// Restore its protected baseline before deciding whether this is a retry.
-	hostd, updater, err := pendingInstallers(previous, paths)
+	lifecycle, err := preparedLifecycle(previous, paths, authorize)
 	if err != nil {
 		return Request{}, nil, err
 	}
-	var host *service.Installer
-	host, err = hostInstallerWithMissing(previous, paths, true)
-	if err != nil {
+	// The journal of an interrupted update describes the update's own generation (its
+	// hostd unit, its carrier generation): recover with that request, or recovery would
+	// act on the previous generation's live units.
+	native, err := lifecycle.PendingNativeInstallation()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Request{}, nil, err
 	}
-	lifecycle, err := newLifecycleManagerWithRestorePolicy(previous, paths, host, hostd, updater, false, authorize)
-	if err != nil {
-		return Request{}, nil, err
+	if journaled := recoveryRequest(previous, native, paths); journaled.Source != previous.Source {
+		if lifecycle, err = preparedLifecycle(journaled, paths, authorize); err != nil {
+			return Request{}, nil, err
+		}
 	}
 	if err = lifecycle.Recover(ctx); err != nil {
 		return Request{}, nil, err
@@ -366,4 +369,29 @@ func finalizePreparedUpdateLocked(ctx context.Context, uid int) error {
 		return (service.ExecRunner{}).Run(ctx, "systemctl", "daemon-reload")
 	}
 	return nil
+}
+
+func preparedLifecycle(request Request, paths installPaths, authorize func(context.Context, installsource.Source, string) error) (*service.LifecycleManager, error) {
+	hostd, updater, err := pendingInstallers(request, paths)
+	if err != nil {
+		return nil, err
+	}
+	host, err := hostInstallerWithMissing(request, paths, true)
+	if err != nil {
+		return nil, err
+	}
+	return newLifecycleManagerWithRestorePolicy(request, paths, host, hostd, updater, false, authorize)
+}
+
+// recoveryRequest is the request an interrupted operation's journal was written
+// for: the previous installation's, with the candidate source its baseline names.
+func recoveryRequest(previous Request, native []byte, paths installPaths) Request {
+	var baseline unixCarrierBaseline
+	if len(native) == 0 || decodeInstallJSON(bytes.NewReader(native), &baseline, 256<<10) != nil || baseline.Candidate == nil || baseline.Candidate.Validate() != nil {
+		return previous
+	}
+	journaled := previous
+	journaled.Source = *baseline.Candidate
+	journaled.Executable = filepath.Join(filepath.Dir(paths.workerRollback), "pins", journaled.Source.SHA256, "pb")
+	return journaled
 }

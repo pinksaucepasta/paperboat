@@ -40,6 +40,9 @@ type NativeComponentStatus struct {
 	Running    bool   `json:"running"`
 	Ready      bool   `json:"ready"`
 	Definition []byte `json:"definition,omitempty"`
+	// Unit is the declaration this status describes. A role such as hostd has one
+	// unit per generation, so a journal's status applies only to that same unit.
+	Unit string `json:"unit,omitempty"`
 }
 
 // TransactionalComponent is the native service-manager boundary. Restore
@@ -491,6 +494,13 @@ func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJourna
 		// stop it so the restore below starts it on the restored executable.
 		restart := swapped && before.Running && m.runsReplacedImage(before)
 		current, inspectErr := component.Inspect(ctx)
+		if inspectErr == nil && current.Unit != before.Unit {
+			// Recovery built for another generation: restoring this journal entry onto that
+			// generation's unit would uninstall a live service (a hostd baseline taken while
+			// the update's own generation was "hostd").
+			joined = errors.Join(joined, fmt.Errorf("restore %s: the journal describes %s, not %s: %w", component.ID(), before.Unit, current.Unit, ErrLifecycleUncertain))
+			continue
+		}
 		if !restart && inspectErr == nil && sameComponentStatus(current, before) {
 			continue
 		}
@@ -534,6 +544,17 @@ func (m *LifecycleManager) writeJournal(journal lifecycleJournal) error {
 		return errors.Join(ErrLifecycleInvalid, err)
 	}
 	return writeLifecycleJournal(m.journal, encoded)
+}
+
+// PendingNativeInstallation returns the native installation state an interrupted
+// replacement captured (os.ErrNotExist when nothing is pending). Recovery reads it
+// to rebuild the components the journal was written for.
+func (m *LifecycleManager) PendingNativeInstallation() ([]byte, error) {
+	journal, err := m.readJournal()
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), journal.NativeInstallation...), nil
 }
 
 func (m *LifecycleManager) readJournal() (lifecycleJournal, error) {
