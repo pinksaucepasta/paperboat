@@ -82,11 +82,12 @@ func (u *Uploader) Run(ctx context.Context) {
 	}
 }
 
-// Flush uploads every queued event, one batch at a time.
+// Flush uploads the events queued when it starts, one batch at a time. Events recorded meanwhile wait
+// for the next flush, so Run's MinInterval holds while sessions keep recording.
 func (u *Uploader) Flush(ctx context.Context) error {
-	for {
-		u.dropUnacceptable()
-		batch := u.Queue.Oldest(MaxBatch)
+	u.dropUnacceptable()
+	for pending := u.Queue.Len(); pending > 0; {
+		batch := u.Queue.Oldest(min(pending, MaxBatch))
 		if len(batch) == 0 {
 			return nil
 		}
@@ -96,7 +97,9 @@ func (u *Uploader) Flush(ctx context.Context) error {
 		if err := u.Queue.Remove(len(batch)); err != nil {
 			return err
 		}
+		pending -= len(batch)
 	}
+	return nil
 }
 
 // dropUnacceptable removes events the server can no longer accept (older than MaxAge), so one

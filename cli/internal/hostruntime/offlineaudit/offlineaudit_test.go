@@ -133,6 +133,8 @@ func TestSSHEventsKeepTheirIDsAndUploadAtMostOncePerInterval(t *testing.T) {
 	var mu sync.Mutex
 	var uploads []time.Time
 	var bodies []string
+	// The first upload stays in flight until the burst is recorded (CI run 41998830882 interleaved so).
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var request struct {
@@ -142,7 +144,11 @@ func TestSSHEventsKeepTheirIDsAndUploadAtMostOncePerInterval(t *testing.T) {
 		mu.Lock()
 		uploads = append(uploads, time.Now())
 		bodies = append(bodies, string(body))
+		first := len(uploads) == 1
 		mu.Unlock()
+		if first {
+			<-release
+		}
 		_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(request.Events)})
 	}))
 	defer server.Close()
@@ -177,10 +183,11 @@ func TestSSHEventsKeepTheirIDsAndUploadAtMostOncePerInterval(t *testing.T) {
 		t.Fatalf("waited for %d uploads", count)
 	}
 	waitFor(1)
-	// Three more events arrive right after the first upload: they go up together, one interval later.
+	// Three more events arrive while the first upload is in flight: they go up together, one interval later.
 	record(Event{Kind: KindSSHEnded, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOnline, SessionID: "session_1", Outcome: "closed", BytesIn: 7, BytesOut: 9})
 	record(Event{Kind: KindSSHRefused, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOffline, Reason: "busy"})
 	record(Event{Kind: KindSSHRefused, PeerEndpointID: "cli_1", PeerAccountID: "acct", Origin: OriginOnline, Reason: "not_set_up"})
+	close(release)
 	waitFor(2)
 	time.Sleep(600 * time.Millisecond) // idle: nothing more is sent
 	mu.Lock()
