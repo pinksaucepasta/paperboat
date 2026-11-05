@@ -196,12 +196,20 @@ export const policyVersionQuery = (workspace: string, version: number) =>
     staleTime: Infinity,
   })
 
+/** A policy's saved versions, newest first, one server page at a time (load more until the server's total). */
 export const policyVersionsQuery = (workspace: string) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: ["policy", workspace, "versions"],
-    queryFn: async ({ signal }) =>
-      (await call<{ versions: PolicyVersion[] }>("Loading the history", `${ws(workspace)}/policy/versions`, { signal }))
-        .versions,
+    queryFn: async ({ pageParam, signal }) => {
+      const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
+      return call<{ versions: PolicyVersion[]; total: number; next_cursor?: string }>(
+        "Loading the history",
+        `${ws(workspace)}/policy/versions?${query}`,
+        { signal },
+      )
+    },
+    initialPageParam: "",
+    getNextPageParam: (page) => page.next_cursor || undefined,
     enabled: Boolean(workspace),
   })
 

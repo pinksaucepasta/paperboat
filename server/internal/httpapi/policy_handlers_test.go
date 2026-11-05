@@ -29,8 +29,8 @@ func (fakePolicyAPI) RestorePolicy(context.Context, string, string, teams.Policy
 func (fakePolicyAPI) ExplainPolicy(context.Context, string, string, teams.PolicyExplainRequest) (teams.PolicyExplanation, error) {
 	return teams.PolicyExplanation{}, nil
 }
-func (fakePolicyAPI) PolicyVersions(context.Context, string, string) ([]teams.PolicyVersion, error) {
-	return []teams.PolicyVersion{{Version: 3, Kind: "saved"}}, nil
+func (fakePolicyAPI) PolicyVersions(context.Context, string, string, int, string) (teams.Page[teams.PolicyVersion], error) {
+	return teams.Page[teams.PolicyVersion]{Items: []teams.PolicyVersion{{Version: 3, Kind: "saved"}}, Total: 1}, nil
 }
 func (fakePolicyAPI) SetMachineTags(_ context.Context, _, _, machine string, r teams.MachineTagsRequest) (teams.MachineTagsView, error) {
 	if machine == "machine_gone" {

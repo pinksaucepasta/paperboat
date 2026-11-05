@@ -136,7 +136,7 @@ the server's envelope `{"error": {"code", "message", "details"}}`; policy errors
 | `POST /v1/workspaces/{ws}/policy/validate` | members | `{"policy": "<file text>"}` | `Validation` |
 | `PUT /v1/workspaces/{ws}/policy` | editors | `{"policy", "expected_version", "message"?, "confirm"?}` | `Policy` |
 | `POST /v1/workspaces/{ws}/policy/explain` | members (own access), owners, admins and auditors (anyone) | `{"policy"?, "src"?, "dst"?, "action"?, "port"?, "api_token"?}` | `Explanation` |
-| `GET /v1/workspaces/{ws}/policy/versions` | members | — | `{"versions": [Version]}` newest first |
+| `GET /v1/workspaces/{ws}/policy/versions?limit=&cursor=` | members | — | `{"versions": [PolicyVersion], "total", "next_cursor"?}`: newest first, limit 1-200 (default 50); pass `next_cursor` back as `cursor` |
 | `POST /v1/workspaces/{ws}/policy/restore` | editors | `{"version", "expected_version", "message"?, "confirm"?}` | `Policy` |
 
 ```text

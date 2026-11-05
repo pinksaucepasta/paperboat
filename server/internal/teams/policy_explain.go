@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"strings"
@@ -137,9 +138,23 @@ func guardrailTx(ctx context.Context, tx *db.Tx, sc policyScope) (string, error)
 	return "", nil
 }
 
-func (s *Service) PolicyVersions(ctx context.Context, account, ws string) ([]PolicyVersion, error) {
-	out := []PolicyVersion{}
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+func (s *Service) PolicyVersions(ctx context.Context, account, ws string, limit int, cursor string) (Page[PolicyVersion], error) {
+	out := Page[PolicyVersion]{Items: []PolicyVersion{}}
+	limit, err := pageLimit(limit)
+	if err != nil {
+		return out, err
+	}
+	key, err := decodePageCursor(ws, "policy-versions", cursor, 1)
+	if err != nil {
+		return out, err
+	}
+	before := int64(0)
+	if key != nil {
+		if before, err = strconv.ParseInt(key[0], 10, 64); err != nil || before < 1 {
+			return out, ErrInvalid
+		}
+	}
+	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		sc, err := scopeTx(ctx, tx, account, ws)
 		if err != nil {
 			return err
@@ -152,7 +167,11 @@ func (s *Service) PolicyVersions(ctx context.Context, account, ws string) ([]Pol
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT version,digest,created_at,coalesce(author,''),coalesce(api_token,''),message,gained,lost,kind FROM workspace_policy_versions WHERE policy_id=$1 ORDER BY version DESC`, p.id)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM workspace_policy_versions WHERE policy_id=$1`, p.id).Scan(&out.Total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT version,digest,created_at,coalesce(author,''),coalesce(api_token,''),message,gained,lost,kind
+FROM workspace_policy_versions WHERE policy_id=$1 AND ($2::bigint = 0 OR version < $2) ORDER BY version DESC LIMIT $3`, p.id, before, limit+1)
 		if err != nil {
 			return err
 		}
@@ -164,11 +183,18 @@ func (s *Service) PolicyVersions(ctx context.Context, account, ws string) ([]Pol
 				return err
 			}
 			v.Author = userLabel(inv, author)
-			out = append(out, v)
+			out.Items = append(out.Items, v)
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return Page[PolicyVersion]{Items: []PolicyVersion{}}, err
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.NextCursor = encodePageCursor(ws, "policy-versions", strconv.FormatInt(int64(out.Items[limit-1].Version), 10))
+	}
+	return out, nil
 }
 
 // compileFailed reports errors other than failing in-file tests: the policy cannot be evaluated.

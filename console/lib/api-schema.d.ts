@@ -27368,7 +27368,12 @@ export interface operations {
     };
     get_v1_workspace_policy_versions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size (default 50). */
+                limit?: number;
+                /** @description next_cursor of the previous page. */
+                cursor?: string;
+            };
             header?: never;
             path: {
                 ws: string;

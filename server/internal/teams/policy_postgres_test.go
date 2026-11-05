@@ -245,9 +245,28 @@ func TestPolicySaveReviewAndRights(t *testing.T) {
 	if err != nil || restored.Version != 3 || f.sqlAllowed(f.other, f.db1, "exec", 0) {
 		t.Fatalf("%+v %v", restored, err)
 	}
-	versions, err := f.service.PolicyVersions(f.ctx, f.admin, f.team)
-	if err != nil || len(versions) != 3 || versions[0].Kind != "restored" || versions[1].Message != "exec for all" || versions[1].Gained != 4 || versions[0].Lost != 4 {
+	page, err := f.service.PolicyVersions(f.ctx, f.admin, f.team, 0, "")
+	versions := page.Items
+	if err != nil || len(versions) != 3 || page.Total != 3 || versions[0].Kind != "restored" || versions[1].Message != "exec for all" || versions[1].Gained != 4 || versions[0].Lost != 4 {
 		t.Fatalf("%+v %v", versions, err)
+	}
+	// Paging one version at a time walks 3, 2, 1 with the total kept; another list's cursor is refused.
+	var walked []uint64
+	for cursor := ""; ; {
+		one, err := f.service.PolicyVersions(f.ctx, f.admin, f.team, 1, cursor)
+		if err != nil || len(one.Items) != 1 || one.Total != 3 {
+			t.Fatalf("version page after %q: %+v %v", cursor, one, err)
+		}
+		walked = append(walked, one.Items[0].Version)
+		if cursor = one.NextCursor; cursor == "" {
+			break
+		}
+		if _, err := f.service.PolicyVersions(f.ctx, f.admin, "personal", 1, cursor); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("a team version cursor paged another workspace: %v", err)
+		}
+	}
+	if fmt.Sprint(walked) != "[3 2 1]" {
+		t.Fatalf("walked %v", walked)
 	}
 }
 

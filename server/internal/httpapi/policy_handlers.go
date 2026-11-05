@@ -17,7 +17,7 @@ type policyAPI interface {
 	SavePolicy(context.Context, string, string, teams.PolicySaveRequest) (teams.PolicyView, error)
 	RestorePolicy(context.Context, string, string, teams.PolicyRestoreRequest) (teams.PolicyView, error)
 	ExplainPolicy(context.Context, string, string, teams.PolicyExplainRequest) (teams.PolicyExplanation, error)
-	PolicyVersions(context.Context, string, string) ([]teams.PolicyVersion, error)
+	PolicyVersions(context.Context, string, string, int, string) (teams.Page[teams.PolicyVersion], error)
 	SetMachineTags(context.Context, string, string, string, teams.MachineTagsRequest) (teams.MachineTagsView, error)
 	WorkspaceTagList(context.Context, string, string) (teams.WorkspaceTags, error)
 }
@@ -63,9 +63,20 @@ func policyHandler(service policyAPI, kind string) http.HandlerFunc {
 			}
 			out, err = service.Policy(r.Context(), account, ws, version)
 		case "versions":
-			var list []teams.PolicyVersion
-			list, err = service.PolicyVersions(r.Context(), account, ws)
-			out = map[string]any{"versions": list}
+			limit := 0
+			if v := r.URL.Query().Get("limit"); v != "" {
+				if limit, err = strconv.Atoi(v); err != nil {
+					writeError(w, r, http.StatusBadRequest, "invalid_request", "limit is a number from 1 to 200.")
+					return
+				}
+			}
+			var page teams.Page[teams.PolicyVersion]
+			page, err = service.PolicyVersions(r.Context(), account, ws, limit, r.URL.Query().Get("cursor"))
+			versions := map[string]any{"versions": page.Items, "total": page.Total}
+			if page.NextCursor != "" {
+				versions["next_cursor"] = page.NextCursor
+			}
+			out = versions
 		case "validate":
 			var in struct {
 				Policy string `json:"policy"`

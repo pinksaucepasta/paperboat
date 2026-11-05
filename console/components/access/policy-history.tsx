@@ -1,5 +1,6 @@
 "use client"
 
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { useApiQuery } from "@/lib/api"
 import {
@@ -25,15 +26,17 @@ const kinds: Record<PolicyVersion["kind"], string> = {
 
 /** Every saved version, newest first; compare one with the current file and restore it. */
 export function PolicyHistory({ workspace, policy }: { workspace: string; policy: Policy }) {
-  const versions = useApiQuery(policyVersionsQuery(workspace))
+  const versions = useInfiniteQuery(policyVersionsQuery(workspace))
+  const items = versions.data?.pages.flatMap((page) => page.versions) ?? []
+  const total = versions.data?.pages[0]?.total ?? 0
   const [open, setOpen] = useState<number | null>(null)
   const [restoring, setRestoring] = useState<number | null>(null)
   if (versions.isPending) return <Skeleton className="h-40 w-full" />
   if (versions.isError) return <p className="text-sm text-destructive">{versions.error.message}</p>
-  if (!versions.data.length) return <p className="text-sm text-muted-foreground">No versions yet.</p>
+  if (!items.length) return <p className="text-sm text-muted-foreground">No versions yet.</p>
   return (
     <div className="flex flex-col border-t border-divider">
-      {versions.data.map((version) => (
+      {items.map((version) => (
         <div key={version.version} className="flex flex-col border-b border-divider" data-version={version.version}>
           <div className="flex min-h-12 flex-wrap items-center gap-3 py-2 text-sm">
             <span className="w-12 font-medium tabular-nums">v{version.version}</span>
@@ -63,6 +66,16 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
           {open === version.version && <VersionDiff workspace={workspace} version={version.version} current={policy} />}
         </div>
       ))}
+      <div className="flex items-center gap-3 pt-3 text-sm text-muted-foreground">
+        <span>
+          {items.length} of {total} versions
+        </span>
+        {versions.hasNextPage && (
+          <Button variant="secondary" onClick={() => versions.fetchNextPage()} disabled={versions.isFetchingNextPage}>
+            {versions.isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        )}
+      </div>
       {restoring !== null && (
         <ChangesDialog
           workspace={workspace}
