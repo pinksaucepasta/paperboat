@@ -129,6 +129,10 @@ func (p *pipeProcess) CloseInput() error {
 			err = p.stdin.Close()
 		}
 	})
+	// os/exec's Wait closes the stdin pipe once the process exits; EOF to an exited process is done.
+	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
 	return err
 }
 func (p *pipeProcess) Resize(pty.Dimensions) error { return ErrInvalid }
