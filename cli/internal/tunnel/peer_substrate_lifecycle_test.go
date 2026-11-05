@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
@@ -86,5 +87,52 @@ func TestCachedNativeRuntimeSkipsRefreshWhenItAlreadyAdmitsTheTarget(t *testing.
 	}
 	if _, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return false }); err == nil || refreshes.Load() == 0 {
 		t.Fatalf("a runtime that does not admit the target was reused without refresh: refreshes=%d err=%v", refreshes.Load(), err)
+	}
+}
+
+// pbvm4 prefix1 07:48:03: `pb ssh` needed no refresh (refresh_skipped at 04.925) but waited on the daemon's
+// runtime lock behind two exec refreshes (03.633-04.105, 04.105-04.922) and took 1.9 s against 0.7 s. A
+// refresh in flight must not hold up an operation the runtime already admits.
+func TestCachedNativeRuntimeRefreshDoesNotHoldAdmittedOperations(t *testing.T) {
+	issuer, accountID, endpointID := "https://api.example.test", "account_connected", "cli_connected"
+	identity, _, _ := connectedEndpointAuthority(t, connectedStore(t), issuer, accountID, endpointID, "machine_connected")
+	defer identity.Clear()
+	networkAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: connectedStore(t), Issuer: issuer, Self: tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}, Keys: connectedNetworkKeys{public: identity.RootPublic}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer networkAuthority.Close()
+	inFlight, release := make(chan struct{}), make(chan struct{})
+	current := &cliNativeRuntime{accountID: accountID, endpointID: endpointID, identityFingerprint: identity.LocalCertificate.Fingerprint(), authority: networkAuthority, done: make(chan struct{})}
+	peer := &PeerTerminalTunnel{nativeRuntime: current, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: &http.Client{Transport: substrateTransport(func(request *http.Request) (*http.Response, error) {
+		close(inFlight)
+		select {
+		case <-release:
+		case <-request.Context().Done():
+		}
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"code":"peer_network_unavailable","message":"unavailable"}}`))}, nil
+	})}}}
+	refreshed := make(chan error, 1)
+	go func() {
+		_, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return false })
+		refreshed <- err
+	}()
+	<-inFlight
+	admitted := make(chan *cliNativeRuntime, 1)
+	go func() {
+		got, _, _ := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return true })
+		admitted <- got
+	}()
+	select {
+	case got := <-admitted:
+		if got != current {
+			t.Fatal("admitted operation did not reuse the runtime")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("an admitted operation waited for another operation's refresh")
+	}
+	close(release)
+	if err := <-refreshed; err == nil {
+		t.Fatal("refresh against an unavailable server admitted the operation")
 	}
 }

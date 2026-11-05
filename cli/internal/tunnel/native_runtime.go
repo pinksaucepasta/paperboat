@@ -467,13 +467,14 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		return nil, false, ErrPeerTerminalInvalid
 	}
 	t.nativeMu.Lock()
-	defer t.nativeMu.Unlock()
 	if t.nativeClosed {
+		t.nativeMu.Unlock()
 		return nil, false, net.ErrClosed
 	}
 	fingerprint := identity.LocalCertificate.Fingerprint()
 	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
 	if current := t.nativeRuntime; current != nil && current.alive() && current.accountID == accountID && current.endpointID == endpointID && current.identityFingerprint == fingerprint && identity.LocalCertificate.Claims.ExpiresAt.After(time.Now().UTC()) {
+		t.nativeMu.Unlock()
 		diagnosticlog.TryInfo("native cache reuse", "stage", "admission_check", "predicate_present", admitted != nil)
 		if admitted != nil && admitted(current.authority) {
 			diagnosticlog.TryInfo("native cache reuse", "stage", "refresh_skipped")
@@ -482,10 +483,12 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		// The operation descriptor may have just created its peer grant. Refresh
 		// signed admission before reusing the engine; the periodic refresh alone
 		// cannot establish that this new operation is ready to open a stream.
+		// Outside nativeMu (a server round trip held every other command behind it), and shared: a
+		// renewal sent after this operation asked already carries its grant.
 		diagnosticlog.TryInfo("native cache reuse", "stage", "refresh_required")
 		refresh, cancel := context.WithTimeout(ctx, 10*time.Second)
 		refreshEnd := diagnostics.ReconnectStep(ctx, "network_refresh")
-		err := current.authority.Refresh(refresh, networkAPI)
+		err := current.authority.RefreshForAdmission(refresh, networkAPI)
 		refreshEnd(err)
 		cancel()
 		if err != nil {
@@ -493,6 +496,7 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		}
 		return current, false, nil
 	}
+	defer t.nativeMu.Unlock()
 	if t.nativeRuntime != nil {
 		_ = t.nativeRuntime.Close()
 		t.nativeRuntime = nil
