@@ -164,6 +164,10 @@ type regionalSilentSession struct {
 	calls   int
 	done    chan struct{}
 	once    sync.Once
+	// clock, when set, moves by the ping's entry in elapse while that ping is in flight: the monitor reads
+	// the time before and after its ping inside one iteration, so only the monitor's own call moves it.
+	clock  *steppedHealthClock
+	elapse []time.Duration
 }
 
 func (s *regionalSilentSession) OpenStream(context.Context) (DataCarrierStreamLink, error) {
@@ -182,18 +186,21 @@ func (s *regionalSilentSession) Ping(ctx context.Context) error {
 	i := s.calls
 	s.calls++
 	reply := i < len(s.replies) && s.replies[i]
+	if s.clock != nil && i < len(s.elapse) {
+		s.clock.advance(s.elapse[i])
+	}
 	s.mu.Unlock()
 	if reply {
 		return nil
 	}
-	return context.DeadlineExceeded // no answer before its deadline; the stepped clock decides when that is
+	return context.DeadlineExceeded // no answer before its deadline; the stepped clock says how long that took
 }
 func (s *regionalSilentSession) Close() error               { s.once.Do(func() { close(s.done) }); return nil }
 func (s *regionalSilentSession) CloseChan() <-chan struct{} { return s.done }
 
-// steppedHealthClock delivers each monitor tick only when the previous ping's decision is done (the
-// unbuffered send waits for the monitor's next select), so pings and staleness follow the test's steps
-// rather than the runner's scheduling (macOS runs 41993423157 and 42031541678 closed at ping 5 and 2).
+// steppedHealthClock moves only while a ping is in flight (regionalSilentSession.elapse) and delivers a tick
+// only when the monitor is back in its select, so every decision reads one fixed time before and one after
+// its ping, whatever the runner's scheduling (macOS runs 41993423157 and 42031541678 closed at ping 5 and 2).
 type steppedHealthClock struct {
 	mu    sync.Mutex
 	now   time.Time
@@ -208,28 +215,15 @@ func (c *steppedHealthClock) Now() time.Time {
 func (c *steppedHealthClock) NewTicker(time.Duration) (<-chan time.Time, func()) {
 	return c.ticks, func() {}
 }
-
-// step advances the clock by d and delivers one tick; false once the carrier is closed.
-func (c *steppedHealthClock) step(t *testing.T, d time.Duration, closed <-chan struct{}) bool {
-	t.Helper()
+func (c *steppedHealthClock) advance(d time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(d)
-	now := c.now
 	c.mu.Unlock()
-	select {
-	case c.ticks <- now:
-		return true
-	case <-closed:
-		return false
-	case <-time.After(10 * time.Second):
-		t.Fatal("the health monitor stopped taking ticks")
-		return false
-	}
 }
 
-// monitorSilentPeer runs the pool's health monitor over a peer answering only the pings marked true, with
-// one tick per step (each step's clock advance), and returns how many pings it sent before closing.
-func monitorSilentPeer(t *testing.T, replies []bool, steps []time.Duration, interval time.Duration) (int, *DataCarrierPool) {
+// monitorSilentPeer runs the pool's health monitor over a peer answering only the pings marked true, each
+// ping taking its elapse entry of clock time, and returns how many pings it sent before closing.
+func monitorSilentPeer(t *testing.T, replies []bool, elapse []time.Duration, interval time.Duration) (int, *DataCarrierPool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -241,7 +235,9 @@ func monitorSilentPeer(t *testing.T, replies []bool, steps []time.Duration, inte
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	silent := &regionalSilentSession{done: make(chan struct{}), replies: replies}
+	// An hour ahead: probe deadlines from this clock stay in the real future.
+	clock := &steppedHealthClock{now: time.Now().Add(time.Hour), ticks: make(chan time.Time)}
+	silent := &regionalSilentSession{done: make(chan struct{}), replies: replies, clock: clock, elapse: elapse}
 	survivor := &regionalSilentSession{done: make(chan struct{})}
 	first, err := NewDataCarrierClientWithSession(ctx, silent, config.Carrier, config.Session)
 	if err != nil {
@@ -253,15 +249,19 @@ func monitorSilentPeer(t *testing.T, replies []bool, steps []time.Duration, inte
 	}
 	pool.carriers = []*pooledDataCarrier{{carrier: first, edgeID: "edge-a"}, {carrier: second, edgeID: "edge-b"}}
 	pool.state = DataCarrierPoolReady
-	// An hour ahead: probe deadlines from this clock stay in the real future.
-	clock := &steppedHealthClock{now: time.Now().Add(time.Hour), ticks: make(chan time.Time)}
 	pool.healthClock = clock
 	pool.workers.Add(1)
 	go pool.monitorCarrier(first, interval, interval/4)
-	for _, d := range steps {
-		if !clock.step(t, d, first.Done()) {
-			break
+	// One tick per ping; the unbuffered send waits until the previous ping's decision is done.
+	for range len(elapse) + 1 {
+		select {
+		case clock.ticks <- clock.Now():
+			continue
+		case <-first.Done():
+		case <-time.After(10 * time.Second):
+			t.Fatal("the health monitor stopped taking ticks")
 		}
+		break
 	}
 	select {
 	case <-first.Done():
@@ -299,6 +299,7 @@ func TestRegionalCarrierSilentPeerMissesResetAndExposeSurvivor(t *testing.T) {
 // misses: a monitor stalled past that window (a starved runner) still closes it on its next ping.
 func TestRegionalCarrierSilentPeerIsClosedOnStaleness(t *testing.T) {
 	interval := time.Second
+	// The second ping returns three intervals after the first: a stall, as on a starved runner.
 	calls, _ := monitorSilentPeer(t, nil, []time.Duration{interval, 3 * interval, interval}, interval)
 	if calls != 2 {
 		t.Fatalf("stale silent peer closed after %d pings, want on the second (three intervals without a response)", calls)
