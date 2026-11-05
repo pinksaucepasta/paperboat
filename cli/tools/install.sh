@@ -141,7 +141,14 @@ if [ "$pair" = true ]; then
   [ -n "$host" ] || { echo "pb installer: could not resolve this machine hostname" >&2; exit 1; }
   "$installer_pb" reset --confirmation 'RESET PAPERBOAT' --hostname "$host" --enrollment-token-file "$token_file" --json > "$temporary/reset.json" || {
     status=$?
-    echo "pb installer: pb reset failed; rerun this installer to retry machine enrollment" >&2
+    # pb's user-facing error message (never a secret) names why reset failed; the token stays in its file.
+    reason=
+    if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
+      reason=$(/usr/bin/plutil -extract error.message raw -o - "$temporary/reset.json" 2>/dev/null || true)
+    elif command -v python3 >/dev/null 2>&1; then
+      reason=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["error"]["message"])' "$temporary/reset.json" 2>/dev/null || true)
+    fi
+    echo "pb installer: pb reset failed${reason:+: $reason}; rerun this installer to retry machine enrollment" >&2
     exit "$status"
   }
   if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then

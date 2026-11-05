@@ -102,8 +102,15 @@ esac
 				if !strings.Contains(string(output), "pb "+step+" failed") || !strings.Contains(string(output), "rerun this installer") {
 					t.Fatalf("%s failed without step and recovery: %q", step, output)
 				}
-				if strings.Contains(string(output), "private fixture detail") || strings.Contains(string(output), "fixture-token") {
-					t.Fatal("installer exposed captured details or enrollment token")
+				if strings.Contains(string(output), "fixture-token") {
+					t.Fatal("installer exposed the enrollment token")
+				}
+				// A failed reset names pb's own reason (pbmac F1-01 printed only "pb reset failed").
+				if scenario == "reset-failure" && !strings.Contains(string(output), "pb reset failed: private fixture detail;") {
+					t.Fatalf("reset failure did not say why: %q", output)
+				}
+				if scenario == "install-failure" && strings.Contains(string(output), "private fixture detail") {
+					t.Fatal("installer exposed the install step's captured details")
 				}
 				got, readErr := os.ReadFile(calls)
 				if readErr != nil || string(got) != step+"\n" {
