@@ -15,6 +15,10 @@ describe("terminal close codes", () => {
     expect(terminalCloseCodes.revoked).toEqual({ phase: "reconnect", message: "", silent: true })
     expect(ticketCloseCode(refusal(403, "forbidden"))).toBe("no_access")
   })
+  test("a moved close (pb update, 4301) reattaches at once with no message", () => {
+    expect(workerCloseCode({ state: "reconnecting", code: "moved" })).toBe("moved")
+    expect(terminalCloseCodes.moved).toEqual({ phase: "reconnect", message: "", silent: true, immediate: true })
+  })
   test("in-channel host codes map onto the table, unknown ones fall back by state", () => {
     expect(workerCloseCode({ state: "reconnecting", code: "credential_expired" })).toBe("expired")
     expect(workerCloseCode({ state: "denied", code: "something_new" })).toBe("no_access")

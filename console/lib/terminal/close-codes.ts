@@ -7,7 +7,8 @@ import type { TerminalPhase } from "@/lib/terminal/use-terminal-connection"
  * close reason, then its close number, to one of these; anything unknown is `protocol`. The raw
  * close number is for diagnostics only and is never branched on.
  *
- * `reconnect`: the controller retries on its own. `silent`: it does so with no error shown.
+ * `reconnect`: the controller retries on its own. `silent`: it does so with no error shown. `immediate`: it
+ * retries at once instead of after the backoff.
  */
 export type CloseCode =
   | "no_access"
@@ -20,9 +21,10 @@ export type CloseCode =
   | "machine_unavailable"
   | "edge_unavailable"
   | "terminal_service_unavailable"
+  | "moved"
   | "protocol"
 
-export type CloseOutcome = { phase: TerminalPhase | "reconnect"; message: string; silent?: boolean }
+export type CloseOutcome = { phase: TerminalPhase | "reconnect"; message: string; silent?: boolean; immediate?: boolean }
 
 export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
   no_access: { phase: "denied", message: "You do not have access to this terminal. Ask its owner." },
@@ -46,6 +48,9 @@ export const terminalCloseCodes: Readonly<Record<CloseCode, CloseOutcome>> = {
     phase: "reconnect",
     message: "The machine's terminal service is not responding. This resumes when it answers.",
   },
+  // 4301: pb update replaced the machine's generation this connection ran on and that one stopped serving it;
+  // the new one serves already, so reattach at once (sequence replay keeps the screen).
+  moved: { phase: "reconnect", message: "", silent: true, immediate: true },
   protocol: { phase: "transport-error", message: "The machine sent something this page could not use. You can retry." },
 }
 

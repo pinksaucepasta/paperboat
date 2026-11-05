@@ -759,7 +759,7 @@ export function useTerminalConnection({
         setLastClose([event.code ?? event.state, event.close, event.transport_cause].filter(Boolean).join(" "))
         if (outcome.phase === "reconnect") {
           setError(reconnectReason(outcome.message))
-          scheduleReconnect()
+          scheduleReconnect(outcome.immediate ? 0 : undefined)
           return
         }
         window.clearTimeout(reconnectTimerRef.current)
