@@ -6,6 +6,8 @@
 # tickets sort first). Tickets of exited callers are pruned, so a killed job never blocks the queue.
 # Broad work (./..., several modules, -race, full packages) belongs on GitHub: tools/ci-test.sh.
 set -eu
+# Already inside a slot (e.g. lanebtest.sh run by a slotted job): run directly, so nesting never deadlocks.
+[ -n "${PB_IN_ORACLE_SLOT:-}" ] && exec nice -n 15 "$@"
 n=${PB_ORACLE_SLOTS:-4}
 dir=/tmp/pb-oracle-queue
 mkdir -p "$dir"
@@ -32,4 +34,4 @@ while :; do
   [ "$pos" -lt "$n" ] && break
   sleep 1
 done
-nice -n 15 "$@"
+PB_IN_ORACLE_SLOT=1 nice -n 15 "$@"
