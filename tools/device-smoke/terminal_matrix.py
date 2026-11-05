@@ -333,7 +333,15 @@ def network_drop(a, sessions):
             c1.expect('ND60', 120)
             row('N4 network drop: session resumes on its own', True, f'{time.monotonic() - t0:.1f} s after the network returned')
         except RuntimeError:
-            row('N4 network drop: session resumes on its own', False, 'no output 120 s after the network returned')
+            seen = sorted({int(n) for n in re.findall(rb'ND(\d+)', bytes(c1.output))})  # the test's own markers only
+            try:
+                done, code = os.waitpid(c1.pid, os.WNOHANG)
+                client = f'pb exited {os.waitstatus_to_exitcode(code)}' if done else 'pb still running'
+            except ChildProcessError:
+                client = 'pb already reaped'
+            plain = re.sub(rb'\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07', b'', bytes(c1.output)).decode('latin1')
+            notes = [line.strip()[:100] for line in plain.splitlines() if line.strip() and not re.fullmatch(r'ND\d+', line.strip())][-3:]  # the client's own notice, not session data
+            row('N4 network drop: session resumes on its own', False, f'no output 120 s after the network returned (ND markers seen: {len(seen)}, highest {seen[-1] if seen else None}; {client}; last lines {notes})')
             return
         c1.settle(2)
         ok, why = exactly_once(bytes(c1.output), b'ND', 1, 60)

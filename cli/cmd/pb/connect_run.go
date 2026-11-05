@@ -557,6 +557,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			}
 			return nil, dialErr
 		}
+		// The old link may still deliver while this one attaches; replayed output it already showed is dropped.
+		if link, ok := freshConn.(interface{ SkipDelivered(func() int) }); ok {
+			link.SkipDelivered(func() int { return int(lastTerminalSequence.Load()) })
+		}
 		if c.Bool("debug") {
 			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
 		}

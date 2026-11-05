@@ -473,6 +473,8 @@ type localPeerConn struct {
 	pendingSequence   uint64
 	committedSequence uint64
 	sequenceSink      func(int)
+	delivered         func() int // see SkipDelivered
+	skipThrough       uint64
 	replayGapSink     func(uint64, uint64, uint64)
 	launchWarningSink func([]string)
 	linkMu            sync.Mutex
@@ -516,7 +518,10 @@ func (c *localBasicPeerConn) Write(v []byte) (int, error)    { return c.inner.Wr
 func (c *localBasicPeerConn) Close() error                   { return c.inner.Close() }
 func (c *localBasicPeerConn) Resize(rows, cols uint16) error { return c.inner.Resize(rows, cols) }
 func (c *localBasicPeerConn) Wait() (int, error)             { return c.inner.Wait() }
-func (c *localBasicPeerConn) CloseWrite() error              { return c.inner.CloseWrite() }
+func (c *localBasicPeerConn) SkipDelivered(delivered func() int) {
+	c.inner.SkipDelivered(delivered)
+}
+func (c *localBasicPeerConn) CloseWrite() error { return c.inner.CloseWrite() }
 
 func NewLocalExecPeerConn(connection net.Conn) (ExecConn, error) {
 	value, err := newLocalPeerConn(connection, true, false, nil, nil)
@@ -766,12 +771,18 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 		}
 		return count, nil
 	}
+	if c.delivered != nil {
+		c.skipThrough, c.delivered = uint64(max(c.delivered(), 0)), nil
+	}
 	var output localPeerOutput
 	for {
 		var ok bool
 		output, ok = <-c.data
 		if !ok {
 			return 0, io.EOF
+		}
+		if output.sequence != 0 && output.sequence <= c.skipThrough {
+			continue // replayed output another link already delivered
 		}
 		if len(output.data) > 0 {
 			break
@@ -796,6 +807,16 @@ func (c *localPeerConn) Write(value []byte) (int, error) {
 		return 0, errors.Join(ErrInputNotSent, err)
 	}
 	return len(value), nil
+}
+
+// SkipDelivered makes this link, once adopted, drop replayed output up to the sequence the terminal had
+// delivered when the first Read arrives. A probe link attaches from the cursor of its dial; the stalled link it
+// replaces can still deliver output while the probe attaches (the network returning), and that output came back
+// as duplicate lines (F3-15 N4, 1-3 lines). The carrier-move path trims the same way (helperTerminalConn.skipThrough).
+func (c *localPeerConn) SkipDelivered(delivered func() int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.delivered = delivered
 }
 
 // MarkTransportLost ends the link as a transport loss, so the terminal reconnects instead of ending.
