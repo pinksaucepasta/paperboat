@@ -1,6 +1,7 @@
 name: Cross-platform
 
-# Build and test the cli, shared and Go SDK modules on macOS (Linux has its own lanes). Windows is post-launch (PLAN 1.1).
+# Build and test the cli, shared and Go SDK modules on macOS (Linux has its own lanes), and the device-smoke harness's
+# Python unit tests on every push to main. Windows is post-launch (PLAN 1.1).
 on:
   push:
     branches: [main]
@@ -66,3 +67,13 @@ jobs:
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
         run: go test -race -timeout 15m -count "$COUNT" ${RUN:+-run "$RUN"} $PACKAGES
+
+  # The device harness's own unit tests (no devices, no network), as lane-test's smoke job: a harness
+  # regression fails the push that brings it, not the next device run.
+  smoke:
+    name: device-smoke unittest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s tools/device-smoke -p 'test_*.py' -v
