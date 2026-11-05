@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -58,7 +59,10 @@ type Service interface {
 type Component struct {
 	Name     string
 	Required bool
-	Service  Service
+	// Retry restarts a failed optional component with backoff until it starts. Set it only for a service whose
+	// Start works again after a failed Start and its rollback Shutdown.
+	Retry   bool
+	Service Service
 }
 
 // Workloads is the only owner of live workload managers.  It is intentionally
@@ -81,7 +85,16 @@ type Config struct {
 	Workloads       Workloads
 	Components      []Component
 	ShutdownTimeout time.Duration
+	// Report receives each optional component's failure (with the wait before its next attempt, 0 when it is
+	// not retried) and its recovery (nil error), so a skipped component is a failing step, not a silent one.
+	Report func(component string, err error, retryAfter time.Duration)
 }
+
+// The failed optional component retry schedule: doubling from 5 s to 5 min, jittered (shared/backoff).
+var (
+	componentRetryFirst   = 5 * time.Second
+	componentRetryMaximum = 5 * time.Minute
+)
 
 // Daemon is the stable host supervisor.  Its Shutdown method is reserved for
 // actual hostd shutdown.  Worker replacement is performed by WorkerController
@@ -95,6 +108,10 @@ type Daemon struct {
 	failedStart bool
 	recorder    *diagnostics.Recorder
 	reference   string
+	// retryCtx ends the optional component retries; retries waits for them.
+	retryCtx    context.Context
+	retryCancel context.CancelFunc
+	retries     sync.WaitGroup
 }
 
 func New(config Config) (*Daemon, error) {
@@ -143,6 +160,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 			failedCleanupErr := invokeComponent(cleanupCtx, component, "component_rollback", component.Service.Shutdown)
 			cancel()
 			if !component.Required && failedCleanupErr == nil {
+				d.optionalFailedLocked(ctx, component, err)
 				continue
 			}
 			if failedCleanupErr != nil {
@@ -165,6 +183,7 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	d.stopRetries()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.stopped {
@@ -188,6 +207,93 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 		d.stopped = true
 	}
 	return err
+}
+
+// optionalFailedLocked reports a skipped optional component and, when it is restartable, retries it in the
+// background. Called with d.mu held.
+func (d *Daemon) optionalFailedLocked(ctx context.Context, component Component, err error) {
+	if !component.Retry {
+		d.report(component.Name, err, 0)
+		return
+	}
+	if d.retryCtx == nil {
+		d.retryCtx, d.retryCancel = context.WithCancel(context.WithoutCancel(ctx))
+	}
+	retryCtx := d.retryCtx
+	d.retries.Add(1)
+	go func() {
+		defer d.retries.Done()
+		d.retryComponent(retryCtx, component, err)
+	}()
+}
+
+// retryComponent starts component again after backoff.Retry waits until it starts or ctx ends. A started
+// component joins d.started, so Shutdown stops it like any other.
+func (d *Daemon) retryComponent(ctx context.Context, component Component, cause error) {
+	for failures := 1; ; failures++ {
+		wait := backoff.Retry(failures, componentRetryFirst, componentRetryMaximum)
+		d.report(component.Name, cause, wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		cause = invokeComponent(ctx, component, "component_start", component.Service.Start)
+		if cause == nil {
+			d.mu.Lock()
+			stopping := ctx.Err() != nil
+			if !stopping {
+				d.started = append(d.started, component)
+			}
+			d.mu.Unlock()
+			if stopping {
+				cleanupCtx, cancel := detachedShutdownContext(ctx, d.config.ShutdownTimeout)
+				_ = invokeComponent(cleanupCtx, component, "component_shutdown", component.Service.Shutdown)
+				cancel()
+				return
+			}
+			d.report(component.Name, nil, 0)
+			return
+		}
+		cleanupCtx, cancel := detachedShutdownContext(ctx, d.config.ShutdownTimeout)
+		cleanupErr := invokeComponent(cleanupCtx, component, "component_rollback", component.Service.Shutdown)
+		cancel()
+		if cleanupErr != nil {
+			// Partial allocations remain: another Start could duplicate them. Shutdown retries the cleanup.
+			d.mu.Lock()
+			d.started = append(d.started, component)
+			d.mu.Unlock()
+			d.report(component.Name, errors.Join(cause, cleanupErr), 0)
+			return
+		}
+	}
+}
+
+// stopRetries ends the optional component retries and waits for them, before Shutdown takes d.mu (a retry
+// that just started its component takes d.mu to join d.started).
+func (d *Daemon) stopRetries() {
+	d.mu.Lock()
+	cancel := d.retryCancel
+	d.retryCtx, d.retryCancel = nil, nil
+	d.mu.Unlock()
+	if cancel != nil {
+		cancel()
+		d.retries.Wait()
+	}
+}
+
+func (d *Daemon) report(name string, err error, retryAfter time.Duration) {
+	if d.config.Report == nil {
+		return
+	}
+	// invokeComponent's wrapper only says a lifecycle step failed; the report names the cause.
+	var owned reportedComponentError
+	if errors.As(err, &owned) && owned.cause != nil {
+		err = owned.cause
+	}
+	d.config.Report(name, err, retryAfter)
 }
 
 func detachedShutdownContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

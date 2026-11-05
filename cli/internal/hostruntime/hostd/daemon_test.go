@@ -406,3 +406,158 @@ func TestWorkerReplacementReportsCommittedCandidateWhenPreviousCleanupFails(t *t
 		t.Fatal(err)
 	}
 }
+
+// flakyStartService fails its first Start and starts on the next one.
+type flakyStartService struct{ failingStartService }
+
+func (s *flakyStartService) Start(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starts++
+	if s.starts == 1 {
+		return errors.New("registration refused")
+	}
+	return nil
+}
+
+type stepReport struct {
+	component  string
+	err        error
+	retryAfter time.Duration
+}
+
+type stepRecorder struct {
+	mu      sync.Mutex
+	reports []stepReport
+	changed chan struct{}
+}
+
+func newStepRecorder() *stepRecorder { return &stepRecorder{changed: make(chan struct{}, 64)} }
+
+func (r *stepRecorder) report(component string, err error, retryAfter time.Duration) {
+	r.mu.Lock()
+	r.reports = append(r.reports, stepReport{component, err, retryAfter})
+	r.mu.Unlock()
+	r.changed <- struct{}{}
+}
+
+func (r *stepRecorder) waitFor(t *testing.T, done func([]stepReport) bool) []stepReport {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		r.mu.Lock()
+		reports := append([]stepReport(nil), r.reports...)
+		r.mu.Unlock()
+		if done(reports) {
+			return reports
+		}
+		select {
+		case <-r.changed:
+		case <-deadline:
+			t.Fatalf("reports never reached the expected state: %+v", reports)
+		}
+	}
+}
+
+func shortComponentRetry(t *testing.T) {
+	t.Helper()
+	first, maximum := componentRetryFirst, componentRetryMaximum
+	componentRetryFirst, componentRetryMaximum = time.Millisecond, 4*time.Millisecond
+	t.Cleanup(func() { componentRetryFirst, componentRetryMaximum = first, maximum })
+}
+
+// A restartable optional component that fails to start is retried with backoff, without a worker or hostd
+// restart, is reported failing and then recovered, and is stopped by Shutdown once it runs.
+func TestRestartableOptionalComponentIsRetriedUntilItStarts(t *testing.T) {
+	shortComponentRetry(t)
+	flaky := &flakyStartService{}
+	steps := newStepRecorder()
+	d, err := New(Config{
+		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
+		Components: []Component{{Name: "peer_transport", Retry: true, Service: flaky}, {Name: "required", Required: true, Service: &testService{}}},
+		Report:     steps.report,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reports := steps.waitFor(t, func(reports []stepReport) bool {
+		return len(reports) > 0 && reports[len(reports)-1].err == nil
+	})
+	if first := reports[0]; first.component != "peer_transport" || first.err == nil || first.retryAfter <= 0 {
+		t.Fatalf("first report %+v, want the failure with its retry wait", first)
+	}
+	if err := d.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	flaky.mu.Lock()
+	defer flaky.mu.Unlock()
+	if flaky.starts != 2 || flaky.shutdowns != 2 {
+		t.Fatalf("starts=%d shutdowns=%d, want rollback after the failure and shutdown of the recovered component", flaky.starts, flaky.shutdowns)
+	}
+}
+
+// An optional component that cannot be restarted is reported failing, with no retry, instead of being skipped
+// silently.
+func TestNonRestartableOptionalFailureIsReportedNotRetried(t *testing.T) {
+	shortComponentRetry(t)
+	failed := &failingStartService{startErr: errors.New("optional unavailable")}
+	steps := newStepRecorder()
+	d, err := New(Config{
+		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
+		Components: []Component{{Name: "preview_recovery", Service: failed}, {Name: "required", Required: true, Service: &testService{}}},
+		Report:     steps.report,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The report is made synchronously during Start; a non-restartable component launches no retry.
+	steps.mu.Lock()
+	reports := append([]stepReport(nil), steps.reports...)
+	steps.mu.Unlock()
+	if len(reports) != 1 || reports[0].component != "preview_recovery" || reports[0].err == nil || reports[0].retryAfter != 0 {
+		t.Fatalf("reports %+v, want one failure without a retry", reports)
+	}
+	if err := d.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if failed.starts != 1 {
+		t.Fatalf("a non-restartable component was started %d times", failed.starts)
+	}
+}
+
+// Shutdown during a retry's backoff stops the retry; the component is never started again.
+func TestShutdownStopsAPendingComponentRetry(t *testing.T) {
+	failed := &failingStartService{startErr: errors.New("registration refused")}
+	steps := newStepRecorder()
+	d, err := New(Config{
+		Workloads:  Workloads{Transfers: &filetransfer.Service{}},
+		Components: []Component{{Name: "peer_transport", Retry: true, Service: failed}, {Name: "required", Required: true, Service: &testService{}}},
+		Report:     steps.report,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	steps.waitFor(t, func(reports []stepReport) bool { return len(reports) == 1 })
+	done := make(chan error, 1)
+	go func() { done <- d.Shutdown(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown waited for the component retry's backoff")
+	}
+	if failed.starts != 1 {
+		t.Fatalf("component started %d times after Shutdown", failed.starts)
+	}
+}
