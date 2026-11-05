@@ -115,9 +115,6 @@ func deliverEndpoints(peers []networkPeer, capable bool) {
 // configurationClaims are the signed network configuration's claims for one recipient.
 func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer, endpointsCapable bool) map[string]any {
 	deliverEndpoints(peers, endpointsCapable)
-	for i := range peers {
-		deliverCarrierOffer(&peers[i], now)
-	}
-	self.Endpoints, self.CarrierOffer, self.CarrierOfferExpires = nil, nil, 0
+	self.Endpoints = nil
 	return map[string]any{"version": 1, "iss": issuer, "aud": "paperboat-network", "iat": now.Unix(), "exp": expiry.Unix(), "generation": generation, "self": bindingMap(self), "peers": peers}
 }

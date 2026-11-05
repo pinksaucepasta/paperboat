@@ -41,7 +41,6 @@ type peerNetworkConfigBody struct {
 type peerNetworkService interface {
 	Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error)
 	Configuration(context.Context, peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error)
-	ReportCarrierOffer(context.Context, peersessions.CarrierOfferReport) error
 }
 
 func decodePeerNetworkRegister(body peerNetworkRegisterBody) ([]byte, []byte, []byte, bool) {
@@ -121,35 +120,6 @@ func machinePeerNetworkRegister(s peerNetworkService, v machineEndpointProofVeri
 // Retry-After instead of loading the control plane.
 func machinePeerNetworkConfig(s peerNetworkService, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) http.HandlerFunc {
 	return machinePeerNetwork(s, v, false, limiter)
-}
-
-type machineCarrierOfferBody struct {
-	OperationID string `json:"operation_id"`
-	// Offer is the machine's active carrier generation offer (native.CarrierOffer bytes); empty withdraws it.
-	Offer []byte `json:"offer"`
-}
-
-// machineCarrierOffer stores a machine's carrier generation offer for its peers' configurations. It has its own
-// limiter: a report is rare (one per generation and renewal) and must not wait behind configuration refreshes.
-func machineCarrierOffer(s peerNetworkService, v machineEndpointProofVerifier, limiter *ratelimit.Limiter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		claims, raw, ok := verifyMachinePeerNetwork(w, r, v, limiter)
-		if !ok {
-			return
-		}
-		var body machineCarrierOfferBody
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&body) != nil || len(body.Offer) > peersessions.MaxCarrierOfferBytes {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Carrier offer report is invalid.")
-			return
-		}
-		if err := s.ReportCarrierOffer(r.Context(), peersessions.CarrierOfferReport{UserID: claims.UserID, MachineID: claims.MachineID, MachineGeneration: claims.InstallationGeneration, Offer: body.Offer}); err != nil {
-			peerNetworkError(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: struct{}{}})
-	}
 }
 
 // verifyMachinePeerNetwork reads a machine-proof request body and verifies it: the per-credential limiter first

@@ -1978,8 +1978,6 @@ type PeerNetworkIdentity struct {
 	PublishedEndpoints         []string
 	EndpointsPublishedAt       sql.NullTime
 	EndpointsDueAt             sql.NullTime
-	CarrierOffer               []byte
-	CarrierOfferExpiresAt      sql.NullTime
 }
 
 type PeerNetworkRegistrationOperation struct {
