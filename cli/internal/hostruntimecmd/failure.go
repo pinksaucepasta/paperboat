@@ -315,7 +315,11 @@ func (e *installationStageError) Error() string {
 		case "service_readiness":
 			step = "confirming system service readiness"
 		case "daemon_readiness":
-			return "Machine pairing failed while binding the local daemon. The committed runtime was retained; retry pairing with the same enrollment token file."
+			cause := ""
+			if e.Cause != nil {
+				cause = ": " + e.Cause.Error()
+			}
+			return "Machine pairing failed while binding the local daemon" + cause + ". The committed runtime was retained; retry pairing with the same enrollment token file."
 		case "environment_readiness":
 			return "Machine pairing failed while preparing managed environment variables. The committed runtime was retained; unlock your ENV vault to deliver them."
 		}

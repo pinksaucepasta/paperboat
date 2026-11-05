@@ -45,24 +45,33 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 		}
 		return withCleanup("restoring the previous local daemon after enrollment binding failed", runtimeFailure("binding the local daemon to the completed enrollment failed", err), cleanupErr)
 	}
+	return awaitBoundDaemon(ctx, localdaemon.ProbeCurrentUserForUpdate, expectedVersion)
+}
+
+// awaitBoundDaemon waits until probe shows the replaced daemon serving expectedVersion. On timeout it
+// names what the last probe saw, so a failed pair says why and not only that time ran out.
+func awaitBoundDaemon(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error), expectedVersion string) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var lastProbe localdaemon.UpdateProbe
 	var lastErr error
 	for {
-		probe, err := localdaemon.ProbeCurrentUserForUpdate(ctx)
-		if err == nil && boundDaemonServing(probe, expectedVersion) {
+		state, err := probe(ctx)
+		if err == nil && boundDaemonServing(state, expectedVersion) {
 			return nil
 		}
 		if ctx.Err() == nil {
-			lastProbe, lastErr = probe, err
+			lastProbe, lastErr = state, err
 		}
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return fmt.Errorf("installed daemon readiness probe failed: %w; retry enrollment: %w", lastErr, ctx.Err())
+				return fmt.Errorf("the installed local daemon did not answer: %w: %w", lastErr, ctx.Err())
 			}
-			return fmt.Errorf("installed daemon did not become ready at version %s (running=%t state=%q version=%q); retry enrollment: %w", expectedVersion, lastProbe.Running, lastProbe.State, lastProbe.Version, ctx.Err())
+			if !lastProbe.Running {
+				return fmt.Errorf("the installed local daemon service is not running: %w", ctx.Err())
+			}
+			return fmt.Errorf("the installed local daemon did not become ready at version %s (state %q, version %q): %w", expectedVersion, lastProbe.State, lastProbe.Version, ctx.Err())
 		case <-ticker.C:
 		}
 	}

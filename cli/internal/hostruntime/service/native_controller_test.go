@@ -437,3 +437,50 @@ func TestLaunchdEnableThenStartDoesNotRestartTheStartedJob(t *testing.T) {
 		}
 	}
 }
+
+// lingeringLaunchd models launchd after bootout: the old job stays registered while it exits, and
+// bootstrap fails until it is gone (macOS pb pair, 2026-11-04: the new daemon was never loaded).
+type lingeringLaunchd struct {
+	calls              [][]string
+	exitingPrints      int
+	bootedOut, loaded  bool
+	bootstrapsAccepted int
+}
+
+func (l *lingeringLaunchd) Run(_ context.Context, name string, args ...string) error {
+	l.calls = append(l.calls, append([]string{name}, args...))
+	absent := errors.New("Could not find service")
+	switch args[0] {
+	case "bootout":
+		l.bootedOut, l.loaded = true, false
+		return nil
+	case "print", "kickstart":
+		if l.bootedOut && l.exitingPrints > 0 {
+			l.exitingPrints--
+			return nil // the old job, still exiting
+		}
+		if !l.loaded {
+			return absent
+		}
+		return nil
+	case "bootstrap":
+		if l.bootedOut && l.exitingPrints > 0 {
+			return errors.New("Bootstrap failed: 5: Input/output error")
+		}
+		l.loaded, l.bootedOut = true, false
+		l.bootstrapsAccepted++
+		return nil
+	}
+	return nil
+}
+
+func TestLaunchdUpgradeLoadsNewDeclarationAfterOldJobExits(t *testing.T) {
+	runner := &lingeringLaunchd{loaded: true, exitingPrints: 3}
+	controller := LaunchdController{Runner: runner, UID: 501, Label: DaemonLabel, UserDomain: true}
+	if err := controller.Apply(context.Background(), "/Users/a/Library/LaunchAgents/"+DaemonLabel+".plist", true); err != nil {
+		t.Fatal(err)
+	}
+	if !runner.loaded || runner.bootstrapsAccepted != 1 {
+		t.Fatalf("replacement declaration was not loaded: calls=%v", runner.calls)
+	}
+}

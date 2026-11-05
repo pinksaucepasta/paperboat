@@ -452,12 +452,12 @@ func TestNativeControllerCommandSequences(t *testing.T) {
 	if len(runner.calls) != 4 || strings.Join(runner.calls[2], " ") != "systemctl restart paperboat-runtime-host.service" || strings.Join(runner.calls[3], " ") != "systemctl is-active --quiet paperboat-runtime-host.service" {
 		t.Fatalf("upgrade calls=%v", runner.calls)
 	}
-	runner = &commandRunner{}
+	runner = &commandRunner{errAt: 2, customError: errors.New("Could not find service")}
 	launchd := LaunchdController{Runner: runner, UID: 501}
 	if err := launchd.Apply(context.Background(), "/tmp/helper.plist", true); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 4 || strings.Join(runner.calls[0], " ") != "launchctl bootout system/"+Label || strings.Join(runner.calls[3], " ") != "launchctl print system/"+Label {
+	if len(runner.calls) != 5 || strings.Join(runner.calls[0], " ") != "launchctl bootout system/"+Label || strings.Join(runner.calls[2], " ") != "launchctl bootstrap system /tmp/helper.plist" || strings.Join(runner.calls[4], " ") != "launchctl print system/"+Label {
 		t.Fatalf("calls=%v", runner.calls)
 	}
 	runner = &commandRunner{errAt: 3}

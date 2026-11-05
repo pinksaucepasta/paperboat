@@ -230,13 +230,10 @@ func (c LaunchdController) Apply(ctx context.Context, path string, upgrading boo
 		return err
 	}
 	defer cancel()
-	domain := "system"
-	if c.UserDomain {
-		domain = fmt.Sprintf("gui/%d", c.UID)
-	}
-	service := domain + "/" + c.label()
+	// The old job must be gone before bootstrap: while it is still exiting, bootstrap fails, print
+	// and a plain kickstart succeed on the dying job, and the new declaration is never loaded.
 	if upgrading {
-		if err := c.Runner.Run(operationCtx, "launchctl", "bootout", service); err != nil && !launchdServiceAbsent(err) {
+		if err := c.bootoutAndWait(operationCtx); err != nil {
 			return err
 		}
 	}
