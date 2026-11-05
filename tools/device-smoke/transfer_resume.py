@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Interrupt a large batch by restarting the receiver's daemon; every file must arrive once, byte-identical."""
+"""Interrupt a large batch mid-send; every file must arrive once, byte-identical, and the same send finishes by itself.
+
+--interrupt receiver (default): restart the receiver's daemon. sender: restart this machine's daemon.
+network: drop this user's outbound non-loopback traffic for DROP_SECONDS (iptables, needs sudo -n; removed on
+every exit path and by a root failsafe timer, as network_drop.py does).
+"""
 import argparse
 import hashlib
 import json
@@ -19,11 +24,14 @@ FILE_SIZE = 24 << 20  # 96 MiB batch: about two minutes on the hp-dadape path; p
 SIZE = FILES * FILE_SIZE
 RESTART_AFTER = 25.0
 SEND_TIMEOUT = 600
+DROP_SECONDS = 15
+RULE = ['OUTPUT', '-m', 'owner', '--uid-owner', str(os.getuid()), '!', '-o', 'lo', '-j', 'DROP']
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
+    parser.add_argument('--interrupt', choices=('receiver', 'sender', 'network'), default='receiver')
     args = parser.parse_args()
     binary = Path.home() / '.local/bin/pb'
     before = registration()
@@ -50,7 +58,19 @@ def main():
         def interrupt():
             time.sleep(RESTART_AFTER)
             command = '(sleep 1; ~/.local/bin/pb service restart) >/dev/null 2>&1 &'
-            run(binary, 'exec', args.target, '--', 'sh', '-c', command)
+            if args.interrupt == 'receiver':
+                run(binary, 'exec', args.target, '--', 'sh', '-c', command)
+            elif args.interrupt == 'sender':
+                subprocess.run(['sh', '-c', command], timeout=30, check=True)
+            else:
+                # Root failsafe removes the rule even if this process dies.
+                subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (DROP_SECONDS + 60, ' '.join(RULE))],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                subprocess.run(['sudo', '-n', 'iptables', '-I', *RULE], timeout=30, check=True)
+                try:
+                    time.sleep(DROP_SECONDS)
+                finally:
+                    subprocess.run(['sudo', '-n', 'iptables', '-D', *RULE], timeout=30)
             restarted['at'] = time.monotonic()
 
         try:
@@ -73,7 +93,7 @@ def main():
             if len(batch['transfers']) != FILES:
                 raise RuntimeError('resumed send did not report every file')
             if 'at' not in restarted or finished - restarted['at'] < 2 or restarted['at'] - started < RESTART_AFTER - 1:
-                raise RuntimeError('the transfer was not still running when the receiver restarted')
+                raise RuntimeError('the transfer was not still running when the %s interruption ended' % args.interrupt)
             verify = ("from pathlib import Path\nimport hashlib\n"
                       "root=Path.home()/'Paperboat/Inbox'\n"
                       "expected=" + repr(expected) + "\n"
@@ -101,7 +121,7 @@ def main():
                 failure.add_note('Exact received-file cleanup failed: ' + str(error))
     if registration() != before:
         raise RuntimeError('transfer resume changed the enrolled identity')
-    print(json.dumps({'check': 'transfer-resume', 'target': args.target, 'status': 'PASS',
+    print(json.dumps({'check': 'transfer-resume', 'target': args.target, 'interrupt': args.interrupt, 'status': 'PASS',
                       'bytes': SIZE, 'interrupted_after_s': RESTART_AFTER, 'enrollment_unchanged': True}))
 
 
