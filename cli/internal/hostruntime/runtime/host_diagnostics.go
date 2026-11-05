@@ -101,6 +101,23 @@ func (diagnostics HostDiagnostics) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// NewHostHealthTracker is the host's typed health, served at /diagnostics for pb doctor. Every dimension starts
+// not applicable: a host reports only what its components own (lifecycle, start failures), and a dimension
+// nothing reports must not read as unknown, which would make the overall state unknown on a healthy host.
+func NewHostHealthTracker() (*health.HealthTracker, error) {
+	tracker, err := health.NewHealthTracker(nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, dimension := range health.Dimensions() {
+		if err := tracker.Update(health.HealthUpdate{Dimension: dimension, Status: health.StatusNotApplicable, Code: "not_reported",
+			Summary: "This host does not report this dimension.", RepairAction: "No action is required.", Retry: health.RetryNone}); err != nil {
+			return nil, err
+		}
+	}
+	return tracker, nil
+}
+
 type hostDiagnosticsSource struct {
 	workloads     func() HostWorkloadCounts
 	health        *runtimeHealthSource

@@ -22,6 +22,7 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
@@ -386,6 +387,9 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 func probeDoctorLocalState(ctx context.Context) doctorpkg.Check {
 	state := collectLocalDoctor(ctx)
 	if state.SetupState == "configured" && state.IdentityState == "valid" {
+		if check, failing := doctorHostStepsCheck(state.hostSteps); failing {
+			return check
+		}
 		return doctorpkg.Check{Category: "local", Code: "local_state", Status: doctorpkg.StatusPass, Summary: "Local Paperboat state and identity are valid."}
 	}
 	recovery := "Run pb setup, then run pb doctor again."
@@ -633,7 +637,9 @@ func doctorProxyDiagnosis(err error) (proxyDoctorDiagnosis, bool) {
 }
 
 type localDoctorReport struct {
-	failure                error
+	failure error
+	// hostSteps are the host runtime's failing steps (degraded or down typed health dimensions).
+	hostSteps              []health.Alert
 	StateRoot              string   `json:"state_root,omitempty"`
 	SetupState             string   `json:"setup_state"`
 	MachineID              string   `json:"machine_id,omitempty"`
@@ -824,6 +830,7 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 		report.WorkloadCounts = "unavailable · invalid runtime diagnostics"
 		return
 	}
+	report.hostSteps = failingHostSteps(diagnostics.Health)
 	state := diagnostics.Health.Dimensions.Service
 	if state.Status != "" && state.Status != "ready" {
 		report.HostRuntime = string(state.Status) + " · " + state.Summary
@@ -840,6 +847,36 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 	report.ActiveProcesses = diagnostics.Workloads.Processes
 	report.ActiveAttachments = diagnostics.Workloads.Attachments
 	report.ActiveUploads = diagnostics.Workloads.Uploads
+}
+
+// failingHostSteps lists the host's degraded or down health dimensions, the steps pb doctor must name.
+// Unknown (not yet observed) and not applicable dimensions are not failures; a dimension suppressed by a
+// failing dependency is shown through that dependency.
+func failingHostSteps(snapshot health.HealthSnapshot) []health.Alert {
+	var failing []health.Alert
+	for _, dimension := range health.Dimensions() {
+		alert, ok := snapshot.AlertFor(dimension)
+		if ok && (alert.Status == health.StatusDegraded || alert.Status == health.StatusDown) && snapshot.Dimensions.Get(dimension).SuppressedBy == "" {
+			failing = append(failing, alert)
+		}
+	}
+	return failing
+}
+
+// doctorHostStepsCheck fails local_state while the host runtime reports a failing step, naming the first one,
+// its cause and the repair action.
+func doctorHostStepsCheck(steps []health.Alert) (doctorpkg.Check, bool) {
+	if len(steps) == 0 {
+		return doctorpkg.Check{}, false
+	}
+	summary := "The host runtime reports a failing step (" + string(steps[0].Dimension) + "): " + steps[0].Summary
+	if len(steps) > 1 {
+		summary += fmt.Sprintf(" (and %d more)", len(steps)-1)
+	}
+	if len(summary) > 512 {
+		summary = strings.ToValidUTF8(summary[:509], "") + "..."
+	}
+	return doctorpkg.Check{Category: "local", Code: "local_state", Status: doctorpkg.StatusFail, Summary: summary, Recovery: steps[0].RepairAction}, true
 }
 
 func doctorUserMachine(ctx context.Context, client *api.Client, machineID string) (api.UserMachine, error) {

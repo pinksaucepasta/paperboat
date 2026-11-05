@@ -56,16 +56,19 @@ const (
 )
 
 type Runtime struct {
-	opMu            sync.Mutex
-	mu              sync.RWMutex
-	config          Config
-	state           State
-	started         []Component
-	health          *health.Registry
-	typedHealth     *health.HealthTracker
-	metrics         *hosttelemetry.Registry
-	eventLog        *hosttelemetry.EventLog
-	correlation     string
+	opMu        sync.Mutex
+	mu          sync.RWMutex
+	config      Config
+	state       State
+	started     []Component
+	health      *health.Registry
+	typedHealth *health.HealthTracker
+	metrics     *hosttelemetry.Registry
+	eventLog    *hosttelemetry.EventLog
+	correlation string
+	// typedMu guards typedComponents and typedSequence: stable host component retries report from their own
+	// goroutines.
+	typedMu         sync.Mutex
 	typedComponents map[health.Dimension]map[string]componentHealthState
 	typedSequence   uint64
 	startedAt       time.Time
@@ -459,6 +462,8 @@ func (r *Runtime) updateTypedHealth(capability string, update health.HealthUpdat
 	if r == nil || r.typedHealth == nil {
 		return
 	}
+	r.typedMu.Lock()
+	defer r.typedMu.Unlock()
 	if r.typedComponents == nil {
 		r.typedComponents = make(map[health.Dimension]map[string]componentHealthState)
 	}
@@ -483,6 +488,31 @@ func (r *Runtime) updateTypedHealth(capability string, update health.HealthUpdat
 		_ = r.metrics.RecordHealthTransition(update.Dimension, previous.Status, current.Status)
 	}
 	_ = r.metrics.RecordHealth(snapshot)
+}
+
+// ReportComponentStep records a stable host component's start failure (retried after retryAfter, or not
+// retried when it is 0) or its recovery (nil err) in the typed health that pb doctor reads.
+func (r *Runtime) ReportComponentStep(capability string, err error, retryAfter time.Duration) {
+	if r == nil {
+		return
+	}
+	correlation := r.correlation
+	if correlation == "" {
+		correlation = "correlation_runtime"
+	}
+	update := health.HealthUpdate{Dimension: componentDimension(capability), Status: health.StatusReady, Code: "ready",
+		Summary: "Host component " + capability + " is running.", RepairAction: "No action is required.", CorrelationID: correlation, Retry: health.RetryNone}
+	if err != nil {
+		update.Status, update.Code = health.StatusDegraded, "start_failed"
+		update.Summary = "Host component " + capability + " failed to start: " + err.Error()
+		update.RepairAction = "Restart the Paperboat host service, then run pb doctor again."
+		update.Retry = health.RetryWaitForChange
+		if retryAfter > 0 {
+			update.RepairAction = "Paperboat retries this on its own. If it keeps failing, restart the Paperboat host service, then run pb doctor again."
+			update.Retry, update.NextRetryAt = health.RetryScheduled, r.telemetryNow().Add(retryAfter)
+		}
+	}
+	r.updateTypedHealth(capability, update)
 }
 
 func aggregateHealthUpdate(components map[string]componentHealthState) health.HealthUpdate {

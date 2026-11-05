@@ -602,9 +602,13 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.EngineTunnels != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "engine_tunnels", Required: false, Service: dependencies.EngineTunnels})
 	}
+	var hostRuntime *Runtime // set below, before the daemon starts
 	daemon, err := stablehostd.New(stablehostd.Config{
 		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, ManagedSSH: dependencies.ManagedSSH},
 		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
+		Report: func(component string, err error, retryAfter time.Duration) {
+			hostRuntime.ReportComponentStep(component, err, retryAfter)
+		},
 	})
 	if err != nil {
 		return nil, errors.Join(ErrHostInvalid, err)
@@ -616,6 +620,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err != nil {
 		return nil, err
 	}
+	hostRuntime = runtime
 	workers, err := stablehostd.NewWorkerController(daemon)
 	if err != nil {
 		return nil, errors.Join(ErrHostInvalid, err)
