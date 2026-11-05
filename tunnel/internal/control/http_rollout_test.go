@@ -41,6 +41,13 @@ func TestHTTPClientRequestsSurviveConnectionClosedMidRequest(t *testing.T) {
 		{"runtime carrier observations", ``, func(ctx context.Context, c *HTTPClient) error {
 			return c.ObserveRuntimeCarriers(ctx, "edge_1", "edge_epoch_1", []runtimewire.Observation{{RouteID: "route_1", SessionID: "session_1", AttachmentGeneration: 1}})
 		}, true},
+		{"register", ``, func(ctx context.Context, c *HTTPClient) error {
+			trust, err := NewProcessCarrierServerTrust("edge", "epoch", "edge.example.test", time.Now().UTC(), time.Hour)
+			if err != nil {
+				return err
+			}
+			return c.RegisterNode(ctx, NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", Capacity: 1, CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM})
+		}, false},
 		{"certificate request", ``, func(ctx context.Context, c *HTTPClient) error {
 			distribution, err := NewCertificateDistributionClient(c)
 			if err != nil {

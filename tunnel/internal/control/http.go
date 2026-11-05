@@ -510,12 +510,13 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	if !distribution {
-		// Every other node request is a read, an idempotent state report or upsert (heartbeat,
-		// register, observations), or a usage report the server deduplicates by operation id.
-		// Marking it idempotent lets net/http resend it once on a fresh connection when a server
-		// rollout closes the kept-alive one mid-request; a nil value is not sent on the wire.
+	if !distribution && path != "/v1/nodes/register" {
+		// Every other node request is a read, an idempotent state report (heartbeat,
+		// observations), or a usage report the server deduplicates by operation id. Marking it
+		// idempotent lets net/http resend it once on a fresh connection when a server rollout
+		// closes the kept-alive one mid-request; a nil value is not sent on the wire.
 		// Distribution requests carry a single-use signed nonce: a resend would be a replay.
+		// Register is not resent: replaying it resets this process's readiness on the server.
 		request.Header["Idempotency-Key"] = nil
 	}
 	response, err := c.client.Do(request)
