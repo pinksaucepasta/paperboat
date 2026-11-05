@@ -71,6 +71,10 @@ func TestFailedUpdateWithdrawsOnlyItsCandidateSessionOwner(t *testing.T) {
 	if err = os.Mkdir(runtimeRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// The host's unit directory always exists; removing a unit syncs it.
+	if err = os.MkdirAll(filepath.Join(root, "etc", "systemd", "system"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	for _, existed := range []bool{false, true} {
 		runner := &withdrawRunner{}
 		catalog := sessionowner.Catalog{Root: filepath.Join(root, "catalog"), ConfigRoot: root, User: "root", Group: "root", Maximum: 4, Runner: runner}
