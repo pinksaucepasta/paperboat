@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -110,24 +111,7 @@ func platformWildcardInputs(challenge string, bases tunnelcert.PlatformCertifica
 func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunnelcert.CAAInspector, *tunnelcert.HTTP01Responses, error) {
 	certificateConfig := cfg.Certificates
 	secrets := tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv}
-	signerSource := tunnelcert.EnvironmentSignerSource{EnvironmentReferenceSource: secrets}
-	issuerConfig := tunnelcert.ACMEIssuerConfig{
-		DirectoryURL:        certificateConfig.DirectoryURL,
-		AccountKID:          certificateConfig.AccountKID,
-		AccountEmail:        certificateConfig.AccountEmail,
-		AccountKeys:         signerSource,
-		AccountKeyReference: certificateConfig.AccountKeyReference,
-		HTTPClient:          providerHTTPClient("acme", cfg.HTTP.RequestTimeout),
-		Timeout:             certificateConfig.ACMETimeout,
-		PropagationTimeout:  certificateConfig.PropagationTimeout,
-		CleanupTimeout:      certificateConfig.CleanupTimeout,
-		PollInterval:        certificateConfig.PollInterval,
-		MaxAttempts:         certificateConfig.MaxAttempts,
-		RetryBase:           certificateConfig.RetryBase,
-		RetryMax:            certificateConfig.RetryMax,
-		Issuer:              certificateConfig.Issuer,
-		ChallengeZone:       certificateConfig.ChallengeZone,
-	}
+	issuerConfig := acmeIssuerConfig(cfg, secrets)
 	var http01 *tunnelcert.HTTP01Responses
 	if certificateConfig.ChallengeType() == config.CertificateChallengeHTTP01 {
 		http01 = tunnelcert.NewHTTP01Responses(func() time.Time { return time.Now().UTC() })
@@ -176,20 +160,79 @@ func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentRefe
 		cfg.RuntimeBaseDomain:           dnsProvider,
 		certificateConfig.ChallengeZone: dnsProvider,
 	}
-	if cfg.RegionalDomain != "" && cfg.RegionalDNSZoneID != "" {
-		// The regional server-node wildcard writes its _acme-challenge TXT in the regional zone.
-		regionalDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-			ZoneID: cfg.RegionalDNSZoneID, TokenReference: certificateConfig.DNSTokenReference, TokenSource: secrets,
-			HTTPClient: providerHTTPClient("cloudflare-regional-dns", cfg.HTTP.RequestTimeout), WriteBase: certificateConfig.DNSWriteBase,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("%w: regional DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
-		}
-		zones[cfg.RegionalDomain] = regionalDNS
-	}
 	dnsZones, err := tunnelcert.NewDNS01Zones(zones)
 	if err != nil {
 		return nil, fmt.Errorf("%w: configured DNS zones: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
 	return dnsZones, nil
+}
+
+// acmeIssuerConfig is the ACME account and timing every issuer shares; callers add the challenge path.
+func acmeIssuerConfig(cfg config.Config, secrets tunnelcert.EnvironmentReferenceSource) tunnelcert.ACMEIssuerConfig {
+	certificateConfig := cfg.Certificates
+	return tunnelcert.ACMEIssuerConfig{
+		DirectoryURL:        certificateConfig.DirectoryURL,
+		AccountKID:          certificateConfig.AccountKID,
+		AccountEmail:        certificateConfig.AccountEmail,
+		AccountKeys:         tunnelcert.EnvironmentSignerSource{EnvironmentReferenceSource: secrets},
+		AccountKeyReference: certificateConfig.AccountKeyReference,
+		HTTPClient:          providerHTTPClient("acme", cfg.HTTP.RequestTimeout),
+		Timeout:             certificateConfig.ACMETimeout,
+		PropagationTimeout:  certificateConfig.PropagationTimeout,
+		CleanupTimeout:      certificateConfig.CleanupTimeout,
+		PollInterval:        certificateConfig.PollInterval,
+		MaxAttempts:         certificateConfig.MaxAttempts,
+		RetryBase:           certificateConfig.RetryBase,
+		RetryMax:            certificateConfig.RetryMax,
+		Issuer:              certificateConfig.Issuer,
+		ChallengeZone:       certificateConfig.ChallengeZone,
+	}
+}
+
+// newRegionalCertificateIssuer issues the server-node wildcard *.<regional_domain> with DNS-01 in the regional
+// zone only, so a node without edges (no preview or runtime domain) can issue it too.
+func newRegionalCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, error) {
+	secrets := tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv}
+	if err := checkRegionalCertificateSecrets(cfg, secrets); err != nil {
+		return nil, err
+	}
+	provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		ZoneID: cfg.RegionalDNSZoneID, TokenReference: cfg.Certificates.DNSTokenReference, TokenSource: secrets,
+		HTTPClient: providerHTTPClient("cloudflare-regional-dns", cfg.HTTP.RequestTimeout), WriteBase: cfg.Certificates.DNSWriteBase,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("regional DNS provider: %w", err)
+	}
+	zones, err := tunnelcert.NewDNS01Zones(map[string]tunnelcert.DNS01Provider{cfg.RegionalDomain: provider})
+	if err != nil {
+		return nil, fmt.Errorf("regional DNS zone: %w", err)
+	}
+	issuerConfig := acmeIssuerConfig(cfg, secrets)
+	issuerConfig.DNS = zones
+	return tunnelcert.NewACMEIssuer(issuerConfig)
+}
+
+// checkRegionalCertificateSecrets refuses to start a regional node whose DNS token or ACME account key is not
+// configured or does not resolve, naming the setting, instead of failing every issuance later.
+func checkRegionalCertificateSecrets(cfg config.Config, secrets tunnelcert.EnvironmentReferenceSource) error {
+	c := cfg.Certificates
+	for _, setting := range []struct{ name, reference string }{
+		{"certificates.dns_token_reference (PAPERBOAT_CERTIFICATES_DNS_TOKEN_REFERENCE)", c.DNSTokenReference},
+		{"certificates.account_key_reference (PAPERBOAT_CERTIFICATES_ACCOUNT_KEY_REFERENCE)", c.AccountKeyReference},
+		{"certificates.directory_url (PAPERBOAT_CERTIFICATES_DIRECTORY_URL)", c.DirectoryURL},
+	} {
+		if strings.TrimSpace(setting.reference) == "" {
+			return fmt.Errorf("regional_domain is set but %s is not: the regional certificate cannot be issued", setting.name)
+		}
+	}
+	ctx := context.Background()
+	if token, err := secrets.Resolve(ctx, c.DNSTokenReference); err != nil || len(token) == 0 {
+		name, _ := tunnelcert.EnvironmentReferenceName(secrets.Prefix, c.DNSTokenReference)
+		return fmt.Errorf("regional_domain is set but the DNS token %s does not resolve: set %s", c.DNSTokenReference, name)
+	}
+	if _, err := (tunnelcert.EnvironmentSignerSource{EnvironmentReferenceSource: secrets}).ResolveSigner(ctx, c.AccountKeyReference); err != nil {
+		name, _ := tunnelcert.EnvironmentReferenceName(secrets.Prefix, c.AccountKeyReference)
+		return fmt.Errorf("regional_domain is set but the ACME account key %s does not resolve to a usable private key: set %s", c.AccountKeyReference, name)
+	}
+	return nil
 }

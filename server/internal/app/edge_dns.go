@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -60,11 +61,11 @@ func newRegionalDNS(database *db.DB, cfg config.Config) (*servernodes.RegionalDN
 	if err != nil {
 		return nil, err
 	}
-	issuer, _, _, err := newPublicCertificateIssuer(cfg)
+	issuer, err := newRegionalCertificateIssuer(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("regional certificate issuer: %w", err)
 	}
-	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey}, nil
+	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey, Logger: slog.Default()}, nil
 }
 
 // newRegionalDNSWorker runs only the regional loop every 10 s, for nodes without the edge certificate runtime.

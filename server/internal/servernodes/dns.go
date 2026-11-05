@@ -3,6 +3,7 @@ package servernodes
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/netip"
 	"time"
 
@@ -27,6 +28,7 @@ type RegionalDNS struct {
 	// issuance waits 10 minutes before the next attempt (ACME failure rate limits).
 	Issuer       DNS01Issuer
 	Key          string
+	Logger       *slog.Logger
 	issueBackoff time.Time
 }
 
@@ -37,6 +39,9 @@ func (r *RegionalDNS) Sync(ctx context.Context) error {
 	if r.Issuer != nil && time.Now().After(r.issueBackoff) {
 		if certErr = EnsureCertificate(ctx, r.DB, r.Key, r.Domain, r.Issuer, time.Now()); certErr != nil {
 			r.issueBackoff = time.Now().Add(10 * time.Minute)
+			if r.Logger != nil {
+				r.Logger.Warn("regional certificate not issued; retrying in 10 minutes", "name", wildcardName(r.Domain), "error", certErr)
+			}
 		}
 	}
 	rows, err := r.DB.Pool().Query(ctx, `SELECT region, coalesce(array_agg(coalesce(public_address, endpoint_host) ORDER BY coalesce(public_address, endpoint_host))
@@ -86,6 +91,9 @@ FROM paperboat.control_server_nodes GROUP BY region ORDER BY region`, HealthyWit
 		cancel()
 		if err != nil && !tunnelcert.WaitingForDNS(err) {
 			errs = append(errs, err)
+			if r.Logger != nil {
+				r.Logger.Warn("regional DNS not reconciled", "name", desired.Hostname, "error", err)
+			}
 		}
 	}
 	return errors.Join(append(errs, certErr)...)
