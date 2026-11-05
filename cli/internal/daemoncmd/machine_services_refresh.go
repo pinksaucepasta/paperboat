@@ -7,6 +7,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
@@ -42,10 +44,12 @@ func machineServicesFetcher(serverURL string, auth *sessionauth.Source, transpor
 	}
 }
 
-func refreshMachineServices(ctx context.Context, coordinator serviceApplier, fetch machineServicesFetch, changed, nudge <-chan struct{}) {
+// refreshMachineServices reports into steps: a failing fetch or apply is the machine_services step, retried
+// with doubling jittered waits (backoff.Retry) and shown by pb doctor until it succeeds.
+func refreshMachineServices(ctx context.Context, steps *health.Registry, coordinator serviceApplier, fetch machineServicesFetch, changed, nudge <-chan struct{}) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
-	retry := machineServicesFirstRetry
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -64,13 +68,13 @@ func refreshMachineServices(ctx context.Context, coordinator serviceApplier, fet
 		cancel()
 		wait := machineServicesIdleRefresh
 		if err == nil {
-			retry = machineServicesFirstRetry
-		} else {
-			// A failing server is retried with doubling waits.
-			wait, retry = backoff.Jitter(retry), min(retry*2, machineServicesMaximumRetry)
-			if ctx.Err() == nil {
-				diagnosticlog.TryWarn("could not refresh the announced services; the next attempt follows", "error", err)
-			}
+			failures = 0
+			steps.Set(localdaemon.StepMachineServices, health.Ready, "", 0)
+		} else if ctx.Err() == nil {
+			failures++
+			wait = backoff.Retry(failures, machineServicesFirstRetry, machineServicesMaximumRetry)
+			steps.Fail(localdaemon.StepMachineServices, err, wait)
+			diagnosticlog.TryWarn("could not refresh the announced services; the next attempt follows", "error", err)
 		}
 		timer.Reset(wait)
 	}
