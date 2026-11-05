@@ -214,8 +214,8 @@ func (s *Service) RecordBrowserAttached(ctx context.Context, attachment string, 
 	return err
 }
 
-// A resume extended attached_until past until (the value the detaching connection last wrote):
-// the resumed connection owns the attachment and it stays attached.
+// RecordBrowserDetached ends the attachment unless a resume extended attached_until past until (the
+// value the detaching connection last wrote): then the resumed connection owns it and it stays attached.
 func (s *Service) RecordBrowserDetached(ctx context.Context, attachment string, until time.Time) error {
 	_, err := s.Store.SQL().ExecContext(ctx, `UPDATE native_usage_authorities SET attached_until=least(attached_until,now()) WHERE access_session_id=$1 AND resource_kind='terminal' AND attached_until<=$2`, attachment, until)
 	return err
