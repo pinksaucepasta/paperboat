@@ -446,12 +446,23 @@ func TestTimeoutBypassesWebSocketControlLifetime(t *testing.T) {
 		w.WriteHeader(http.StatusSwitchingProtocols)
 	})))
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/tunnels/tunnel_01/connectors/connector_01/control", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/edge/browser-terminal/control", nil)
 	req.Header.Set("Connection", "keep-alive, Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSwitchingProtocols {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// No handler serves a tunnel connector control socket, so its path is an ordinary request that keeps
+// the request timeout.
+func TestConnectorControlPathIsNotStreaming(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/tunnels/tunnel_01/connectors/connector_01/control", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	if isStreamingRoute(req) {
+		t.Fatal("the unserved connector control path skips the request timeout")
 	}
 }
 
