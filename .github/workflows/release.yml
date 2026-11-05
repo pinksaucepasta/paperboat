@@ -590,6 +590,32 @@ jobs:
               if asset.get('url') != expected:
                   raise SystemExit(f'published GitHub asset URL mismatch: {asset["name"]}')
           PY
+      - name: Verify the release is public to an anonymous client before signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The checks above read through the token, which also sees drafts. On 2026-11-04 GitHub
+          # accepted `--draft=false` twice (2026.11.04.10, 2026.11.05.2) while the release stayed a
+          # draft, and TUF was signed for assets that answer 404 to every client. Sign nothing until
+          # an unauthenticated read sees the release published and every asset downloadable.
+          release_api="https://api.github.com/repos/$PAPERBOAT_GITHUB_REPOSITORY/releases/tags/$RELEASE_VERSION"
+          assets=$(python3 -c 'import json,sys; print(" ".join(a["name"] for a in json.load(open(sys.argv[1]))["assets"]))' "$RUNNER_TEMP/published-release.json")
+          test -n "$assets"
+          for attempt in $(seq 1 20); do
+            public=true
+            body=$(curl -fsS --max-time 30 -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null) || public=false
+            if test "$public" = true && ! printf '%s' "$body" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("draft") is False else 1)'; then public=false; fi
+            if test "$public" = true; then
+              for name in $assets; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 60 -r 0-0 "https://github.com/$PAPERBOAT_GITHUB_REPOSITORY/releases/download/$RELEASE_VERSION/$name" || true)
+                case "$code" in 200|206) ;; *) public=false; echo "attempt $attempt: $name answered $code" ;; esac
+              done
+            fi
+            if test "$public" = true; then echo "release $RELEASE_VERSION is public: $assets"; exit 0; fi
+            sleep 15
+          done
+          echo "Release $RELEASE_VERSION is not public to anonymous clients after 5 minutes; TUF is not signed. Publish the draft (gh release edit $RELEASE_VERSION --draft=false) and rerun the failed job." >&2
+          exit 1
       - name: Read and validate current production TUF root and online signer
         shell: bash
         run: |

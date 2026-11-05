@@ -73,6 +73,17 @@ class TUFWorkflowSignerTest(unittest.TestCase):
                 metadata = runner / "tuf-candidate/metadata/root.json"
                 self.assertEqual(metadata.is_file(), status == 42)
 
+    def test_nothing_is_signed_before_an_anonymous_client_sees_the_release_public(self):
+        publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        names = [s.get("name") for s in publication["jobs"]["release-publication"]["steps"]]
+        public = names.index("Verify the release is public to an anonymous client before signing")
+        self.assertLess(names.index("Publish release assets without changing Latest"), public)
+        self.assertLess(public, names.index("Sign the three qualified release targets"))
+        check = publication["jobs"]["release-publication"]["steps"][public]
+        self.assertNotIn("env", check, "the public check must not read with a token, which also sees drafts")
+        self.assertIn('"draft") is False', check["run"])
+        self.assertIn("/releases/download/", check["run"])
+
     def test_release_creation_uses_source_repository_and_verified_tag(self):
         publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         step = next(s for s in publication["jobs"]["release-publication"]["steps"]
