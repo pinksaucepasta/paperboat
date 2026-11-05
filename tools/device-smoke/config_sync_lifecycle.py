@@ -75,7 +75,8 @@ def pb_json(*args, stdin=None, ok=True):
 def confirmed(*args):
     preview = pb_json(*args, ok=False)
     token = preview.get('confirmation_token')
-    assert token, 'no confirmation preview for ' + ' '.join(args)
+    # A refusal (unreachable, forbidden, state) is not a preview: say which, so the cause is in the failure.
+    assert token, 'no confirmation preview for %s: %s' % (' '.join(args), {k: preview.get(k) for k in ('outcome', 'code', 'message', 'error') if preview.get(k)})
     return pb_json(*args, '--confirm', token)
 
 
