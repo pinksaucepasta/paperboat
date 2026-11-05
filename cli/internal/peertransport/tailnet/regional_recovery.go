@@ -74,8 +74,10 @@ type regionalRecovery struct {
 	done      chan struct{}
 	ready     chan struct{}
 	readyOnce sync.Once
-	inbox     chan regionalInbound
-	status    RegionalStatus
+	// provisioning is set while a background provisional preparation for a direct peer runs.
+	provisioning atomic.Bool
+	inbox        chan regionalInbound
+	status       RegionalStatus
 	// unusableSince is when RegionalStatus first saw no usable relay (protected by mu).
 	unusableSince time.Time
 	// Protected by authority.mu; renewal timestamps do not revoke an unchanged pair.
@@ -183,10 +185,31 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	}
 	ready := r.ready
 	r.mu.Unlock()
-	a.mu.Unlock()
 	// Direct UDP discovery belongs to magicsock; relay rendezvous must not
-	// serialize it. The recovery worker above still prepares fallback routes.
-	if peerID == "" || a.PeerHasEndpoints(peerID) {
+	// serialize it. A relay must still carry the traffic while no direct path is
+	// proven (magicsock sends via DERP until a disco pong): give the peer a
+	// reachable rendezvous in the background, since acknowledged recovery needs
+	// the peer to answer and its first relay may be one this machine cannot reach.
+	direct := peerID != "" && a.peerHasEndpointsLocked(peerID)
+	if direct && r.provisioning.CompareAndSwap(false, true) {
+		a.recoveryWorkers.Add(1)
+		go func() {
+			defer a.recoveryWorkers.Done()
+			defer r.provisioning.Store(false)
+			background, cancel := context.WithTimeout(context.Background(), regionalProvisionalBound)
+			defer cancel()
+			go func() {
+				select {
+				case <-a.done:
+					cancel()
+				case <-background.Done():
+				}
+			}()
+			_ = r.prepareProvisional(background, peerID)
+		}()
+	}
+	a.mu.Unlock()
+	if peerID == "" || direct {
 		return nil
 	}
 	select {
@@ -197,16 +220,19 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 	case <-ready:
 		return nil
 	case <-time.After(regionalAcknowledgedRouteWait):
-		return r.prepareProvisional(ctx)
+		return r.prepareProvisional(ctx, peerID)
 	}
 }
+
+// regionalProvisionalBound bounds one background provisional relay preparation for a direct peer.
+const regionalProvisionalBound = 30 * time.Second
 
 // prepareProvisional prevents regional reachability coordination from becoming
 // a prerequisite for an otherwise authorized native connection. The signed
 // relay grant and exact application peer scope remain the authorization
 // boundary; this only chooses a current DERP rendezvous while the recovery
 // worker continues looking for an acknowledged common route.
-func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
+func (r *regionalRecovery) prepareProvisional(ctx context.Context, peerID string) error {
 	nodes, peers, _, err := r.snapshot()
 	if err != nil {
 		return fmt.Errorf("provisional regional snapshot: %w", err)
@@ -214,7 +240,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	if len(nodes) == 0 {
 		return fmt.Errorf("%w: no current regional relay grant", ErrRegionalAuthority)
 	}
-	peer, err := publicKeyForEndpoint(peers, r.pair())
+	peer, err := publicKeyForEndpoint(peers, peerID)
 	if err != nil {
 		return fmt.Errorf("%w: target peer scope is unavailable", ErrRegionalAuthority)
 	}
@@ -254,7 +280,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	if err != nil || !sameRegionalNode(freshNodes, node) {
 		return fmt.Errorf("%w: regional relay grant changed during preparation", ErrRegionalAuthority)
 	}
-	freshPeer, err := publicKeyForEndpoint(freshPeers, r.pair())
+	freshPeer, err := publicKeyForEndpoint(freshPeers, peerID)
 	if err != nil || freshPeer != peer {
 		return fmt.Errorf("%w: target peer scope changed during preparation", ErrRegionalAuthority)
 	}

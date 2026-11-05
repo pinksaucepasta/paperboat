@@ -70,6 +70,11 @@ type locoBackend struct {
 
 	mu      sync.Mutex
 	clients map[key.NodePublic]*tailcfg.Node // for the server
+	// peerRegions is each admitted peer's last chosen relay region. A retired lease re-adds its peer; the
+	// peer keeps its rendezvous, as magicsock keeps a peer's derpRoute across WireGuard resets
+	// (wgengine/magicsock/derp.go). Re-added on the default home, a dial attempt lost the relay its
+	// predecessor had found (pbmac 2026-11-05).
+	peerRegions map[key.NodePublic]tailcfg.DERPRegionID
 	// clientByAddr indexes clients by address for the per-packet peer lookup; it changes only
 	// through setClientLocked and deleteClientLocked.
 	clientByAddr map[netip.Addr]key.NodePublic

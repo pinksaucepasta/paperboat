@@ -63,6 +63,11 @@ func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
 func (a *Authority) PeerHasEndpoints(endpointID string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.peerHasEndpointsLocked(endpointID)
+}
+
+// peerHasEndpointsLocked is PeerHasEndpoints with a.mu held.
+func (a *Authority) peerHasEndpointsLocked(endpointID string) bool {
 	if a.current == nil {
 		return false
 	}

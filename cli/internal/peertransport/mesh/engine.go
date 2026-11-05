@@ -173,6 +173,11 @@ func (s *Server) Start() error {
 				// "meowed" is the ack that tells the client it can
 				// start dialing. Disallowed clients get no reply.
 				if lb.onMeow(src, discoPub) {
+					// The peer reached us through regionID, so it is a rendezvous both ends hold: answer it there
+					// rather than on the peer's default region, which may be a relay this engine cannot reach
+					// (pbmac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
+					// derp.go derpRoute, issue 150).
+					_ = lb.setPeerRelayRegion(src, regionID)
 					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed()); err == nil {
 						// The client's peer map is installed before it sends the meow.
 						// Advertise after the acknowledgment on the same DERP route so
