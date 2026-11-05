@@ -13,6 +13,9 @@ import unittest
 import deploy
 
 HERE = Path(__file__).resolve().parent
+# Fixtures for the privileged install inventory that device_install runs after the install.
+INVENTORY_OK = [sys.executable, '-c', 'print(\'{"version":"paperboat.purge-result/v1","ok":true}\')']
+INVENTORY_LEFTOVER = [sys.executable, '-c', 'import sys; print(\'{"ok":false,"remaining":["process 7 (/old/pb)"]}\'); sys.exit(1)']
 
 
 class DeviceDeployment(unittest.TestCase):
@@ -71,7 +74,7 @@ class DeviceDeployment(unittest.TestCase):
                     archive = root / 'candidate.xz'
                     archive.write_bytes(lzma.compress(binary))
                     request = dict(archive=str(archive), sha256=hashlib.sha256(binary).hexdigest(),
-                                   version='dev-fixture', install_timeout=3)
+                                   version='dev-fixture', install_timeout=3, inventory_command=INVENTORY_OK)
                     if failure == 'checksum':
                         request['sha256'] = '0' * 64
                     if failure == 'version':
@@ -91,6 +94,14 @@ class DeviceDeployment(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn('install_failed', result.stdout, 'primary installer receipt must survive failure')
             self.assertFalse(archive.exists())
+            # An install that succeeds but leaves another version's items fails, naming them.
+            archive.write_bytes(lzma.compress(binary))
+            request.update(sha256=hashlib.sha256(binary).hexdigest(), inventory_command=INVENTORY_LEFTOVER)
+            result = subprocess.run([sys.executable, str(HERE / 'device_install.py')],
+                                    input=json.dumps(request), text=True, capture_output=True)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn('process 7 (/old/pb)', result.stderr)
+            self.assertTrue(json.loads(result.stdout)['ok'], 'stdout keeps only the install receipt')
 
     def test_installer_answers_administrator_prompt_on_a_real_terminal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -108,7 +119,7 @@ class DeviceDeployment(unittest.TestCase):
             archive.write_bytes(lzma.compress(binary))
             request = dict(archive=str(archive), sha256=hashlib.sha256(binary).hexdigest(),
                            version='dev-fixture', install_timeout=3,
-                           password='test-admin-secret')
+                           password='test-admin-secret', inventory_command=INVENTORY_OK)
             result = subprocess.run([sys.executable, str(HERE / 'device_install.py')],
                                     input=json.dumps(request), text=True, capture_output=True,
                                     timeout=10)

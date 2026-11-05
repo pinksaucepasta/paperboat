@@ -40,6 +40,15 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		_, err = machineguard.InstallBrowserDomain(ctx, executable, request.Owner, request.Domain)
 		return err
 	}
+	if len(args) >= 1 && args[0] == "inventory" {
+		if os.Geteuid() != 0 {
+			return hostinstall.ErrNotPrivileged
+		}
+		if len(args) > 2 || len(args) == 2 && args[1] != "--check" {
+			return errors.New("inventory accepts only --check")
+		}
+		return writePurgeResult(ctx, stdout, runInstallInventory(ctx, invokingServiceUID(), len(args) == 2))
+	}
 	preserveCLI := len(args) == 2 && args[0] == "purge" && args[1] == "--preserve-cli"
 	if (!preserveCLI && len(args) != 1) || args[0] != "install" && args[0] != "commit" && args[0] != "repair" && args[0] != "repair-persisted" && args[0] != "stop" && args[0] != "uninstall" && args[0] != "uninstall-persisted" && args[0] != "purge" && args[0] != "install-supplied" && args[0] != "commit-supplied" && args[0] != "rollback-supplied" {
 		return errors.New("service requires install, commit, repair, repair-persisted, stop, or uninstall")
@@ -68,7 +77,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return hostinstall.UninstallPersisted(ctx)
 	}
 	if args[0] == "repair-persisted" {
-		return hostinstall.RepairPersisted(ctx)
+		return withInstallInventory(ctx, hostinstall.RepairPersisted(ctx))
 	}
 	if args[0] == "purge" {
 		return writePurgeResult(ctx, stdout, purgeSystemInstallationScoped(ctx, preserveCLI))
@@ -92,15 +101,25 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return hostinstall.Uninstall(ctx, request)
 	}
 	if args[0] == "commit" {
-		return hostinstall.Commit(ctx, request)
+		return withInstallInventory(ctx, hostinstall.Commit(ctx, request))
 	}
 	if args[0] == "repair" {
-		return hostinstall.Repair(ctx, request)
+		return withInstallInventory(ctx, hostinstall.Repair(ctx, request))
 	}
 	if args[0] == "stop" {
 		return hostinstall.Stop(ctx, request)
 	}
-	return hostinstall.Install(ctx, request)
+	// A successful install is finished by commit; a failed one ends here.
+	if err := hostinstall.Install(ctx, request); err != nil {
+		return withInstallInventory(ctx, err)
+	}
+	return nil
+}
+
+// withInstallInventory ends a root install operation, failed or not, with the
+// install inventory; the operation's own failure stays first.
+func withInstallInventory(ctx context.Context, err error) error {
+	return errors.Join(err, runInstallInventory(context.WithoutCancel(ctx), invokingServiceUID(), false))
 }
 
 func authorizePersistedUninstall(ctx context.Context) error {

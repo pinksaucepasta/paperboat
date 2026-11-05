@@ -214,6 +214,21 @@ check_device() { # doctor + version on the device itself
   t0=$(now); out=$(pb_on "$d" doctor 2>&1)
   if grep -q "doctor: healthy" <<<"$out"; then record "doctor:$d" PASS $(( $(now)-t0 ))
   else record "doctor:$d" FAIL $(( $(now)-t0 )) "$(grep -m3 -iE 'fail|warning|unhealthy|degraded' <<<"$out" | tr '\n' ' ')"; fi
+  [ "$d" != victus ] && ! skipped inventory && check_inventory "$d"
+  return 0
+}
+
+# inventory:DEVICE: after the install, nothing of another version remains on the device (no old process, unit,
+# socket, pin, release slot or generation file). The privileged `inventory --check` only reports.
+check_inventory() {
+  local d=$1 t0 out status pass="" stdin_flag=""
+  case "$d" in apple) pass=$APPLE_PASS ;; dadape) pass=${DADAPE_PASS:-} ;; esac
+  [ -z "$pass" ] || stdin_flag=1
+  t0=$(now)
+  on "$d" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/install_inventory_check.sh" < "$HERE/install_inventory_check.sh" >/dev/null
+  out=$(printf '%s\n' "$pass" | on "$d" "PB_SUDO_STDIN=$stdin_flag sh /tmp/$RUN_ID/install_inventory_check.sh; echo rc=\$?" 2>&1); status=$?
+  if command_ok "$status" "$out" && grep -q '"ok":true' <<<"$out"; then record "inventory:$d" PASS $(( $(now)-t0 ))
+  else record "inventory:$d" FAIL $(( $(now)-t0 )) "$(grep -o '"remaining":\[[^]]*\]' <<<"$out" | head -c 400)"; fi
 }
 
 remote_echo_cmd() { # command that prints $2 on target $1

@@ -1,0 +1,383 @@
+//go:build darwin || linux
+
+package hostruntimecmd
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+)
+
+// The install inventory runs after every install, upgrade and rollback, also
+// after one that failed midway. It is the uninstall inventory (unixSweep) with
+// one difference: the version now active, and only that version, stays. It
+// lists every Paperboat process, unit, generation file, pin and release slot of
+// this account plus the shared machine guard. It stops and removes what belongs
+// to another version, then re-scans and names whatever is still there.
+
+// inventoryDrainCap bounds how long a previous generation may keep serving the
+// streams it held at activation. It is the longest drain any held stream has.
+const inventoryDrainCap = managedssh.CarrierDrainTimeout
+
+// inventoryPaths are the generation-specific locations of one account, as
+// canonical host paths.
+type inventoryPaths struct {
+	pins         string
+	releaseSlots []string
+	// generationGlobs match per-generation descriptors, locks and endpoints.
+	generationGlobs []string
+	guardBinaries   []string
+}
+
+func newInventoryPaths(plan unixPurgePlan) (inventoryPaths, error) {
+	layout, err := service.UserLayout(plan.platform, plan.uid)
+	if err != nil {
+		return inventoryPaths{}, err
+	}
+	carrier := filepath.Join(layout.InstallRoot, "carrier")
+	p := inventoryPaths{
+		pins: filepath.Join(layout.ReleasesRoot, "pins"),
+		releaseSlots: []string{
+			layout.BinaryStaged, layout.BinaryRollback,
+		},
+		generationGlobs: []string{
+			filepath.Join(carrier, "generation-*.json"),
+			filepath.Join(carrier, "owner-*.lock"),
+			layout.HostdSocket + ".c*",
+		},
+	}
+	if plan.platform == "darwin" {
+		p.generationGlobs = append(p.generationGlobs, "/Library/Application Support/Paperboat/ipc/"+plan.instance+"-*")
+		p.guardBinaries = []string{"/Library/PrivilegedHelperTools/io.paperboat.machineguard"}
+	} else {
+		p.generationGlobs = append(p.generationGlobs, "/run/paperboat-session-owner-"+plan.instance+"-*")
+		p.guardBinaries = []string{"/usr/local/libexec/paperboat-machineguard/pb"}
+	}
+	return p, nil
+}
+
+const noteOutlivedCap = " outlived its drain cap"
+
+// inventoryFinding is one item of another version: a path or a process.
+type inventoryFinding struct {
+	path    string
+	unit    string // the native unit a definition declares, if any
+	process *unixProcess
+	note    string
+}
+
+func (f inventoryFinding) String() string {
+	if f.process != nil {
+		return fmt.Sprintf("process %d (%s)%s", f.process.pid, f.process.exe, f.note)
+	}
+	return f.path + f.note
+}
+
+// settleInventory removes what another version left and fails naming what
+// remains. check reports without removing anything (the device harness).
+func (s unixSweep) settleInventory(ctx context.Context, check bool) error {
+	sources, err := s.sources(ctx)
+	if err != nil {
+		return withPurgeStage("final_inventory", err)
+	}
+	findings, err := s.versionLeftovers(ctx, sources)
+	if err != nil {
+		return withPurgeStage("final_inventory", err)
+	}
+	// A generation that outlived its drain cap is a failure even once removed.
+	var items []string
+	for _, finding := range findings {
+		if finding.note == noteOutlivedCap {
+			items = append(items, finding.String())
+		}
+	}
+	if !check && len(findings) > 0 {
+		s.removeFindings(ctx, findings)
+		if findings, err = s.versionLeftovers(ctx, sources); err != nil {
+			return withPurgeStage("final_inventory", err)
+		}
+	}
+	for _, finding := range findings {
+		if item := finding.String(); !containsString(items, item) {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return withPurgeStage("final_inventory", unixLeftoverError{items: items})
+}
+
+func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFinding) {
+	var units []string
+	var processes []unixProcess
+	for _, finding := range findings {
+		switch {
+		case finding.unit != "" && !containsString(units, finding.unit):
+			units = append(units, finding.unit)
+		case finding.unit != "":
+		case finding.process != nil:
+			processes = append(processes, *finding.process)
+		}
+	}
+	// The service manager stops every process of a unit first; signals reach
+	// only what no unit owns any more. Removal errors surface in the re-scan.
+	s.stopUnits(ctx, units)
+	for _, finding := range findings {
+		if finding.path != "" {
+			_ = s.removePath(finding.path)
+		}
+	}
+	if len(units) > 0 {
+		_ = s.reloadUnits(ctx, units)
+	}
+	_ = s.stopTargets(ctx, processes)
+}
+
+// versionLeftovers lists every item of this account and the shared guard that
+// the active version does not own. Owned: the active version; session-owner
+// generations its catalogue references (they hold PTYs across updates); and a
+// previous generation's processes that started before the activation, until the
+// drain cap. With an unfinished installation journal only processes running a
+// replaced image are leftovers: the next install recovers the files.
+func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.InventorySources) ([]inventoryFinding, error) {
+	paths, err := newInventoryPaths(s.plan)
+	if err != nil {
+		return nil, err
+	}
+	processes, err := s.inventoryProcesses(ctx, paths)
+	if err != nil {
+		return nil, err
+	}
+	// owned digests keep every item of their generation; retained ones keep
+	// only their session owner, which holds PTYs across updates.
+	owned := map[string]bool{}
+	if sources.Active != "" {
+		owned[sources.Active] = true
+	}
+	var findings []inventoryFinding
+	now := s.now()
+	for index := range processes {
+		process := &processes[index]
+		digest, pinned := pinDigest(paths.pins, process.exe)
+		switch {
+		case process.stale:
+			findings = append(findings, inventoryFinding{process: process, note: " runs a replaced image"})
+		case !pinned:
+			if underAnyRoot(process.exe, paths.releaseSlots) {
+				findings = append(findings, inventoryFinding{process: process})
+			}
+		case owned[digest]:
+		case sources.Retained[digest] && sessionOwnerProcess(*process):
+		case sources.Pending != "":
+		case process.started.Before(sources.Activated) && now.Before(sources.Activated.Add(inventoryDrainCap)):
+			owned[digest] = true // a draining previous generation keeps its files
+		case process.started.Before(sources.Activated):
+			findings = append(findings, inventoryFinding{process: process, note: noteOutlivedCap})
+		default:
+			findings = append(findings, inventoryFinding{process: process})
+		}
+	}
+	if sources.Pending != "" {
+		return append(findings, inventoryFinding{path: sources.Pending, note: " (installation not finished; rerun pb install)"}), nil
+	}
+	files, err := s.versionFiles(paths, owned, sources.Retained)
+	return append(findings, files...), err
+}
+
+// sessionOwnerProcess reports a session owner by its unit. shortcut: macOS
+// lists no unit per process, so there every process of a retained digest
+// counts as its session owner; read launchctl job labels if that matters.
+func sessionOwnerProcess(process unixProcess) bool {
+	return process.unit == "" || strings.Contains(process.unit, "session-owner")
+}
+
+// versionFiles lists definitions, generation files, pins and release slots of
+// generations that no owned digest names.
+func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string]bool) ([]inventoryFinding, error) {
+	var findings []inventoryFinding
+	ownedName := func(path string) bool {
+		name := filepath.Base(path)
+		token := generationToken(name)
+		if token == "" {
+			return true // a fixed role of the account, not a generation
+		}
+		sessionOwner := strings.Contains(name, "session-owner") || strings.HasPrefix(name, s.plan.instance+"-")
+		for digest := range owned {
+			if strings.HasPrefix(digest, token) {
+				return true
+			}
+		}
+		for digest := range retained {
+			if sessionOwner && strings.HasPrefix(digest, token) {
+				return true
+			}
+		}
+		return false
+	}
+	definitions, err := s.matchedDefinitions()
+	for _, definition := range definitions {
+		if !ownedName(definition) {
+			findings = append(findings, inventoryFinding{path: definition, unit: unitName(s.plan.platform, definition)})
+		}
+	}
+	// These globs sit in the account's own directories or carry its token
+	// followed by '-', so no other account matches them.
+	var generationFiles []string
+	for _, pattern := range paths.generationGlobs {
+		matches, globErr := filepath.Glob(s.at(pattern))
+		err = errors.Join(err, globErr)
+		for _, match := range matches {
+			generationFiles = append(generationFiles, strings.TrimPrefix(match, s.root))
+		}
+	}
+	for _, path := range generationFiles {
+		if !ownedName(path) {
+			findings = append(findings, inventoryFinding{path: path})
+		}
+	}
+	pins, globErr := filepath.Glob(s.at(filepath.Join(paths.pins, "*")))
+	err = errors.Join(err, globErr)
+	for _, pin := range pins {
+		if name := filepath.Base(pin); !owned[name] && !retained[name] {
+			findings = append(findings, inventoryFinding{path: strings.TrimPrefix(pin, s.root)})
+		}
+	}
+	for _, slot := range paths.releaseSlots {
+		present, existsErr := s.exists(slot)
+		err = errors.Join(err, existsErr)
+		if present {
+			findings = append(findings, inventoryFinding{path: slot})
+		}
+	}
+	return findings, err
+}
+
+// inventoryProcesses returns the service-managed processes that run this
+// account's payload or the shared guard, excluding this process tree. On macOS
+// a launchd job's descendants are its own.
+func (s unixSweep) inventoryProcesses(ctx context.Context, paths inventoryPaths) ([]unixProcess, error) {
+	all, err := s.processes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	excluded := processTreeOf(all, os.Getpid())
+	roots := append(append([]string(nil), s.plan.payloadPaths...), paths.guardBinaries...)
+	candidates := map[int]unixProcess{}
+	for _, process := range all {
+		if !excluded[process.pid] && underAnyRoot(process.exe, roots) {
+			candidates[process.pid] = process
+		}
+	}
+	managed := func(process unixProcess) bool {
+		for seen := 0; seen < len(all); seen++ {
+			if process.managed {
+				return true
+			}
+			parent, ok := candidates[process.ppid]
+			if !ok {
+				return false
+			}
+			process = parent
+		}
+		return false
+	}
+	var result []unixProcess
+	for _, process := range candidates {
+		if managed(process) {
+			result = append(result, process)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].pid < result[j].pid })
+	return result, nil
+}
+
+// pinDigest returns the source digest of a pinned executable path.
+func pinDigest(pins, exe string) (string, bool) {
+	relative, ok := strings.CutPrefix(exe, pins+"/")
+	if !ok {
+		return "", false
+	}
+	digest, rest, _ := strings.Cut(relative, "/")
+	return digest, rest == "pb" && len(digest) == 64
+}
+
+// generationToken returns the generation a name carries: 32 hex (units,
+// descriptors, locks, endpoints) or a carrier socket's "c" + 16 hex.
+func generationToken(name string) string {
+	for _, part := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '.' }) {
+		if len(part) == 17 && part[0] == 'c' {
+			part = part[1:]
+		}
+		if (len(part) == 32 || len(part) == 16) && strings.ToLower(part) == part {
+			if _, err := hex.DecodeString(part); err == nil {
+				return part
+			}
+		}
+	}
+	return ""
+}
+
+// unitName is the systemd unit or launchd label a definition path declares.
+func unitName(platform, definition string) string {
+	name := filepath.Base(definition)
+	if platform == "linux" {
+		return strings.TrimSuffix(name, ".d")
+	}
+	return strings.TrimSuffix(name, ".plist")
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func (s unixSweep) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
+// runInstallInventory is the root side of `__runtime-service inventory`.
+func runInstallInventory(ctx context.Context, uid int, check bool) error {
+	plan, err := newUnixPurgePlan(runtime.GOOS, uid)
+	if err != nil {
+		return err
+	}
+	return newHostUnixSweep(plan).settleInventory(ctx, check)
+}
+
+// runInventoryCommand runs the privileged inventory and turns what it could not
+// remove into a failure that names each item.
+func runInventoryCommand(ctx context.Context, command *exec.Cmd) error {
+	var output purgeOutput
+	command.Stdout = &output
+	command.Stderr = os.Stderr
+	err := command.Run()
+	if output.exceeded {
+		return runtimeFailure("the install inventory result exceeded its bound", err)
+	}
+	err = readPurgeResult(output.data, errors.Join(err, runtimeContextFailure(ctx)))
+	var incomplete PurgeIncomplete
+	if errors.As(err, &incomplete) && len(incomplete.Remaining) > 0 {
+		return runtimeFailure("items of another Paperboat version are still on this machine and could not be removed: "+strings.Join(incomplete.Remaining, ", ")+"; run pb doctor, then pb install again", err)
+	}
+	return err
+}

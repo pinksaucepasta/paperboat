@@ -145,8 +145,13 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		}
 		return nil
 	}
+	// Every outcome ends with the install inventory: nothing of another version may stay on the host.
+	inventory := func(callCtx context.Context) error {
+		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, installerExecutable, "__runtime-service", "inventory")
+		return runInventoryCommand(callCtx, command)
+	}
 	if err = invoke(ctx, "install-supplied"); err != nil {
-		return "", err
+		return "", errors.Join(err, inventory(context.WithoutCancel(ctx)))
 	}
 	link, err := installWorkerCommand(directory, layout.Binary)
 	var restoreService func(context.Context) error
@@ -167,7 +172,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		if restoreService != nil {
 			serviceErr = restoreService(recovery)
 		}
-		return "", errors.Join(cause, binaryErr, serviceErr, linkErr)
+		return "", errors.Join(cause, binaryErr, serviceErr, linkErr, inventory(recovery))
 	}
 	if err != nil {
 		return rollback(err)
@@ -207,6 +212,9 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 		return "", runtimeFailure("installation commit could not be confirmed; keep the installed files and run pb doctor before retrying", err)
 	}
 	if err = link.Commit(); err != nil {
+		return "", err
+	}
+	if err = inventory(ctx); err != nil {
 		return "", err
 	}
 	if runtime.GOOS == "darwin" {

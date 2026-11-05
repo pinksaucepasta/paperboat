@@ -38,6 +38,29 @@ def run_installer(candidate, request):
                           timeout=request['install_timeout'])
 
 
+def check_inventory(request):
+    """Nothing of another version may remain after the install (install_inventory_check.sh)."""
+    root = ('/Library/PrivilegedHelperTools/Paperboat' if sys.platform == 'darwin'
+            else '/usr/local/libexec/paperboat')
+    uid = os.getuid()
+    sudo = ['sudo', '-S', '-p', ''] if request.get('password') else ['sudo', '-n']
+    command = sudo + ['/usr/bin/env', f'PAPERBOAT_INVOKING_UID={uid}',
+                      f'{root}/users/u{uid}/bin/pb', '__runtime-service', 'inventory', '--check']
+    # Workspace tests stand a fixture in for the privileged inventory.
+    command = request.get('inventory_command') or command
+    result = subprocess.run(command, input=(request.get('password') or '') + '\n', capture_output=True, text=True,
+                            timeout=120)
+    # stdout carries only the install receipt; the inventory goes to stderr.
+    sys.stderr.write(result.stdout)
+    try:
+        receipt = json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        receipt = {}
+    if result.returncode or receipt.get('ok') is not True:
+        raise RuntimeError('install inventory found items of another version: '
+                           + ', '.join(receipt.get('remaining') or ['(no inventory result)']))
+
+
 def install(request):
     archive = Path(request['archive'])
     try:
@@ -64,6 +87,7 @@ def install(request):
             sys.stderr.write(result.stderr)
             if result.returncode or json.loads(result.stdout).get('ok') is not True:
                 raise RuntimeError('supplied candidate installation failed')
+            check_inventory(request)
     finally:
         archive.unlink(missing_ok=True)
 

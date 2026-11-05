@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	documentation "github.com/pinksaucepasta/paperboat/docs"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -617,8 +618,12 @@ func TestLinuxParentPIDSurvivesHostileCommandNames(t *testing.T) {
 }
 
 func TestDarwinProcessParsingKeepsSpacedExecutablePaths(t *testing.T) {
-	processes := parseDarwinProcesses("  501     1 /Library/Application Support/Paperboat/users/u501/bin/pb\n\n  x y z\n")
-	want := []unixProcess{{pid: 501, ppid: 1, exe: "/Library/Application Support/Paperboat/users/u501/bin/pb"}}
+	now := time.Unix(1_800_000_000, 0)
+	processes := parseDarwinProcesses("  501     1 1-02:03:04 /Library/Application Support/Paperboat/users/u501/bin/pb\n  502 1 05:06 /usr/sbin/x\n\n  x y z w\n", now)
+	want := []unixProcess{
+		{pid: 501, ppid: 1, exe: "/Library/Application Support/Paperboat/users/u501/bin/pb", started: now.Add(-(26*time.Hour + 3*time.Minute + 4*time.Second))},
+		{pid: 502, ppid: 1, exe: "/usr/sbin/x", started: now.Add(-(5*time.Minute + 6*time.Second))},
+	}
 	if !reflect.DeepEqual(processes, want) {
 		t.Fatalf("processes = %+v, want %+v", processes, want)
 	}

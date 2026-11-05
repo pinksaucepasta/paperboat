@@ -89,6 +89,7 @@ func (s unixSweep) purgeForReset(ctx context.Context, prove func() (string, erro
 // and must carry this account's exact token.
 type unixPurgePlan struct {
 	platform string
+	uid      int
 	instance string
 	// units are systemd unit names or launchd labels that always belong to
 	// the account, whether or not their definitions still exist.
@@ -121,6 +122,7 @@ func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
 		}
 		return unixPurgePlan{
 			platform:    platform,
+			uid:         uid,
 			instance:    instance,
 			units:       units,
 			definitions: appendSystemdDefinitions(units),
@@ -153,6 +155,7 @@ func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
 		}
 		return unixPurgePlan{
 			platform:    platform,
+			uid:         uid,
 			instance:    instance,
 			units:       labels,
 			definitions: definitions,
@@ -218,6 +221,15 @@ type unixProcess struct {
 	pid  int
 	ppid int
 	exe  string
+	// started is when the process started. stale reports that exe was replaced
+	// after it started, so it runs another version's image. managed reports a
+	// process the service manager owns: a paperboat unit's cgroup on Linux, a
+	// launchd job (parent 1) on macOS.
+	started time.Time
+	stale   bool
+	managed bool
+	// unit is the systemd unit a Linux process runs in; empty on macOS.
+	unit string
 }
 
 // unixSweep performs one account's teardown. Paths in the plan are canonical
@@ -233,6 +245,8 @@ type unixSweep struct {
 	signal        func(pid int, sig syscall.Signal) error
 	uninstall     func(context.Context) error
 	guard         func(context.Context) error
+	sources       func(context.Context) (hostinstall.InventorySources, error)
+	clock         func() time.Time
 	terminateWait time.Duration
 	killWait      time.Duration
 }
@@ -254,8 +268,11 @@ func newHostUnixSweep(plan unixPurgePlan) unixSweep {
 		signal: func(pid int, sig syscall.Signal) error {
 			return syscall.Kill(pid, sig)
 		},
-		uninstall:     hostinstall.UninstallPersisted,
-		guard:         machineguard.Purge,
+		uninstall: hostinstall.UninstallPersisted,
+		guard:     machineguard.Purge,
+		sources: func(ctx context.Context) (hostinstall.InventorySources, error) {
+			return hostinstall.LoadInventorySources(ctx, plan.uid)
+		},
 		terminateWait: 5 * time.Second,
 		killWait:      2 * time.Second,
 	}
@@ -453,33 +470,11 @@ func (s unixSweep) sweepAccount(ctx context.Context) error {
 	definitions, err := s.matchedDefinitions()
 	result = errors.Join(result, err)
 	units := s.accountUnits(definitions)
-	if s.plan.platform == "linux" {
-		for _, unit := range units {
-			for _, action := range []string{"stop", "disable"} {
-				// A unit that never loaded or is already gone reports an error;
-				// absence is confirmed by the file removal and re-scan below.
-				if err := s.run(ctx, "/usr/bin/systemctl", action, unit); err != nil {
-					observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
-				}
-			}
-		}
-	} else {
-		for _, label := range units {
-			if err := s.run(ctx, "/bin/launchctl", "bootout", "system/"+label); err != nil {
-				observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
-			}
-		}
-	}
+	s.stopUnits(ctx, units)
 	for _, path := range append(append([]string(nil), s.plan.definitions...), definitions...) {
 		result = errors.Join(result, s.removePath(path))
 	}
-	if s.plan.platform == "linux" {
-		result = errors.Join(result, s.run(ctx, "/usr/bin/systemctl", "daemon-reload"))
-		arguments := append([]string{"reset-failed"}, units...)
-		if err := s.run(ctx, "/usr/bin/systemctl", arguments...); err != nil {
-			observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
-		}
-	}
+	result = errors.Join(result, s.reloadUnits(ctx, units))
 	result = errors.Join(result, s.stopProcesses(ctx))
 	payloads, err := s.payloadPaths()
 	result = errors.Join(result, err)
@@ -491,6 +486,39 @@ func (s unixSweep) sweepAccount(ctx context.Context) error {
 		}
 	}
 	return result
+}
+
+// stopUnits asks the service manager to stop units, so it stops every process
+// in their cgroup or job. A unit that never loaded or is already gone reports
+// an error; absence is confirmed by the caller's re-scan.
+func (s unixSweep) stopUnits(ctx context.Context, units []string) {
+	if s.plan.platform == "linux" {
+		for _, unit := range units {
+			for _, action := range []string{"stop", "disable"} {
+				if err := s.run(ctx, "/usr/bin/systemctl", action, unit); err != nil {
+					observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
+				}
+			}
+		}
+		return
+	}
+	for _, label := range units {
+		if err := s.run(ctx, "/bin/launchctl", "bootout", "system/"+label); err != nil {
+			observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
+		}
+	}
+}
+
+// reloadUnits makes systemd forget removed definitions; launchd needs nothing.
+func (s unixSweep) reloadUnits(ctx context.Context, units []string) error {
+	if s.plan.platform != "linux" {
+		return nil
+	}
+	err := s.run(ctx, "/usr/bin/systemctl", "daemon-reload")
+	if err := s.run(ctx, "/usr/bin/systemctl", append([]string{"reset-failed"}, units...)...); err != nil {
+		observeRuntimeFailure(ctx, "uninstall", runtimeFailure("service cleanup could not be confirmed", err))
+	}
+	return err
 }
 
 // accountUnits returns the systemd units or launchd labels to stop, in a
@@ -628,6 +656,10 @@ func (s unixSweep) stopProcesses(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return s.stopTargets(ctx, targets)
+}
+
+func (s unixSweep) stopTargets(ctx context.Context, targets []unixProcess) error {
 	var result error
 	for _, process := range targets {
 		result = errors.Join(result, s.signalProcess(process.pid, syscall.SIGTERM))
@@ -653,14 +685,14 @@ func (s unixSweep) signalProcess(pid int, sig syscall.Signal) error {
 func (s unixSweep) waitForProcesses(ctx context.Context, targets []unixProcess, wait time.Duration) ([]unixProcess, error) {
 	deadline := time.Now().Add(wait)
 	for {
-		current, err := s.accountProcesses(ctx)
+		current, err := s.processes(ctx)
 		if err != nil {
 			return nil, err
 		}
 		var alive []unixProcess
 		for _, target := range targets {
 			for _, process := range current {
-				if process.pid == target.pid {
+				if process.pid == target.pid && process.exe == target.exe {
 					alive = append(alive, target)
 					break
 				}
@@ -714,26 +746,70 @@ func listLinuxProcesses(context.Context) ([]unixProcess, error) {
 	if err != nil {
 		return nil, err
 	}
+	boot := linuxBootTime()
 	var processes []unixProcess
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		directory := filepath.Join("/proc", entry.Name())
+		exe, err := os.Readlink(filepath.Join(directory, "exe"))
 		if err != nil {
 			// The process exited or is a kernel thread; neither owns payload.
 			continue
 		}
 		// A replaced binary keeps running as "<path> (deleted)".
+		deleted := strings.HasSuffix(exe, " (deleted)")
 		exe = strings.TrimSuffix(exe, " (deleted)")
-		stat, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		stat, err := os.ReadFile(filepath.Join(directory, "stat"))
 		if err != nil {
 			continue
 		}
-		processes = append(processes, unixProcess{pid: pid, ppid: linuxParentPID(stat), exe: exe})
+		process := unixProcess{pid: pid, ppid: linuxParentPID(stat), exe: exe, started: linuxStartTime(stat, boot), stale: deleted}
+		if !deleted {
+			image, imageErr := os.Stat(filepath.Join(directory, "exe"))
+			current, currentErr := os.Stat(exe)
+			process.stale = imageErr == nil && (currentErr != nil || !os.SameFile(image, current))
+		}
+		cgroup, _ := os.ReadFile(filepath.Join(directory, "cgroup"))
+		process.unit = filepath.Base(strings.TrimSpace(string(cgroup)))
+		process.managed = strings.HasPrefix(process.unit, "paperboat")
+		processes = append(processes, process)
 	}
 	return processes, nil
+}
+
+// linuxUserHZ is the kernel's fixed USER_HZ for /proc tick fields.
+const linuxUserHZ = 100
+
+func linuxBootTime() time.Time {
+	data, _ := os.ReadFile("/proc/stat")
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(line, "btime "); ok {
+			seconds, _ := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			return time.Unix(seconds, 0)
+		}
+	}
+	return time.Time{}
+}
+
+// linuxStartTime reads field 22 of /proc/<pid>/stat, in ticks since boot.
+func linuxStartTime(stat []byte, boot time.Time) time.Time {
+	text := string(stat)
+	index := strings.LastIndexByte(text, ')')
+	if index < 0 || boot.IsZero() {
+		return time.Time{}
+	}
+	fields := strings.Fields(text[index+1:])
+	if len(fields) < 20 {
+		return time.Time{}
+	}
+	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return boot.Add(time.Duration(ticks) * time.Second / linuxUserHZ)
 }
 
 // linuxParentPID reads field 4 of /proc/<pid>/stat. The command name may
@@ -756,28 +832,65 @@ func linuxParentPID(stat []byte) int {
 }
 
 // listDarwinProcesses reads ps output. On macOS comm is the executable path,
-// which may contain spaces, so only the first two columns are split off.
+// which may contain spaces, so only the leading columns are split off.
 func listDarwinProcesses(ctx context.Context) ([]unixProcess, error) {
-	output, err := exec.CommandContext(ctx, "/bin/ps", "-axo", "pid=,ppid=,comm=").Output()
+	output, err := exec.CommandContext(ctx, "/bin/ps", "-axo", "pid=,ppid=,etime=,comm=").Output()
 	if err != nil {
 		return nil, err
 	}
-	return parseDarwinProcesses(string(output)), nil
+	processes := parseDarwinProcesses(string(output), time.Now())
+	for index := range processes {
+		process := &processes[index]
+		process.managed = process.ppid == 1
+		// ps has no image identity; a binary written after the process started
+		// is a newer version than the one it runs. etime has 1 s resolution.
+		if info, err := os.Stat(process.exe); err == nil {
+			process.stale = process.started.Add(2 * time.Second).Before(info.ModTime())
+		}
+	}
+	return processes, nil
 }
 
-func parseDarwinProcesses(output string) []unixProcess {
+func parseDarwinProcesses(output string, now time.Time) []unixProcess {
 	var processes []unixProcess
 	for _, line := range strings.Split(output, "\n") {
 		pidText, rest := cutField(line)
-		ppidText, exe := cutField(rest)
+		ppidText, rest := cutField(rest)
+		elapsedText, exe := cutField(rest)
 		pid, pidErr := strconv.Atoi(pidText)
 		ppid, ppidErr := strconv.Atoi(ppidText)
-		if pidErr != nil || ppidErr != nil || exe == "" {
+		elapsed, elapsedOK := parseElapsed(elapsedText)
+		if pidErr != nil || ppidErr != nil || !elapsedOK || exe == "" {
 			continue
 		}
-		processes = append(processes, unixProcess{pid: pid, ppid: ppid, exe: exe})
+		processes = append(processes, unixProcess{pid: pid, ppid: ppid, exe: exe, started: now.Add(-elapsed)})
 	}
 	return processes
+}
+
+// parseElapsed reads ps etime: [[dd-]hh:]mm:ss.
+func parseElapsed(text string) (time.Duration, bool) {
+	days := 0
+	if before, after, ok := strings.Cut(text, "-"); ok {
+		value, err := strconv.Atoi(before)
+		if err != nil {
+			return 0, false
+		}
+		days, text = value, after
+	}
+	parts := strings.Split(text, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, false
+	}
+	seconds := 0
+	for _, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return 0, false
+		}
+		seconds = seconds*60 + value
+	}
+	return time.Duration(days)*24*time.Hour + time.Duration(seconds)*time.Second, true
 }
 
 func cutField(line string) (string, string) {

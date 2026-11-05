@@ -33,10 +33,13 @@ import (
 var (
 	lockInstallation = updated.LockUnixNativeInstall
 	healGuard        = hostinstall.HealMachineGuard
+	settleInventory  = runInstallInventory
 	healRetryWait    = 30 * time.Second
 )
 
-func healMachineGuard(ctx context.Context, stateRoot string, source installsource.Source, binary string, stderr io.Writer) {
+// healMachineGuard also ends every updater start (after an update or a
+// rollback) with the install inventory, under the same installation lock.
+func healMachineGuard(ctx context.Context, stateRoot string, uid int, source installsource.Source, binary string, stderr io.Writer) {
 	for attempt := 0; attempt < 20; attempt++ {
 		if attempt > 0 {
 			select {
@@ -54,7 +57,11 @@ func healMachineGuard(ctx context.Context, stateRoot string, source installsourc
 		healCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		healed, err := healGuard(healCtx, source, binary)
 		cancel()
+		inventoryErr := settleInventory(ctx, uid, false)
 		_ = lock.Close()
+		if inventoryErr != nil {
+			fmt.Fprintf(stderr, "paperboat-updated: %v\n", inventoryErr)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "paperboat-updated: machine guard runs another version and replacing it failed: %v\n", err)
 		} else if healed {
@@ -151,7 +158,7 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return failInitialization(err)
 	}
 	if !pending {
-		go healMachineGuard(ctx, stateRoot, installedSource, binary, stderr)
+		go healMachineGuard(ctx, stateRoot, uid, installedSource, binary, stderr)
 	}
 	environment := map[string]string{}
 	refreshManuals, err := newUnixManualRefresher(binary, uid, gid)
