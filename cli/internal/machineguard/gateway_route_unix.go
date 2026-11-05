@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 package machineguard
 
 import (
@@ -15,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
-// One host gateway routed by the caller's uid (PLAN 3b multi-account hosts, F23-01). The guard owns one listener
+// One host gateway routed by the caller's uid (PLAN 3b multi-account hosts, F23-01; Linux and macOS). The guard owns one listener
 // per gateway port. Each OS user's daemon registers a route for the port and receives one end of a socket pair;
 // every accepted connection is attributed to the connecting socket's uid (attributeConnection, fail closed) and
 // its descriptor is passed over that uid's pair. The daemon routes by Host/SNI among its own routes only.
@@ -56,7 +58,7 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 		if err != nil {
 			return nil, err
 		}
-		gateway = &sharedGateway{port: port, listener: listener, routes: map[uint32]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), lookup: lookupOwnersINETDiag, release: func(s *sharedGateway) {
+		gateway = &sharedGateway{port: port, listener: listener, routes: map[uint32]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), lookup: platformLookupOwners, release: func(s *sharedGateway) {
 			if g.gateways[s.port] == s {
 				delete(g.gateways, s.port)
 			}
@@ -77,7 +79,7 @@ func (g *guardServer) routeGateway(ctx context.Context, uid string, port int) (*
 
 // addRoute registers uid on the gateway with a new socket pair.
 func (s *sharedGateway) addRoute(uid uint32) (*gatewayRoute, error) {
-	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	pair, err := socketpairCloexec()
 	if err != nil {
 		return nil, err
 	}

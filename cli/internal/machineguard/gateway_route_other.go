@@ -1,4 +1,4 @@
-//go:build darwin || windows
+//go:build windows
 
 package machineguard
 
@@ -8,7 +8,7 @@ import (
 	"net"
 )
 
-// The gateway is routed by uid only where the guard can attribute a connection's owner (Linux; macOS is F23-04).
+// The gateway is routed by uid only where the guard can attribute a connection's owner (Linux, macOS).
 // Elsewhere one OS user's daemon owns each gateway port.
 const gatewayRouting = false
 

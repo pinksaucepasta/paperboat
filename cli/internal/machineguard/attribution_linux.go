@@ -24,6 +24,13 @@ const (
 
 var inetDiagSequence atomic.Uint32
 
+// platformLookupOwners answers which sockets have a tuple: INET_DIAG on Linux.
+var platformLookupOwners lookupOwners = lookupOwnersINETDiag
+
+func socketpairCloexec() ([2]int, error) {
+	return unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+}
+
 // lookupOwnersINETDiag asks the kernel for the exact TCP socket with tuple (an INET_DIAG lookup without
 // NLM_F_DUMP, a hash lookup) and returns its owner. A socket of another network namespace is never found: the
 // netlink socket answers for the guard's own namespace only.
