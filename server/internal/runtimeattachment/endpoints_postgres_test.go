@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
 // PLAN 3a step 1: a preview endpoint is served over the agent's runtime carriers. Its route is
@@ -322,6 +323,21 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
 	if pending() {
 		t.Fatal("a preview served by every live edge is still pending")
+	}
+	// A private preview served by both edges has one preview_routes row per edge; the grant for the edge the
+	// agent's carrier is on must bind that edge's row, never the other one (macOS: wrong_route, 2026-11-05).
+	resolver, err := privateaccess.NewPreviewRouteResolver(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, edge := range []previewattachment.PreviewEdgeIdentity{f.edge, f.backupEdge} {
+		for attempt := 0; attempt < 20; attempt++ { // the pair has no row order; repeat so a wrong pick shows
+			binding, err := resolver.ResolvePrivate(ctx, privateaccess.Lookup{AccountID: account, Edge: privateaccess.EdgeIdentity{NodeID: edge.NodeID, ProcessEpoch: edge.ProcessEpoch},
+				Request: privateaccess.Request{ResourceKind: privateaccess.ResourcePreview, ResourceID: lease, OperationID: lease}})
+			if err != nil || binding.EdgeNodeID != edge.NodeID || binding.EdgeProcessEpoch != edge.ProcessEpoch {
+				t.Fatalf("private preview binding for edge %s = %+v, %v; want that edge's own route", edge.NodeID, binding, err)
+			}
+		}
 	}
 	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)

@@ -11,7 +11,8 @@ import (
 )
 
 // PreviewRouteResolver binds a private preview to its current route on an edge, read from
-// preview_routes (the agent's runtime carrier route of the preview).
+// preview_routes (the agent's runtime carrier route of the preview). A preview served by both edges of the
+// pair has one row per edge; the requesting edge's own row is the binding.
 type PreviewRouteResolver struct {
 	db  *db.DB
 	now func() time.Time
@@ -37,7 +38,7 @@ SELECT pr.account_id, pr.preview_id, pr.operation_id, pr.route_id, pr.connector_
        pr.route_generation, pr.lease_generation, pr.process_generation, pr.config_generation, p.access_mode, p.endpoint,
        pr.edge_node_id, pr.edge_process_epoch, pr.state, pr.expires_at
 FROM preview_routes pr JOIN preview_leases p ON p.id = pr.preview_id AND p.account_id = pr.account_id
-WHERE pr.account_id = $1 AND pr.preview_id = $2 AND pr.operation_id = $3`
+WHERE pr.account_id = $1 AND pr.preview_id = $2 AND pr.operation_id = $3 AND pr.edge_node_id = $4 AND pr.edge_process_epoch = $5`
 
 func (r *PreviewRouteResolver) ResolvePrivate(ctx context.Context, lookup Lookup) (Binding, error) {
 	if r == nil || r.db == nil || ctx == nil {
@@ -49,7 +50,7 @@ func (r *PreviewRouteResolver) ResolvePrivate(ctx context.Context, lookup Lookup
 	var b Binding
 	var sessionState, endpoint string
 	var routeGeneration, leaseGeneration, processGeneration, configGeneration int64
-	err := r.db.Pool().QueryRow(ctx, resolvePrivatePreviewSQL, lookup.AccountID, lookup.Request.ResourceID, lookup.Request.OperationID).Scan(
+	err := r.db.Pool().QueryRow(ctx, resolvePrivatePreviewSQL, lookup.AccountID, lookup.Request.ResourceID, lookup.Request.OperationID, lookup.Edge.NodeID, lookup.Edge.ProcessEpoch).Scan(
 		&b.AccountID, &b.ResourceID, &b.OperationID, &b.RouteID, &b.CarrierSessionID, &b.OwnerMachineID, &b.OwnerSessionID,
 		&routeGeneration, &leaseGeneration, &processGeneration, &configGeneration, &b.AccessMode, &endpoint,
 		&b.EdgeNodeID, &b.EdgeProcessEpoch, &sessionState, &b.ExpiresAt)
