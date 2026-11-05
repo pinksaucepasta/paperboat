@@ -146,6 +146,21 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 			}
 		}
 	}
+	// Admitted work outranks newer grants: on pbvm4 ~3 exec grants/s (2 min each) pushed a running `pb exec` and
+	// terminal past the 128-grant bound after ~45 s, and the client's scope lease closed them.
+	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
+ SELECT 'external_issuer',$1||'-fresh-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['exec'],$8||i,$9 FROM generate_series(1,200) i`, access, machine, account, environment, cli, "terminal_fresh_"+suffix, "files_fresh_"+suffix, "operation_fresh_"+suffix, now.Add(2*time.Minute))
+	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(5*time.Second))
+	for _, endpoint := range []string{cli, machine} {
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "admitted_first_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNetworkScope(t, result.Configuration, "machine_access", access, "terminal")
+		assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
+		assertNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
+	}
+	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id LIKE $1||'-fresh-%'`, access, now.Add(-time.Second))
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(-time.Second))
 	for _, endpoint := range []string{cli, machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "inactive_history_" + suffix, UserID: account, EndpointID: endpoint})
