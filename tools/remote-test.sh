@@ -7,6 +7,7 @@
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`.
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
 # on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
+# The synced tree has no .git, so the full HEAD goes over as GITHUB_SHA (tools/tuf-repository reads it for its release source commit).
 # gcc is installed on all three, so -race works.
 set -euo pipefail
 
@@ -46,7 +47,7 @@ rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$la
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
 printf -v quoted ' %q' "$@"
 exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
+  "GITHUB_SHA=$(git rev-parse HEAD) flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
 set -euo pipefail
 module=$1 lane=$2
 shift 2
