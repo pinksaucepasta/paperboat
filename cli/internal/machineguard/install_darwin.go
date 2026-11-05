@@ -4,7 +4,6 @@ package machineguard
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +20,6 @@ import (
 
 const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machineguard"
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
-const darwinLaunchMarker = "<!-- Managed by Paperboat machine guard -->"
 
 func installGuard(ctx context.Context, executable, browserDomain string, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
@@ -167,26 +165,10 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 			return trustErr
 		}
 	}
-	programArguments := append([]string{cfg.HelperPath}, cfg.LaunchArguments...)
-	var argumentXML strings.Builder
-	for _, argument := range programArguments {
-		argumentXML.WriteString("<string>")
-		if err := xml.EscapeText(&argumentXML, []byte(argument)); err != nil {
-			return err
-		}
-		argumentXML.WriteString("</string>")
+	unit, err := darwinGuardLaunchPlist(cfg.Label, append([]string{cfg.HelperPath}, cfg.LaunchArguments...))
+	if err != nil {
+		return err
 	}
-	unit := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-%s
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array>%s</array>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-<key>ProcessType</key><string>Background</string><key>ThrottleInterval</key><integer>2</integer>
-<key>Umask</key><integer>63</integer>
-</dict></plist>
-`, darwinLaunchMarker, cfg.Label, argumentXML.String())
 	err = darwinWrite(cfg.LaunchPath, []byte(unit), 0644)
 	rollback.record(cfg.LaunchPath)
 	if err != nil {
