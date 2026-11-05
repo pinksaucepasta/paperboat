@@ -31,6 +31,13 @@ def mac(script, timeout=120):
     return run('MAC_CMD', script, timeout)[1]
 
 
+def daemon_pids():
+    """The Mac daemon's pid to pause: launchd's job for its label, never a name match, which also
+    finds the user's own `pb daemon ...` commands."""
+    match = re.search(r'^\s*pid = (\d+)$', mac('launchctl print gui/$(id -u)/com.pinksaucepasta.paperboatd'), re.MULTILINE)
+    return [match.group(1)] if match else []
+
+
 def cl(script, timeout=300):
     return run('CLIENT_CMD', script, timeout)[1]
 
@@ -135,8 +142,8 @@ def refusals():
     if not back:
         return report(row, 'FAIL', 'sshd did not come back; the root timer should have restarted it')
     time.sleep(5)
-    pids = mac("pgrep -u $(id -u) -f '[p]b daemon' | tr '\\n' ' '").split()
-    if pids and all(p.isdigit() for p in pids):  # SIGSTOP the Mac's daemon (docker pause equivalent), SIGCONT on a timer
+    pids = daemon_pids()
+    if pids:  # SIGSTOP the Mac's daemon (docker pause equivalent), SIGCONT on a timer
         mac('nohup sh -c "sleep 50; kill -CONT %s" >/dev/null 2>&1 &' % ' '.join(pids))
         try:
             mac('kill -STOP %s' % ' '.join(pids))
