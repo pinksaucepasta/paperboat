@@ -2,8 +2,12 @@ package daemoncmd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -12,6 +16,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/internal/testcert"
 )
 
 // leaseGuard is the machine guard's lease hold: one socket per port that outlives a daemon's
@@ -225,3 +230,87 @@ func TestHeldForwardSurvivesTheDaemonGenerationHandover(t *testing.T) {
 type gapError struct{ gap time.Duration }
 
 func (e *gapError) Error() string { return "gap " + e.gap.String() + " above 1 s" }
+
+// A browser request in flight through the gateway when the generation drains is served to the end
+// and counted as held meanwhile; the draining gateway accepts no new connection (the next generation
+// takes the guard's listener).
+func TestBrowserRequestInFlightFinishesWhileTheGenerationDrains(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	arrived, release := make(chan struct{}), make(chan struct{})
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(arrived)
+		<-release
+		_, _ = io.WriteString(w, "served")
+	}))
+	defer origin.Close()
+	names := &coordinatorNameClient{}
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+	}, IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		return tls.X509KeyPair(cert, key)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	host := "6767.hp." + testBrowserDomain
+	names.mu.Lock()
+	address := names.addresses[443]
+	names.mu.Unlock()
+	get := func() (string, error) {
+		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}
+		defer transport.CloseIdleConnections()
+		request, _ := http.NewRequest(http.MethodGet, "https://"+address+"/", nil)
+		request.Host = host
+		response, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Do(request)
+		if err != nil {
+			return "", err
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		return string(body), err
+	}
+	baseline := liveconnections.Held()
+	inFlight := make(chan string, 1)
+	go func() {
+		body, err := get()
+		if err != nil {
+			body = err.Error()
+		}
+		inFlight <- body
+	}()
+	<-arrived
+	if held := liveconnections.Held(); held < baseline+1 {
+		t.Fatalf("held = %d: the request in flight is not counted (baseline %d)", held, baseline)
+	}
+	if err := c.Drain(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	if body := <-inFlight; body != "served" {
+		t.Fatalf("request in flight across the drain = %q, want served", body)
+	}
+	if body, err := get(); err == nil {
+		t.Fatalf("the draining gateway accepted a new request: %q", body)
+	}
+	for deadline := time.Now().Add(2 * time.Second); liveconnections.Held() > baseline; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("finished browser request still held: %d > %d", liveconnections.Held(), baseline)
+		}
+	}
+}

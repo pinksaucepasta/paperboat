@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
@@ -110,7 +111,12 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		if err != nil {
 			return nil, err
 		}
-		return c.cfg.DialMachine(ctx, machineID, port)
+		upstream, err := c.cfg.DialMachine(ctx, machineID, port)
+		if err != nil {
+			return nil, err
+		}
+		// A browser request or upgrade in flight is a held connection: a draining generation waits for it.
+		return &heldConn{Conn: upstream, release: liveconnections.TrackForward()}, nil
 	}})
 	if err == nil {
 		err = proxy.StartListeners(&limitedListener{Listener: httpListener, permits: c.connections, ctx: context.WithoutCancel(ctx)}, &limitedListener{Listener: httpsListener, permits: c.connections, ctx: context.WithoutCancel(ctx)})
