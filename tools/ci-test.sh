@@ -63,7 +63,11 @@ echo "ci-test: ${modules[*]:-all modules}${run:+ -run $run} at $sha: $url" >&2
 seen=""
 deadline=$((SECONDS + 5400))
 while :; do
-  state=$(gh run view "$id" --json status,jobs)
+  # A failed poll (GitHub API rate limit, network) must not exit: the EXIT trap would delete the branch and
+  # cancel the run being watched. Retry within the deadline instead.
+  state=$(gh run view "$id" --json status,jobs) || {
+    [ $SECONDS -lt $deadline ] || { echo "ci-test: gave up waiting after 90 min: $url" >&2; exit 1; }
+    echo "ci-test: polling the run failed; retrying in 60 s" >&2; sleep 60; continue; }
   for line in $(jq -r '.jobs[] | select(.status == "completed") | "\(.name | gsub(" "; "_"))=\(.conclusion)"' <<<"$state"); do
     case $seen in *"|$line|"*) ;; *) seen="$seen|$line|"; echo "ci-test: ${line%%=*}: ${line#*=}" | tr _ ' ' >&2 ;; esac
   done
@@ -72,7 +76,11 @@ while :; do
   sleep 60  # one GitHub API call per run per minute: many lanes poll at once, 5000/h is shared
 done
 
-final=$(gh run view "$id" --json conclusion,jobs)
+for attempt in $(seq 30); do
+  final=$(gh run view "$id" --json conclusion,jobs) && break
+  [ "$attempt" -lt 30 ] || { echo "ci-test: could not read the result: $url" >&2; exit 1; }
+  echo "ci-test: reading the result failed; retrying in 60 s" >&2; sleep 60
+done
 echo
 jq -r '.jobs[] | select(.name != "Plan" and .conclusion != "skipped") | [.name, (.conclusion // .status),
   (if .completedAt and .startedAt then ((.completedAt | fromdate) - (.startedAt | fromdate)) else 0 end | "\(. / 60 | floor)m\(. % 60)s")] | @tsv' <<<"$final" |
