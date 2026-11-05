@@ -126,6 +126,9 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		session.Close()
 		return err
 	}
+	if !o.admitsNew() {
+		return session.CloseRestarting()
+	}
 	defer session.Close()
 	return serve(ctx, session)
 

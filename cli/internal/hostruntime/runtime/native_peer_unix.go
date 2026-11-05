@@ -305,7 +305,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitNew: func() bool { return !s.refuseNew.Load() }, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -380,9 +380,6 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	generation.run = runCtx
 	generation.serve = func(serveCtx context.Context, session *native.Session) error {
-		if s.refuseNew.Load() {
-			return session.CloseRestarting()
-		}
 		return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
 	}
 	if err := generation.listenPrimary(); err != nil {

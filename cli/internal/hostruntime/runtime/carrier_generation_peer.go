@@ -30,9 +30,6 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 	apps := g.apps
 	g.run = run
 	g.serve = func(serveCtx context.Context, session *native.Session) error {
-		if s.refuseNew.Load() {
-			return session.CloseRestarting()
-		}
 		return apps.Serve(nativePeerApplicationContext(serveCtx, daemon), session)
 	}
 	g.network, err = g.owner.StartCarrierNetwork(run, identity, name, g.serve)
