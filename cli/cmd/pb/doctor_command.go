@@ -881,7 +881,15 @@ func doctorHostStepsCheck(steps []health.Alert) (doctorpkg.Check, bool) {
 	if len(summary) > 512 {
 		summary = strings.ToValidUTF8(summary[:509], "") + "..."
 	}
-	return doctorpkg.Check{Category: "local", Code: "local_state", Status: doctorpkg.StatusFail, Summary: summary, Recovery: steps[0].RepairAction}, true
+	// A degraded step (an optional host component that failed) degrades only that item: a warning naming it.
+	// Only a dimension that is down fails the machine.
+	status := doctorpkg.StatusWarning
+	for _, step := range steps {
+		if step.Status == health.StatusDown {
+			status = doctorpkg.StatusFail
+		}
+	}
+	return doctorpkg.Check{Category: "local", Code: "local_state", Status: status, Summary: summary, Recovery: steps[0].RepairAction}, true
 }
 
 func doctorUserMachine(ctx context.Context, client *api.Client, machineID string) (api.UserMachine, error) {
