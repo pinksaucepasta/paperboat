@@ -76,6 +76,7 @@ type cliNativeRuntime struct {
 	done                  chan struct{}
 	once                  sync.Once
 	waking                sync.Map // machine IDs with a WakePeer connection in flight
+	failedDials           sync.Map // machine ID -> time.Time of its last failed dial; a successful dial deletes it
 }
 
 // NativeProbe reports an authenticated connection to one admitted machine.
@@ -769,7 +770,14 @@ func (r *cliNativeRuntime) Dial(ctx context.Context, machineID string, class pee
 		}
 		return nil, &nativePhaseFailure{stage: "peer_authority", code: "peer_authority_failed", err: err}
 	}
-	return r.owner.Dial(ctx, descriptor, machineID, class)
+	session, err := r.owner.Dial(ctx, descriptor, machineID, class)
+	switch {
+	case err == nil:
+		r.failedDials.Delete(machineID)
+	case !errors.Is(err, context.Canceled):
+		r.failedDials.Store(machineID, time.Now())
+	}
+	return session, err
 }
 
 func (r *cliNativeRuntime) Close() error {
@@ -807,7 +815,13 @@ func (t *PeerTerminalTunnel) RelayDenial() *api.APIError {
 type NativeTransport struct {
 	Paths map[string]string
 	Relay tailnet.RegionalStatus
+	// NoPath lists the machines whose last dial failed within noPathWindow, with when it failed.
+	NoPath map[string]time.Time
 }
+
+// noPathWindow is how long a failed dial keeps its machine reported as having no path: longer than the gap
+// between a user's retries, short enough that an old failure is not reported once nobody is trying.
+const noPathWindow = 2 * time.Minute
 
 func (t *PeerTerminalTunnel) NativeTransport() NativeTransport {
 	if t == nil {
@@ -819,5 +833,12 @@ func (t *PeerTerminalTunnel) NativeTransport() NativeTransport {
 	if runtime == nil || runtime.authority == nil {
 		return NativeTransport{}
 	}
-	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus()}
+	noPath := map[string]time.Time{}
+	runtime.failedDials.Range(func(machineID, failed any) bool {
+		if at := failed.(time.Time); time.Since(at) < noPathWindow {
+			noPath[machineID.(string)] = at
+		}
+		return true
+	})
+	return NativeTransport{Paths: runtime.authority.PeerPaths(), Relay: runtime.authority.RegionalStatus(), NoPath: noPath}
 }

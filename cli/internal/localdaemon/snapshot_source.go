@@ -134,6 +134,10 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 			continue
 		}
 		switch native.Paths[machine.ID] {
+		case "":
+			if failed, ok := native.NoPath[machine.ID]; ok {
+				machine.Health = append(machine.Health, noPathHealth(machine.Alias, failed))
+			}
 		case "direct":
 			machine.SelectedPath, machine.RelayRegion = "direct", ""
 		case "peer_relay":
@@ -148,6 +152,15 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 	if item, ok := relayFailoverHealth(native.Relay); ok {
 		snapshot.Health = append(snapshot.Health, item)
 	}
+}
+
+// noPathHealth is an error: a machine someone is trying to use is unreachable, unlike an idle machine
+// with no path. Paperboat retries direct and relay paths on each attempt.
+func noPathHealth(alias string, failed time.Time) localapi.HealthItem {
+	at := failed.UTC()
+	return localapi.HealthItem{Code: localapi.NoPathCode, ETag: localapi.NoPathCode, Severity: "error", BrokenSince: &at,
+		Title:    "No path to " + alias + ": the last connection attempt failed",
+		Recovery: "Check that " + alias + " is online and that UDP and HTTPS to the relays are allowed here and there, then run pb doctor " + alias + ". If it persists, run pb bugreport."}
 }
 
 // NetworkDownCode is the health item for this computer's network being down.
