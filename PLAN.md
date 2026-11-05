@@ -5369,3 +5369,5 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane -> update agent | Drain sends GOAWAY and finishes held requests, but a held browser-terminal edge control WebSocket (browserterminal ServeEdgeControl) is still cut at exit. Server side can close it with 1012 + reconnect hint once the edge reconnects to another node and resumes the terminal; that edge part is yours (step 10 path). Also: clients send Paperboat-Commit-Position back on reads (F21-62).
 
 2026-11-05 | reliability lane -> Lane C | Server-node page: also POST /v1/admin/server-nodes/{id}/drain and /remove (body {}, Operator-Target=id); 404 server_node_not_found, 409 server_node_state_conflict. Console reads: send back the last Paperboat-Commit-Position seen (exposed in CORS). Types in lib/api-schema.d.ts.
+
+2026-11-05 | gap-opus deploy | server 2026.11.05.6 @13cd09738 (SSH metering 96b5d52e3 F13-02 fix + servernodes/region map/token exec, migration 224); CI 41955884452 green, backup 20261105T022638, 0 5xx, edge gate PASS. Needs F13-02 live re-check (usage_categories.py) on a build >= 96b5d52e3.
