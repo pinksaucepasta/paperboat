@@ -109,12 +109,14 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 		return errors.New("runtime container belongs to another installation; nothing changed")
 	}
 	adopted := exists && info.Running && info.ImageID == imageID
+	handedOver := false
 	switch {
 	case adopted:
 	case capability == "tunnel" && exists && info.Running:
 		if err := l.handOver(ctx, capability, image, name, owner, output); err != nil {
 			return err
 		}
+		handedOver = true
 	default:
 		if err := removeOwned(ctx, name, owner); err != nil {
 			return err
@@ -150,10 +152,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	go func() { logsDone <- logs.Wait() }()
 	defer func() { stopLogs(); <-logsDone }()
 	ready, cancel := context.WithTimeout(ctx, StartupTimeout)
-	previousEpoch := before.ProcessEpoch
-	if adopted {
-		previousEpoch = ""
-	}
+	previousEpoch := readinessBaseline(before.ProcessEpoch, adopted, handedOver)
 	err = waitReady(ready, name, owner, client, previousEpoch)
 	cancel()
 	if err != nil {
@@ -349,4 +348,15 @@ func (b *cappedOutput) Write(p []byte) (int, error) {
 	}
 	_, err := b.Buffer.Write(p)
 	return n, err
+}
+
+// readinessBaseline is the process epoch a container must differ from to count as ready. A fresh
+// start must show a new epoch. An adopted container, and a replacement that took over by handover,
+// serve under the epoch they already have (the handover inherits it on purpose), so any epoch is
+// fine (oracle, 2026-11-05: a handed-over tunnel was killed 45 s later for "not becoming ready").
+func readinessBaseline(servingEpoch string, adopted, handedOver bool) string {
+	if adopted || handedOver {
+		return ""
+	}
+	return servingEpoch
 }

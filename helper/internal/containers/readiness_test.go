@@ -110,3 +110,14 @@ func TestProbePortReadsTheTunnelComponentDirectoryAndDecodesTheResult(t *testing
 		t.Fatalf("got %+v err %v", got, err)
 	}
 }
+
+func TestReadinessBaselineAcceptsTheInheritedEpochOfAHandover(t *testing.T) {
+	for _, tc := range []struct {
+		adopted, handedOver bool
+		want                string
+	}{{false, false, "epoch_a"}, {true, false, ""}, {false, true, ""}} {
+		if got := readinessBaseline("epoch_a", tc.adopted, tc.handedOver); got != tc.want {
+			t.Fatalf("readinessBaseline(adopted=%v, handedOver=%v) = %q, want %q", tc.adopted, tc.handedOver, got, tc.want)
+		}
+	}
+}
