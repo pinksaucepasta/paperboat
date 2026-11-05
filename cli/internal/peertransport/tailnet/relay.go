@@ -491,6 +491,37 @@ func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certif
 	return nil
 }
 
+// relayCredential is the grant a carrier for node presents on each dial. A new dial that meets an expired grant
+// asks for a fresh one on demand (spaced and coalesced by Run) and fails retryably; the relay region is never
+// locked out.
+func (a *Authority) relayCredential(node RegionalNode) func(context.Context) (string, error) {
+	return func(context.Context) (string, error) {
+		token, err := a.relayToken(node)
+		if errors.Is(err, ErrRelayGrantExpired) {
+			a.RequestRefresh()
+		}
+		return token, err
+	}
+}
+
+// relayToken is node's current grant, refused when the relay moved or its grant does not match.
+func (a *Authority) relayToken(node RegionalNode) (string, error) {
+	a.relay.mu.Lock()
+	defer a.relay.mu.Unlock()
+	grant := a.relay.grants[node.NodeID]
+	current := a.relay.nodes[regionalID(node.NodeID)]
+	if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
+		return "", ErrAuthority
+	}
+	if node.NodeID == "" || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
+		return "", ErrAuthority
+	}
+	if grant.ExpiresAt <= serverclock.Now().Unix() {
+		return "", ErrRelayGrantExpired
+	}
+	return a.relay.tokens[node.NodeID], nil
+}
+
 func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byte, disco key.DiscoPublic) magicsock.DERPCarrierFactory {
 	return func(_ key.NodePrivate, region func() *tailcfg.DERPRegion) magicsock.DERPCarrier {
 		r := region()
@@ -500,22 +531,7 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 			node = a.relay.nodes[r.RegionID]
 		}
 		a.relay.mu.Unlock()
-		credential := func(context.Context) (string, error) {
-			a.relay.mu.Lock()
-			defer a.relay.mu.Unlock()
-			grant := a.relay.grants[node.NodeID]
-			current := a.relay.nodes[regionalID(node.NodeID)]
-			if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
-				return "", ErrAuthority
-			}
-			if node.NodeID == "" || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
-				return "", ErrAuthority
-			}
-			if grant.ExpiresAt <= serverclock.Now().Unix() {
-				return "", ErrRelayGrantExpired
-			}
-			return a.relay.tokens[node.NodeID], nil
-		}
+		credential := a.relayCredential(node)
 		nodeTLS, pinErr := nodetls.ClientConfig(config, node.TLSSPKISHA256)
 		if pinErr != nil {
 			// Signed candidates are validated on ingestion; fail closed if unavailable.
