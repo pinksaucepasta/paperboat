@@ -3060,15 +3060,17 @@ Design (approved by the user 2026-11-04, with graceful drain and LSN read-your-w
   TLS goes through tunnelcert: ACME DNS-01 for the regional name, delivered through the DB-backed DistributionHub
   (F21-52). A node serves its regional name only after its certificate arrives; until then it is `registered` but
   not in the map.
-- **Regional TLS and DNS, as built** (2026-11-05, reliability lane): each regional node serves its own TLS for
-  `<region>.<regional_domain>` with ACME (Go autocert, HTTP-01 on :80, HTTPS on :443). The ACME cache lives in the
-  shared database (`control_server_node_acme_cache`, encrypted with the shared encryption key), so the nodes of a
-  region share one certificate and any of them answers a challenge another started; renewals need no restart. A node
-  turns `active`, and so enters the region map, only once it holds the certificate. The edge-oriented platform
-  certificate coordinator was not reused: it requires edge targets for every issuance. DNS: per region, A/AAAA
-  records for the public addresses of its active, healthy nodes, written by the leader (one writer).
-  Prior art: headscale serves its own TLS with autocert (hscontrol/app.go:1166 getTLSSettings); Teleport auth
-  servers share one backend for their state (lib/backend/pgbk/pgbk.go).
+- **Regional TLS and DNS, as built** (2026-11-05, reliability lane, proven live on an anvit staging stack): one
+  certificate for `*.<regional_domain>` covers every region. The worker leader issues and renews it with DNS-01 through
+  the existing ACME issuer (regional zone only; renew 30 days ahead; 10 min backoff after a failure) and stores it
+  encrypted in the shared database; every node serves it on `regional_https_address`, reloading each minute. No port
+  80, one issuance for all regions and nodes (the cert-manager and Caddy pattern for one name on many nodes). A node
+  turns `active`, and so enters the map, only once it serves the certificate. DNS: per region, A/AAAA records for the
+  public addresses the region's active, fresh nodes declared at enrollment, written by the leader only when the set
+  changes (or every 5 min). Propagation of both is checked at the zone's authoritative nameservers (lego's precheck),
+  not a recursive resolver. A node with `regional_domain` set refuses to start without its DNS token and ACME key.
+  Prior art: headscale terminates its own TLS (hscontrol/app.go:1166 getTLSSettings); Teleport auth servers share one
+  backend (lib/backend/pgbk/pgbk.go).
 - **Health and the map.** A node heartbeats its `control_server_nodes` row every 10 s with its state, version and
   replica lag. Discovery lists the regions that have at least one healthy node. Clients pick the nearest healthy
   region and fall back to the next (see the region map above).
@@ -5371,3 +5373,7 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | reliability lane -> Lane C | Server-node page: also POST /v1/admin/server-nodes/{id}/drain and /remove (body {}, Operator-Target=id); 404 server_node_not_found, 409 server_node_state_conflict. Console reads: send back the last Paperboat-Commit-Position seen (exposed in CORS). Types in lib/api-schema.d.ts.
 
 2026-11-05 | gap-opus deploy | server 2026.11.05.6 @13cd09738 (SSH metering 96b5d52e3 F13-02 fix + servernodes/region map/token exec, migration 224); CI 41955884452 green, backup 20261105T022638, 0 5xx, edge gate PASS. Needs F13-02 live re-check (usage_categories.py) on a build >= 96b5d52e3.
+
+2026-11-05 | reliability lane | F21-60 and F21-62 proven live on an anvit staging stack (victus offline); fixes from the run in the server-node batch. Root-tests CI step pushed (099483ba4).
+
+2026-11-05 | reliability lane -> update agent | main CI 41963775011 "Vet and test cli" failed in your area (passed on the run before): TestPrimaryCarrierMovesHeldTerminalToStagedGeneration, TestTargetCarrierMachineRevocationKillsBothGenerations, TestTerminalCleanupRetriesPastTransientJournalOutcome, TestAutomaticPeerRelayThenDirectRecovery, TestDelegatedCarrierUsesPeerRelayWithDirectBlocked.
