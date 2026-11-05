@@ -10,12 +10,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
-// generationRunner is a service manager fake that tracks which daemon generations run.
+// generationRunner is a service manager fake that tracks which daemon generations run. A launchd
+// job stays loaded after it exits, until bootout unloads it.
 type generationRunner struct {
-	running map[string]bool
-	calls   []string
+	running  map[string]bool
+	unloaded map[string]bool
+	calls    []string
+}
+
+func launchdAbsent() error {
+	return &hostservice.CommandError{Tool: "launchctl", Output: "could not find service", Cause: os.ErrNotExist}
 }
 
 func (r *generationRunner) generation(args []string) string {
@@ -33,14 +41,23 @@ func (r *generationRunner) Run(_ context.Context, name string, args ...string) e
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
 	generation := r.generation(args)
+	if r.unloaded == nil {
+		r.unloaded = map[string]bool{}
+	}
 	switch {
-	case strings.Contains(call, "enable --now"), strings.Contains(call, " start "), strings.Contains(call, "bootstrap"), strings.Contains(call, "kickstart"):
-		r.running[generation] = true
-	case strings.Contains(call, "disable --now"), strings.Contains(call, " stop "), strings.Contains(call, "bootout"):
+	case strings.Contains(call, "enable --now"), strings.Contains(call, " start "), strings.Contains(call, " restart "), strings.Contains(call, "bootstrap"), strings.Contains(call, "kickstart"):
+		r.running[generation], r.unloaded[generation] = true, false
+	case strings.Contains(call, "disable --now"), strings.Contains(call, " stop "):
 		r.running[generation] = false
-	case strings.Contains(call, "is-active"), strings.HasPrefix(call, "launchctl print"):
+	case strings.Contains(call, "bootout"):
+		r.running[generation], r.unloaded[generation] = false, true
+	case strings.Contains(call, "is-active"):
 		if !r.running[generation] {
-			return errors.New("not running")
+			return errors.New("inactive")
+		}
+	case strings.HasPrefix(call, "launchctl print"):
+		if r.unloaded[generation] {
+			return launchdAbsent()
 		}
 	}
 	return nil
@@ -48,8 +65,12 @@ func (r *generationRunner) Run(_ context.Context, name string, args ...string) e
 
 func (r *generationRunner) Output(_ context.Context, name string, args ...string) (string, error) {
 	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
-	running := r.running[r.generation(args)]
+	generation := r.generation(args)
+	running := r.running[generation]
 	if name == "launchctl" {
+		if r.unloaded[generation] {
+			return "", launchdAbsent()
+		}
 		if running {
 			return "state = running\npid = 42\nactive count = 1\n", nil
 		}
@@ -176,6 +197,34 @@ func TestReinstallingADrainingGenerationReplacesItsProcess(t *testing.T) {
 			replaced, quit := indexOf(runner.calls, replace), indexOf(runner.calls, "SIGQUIT")
 			if replaced < 0 || quit < replaced || !strings.Contains(runner.calls[quit], live) {
 				t.Fatalf("the draining process must be replaced, then the live generation quit:\n%s", strings.Join(runner.calls, "\n"))
+			}
+		})
+	}
+}
+
+// pb update restarts the daemon through the updater as a new generation: it renders the new unit
+// with the arguments and environment the previous generation's unit declares, read back exactly.
+func TestUpdateDeclarationReadsBackTheRenderedArgumentsAndEnvironment(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin"} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			environment := map[string]string{"HOME": home, "TMPDIR": "/private/var/folders/x y", "PAPERBOAT_RUNTIME_STATE_ROOT": "/state/100%/$root"}
+			config := serviceConfig{Platform: platform, Home: home, Generation: testDaemonGeneration, Executable: serviceExecutable(t), ConfigPath: filepath.Join(home, "cfg dir", "config.json"), ServerURL: "https://api.example.test", Username: "test", Group: "staff", UID: os.Geteuid(), Environment: environment, Runner: &generationRunner{running: map[string]bool{}}}
+			if err := installService(context.Background(), config); err != nil {
+				t.Fatal(err)
+			}
+			declared, err := readUpdateDeclaration(platform, home, os.Geteuid())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"daemon", "--generation", testDaemonGeneration, "--config", config.ConfigPath, "--server", config.ServerURL}
+			if strings.Join(declared.arguments, "\x00") != strings.Join(want, "\x00") {
+				t.Fatalf("arguments = %q, want %q", declared.arguments, want)
+			}
+			for key, value := range environment {
+				if declared.environment[key] != value {
+					t.Fatalf("environment %s = %q, want %q", key, declared.environment[key], value)
+				}
 			}
 		})
 	}
