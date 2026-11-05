@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
-	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 // RuntimeCarrierWorker owns the admissions of agents' runtime carriers and their routes: the
@@ -571,5 +571,5 @@ func runtimeAdmissionEqual(left, right datacarrier.ExpectedAdmission) bool {
 
 // The carrier stays connected while its route is refused; this line names the route and the reason.
 func logRuntimeAttachFailure(a datacarrier.ExpectedAdmission, err error) {
-	slog.Warn("runtime_route_attach_refused", "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
+	edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "runtime_route_attach_refused", edgetelemetry.OutcomeRejected, "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
 }

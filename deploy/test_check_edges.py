@@ -74,7 +74,7 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertRegex(out, r'preview failures=[1-9]')
 
     def test_edge_5xx_and_attach_refusal_fail(self):
-        code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\nWARN runtime_route_attach_refused route_id=r\n')
+        code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\n{"msg":"runtime_route_attach_refused","route_id":"r"}\n')
         self.assertEqual(code, 1, out)
         self.assertIn('attach=1 edge5xx=1', out)
 
