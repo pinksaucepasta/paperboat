@@ -53,13 +53,13 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  UNION ALL SELECT member.account_id,greatest(ht.binding_generation,ht.policy_version,member.membership_generation)
  FROM host_teams ht JOIN paperboat.team_members member ON member.team_id=ht.team_id AND member.active
 ), endpoints AS (
- SELECT c.id,c.user_id,max(a.generation) AS generation FROM paperboat.cli_client_sessions c
+ SELECT n.endpoint_id AS id,c.user_id,max(a.generation) AS generation FROM paperboat.cli_client_sessions c
  JOIN accounts a ON a.account_id=c.user_id
  JOIN paperboat.users actor ON actor.id=c.user_id AND actor.status='active'
- JOIN paperboat.peer_network_identities n ON n.endpoint_id=c.id AND n.user_id=c.user_id AND n.role='cli' AND n.revoked_at IS NULL
+ JOIN paperboat.peer_network_identities n ON n.owner_endpoint_id=c.id AND n.user_id=c.user_id AND n.role='cli' AND n.revoked_at IS NULL
  WHERE c.state='active' AND c.revoked_at IS NULL AND c.api_token_id IS NULL
- GROUP BY c.id,c.user_id,c.last_used_at
- ORDER BY c.last_used_at DESC NULLS LAST,c.id LIMIT $3
+ GROUP BY n.endpoint_id,c.user_id,c.last_used_at
+ ORDER BY c.last_used_at DESC NULLS LAST,n.endpoint_id LIMIT $3
 )
 SELECT e.id,e.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network)),e.generation
 FROM endpoints e CROSS JOIN host h

@@ -130,14 +130,14 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	machinePrivate, machinePublic := networkX25519Key(t)
 	cliDisco := networkDiscoPublic(t, cliPrivate)
 	machineDisco := networkDiscoPublic(t, machinePrivate)
-	cliRegistration, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cli_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: cliPublic, DiscoPublicKey: cliDisco, QUICCertificateFingerprint: cliFingerprint[:]})
+	cliRegistration, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cli_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: cliPublic, DiscoPublicKey: cliDisco, QUICCertificateFingerprint: cliFingerprint[:]})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, machineID); err != nil {
 		t.Fatal(err)
 	}
-	machineRegistration, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_machine_" + suffix, UserID: userID, EndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]})
+	machineRegistration, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_machine_" + suffix, UserID: userID, EndpointID: machineID, OwnerEndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, machineID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_machine_" + suffix, UserID: userID, EndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]}); !errors.Is(err, ErrDenied) {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_machine_" + suffix, UserID: userID, EndpointID: machineID, OwnerEndpointID: machineID, Role: "machine", MachineID: machineID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("released machine registration: %v", err)
 	}
 	if _, err = service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_host_released_" + suffix, UserID: userID, EndpointID: machineID}); err == nil {
@@ -169,18 +169,18 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	initialCLIPrivate := append([]byte(nil), cliPrivate...)
-	initialCLIConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_initial_config_" + suffix, UserID: userID, EndpointID: cliID})
+	initialCLIConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_initial_config_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRegionalCandidates(t, initialCLIConfig.CandidateSet, userID, cliID, regionalNodeID, 1)
-	assertNetworkConfig(t, initialCLIConfig.Configuration, cliID, machineID, "dial", 1)
+	assertRegionalCandidates(t, initialCLIConfig.CandidateSet, userID, daemonEndpoint(cliID), regionalNodeID, 1)
+	assertNetworkConfig(t, initialCLIConfig.Configuration, daemonEndpoint(cliID), machineID, "dial", 1)
 	initialScopes := networkClaims(t, initialCLIConfig.Configuration)["peers"].([]any)[0].(map[string]any)["scopes"].([]any)
 	initialScope := initialScopes[0].(map[string]any)
 	if initialScope["resource_kind"] != "machine_network" || initialScope["capability"] != "connect" {
 		t.Fatal("session-free configuration granted application access")
 	}
-	assertRelayGrant(t, initialCLIConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 1, relayWG, relayDisco)
+	assertRelayGrant(t, initialCLIConfig.RelayGrants, userID, daemonEndpoint(cliID), regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 1, relayWG, relayDisco)
 	assertRelayControlPeers(t, initialCLIConfig.RelayGrants, machinePublic)
 	// A Paperboat-managed node carries no hosting; the account's own pbh relay is self_hosted, which
 	// is the only relay an Unlimited transfer may use.
@@ -194,11 +194,11 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=$2 WHERE id=$1`, regionalNodeID, installationKey[:]); err != nil {
 		t.Fatal(err)
 	}
-	ownRelayConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_own_relay_config_" + suffix, UserID: userID, EndpointID: cliID})
+	ownRelayConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_own_relay_config_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRegionalCandidates(t, ownRelayConfig.CandidateSet, userID, cliID, regionalNodeID, 1)
+	assertRegionalCandidates(t, ownRelayConfig.CandidateSet, userID, daemonEndpoint(cliID), regionalNodeID, 1)
 	if hosting := networkClaims(t, ownRelayConfig.CandidateSet)["nodes"].([]any)[0].(map[string]any)["hosting"]; hosting != "self_hosted" {
 		t.Fatalf("own relay hosting=%v", hosting)
 	}
@@ -211,11 +211,11 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=$2 WHERE id=$1`, regionalNodeID, now.Add(30*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	drainingConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_draining_config_" + suffix, UserID: userID, EndpointID: cliID})
+	drainingConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_draining_config_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRegionalCandidates(t, drainingConfig.CandidateSet, userID, cliID, "", 0)
+	assertRegionalCandidates(t, drainingConfig.CandidateSet, userID, daemonEndpoint(cliID), "", 0)
 	if len(drainingConfig.RelayGrants) != 0 {
 		t.Fatalf("draining relay grants=%d", len(drainingConfig.RelayGrants))
 	}
@@ -224,10 +224,10 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	rotatedPrivate, rotatedPublic := networkX25519Key(t)
 	rotatedDisco := networkDiscoPublic(t, rotatedPrivate)
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cli_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: cliPublic, DiscoPublicKey: rotatedDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrConflict) {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cli_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: cliPublic, DiscoPublicKey: rotatedDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("registration replay changed disco=%v", err)
 	}
-	rotated, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_rotate_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: rotatedPublic, DiscoPublicKey: rotatedDisco, QUICCertificateFingerprint: cliFingerprint[:]})
+	rotated, err := service.Register(ctx, NetworkRegistration{OperationID: "operation_network_rotate_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 1, WireGuardPublicKey: rotatedPublic, DiscoPublicKey: rotatedDisco, QUICCertificateFingerprint: cliFingerprint[:]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,13 +236,13 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	cliPrivate, cliPublic = rotatedPrivate, rotatedPublic
 	cliDisco = rotatedDisco
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_wrong_role_" + suffix, UserID: userID, EndpointID: cliID, Role: "machine", MachineID: cliID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrDenied) {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_wrong_role_" + suffix, UserID: userID, EndpointID: cliID, OwnerEndpointID: cliID, Role: "machine", MachineID: cliID, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("wrong role=%v", err)
 	}
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_wrong_key_" + suffix, UserID: userID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 2, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]}); !errors.Is(err, ErrDenied) {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_wrong_key_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, ExpectedKeyGeneration: 2, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: machineFingerprint[:]}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("wrong certificate key=%v", err)
 	}
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cross_account_" + suffix, UserID: "foreign_" + suffix, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrDenied) {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_network_cross_account_" + suffix, UserID: "foreign_" + suffix, EndpointID: daemonEndpoint(cliID), OwnerEndpointID: cliID, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: machinePublic, DiscoPublicKey: machineDisco, QUICCertificateFingerprint: cliFingerprint[:]}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("cross account=%v", err)
 	}
 
@@ -251,16 +251,16 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, accessID, machineID, userID, envID, cliID, "jti_terminal_"+suffix, "jti_file_"+suffix, "operation_access_"+suffix, grantExpiry); err != nil {
 		t.Fatal(err)
 	}
-	cliConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_cli_" + suffix, UserID: userID, EndpointID: cliID})
+	cliConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_cli_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRelayGrant(t, cliConfig.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 4, relayWG, relayDisco)
+	assertRelayGrant(t, cliConfig.RelayGrants, userID, daemonEndpoint(cliID), regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, machinePublic, machineDisco, 4, relayWG, relayDisco)
 	assertRelayControlPeers(t, cliConfig.RelayGrants, machinePublic)
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET disco_public_key=NULL WHERE user_id=$1 AND endpoint_id=$2`, userID, machineID); err != nil {
 		t.Fatal(err)
 	}
-	derpOnly, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_derp_only_" + suffix, UserID: userID, EndpointID: cliID})
+	derpOnly, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_derp_only_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,8 +282,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if peers, ok := runtimeRelayClaims["relay_control_peers"].([]any); !ok || len(peers) != 1 || peers[0] != base64.RawURLEncoding.EncodeToString(cliPublic) {
 		t.Fatalf("machine relay control peers=%v", runtimeRelayClaims["relay_control_peers"])
 	}
-	assertNetworkConfig(t, cliConfig.Configuration, cliID, machineID, "dial", 4)
-	assertNetworkConfig(t, machineConfig.Configuration, machineID, cliID, "accept", 4)
+	assertNetworkConfig(t, cliConfig.Configuration, daemonEndpoint(cliID), machineID, "dial", 4)
+	assertNetworkConfig(t, machineConfig.Configuration, machineID, daemonEndpoint(cliID), "accept", 4)
 
 	// A teammate keeps an independently rooted CLI identity. The signed network
 	// projection joins that identity to the enrolled owner's exact machine key;
@@ -310,7 +310,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	}
 	sharedPrivate, sharedPublic := networkX25519Key(t)
 	sharedDisco := networkDiscoPublic(t, sharedPrivate)
-	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_shared_network_" + suffix, UserID: sharedUser, EndpointID: sharedCLI, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: sharedPublic, DiscoPublicKey: sharedDisco, QUICCertificateFingerprint: sharedFingerprint[:]}); err != nil {
+	if _, err = service.Register(ctx, NetworkRegistration{OperationID: "operation_shared_network_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI), OwnerEndpointID: sharedCLI, Role: "cli", EndpointGeneration: 1, WireGuardPublicKey: sharedPublic, DiscoPublicKey: sharedDisco, QUICCertificateFingerprint: sharedFingerprint[:]}); err != nil {
 		t.Fatal(err)
 	}
 	// Exact runtime-carrier readiness is required independently of the native
@@ -476,7 +476,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		heldRoute, heldOwnerToken = "https://"+ready.PublicHost, ownerAuth["token"].(string)
 		machineService.ConfigureTerminalSessions(provider, heldRuntime.HTTPClient)
 	}
-	terminalOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_owner_config_" + suffix, UserID: userID, EndpointID: cliID})
+	terminalOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_owner_config_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT helper_terminal_session_id FROM paperboat.user_machine_access_sessions WHERE id=$1`, viewerAccessID).Scan(&viewerJTI); err != nil {
 		t.Fatal(err)
 	}
-	terminalViewerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_viewer_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	terminalViewerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_viewer_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +550,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 	}
 	setTeamPeriodWithoutFence(`now()-interval '1 second'`)
-	expiredTerminalConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_expired_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	expiredTerminalConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_expired_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +568,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil || !interactiveTerminalDescriptor.Connectable {
 		t.Fatalf("interactive terminal connectable=%v status=%q reason=%q err=%v", interactiveTerminalDescriptor.Connectable, interactiveTerminalDescriptor.Status, interactiveTerminalDescriptor.Reason, err)
 	}
-	terminalInteractiveConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_interactive_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	terminalInteractiveConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_interactive_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = machineService.RemoveTerminalParticipant(ctx, userID, ownerSharedTerminalID, sharedUser, "operation_terminal_remove_"+suffix, interactiveTeam.Sharing.Generation); err != nil {
 		t.Fatal(err)
 	}
-	terminalRevokedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_revoked_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	terminalRevokedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_terminal_revoked_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +706,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	sharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +716,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	assertNetworkScope(t, sharedConfig.Configuration, "machine_access", fileDescriptor.Auth["access_session_id"].(string), "file_transfer")
 	assertNetworkPeerAccount(t, sharedConfig.Configuration, machineID, userID)
 	assertNoNetworkCapability(t, sharedConfig.Configuration, "private_access")
-	ownerSharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_owner_shared_" + suffix, UserID: userID, EndpointID: cliID})
+	ownerSharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_owner_shared_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,11 +724,11 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNetworkPeerAccount(t, machineSharedConfig.Configuration, sharedCLI, sharedUser)
+	assertNetworkPeerAccount(t, machineSharedConfig.Configuration, daemonEndpoint(sharedCLI), sharedUser)
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET configured_capabilities=array_remove(configured_capabilities,'file_receive') WHERE id=$1`, machineID); err != nil {
 		t.Fatal(err)
 	}
-	sharedMachineDisabled, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_file_disabled_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	sharedMachineDisabled, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_file_disabled_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,16 +742,16 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("disabled file receive descriptor error=%v", err)
 	}
 	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser)
-	withdrawnShared, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_withdrawn_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	withdrawnShared, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_withdrawn_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNetworkConfig(t, withdrawnShared.Configuration, sharedCLI, "", "", 0)
+	assertNetworkConfig(t, withdrawnShared.Configuration, daemonEndpoint(sharedCLI), "", "", 0)
 	machineWithdrawnConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_machine_shared_withdrawn_" + suffix, UserID: userID, EndpointID: machineID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNoNetworkPeer(t, machineWithdrawnConfig.Configuration, sharedCLI)
+	assertNoNetworkPeer(t, machineWithdrawnConfig.Configuration, daemonEndpoint(sharedCLI))
 	teamstest.SetMachineAccess(t, store, teamID, machineID, sharedUser, "terminal", "exec", "managed_ssh", "files")
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, machineID, teamID); err != nil {
 		t.Fatal(err)
@@ -767,7 +767,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finalSharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_after_owner_left_config_" + suffix, UserID: sharedUser, EndpointID: sharedCLI})
+	finalSharedConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_shared_after_owner_left_config_" + suffix, UserID: sharedUser, EndpointID: daemonEndpoint(sharedCLI)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +775,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	removedOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_removed_owner_config_" + suffix, UserID: userID, EndpointID: cliID})
+	removedOwnerConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_removed_owner_config_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -788,26 +788,26 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=$2,updated_at=$3 WHERE id=$1`, accessID, now.Add(-time.Second), now); err != nil {
 		t.Fatal(err)
 	}
-	expired, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_expired_" + suffix, UserID: userID, EndpointID: cliID})
+	expired, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_expired_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The machine is team-owned now and this account has left the team.
 	// Personal-network admission must not survive through its former owner.
-	assertNetworkConfig(t, expired.Configuration, cliID, "", "", 0)
-	assertRelayGrant(t, expired.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
+	assertNetworkConfig(t, expired.Configuration, daemonEndpoint(cliID), "", "", 0)
+	assertRelayGrant(t, expired.RelayGrants, userID, daemonEndpoint(cliID), regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=$2,updated_at=$3 WHERE id=$1`, accessID, grantExpiry, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=$2,revocation_reason='test',updated_at=$2 WHERE id=$1`, accessID, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	revoked, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_revoked_" + suffix, UserID: userID, EndpointID: cliID})
+	revoked, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_revoked_" + suffix, UserID: userID, EndpointID: daemonEndpoint(cliID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNetworkConfig(t, revoked.Configuration, cliID, "", "", 0)
-	assertRelayGrant(t, revoked.RelayGrants, userID, cliID, regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
+	assertNetworkConfig(t, revoked.Configuration, daemonEndpoint(cliID), "", "", 0)
+	assertRelayGrant(t, revoked.RelayGrants, userID, daemonEndpoint(cliID), regionalNodeID, "epoch_"+suffix, 1, cliPublic, cliDisco, cliFingerprint, nil, nil, 0, relayWG, relayDisco)
 	if networkGeneration(t, revoked.Configuration) <= networkGeneration(t, cliConfig.Configuration) {
 		t.Fatal("revocation did not advance configuration generation")
 	}

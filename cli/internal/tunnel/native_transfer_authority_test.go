@@ -37,7 +37,7 @@ func TestNativeTransferUsesOwnIdentityBeforeAuthenticatedRemoteNetwork(t *testin
 		}
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable"}}`))}, nil
 	})
-	peer, err := NewPeerTerminalTunnel(PeerTerminalConfig{Issuer: issuer, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, TLS: &tls.Config{}, HTTPClient: &http.Client{Transport: transport, Timeout: time.Second}})
+	peer, err := NewPeerTerminalTunnel(PeerTerminalConfig{Issuer: issuer, Generation: testDaemonGeneration, Store: store, Auth: &rotatingNativeAuth{token: "machine-test-token"}, TLS: &tls.Config{}, HTTPClient: &http.Client{Transport: transport, Timeout: time.Second}})
 	if err != nil {
 		t.Fatal(err)
 	}

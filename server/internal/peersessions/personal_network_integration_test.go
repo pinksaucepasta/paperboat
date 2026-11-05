@@ -74,7 +74,7 @@ func TestPersonalNetworkCarriesEveryComputerOfALargeAccountOnPostgres(t *testing
 			t.Fatal(err)
 		}
 		private, public := networkX25519Key(t)
-		if _, err := service.Register(ctx, NetworkRegistration{OperationID: "register_" + machine, UserID: account, EndpointID: machine, Role: "machine", MachineID: machine, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}); err != nil {
+		if _, err := service.Register(ctx, NetworkRegistration{OperationID: "register_" + machine, UserID: account, EndpointID: machine, OwnerEndpointID: machine, Role: "machine", MachineID: machine, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -178,7 +178,7 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		private, public := networkX25519Key(t)
-		if _, err := service.Register(ctx, NetworkRegistration{OperationID: "register_" + machine, UserID: account, EndpointID: machine, Role: "machine", MachineID: machine, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}); err != nil {
+		if _, err := service.Register(ctx, NetworkRegistration{OperationID: "register_" + machine, UserID: account, EndpointID: machine, OwnerEndpointID: machine, Role: "machine", MachineID: machine, EndpointGeneration: 1, MachineGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}); err != nil {
 			t.Fatal(err)
 		}
 	}
