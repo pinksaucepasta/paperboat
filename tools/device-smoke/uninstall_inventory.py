@@ -29,6 +29,16 @@ def retained(path, inbox):
     return any(retained(child, inbox) for child in path.iterdir())
 
 
+def retained_leaf(path, inbox):
+    # The deepest retained entry, so a kept parent directory names what keeps it (bounded by bounded_entries).
+    while path.is_dir() and not path.is_symlink():
+        child = next((c for c in sorted(bounded_entries(path)) if retained(c, inbox)), None)
+        if child is None:
+            break
+        path = child
+    return str(path)
+
+
 def bounded_entries(directory):
     entries = list(islice(directory.iterdir(), 4097))
     if len(entries) > 4096:
@@ -234,7 +244,7 @@ def inventory(account, inbox):
                  '.ssh/.paperboat-config-transaction-v1.json'])
     for pattern in patterns:
         paths.extend(glob.glob(pattern))
-    kept = sorted(path for path in set(paths) if retained(Path(path), inbox))
+    kept = sorted(retained_leaf(Path(path), inbox) for path in set(paths) if retained(Path(path), inbox))
     LEFTOVER_FILES[:] = kept[:20]  # names only (never contents), so a failure says which file stayed
     add('files', len(kept))
     add('ssh_configuration', owned_ssh_configuration(home / '.ssh/config'))
