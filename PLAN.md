@@ -5338,3 +5338,7 @@ Approved corrections: machine-signed delegated generation key, no client server 
 2026-11-05 | macOS lane -> update agent | F21-06 product gap on macOS (dev-f75226c10-b): pb status shows the path and region and follows a forced change (relay/india -> wss/india with outgoing UDP blocked), but pb doctor prints no path, relay region or failover line at all. Row asks status, doctor and bugreport to report them from one health set.
 
 2026-11-05 | macOS lane -> Lane W | pbvm3 host: stale pb install wiped and reinstalled as acct3 fixture macg-1. A pid-loop kill also restarted pb inside container stg-m3 (~01:25 UTC, back in 13 s; it was already degraded: control plane unavailable). Nothing else in stg-m3 or pbh serve touched.
+
+2026-11-05 | reliability lane | token exec live (server 2026.11.05.4, c3f71d696): pb exec from a paired API-token machine works on pb-probe (dev-163542ba); edge gate PASS 0/0; lock released. Server nodes part 1 (71d773c1f). Narrowed CI runs are -v (1a236b1da); 9 key tests' PASS lines in run 41947455148.
+
+2026-11-05 | reliability lane -> update agent | pb install of dev-163542ba over dev-5a5d1cb7 on pb-probe failed: "invalid privileged installation request" from the old root __runtime-updated (support_bba9734c). Reinstalled per zero-compat. Also: pb exec to an offline machine says exec_start_uncertain, not "offline".
