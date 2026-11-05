@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
+	"time"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tailcfg"
@@ -67,6 +70,7 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	defer b.policyMu.Unlock()
 	dm := derpMapOf(regions)
 	b.mu.Lock()
+	redefined := redefinedPinnedRegions(b.dm, dm, b.clients)
 	b.dm = dm
 	b.homeDERP = 0
 	if len(regions) != 0 {
@@ -74,8 +78,34 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	}
 	b.updateServerMapLocked()
 	b.mu.Unlock()
-	b.sys.MagicSock.Get().SetDERPMap(dm)
+	ms := b.sys.MagicSock.Get()
+	ms.SetDERPMap(dm)
+	for _, id := range redefined {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), relayReconnectTimeout)
+			defer cancel()
+			_ = ms.PrepareDERP(ctx, id) // a failure leaves the region to magicsock's own reconnect
+		}()
+	}
 }
+
+// redefinedPinnedRegions lists the regions some peer is pinned to (setPeerRelayRegion) whose
+// definition changes. Peers send to us through their pinned region, as Tailscale peers send to a home
+// region, but magicsock closes a redefined region and brings back only its home, after a netcheck;
+// until then a relay that moved has nowhere to deliver the pinned peers' packets.
+func redefinedPinnedRegions(old, next *tailcfg.DERPMap, clients map[key.NodePublic]*tailcfg.Node) []tailcfg.DERPRegionID {
+	var out []tailcfg.DERPRegionID
+	for _, n := range clients {
+		id := n.HomeDERP
+		if old != nil && old.Regions[id] != nil && next.Regions[id] != nil && !reflect.DeepEqual(old.Regions[id], next.Regions[id]) && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// relayReconnectTimeout matches one derpquic dial (its dial bound) plus the ping.
+const relayReconnectTimeout = 10 * time.Second
 
 // SetPeerRelayNodes atomically replaces discovery-only peer relay metadata.
 func (s *Server) SetPeerRelayNodes(nodes []*tailcfg.Node) error {

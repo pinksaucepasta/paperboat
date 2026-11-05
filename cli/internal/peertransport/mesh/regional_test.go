@@ -63,3 +63,22 @@ func TestEmptyRelayInventoryBeforeStartClearsBootstrap(t *testing.T) {
 		t.Fatal("withdrawn bootstrap relay retained")
 	}
 }
+
+func TestRedefinedPinnedRegionsReconnectsOnlyMovedPinnedRelays(t *testing.T) {
+	region := func(id tailcfg.DERPRegionID, port int) *tailcfg.DERPRegion {
+		return &tailcfg.DERPRegion{RegionID: id, Nodes: []*tailcfg.DERPNode{{Name: "n", RegionID: id, HostName: "127.0.0.1", DERPPort: port}}}
+	}
+	old := derpMapOf([]*tailcfg.DERPRegion{region(1, 100), region(2, 200), region(3, 300)})
+	next := derpMapOf([]*tailcfg.DERPRegion{region(1, 101), region(2, 200), region(4, 400)})
+	clients := map[key.NodePublic]*tailcfg.Node{}
+	for _, home := range []tailcfg.DERPRegionID{1, 1, 2, 3, 4, 0} {
+		clients[key.NewNode().Public()] = &tailcfg.Node{HomeDERP: home}
+	}
+	// 1 moved (once, though two peers use it); 2 is unchanged; 3 was withdrawn; 4 and 0 are new or unpinned.
+	if got := redefinedPinnedRegions(old, next, clients); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("redefined pinned regions=%v, want [1]", got)
+	}
+	if got := redefinedPinnedRegions(nil, next, clients); len(got) != 0 {
+		t.Fatalf("first inventory reconnected %v", got)
+	}
+}
