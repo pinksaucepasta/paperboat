@@ -13,10 +13,13 @@ class FullscreenApplications(unittest.TestCase):
         terminal = Terminal([shutil.which('bash'), '--noprofile', '--norc', '-i'])
         try:
             terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=10)
-            applications(terminal)
+            prompt = applications(terminal)
             terminal.expect(terminal.marker('AFTER_APPLICATIONS'))
+            # Ctrl-D sent before the shell is back at its prompt is lost by the tty line discipline (Terminal.settle):
+            # wait for the prompt itself, however long a loaded host takes, then for the exit with a generous bound.
+            terminal.expect(prompt, timeout=120)
             terminal.send(b'\x04')
-            self.assertEqual(0, terminal.wait_exit())
+            self.assertEqual(0, terminal.wait_exit(timeout=120))
         finally:
             terminal.close()
 

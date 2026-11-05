@@ -24,7 +24,7 @@
 #                        while a terminal and a long exec are running, then verify
 #                        they recover and the version changed.
 #   --update-version V   version the --update build reports (required with --update)
-#   --teammate DEVICE    the independent teammate's device for inbox-approval (default ubuntu24; a SMOKE_CT_MAP name works)
+#   --teammate DEVICE    the independent teammate's device for inbox-approval and team checks (default ubuntu24; a SMOKE_CT_MAP name works)
 #
 # Output: a PASS/FAIL table and .build-free JSON at
 #   tools/device-smoke/results/<UTC timestamp>.json
@@ -510,7 +510,7 @@ test_application_pairs() {
       fi
       arguments="$target"
       [ -z "$check" ] || arguments+=" --check $check"
-      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $arguments" 2>&1); status=$?
+      out=$(on "$source" "PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $arguments" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1]); assert r["status"]=="PASS" and r["target"]==sys.argv[2]
@@ -950,18 +950,22 @@ test_fresh_pair_access() {
   fi
 }
 
-# team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account) on the device that
-# runs them. A disposable container can never hold one (it would need that account's sign-in), so they never run
-# there. In the lab ubuntu24 holds the profile and its own account is the fixture team's independent teammate: it
-# always runs both checks in the member role (ids team-lifecycle:ubuntu24, team-roles:ubuntu24), and so does every
-# non-container device in the run (owner role). A run therefore always covers them, without a hand judgement.
+# team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account, teammate_profile.py)
+# on the device that runs them. The --teammate device (default ubuntu24) is the fixture team's independent teammate
+# and runs both checks in the member role; every other device of the run runs them in the owner role, a container
+# too when its teammate profile is signed in. A run therefore always covers both roles.
 test_team_checks() {
   local spec group script flags device devices
   for spec in "team-lifecycle team_lifecycle.py" "team-roles team_lifecycle.py --roles"; do
     set -- $spec; group=$1; script=$2; flags=${3:-}
     devices=()
-    for device in "${TLIST[@]}"; do ct_of "$device" >/dev/null || devices+=("$device"); done
-    [[ " ${devices[*]:-} " == *" ubuntu24 "* ]] || devices+=(ubuntu24)
+    for device in "${TLIST[@]}"; do
+      # A container runs them only with its own signed-in teammate profile (teammate_profile.py).
+      ! ct_of "$device" >/dev/null || on "$device" 'test -s "$HOME/.local/state/paperboat/device-smoke/teammate/config/paperboat/config.json"' \
+        >/dev/null 2>&1 || continue
+      devices+=("$device")
+    done
+    [[ " ${devices[*]:-} " == *" $TEAMMATE "* ]] || devices+=("$TEAMMATE")
     test_device_application "$group" "$script" "$flags" "${devices[@]}"
   done
 }
@@ -984,7 +988,7 @@ test_device_application() {
     case "$group" in
       team-lifecycle|team-roles)
         flags+=" --team $SMOKE_TEAM"
-        [ "$device" != ubuntu24 ] || flags+=" --device-role member" ;;
+        [ "$device" != "$TEAMMATE" ] || flags+=" --device-role member" ;;
       doctor-lifecycle|session-limit) flags=$device ;;
     esac
     out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?

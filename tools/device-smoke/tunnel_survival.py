@@ -58,6 +58,17 @@ def sudo(*args):
     subprocess.run(['sudo', '-n', *args], check=True, timeout=180)
 
 
+def hostd_unit():
+    """The running host service unit: paperboat-hostd-u<uid>-<generation>.service since c98ac40fe (an update starts the
+    next generation before the old one retires), so its name is looked up, never assumed."""
+    listed = subprocess.run(['systemctl', 'list-units', '--plain', '--no-legend', '--type=service', '--state=running',
+                             'paperboat-hostd-u%d-*.service' % os.getuid()], capture_output=True, text=True, timeout=30)
+    units = [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
+    if listed.returncode or len(units) != 1:
+        raise RuntimeError('expected exactly one running host service unit, found %r' % units)
+    return units[0]
+
+
 def survive(endpoint, identifier, what, action):
     action()
     time.sleep(3)
@@ -105,7 +116,7 @@ def main():
             if platform.system() == 'Darwin':
                 restart_host = lambda: sudo('launchctl', 'kickstart', '-k', 'system/com.pinksaucepasta.paperboat.hostd.u%d' % os.getuid())
             else:
-                restart_host = lambda: sudo('systemctl', 'restart', 'paperboat-hostd-u%d.service' % os.getuid())
+                restart_host = lambda: sudo('systemctl', 'restart', hostd_unit())
             survive(endpoint, identifier, 'a host-service restart', restart_host)
         except BaseException as error:
             primary_error = error

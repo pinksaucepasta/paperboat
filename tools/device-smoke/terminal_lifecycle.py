@@ -199,6 +199,7 @@ def applications(terminal, monitor=None):
         terminal.send('q')
         terminal.expect(prompt)
         terminal.expect(terminal.marker('MONITOR_EXIT'))
+    return prompt
 
 
 def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off'):

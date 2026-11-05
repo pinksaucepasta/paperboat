@@ -20,12 +20,14 @@ class DeviceDeployment(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             ready = root / 'ready'
+            # The ready file appears whole (rename), so the test never reads a half-written pid.
             binary = ('#!/usr/bin/env python3\nimport os,time\nfrom pathlib import Path\n'
-                      'Path(' + repr(str(ready)) + ').write_text(str(os.getpid()))\ntime.sleep(60)\n').encode()
+                      'Path(' + repr(str(ready) + '.tmp') + ').write_text(str(os.getpid()))\n'
+                      'os.replace(' + repr(str(ready) + '.tmp') + ', ' + repr(str(ready)) + ')\ntime.sleep(600)\n').encode()
             archive = root / 'candidate.xz'
             archive.write_bytes(lzma.compress(binary))
             request = dict(archive=str(archive), sha256=hashlib.sha256(binary).hexdigest(),
-                           version='dev-fixture', install_timeout=3)
+                           version='dev-fixture', install_timeout=300)
             process = subprocess.Popen([sys.executable, str(HERE / 'device_install.py')],
                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                        stderr=subprocess.DEVNULL)
@@ -33,13 +35,15 @@ class DeviceDeployment(unittest.TestCase):
             try:
                 process.stdin.write(json.dumps(request).encode())
                 process.stdin.close()
-                deadline = time.monotonic() + 3
+                # Wait for the candidate's own ready file, however slowly a loaded host starts Python; the bounds only
+                # stop a hung run (the installer's install_timeout is longer, so it cannot end the candidate first).
+                deadline = time.monotonic() + 120
                 while not ready.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(ready.exists(), 'candidate must be running before disconnect')
                 child = int(ready.read_text())
                 process.send_signal(signal.SIGHUP)
-                process.wait(timeout=3)
+                process.wait(timeout=120)
                 self.assertFalse(archive.exists(), 'SSH disconnect must run staging cleanup')
                 with self.assertRaises(ProcessLookupError):
                     os.kill(child, 0)

@@ -20,7 +20,7 @@ import uuid
 
 from install_lifecycle import registration
 from preview_lifecycle import QuietHandler
-from tunnel_survival import PB, confirmed, run, status_code, sudo, wait_status
+from tunnel_survival import PB, confirmed, hostd_unit, run, status_code, sudo, wait_status
 
 CAUSE_SECONDS = 150
 RECOVER_SECONDS = 150
@@ -97,7 +97,7 @@ def main():
             result['origin_stopped'] = origin
 
             if platform.system() == 'Linux':
-                unit = 'paperboat-hostd-u%d.service' % os.getuid()
+                unit = hostd_unit()
                 sudo('systemctl', 'stop', unit)
                 stopped_host = unit
                 wait_code(identifier, 'connector_offline', CAUSE_SECONDS, 'stopping the host service')

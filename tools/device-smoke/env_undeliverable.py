@@ -7,7 +7,7 @@ Run on a controller machine; TARGET is another machine of the account that is sa
 disposable machine, never a shared one). --inject must make the TARGET host runtime's new connections
 to the control plane fail (the layer fetch of a launch then fails for a reason that is not "not ready
 yet"); --clear undoes it. Example for a container on this machine whose host runtime is the cgroup
-system.slice/paperboat-hostd-u1000.service:
+system.slice/paperboat-hostd-u1000-<generation>.service (systemctl list-units 'paperboat-hostd-u1000-*'):
   --inject "sudo docker exec CT iptables -A OUTPUT -p tcp --dport 443 -m cgroup --path CGROUP -j REJECT --reject-with tcp-reset"
   --clear  "sudo docker exec CT iptables -D OUTPUT -p tcp --dport 443 -m cgroup --path CGROUP -j REJECT --reject-with tcp-reset"
 The check waits --wait seconds after injecting so idle kept-alive connections are gone.

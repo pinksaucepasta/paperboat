@@ -20,7 +20,7 @@ CMD ["/sbin/init"]
 DOCKERFILE
  $docker build -q ${platform:+--platform "$platform"} -t "$name" "$work" >/dev/null
  $docker volume create "$name" >/dev/null
- $docker run -d --name "$name" ${platform:+--platform "$platform"} --privileged --cgroupns=host --tmpfs /run --tmpfs /run/lock \
+ $docker run -d --name "$name" ${platform:+--platform "$platform"} --privileged --dns-option single-request --cgroupns=host --tmpfs /run --tmpfs /run/lock \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$name:/var/lib/docker" "$@" "$name" >/dev/null
  for _ in $(seq 1 30); do inside 'systemctl is-system-running 2>/dev/null | grep -qE "running|degraded"' && break; sleep 1; done
  inside 'loginctl enable-linger tester; for _ in $(seq 1 20); do test -d /run/user/1001 && exit 0; sleep 1; done; exit 1'

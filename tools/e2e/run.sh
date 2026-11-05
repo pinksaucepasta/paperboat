@@ -60,7 +60,7 @@ docker build -q -t e2e-machine -f tools/device-smoke/ubuntu24-systemd.Dockerfile
 machines=(a b); has multi && machines+=(c)
 for name in "${machines[@]}"; do
   c=e2e-$name
-  docker run -d --name $c --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
+  docker run -d --name $c --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
     --add-host "$host:$gateway" e2e-machine >/dev/null
   sleep 6
   docker cp "$work/ca.pem" $c:/usr/local/share/ca-certificates/e2e-ca.crt

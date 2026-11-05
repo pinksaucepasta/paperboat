@@ -8,7 +8,7 @@ pbt="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1
 fail() { echo "{\"check\": \"ssh-trust-host\", \"status\": \"FAIL\", \"reason\": \"$1\"}"; exit 1; }
 
 ssh "$host" "$pbt $a /home/pbt/.local/bin/pb ssh $peer -- true" || fail "pb ssh failed before the key change"
-ssh "$host" "sudo -n docker exec $b sh -c 'rm -f /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub && ssh-keygen -q -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key && (systemctl reload ssh || systemctl reload sshd) && systemctl restart paperboat-hostd-u1000'"
+ssh "$host" "sudo -n docker exec $b sh -c 'rm -f /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub && ssh-keygen -q -t ed25519 -N \"\" -f /etc/ssh/ssh_host_ed25519_key && (systemctl reload ssh || systemctl reload sshd) && systemctl restart \"paperboat-hostd-u1000-*.service\"'"
 
 # The restarted host runtime observes the new key; the server holds it as pending until the owner trusts it.
 pending=""

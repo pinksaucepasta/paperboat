@@ -26,7 +26,7 @@ from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
-from tunnel_survival import sudo
+from tunnel_survival import hostd_unit, sudo
 
 PB = Path.home() / '.local/bin/pb'
 WAIT_SECONDS = 150
@@ -102,7 +102,7 @@ def main():
                 lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '15m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 identifier, endpoint = lease['id'], receipt_value(lease, 'endpoint')
                 wait_for(lambda: marker in body(endpoint), 'the second preview to serve')
-                sudo('systemctl', 'restart', 'paperboat-hostd-u%d.service' % os.getuid())
+                sudo('systemctl', 'restart', hostd_unit())
                 time.sleep(5)
                 wait_for(lambda: marker in body(endpoint) and state(identifier) == 'ready', 'the same URL after a host-service restart')
                 result['host_restart'] = 'survived'
