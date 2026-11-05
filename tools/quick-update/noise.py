@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# noise.py QUIETRUN...: the probe's intrinsic noise. Slides a synthetic WIN-second "update window" (1 s steps, from
+# noise.py QUIETRUN[:LABEL]...: the probe's intrinsic noise. Slides a synthetic WIN-second "update window" (1 s steps, from
 # WARM s after the first event) across runs that had no update and reports, per feature, the p95 and max of the
-# in-window excess over that run's own median, pooled over all window positions of all runs given.
+# in-window excess over that run's own median, pooled over all window positions of all runs given. A LABEL (e.g.
+# quiet3:pre-c231ef2b0, a run from before the fix for a stall it contains) is printed beside the run's name.
 import sys,pathlib
 sys.path.insert(0,str(pathlib.Path(__file__).parent));import excess
 WIN,WARM=40.0,10.0
@@ -19,8 +20,9 @@ def positions(ev,feat):
  return out
 def pct(v,q):v=sorted(v);return v[min(len(v)-1,int(q*len(v)))]
 if __name__=='__main__':
- evs=[excess.load_events(pathlib.Path(r)) for r in sys.argv[1:]]
- print('noise floor: %gs windows slid in 1 s steps (first %gs of each run skipped) over %d runs: %s'%(WIN,WARM,len(evs),' '.join(pathlib.Path(r).name for r in sys.argv[1:])))
+ runs=[a.partition(':')[::2] for a in sys.argv[1:]];names=[pathlib.Path(r).name+(' ('+l+')' if l else '') for r,l in runs]
+ evs=[excess.load_events(pathlib.Path(r)) for r,l in runs]
+ print('noise floor: %gs windows slid in 1 s steps (first %gs of each run skipped) over %d runs: %s'%(WIN,WARM,len(evs),', '.join(names)))
  print('%-17s %8s %8s %8s   per run max'%('feature','p50','p95','max'))
  for f in excess.FEATS:
   per=[positions(ev,f) for ev in evs];allp=[x for p in per for x in p]
