@@ -1031,6 +1031,7 @@ type DiagnosticUploadIntent struct {
 	CreatedAt          time.Time
 	UploadedAt         sql.NullTime
 	ObjectEtag         sql.NullString
+	FailureReferences  []string
 }
 
 type EdgeDnsProviderBudget struct {

@@ -180,11 +180,21 @@ func supportLookup(service *supportreport.Service, uploads supportUploadLookup, 
 		if issueURL != "" {
 			searchURL = issueURL + "?query=" + url.QueryEscape("support_reference:"+ref)
 		}
+		// A failure that happened only on the client (an install, a command before any request) is on the
+		// server only when the user uploaded its bundle (`pb bugreport --upload`): show that too.
+		bundle := false
+		if uploads != nil && owner != "" {
+			bundle, err = uploads.Uploaded(r.Context(), owner, ref)
+			if err != nil {
+				writeError(w, r, 503, "support_unavailable", "Support evidence is unavailable. Keep the reference and try again later.", err)
+				return
+			}
+		}
 		state := "available"
-		if len(records) == 0 {
+		if len(records) == 0 && !bundle {
 			state = "unavailable"
 		}
-		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"support_reference": ref, "owner_id": owner, "status": state, "records_by_owner": groups, "truncated": truncated, "sentry_links": links, "sentry_search_url": searchURL, "dropped_records": service.Dropped(), "message": "Sentry event IDs indicate an attempted capture, not confirmed receipt. Missing evidence may be expired, filtered, local, or dropped."}})
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"support_reference": ref, "owner_id": owner, "status": state, "diagnostic_bundle_uploaded": bundle, "records_by_owner": groups, "truncated": truncated, "sentry_links": links, "sentry_search_url": searchURL, "dropped_records": service.Dropped(), "message": "Sentry event IDs indicate an attempted capture, not confirmed receipt. Missing evidence may be expired, filtered, local, or dropped."}})
 	})
 }
 

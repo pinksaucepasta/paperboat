@@ -193,7 +193,7 @@ func Run(ctx context.Context, options Options) (result Result, resultErr error) 
 	if err != nil {
 		return result, &StageError{Stage: "authorize upload", Result: result, Err: err}
 	}
-	intent, err := options.Server.CreateDiagnosticUploadIntent(ctx, operationKey, api.DiagnosticUploadIntentRequest{Schema: api.DiagnosticUploadIntentRequestSchemaV1, CorrelationID: result.CorrelationID, Bytes: result.Bytes, SHA256: result.SHA256, Categories: slices.Clone(result.Categories)})
+	intent, err := options.Server.CreateDiagnosticUploadIntent(ctx, operationKey, api.DiagnosticUploadIntentRequest{Schema: api.DiagnosticUploadIntentRequestSchemaV1, CorrelationID: result.CorrelationID, Bytes: result.Bytes, SHA256: result.SHA256, Categories: slices.Clone(result.Categories), FailureReferences: slices.Clone(bundle.FailureReferences)})
 	if err != nil {
 		return result, &StageError{Stage: "authorize upload", Result: result, Err: err}
 	}

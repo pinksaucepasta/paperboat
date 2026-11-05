@@ -29,6 +29,8 @@ func diagnosticUploadIntentCreate(service *diagnosticuploads.Service) http.Handl
 		Bytes         int64    `json:"bytes"`
 		SHA256        string   `json:"sha256"`
 		Categories    []string `json:"categories"`
+		// The support references of the failures in the bundle; a lookup by any of them finds the upload.
+		FailureReferences []string `json:"failure_references"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := principalFromContext(r.Context())
@@ -52,7 +54,7 @@ func diagnosticUploadIntentCreate(service *diagnosticuploads.Service) http.Handl
 		}
 		intent, authority, err := service.Create(r.Context(), diagnosticuploads.CreateRequest{
 			UserID: principal.User.ID, CLIClientSessionID: principal.Client.SessionID, OperationKey: operationKey,
-			CorrelationID: body.CorrelationID, Bytes: body.Bytes, SHA256: body.SHA256, Categories: body.Categories,
+			CorrelationID: body.CorrelationID, Bytes: body.Bytes, SHA256: body.SHA256, Categories: body.Categories, FailureReferences: body.FailureReferences,
 		})
 		if err != nil {
 			writeDiagnosticUploadError(w, r, err)

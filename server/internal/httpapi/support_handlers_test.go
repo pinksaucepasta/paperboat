@@ -349,3 +349,30 @@ func TestSupportLookupResolvesAnUploadedBugreportReference(t *testing.T) {
 		t.Fatalf("no upload service: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// An operator looking up a reference from a client-only failure finds the bundle the user uploaded for it
+// (before, the operator route passed no upload lookup, so such a reference pointed nowhere for support).
+func TestOperatorSupportLookupShowsTheUploadedBundle(t *testing.T) {
+	ref := supportreport.NewReference()
+	lookup := func(uploads supportUploadLookup) *httptest.ResponseRecorder {
+		service, _ := supportreport.New(&noFaultSupportStore{}, supportreport.Config{})
+		req := httptest.NewRequest("GET", "/v1/admin/support/"+ref+"?owner_id=usr_target", nil)
+		req.SetPathValue("reference", ref)
+		req.Pattern = "GET /v1/admin/support/{reference}"
+		req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_operator", Role: auth.RoleSupport}, Session: auth.Session{OperatorAuthenticatedAt: time.Now()}}))
+		rr := httptest.NewRecorder()
+		operatorGuard(&operatorAuditFake{}, supportLookup(service, uploads, true, "")).ServeHTTP(rr, req)
+		return rr
+	}
+	uploaded := &uploadLookupFake{uploaded: true}
+	rr := lookup(uploaded)
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"available"`) || !strings.Contains(rr.Body.String(), `"diagnostic_bundle_uploaded":true`) || uploaded.asked != "usr_target" {
+		t.Fatalf("uploaded bundle: %d %s (asked %q)", rr.Code, rr.Body.String(), uploaded.asked)
+	}
+	if rr := lookup(&uploadLookupFake{}); rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"unavailable"`) || !strings.Contains(rr.Body.String(), `"diagnostic_bundle_uploaded":false`) {
+		t.Fatalf("nothing uploaded: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := lookup(&uploadLookupFake{err: errors.New("database down")}); rr.Code != 503 {
+		t.Fatalf("upload lookup failure: %d %s", rr.Code, rr.Body.String())
+	}
+}

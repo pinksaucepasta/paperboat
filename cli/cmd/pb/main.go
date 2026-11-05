@@ -272,10 +272,8 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 		return 1
 	}
 	if message := commandFailureMessage(err, failure); message != "" {
-		if diagnosticReference != "" && !strings.Contains(message, diagnosticReference) {
-			message = sentence(message) + " Support reference: " + diagnosticReference + "."
-		}
-		fmt.Fprintln(stderr, "pb:", message)
+		// failure.supportReference is set only when a remote answer carried the reference.
+		fmt.Fprintln(stderr, "pb:", withSupportReference(message, diagnosticReference, supportref.Valid(failure.supportReference)))
 	}
 	return 1
 }
