@@ -31,7 +31,7 @@ stop_preview
 new_preview && step inspector-hold env HOLD=${HOLD:-300} node "$ROOT/console/scripts/check-preview-inspector-hold.mjs" "$ID" "$PHOST"
 stop_preview
 new_preview && step inspector-restart env \
-  RESTART_CMD="ssh $HOST '$DOCKER exec $CT systemctl restart paperboat-carrier-u1000.service'" \
+  RESTART_CMD="ssh $HOST '$DOCKER exec $CT systemctl restart \"paperboat-carrier-u1000-*.service\"'" \
   STOP_CMD="ssh $HOST \"$DOCKER exec -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT .local/bin/pb preview stop <id> --json\" >/dev/null" \
   node "$ROOT/console/scripts/check-preview-inspector-restart.mjs" "$ID" "$PHOST"
 stop_preview

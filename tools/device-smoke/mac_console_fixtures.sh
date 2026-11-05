@@ -9,7 +9,7 @@
 #   files-up [PEER] no PEER: print SELF_ID SELF_ALIAS OFFLINE_ID FILE_NAME FILE_CONTENT FILE_PATH; the fixture file
 #                   stays in ~/.pb-console-fixtures/ (send it from a peer: pb send FILE --to SELF_ALIAS).
 #                   PEER (alias): send the fixture from this Mac to PEER and also print ONLINE_ID=<peer id>.
-#   restart-runtime kickstart the carrier launchd agent (Linux: systemctl restart paperboat-carrier-u<uid>)
+#   restart-runtime kickstart the carrier launchd agent (Linux: systemctl restart "paperboat-carrier-u<uid>-*.service")
 set -uo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:$PATH"
 PB=$HOME/.local/bin/pb

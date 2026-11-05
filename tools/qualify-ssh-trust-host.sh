@@ -58,7 +58,7 @@ inside_user './pb install' > "$work/install" 2>&1 || { tail -15 "$work/install";
 # A pairing that stops after enrollment is retried with the same token file, as its own message says.
 attempt=0
 until inside_user "~/.local/bin/pb pair --enrollment-token-file /home/tester/token --name $machine" > "$work/pair" 2>&1; do
- attempt=$((attempt+1)); [ "$attempt" -lt 3 ] || { tail -8 "$work/pair"; inside 'journalctl -u paperboat-carrier-u1001.service --no-pager -n 14 2>/dev/null | cut -c1-260' || true; inside_user '~/.local/bin/pb doctor 2>&1 | head -8' || true; fail "pair failed after $attempt attempts"; }
+ attempt=$((attempt+1)); [ "$attempt" -lt 3 ] || { tail -8 "$work/pair"; inside 'journalctl -u "paperboat-carrier-u1001-*.service" --no-pager -n 14 2>/dev/null | cut -c1-260' || true; inside_user '~/.local/bin/pb doctor 2>&1 | head -8' || true; fail "pair failed after $attempt attempts"; }
  sleep 5
 done
 i=0

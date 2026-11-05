@@ -42,7 +42,7 @@ def main():
         raise RuntimeError('target is not reachable before UDP is blocked')
     script = (f'nft delete table inet {TABLE} 2>/dev/null; echo {json.dumps(BLOCK)} | nft -f - && '
               f'systemd-run --quiet --on-active=240 nft delete table inet {TABLE} && '
-              '(systemctl restart "paperboat-carrier-u$(id -u "$SUDO_USER").service" || true)')
+              '(systemctl restart "paperboat-carrier-u$(id -u "$SUDO_USER")-*.service" || true)')
     # The block cuts the session that applies it; the command's own result is not meaningful.
     pb_exec(args.target, 'sudo', '-n', 'sh', '-c', script)
     started, recovered = time.monotonic(), None
