@@ -248,13 +248,17 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 			// Browser trust (for example NSS certutil on Linux) is a prerequisite of browser URLs
 			// only: native machine access and names keep working without them.
 			c.observeBrowserTrustFailure(ctx, err)
+			c.browserPending = true
 			aliases = map[string]string{}
 		case err != nil:
 			c.resetNameGenerationLocked(ctx)
 			return err
 		default:
+			c.browserPending = false
 			wantedWeb[splitdns.BrowserGatewayHostname] = web
 		}
+	} else {
+		c.browserPending = false
 	}
 	if err := nameClient.ReplaceAliases(ctx, aliases); err != nil {
 		c.resetNameGenerationLocked(ctx)

@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -51,7 +52,16 @@ type Coordinator struct {
 	reconcileFailed bool
 	// browserTrustReported is set once a browser certificate failure has been recorded.
 	browserTrustReported bool
-	domain               atomic.Pointer[string] // the local access domain, as the machine guard reports it
+	// browserPending is set while the last reconciliation left browser URLs off because the browser
+	// certificate could not be issued or trusted (guarded by mu); it is retried like a failed reconcile.
+	browserPending bool
+	// retry re-applies the latest snapshot after a failed or incomplete reconciliation (guarded by retryMu).
+	retryMu       sync.Mutex
+	retryTimer    *time.Timer
+	retryAttempt  int
+	retryPeers    []*daemonrpc.PeerUpdate
+	retryRevision uint64
+	domain        atomic.Pointer[string] // the local access domain, as the machine guard reports it
 }
 
 // connectTimeout bounds connecting to the protected machine-name service and stopping the coordinator.
@@ -365,7 +375,66 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 		c.reconcileFailed = false
 		c.reportMu.Unlock()
 	}
+	c.mu.Lock()
+	incomplete := err != nil || c.browserPending
+	c.mu.Unlock()
+	if incomplete {
+		c.scheduleReconcileRetry(peers, revision)
+	} else {
+		c.resetReconcileRetry()
+	}
 	return err
+}
+
+// Local access setup that fails (machine names, browser aliases, the browser certificate) is retried with
+// capped exponential backoff and jitter until it succeeds, instead of waiting for the next topology change.
+var (
+	reconcileRetryBase = time.Second
+	reconcileRetryMax  = time.Minute
+)
+
+func (c *Coordinator) scheduleReconcileRetry(peers []*daemonrpc.PeerUpdate, revision uint64) {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	c.retryPeers, c.retryRevision = peers, revision // the newest snapshot is the one retried
+	if c.retryTimer != nil {
+		return
+	}
+	c.retryAttempt++
+	delay := backoff.Retry(c.retryAttempt, reconcileRetryBase, reconcileRetryMax)
+	c.retryTimer = time.AfterFunc(delay, func() {
+		c.retryMu.Lock()
+		c.retryTimer = nil
+		peers, revision := c.retryPeers, c.retryRevision
+		c.retryMu.Unlock()
+		c.mu.Lock()
+		running := c.running
+		c.mu.Unlock()
+		if running {
+			c.applySnapshot(peers, revision)
+		}
+	})
+}
+
+// PendingLocalAccessStep names the local access step still being retried after the last reconciliation
+// reported success with browser URLs off (the browser certificate), or "" when nothing is pending.
+func (c *Coordinator) PendingLocalAccessStep() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.browserPending {
+		return "browser_certificate"
+	}
+	return ""
+}
+
+func (c *Coordinator) resetReconcileRetry() {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	if c.retryTimer != nil {
+		c.retryTimer.Stop()
+		c.retryTimer = nil
+	}
+	c.retryAttempt, c.retryPeers = 0, nil
 }
 
 // ReconcileStatus reports the latest streaming topology reconciliation. The
@@ -444,6 +513,7 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 func (c *Coordinator) Stop() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer shutdownCancel()
+	c.resetReconcileRetry()
 	c.mu.Lock()
 	server, listener, cancel := c.rpcServer, c.rpcListener, c.cancel
 	c.rpcServer, c.rpcListener, c.ctx, c.cancel, c.running = nil, nil, nil, nil, false

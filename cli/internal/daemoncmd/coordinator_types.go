@@ -61,6 +61,9 @@ func (e coordinatorOperationError) DiagnosticStage() string {
 	}
 }
 
+// LocalAccessStep names the failed local access step for pb doctor.
+func (e coordinatorOperationError) LocalAccessStep() string { return e.operation }
+
 func (e coordinatorOperationError) DiagnosticCode() string {
 	return "local_access_" + e.operation + "_failed"
 }

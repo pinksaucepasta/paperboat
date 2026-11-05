@@ -409,7 +409,13 @@ func localDaemonCommand() *cobra.Command {
 						if sharedErr != nil {
 							diagnosticlog.TryWarn("machines shared by teams are unavailable; keeping the last known ones", "error", sharedErr)
 						}
-						return coordinator.ApplyMachines(ctx, machines, services)
+						if err := coordinator.ApplyMachines(ctx, machines, services); err != nil {
+							return err
+						}
+						if step := coordinator.PendingLocalAccessStep(); step != "" {
+							return localdaemon.LocalAccessPendingError{Step: step}
+						}
+						return nil
 					},
 					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(ctx, peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), InspectorRequest: localdaemon.TunnelInspectorRequest(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines, RelayDenial: peerTunnel.RelayDenial, NativeTransport: peerTunnel.NativeTransport,
 					RelayInventory: func(ctx context.Context) (localapi.RelayInventory, error) {

@@ -265,8 +265,13 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	var sourceErr error
 	stage(func(stageCtx context.Context) { machines, sourceErr = i.source.ListUserMachines(stageCtx) })
 	var reconcileErr error
+	var pending LocalAccessPendingError
 	if sourceErr == nil && i.reconcileMachines != nil {
 		stage(func(stageCtx context.Context) { reconcileErr = i.reconcileMachines(stageCtx, machines) })
+		// Native access is set up; one step (the browser certificate) is still being retried by the coordinator.
+		if errors.As(reconcileErr, &pending) {
+			reconcileErr = nil
+		}
 	}
 	var completionItems []localapi.CompletionItem
 	var completionErr error
@@ -304,6 +309,14 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 			if reconcileErr == nil {
 				i.reconciledOnce = true
 			}
+			if pending.Step != "" {
+				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+					Code:     "browser_urls_unavailable",
+					Severity: "warning",
+					Title:    "Browser URLs are unavailable: the " + strings.ReplaceAll(pending.Step, "_", " ") + " step failed and is retrying",
+					Recovery: "Machine names and native access work; Paperboat retries the step by itself",
+				})}
+			}
 			if reconcileErr != nil {
 				desired.DaemonState = "degraded"
 				// A daemon that just started has not finished its first local-access setup (the machine guard and
@@ -322,7 +335,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 					desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
 						Code:     "local_access_unavailable",
 						Severity: "error",
-						Title:    "Local machine access is unavailable",
+						Title:    localAccessTitle("Local machine access is unavailable", reconcileErr),
 						Recovery: "Check Paperboat local access settings and repair the installation",
 					})}
 				}
@@ -614,4 +627,22 @@ func capabilityReadiness(online bool, capability api.MachineCapability) string {
 		return "ready"
 	}
 	return "degraded"
+}
+
+// LocalAccessPendingError reports a reconciliation that set up native access while one local access step
+// (Step, for example browser_certificate) failed and is being retried: the daemon stays ready and pb doctor
+// names the step.
+type LocalAccessPendingError struct{ Step string }
+
+func (e LocalAccessPendingError) Error() string {
+	return "local access step " + e.Step + " is retrying"
+}
+
+// localAccessTitle names the failing local access step in a health title when the error carries one.
+func localAccessTitle(title string, err error) string {
+	var step interface{ LocalAccessStep() string }
+	if errors.As(err, &step) && step.LocalAccessStep() != "" {
+		return title + ": the " + strings.ReplaceAll(step.LocalAccessStep(), "_", " ") + " step failed"
+	}
+	return title
 }
