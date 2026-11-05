@@ -125,6 +125,11 @@ func TestPreviewManagedPublicationRetainsOwnerBeyondThirtySeconds(t *testing.T) 
 			defer authority.mu.Unlock()
 			return apiLeaseFromPreview(authority.lease), authority.lease.ETag, http.StatusOK
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/machines/machine_cli/events/wait" {
+			// A ready lease's observer long-polls its machine's topics (ff03f92a4); no topic moves here.
+			<-r.Context().Done()
+			return nil, "", http.StatusServiceUnavailable
+		}
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		return nil, "", http.StatusNotFound
 	})
