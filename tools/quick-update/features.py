@@ -9,6 +9,9 @@ run.mkdir(parents=True,exist_ok=False)
 H=os.environ['QV_VM'];CT=os.environ['QV_CTL'];TG=os.environ['QV_TARGET'];name=run.name
 # QV_VM=local: the target is this machine (a GitHub runner); every remote command runs through bash instead of ssh.
 LOCAL=H=='local'
+# QV_PRIVATE=1 (private VM runs only, never the public CI artifact): keep pb's last 2 KB of stderr per failed call
+# (failures.jsonl) and run `pb bugreport` on both sides after a run with a failure, its ids going into summary.json.
+PRIVATE=os.environ.get('QV_PRIVATE')=='1'
 SSHX=lambda c:['bash','-c',c] if LOCAL else ['ssh',H,c]
 PUT=lambda src,dst:['cp',src,os.path.expanduser('~/'+dst)] if LOCAL else ['scp','-q',src,f'{H}:{dst}']
 SRV=os.environ['QV_SERVER']
@@ -23,8 +26,8 @@ R(f'mkdir -p ~/gap5/{name}')
 if cand!='-':subprocess.run(PUT(cand,f'gap5/{name}/candidate'),check=True)
 subprocess.run(PUT(str(pathlib.Path(__file__).with_name('probe.py')),'gap5/probe.py'),check=True)
 R(f'chmod 755 ~/gap5/{name}/candidate 2>/dev/null; sudo docker cp ~/gap5/probe.py {CT}:/tmp/probe.py && sudo docker exec {CT} chown pbt /tmp/probe.py')
-R(f"{U} sh -c 'mkdir -p /home/pbt/{name} && head -c 65536 /dev/urandom > /home/pbt/{name}/big.bin'")
-R(f"{U} bash -c 'nohup python3 /tmp/probe.py {TG} {pv} {tn} /home/pbt/{name}/p /home/pbt/{name}/stop > /home/pbt/{name}/probe.out 2>&1 &'")
+R(f"{U} sh -c 'mkdir -p /home/pbt/{name} && head -c 65536 /dev/urandom > /home/pbt/{name}/small.bin && head -c 20000000 /dev/urandom > /home/pbt/{name}/big.bin'")
+R(f"{U} bash -c '{"PROBE_STDERR=1 " if PRIVATE else ""}nohup python3 /tmp/probe.py {TG} {pv} {tn} /home/pbt/{name}/p /home/pbt/{name}/stop > /home/pbt/{name}/probe.out 2>&1 &'")
 # Held browser terminal: a guest joins one owner session by code through the console's own page (WASM browser
 # terminal) from the controller host, types a 200 ms echo ticker and records each new marker (web/webheld.mjs).
 NOWEB=os.environ.get('NO_WEB')=='1';webp=None
@@ -85,10 +88,15 @@ for _ in range(300):
  if subprocess.run(SSHX(f'{U} test -f /home/pbt/{name}/held/result.json'),capture_output=True).returncode==0:break
  time.sleep(1)
 R(f'{U} cat /home/pbt/{name}/held/result.json > ~/gap5/{name}/held-result.json; {U} cat /home/pbt/{name}/held/markers.json > ~/gap5/{name}/held-markers.json',check=False)
-R(f'{U} cat /home/pbt/{name}/p/events.jsonl > ~/gap5/{name}/events.jsonl; {U} rm -f /home/pbt/{name}/big.bin',check=False)
+R(f'{U} cat /home/pbt/{name}/p/events.jsonl > ~/gap5/{name}/events.jsonl; {U} rm -f /home/pbt/{name}/small.bin /home/pbt/{name}/big.bin',check=False)
+if PRIVATE:R(f'{U} cat /home/pbt/{name}/p/failures.jsonl > ~/gap5/{name}/failures.jsonl',check=False)
 subprocess.run(['rsync','-a',(os.path.expanduser(f'~/gap5/{name}/') if LOCAL else f'{H}:gap5/{name}/'),str(run)+'/','--exclude=candidate'],timeout=300)
 ts=excess.iso
 ev=excess.load_events(run)
 rows=excess.score(ev,[(ts(t0),ts(t1))])
-s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows,build=build,updates=[(t0,t1)])
+def bug(c):
+ try:return excess.bugreport_id(R(c,timeout=240,check=False))
+ except subprocess.TimeoutExpired:return dict(error='timeout')
+ids=dict(controller=bug(f'{U} /home/pbt/.local/bin/pb bugreport --json'),target=bug('~/.local/bin/pb bugreport --json')) if PRIVATE and any(r.get('failures') for r in rows) else None
+s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows,build=build,updates=[(t0,t1)],**({'support_ids':ids} if ids else {}))
 (run/'summary.json').write_text(json.dumps(s,indent=1));print(json.dumps(s))

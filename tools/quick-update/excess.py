@@ -8,11 +8,12 @@
 #  - streams (exec_long, ssh_stream, term_cli, term_web) and the HTTP fetch loops (preview, tunnel): value = gap
 #    between consecutive successful markers/fetches, i.e. the outage between the last success before a pause and
 #    the first one after it; a failed or timed-out fetch only makes the gap longer (and counts as a failure).
-# send: only sends overlapping the window are scored, by their own latency. `pb send` exposes no progress, so a
-# stall inside a send cannot be seen separately from the send's total time (see the note in probe.py's send()).
-import json,sys,datetime,pathlib
+# send: a 64 KiB file every second; only sends overlapping the window are scored, by their own latency (`pb send`
+# exposes no progress, so the pause is the send's whole time, which is small). send_big (20 MB every 10 s) is the
+# throughput check: it fails only on failures and reports MB/s before the window and its lowest inside it.
+import json,sys,datetime,pathlib,collections
 LO,HI,LIMIT=2.0,10.0,1.0
-FEATS=['exec_short','exec_long','exec_stdin','exec_stdin_large','ssh_stream','ssh_connect','send','preview','tunnel','term_cli','term_web']
+FEATS=['exec_short','exec_long','exec_stdin','exec_stdin_large','ssh_stream','ssh_connect','send','send_big','preview','tunnel','term_cli','term_web']
 STREAMS={'exec_long','ssh_stream','term_cli','term_web','preview','tunnel'}
 iso=lambda s:datetime.datetime.fromisoformat(s.strip()).timestamp()
 hms=lambda t:datetime.datetime.fromtimestamp(t,datetime.timezone.utc).strftime('%H:%M:%S.%f')[:-3]
@@ -48,14 +49,19 @@ def score(ev,updates):
   w=[(v-med,s) for s,t,v in it if inw(s,t)];worst=max(w) if w else (None,None)
   pre=[v-med for s,t,v in it if t<lo];post=[v-med for s,t,v in it if s>hi]
   bad=[x for x in e if not x['ok']]
+  errs=dict(collections.Counter(x.get('err') or ('exit%s'%x['rc'] if 'rc' in x else 'unrecorded') for x in bad))  # codes only
   starts=[x for x in ev if x['f']==feat+'_start'];ends=[x for x in ev if x['f']==feat+'_end']
   fin=len([x for x in bad if inw(x['t']-(x['ms'] or 0)/1000,x['t'])])
   ex=None if worst[0] is None else round(max(0,worst[0]),3)
   rows.append(dict(feature=feat,events=len(e),restarts=max(0,len(starts)-1),cut=[x.get('rc') for x in ends],base_med_s=round(med,3),
    excess_s=ex,excess_at=hms(worst[1]) if worst[1] else None,in_window=len(w),pre_max_s=round(max(0,max(pre,default=0)),3),post_max_s=round(max(0,max(post,default=0)),3),
-   failures=len(bad),failures_in_update=fin))
+   failures=len(bad),failures_in_update=fin,errors=errs))
   r=rows[-1];r['noise_s']=max(r['pre_max_s'],r['post_max_s'])
   r['status']='FAIL' if ex is None or bad else 'PASS' if ex<=LIMIT else 'UNRESOLVED' if r['noise_s']>=ex else 'FAIL'
+  if feat=='send_big':  # throughput check: only failures fail it
+   mb=[(x['bytes']/1e6/(x['ms']/1000),x['t']) for x in e if x['ok'] and x.get('bytes') and x['ms']]
+   before=sorted(v for v,t in mb if t<lo);inwin=[v for v,t in mb if lo<=t<=hi]
+   r.update(status='FAIL' if bad else 'PASS',info='%s MB/s before, lowest in window %s'%('%.1f'%before[len(before)//2] if before else '-','%.1f'%min(inwin) if inwin else '-'))
   r['ok']=r['status']=='PASS'
  return rows
 
@@ -71,6 +77,17 @@ def pb_version(out):
  try:j=json.loads(out.strip().splitlines()[-1]);j=j.get('data',j);return dict(version=j['version'],commit=j['commit'])
  except Exception as e:return dict(error='unreadable: '+type(e).__name__)
 
+def bugreport_id(out):
+ """{correlation_id} from `pb bugreport --json` output (a local redacted bundle), or the failure's support reference."""
+ try:j=json.loads(out.strip().splitlines()[-1]);e=j.get('error') or {}
+ except Exception as x:return dict(error='unreadable: '+type(x).__name__)
+ return dict(correlation_id=j['correlation_id']) if j.get('correlation_id') else dict(error=e.get('code','none'),support_reference=e.get('support_reference'))
+
+def verdict(r):
+ if r.get('info'):return r['status']+' ('+r['info']+')'  # send_big: throughput, not a stall measure
+ if r['status']=='UNRESOLVED':return 'unresolved (noise %.3gs)'%r['noise_s']
+ return r['status']+(' (no data in window)' if r['excess_s'] is None else '')
+
 def render(rows,updates,build=None):
  lo,hi=min(a for a,b in updates)-LO,max(b for a,b in updates)+HI
  b=build or {};pv=lambda k:'%(version)s %(commit).12s'%b[k] if 'version' in (b.get(k) or {}) else 'unrecorded'
@@ -80,7 +97,9 @@ def render(rows,updates,build=None):
  for r in rows:
   if not r.get('events'):print('%-17s %s'%(r['feature'],'NO EVENTS  FAIL'));continue
   x=lambda k:'-' if r.get(k) is None else '%.3fs'%r[k]
-  print('%-17s %8s %9s %9s %9s %6d %7s  %s'%(r['feature'],x('base_med_s'),x('excess_s'),x('pre_max_s'),x('post_max_s'),r['in_window'],'%d/%d'%(r['failures'],r['failures_in_update']),'unresolved (noise %.3gs)'%r['noise_s'] if r['status']=='UNRESOLVED' else r['status']+(' (no data in window)' if r['excess_s'] is None else '')))
+  print('%-17s %8s %9s %9s %9s %6d %7s  %s'%(r['feature'],x('base_med_s'),x('excess_s'),x('pre_max_s'),x('post_max_s'),r['in_window'],'%d/%d'%(r['failures'],r['failures_in_update']),verdict(r)))
+ for r in rows:
+  if r.get('errors'):print('  %s failed calls (codes only): %s'%(r['feature'],', '.join('%s x%d'%kv for kv in sorted(r['errors'].items()))))
 
 if __name__=='__main__':
  run=pathlib.Path(sys.argv[1]);u=[(iso((run/'update-start.utc').read_text()),iso((run/'update-end.utc').read_text()))]
