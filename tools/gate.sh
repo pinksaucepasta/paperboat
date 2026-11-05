@@ -44,6 +44,9 @@ python3 tools/check_migrations.py && (cd tools && python3 -m unittest test_check
 step "server-first check tests"
 (cd tools && python3 -m unittest test_check_server_deployed) || { echo "FAIL: server-first check"; fail=1; }
 
+step "quick-update check tests"
+python3 -m unittest discover -s tools/quick-update -p 'test_*.py' || { echo "FAIL: quick-update"; fail=1; }
+
 step "managed deployment lifecycle tests"
 python3 -m unittest discover -s deploy -p 'test_*.py' || { echo "FAIL: deployment"; fail=1; }
 

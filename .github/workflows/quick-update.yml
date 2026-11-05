@@ -1,0 +1,115 @@
+name: Quick update run
+
+# The all-rows `pb update` run (held CLI and browser terminals, exec, ssh, send, preview, tunnel; max pause and
+# failures per feature) for one or more refs in parallel, one runner each. Run it with tools/quick-update/dispatch.sh
+# (pushes each ref to a throwaway ci/ branch, dispatches this workflow from main, prints the tables, deletes the branches).
+# Each job: builds the ref, makes the runner itself the update target (user runner, real systemd, like a test VM) and a
+# systemd container the controller, pairs both under the throwaway prefix lanegapgh<run id>x<n>- (cleanup_test_account.py accepts no hyphen inside a prefix), runs
+# tools/quick-update/run.sh and uploads the per-feature table (table + summary only: the repository is public).
+# Secret QUICK_UPDATE_API_TOKEN (the `secret` of a test-account API token, never printed) mints the jobs' one-shot
+# enrollment tokens. Variables: PAPERBOAT_DEFAULT_SERVER_URL (API base) and QUICK_UPDATE_CONSOLE_ORIGIN (console origin
+# for the browser-terminal row). The jobs' machines go stale when the runner ends; revoke them with
+# tools/device-smoke/cleanup_test_account.py --prefix lanegapgh<run id>x<n>- (operator ssh, so not from here).
+
+on:
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: 'Space separated refs (branch or sha) to test, one runner each; empty = the dispatched ref'
+        default: ''
+      web:
+        description: 'Run the browser-terminal row (needs QUICK_UPDATE_CONSOLE_ORIGIN)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      refs: ${{ steps.plan.outputs.refs }}
+    steps:
+      - id: plan
+        env:
+          REFS: ${{ inputs.refs }}
+        run: |
+          refs="${REFS:-$GITHUB_SHA}"
+          for r in $refs; do
+            [[ $r =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "bad ref '$r'" >&2; exit 1; }
+          done
+          echo "refs=$(printf '%s\n' $refs | jq -R . | jq -sc 'to_entries | map({n: .key, ref: .value})')" >> "$GITHUB_OUTPUT"
+
+  run:
+    name: update ${{ matrix.ref }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.refs) }}
+    env:
+      QV_N: ${{ matrix.n }}
+      QV_SERVER: ${{ vars.PAPERBOAT_DEFAULT_SERVER_URL }}
+      QV_OUT: ${{ runner.temp }}/qu-out
+      QV_SRC: ${{ github.workspace }}/src
+    steps:
+      # The harness comes from the dispatched ref (main); the code under test is checked out beside it in src/.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: src/cli/go.mod
+          cache: false
+      - id: paths
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ steps.paths.outputs.build }}
+            ${{ steps.paths.outputs.mod }}
+          key: lane-test-go-cli-${{ hashFiles('src/go.work.sum', 'src/*/go.sum', 'src/sdk/go/go.sum') }}
+          restore-keys: |
+            lane-test-go-cli-
+      - name: Headless browser for the browser-terminal row
+        if: inputs.web
+        env:
+          ORIGIN: ${{ vars.QUICK_UPDATE_CONSOLE_ORIGIN }}
+        run: |
+          [ -n "$ORIGIN" ] || { echo "set the repository variable QUICK_UPDATE_CONSOLE_ORIGIN or run with web=false" >&2; exit 1; }
+          npm install --prefix "$RUNNER_TEMP/pw" playwright-core
+          node "$RUNNER_TEMP/pw/node_modules/playwright-core/cli.js" install --with-deps chromium
+          echo "PW_MODULE=$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs" >> "$GITHUB_ENV"
+          echo "PW_CHROMIUM=$(node -e "import('$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs').then(m => console.log(m.chromium.executablePath()))")" >> "$GITHUB_ENV"
+          echo "PB_CONSOLE_ORIGIN=$ORIGIN" >> "$GITHUB_ENV"
+      - name: Quick update run
+        env:
+          API_TOKEN: ${{ secrets.QUICK_UPDATE_API_TOKEN }}
+          NO_WEB: ${{ inputs.web && '0' || '1' }}
+        run: |
+          [ -n "$API_TOKEN" ] || { echo "the secret QUICK_UPDATE_API_TOKEN is not set" >&2; exit 1; }
+          (umask 077; jq -n --arg s "$API_TOKEN" '{secret: $s}' > "$RUNNER_TEMP/qu-token.json")
+          export QV_WEBTOKEN="$RUNNER_TEMP/qu-token.json"
+          tools/quick-update/run.sh
+      - name: Table
+        if: always()
+        run: |
+          { echo "### $QV_N: ${{ matrix.ref }}"; echo '```'; cat "$QV_OUT/table.txt" 2>/dev/null || tail -20 "$QV_OUT/features.out" 2>/dev/null || echo "no table"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: quick-update-${{ matrix.n }}
+          path: |
+            ${{ runner.temp }}/qu-out/table.txt
+            ${{ runner.temp }}/qu-out/summary.json
+            ${{ runner.temp }}/qu-out/update.raw
+          if-no-files-found: ignore
