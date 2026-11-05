@@ -103,6 +103,10 @@ func (b *locoBackend) addClientLocked(k key.NodePublic, disco key.DiscoPublic, a
 	}
 	id := b.nextClientID
 	b.nextClientID++
+	home := b.derpRegionIDLocked()
+	if region := b.peerRegions[k]; b.dm.Regions[region].HasDERP() {
+		home = region
+	}
 	b.setClientLocked(k, &tailcfg.Node{
 		ID:         id,
 		StableID:   tailcfg.StableNodeID(fmt.Sprint(id)),
@@ -113,7 +117,7 @@ func (b *locoBackend) addClientLocked(k key.NodePublic, disco key.DiscoPublic, a
 		Addresses:  []netip.Prefix{pfxOf(addr)},
 		AllowedIPs: []netip.Prefix{pfxOf(addr)},
 		Endpoints:  slices.Clone(b.contacts[k].Endpoints),
-		HomeDERP:   b.derpRegionIDLocked(),
+		HomeDERP:   home,
 		Cap:        tailcfg.CurrentCapabilityVersion,
 	})
 }

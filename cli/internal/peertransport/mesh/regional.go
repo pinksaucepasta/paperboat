@@ -16,6 +16,8 @@ import (
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
+	"tailscale.com/util/mak"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/wgengine/filter"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
@@ -182,6 +184,7 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	n = n.Clone()
 	n.HomeDERP = id
 	b.setClientLocked(peer, n)
+	mak.Set(&b.peerRegions, peer, id)
 	b.updateServerMapLocked()
 	return nil
 }
