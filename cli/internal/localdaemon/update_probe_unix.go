@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +41,28 @@ type UpdateProbe struct {
 	HealthTitles []string `json:"health_titles,omitempty"`
 }
 
+// controlPlaneOutageDependents are health items a control-plane outage brings with it: a relay failover
+// during the outage follows from the server being unreachable, so it does not make the daemon degraded for
+// a local reason (tailscale Warnable.DependsOn, health/health.go). Without this a candidate that came up in
+// an outage with both items was failed as degraded locally and rolled back.
+var controlPlaneOutageDependents = []string{RelayFailoverCode}
+
+// controlPlaneUnavailableOnly reports whether the control plane being unreachable, with only the items that
+// depend on it, is all that is wrong.
+func controlPlaneUnavailableOnly(health []localapi.HealthItem) bool {
+	outage := false
+	for _, item := range health {
+		switch {
+		case item.Code == "control_plane_unavailable":
+			outage = true
+		case slices.Contains(controlPlaneOutageDependents, item.Code):
+		default:
+			return false
+		}
+	}
+	return outage
+}
+
 // ProbeCurrentUserForUpdate runs as the enrolled user, preserving local API
 // authorization. Read the installed declaration rather than inheriting the
 // privileged updater's HOME, TMPDIR or XDG namespace.
@@ -55,7 +78,7 @@ func ProbeCurrentUserForUpdate(ctx context.Context) (UpdateProbe, error) {
 	}
 	result.Version, result.State, result.Running = snapshot.DaemonVersion, snapshot.DaemonState, true
 	result.Machines = uint32(len(snapshot.Machines))
-	result.ControlPlaneUnavailableOnly = len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
+	result.ControlPlaneUnavailableOnly = controlPlaneUnavailableOnly(snapshot.Health)
 	for _, item := range snapshot.Health {
 		result.Health = append(result.Health, item.Code)
 		result.HealthTitles = append(result.HealthTitles, item.Title)

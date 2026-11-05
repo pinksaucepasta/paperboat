@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
 func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
@@ -109,4 +110,26 @@ func updateProbeTestDeclaration(t *testing.T, home, platform string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// A server outage that also shows a relay failover is still only the outage for the updater's gate, so a
+// candidate that comes up in it waits for the server instead of failing as degraded locally; any local
+// problem alongside the outage still counts.
+func TestControlPlaneOutageIncludesItsRelayFailover(t *testing.T) {
+	outage := localapi.HealthItem{Code: "control_plane_unavailable"}
+	for _, c := range []struct {
+		health []localapi.HealthItem
+		want   bool
+	}{
+		{[]localapi.HealthItem{outage}, true},
+		{[]localapi.HealthItem{outage, {Code: RelayFailoverCode}}, true},
+		{[]localapi.HealthItem{{Code: RelayFailoverCode}, outage}, true},
+		{[]localapi.HealthItem{{Code: RelayFailoverCode}}, false},
+		{[]localapi.HealthItem{outage, {Code: "local_access_unavailable"}}, false},
+		{nil, false},
+	} {
+		if got := controlPlaneUnavailableOnly(c.health); got != c.want {
+			t.Fatalf("controlPlaneUnavailableOnly(%+v) = %t, want %t", c.health, got, c.want)
+		}
+	}
 }
