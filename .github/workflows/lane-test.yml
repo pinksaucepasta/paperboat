@@ -110,6 +110,16 @@ jobs:
       - name: Check shared import boundary
         if: matrix.module == 'shared'
         run: ../tools/check-shared-imports.sh
+      - name: enable PostgreSQL work statistics
+        if: matrix.module == 'server'
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -qc "ALTER SYSTEM SET shared_preload_libraries='pg_stat_statements'"
+          docker restart ${{ job.services.postgres.id }}
+          for attempt in {1..30}; do
+            PGPASSWORD=postgres pg_isready -h localhost -U postgres && break
+            sleep 1
+          done
+          PGPASSWORD=postgres pg_isready -h localhost -U postgres
       - run: go vet ./...
       # The same non-test checks as main's Server checks job (make check; Makefile policy-checks), so a green
       # full-module lane run means main goes green too. Narrowed -run runs skip them to stay fast.
@@ -190,6 +200,9 @@ jobs:
           PAPERBOAT_PERF_DATABASE_DSN="postgres://postgres:postgres@localhost:5432/lane_perf_test?sslmode=disable" \
             go test -json -count=1 -timeout 30m -run '^TestPerformanceBudgetsOnSeededPostgres$' ./internal/app |
             python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/perf.jsonl" --verbose
+          PAPERBOAT_PERF_DATABASE_DSN="postgres://postgres:postgres@localhost:5432/lane_perf_test?sslmode=disable" \
+            go test -json -count=1 -run '^TestPerformanceThousandMachineMeshOnPostgres$' ./internal/peersessions |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/mesh-perf.jsonl" --verbose
       - name: cli tests that need root (under sudo)
         if: matrix.module == 'cli' && !cancelled()
         run: |

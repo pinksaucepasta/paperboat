@@ -31,10 +31,23 @@ func (meshTestSigner) SignRelayGrant(map[string]any) (string, error) { return "g
 // Every endpoint of an account rebuilt the whole personal mesh (3 queries per peer) on every change: N x N per
 // join. The shared mesh is built once per change: on a 1,000-machine account a join writes one log row, a refresh
 // with no change writes none, and every entry is exactly what loadNetworkBinding gives for that endpoint. The build
-// is linear: with 9,000 more endpoints and their revoked certificates in another account on the server, the first
-// build and a join each take well under a second (the build passed the 30 s statement timeout on CI before).
+// is linear: statements and returned rows are bounded even with 9,000 unrelated endpoints.
 func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T) {
+	testThousandMachineMesh(t, false)
+}
+
+func TestPerformanceThousandMachineMeshOnPostgres(t *testing.T) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("PAPERBOAT_PERF_DATABASE_DSN") == "" {
+		t.Skip("latency budgets require the GitHub performance runner")
+	}
+	testThousandMachineMesh(t, true)
+}
+
+func testThousandMachineMesh(t *testing.T, performance bool) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if performance {
+		dsn = os.Getenv("PAPERBOAT_PERF_DATABASE_DSN")
+	}
 	if dsn == "" {
 		t.Skip("requires isolated PostgreSQL")
 	}
@@ -103,14 +116,39 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 		}
 		return rows, last
 	}
+	// Snapshot only this isolated database; do not reset shared server statistics.
+	exec(`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`)
+	type work struct{ statements, rows int64 }
+	snapshot := func() (w work) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(calls),0),
+ coalesce(sum(CASE WHEN query ~ '^SELECT' THEN rows ELSE 0 END),0)
+ FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND query NOT LIKE '%pg_stat_statements%'`).Scan(&w.statements, &w.rows); err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	checkWork := func(before work, endpoints int64) {
+		t.Helper()
+		after := snapshot()
+		calls, rows := after.statements-before.statements, after.rows-before.rows
+		t.Logf("mesh work: %d statements, %d rows read for %d endpoints", calls, rows, endpoints)
+		// A few set-based reads plus bounded writes, never per-peer queries or N² returned rows.
+		if calls > 25 || rows > 3*endpoints+20 {
+			t.Fatalf("mesh work grew beyond linear bounds: %d statements, %d rows read", calls, rows)
+		}
+	}
+	before := snapshot()
 	started := time.Now()
 	seq, err := service.refreshMesh(ctx, account)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(started); took > 2*time.Second {
+	if took := time.Since(started); performance && took > 2*time.Second {
 		t.Fatalf("the first build of a 1,000-machine account took %v", took)
 	}
+	checkWork(before, 1000)
 	if n, _ := logRows(); n != 1000 || seq != 1000 {
 		t.Fatalf("first build: %d log rows, seq %d; want 1000 adds", n, seq)
 	}
@@ -160,13 +198,15 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	}
 
 	join(1000, 1000)
+	before = snapshot()
 	started = time.Now()
 	if seq, err = service.refreshMesh(ctx, account); err != nil || seq != 1001 {
 		t.Fatalf("after a join: seq %d, %v; want one more entry", seq, err)
 	}
-	if took := time.Since(started); took > time.Second {
+	if took := time.Since(started); performance && took > time.Second {
 		t.Fatalf("a join on a 1,000-machine account took %v", took)
 	}
+	checkWork(before, 1001)
 	if n, last := logRows(); n != 1001 || last != "add "+account+"_m_1000" {
 		t.Fatalf("a join on a 1,000-machine account wrote %d rows (last %q), want exactly one add", n-1000, last)
 	}
