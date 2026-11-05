@@ -489,17 +489,24 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 		}
 		// RPC status must describe acquired native listeners, while browser URLs
 		// can still offer an independently authorized route to an occupied port.
+		// The address is the one the guard bound them on: its per-uid claim differs from the server's preferred
+		// address when another OS user holds that one (pbvm1, 2026-11-05: pb resolve said .3, the port was on .18).
 		c.mu.Lock()
 		active := make(map[string]map[int]bool)
+		bound := make(map[string]string)
 		for _, route := range c.routes {
 			if active[route.machineID] == nil {
 				active[route.machineID] = make(map[int]bool)
 			}
 			active[route.machineID][route.port] = true
+			bound[route.machineID] = route.address.String()
 		}
 		for _, peer := range localPeers {
 			if peer == nil {
 				continue
+			}
+			if address := bound[peer.PeerId]; address != "" {
+				peer.AssignedIp = address
 			}
 			forwarded := make([]int32, 0, len(peer.ExportedPorts))
 			for _, port := range peer.ExportedPorts {

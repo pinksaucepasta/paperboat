@@ -1000,6 +1000,15 @@ func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing
 	if got.String() != "127.100.0.77" {
 		t.Fatalf("published %v, want the guard-assigned 127.100.0.77", got)
 	}
+	// pbvm1, 2026-11-05: pb resolve printed the server's preferred address (.3) while the port listened on the
+	// guard's (.18). The RPC status pb resolve reads names the bound address.
+	status, err := c.rpcBackend.GetStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Peers) != 1 || status.Peers[0].AssignedIp != "127.100.0.77" {
+		t.Fatalf("resolve status=%v, want the bound 127.100.0.77", status.Peers)
+	}
 	if len(claims) != 1 || claims[0] != "acct_alice:m_hp,m_off" {
 		t.Fatalf("claims=%v, want the complete set including the offline machine", claims)
 	}

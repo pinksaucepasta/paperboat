@@ -77,6 +77,7 @@ func rpcResolveCommand() *cobra.Command {
 					ports[i] = fmt.Sprintf("%d", p)
 				}
 				fmt.Fprintf(output, "Ports:    %s\n", strings.Join(ports, ", "))
+				fmt.Fprintf(output, "Raw TCP:  connect to %s:<port>; the machine's name reaches HTTP, HTTPS and WebSocket only\n", addr.AssignedIp)
 			}
 			if len(addr.BrowserUrls) > 0 {
 				ports := make([]int, 0, len(addr.BrowserUrls))
