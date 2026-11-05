@@ -29,6 +29,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 	if s.stopped {
 		s.mu.Unlock()
 		<-s.sem
+		diagnosticlog.TryInfo("request refused", "stage", "server_stopping", "capability", frame.Capability)
 		_ = writer.write(errorFrame(frame.RequestID, "unavailable", "server is stopping", true))
 		return
 	}
@@ -56,6 +57,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		authorization, err := authorizer.Authorize(opCtx, frame)
 		if err != nil {
 			if reportAuthorizationFailure(opCtx, err) {
+				diagnosticlog.TryInfo("request refused", "stage", "authorization_unavailable", "capability", frame.Capability)
 				_ = respond(errorFrame(frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
 			} else {
 				_ = respond(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
@@ -74,6 +76,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		owner, ok := s.registerOperation(activeKey, cancel)
 		if !ok {
 			cancel()
+			diagnosticlog.TryInfo("request refused", "stage", "operation_registration_refused", "capability", frame.Capability)
 			_ = respond(errorFrame(frame.RequestID, "unavailable", "server is stopping", true))
 			return
 		}
@@ -128,6 +131,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 				errorreport.Current().ObserveFailure(connectionCtx, "paperboat-daemon", "sessions", "resume_stream_open", "terminal_resume_failed", streamErr)
 			}
 			reportStreamOpenFailure(connectionCtx, frame.Capability, streamErr)
+			diagnosticlog.TryInfo("request refused", "stage", "output_stream_open_failed", "capability", frame.Capability)
 			_ = respond(errorFrame(frame.RequestID, "unavailable", "output stream could not be opened", true))
 			return
 		}
@@ -148,6 +152,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			if streamErr != nil {
 				terminalState.remove(streamID)
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
+				diagnosticlog.TryInfo("request refused", "stage", "terminal_stream_id_failed", "capability", frame.Capability)
 				_ = respond(errorFrame(frame.RequestID, "unavailable", "terminal stream could not be opened", true))
 				return
 			}
