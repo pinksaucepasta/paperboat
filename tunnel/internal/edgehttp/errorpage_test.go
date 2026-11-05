@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
@@ -90,5 +92,35 @@ func TestUnavailableRouteHostServesBrandedBadGateway(t *testing.T) {
 			sentence = "could not reach the app"
 		}
 		assertBrandedPage(t, w, status, sentence)
+	}
+}
+
+func TestHoldForRouteWaitsOnlyWithinTheGrace(t *testing.T) {
+	var calls atomic.Int32
+	acquire := func(succeedAfter int32) func() (*route.StreamLease, route.RouteMatch, error) {
+		return func() (*route.StreamLease, route.RouteMatch, error) {
+			if calls.Add(1) > succeedAfter {
+				return nil, route.RouteMatch{}, nil
+			}
+			return nil, route.RouteMatch{}, route.ErrNoMatch
+		}
+	}
+	if _, _, err := holdForRoute(context.Background(), time.Second, acquire(3)); err != nil || calls.Load() != 4 {
+		t.Fatalf("a route that appears within the grace: err=%v after %d calls", err, calls.Load())
+	}
+	calls.Store(0)
+	if _, _, err := holdForRoute(context.Background(), 0, acquire(3)); !errors.Is(err, route.ErrNoMatch) || calls.Load() != 1 {
+		t.Fatalf("without a grace the request is answered at once: err=%v after %d calls", err, calls.Load())
+	}
+	calls.Store(0)
+	start := time.Now()
+	if _, _, err := holdForRoute(context.Background(), 200*time.Millisecond, acquire(1<<30)); !errors.Is(err, route.ErrNoMatch) || time.Since(start) > time.Second {
+		t.Fatalf("a route that never appears is refused after the grace: err=%v in %v", err, time.Since(start))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls.Store(0)
+	if _, _, err := holdForRoute(ctx, time.Minute, acquire(1<<30)); !errors.Is(err, route.ErrNoMatch) || calls.Load() != 1 {
+		t.Fatalf("a request that ended stops waiting: err=%v after %d calls", err, calls.Load())
 	}
 }

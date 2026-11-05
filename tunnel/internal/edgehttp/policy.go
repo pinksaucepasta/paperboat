@@ -66,7 +66,11 @@ type Config struct {
 	// RouteUnavailable, when set, reports a host whose route is known but failed its probe: it gets the
 	// "could not reach the app" page (502) instead of a 404.
 	RouteUnavailable func(host string) bool
-	HelperAccess     interface {
+	// RouteGrace, when set, is how long a request for an unknown host waits for its route before the
+	// 404. It is non-zero only just after an install handover took over accepting: hosts re-attach
+	// their carriers to the replacement after that, and a request in that gap has no route yet.
+	RouteGrace   func() time.Duration
+	HelperAccess interface {
 		VerifyHelperAccess(context.Context, string) (admission.Claims, error)
 	}
 	Revocations interface {
@@ -406,6 +410,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		candidateLease, acquired, acquireErr := p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
+		if errors.Is(acquireErr, route.ErrNoMatch) && p.config.RouteGrace != nil {
+			candidateLease, acquired, acquireErr = holdForRoute(r.Context(), p.config.RouteGrace(), func() (*route.StreamLease, route.RouteMatch, error) {
+				return p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
+			})
+		}
 		if acquireErr != nil {
 			token, hasSession := browserCookie(r, browserEdgeCookie)
 			machine := false
@@ -939,4 +948,25 @@ func isWebSocketUpgrade(headers http.Header) bool {
 		}
 	}
 	return false
+}
+
+// routeHoldPoll is how often a held request looks for its route again.
+const routeHoldPoll = 50 * time.Millisecond
+
+// holdForRoute retries acquire until it succeeds, the grace passes or the request ends, so a request
+// that arrives in the gap after a handover is answered by the route the host attaches a moment later
+// (anvit, 2026-11-05: three 404s in 490 ms, 2 s after the replacement started). With no grace it is a
+// single call.
+func holdForRoute(ctx context.Context, grace time.Duration, acquire func() (*route.StreamLease, route.RouteMatch, error)) (*route.StreamLease, route.RouteMatch, error) {
+	lease, matched, err := acquire()
+	deadline := time.Now().Add(grace)
+	for errors.Is(err, route.ErrNoMatch) && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return lease, matched, err
+		case <-time.After(routeHoldPoll):
+		}
+		lease, matched, err = acquire()
+	}
+	return lease, matched, err
 }

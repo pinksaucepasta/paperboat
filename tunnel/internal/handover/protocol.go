@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -201,6 +202,7 @@ func (i *Inheritance) Ready(ctx context.Context) error {
 		return fmt.Errorf("%w: the serving process did not release its sockets: %v", ErrHandover, err)
 	}
 	_ = i.conn.SetDeadline(time.Time{})
+	tookOverAt.Store(time.Now().UnixNano())
 	s := current
 	s.mu.Lock()
 	close(s.accept)
@@ -331,4 +333,16 @@ func wipeRecords(records [][]byte) {
 			record[i] = 0
 		}
 	}
+}
+
+var tookOverAt atomic.Int64
+
+// SinceTakeover is how long ago this process took over accepting from the process it replaced, and
+// false when it did not take over one.
+func SinceTakeover() (time.Duration, bool) {
+	at := tookOverAt.Load()
+	if at == 0 {
+		return 0, false
+	}
+	return time.Since(time.Unix(0, at)), true
 }

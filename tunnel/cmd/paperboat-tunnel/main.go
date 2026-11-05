@@ -636,7 +636,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			}
 		}
 		reporter.ObserveFailure(ctx, "upstream_request", cause)
-	}, RouteUnavailable: unavailableRoutes.Has, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
+	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: takeoverRouteGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
 		return runtimeExpected.Expects(host, now)
 	}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
@@ -1289,4 +1289,18 @@ func (p componentPair) Start(ctx context.Context) error {
 
 func (p componentPair) Shutdown(ctx context.Context) error {
 	return errors.Join(p.second.Shutdown(ctx), p.first.Shutdown(ctx))
+}
+
+const (
+	// takeoverRouteWindow is how long after taking over from a replaced process a request for an unknown
+	// host waits (takeoverRouteHold) for the host to re-attach its carrier here.
+	takeoverRouteWindow = 10 * time.Second
+	takeoverRouteHold   = 3 * time.Second
+)
+
+func takeoverRouteGrace() time.Duration {
+	if since, tookOver := handover.SinceTakeover(); tookOver && since < takeoverRouteWindow {
+		return takeoverRouteHold
+	}
+	return 0
 }
