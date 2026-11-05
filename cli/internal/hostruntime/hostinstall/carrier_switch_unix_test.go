@@ -67,3 +67,36 @@ func TestSwitchNetworkReleasesBeforeStartingAndStopsOnFailure(t *testing.T) {
 		}
 	}
 }
+
+// The update commits only on a carrier that still serves. The candidate that took the network and then died (stopped,
+// crashed in a loop) used to be committed anyway: the update returned with the new version installed and the machine
+// offline. confirmServing fails then, and the lifecycle rollback restarts the previous carrier.
+func TestConfirmServingFailsWhenTheNewCarrierIsGone(t *testing.T) {
+	root := shorttemp.Dir(t)
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	token := []byte(strings.Repeat("c", 32))
+	sha := strings.Repeat("b", 64)
+	ssh, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: time.Second, DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &carriercontrol.Server{Endpoint: filepath.Join(root, "new"), Token: token, SHA256: sha, SSH: ssh, Ready: make(chan error, 1)}
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	if err := <-server.Ready; err != nil {
+		t.Fatal(err)
+	}
+	u := &unixCarrierUpgrade{candidate: CarrierConfig{ControlEndpoint: server.Endpoint, Source: installsource.Source{SHA256: sha}}, capability: append([]byte(nil), token...)}
+	if err := u.confirmServing(t.Context(), time.Second); err != nil {
+		t.Fatalf("a serving carrier was refused: %v", err)
+	}
+	stop()
+	<-done
+	started := time.Now()
+	if err := u.confirmServing(t.Context(), 600*time.Millisecond); err == nil || time.Since(started) > 3*time.Second {
+		t.Fatalf("a carrier that is gone was confirmed (err %v after %v)", err, time.Since(started))
+	}
+}

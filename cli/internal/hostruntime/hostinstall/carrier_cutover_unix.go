@@ -82,7 +82,6 @@ func (u *unixCarrierUpgrade) switchNetwork(ctx context.Context) error {
 	if u == nil {
 		return nil
 	}
-	defer clear(u.capability)
 	previous, err := carriercontrol.NewClient(u.previous.ControlEndpoint, u.capability, u.previous.Source.SHA256)
 	if err != nil {
 		return err
@@ -100,6 +99,34 @@ func (u *unixCarrierUpgrade) switchNetwork(ctx context.Context) error {
 	startErr := next.StartNetwork(ctx)
 	diagnosticlog.TryInfo("carrier cutover", "stage", "network_started", "failed", startErr != nil, "duration_ms", time.Since(started).Milliseconds())
 	return startErr
+}
+
+// carrierServingWait is how long the commit waits for the new carrier to answer (a crashed one is restarted by its unit).
+const carrierServingWait = 10 * time.Second
+
+// confirmServing fails unless the new carrier answers within wait. It runs after the new daemon and the new
+// services passed their checks, right before the update commits: a carrier that took the network and then went
+// away fails the update here, while the previous version can still be restored.
+func (u *unixCarrierUpgrade) confirmServing(ctx context.Context, wait time.Duration) error {
+	if u == nil {
+		return nil
+	}
+	client, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	for {
+		if err = client.Health(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return hostInstallFailure("the new version's carrier is not serving, so the update is not committed", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // activate marks the already serving candidate generation active: readers of

@@ -240,16 +240,24 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			return err
 		}
 
+		validate := func(ctx context.Context) error {
+			if hooks.Validate != nil {
+				if err := hooks.Validate(ctx); err != nil {
+					return err
+				}
+			}
+			return carrierUpgrade.confirmServing(ctx, carrierServingWait)
+		}
 		if intent == unixPreparedUpdate {
-			return commitValidatedPreparedUpdate(ctx, request, paths, hooks.Validate)
+			return commitValidatedPreparedUpdate(ctx, request, paths, validate)
 		}
 		journal.Stage, journal.UpdatedAt = "services_started", time.Now().UTC()
 		if err := writeJournal(paths.journal, journal); err != nil {
 			return err
 		}
-		if intent == unixSuppliedInstall && hooks.Validate != nil {
+		if intent == unixSuppliedInstall {
 			// Nothing is committed yet, so failing here restores the previous installation.
-			if err := hooks.Validate(ctx); err != nil {
+			if err := validate(ctx); err != nil {
 				return UpdateNotReady(err)
 			}
 		}

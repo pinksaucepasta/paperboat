@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // unixCarrierInstallation belongs to the host installation lifecycle journal.
@@ -351,6 +352,9 @@ func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.
 
 // reconcileInstalledCarrier keeps the active carrier generation running and
 // retires and removes every other carrier and hostd generation (sweepGenerations).
+// carrierReconcileBound bounds how long one reconcile pass waits for the active carrier while it holds the update lock.
+const carrierReconcileBound = 5 * time.Second
+
 func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(context.Context, string) ([]string, error)) (resultErr error) {
 	uid, err := carrierUID(instance)
 	if err != nil {
@@ -389,7 +393,10 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 	if err != nil {
 		return err
 	}
-	if err := EnsureExistingCarrier(ctx, active); err != nil {
+	// The update lock is held for this pass: a carrier that does not come up must not hold it for long.
+	ensureCtx, cancel := context.WithTimeout(ctx, carrierReconcileBound)
+	defer cancel()
+	if err := EnsureExistingCarrier(ensureCtx, active); err != nil {
 		return err
 	}
 	return sweepGenerations(ctx, request, active.Generation, false)

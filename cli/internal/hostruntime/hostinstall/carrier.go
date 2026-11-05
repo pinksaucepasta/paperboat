@@ -248,11 +248,16 @@ func EnsureExistingCarrier(ctx context.Context, c CarrierConfig) error {
 	if err != nil {
 		return err
 	}
-	if !status.Registered && !status.Running {
+	switch carrierEnsureAction(status) {
+	case ensureInstall:
 		if err := installer.PublishDefinition(ctx); err != nil {
 			return err
 		}
 		if err := native.Apply(ctx, installer.DefinitionPath(), false); err != nil {
+			return err
+		}
+	case ensureStart:
+		if err := native.Start(ctx, installer.DefinitionPath()); err != nil {
 			return err
 		}
 	}
@@ -260,6 +265,28 @@ func EnsureExistingCarrier(ctx context.Context, c CarrierConfig) error {
 		return err
 	}
 	return waitCarrierReady(ctx, retained)
+}
+
+type ensureAction int
+
+const (
+	ensureNothing ensureAction = iota
+	ensureInstall
+	ensureStart
+)
+
+// carrierEnsureAction says what brings the active carrier back: install its definition when it has none, start
+// it when it is declared but not running (stopped, or exited after an update released the network). Waiting for
+// a carrier that nothing starts held the update lock for the whole wait on every reconcile pass and left the
+// machine offline.
+func carrierEnsureAction(status service.NativeControllerStatus) ensureAction {
+	switch {
+	case !status.Registered && !status.Running:
+		return ensureInstall
+	case !status.Running:
+		return ensureStart
+	}
+	return ensureNothing
 }
 
 // ReadCarrierConfig accepts retained verified source pins and never consults
