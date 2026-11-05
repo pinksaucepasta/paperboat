@@ -66,6 +66,59 @@ func TestProcessNotifierLifecycleAndWatchdog(t *testing.T) {
 	}
 }
 
+// systemd's restart backoff is reset once the process has stayed ready for a minute, not at READY: a process
+// that crashes right after start must keep backing off.
+func TestProcessNotifierResetsRestartBackoffOnlyAfterStayingReady(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notify.sock")
+	listener, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	t.Setenv("NOTIFY_SOCKET", path)
+	t.Setenv("WATCHDOG_USEC", "2000000")
+	t.Setenv("WATCHDOG_PID", "")
+	resetServiceManager(t)
+	notifier, err := NewProcessNotifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	notifier.now = func() time.Time { return now }
+	buffer := make([]byte, 512)
+	receive := func(call func() error) string {
+		t.Helper()
+		if err := call(); err != nil {
+			t.Fatal(err)
+		}
+		if err := listener.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		count, _, err := listener.ReadFromUnix(buffer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(buffer[:count])
+	}
+	if got := receive(notifier.Watchdog); got != "WATCHDOG=1" {
+		t.Fatalf("before ready: %q", got)
+	}
+	if got := receive(notifier.Ready); got != "READY=1\nSTATUS=ready" {
+		t.Fatalf("ready: %q", got)
+	}
+	now = now.Add(59 * time.Second)
+	if got := receive(notifier.Watchdog); got != "WATCHDOG=1" {
+		t.Fatalf("59 s after ready: %q, want no reset yet", got)
+	}
+	now = now.Add(time.Second)
+	if got := receive(notifier.Watchdog); got != "WATCHDOG=1\nRESTART_RESET=1" {
+		t.Fatalf("60 s after ready: %q, want the restart backoff reset", got)
+	}
+	if got := receive(notifier.Watchdog); got != "WATCHDOG=1" {
+		t.Fatalf("after the reset: %q, want it sent once", got)
+	}
+}
+
 func resetServiceManager(t *testing.T) {
 	t.Helper()
 	serviceManager = sync.OnceValues(captureServiceManager)
