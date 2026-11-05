@@ -31,6 +31,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=native-regional-carrier
 	"tailscale.com/tailcfg"
