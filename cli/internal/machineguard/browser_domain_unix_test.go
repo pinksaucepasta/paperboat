@@ -9,18 +9,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func TestBrowserDomainCallerRequiresInvokingUID(t *testing.T) {
-	t.Setenv("SUDO_UID", "1000")
-	t.Setenv("PAPERBOAT_INVOKING_UID", "2000")
-	if err := validateBrowserDomainCaller("1000"); err != nil {
+	// The invoking user is resolved by InvokingUID; as the unprivileged test process it is this process's uid.
+	t.Setenv("SUDO_UID", "2000")
+	self, _ := InvokingUID()
+	if err := validateBrowserDomainCaller(strconv.Itoa(self)); err != nil {
 		t.Fatal(err)
 	}
-	for _, owner := range []string{"0", "2000", "01000", "-1", "foreign"} {
+	for _, owner := range []string{"2000", "0" + strconv.Itoa(self), "-1", "foreign"} {
 		if validateBrowserDomainCaller(owner) == nil {
 			t.Fatalf("accepted owner %s", owner)
 		}

@@ -16,14 +16,11 @@ func validateBrowserDomainCaller(owner string) error {
 	if !validBrowserDomainOwner(owner) {
 		return errors.New("invalid browser domain owner UID")
 	}
-	caller := os.Getenv("SUDO_UID")
-	if caller == "" {
-		caller = os.Getenv("PAPERBOAT_INVOKING_UID")
+	uid, ok := InvokingUID()
+	if !ok {
+		uid = os.Getuid()
 	}
-	if caller == "" {
-		caller = strconv.Itoa(os.Getuid())
-	}
-	if caller != owner {
+	if strconv.Itoa(uid) != owner {
 		return errors.New("browser domain owner does not match the invoking OS user")
 	}
 	return nil

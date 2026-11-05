@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
 func workerEnvironment(request Request) map[string]string {
@@ -40,15 +42,10 @@ func workerEnvironment(request Request) map[string]string {
 }
 
 func invokingUID() int {
-	value := os.Getenv("SUDO_UID")
-	if value == "" {
-		value = os.Getenv("PAPERBOAT_INVOKING_UID")
+	if uid, ok := machineguard.InvokingUID(); ok {
+		return uid
 	}
-	uid, err := strconv.Atoi(value)
-	if err != nil {
-		return -1
-	}
-	return uid
+	return -1
 }
 
 func verifyArtifact(path string, uid int, platform string) (resultErr error) {

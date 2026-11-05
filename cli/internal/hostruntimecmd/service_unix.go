@@ -124,14 +124,7 @@ func systemWorkerExecutable() string {
 }
 
 func invokingServiceUID() int {
-	value := os.Getenv("PAPERBOAT_INVOKING_UID")
-	if value == "" {
-		value = os.Getenv("SUDO_UID")
-	}
-	uid, err := strconv.Atoi(value)
-	if err != nil || uid < 0 {
-		return 0
-	}
+	uid, _ := machineguard.InvokingUID()
 	return uid
 }
 
