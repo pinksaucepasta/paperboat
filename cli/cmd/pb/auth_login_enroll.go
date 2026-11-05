@@ -137,7 +137,7 @@ func offerLoginChoices(c *command.Context, store config.ProfileStore, issuer str
 	who := firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID)
 	if loginDaemonAwaitingEnrollment(c.Context) {
 		// The sign-in is valid but this computer's service lost its enrollment; signing in again cannot restore it.
-		return false, errors.New("Signed in as " + who + ", but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again.")
+		return false, browserLoginFailure{message: "Signed in as " + who + ", but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again."}
 	}
 	summary := "Already signed in as " + who
 	if where := machineWorkspaceSummary(c.Context, store, issuer, machineID); where != "" {

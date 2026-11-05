@@ -27,7 +27,11 @@ func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledPointsAtFresh(t *testin
 	}
 	loginDaemonAwaitingEnrollment = func(context.Context) bool { return true }
 	again, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
-	if err == nil || strings.Contains(again+err.Error(), "Already signed in") || !strings.Contains(err.Error(), "pb login --fresh") || !strings.Contains(err.Error(), "not enrolled") {
+	if err == nil || strings.Contains(again, "Already signed in") {
 		t.Fatalf("login with an unenrolled daemon: err=%v output=%s", err, again)
+	}
+	// What the user sees (the CLI renders errors), not only the raw error.
+	if shown := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(shown, "pb login --fresh") || !strings.Contains(shown, "not enrolled") {
+		t.Fatalf("shown message: %q", shown)
 	}
 }
