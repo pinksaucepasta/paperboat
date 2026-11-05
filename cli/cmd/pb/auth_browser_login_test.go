@@ -771,13 +771,13 @@ func TestBrowserLoginFreshRemovesThenAdds(t *testing.T) {
 	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "personal", "admission": "accepted"}}
 	srv := loginDeviceServer(t, f)
 	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	oldRemove, oldCleanup, oldSource, oldInstall := removeOwnMachineRecordFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
+	oldRemember, oldCleanup, oldSource, oldInstall := rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
 	t.Cleanup(func() {
 		loginLocalMachineID, pairLoginDevice = oldMachine, oldPair
-		removeOwnMachineRecordFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldRemove, oldCleanup, oldSource, oldInstall
+		rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldRemember, oldCleanup, oldSource, oldInstall
 	})
 	var steps []string
-	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { steps = append(steps, "remove"); return "machine_old", nil }
+	rememberReplacedMachineFunc = func() (string, error) { steps = append(steps, "remember"); return "machine_old", nil }
 	freshEnrollmentCleanup = func(*cobra.Command) error { steps = append(steps, "cleanup"); return nil }
 	runningInstallSource = func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
 	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
@@ -799,7 +799,7 @@ func TestBrowserLoginFreshRemovesThenAdds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login --fresh: %v\n%s", err, out)
 	}
-	if strings.Join(steps, ",") != "remove,cleanup,install,pair" || f.authorize["enroll"] != true {
+	if strings.Join(steps, ",") != "remember,cleanup,install,pair" || f.authorize["enroll"] != true {
 		t.Fatalf("steps=%v authorize=%v", steps, f.authorize)
 	}
 	if !strings.Contains(out, "Added") {

@@ -164,3 +164,86 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		t.Fatalf("a live machine was removed: %q %v", status, deleted)
 	}
 }
+
+// F1-09/F1-10: pb reset no longer removes the old record; pb pair replaces it only after the new machine
+// works. The replacement takes the old local address and exact name in one transaction, even while the old
+// record still looks live, a retry is a no-op, and another account's record is never touched.
+func TestReplaceMachineCutsOverToTheVerifiedNewRecordAndKeepsTheAddress(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userA, userB := "usr_cutover_a_"+suffix, "usr_cutover_b_"+suffix
+	for _, id := range []string{userA, userB} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, id, "workos_"+id, id+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addMachine := func(id, userID, alias string) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, id, userID, "env_"+id, alias); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slotOf := func(id string) (slot int) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT leased_slot FROM paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, id).Scan(&slot); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	state := func(id string) (alias string, deleted bool) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT alias,deleted_at IS NOT NULL FROM paperboat.user_machines WHERE id=$1`, id).Scan(&alias, &deleted); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
+
+	// The account already has machines below the old one, so a fresh allocation would move the address.
+	filler, oldID, newID := "mch_cfill_"+suffix, "mch_cold_"+suffix, "mch_cnew_"+suffix
+	addMachine(filler, userA, "other")
+	addMachine(oldID, userA, "studio")
+	slotOf(filler)
+	oldSlot := slotOf(oldID)
+	if _, err := store.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, filler); err != nil {
+		t.Fatal(err)
+	}
+	addMachine(newID, userA, "studio-2")
+	if own := slotOf(newID); own == oldSlot {
+		t.Fatalf("fixture: the new record already has the old slot %d", own)
+	}
+	if err := service.ReplaceMachine(ctx, userA, oldID, newID); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if _, deleted := state(oldID); !deleted {
+		t.Fatal("the old record was not removed after the cutover")
+	}
+	if alias, deleted := state(newID); alias != "studio" || deleted {
+		t.Fatalf("new record: alias=%q deleted=%v, want studio kept", alias, deleted)
+	}
+	if got := slotOf(newID); got != oldSlot {
+		t.Fatalf("the local address slot changed across reset: %d -> %d", oldSlot, got)
+	}
+	if err := service.ReplaceMachine(ctx, userA, oldID, newID); err != nil {
+		t.Fatalf("a retry after the cutover must be a no-op: %v", err)
+	}
+
+	// Another account's record is never touched.
+	foreign := "mch_cforeign_" + suffix
+	addMachine(foreign, userB, "desk")
+	if err := service.ReplaceMachine(ctx, userA, foreign, newID); err != nil {
+		t.Fatalf("another account's record: %v", err)
+	}
+	if _, deleted := state(foreign); deleted {
+		t.Fatal("another account's record was removed")
+	}
+	third := "mch_cthird_" + suffix
+	addMachine(third, userA, "rack")
+	if err := service.ReplaceMachine(ctx, userA, third, "mch_cmissing_"+suffix); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing replacement: %v, want ErrNotFound", err)
+	}
+	if _, deleted := state(third); deleted {
+		t.Fatal("the old record was removed although the replacement does not exist")
+	}
+}

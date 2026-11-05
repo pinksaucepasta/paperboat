@@ -25863,6 +25863,65 @@
         ]
       }
     },
+    "/v1/machines/{machine_id}/replace": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Replace the old record of this computer",
+        "description": "Called by pb pair once the new machine (the path one) is verified: removes the retired machine record, and the new machine takes its local address and exact name in one transaction. An already removed record is a no-op.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "retired_machine_id"
+                ],
+                "properties": {
+                  "retired_machine_id": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Old record replaced (or already gone)."
+          },
+          "404": {
+            "description": "The new machine was not found."
+          },
+          "409": {
+            "description": "A personal machine cannot replace a team machine."
+          }
+        },
+        "operationId": "post_v1_user_machines_machine_id_replace"
+      }
+    },
     "/v1/machines/{machine_id}/disconnect": {
       "parameters": [
         {

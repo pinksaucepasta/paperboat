@@ -169,8 +169,6 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if err != nil {
 			return err
 		}
-		// The pairing carried the note (the server stores it); it is not needed again.
-		_ = bootstrap.ClearReplacement()
 	}
 	// Each enrollment initializes its CLI profile and durable runtime.
 	if err := completeBootstrapCLIResume(ctx, *stateRoot, *serverURL, material, &resume, installBootstrapCLI, bootstrap.SaveResume); err != nil {

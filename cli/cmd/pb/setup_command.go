@@ -131,7 +131,7 @@ func pairCommand() *cobra.Command {
 			if jsonOutput {
 				operationOut, operationErr = io.Discard, &failureOutput
 			}
-			code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
+			code := pairBootstrap(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
 			if code != 0 {
 				if jsonOutput {
 					// The runtime writes one curated "pb: ..." failure line; JSON
@@ -140,12 +140,15 @@ func pairCommand() *cobra.Command {
 				}
 				return exitCodeError{code: code}
 			}
+			paired, err := identityStore.Registration()
+			if err != nil {
+				return fmt.Errorf("read paired machine registration: %w", err)
+			}
+			if err := finishMachineReplacement(actionContext(command, nil), paired.MachineID); err != nil {
+				return err
+			}
 			warnings := installedTrustWarnings(command.Context())
 			if jsonOutput {
-				paired, err := identityStore.Registration()
-				if err != nil {
-					return fmt.Errorf("read paired machine registration: %w", err)
-				}
 				result := map[string]any{"machine_id": paired.MachineID, "environment_id": paired.EnvironmentID, "server_url": paired.ServerURL, "installation_generation": paired.InstallationGeneration}
 				if len(warnings) > 0 {
 					result["browser_https"] = "trust_pending"
@@ -171,6 +174,9 @@ func pairCommand() *cobra.Command {
 	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
+
+// pairBootstrap runs the pairing; it returns 0 only once the new machine is verified (daemon bound).
+var pairBootstrap = hostruntimecmd.Execute
 
 func setupCommand() *cobra.Command {
 	command := &cobra.Command{

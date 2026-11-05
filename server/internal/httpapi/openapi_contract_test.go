@@ -852,6 +852,7 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/machines/{machine_id}/connection-descriptor":                       {"post"},
 		"/v1/machines/{machine_id}/connection-readiness":                        {"get"},
 		"/v1/machines/{machine_id}/disconnect":                                  {"post"},
+		"/v1/machines/{machine_id}/replace":                                     {"post"},
 		"/v1/machines/{machine_id}/terminal-sessions":                           {"get", "post"},
 		"/v1/machines/{machine_id}/terminal-sessions/{session_id}":              {"patch", "delete"},
 		"/v1/machines/{machine_id}/terminal-sessions/{session_id}/close":        {"post"},

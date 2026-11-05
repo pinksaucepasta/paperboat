@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -82,26 +81,21 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("verify reset CLI before cleanup: %w", err)
 			}
-			retired, err := removeOwnMachineRecordFunc(command)
+			// Make-before-break: the old machine record stays until pb pair has a working new machine,
+			// which then replaces it (ReplaceUserMachine). A reset that fails leaves the record and sign-in.
+			replaced, err := rememberReplacedMachineFunc()
 			if err != nil {
-				return err
+				return machineReplacementError{step: replaceStepRemember, cause: err}
 			}
 			if err := freshEnrollmentCleanup(command); err != nil {
 				return err
 			}
 			if err := source.Verify(executable); err != nil {
-				return fmt.Errorf("reset CLI did not survive cleanup: %w", err)
-			}
-			if retired != "" {
-				// The next pairing of this computer asks the server to hand the removed record's
-				// name and local address to the new one. A request, never authority.
-				if err := bootstrapSaveReplacement(retired, time.Now()); err != nil {
-					return fmt.Errorf("remember the removed machine record for the next pairing: %w", err)
-				}
+				return machineReplacementError{step: replaceStepVerifyCLI, cause: err}
 			}
 			result := map[string]any{"reset": true, "resume": false, "executable": executable, "hostname": hostname, "inbox_preserved": true}
-			if retired != "" {
-				result["retired_machine_id"] = retired
+			if replaced != "" {
+				result["replaces_machine_id"] = replaced
 			}
 			if asJSON {
 				return writeCLIJSON(command.OutOrStdout(), result)
@@ -119,39 +113,68 @@ func freshEnrollmentResetCommand() *cobra.Command {
 }
 
 var freshEnrollmentCleanup = runFreshEnrollmentCleanup
-var removeOwnMachineRecordFunc = removeOwnMachineRecord
-var bootstrapSaveReplacement = bootstrap.SaveReplacement
+var rememberReplacedMachineFunc = rememberReplacedMachine
 
-// removeOwnMachineRecord removes this computer's current machine record
-// (the normal machine removal: its ENV access, peer identity, SSH host keys and
-// sessions are released; its Activity history stays) before the local credentials
-// are deleted, so the fresh enrollment takes the exact name instead of a numbered
-// one beside a dead record. It returns the removed machine ID, or "" when there is
-// nothing to remove (never enrolled, signed out, or already removed). The server
-// revokes the machine's own CLI session with the record, so this is the last
-// server call reset makes.
-func removeOwnMachineRecord(command *cobra.Command) (string, error) {
+// rememberReplacedMachine notes, before anything is removed, which machine record the next pairing of this
+// computer replaces; the note survives the wipe (freshEnrollmentPreserved). It returns that ID, or "" when
+// this computer has no record (never added, or a note from an earlier failed reset is kept as it is).
+func rememberReplacedMachine() (string, error) {
 	machineID, err := configuredMachineID()
 	if err != nil || machineID == "" {
 		return "", nil
 	}
-	ctx := actionContext(command, nil)
-	client, err := backendClient(ctx)
-	switch {
-	case err == nil:
-	case errors.Is(err, config.ErrNoCredentials), errors.Is(err, commandRejection{reason: commandRejectMissingServer}):
-		return "", nil
-	default:
-		return "", commandRejection{reason: commandRejectResetRetire}
+	return machineID, bootstrap.SaveReplacement(machineID, time.Now())
+}
+
+var replaceUserMachine = func(c *command.Context, replacementID, retiredID string) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
 	}
-	err = client.DeleteUserMachine(ctx.Context, machineID)
-	switch {
-	case err == nil:
-		return machineID, nil
-	case api.IsNotFound(err), errors.Is(err, api.ErrUnauthenticated):
-		return "", nil
+	return client.ReplaceUserMachine(c.Context, replacementID, retiredID)
+}
+
+// finishMachineReplacement is the cutover of a reset (make-before-break): pairing calls it only after the
+// new machine is verified (signed configuration fetched, daemon bound), and only then is the old record
+// removed. The server moves the old local address and name to the new machine in the same transaction.
+func finishMachineReplacement(c *command.Context, machineID string) error {
+	retired := bootstrap.LoadReplacement(time.Now())
+	if retired == "" || retired == machineID {
+		return nil
 	}
-	return "", commandRejection{reason: commandRejectResetRetire}
+	if err := replaceUserMachine(c, machineID, retired); err != nil {
+		return machineReplacementError{step: replaceStepCutover, retiredID: retired, cause: err}
+	}
+	// A note left behind only makes the next pairing ask again, which is a no-op.
+	_ = bootstrap.ClearReplacement()
+	return nil
+}
+
+type replaceStep int
+
+const (
+	replaceStepRemember replaceStep = iota + 1
+	replaceStepVerifyCLI
+	replaceStepCutover
+)
+
+// machineReplacementError names the reset or pairing step that failed and what is left, so a failed
+// reset never ends in "could not finish the command" (F1-09).
+type machineReplacementError struct {
+	step      replaceStep
+	retiredID string
+	cause     error
+}
+
+func (e machineReplacementError) Unwrap() error { return e.cause }
+func (e machineReplacementError) Error() string {
+	switch e.step {
+	case replaceStepRemember:
+		return "pb reset could not save which machine record the new pairing replaces, so nothing was removed. Check that your user configuration directory is writable, then run the installer again."
+	case replaceStepVerifyCLI:
+		return "pb reset removed the local setup, but the pb executable it runs from changed during cleanup. The old machine record and its address are kept; run the installer again to pair."
+	}
+	return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced. Check your connection, then remove the old machine in the dashboard."
 }
 
 var resolveFreshEnrollmentExecutable = existingFreshEnrollmentExecutable
@@ -168,6 +191,7 @@ func runFreshEnrollmentCleanup(command *cobra.Command) error {
 		// public command link while deleting credentials and user runtime state.
 		preservedInboxes = append(preservedInboxes, filepath.Join(home, ".local", "bin", "pb"))
 	}
+	preservedInboxes = append(preservedInboxes, freshEnrollmentPreserved(command)...)
 	return performFreshEnrollmentCleanup(inboxErr,
 		func() error {
 			if executableErr != nil {
@@ -190,6 +214,19 @@ func runFreshEnrollmentCleanup(command *cobra.Command) error {
 		}, func() error { return freshEnrollmentRuntimePurge(command) },
 		func() error { return discardUnfinishedEnrollment(command) },
 		func() error { return purgeUserPaperboatState(command, preservedInboxes) })
+}
+
+// freshEnrollmentPreserved is what reset keeps until the new pairing works: the note naming the record it
+// replaces, and the local diagnostics, so a failure after the wipe can still be investigated (F1-09).
+func freshEnrollmentPreserved(command *cobra.Command) []string {
+	var paths []string
+	if path, err := bootstrap.ReplacementPath(); err == nil {
+		paths = append(paths, path)
+	}
+	if path, err := processDiagnosticsDirectory(command); err == nil {
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 // discardUnfinishedEnrollment removes the pairing journal that makes pb pair

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/spf13/cobra"
@@ -25,24 +28,47 @@ func freshResetTokenFile(t *testing.T) string {
 	return path
 }
 
-// noRetire keeps a reset test from reaching the real machine record or server.
-func noRetire(t *testing.T) {
+// noRemember keeps a reset test from writing the replacement note of the real user.
+func noRemember(t *testing.T) {
 	t.Helper()
-	original := removeOwnMachineRecordFunc
-	t.Cleanup(func() { removeOwnMachineRecordFunc = original })
-	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return "", nil }
+	original := rememberReplacedMachineFunc
+	t.Cleanup(func() { rememberReplacedMachineFunc = original })
+	rememberReplacedMachineFunc = func() (string, error) { return "", nil }
 }
 
-func TestFreshEnrollmentResetRemovesTheOldRecordBeforeCleanup(t *testing.T) {
+// noServer fails a test that reaches the server to replace a machine record.
+func noServer(t *testing.T) {
+	t.Helper()
+	original := replaceUserMachine
+	t.Cleanup(func() { replaceUserMachine = original })
+	replaceUserMachine = func(*command.Context, string, string) error {
+		t.Fatal("the old machine record was replaced before a new machine was verified")
+		return nil
+	}
+}
+
+// isolatedReplacementNote points the replacement note (and the user's state) at a temporary home.
+func isolatedReplacementNote(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	return home
+}
+
+// F1-09: reset is make-before-break. It never removes the old machine record (the new pairing replaces it
+// once it works); it notes the record before anything local is removed.
+func TestFreshEnrollmentResetKeepsTheOldRecordAndNotesItBeforeCleanup(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalCleanup := freshEnrollmentCleanup
-	originalRetire := removeOwnMachineRecordFunc
-	t.Cleanup(func() { freshEnrollmentCleanup, removeOwnMachineRecordFunc = originalCleanup, originalRetire })
+	noServer(t)
+	originalCleanup, originalRemember := freshEnrollmentCleanup, rememberReplacedMachineFunc
+	t.Cleanup(func() { freshEnrollmentCleanup, rememberReplacedMachineFunc = originalCleanup, originalRemember })
 	var order []string
-	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { order = append(order, "retire"); return "machine_old", nil }
+	rememberReplacedMachineFunc = func() (string, error) { order = append(order, "remember"); return "machine_old", nil }
 	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
 	var output bytes.Buffer
 	command := freshEnrollmentResetCommand()
@@ -51,68 +77,155 @@ func TestFreshEnrollmentResetRemovesTheOldRecordBeforeCleanup(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(order, ",") != "retire,cleanup" || !strings.Contains(output.String(), `"retired_machine_id":"machine_old"`) {
+	if strings.Join(order, ",") != "remember,cleanup" || !strings.Contains(output.String(), `"replaces_machine_id":"machine_old"`) {
 		t.Fatalf("order=%v output=%s", order, output.String())
 	}
 }
 
-// The removed record's ID is remembered across the wipe so the next pairing of this computer can
-// ask the server to hand over its name and address.
-func TestFreshEnrollmentResetRemembersTheRemovedRecordForTheNextPairing(t *testing.T) {
+// F1-09 (soft-a-11051534): a reset that fails at any step names that step, never "could not finish the
+// command", and leaves the old record (no server call) and the note for the next attempt.
+func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalCleanup, originalRemove, originalSave := freshEnrollmentCleanup, removeOwnMachineRecordFunc, bootstrapSaveReplacement
-	t.Cleanup(func() {
-		freshEnrollmentCleanup, removeOwnMachineRecordFunc, bootstrapSaveReplacement = originalCleanup, originalRemove, originalSave
-	})
-	var order []string
-	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
-	for _, removed := range []string{"machine_old", ""} {
-		order = nil
-		removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return removed, nil }
-		bootstrapSaveReplacement = func(id string, _ time.Time) error { order = append(order, "save:"+id); return nil }
+	noServer(t)
+	originalCleanup, originalRemember := freshEnrollmentCleanup, rememberReplacedMachineFunc
+	t.Cleanup(func() { freshEnrollmentCleanup, rememberReplacedMachineFunc = originalCleanup, originalRemember })
+	for _, test := range []struct {
+		name            string
+		rememberErr     error
+		cleanupErr      error
+		want            string
+		cleanupExpected bool
+	}{
+		{name: "note", rememberErr: os.ErrPermission, want: "nothing was removed"},
+		{name: "cleanup", cleanupErr: freshResetCleanupError{err: uninstallCleanupError{err: uninstallStepFailure{name: "remove system Paperboat runtime", err: errors.New("exit status 1")}}}, want: "remove system Paperboat runtime", cleanupExpected: true},
+	} {
+		cleaned := false
+		rememberReplacedMachineFunc = func() (string, error) { return "machine_old", test.rememberErr }
+		freshEnrollmentCleanup = func(*cobra.Command) error { cleaned = true; return test.cleanupErr }
 		command := freshEnrollmentResetCommand()
-		command.SetOut(&bytes.Buffer{})
 		command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
-		if err := command.Execute(); err != nil {
-			t.Fatal(err)
+		err := command.Execute()
+		value := classifyCLIJSONError(err)
+		if err == nil || !strings.Contains(value.Message, test.want) || strings.Contains(value.Message, "could not finish the command") {
+			t.Fatalf("%s: message=%q err=%v", test.name, value.Message, err)
 		}
-		want := "cleanup"
-		if removed != "" {
-			want = "cleanup,save:machine_old"
+		if cleaned != test.cleanupExpected {
+			t.Fatalf("%s: local cleanup ran=%v, want %v", test.name, cleaned, test.cleanupExpected)
 		}
-		if got := strings.Join(order, ","); got != want {
-			t.Fatalf("removed=%q: steps %q, want %q (the note is written after the wipe)", removed, got, want)
-		}
+	}
+	verify := classifyCLIJSONError(machineReplacementError{step: replaceStepVerifyCLI, cause: errors.New("digest changed")})
+	if !strings.Contains(verify.Message, "old machine record and its address are kept") {
+		t.Fatalf("verify step message=%q", verify.Message)
 	}
 }
 
-func TestFreshEnrollmentResetChangesNothingWhenTheOldRecordCannotBeRemoved(t *testing.T) {
-	hostname, err := os.Hostname()
-	if err != nil {
+// F1-09: the note naming the old record and the local diagnostics survive the reset's wipe, so a pairing
+// that fails afterwards can still be investigated and the next one still replaces the old record.
+func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing.T) {
+	home := isolatedReplacementNote(t)
+	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	originalCleanup := freshEnrollmentCleanup
-	originalRetire := removeOwnMachineRecordFunc
-	t.Cleanup(func() { freshEnrollmentCleanup, removeOwnMachineRecordFunc = originalCleanup, originalRetire })
-	removeOwnMachineRecordFunc = func(*cobra.Command) (string, error) { return "", commandRejection{reason: commandRejectResetRetire} }
-	freshEnrollmentCleanup = func(*cobra.Command) error {
-		t.Fatal("local state was removed although the old record stayed online")
-		return nil
-	}
 	command := freshEnrollmentResetCommand()
-	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
-	err = command.Execute()
-	failure := classifyCommandFailure(err)
-	if err == nil || failure.kind != commandRejected || !strings.Contains(commandFailureMessage(err, failure), "nothing was reset") {
-		t.Fatalf("kind=%v message=%q err=%v", failure.kind, commandFailureMessage(err, failure), err)
+	preserved := freshEnrollmentPreserved(command)
+	diagnostics := filepath.Join(home, ".local", "state", "paperboat", "diagnostics")
+	note, _ := bootstrap.ReplacementPath()
+	if len(preserved) != 2 || preserved[0] != note || preserved[1] != diagnostics {
+		t.Fatalf("preserved=%v, want [%s %s]", preserved, note, diagnostics)
+	}
+	if err := os.MkdirAll(diagnostics, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(diagnostics, "segment"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentials := filepath.Join(filepath.Dir(note), "credentials")
+	if err := os.WriteFile(credentials, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{filepath.Dir(note), filepath.Dir(diagnostics)} {
+		if err := removePathPreserving(root, preserved); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Lstat(credentials); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("other state survived the wipe: %v", err)
+	}
+	if bootstrap.LoadReplacement(time.Now()) != "machine_old" {
+		t.Fatal("the replacement note was removed by the wipe")
+	}
+	if _, err := os.Lstat(filepath.Join(diagnostics, "segment")); err != nil {
+		t.Fatalf("local diagnostics were removed by the wipe: %v", err)
+	}
+}
+
+// F1-09/F1-10: the old record is replaced only after the new machine is verified, and the note is kept
+// when the cutover fails, so nothing is stranded; with no note nothing is replaced.
+func TestFinishMachineReplacementCutsOverOnlyAfterTheNewMachineWorks(t *testing.T) {
+	isolatedReplacementNote(t)
+	original := replaceUserMachine
+	t.Cleanup(func() { replaceUserMachine = original })
+	var calls []string
+	var replaceErr error
+	replaceUserMachine = func(_ *command.Context, replacement, retired string) error {
+		calls = append(calls, replacement+"<"+retired)
+		return replaceErr
+	}
+	ctx := &command.Context{Context: context.Background()}
+	if err := finishMachineReplacement(ctx, "machine_new"); err != nil || len(calls) != 0 {
+		t.Fatalf("no note: err=%v calls=%v", err, calls)
+	}
+	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := finishMachineReplacement(ctx, "machine_old"); err != nil || len(calls) != 0 {
+		t.Fatalf("same record: err=%v calls=%v", err, calls)
+	}
+	replaceErr = errors.New("connection reset")
+	err := finishMachineReplacement(ctx, "machine_new")
+	value := classifyCLIJSONError(err)
+	if err == nil || !strings.Contains(value.Message, "paired and working") || !strings.Contains(value.Message, "machine_old") {
+		t.Fatalf("failed cutover: message=%q err=%v", value.Message, err)
+	}
+	if bootstrap.LoadReplacement(time.Now()) != "machine_old" {
+		t.Fatal("the note was dropped although the cutover failed")
+	}
+	replaceErr = nil
+	if err := finishMachineReplacement(ctx, "machine_new"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(calls, ",") != "machine_new<machine_old,machine_new<machine_old" || bootstrap.LoadReplacement(time.Now()) != "" {
+		t.Fatalf("calls=%v note=%q", calls, bootstrap.LoadReplacement(time.Now()))
+	}
+}
+
+// F1-09: a pairing that fails (anywhere up to the daemon bind) never replaces the old record.
+func TestPairThatFailsNeverReplacesTheOldRecord(t *testing.T) {
+	isolatedReplacementNote(t)
+	noServer(t)
+	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	original := pairBootstrap
+	t.Cleanup(func() { pairBootstrap = original })
+	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 1 }
+	command := pairCommand()
+	command.SetOut(&bytes.Buffer{})
+	command.SetErr(&bytes.Buffer{})
+	command.SetArgs([]string{"--server", "https://api.example.test", "--enrollment-token-file", freshResetTokenFile(t), "--state-root", t.TempDir()})
+	if err := command.Execute(); err == nil {
+		t.Fatal("a failed pairing reported success")
+	}
+	if bootstrap.LoadReplacement(time.Now()) != "machine_old" {
+		t.Fatal("a failed pairing dropped the note")
 	}
 }
 
 func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
-	noRetire(t)
+	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +248,7 @@ func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
 }
 
 func TestFreshEnrollmentResetReportsOnlyAfterCleanup(t *testing.T) {
-	noRetire(t)
+	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +360,7 @@ func TestFreshEnrollmentResetDiscardsTheUnfinishedEnrollmentWhenTheRuntimePurgeF
 }
 
 func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
-	noRetire(t)
+	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)

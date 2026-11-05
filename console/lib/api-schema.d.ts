@@ -2631,6 +2631,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the old record of this computer
+         * @description Called by pb pair once the new machine (the path one) is verified: removes the retired machine record, and the new machine takes its local address and exact name in one transaction. An already removed record is a no-op.
+         */
+        post: operations["post_v1_user_machines_machine_id_replace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{machine_id}/disconnect": {
         parameters: {
             query?: never;
@@ -16899,6 +16921,46 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    post_v1_user_machines_machine_id_replace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    retired_machine_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Old record replaced (or already gone). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The new machine was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A personal machine cannot replace a team machine. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     post_v1_user_machines_machine_id_disconnect: {

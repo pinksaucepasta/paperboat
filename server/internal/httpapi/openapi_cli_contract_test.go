@@ -189,6 +189,8 @@ func TestOpenAPIFreezesCLIContractSchemas(t *testing.T) {
 	assertRequiredBearerScope(t, objectValue(t, configAssignment["delete"], "DELETE config assignment"), "machines:connect", "DELETE config assignment")
 	disconnectMachine := objectValue(t, doc.Paths["/v1/machines/{machine_id}/disconnect"]["post"], "POST machine disconnect")
 	assertRequiredBearerScope(t, disconnectMachine, "machines:connect", "POST machine disconnect")
+	replaceMachine := objectValue(t, doc.Paths["/v1/machines/{machine_id}/replace"]["post"], "POST machine replace")
+	assertRequiredBearerScope(t, replaceMachine, "machines:connect", "POST machine replace")
 	deleteMachine := objectValue(t, doc.Paths["/v1/machines/{machine_id}"]["delete"], "DELETE machine")
 	assertRequiredBearerScope(t, deleteMachine, "machines:connect", "DELETE machine")
 }
