@@ -67,7 +67,7 @@ func TestCarrierDrainWaitsForOpenStreams(t *testing.T) {
 // it, only while it is the active generation, and never once retired.
 func TestDelegatedCarrierTakesThePrimaryRoleOnlyWhenFreeAndActive(t *testing.T) {
 	lock := t.TempDir() + "/carrier-0.lock"
-	holder, err := lockTerminalCarrier(lock)
+	holder, err := lockCarrier(lock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestDelegatedCarrierTakesThePrimaryRoleOnlyWhenFreeAndActive(t *testing.T) 
 	if peer.config.carrierGeneration != "" {
 		t.Fatal("a later restart would build a delegated generation again")
 	}
-	if _, err := lockTerminalCarrier(lock); err == nil {
+	if _, err := lockCarrier(lock); err == nil {
 		t.Fatal("the primary role is not held after the takeover")
 	}
 	if err := c.unlockPrimary(); err != nil {

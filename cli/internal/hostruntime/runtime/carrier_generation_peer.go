@@ -73,7 +73,8 @@ func (s *productionNativePeerService) startDelegatedGeneration(run, daemon conte
 }
 
 // generationNetwork is a delegated generation's control: read-only until the
-// generation takes the primary role.
+// generation takes the primary role. A delegated generation reads the machine's
+// signed authority but never registers a network identity or publishes endpoints.
 type generationNetwork struct {
 	tailnet.NetworkAPI
 	primary atomic.Bool
@@ -83,14 +84,17 @@ func (n *generationNetwork) RegisterPeerNetwork(ctx context.Context, r api.PeerN
 	if n.primary.Load() {
 		return n.NetworkAPI.RegisterPeerNetwork(ctx, r)
 	}
-	return terminalCarrierNetwork{n.NetworkAPI}.RegisterPeerNetwork(ctx, r)
+	return api.PeerNetworkRegistrationResult{}, ErrProductionInvalid
 }
 
 func (n *generationNetwork) PeerNetworkConfiguration(ctx context.Context, r api.PeerNetworkConfigurationRequest) (api.PeerNetworkConfigurationResult, error) {
 	if n.primary.Load() {
 		return n.NetworkAPI.PeerNetworkConfiguration(ctx, r)
 	}
-	return terminalCarrierNetwork{n.NetworkAPI}.PeerNetworkConfiguration(ctx, r)
+	r.Endpoints, r.MembershipGrants = nil, false
+	result, err := n.NetworkAPI.PeerNetworkConfiguration(ctx, r)
+	result.EndpointReports, result.MembershipGrants = false, false
+	return result, err
 }
 
 // becomePrimary makes this delegated carrier the machine's primary once it holds

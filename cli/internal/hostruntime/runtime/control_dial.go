@@ -14,9 +14,8 @@ import (
 
 // controlDialer resolves the control host with a bounded retry and remembers
 // the last good addresses on disk, so a staged generation still starts when a
-// single DNS lookup times out (pbvm4 run14: the staged session owner's first
-// authority refresh failed on one DNS timeout and the terminal move was
-// skipped). TLS still verifies the hostname; only the address lookup is reused.
+// single DNS lookup times out (pbvm4 run14: a new generation's first authority
+// refresh failed on one DNS timeout). TLS still verifies the hostname; only the address lookup is reused.
 type controlDialer struct {
 	cache   string // owner-only file in the runtime state root; "" disables reuse
 	lookup  func(context.Context, string) ([]net.IPAddr, error)
