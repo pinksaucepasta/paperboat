@@ -82,10 +82,22 @@ func RemoveCurrentUserService(ctx context.Context, executable string) error {
 	return daemonrpc.CleanupUnusedAddresses(ctx)
 }
 
+// removeService also removes the config sync service `pb config` installs beside the daemon: it
+// belongs to the same enrollment, and left behind it crash-looped on the missing registration after
+// pb uninstall or pb reset (macOS, 2026-11-04).
 func removeService(ctx context.Context, config serviceConfig) error {
 	definition, err := serviceDefinition(config)
 	if err != nil {
 		return err
+	}
+	if err := hostservice.Remove(ctx, definition); err != nil {
+		return err
+	}
+	definition.Kind = hostservice.ConfigKind
+	if config.Platform == "darwin" {
+		definition.Controller = hostservice.LaunchdController{Runner: config.Runner, UID: config.UID, Label: hostservice.ConfigLabel, UserDomain: true}
+	} else {
+		definition.Controller = hostservice.SystemdController{Runner: config.Runner, Unit: "paperboat-runtime-config.service", User: true}
 	}
 	return hostservice.Remove(ctx, definition)
 }

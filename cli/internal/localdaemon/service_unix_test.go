@@ -175,3 +175,35 @@ func TestRemoveServiceWorksWithMissingDaemonArtifact(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveServiceRemovesTheConfigSyncService(t *testing.T) {
+	for platform, want := range map[string]string{
+		"linux":  "disable --now paperboat-runtime-config.service",
+		"darwin": "bootout gui/501/" + hostservice.ConfigLabel,
+	} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			definition := filepath.Join(home, ".config", "systemd", "user", "paperboat-runtime-config.service")
+			if platform == "darwin" {
+				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.ConfigLabel+".plist")
+			}
+			if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(definition, []byte("config sync declaration"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			runner := &serviceRunner{}
+			cfg := serviceConfig{Platform: platform, Home: home, Executable: filepath.Join(home, "pb"), Username: "test", Group: "staff", UID: 501, Runner: runner}
+			if err := removeService(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(definition); !os.IsNotExist(err) {
+				t.Fatalf("config sync declaration remains: %v", err)
+			}
+			if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, want) {
+				t.Fatalf("config sync service not stopped: %s", calls)
+			}
+		})
+	}
+}
