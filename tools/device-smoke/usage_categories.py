@@ -13,6 +13,9 @@ Usage: usage_categories.py TARGET
 import argparse
 import glob
 import json
+import shlex
+
+import cli_credential
 import os
 from pathlib import Path
 import pty
@@ -42,14 +45,13 @@ def pb(*arguments, timeout=150):
 class Api:
     def __init__(self):
         self.token = self.read_token()
-        self.server = json.loads((HOME / '.config/paperboat/config.json').read_text())['server_url']
+        self.server = cli_credential.server_url()
 
     @staticmethod
     def read_token():
         # Any pb command that reaches the server renews the saved access credential first.
         pb('machine', 'list', '--json')
-        secrets = glob.glob(str(HOME / '.config/paperboat/credentials/secrets/profile-*-access.secret'))
-        return Path(secrets[0]).read_text().strip()
+        return cli_credential.access_token()
 
     def get(self, path):
         for attempt in range(2):
@@ -98,11 +100,27 @@ class Api:
 SETTLE = 330  # the recorder batch interval (5 min) plus a margin
 
 
+PF_ANCHOR = 'com.apple/pbusage'  # macOS: evaluated by the stock pf.conf (anchor "com.apple/*")
+
+
+def mac_sudo(command):
+    # A Mac controller has no passwordless sudo: the password comes from SUDO_PW_FILE (a path on the Mac).
+    return "sudo -S -p '' sh -c %s < %s" % (shlex.quote(command), shlex.quote(os.environ['SUDO_PW_FILE']))
+
+
 def block_udp():
+    if cli_credential.DARWIN:
+        sh(mac_sudo('printf "block drop out quick proto udp from any to any port != 53\\n" | pfctl -a %s -f - 2>/dev/null; '
+                    'pfctl -E >/dev/null 2>&1; pfctl -F states >/dev/null 2>&1; (sleep 600; pfctl -a %s -F all) >/dev/null 2>&1 &'
+                    % (PF_ANCHOR, PF_ANCHOR)))
+        return
     sh('for t in iptables ip6tables; do sudo -n $t -I %s; done; (sleep 600; for t in iptables ip6tables; do sudo -n $t -D %s; done) >/dev/null 2>&1 &' % (BLOCK, BLOCK))
 
 
 def unblock_udp():
+    if cli_credential.DARWIN:
+        sh(mac_sudo('pfctl -a %s -F all >/dev/null 2>&1; true' % PF_ANCHOR))
+        return
     sh('for t in iptables ip6tables; do sudo -n $t -D %s 2>/dev/null; done; true' % BLOCK)
 
 
