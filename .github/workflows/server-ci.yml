@@ -11,9 +11,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to main supersedes the older run; one full run per commit queued 10 deep (2026-11-05).
 concurrency:
-  group: ci-${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.repository }}-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   server:
