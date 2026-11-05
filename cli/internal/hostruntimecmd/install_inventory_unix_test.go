@@ -47,6 +47,7 @@ func versionFiles(digest string) []string {
 
 func sessionOwnerFiles(digest string) []string {
 	return []string{
+		invRoot + "/session-owners/" + digest[:32] + ".json",
 		"/etc/systemd/system/paperboat-session-owner-u1001-" + digest[:32] + ".service",
 		"/run/paperboat-session-owner-u1001-" + digest[:32] + "/control.sock",
 	}
@@ -79,7 +80,7 @@ func newInventoryHost(t *testing.T, active string, activated time.Time, now time
 		t.Fatal(err)
 	}
 	h := &inventoryHost{t: t, root: root, fake: newPurgeFake(processes...)}
-	h.sources = hostinstall.InventorySources{Active: active, Activated: activated, Retained: map[string]bool{}}
+	h.sources = hostinstall.InventorySources{Active: active, Activated: activated, Retained: map[string]time.Time{}}
 	h.sweep = testSweep(root, plan, h.fake)
 	h.sweep.sources = func(context.Context) (hostinstall.InventorySources, error) { return h.sources, nil }
 	jobs := map[int]string{}
@@ -226,7 +227,7 @@ func TestInstallInventoryRollbackLeavesNoNewVersionItems(t *testing.T) {
 		// A carrier of that same old version is no session owner; it started after A came back.
 		managedProcess(4005, invPin(digestC), "paperboat-carrier-u1001-"+digestC[:32]+".service", activatedA.Add(24*time.Hour)),
 	)
-	h.sources.Retained[digestC] = true
+	h.sources.Retained[digestC] = activatedA.Add(-72 * time.Hour)
 	for _, pid := range []int{4002, 4003, 4005} {
 		h.fake.termExits[pid] = true
 	}
@@ -235,6 +236,31 @@ func TestInstallInventoryRollbackLeavesNoNewVersionItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.assertExactlyActive(keep, newer, 4001, 4004)
+}
+
+// pbvm1: every update that failed at service apply left its candidate's session owner running, with its
+// catalogue descriptor, so the catalogue "retained" it. A descriptor written after the active slot was
+// activated belongs to a failed candidate, not to history: it goes, while older retained owners stay.
+func TestInstallInventoryRemovesAFailedUpdatesCandidateSessionOwner(t *testing.T) {
+	activated := time.Unix(1_800_000_000, 0)
+	keep := append(append(append(append([]string(nil), versionFiles(digestA)...), sessionOwnerFiles(digestA)...), sessionOwnerFiles(digestC)...), invPin(digestC))
+	candidate := append(sessionOwnerFiles(digestB), invPin(digestB))
+	h := newInventoryHost(t, digestA, activated, activated.Add(time.Hour), append(append([]string(nil), keep...), candidate...),
+		managedProcess(4001, invPin(digestA), "paperboat-session-owner-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
+		managedProcess(4002, invPin(digestB), "paperboat-session-owner-u1001-"+digestB[:32]+".service", activated.Add(10*time.Minute)),
+		managedProcess(4003, invPin(digestC), "paperboat-session-owner-u1001-"+digestC[:32]+".service", activated.Add(-48*time.Hour)),
+	)
+	h.sources.Retained[digestA] = activated.Add(time.Second)
+	h.sources.Retained[digestB] = activated.Add(10 * time.Minute) // the failed update's own descriptor
+	h.sources.Retained[digestC] = activated.Add(-48 * time.Hour)  // history from before this version
+	h.fake.termExits[4002] = true
+	if err := h.sweep.settleInventory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	h.assertExactlyActive(keep, candidate, 4001, 4003)
+	if !containsString(h.fake.commands, "/usr/bin/systemctl stop paperboat-session-owner-u1001-"+digestB[:32]+".service") {
+		t.Fatalf("candidate session owner not stopped by its unit: %v", h.fake.commands)
+	}
 }
 
 // A previous generation draining held streams is owned until the drain cap,

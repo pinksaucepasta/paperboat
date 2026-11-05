@@ -56,6 +56,7 @@ func newInventoryPaths(plan unixPurgePlan) (inventoryPaths, error) {
 			filepath.Join(carrier, "generation-*.json"),
 			filepath.Join(carrier, "owner-*.lock"),
 			layout.HostdSocket + ".c*",
+			filepath.Join(layout.InstallRoot, "session-owners", "*.json"),
 		},
 	}
 	if plan.platform == "darwin" {
@@ -196,7 +197,7 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 				findings = append(findings, inventoryFinding{process: process})
 			}
 		case owned[digest]:
-		case sources.Retained[digest] && sessionOwnerProcess(*process):
+		case retainedOwner(sources, digest) && sessionOwnerProcess(*process):
 		case sources.Pending != "":
 		case process.started.Before(sources.Activated) && now.Before(sources.Activated.Add(inventoryDrainCap)):
 			owned[digest] = true // a draining previous generation keeps its files
@@ -209,8 +210,23 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 	if sources.Pending != "" {
 		return append(findings, inventoryFinding{path: sources.Pending, note: " (installation not finished; rerun pb install)"}), nil
 	}
-	files, err := s.versionFiles(paths, owned, sources.Retained)
+	retained := map[string]bool{}
+	for digest := range sources.Retained {
+		if retainedOwner(sources, digest) {
+			retained[digest] = true
+		}
+	}
+	files, err := s.versionFiles(paths, owned, retained)
 	return append(findings, files...), err
+}
+
+// retainedOwner reports a catalogue generation whose session owner may stay:
+// one published before the active slot was activated. A descriptor written
+// after it belongs to an update that never committed (pbvm1: each failed
+// update left its candidate's session owner running), not to history.
+func retainedOwner(sources hostinstall.InventorySources, digest string) bool {
+	written, ok := sources.Retained[digest]
+	return ok && !written.After(sources.Activated)
 }
 
 // sessionOwnerProcess reports a session owner by its unit or job label.
@@ -228,7 +244,8 @@ func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string
 		if token == "" {
 			return true // a fixed role of the account, not a generation
 		}
-		sessionOwner := strings.Contains(name, "session-owner") || strings.HasPrefix(name, s.plan.instance+"-")
+		sessionOwner := strings.Contains(name, "session-owner") || strings.HasPrefix(name, s.plan.instance+"-") ||
+			filepath.Base(filepath.Dir(path)) == "session-owners"
 		for digest := range owned {
 			if strings.HasPrefix(digest, token) {
 				return true

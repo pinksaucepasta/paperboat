@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 )
 
 // InventorySources is what one account's install may keep after an install,
@@ -22,8 +23,9 @@ type InventorySources struct {
 	Active string
 	// Activated is when the fixed slot was last written (its activation).
 	Activated time.Time
-	// Retained holds catalogue-referenced source digests.
-	Retained map[string]bool
+	// Retained maps each catalogue-referenced source digest to when its
+	// descriptor was written.
+	Retained map[string]time.Time
 	// Pending names the installation journal when a transaction is unfinished.
 	Pending string
 }
@@ -34,7 +36,7 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		return InventorySources{}, ErrNotPrivileged
 	}
 	paths := platformPaths(uid)
-	sources := InventorySources{Retained: map[string]bool{}}
+	sources := InventorySources{Retained: map[string]time.Time{}}
 	if _, err := os.Lstat(paths.journal); err == nil {
 		sources.Pending = paths.journal
 	} else if !installNotExistOnly(err) {
@@ -64,7 +66,11 @@ func LoadInventorySources(ctx context.Context, uid int) (InventorySources, error
 		return sources, nil
 	}
 	for _, d := range descriptors {
-		sources.Retained[d.Source.SHA256] = true
+		path, findErr := sessionowner.Find(catalog.Root, d.Generation)
+		info, statErr := os.Lstat(path)
+		if err = errors.Join(err, findErr, statErr); findErr == nil && statErr == nil {
+			sources.Retained[d.Source.SHA256] = info.ModTime()
+		}
 	}
 	return sources, err
 }
