@@ -45,12 +45,15 @@ func TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec(t *tes
 	}
 	var output string
 	var from uint64
-	for !strings.Contains(output, "ready") {
+	// The child can print before run appends the running state, so the replay holds both in either
+	// order. Drain both: the next Next must find nothing and long-poll.
+	for running := false; !running || !strings.Contains(output, "ready"); {
 		event, release, err := reader.Next(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		output += string(event.Data)
+		running = running || event.State == StateRunning
 		from = event.Sequence + 1
 		release()
 	}
