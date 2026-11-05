@@ -15,7 +15,9 @@ def sh(cmd,timeout=600,check=True):
  if check and r.returncode:raise SystemExit('failed: '+cmd[:120])
  return r.stdout
 R=lambda c,**k:sh(('bash -c '+shlex.quote(c)) if LOCAL else ('ssh -o BatchMode=yes -o ConnectTimeout=20 '+H+' '+shlex.quote(c)),**k)
-def put(src,dst):sh(f'cp -r {src} {home}/{dst}' if LOCAL else f'scp -qr {src} {H}:{dst}')
+def put(src,dst):
+ if LOCAL and os.path.exists(f'{home}/{dst}') and os.path.samefile(src,f'{home}/{dst}'):return  # already in place (run.sh builds into ~/gap5)
+ sh(f'cp -r {src} {home}/{dst}' if LOCAL else f'scp -qr {src} {H}:{dst}')
 U=f'sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {CT}'
 def tok(name,dest):
  sh(f"python3 -I {here}/mint-token.py {name} {ST}/t.tok",timeout=120);put(f'{ST}/t.tok',f'gap5/{dest}');os.unlink(ST/'t.tok')
