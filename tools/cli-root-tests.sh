@@ -5,7 +5,7 @@
 #   tools/cli-root-tests.sh [go test args]
 set -eu
 cd "$(dirname "$0")/../cli"
-packages="./internal/hostruntime/service ./internal/hostruntime/hostinstall ./internal/hostruntimecmd ./internal/localdaemon"
+packages="./internal/hostruntime/service ./internal/hostruntime/hostinstall ./internal/hostruntime/sessionowner ./internal/hostruntimecmd ./internal/localdaemon"
 # Root gets its own build cache, so the job's cache stays owned by the runner user.
 exec sudo env "PATH=$PATH" GOTOOLCHAIN=local GOCACHE=/tmp/pb-root-gocache GOMODCACHE="$(go env GOMODCACHE)" \
   go test -count=1 -timeout 30m "$@" $packages
