@@ -55,6 +55,13 @@ func TestHandoverMovesListenerWithoutRefusingConnections(t *testing.T) {
 	t.Cleanup(func() { _ = old.Process.Kill() })
 
 	hammer := startHammer(address)
+	// "Both owners served" needs a hammer request on the old owner before the handover; a loaded runner can
+	// otherwise reach the commit first (owners = map[new:418], CI 41956710564).
+	for deadline := time.Now().Add(5 * time.Second); hammer.lastOwners(1) != "old"; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the old owner never served the hammer: %v", hammer.snapshot())
+		}
+	}
 	// A long request on the old owner, started before the handover.
 	body, bodyWriter := io.Pipe()
 	slow, err := http.Post("http://"+address+"/slow", "text/plain", body)
