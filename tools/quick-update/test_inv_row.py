@@ -18,6 +18,11 @@ class InvRowTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("PASS", out)
 
+    def test_a_clean_inventory_prints_ok_without_remaining(self):
+        code, out = row(json.dumps({"version": "paperboat.purge-result/v1", "ok": True}))
+        self.assertEqual(code, 0)
+        self.assertIn("PASS", out)
+
     def test_leftover_fails_and_is_named(self):
         code, out = row(json.dumps({"ok": False, "remaining": ["process 7 (/x/pb) runs a replaced image"]}))
         self.assertEqual(code, 1)

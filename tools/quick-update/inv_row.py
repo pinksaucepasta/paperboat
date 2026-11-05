@@ -11,6 +11,7 @@ try:
  if not lines:raise ValueError('')
  d=json.loads(lines[0])
  rem=d.get('remaining',d.get('data',{}).get('remaining')) if isinstance(d,dict) else None
+ if rem is None and isinstance(d,dict) and d.get('ok') is True:rem=[]  # a clean inventory prints {"ok":true} without the key
  if rem is None:raise ValueError('no "remaining" in the check output: '+raw.strip()[:200])
  # The controller container shares the host's process table, so the host-wide check also sees the controller's own
  # processes (a second line {"container_pids":[..]} from `docker top`); they are the controller's, not the target's.
