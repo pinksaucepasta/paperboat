@@ -463,6 +463,33 @@ func TestReconnectingConnStalledLinkMovesToAFreshLink(t *testing.T) {
 	}
 }
 
+// F3-15 N13 (pbvm2, 2026-11-05): access to the terminal was revoked while its link was silent. The stalled-link
+// probe was refused for good, stopped probing, and kept the dead link: the terminal said nothing for about
+// 150 s until the transport gave up. A permanent refusal while stalled ends the terminal at once with it.
+func TestReconnectingConnStalledLinkEndsAtOnceWhenTheReattachIsRefused(t *testing.T) {
+	first := stalledReconnectConn{&blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	revoked := errors.New("access to this terminal was revoked")
+	var reconnects atomic.Int32
+	c := NewReconnectingConn(context.Background(), first, 600, time.Millisecond, func(context.Context) (Conn, error) {
+		reconnects.Add(1)
+		return nil, StopReconnect(revoked)
+	})
+	defer c.Close()
+	ended := make(chan error, 1)
+	go func() { _, err := c.Wait(); ended <- err }()
+	select {
+	case err := <-ended:
+		if !errors.Is(err, revoked) {
+			t.Fatalf("terminal ended with %v, want the refusal", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("terminal still waiting on its silent link after a permanent refusal (%d dials)", reconnects.Load())
+	}
+	if n := reconnects.Load(); n > 2 {
+		t.Fatalf("a permanent refusal was retried %d times", n)
+	}
+}
+
 // A target ready after several refusals must be retried promptly instead of
 // sitting in a 30 s exponential-backoff sleep after its update has finished.
 func TestReconnectingConnRetriesReadyTargetPromptly(t *testing.T) {
