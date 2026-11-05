@@ -292,20 +292,83 @@ func startConnectedRuntimeCarrier(t *testing.T, ctx context.Context, expiry time
 // every other control path.
 func startConnectedRuntimeCarrierWith(t *testing.T, ctx context.Context, expiry time.Time, status func() int, tweak func(*admission), other http.RoundTripper) (*Service, *connector.DataCarrier) {
 	t.Helper()
+	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{expiry: expiry, status: status, tweak: tweak, other: other})
+	select {
+	case dial := <-h.edges:
+		if err := dial.edge.Ping(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return h.service, dial.edge
+	case <-ctx.Done():
+		t.Fatal("runtime carrier was not admitted")
+	}
+	return nil, nil
+}
+
+type runtimeCarrierOptions struct {
+	expiry time.Time
+	status func() int
+	tweak  func(*admission)
+	other  http.RoundTripper
+	// confirmActive makes the control plane take the active edge the host asks for.
+	confirmActive bool
+	// failDial fails a carrier dial to edgeID (dial counts that edge's dials from 1).
+	failDial func(edgeID string, dial int) bool
+}
+
+type runtimeCarrierHarness struct {
+	service *Service
+	// edges receives the edge end of each carrier the host dials, in order.
+	edges chan edgeDial
+	// actives receives each active edge node the host asks the control plane for.
+	actives chan string
+}
+
+type edgeDial struct {
+	edgeID string
+	edge   *connector.DataCarrier
+}
+
+// startRuntimeCarrier runs the service against a control plane whose attachment response status is
+// status() and whose admission expires at expiry. Every carrier dial reaches a new edge carrier.
+func startRuntimeCarrier(t *testing.T, ctx context.Context, options runtimeCarrierOptions) *runtimeCarrierHarness {
+	t.Helper()
+	h := &runtimeCarrierHarness{edges: make(chan edgeDial, 16), actives: make(chan string, 64)}
+	var mu sync.Mutex
 	var document admission
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		if other != nil && request.URL.Path != path {
-			return other.RoundTrip(request)
+		if options.other != nil && request.URL.Path != path {
+			return options.other.RoundTrip(request)
+		}
+		mu.Lock()
+		answer := document
+		mu.Unlock()
+		if options.confirmActive && request.Body != nil {
+			var asked struct {
+				Node  string `json:"active_edge_node_id"`
+				Epoch string `json:"active_edge_process_epoch"`
+			}
+			if json.NewDecoder(request.Body).Decode(&asked) == nil && asked.Node != "" {
+				mu.Lock()
+				document.ActiveEdgeNodeID, document.ActiveEdgeProcessEpoch = asked.Node, asked.Epoch
+				answer = document
+				mu.Unlock()
+				select {
+				case h.actives <- asked.Node:
+				default:
+				}
+			}
 		}
 		payload, err := json.Marshal(struct {
 			Data admission `json:"data"`
-		}{document})
+		}{answer})
 		if err != nil {
 			return nil, err
 		}
-		return &http.Response{StatusCode: status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
+		return &http.Response{StatusCode: options.status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})
 	service := newRuntimeAttachmentTestService(t, transport)
+	h.service = service
 	store, err := identity.Open(identity.Config{StateRoot: service.config.StateRoot})
 	if err != nil {
 		t.Fatal(err)
@@ -315,23 +378,34 @@ func startConnectedRuntimeCarrierWith(t *testing.T, ctx context.Context, expiry 
 	trust := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(trust.Close)
 	pin := sha256.Sum256(trust.Certificate().RawSubjectPublicKeyInfo)
-	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: expiry,
+	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: options.expiry,
 		ActiveEdgeNodeID: "edge-test", ActiveEdgeProcessEpoch: "epoch-1234567890123456789012345678",
 		Binding: binding{AccountID: "account-test", HostID: "machine-test", TunnelID: "machine-test", ConnectorID: "machine-test", SessionID: "session-test", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "route-test", EdgeNodeID: "edge-test", EdgeProcessEpoch: "epoch-1234567890123456789012345678", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), EdgeCarrierServerSPKISHA256: "sha256:" + hex.EncodeToString(pin[:]), EdgeCarrierServerCertificateChainPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trust.Certificate().Raw}))}}
-	if tweak != nil {
-		tweak(&document)
+	if options.tweak != nil {
+		options.tweak(&document)
 	}
-	connected := make(chan *connector.DataCarrier, 1)
+	dials := map[string]int{}
 	source, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: service.config.StateRoot, SessionFactory: func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, _ connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
-		local, remote := net.Pipe()
-		edge, err := connector.NewDataCarrierServer(ctx, remote, config.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
-		if err != nil {
-			local.Close()
-			remote.Close()
-			return connector.DataCarrierSessionSource{}, err
-		}
-		connected <- edge
 		return connector.NewDataCarrierSessionSource(got, config, func(_ context.Context, request connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			mu.Lock()
+			dials[request.EdgeID]++
+			dial := dials[request.EdgeID]
+			mu.Unlock()
+			if options.failDial != nil && options.failDial(request.EdgeID, dial) {
+				return connector.DataCarrierDialResult{}, &connector.TransportDialError{Transport: request.Transport, Err: errors.New("edge refused"), Fallback: false}
+			}
+			local, remote := net.Pipe()
+			edge, err := connector.NewDataCarrierServer(ctx, remote, config.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+			if err != nil {
+				local.Close()
+				remote.Close()
+				return connector.DataCarrierDialResult{}, err
+			}
+			t.Cleanup(func() { edge.Close() })
+			select {
+			case h.edges <- edgeDial{edgeID: request.EdgeID, edge: edge}:
+			default:
+			}
 			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
 		})
 	}})
@@ -343,17 +417,7 @@ func startConnectedRuntimeCarrierWith(t *testing.T, ctx context.Context, expiry 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Shutdown(context.Background()) })
-	select {
-	case edge := <-connected:
-		t.Cleanup(func() { edge.Close() })
-		if err := edge.Ping(ctx); err != nil {
-			t.Fatal(err)
-		}
-		return service, edge
-	case <-ctx.Done():
-		t.Fatal("runtime carrier was not admitted")
-	}
-	return nil, nil
+	return h
 }
 
 func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {

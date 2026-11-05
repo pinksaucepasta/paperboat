@@ -233,6 +233,9 @@ type pooledDataCarrier struct {
 	slot          int
 	attempt       int
 	carrier       *DataCarrier
+	// draining: the edge said this carrier is going away; it keeps its open streams, gets no new
+	// ones, and no longer holds its slot.
+	draining bool
 }
 
 // DataCarrierPool maintains a small set of independently dialed carriers.

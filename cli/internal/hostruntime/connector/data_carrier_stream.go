@@ -3,6 +3,8 @@ package connector
 import (
 	"sync"
 	"time"
+
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // DataCarrierStream owns one stream permit.  Closing it is required even
@@ -17,6 +19,25 @@ type DataCarrierStream struct {
 	stopCancel func() bool
 	closeOnce  sync.Once
 	closeErr   error
+	// edgeDraining, set by the pool, takes this stream's carrier out of new-stream use.
+	edgeDraining func()
+}
+
+// goawayReadLimit bounds reading the one notice of a goaway stream.
+const goawayReadLimit = 2 * time.Second
+
+// HandleGoaway takes an edge-opened stream whose preface said Kind goaway: it reads the drain
+// notice and closes the stream (the edge waits for that). An edge_draining notice moves the pool's
+// new streams to a replacement carrier; any other or malformed notice changes nothing.
+func (s *DataCarrierStream) HandleGoaway() {
+	defer s.Close()
+	if s.SetReadDeadline(time.Now().Add(goawayReadLimit)) != nil {
+		return
+	}
+	notice, err := sharedprotocol.ReadGoawayNotice(s)
+	if err == nil && notice.Reason == sharedprotocol.GoawayEdgeDraining && s.edgeDraining != nil {
+		s.edgeDraining()
+	}
 }
 
 // EdgeTarget is the authenticated endpoint selected for the accepting carrier.

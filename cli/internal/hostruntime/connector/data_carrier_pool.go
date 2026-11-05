@@ -179,7 +179,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 		p.mu.RLock()
 		present := false
 		for _, carrier := range p.carriers {
-			if carrier.slot == slot {
+			if carrier.slot == slot && !carrier.draining {
 				present = true
 			}
 		}
@@ -299,6 +299,7 @@ func (p *DataCarrierPool) acceptCarrier(carrier *DataCarrier, target DataCarrier
 			return
 		}
 		stream.edgeTarget = target
+		stream.edgeDraining = func() { p.edgeDraining(carrier) }
 		select {
 		case p.accepted <- dataCarrierAcceptResult{stream: stream, open: open}:
 		case <-p.ctx.Done():
@@ -306,6 +307,49 @@ func (p *DataCarrierPool) acceptCarrier(carrier *DataCarrier, target DataCarrier
 			return
 		}
 	}
+}
+
+// edgeDraining is make-before-break when an edge process hands over (edge install), as cloudflared
+// replaces a connection that got GracefulShutdown (connection/control.go, supervisor/tunnel.go):
+// carrier gets no new streams, its replacement to the same edge is dialed at once, and carrier
+// keeps its open streams until the edge closes it. The replacement dials the fallback (TCP)
+// transport first: the old edge process keeps the shared UDP socket until it exits, while the new
+// one accepts TCP from the goaway on.
+func (p *DataCarrierPool) edgeDraining(carrier *DataCarrier) {
+	p.mu.Lock()
+	found := false
+	for _, pooled := range p.carriers {
+		if pooled.carrier == carrier && !pooled.draining {
+			pooled.draining, found = true, true
+		}
+	}
+	p.mu.Unlock()
+	if !found {
+		return
+	}
+	diagnosticlog.TryInfo("data carrier draining: the edge said it is going away; dialing its replacement")
+	go func() {
+		p.connectMu.Lock()
+		p.fallbackUntil = time.Now().Add(preferFallbackFor)
+		p.connectMu.Unlock()
+		_ = p.Connect(p.ctx)
+	}()
+}
+
+// EdgeDraining reports whether the pool has carriers but every one is draining: open streams
+// still run, a new one has no carrier.
+func (p *DataCarrierPool) EdgeDraining() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, pooled := range p.carriers {
+		if !pooled.draining && pooled.carrier.State() != DataCarrierClosed {
+			return false
+		}
+	}
+	return len(p.carriers) != 0
 }
 
 // HTTP carriers use yamux Ping request/ack frames over their authenticated
@@ -552,6 +596,7 @@ func (p *DataCarrierPool) openStream(ctx context.Context, control bool, open *St
 	if err := p.ensureConnected(ctx); err != nil {
 		return nil, err
 	}
+	redialed := false
 	for {
 		p.removeClosed()
 		p.mu.RLock()
@@ -568,18 +613,23 @@ func (p *DataCarrierPool) openStream(ctx context.Context, control bool, open *St
 			if !ok {
 				return nil, ErrDataCarrierUnavailable
 			}
+			// A draining carrier's TCP replacement may differ from the selected transport.
+			var chosen *pooledDataCarrier
 			for _, pooled := range carriers {
-				if pooled.transport == selected {
-					return pooled.carrier.openStreamWithMetadata(ctx, p.clearControl, nil)
+				if !p.isDraining(pooled) && (chosen == nil || pooled.transport == selected && chosen.transport != selected) {
+					chosen = pooled
 				}
 			}
-			return nil, ErrDataCarrierUnavailable
+			if chosen == nil {
+				return nil, ErrDataCarrierUnavailable
+			}
+			return chosen.carrier.openStreamWithMetadata(ctx, p.clearControl, nil)
 		}
 		// Pick the least-loaded carrier.  Sorting is unnecessary because the
 		// list is small; preserving list order makes selection deterministic.
 		var selected *pooledDataCarrier
 		for _, pooled := range carriers {
-			if pooled.carrier.State() == DataCarrierClosed {
+			if pooled.carrier.State() == DataCarrierClosed || p.isDraining(pooled) {
 				continue
 			}
 			if selected == nil || pooled.carrier.ActiveStreams() < selected.carrier.ActiveStreams() {
@@ -587,7 +637,12 @@ func (p *DataCarrierPool) openStream(ctx context.Context, control bool, open *St
 			}
 		}
 		if selected == nil {
-			if err := p.ensureConnected(ctx); err != nil {
+			// One dial; carriers that only drain do not make a new stream wait for the next one.
+			if redialed {
+				return nil, ErrDataCarrierUnavailable
+			}
+			redialed = true
+			if err := p.Connect(ctx); err != nil {
 				return nil, err
 			}
 			continue
@@ -635,6 +690,12 @@ func (p *DataCarrierPool) AcceptStream(ctx context.Context) (*DataCarrierStream,
 	case <-p.done:
 		return nil, StreamOpen{}, ErrDataCarrierClosed
 	}
+}
+
+func (p *DataCarrierPool) isDraining(pooled *pooledDataCarrier) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return pooled.draining
 }
 
 func (p *DataCarrierPool) clearControl() {

@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 var (
@@ -342,6 +343,11 @@ func (h *DataCarrierPreviewHub) acceptLoop() {
 		}
 		if !previewIdentityMatches(h.identity, open) {
 			h.rejectStream(stream, "permission_denied")
+			continue
+		}
+		if open.Kind == sharedprotocol.Goaway {
+			// The edge is draining this carrier; the pool replaces it (no route owns the notice).
+			go stream.HandleGoaway()
 			continue
 		}
 		h.mu.Lock()

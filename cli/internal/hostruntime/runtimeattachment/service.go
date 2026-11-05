@@ -534,9 +534,11 @@ func (s *Service) run(ctx context.Context) {
 	<-ctx.Done()
 }
 
-// carriersReady reports whether every connected carrier is ready and one of them publishes.
+// carriersReady reports whether every connected carrier is ready and one of them publishes from a
+// carrier its edge is not draining (a goaway with no replacement yet runs a round, which moves
+// the publisher and the active edge to the other carrier).
 func carriersReady(lives map[string]*live, publisherKey string) bool {
-	if len(lives) == 0 || publisherKey == "" {
+	if len(lives) == 0 || publisherKey == "" || lives[publisherKey] == nil || lives[publisherKey].edgeDraining() {
 		return false
 	}
 	for _, item := range lives {
@@ -550,21 +552,31 @@ func carriersReady(lives map[string]*live, publisherKey string) bool {
 func chooseLive(ordered []admissionBinding, lives map[string]*live, activeNode, activeEpoch string) (*live, admissionBinding) {
 	// Preserve the confirmed active carrier while it remains in the measured
 	// pair. A recovered faster edge becomes a ready backup; moving the public
-	// route immediately can strand browsers on their cached DNS address.
-	for _, candidate := range ordered {
-		if candidate.Binding.EdgeNodeID == activeNode && candidate.Binding.EdgeProcessEpoch == activeEpoch {
-			if item := lives[carrierKey(candidate)]; item != nil {
+	// route immediately can strand browsers on their cached DNS address. A
+	// carrier whose edge is draining (goaway, no replacement yet) is chosen only
+	// when no other is live.
+	for _, draining := range []bool{false, true} {
+		usable := func(item *live) bool { return item != nil && (draining || !item.edgeDraining()) }
+		for _, candidate := range ordered {
+			if candidate.Binding.EdgeNodeID == activeNode && candidate.Binding.EdgeProcessEpoch == activeEpoch {
+				if item := lives[carrierKey(candidate)]; usable(item) {
+					return item, candidate
+				}
+				break
+			}
+		}
+		for _, candidate := range ordered {
+			if item := lives[carrierKey(candidate)]; usable(item) {
 				return item, candidate
 			}
-			break
-		}
-	}
-	for _, candidate := range ordered {
-		if item := lives[carrierKey(candidate)]; item != nil {
-			return item, candidate
 		}
 	}
 	return nil, admissionBinding{}
+}
+
+// edgeDraining: every carrier of this live's pool is draining (its edge said it is going away).
+func (l *live) edgeDraining() bool {
+	return l.active != nil && l.active.Pool().EdgeDraining()
 }
 
 type failureClass struct {
