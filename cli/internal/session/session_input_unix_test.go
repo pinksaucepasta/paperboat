@@ -50,6 +50,20 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 	if _, err := inW.Write([]byte("a")); err != nil {
 		t.Fatal(err)
 	}
+	for blocked := time.After(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		s.mu.Lock()
+		n := len(s.writes)
+		s.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		select {
+		case <-blocked:
+			close(s.release)
+			t.Fatal("the first input never reached the sink")
+		default:
+		}
+	}
 	line := append(bytes.Repeat([]byte("x"), 1023), '\n')
 	wrote := make(chan error, 1)
 	go func() {
@@ -71,9 +85,9 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 		close(s.release)
 		t.Fatal("stdin was not read while the sink was blocked; Ctrl-C never reached the client")
 	}
-	// A pipe write returns once buffered, not once read: release the sink only
-	// after Run has read the Ctrl-C, or the last chunk can arrive after the sink
-	// unblocked, when the paste rightly goes with it (CI flake, c74bfb329).
+	// A pipe write returns once buffered, not once read, and FIONREAD 0 only says Run read the Ctrl-C, not that it
+	// queued it: a sink released in between rightly sends the paste first (CI flakes, c74bfb329, f8677c627). Run
+	// reads and queues in order, so once a later "z" is read too, the Ctrl-C is queued behind the stuck paste.
 	unread := func() int {
 		n := -1
 		raw, err := inR.SyscallConn()
@@ -82,23 +96,30 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 		}
 		return n
 	}
-	for drained := time.After(5 * time.Second); unread() != 0; {
-		select {
-		case <-drained:
-			close(s.release)
-			t.Fatal("stdin still held unread input while the sink was blocked")
-		case <-time.After(time.Millisecond):
+	waitRead := func() {
+		for drained := time.After(5 * time.Second); unread() != 0; {
+			select {
+			case <-drained:
+				close(s.release)
+				t.Fatal("stdin still held unread input while the sink was blocked")
+			case <-time.After(time.Millisecond):
+			}
 		}
 	}
+	waitRead()
+	if _, err := inW.Write([]byte("z")); err != nil {
+		t.Fatal(err)
+	}
+	waitRead()
 	close(s.release)
 	deadline := time.After(5 * time.Second)
 	for {
 		s.mu.Lock()
-		last := s.writes[len(s.writes)-1]
+		first, after := string(s.writes[0]), bytes.Join(s.writes[1:], nil)
 		s.mu.Unlock()
-		if len(last) > 0 && last[len(last)-1] == 3 {
-			if len(last) != 1 {
-				t.Fatalf("Ctrl-C write carried %d bytes of the stuck paste", len(last)-1)
+		if bytes.IndexByte(after, 'z') >= 0 {
+			if first != "a" || string(after) != "\x03z" {
+				t.Fatalf("sink got %q then %d bytes, want a then only Ctrl-C and z: the stuck paste was sent", first, len(after))
 			}
 			break
 		}
