@@ -385,8 +385,17 @@ func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doct
 }
 
 func probeDoctorLocalState(ctx context.Context) doctorpkg.Check {
-	state := collectLocalDoctor(ctx)
+	return doctorLocalStateCheck(collectLocalDoctor(ctx))
+}
+
+// doctorLocalStateCheck judges the collected local state. On a set-up machine the host runtime must answer:
+// an unreachable /healthz or /diagnostics is a failure, not a pass.
+func doctorLocalStateCheck(state localDoctorReport) doctorpkg.Check {
 	if state.SetupState == "configured" && state.IdentityState == "valid" {
+		if state.hostUnreachable != "" {
+			return doctorpkg.Check{Category: "local", Code: "local_state", Status: doctorpkg.StatusFail, Summary: state.hostUnreachable,
+				Recovery: "Restart the Paperboat host service, then run pb doctor again."}
+		}
 		if check, failing := doctorHostStepsCheck(state.hostSteps); failing {
 			return check
 		}
@@ -638,6 +647,8 @@ func doctorProxyDiagnosis(err error) (proxyDoctorDiagnosis, bool) {
 
 type localDoctorReport struct {
 	failure error
+	// hostUnreachable says which host runtime endpoint did not answer; empty when both did.
+	hostUnreachable string
 	// hostSteps are the host runtime's failing steps (degraded or down typed health dimensions).
 	hostSteps              []health.Alert
 	StateRoot              string   `json:"state_root,omitempty"`
@@ -805,6 +816,7 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 	if err != nil {
 		report.failure = errors.Join(report.failure, err)
 		report.HostRuntime = "unavailable · local runtime could not be reached"
+		report.hostUnreachable = "The Paperboat host runtime did not answer its health check."
 		return
 	}
 	live, err := decodeTunnelDoctorHealth(bytes.NewReader(body), 64<<10)
@@ -815,6 +827,7 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 			report.failure = errors.Join(report.failure, errLocalDoctorHealthInvalid)
 		}
 		report.HostRuntime = "unhealthy · invalid liveness response"
+		report.hostUnreachable = "The Paperboat host runtime's health check did not report it live."
 		return
 	}
 	report.HostRuntime = "ready"
@@ -822,12 +835,14 @@ func inspectLocalRuntimeHealth(parent context.Context, report *localDoctorReport
 	if err != nil {
 		report.failure = errors.Join(report.failure, err)
 		report.WorkloadCounts = "unavailable · runtime diagnostics could not be read"
+		report.hostUnreachable = "The Paperboat host runtime's diagnostics did not answer."
 		return
 	}
 	diagnostics, err := decodeTunnelHostDiagnostics(body)
 	if err != nil {
 		report.failure = errors.Join(report.failure, err)
 		report.WorkloadCounts = "unavailable · invalid runtime diagnostics"
+		report.hostUnreachable = "The Paperboat host runtime's diagnostics could not be read."
 		return
 	}
 	report.hostSteps = failingHostSteps(diagnostics.Health)

@@ -58,3 +58,17 @@ func TestDoctorNamesAFailingHostStepUntilItRecovers(t *testing.T) {
 		t.Fatalf("recovered host step: overall=%s output:\n%s", report.Overall, output)
 	}
 }
+
+// On a set-up machine whose host runtime does not answer, local_state fails and says so; when it answers,
+// it passes.
+func TestDoctorFailsWhenTheHostRuntimeDoesNotAnswer(t *testing.T) {
+	state := localDoctorReport{SetupState: "configured", IdentityState: "valid", hostUnreachable: "The Paperboat host runtime's diagnostics did not answer."}
+	check := doctorLocalStateCheck(state)
+	if check.Status != doctorpkg.StatusFail || check.Summary != state.hostUnreachable || check.Recovery == "" || check.Validate() != nil {
+		t.Fatalf("unreachable host runtime: %+v", check)
+	}
+	state.hostUnreachable = ""
+	if check = doctorLocalStateCheck(state); check.Status != doctorpkg.StatusPass {
+		t.Fatalf("answering host runtime: %+v", check)
+	}
+}
