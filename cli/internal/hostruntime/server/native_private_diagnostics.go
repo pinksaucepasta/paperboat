@@ -67,7 +67,7 @@ func expectedNativePrivateAuthorizationRejection(err error) bool {
 		return true
 	}
 	return allErrorLeavesMatch(err, func(leaf error) bool {
-		return leaf == native.ErrInvalid || leaf == streamauth.ErrInvalid || leaf == tailnet.ErrAdmission
+		return leaf == native.ErrInvalid || leaf == streamauth.ErrInvalid || leaf == streamauth.ErrExpired || leaf == tailnet.ErrAdmission
 	})
 }
 

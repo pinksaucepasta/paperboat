@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const carrierDelegationKind = "paperboat.terminal-carrier/v1"
@@ -116,7 +117,7 @@ func (o *Owner) delegationCertificate(private ed25519.PrivateKey) (tailnet.Netwo
 	if err != nil {
 		return self, nil, 0, err
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	expires := min(now.Add(carrierDelegationLifetime).Unix(), parentLeaf.NotAfter.Unix())
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
@@ -202,7 +203,7 @@ func (o *Owner) signDelegation(identity *CarrierIdentity, claims CarrierClaims, 
 		return CarrierOffer{}, err
 	}
 	offer := CarrierOffer{Claims: claims, Signature: ed25519.Sign(parent, body)}
-	if err := offer.verify(self, time.Now()); err != nil {
+	if err := offer.verify(self, serverclock.Now()); err != nil {
 		return CarrierOffer{}, err
 	}
 	identity.mu.Lock()

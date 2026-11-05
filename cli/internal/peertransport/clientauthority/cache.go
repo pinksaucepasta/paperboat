@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type cacheKey struct {
@@ -130,7 +131,7 @@ func (c *Cache) refreshLocal(key cacheKey, request Request) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), localRefreshTimeout)
 	defer cancel()
-	request.Now = time.Now().UTC()
+	request.Now = serverclock.Now().UTC()
 	resolved, err := c.resolveLocal(ctx, request)
 	if err != nil {
 		return

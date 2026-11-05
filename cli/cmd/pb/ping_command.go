@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +50,7 @@ func probeDaemonPeer(ctx context.Context, client peerProber, target resolver.Con
 	if !ok {
 		return tunnel.NativeProbe{}, errors.New("daemon probe requires a deadline")
 	}
-	request, err := localapi.NewPeerStreamRequest(target.MachineID, target.Terminal.EnvironmentID, target.MachineGeneration, "health_probe", operation, "local-health-probe", deadline, 1<<20, nil)
+	request, err := localapi.NewPeerStreamRequest(target.MachineID, target.Terminal.EnvironmentID, target.MachineGeneration, "health_probe", operation, "local-health-probe", deadline.Add(serverclock.Offset()), 1<<20, nil)
 	if err != nil {
 		return tunnel.NativeProbe{}, err
 	}

@@ -9,6 +9,8 @@ import (
 	"math/rand/v2"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var ErrExpired = errors.New("admission credential expired")
@@ -28,12 +30,14 @@ type Lease struct {
 
 // Admit checks the credential deadline before accepting work, and subscribes to
 // revocation before returning. A zero deadline is for already verified admission
-// boundaries whose verifier owns the expiry check.
+// boundaries whose verifier owns the expiry check. Deadlines are server-issued, so
+// they are judged on the server clock, like Tailscale judges peer key expiry on
+// control's time (~/ref/tailscale/ipn/ipnlocal/expiry.go flagExpiredPeers).
 func Admit(parent context.Context, expiresAt time.Time, revoked <-chan struct{}) (*Lease, error) {
 	if err := parent.Err(); err != nil {
 		return nil, err
 	}
-	if !expiresAt.IsZero() && !time.Now().Before(expiresAt) {
+	if !expiresAt.IsZero() && serverclock.Until(expiresAt) <= 0 {
 		return nil, ErrExpired
 	}
 	ctx, cancel := context.WithCancelCause(parent)

@@ -19,6 +19,9 @@ const (
 
 var ErrInvalid = errors.New("invalid peer stream authorization header")
 
+// ErrExpired is a well-formed header whose deadline (the credential's server-clock expiry) has passed.
+var ErrExpired = errors.New("peer stream authorization deadline passed")
+
 type Header struct {
 	Version      int    `json:"version"`
 	OperationID  string `json:"operation_id"`
@@ -82,7 +85,7 @@ func (h Header) Validate(now time.Time) error {
 	}
 	deadline := time.Unix(h.DeadlineUnix, 0)
 	if !now.IsZero() && !deadline.After(now) {
-		return ErrInvalid
+		return ErrExpired
 	}
 	return nil
 }
@@ -105,8 +108,11 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	var value Header
-	if err := decoder.Decode(&value); err != nil || value.Validate(now) != nil {
+	if err := decoder.Decode(&value); err != nil {
 		return Header{}, ErrInvalid
+	}
+	if err := value.Validate(now); err != nil {
+		return Header{}, err
 	}
 	var extra any
 	if decoder.Decode(&extra) == nil {

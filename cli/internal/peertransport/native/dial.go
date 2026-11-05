@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/quic-go/quic-go"
 )
 
@@ -130,7 +131,7 @@ func (o *Owner) dialOffered(ctx context.Context, peerID string, class peerquic.C
 		return nil
 	}
 	offer, err := ParseCarrierOffer(raw)
-	if err != nil || !offer.Claims.AllApplications || offer.verify(peer, time.Now()) != nil {
+	if err != nil || !offer.Claims.AllApplications || offer.verify(peer, serverclock.Now()) != nil {
 		o.authority.DeclineCarrierOffer(peerID, raw)
 		return nil
 	}

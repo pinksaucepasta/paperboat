@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type carrierPacket struct {
@@ -36,7 +37,7 @@ func (s *Session) DialCarrier(ctx context.Context, offer CarrierOffer) (*Session
 	if err != nil || peer != s.binding {
 		return nil, tailnet.ErrAdmission
 	}
-	if err := offer.verify(peer, time.Now()); err != nil {
+	if err := offer.verify(peer, serverclock.Now()); err != nil {
 		return nil, err
 	}
 	if session := s.owner.dialRoute(ctx, s.peerID, &offer, peerquic.ClassInteractive); session != nil {
@@ -118,7 +119,7 @@ func (o *Owner) carrierTLS(peerID string, peer tailnet.NetworkBinding, offer Car
 	config.NextProtos = []string{peerquic.ALPN}
 	config.VerifyConnection = func(state tls.ConnectionState) error {
 		current, err := o.authority.Peer(peerID)
-		if err != nil || current != peer || offer.verify(current, time.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || certificateNamespace(state.PeerCertificates[0].Raw) != offer.Namespace() {
+		if err != nil || current != peer || offer.verify(current, serverclock.Now()) != nil || state.NegotiatedProtocol != peerquic.ALPN || len(state.PeerCertificates) != 1 || certificateNamespace(state.PeerCertificates[0].Raw) != offer.Namespace() {
 			return ErrInvalid
 		}
 		return nil
@@ -171,7 +172,7 @@ func (s *Session) carrierAttempt(ctx context.Context, network *tailnet.CarrierNe
 	if err != nil {
 		return nil, err
 	}
-	if current.Namespace() != offer.Namespace() || current.verify(peer, time.Now()) != nil {
+	if current.Namespace() != offer.Namespace() || current.verify(peer, serverclock.Now()) != nil {
 		return nil, ErrInvalid
 	}
 	if err := network.AddPeer(s.peerID, current.Claims.DiscoPublicKey, current.Claims.Endpoints); err != nil {
@@ -225,7 +226,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 		return ErrInvalid
 	}
 	self, err := o.authority.Self()
-	if err != nil || identity.Current().verify(self, time.Now()) != nil {
+	if err != nil || identity.Current().verify(self, serverclock.Now()) != nil {
 		socket.Close()
 		return ErrInvalid
 	}
@@ -233,7 +234,7 @@ func (o *Owner) ListenCarrier(ctx context.Context, socket net.PacketConn, identi
 	config.ClientAuth = tls.RequireAnyClientCert
 	config.VerifyConnection = func(state tls.ConnectionState) error {
 		current, err := o.authority.Self()
-		if err != nil || identity.Current().verify(current, time.Now()) != nil {
+		if err != nil || identity.Current().verify(current, serverclock.Now()) != nil {
 			return ErrInvalid
 		}
 		peer, err := o.carrierPeer(state)

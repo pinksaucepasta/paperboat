@@ -18,7 +18,9 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/netip"
@@ -426,8 +428,17 @@ func boundTLS(base *tls.Config, peer tailnet.NetworkBinding, server bool) *tls.C
 			return ErrInvalid
 		}
 		leaf := state.PeerCertificates[0]
-		now := time.Now()
-		if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute {
+		// Both peers stamp and judge leaves on the server clock (F21-02), like Tailscale judges key expiry on control's
+		// time (~/ref/tailscale/ipn/ipnlocal/expiry.go); the leaf's NotBefore is backdated a minute (endpointidentity) for
+		// the skew below serverclock.Threshold that is not corrected.
+		now := serverclock.Now()
+		if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+			diagnosticlog.TryWarn("native peer certificate refused", "reason", "outside_validity", "peer", peer.EndpointID,
+				"not_before", leaf.NotBefore.UTC(), "not_after", leaf.NotAfter.UTC(), "server_clock_offset", serverclock.Offset().String())
+			return fmt.Errorf("%w: peer certificate is valid %s to %s, outside the server-clock time %s", ErrInvalid,
+				leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+		}
+		if leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute {
 			return ErrInvalid
 		}
 		want, err := base64.RawURLEncoding.Strict().DecodeString(peer.QUICPublicKey)

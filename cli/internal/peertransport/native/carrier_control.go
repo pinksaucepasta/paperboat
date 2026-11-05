@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/quic-go/quic-go"
 )
 
@@ -63,7 +64,7 @@ func (s *Session) OfferCarrier(ctx context.Context, offer CarrierOffer) error {
 	ctx, cancel := context.WithTimeout(ctx, CarrierMoveBudget)
 	defer cancel()
 	self, err := s.owner.authority.Self()
-	if err != nil || offer.verify(self, time.Now()) != nil {
+	if err != nil || offer.verify(self, serverclock.Now()) != nil {
 		return ErrInvalid
 	}
 	body, err := json.Marshal(carrierControl{Kind: "offer", Exchange: CarrierExchange{Offer: offer}})
@@ -135,7 +136,7 @@ func (s *Session) receiveCarrierControl(ctx context.Context, stream *quic.Stream
 	}
 	offer := request.Exchange.Offer
 	parent, err := s.owner.authority.Peer(s.peerID)
-	if err != nil || parent != s.binding || offer.verify(parent, time.Now()) != nil {
+	if err != nil || parent != s.binding || offer.verify(parent, serverclock.Now()) != nil {
 		return ErrInvalid
 	}
 	s.routerMu.Lock()
@@ -219,7 +220,7 @@ type carrierControl struct {
 
 func (s *Session) receiveCarrierCandidates(ctx context.Context, stream *quic.Stream, request CarrierExchange) error {
 	self, err := s.owner.authority.Self()
-	if err != nil || request.Offer.verify(self, time.Now()) != nil || s.owner.prepareCarrier == nil {
+	if err != nil || request.Offer.verify(self, serverclock.Now()) != nil || s.owner.prepareCarrier == nil {
 		return ErrInvalid
 	}
 	peer, err := s.owner.authority.Peer(s.peerID)

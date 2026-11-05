@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/nativegen"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -673,7 +674,7 @@ func (s *productionNativePeerService) currentIdentityFingerprint() (string, erro
 	if err != nil || endpoint.Generation != s.config.generation {
 		return "", errors.Join(ErrProductionInvalid, err)
 	}
-	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: s.config.machineID, Generation: endpoint.Generation}, time.Now().UTC())
+	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: s.config.machineID, Generation: endpoint.Generation}, serverclock.Now().UTC())
 	if err != nil {
 		return "", errors.Join(ErrProductionInvalid, err)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // Staging bounds connection setup by its caller and admission deadline. Accept
@@ -35,7 +37,7 @@ func Stage(parent context.Context, deadline time.Time) (*Staging, error) {
 		}
 	})
 	if !deadline.IsZero() {
-		stage.timer = time.AfterFunc(time.Until(deadline), func() {
+		stage.timer = time.AfterFunc(serverclock.Until(deadline), func() {
 			stage.mu.Lock()
 			defer stage.mu.Unlock()
 			if !stage.accepted {
@@ -57,7 +59,7 @@ func (s *Staging) Accept() (*Lease, error) {
 	if err == nil {
 		err = s.lease.Check()
 	}
-	if err == nil && !s.deadline.IsZero() && !time.Now().Before(s.deadline) {
+	if err == nil && !s.deadline.IsZero() && serverclock.Until(s.deadline) <= 0 {
 		err = ErrExpired
 	}
 	if err != nil {

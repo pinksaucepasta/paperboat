@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -169,7 +170,7 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 // OpenPeerStream upgrades one authenticated local Unix HTTP request into a
 // full-duplex byte stream owned by the daemon's peer transport manager.
 func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (net.Conn, error) {
-	if c == nil || ctx == nil || value.ValidatePending(time.Now().UTC()) != nil {
+	if c == nil || ctx == nil || value.ValidatePending(serverclock.Now().UTC()) != nil {
 		return nil, ErrInvalidConfig
 	}
 	body, err := json.Marshal(value)
@@ -215,7 +216,7 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 }
 
 func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferRequest) (*FileTransferLease, error) {
-	if c == nil || ctx == nil || value.Validate(time.Now().UTC()) != nil {
+	if c == nil || ctx == nil || value.Validate(serverclock.Now().UTC()) != nil {
 		return nil, ErrInvalidConfig
 	}
 	body, err := json.Marshal(value)
@@ -488,7 +489,7 @@ func (c *Client) CreateBugreport(ctx context.Context) (diagnostics.Bundle, error
 
 func (c *Client) ProbePeer(ctx context.Context, value PeerStreamRequest) (PeerProbeResult, error) {
 	var result PeerProbeResult
-	if c == nil || ctx == nil || value.Consumer != "health_probe" || value.Validate(time.Now().UTC()) != nil {
+	if c == nil || ctx == nil || value.Consumer != "health_probe" || value.Validate(serverclock.Now().UTC()) != nil {
 		return result, ErrInvalidConfig
 	}
 	body, err := json.Marshal(value)

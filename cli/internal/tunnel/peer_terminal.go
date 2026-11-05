@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -53,7 +54,7 @@ func NewPeerTerminalTunnel(config PeerTerminalConfig) (*PeerTerminalTunnel, erro
 		return nil, ErrPeerTerminalInvalid
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = func() time.Time { return serverclock.Now().UTC() }
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	return &PeerTerminalTunnel{config: config, authorities: clientauthority.NewCache(), lifetime: lifetime, cancelLifetime: cancel}, nil

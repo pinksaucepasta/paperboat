@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -178,8 +179,12 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				http.Error(w, "invalid dispatch binding", http.StatusBadRequest)
 				return
 			}
-			header, err = streamauth.Parse(envelope.Header, time.Now().UTC())
+			header, err = streamauth.Parse(envelope.Header, serverclock.Now().UTC())
 			if err != nil || !nativeDispatchConsumer(header.Consumer) {
+				if err == nil {
+					err = streamauth.ErrInvalid
+				}
+				recordNativeAdmissionFailure("stream_header", err)
 				http.Error(w, "invalid dispatch header", http.StatusBadRequest)
 				return
 			}
@@ -374,6 +379,12 @@ func BridgeNativeDispatch(left, right net.Conn) error { return bridgeNativePriva
 // Retain only the verifier's finite code, never its credential or error text.
 func recordNativeAdmissionFailure(stage string, err error) {
 	reason := "application_failed"
+	switch {
+	case errors.Is(err, streamauth.ErrExpired):
+		reason = "deadline_passed"
+	case errors.Is(err, streamauth.ErrInvalid):
+		reason = "header_invalid"
+	}
 	if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 		reason = "maintenance_busy"
 	}
@@ -389,5 +400,5 @@ func recordNativeAdmissionFailure(stage string, err error) {
 			reason = string(credential.Code)
 		}
 	}
-	diagnosticlog.TryWarn("native worker admission refused", "stage", stage, "reason", reason)
+	diagnosticlog.TryWarn("native worker admission refused", "stage", stage, "reason", reason, "server_clock_offset", serverclock.Offset().String())
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"strings"
 	"time"
 )
@@ -25,6 +26,16 @@ const (
 	maxUnixSocketPath     = 100
 )
 
+// CredentialExpiredError is a server-issued credential that is expired on the server-corrected
+// clock: the bounded skew allowance (serverclock.Threshold residual, verifier ClockSkew) is spent.
+type CredentialExpiredError struct{ ExpiresAt time.Time }
+
+func (e CredentialExpiredError) Error() string {
+	return "the access credential from Paperboat expired before use (expired " + e.ExpiresAt.UTC().Format(time.RFC3339) +
+		" on the server clock; this machine's clock offset is " + serverclock.Offset().String() + ")"
+}
+func (CredentialExpiredError) LocalAPICode() string { return "credential_expired" }
+
 type FileTransferRequest struct {
 	Schema            string    `json:"schema"`
 	MachineID         string    `json:"machine_id"`
@@ -44,8 +55,11 @@ func (r FileTransferRequest) Validate(now time.Time) error {
 	if r.TransferMode != "" && r.TransferMode != "automatic" && r.TransferMode != "unlimited" {
 		return ErrInvalidConfig
 	}
-	if r.Schema != FileTransferSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || !safeValue(r.AccessSessionID) || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || r.MaximumBytes > 1<<40 {
+	if r.Schema != FileTransferSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || !safeValue(r.AccessSessionID) || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || r.MaximumBytes > 1<<40 {
 		return ErrInvalidConfig
+	}
+	if !r.Deadline.After(now) {
+		return CredentialExpiredError{ExpiresAt: r.Deadline}
 	}
 	return nil
 }
@@ -70,6 +84,8 @@ type PeerStreamRequest struct {
 	QUICEndpoint      string          `json:"quic_endpoint,omitempty"`
 	WSSEndpoint       string          `json:"wss_endpoint,omitempty"`
 	Payload           json.RawMessage `json:"payload,omitempty"`
+	// Deadline is the credential's expiry on the server clock; producers and validators use
+	// serverclock, so a skewed local clock neither expires it early nor stretches it (F21-02).
 	// Offline is set by the daemon when Paperboat could not be reached for a descriptor: the
 	// stream carries no credential and the host admits it from its own signed scopes (F21-11).
 	Offline bool `json:"offline,omitempty"`
@@ -167,7 +183,7 @@ type PeerPreviewPayload struct {
 
 func NewPeerStreamRequest(machineID, environmentID string, machineGeneration uint64, consumer, operationID, credential string, deadline time.Time, maximumBytes uint64, payload json.RawMessage) (PeerStreamRequest, error) {
 	value := PeerStreamRequest{Workspace: "personal", Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Credential: credential, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
-	if value.Validate(time.Now().UTC()) != nil {
+	if value.Validate(serverclock.Now().UTC()) != nil {
 		return PeerStreamRequest{}, ErrInvalidConfig
 	}
 	return value, nil
@@ -175,7 +191,7 @@ func NewPeerStreamRequest(machineID, environmentID string, machineGeneration uin
 
 func NewPendingPeerStreamRequest(machineID, environmentID string, machineGeneration uint64, consumer, operationID string, deadline time.Time, maximumBytes uint64, payload json.RawMessage) (PeerStreamRequest, error) {
 	value := PeerStreamRequest{Workspace: "personal", Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
-	if value.ValidatePending(time.Now().UTC()) != nil {
+	if value.ValidatePending(serverclock.Now().UTC()) != nil {
 		return PeerStreamRequest{}, ErrInvalidConfig
 	}
 	return value, nil
@@ -188,8 +204,11 @@ func (r PeerStreamRequest) Validate(now time.Time) error {
 	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
 		return ErrInvalidConfig
 	}
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != r.Offline || r.Offline && !OfflineConsumers[r.Consumer] || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != r.Offline || r.Offline && !OfflineConsumers[r.Consumer] || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
+	}
+	if !r.Deadline.After(now) {
+		return CredentialExpiredError{ExpiresAt: r.Deadline}
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package streamauth
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 )
@@ -37,8 +38,9 @@ func TestHeaderRejectsExpiredNoncanonicalUnknownAndOversizedInput(t *testing.T) 
 	}
 	header.DeadlineUnix = now.Unix()
 	expired, _ := header.MarshalBinary()
-	if _, err := Parse(expired, now); err == nil {
-		t.Fatal("accepted expired header")
+	// A passed deadline is named apart from a malformed header, so the host logs why it refused (F21-02).
+	if _, err := Parse(expired, now); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expired header error = %v, want ErrExpired", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -189,6 +190,7 @@ func (s *Session) Open(ctx context.Context) (net.Conn, error) {
 	}
 	return &streamConn{Stream: stream, session: s, local: directAddr("local"), remote: directAddr(s.peerID)}, nil
 }
+
 // ensureRouterLocked starts reading incoming streams, so carrier offers reach
 // this session even when it never accepts an application stream.
 func (s *Session) ensureRouterLocked() error {
@@ -247,7 +249,7 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
-	header, err := streamauth.Parse(encoded, time.Now().UTC())
+	header, err := streamauth.Parse(encoded, serverclock.Now().UTC())
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
@@ -304,6 +306,16 @@ func readAuthorizationHeader(connection net.Conn) ([]byte, error) {
 }
 
 func rejectAuthorizedStream(connection net.Conn, err error) (net.Conn, streamauth.Header, error) {
+	reason := "denied"
+	switch {
+	case errors.Is(err, streamauth.ErrExpired):
+		reason = "deadline_passed"
+	case errors.Is(err, streamauth.ErrInvalid):
+		reason = "header_invalid"
+	}
+	// The refusal reaches the client as one stream code; the host log keeps why (F21-02). No error text: it may
+	// carry verifier detail.
+	diagnosticlog.TryWarn("native stream admission refused", "reason", reason, "server_clock_offset", serverclock.Offset().String())
 	code := AdmissionDenied
 	var refusal *AdmissionRefusal
 	if errors.As(err, &refusal) && refusal.Code == AdmissionUnavailable {

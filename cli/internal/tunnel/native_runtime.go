@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"net/url"
@@ -672,17 +673,17 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	lifetime := identity.LocalCertificate.Claims.ExpiresAt.Sub(now)
 	if lifetime > 24*time.Hour {
 		lifetime = 24 * time.Hour
 	}
 	issueLeaf := func() (tls.Certificate, error) {
-		remaining := identity.LocalCertificate.Claims.ExpiresAt.Sub(time.Now().UTC())
+		remaining := identity.LocalCertificate.Claims.ExpiresAt.Sub(serverclock.Now().UTC())
 		if remaining > 24*time.Hour {
 			remaining = 24 * time.Hour
 		}
-		return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, time.Now().UTC(), remaining)
+		return endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, serverclock.Now().UTC(), remaining)
 	}
 	leaf, err := endpointidentity.NewTLSCertificate(identity.LocalCertificate, identity.RootPublic, identity.LocalKeys.QUICPrivate, now, lifetime)
 	if err != nil {

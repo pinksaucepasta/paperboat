@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type LocalPeerTunnel struct {
@@ -21,7 +22,7 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	if t.Client == nil || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" {
 		return localapi.PeerStreamRequest{}, ErrPeerTerminalInvalid
 	}
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := serverclock.Now().Add(2 * time.Minute)
 	var err error
 	if info.Terminal.Auth.ExpiresAt != "" {
 		deadline, err = time.Parse(time.RFC3339, info.Terminal.Auth.ExpiresAt)
@@ -50,12 +51,12 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	}
 	request.AccessSessionID = info.Terminal.Auth.ResourceID
 	if request.Credential == "" {
-		if validationErr := request.ValidatePending(time.Now().UTC()); validationErr != nil {
+		if validationErr := request.ValidatePending(serverclock.Now().UTC()); validationErr != nil {
 			return request, fmt.Errorf("%w: pending peer request: %w", ErrPeerTerminalInvalid, validationErr)
 		}
 		return request, nil
 	}
-	if validationErr := request.Validate(time.Now().UTC()); validationErr != nil {
+	if validationErr := request.Validate(serverclock.Now().UTC()); validationErr != nil {
 		return request, fmt.Errorf("%w: peer request: %w", ErrPeerTerminalInvalid, validationErr)
 	}
 	return request, nil

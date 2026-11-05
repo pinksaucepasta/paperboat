@@ -7,6 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // carrierRoute is a client's active carrier generation for one machine: once a
@@ -81,7 +82,7 @@ func (o *Owner) dialRoute(ctx context.Context, peerID string, want *CarrierOffer
 		return nil
 	}
 	peer, err := o.authority.Peer(peerID)
-	if err != nil || route.offer.verify(peer, time.Now()) != nil {
+	if err != nil || route.offer.verify(peer, serverclock.Now()) != nil {
 		o.dropRoute(peerID, route)
 		return nil
 	}

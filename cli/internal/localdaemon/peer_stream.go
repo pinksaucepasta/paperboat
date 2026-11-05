@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/url"
 	"time"
@@ -149,7 +150,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 
 func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
-		if ctx == nil || peerTunnel == nil || request.Consumer != "health_probe" || request.Validate(time.Now().UTC()) != nil {
+		if ctx == nil || peerTunnel == nil || request.Consumer != "health_probe" || request.Validate(serverclock.Now().UTC()) != nil {
 			return localapi.PeerProbeResult{}, ErrInvalidInventoryConfig
 		}
 		result, err := peerTunnel.ProbeNative(ctx, request.MachineID, request.MachineGeneration)
@@ -213,7 +214,7 @@ type rawPeerAddr string
 func (a rawPeerAddr) Network() string { return "paperboat-peer" }
 func (a rawPeerAddr) String() string  { return string(a) }
 
-func peerTunnelNow() time.Time { return time.Now().UTC() }
+func peerTunnelNow() time.Time { return serverclock.Now().UTC() }
 
 // A terminal setup may renew its authorized descriptor after expiry. Exec and
 // other mutation outcomes retain their existing authoritative classification.

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"log"
 	"net"
@@ -344,8 +345,14 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 		return
 	}
 	var value FileTransferRequest
-	if decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value) != nil || value.Validate(time.Now().UTC()) != nil {
-		writeError(writer, http.StatusBadRequest, requestID, "invalid_file_transfer", "file transfer key request is invalid")
+	err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value)
+	if err == nil {
+		err = value.Validate(serverclock.Now().UTC())
+	}
+	if err != nil {
+		if !writeCredentialExpired(writer, requestID, err) {
+			writeError(writer, http.StatusBadRequest, requestID, "invalid_file_transfer", "file transfer key request is invalid")
+		}
 		return
 	}
 	result, err := s.config.FileTransfers.PrepareFileTransfer(request.Context(), peer, value)
@@ -469,11 +476,11 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 		return
 	}
 	var value PeerStreamRequest
-	if err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value); err != nil || value.Consumer != "health_probe" || value.Validate(time.Now().UTC()) != nil {
+	if err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value); err != nil || value.Consumer != "health_probe" || value.Validate(serverclock.Now().UTC()) != nil {
 		writeError(writer, http.StatusBadRequest, requestID, "invalid_peer_probe", "peer probe request is invalid")
 		return
 	}
-	ctx, cancel := context.WithDeadline(request.Context(), value.Deadline)
+	ctx, cancel := context.WithTimeout(request.Context(), serverclock.Until(value.Deadline))
 	defer cancel()
 	result, err := s.config.PeerProbes.ProbePeer(ctx, peer, value)
 	if err != nil {
@@ -562,8 +569,14 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		return
 	}
 	var value PeerStreamRequest
-	if err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value); err != nil || value.ValidatePending(time.Now().UTC()) != nil {
+	if err := decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value); err != nil {
 		writeError(writer, http.StatusBadRequest, requestID, "invalid_peer_stream", "peer stream request is invalid")
+		return
+	}
+	if err := value.ValidatePending(serverclock.Now().UTC()); err != nil {
+		if !writeCredentialExpired(writer, requestID, err) {
+			writeError(writer, http.StatusBadRequest, requestID, "invalid_peer_stream", "peer stream request is invalid")
+		}
 		return
 	}
 	setupCtx, cancelSetup := context.WithCancel(request.Context())
@@ -591,7 +604,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		}
 		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
 		s.recordCause(request.Context(), "peer_stream", err)
-		if writeServerRefusal(writer, requestID, err) {
+		if writeServerRefusal(writer, requestID, err) || writeCredentialExpired(writer, requestID, err) {
 			return
 		}
 		if s.config.SignedOut != nil && s.config.SignedOut(request.Context()) {
@@ -968,4 +981,15 @@ func (s *Server) recordCause(ctx context.Context, operation string, err error) {
 	if s.config.RecordCause != nil && err != nil {
 		s.config.RecordCause(operation, supportref.FromContext(ctx), err)
 	}
+}
+
+// writeCredentialExpired answers a credential already past its server-clock expiry with its own code,
+// so the user is told the access expired (and the clock offset) instead of "request is invalid".
+func writeCredentialExpired(writer http.ResponseWriter, requestID string, err error) bool {
+	var expired CredentialExpiredError
+	if !errors.As(err, &expired) {
+		return false
+	}
+	writeError(writer, http.StatusUnauthorized, requestID, "credential_expired", expired.Error())
+	return true
 }

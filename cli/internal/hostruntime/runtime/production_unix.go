@@ -57,6 +57,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var (
@@ -67,7 +68,7 @@ var (
 
 type productionClock struct{}
 
-func (productionClock) Now() time.Time { return time.Now().UTC() }
+func (productionClock) Now() time.Time { return serverclock.Now().UTC() }
 
 func NewProductionHost(ctx context.Context, version string, environ func(string) string) (*Host, error) {
 	return newProductionHost(ctx, version, environ)
@@ -696,11 +697,11 @@ func productionBrowserTerminalIdentity(stateRoot, machineID string, generation u
 	if err != nil || endpoint.RootKeyID != "aek_"+rootFingerprint {
 		return server.BrowserTerminalIdentity{}, errors.Join(ErrProductionInvalid, err)
 	}
-	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: generation}, time.Now().UTC())
+	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: generation}, serverclock.Now().UTC())
 	if err != nil {
 		return server.BrowserTerminalIdentity{}, errors.Join(ErrProductionInvalid, err)
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	lifetime := certificate.Claims.ExpiresAt.Sub(now)
 	if lifetime > 24*time.Hour {
 		lifetime = 24 * time.Hour

@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // The primary and delegated carriers use the same enrolled machine identity.
@@ -26,12 +27,12 @@ func loadNativePeerTLS(stateRoot, machineID string, generation uint64) (*tls.Con
 		// a certificate can be verified for this exact machine generation.
 		return nil, nil, tailnet.NetworkBinding{}, errNativePeerPending
 	}
-	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: endpoint.Generation}, time.Now().UTC())
+	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: endpoint.Generation}, serverclock.Now().UTC())
 	if err != nil {
 		return nil, nil, tailnet.NetworkBinding{}, errors.Join(ErrProductionInvalid, err)
 	}
 	issueLeaf := func() (tls.Certificate, error) {
-		now := time.Now().UTC()
+		now := serverclock.Now().UTC()
 		lifetime := certificate.Claims.ExpiresAt.Sub(now)
 		if lifetime > 24*time.Hour {
 			lifetime = 24 * time.Hour

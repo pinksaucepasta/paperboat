@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // APIHost is the host of ServerURL, against which a failed request counts as the control plane being unavailable.
@@ -106,13 +107,18 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	}
 	token, expires = descriptor.Auth.Token, descriptor.Auth.ExpiresAt
 	quicEndpoint, wssEndpoint = descriptor.Endpoints.QUIC, descriptor.Endpoints.WSS
-	if token == "" || expires.IsZero() || !expires.After(time.Now()) {
-		return request, errors.New("operation descriptor expired")
+	if token == "" || expires.IsZero() {
+		return request, errors.New("operation descriptor has no credential")
+	}
+	// The expiry is the server's, so it is judged on the server clock (F21-02): a local clock 10 min
+	// ahead read the 2-min credential as expired and refused every exec.
+	if serverclock.Until(expires) <= 0 {
+		return request, localapi.CredentialExpiredError{ExpiresAt: expires}
 	}
 	request.Credential, request.Deadline = token, expires.UTC()
 	request.AccessSessionID = descriptor.Auth.AccessSessionID
 	request.QUICEndpoint, request.WSSEndpoint = quicEndpoint, wssEndpoint
-	if err := request.Validate(time.Now().UTC()); err != nil {
+	if err := request.Validate(serverclock.Now().UTC()); err != nil {
 		return request, err
 	}
 	return request, nil
@@ -314,8 +320,8 @@ func hostRulesPeerStream(request localapi.PeerStreamRequest) (localapi.PeerStrea
 	}
 	request.Offline, request.Credential, request.AccessSessionID = true, "", ""
 	request.QUICEndpoint, request.WSSEndpoint = "", ""
-	request.Deadline = time.Now().Add(offlineStreamLifetime).UTC()
-	if err := request.Validate(time.Now().UTC()); err != nil {
+	request.Deadline = serverclock.Now().Add(offlineStreamLifetime).UTC()
+	if err := request.Validate(serverclock.Now().UTC()); err != nil {
 		return request, err
 	}
 	return request, nil
