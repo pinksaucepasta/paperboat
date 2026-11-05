@@ -31,7 +31,7 @@ func runOld(dir string) {
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "old") })}
 	go func() { _ = server.Serve(l) }()
 	released := make(chan struct{})
-	if _, err := Offer(dir, "epoch_handover", func() { close(released) }); err != nil {
+	if _, err := Offer(dir, "epoch_handover", nil, func() { close(released) }); err != nil {
 		panic(err)
 	}
 	os.Stdout.WriteString(l.Addr().String() + " " + udp.LocalAddr().String() + "\n")

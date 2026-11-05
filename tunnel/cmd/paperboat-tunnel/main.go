@@ -171,6 +171,11 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	defer stop()
 	if inheritance != nil {
 		service.Handover.SetSilent(true) // the serving process reports until it releases
+		// The server sends each certificate once per epoch, so the serving process hands its over;
+		// the routes' first reconcile needs them (oracle, 2026-11-05: "TLS certificate is not available").
+		report := service.Handover.ImportCertificates(processCtx, inheritance.Certificates)
+		inheritance.Certificates = nil
+		fmt.Fprintf(os.Stderr, "handover certificates imported=%d dropped=%v\n", report.Imported, report.Dropped)
 	}
 	if err := service.Start(serving); err != nil {
 		if inheritance != nil {
@@ -186,7 +191,7 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 		}
 	}
 	released := make(chan struct{})
-	stopOffer, err := handover.Offer(handoverDir, service.Handover.Epoch, func() { close(released) })
+	stopOffer, err := handover.Offer(handoverDir, service.Handover.Epoch, service.Handover.ExportCertificates, func() { close(released) })
 	if err != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
@@ -750,7 +755,11 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	service := edgeruntime.New(cfg, state, telemetryLifecycle, assembly, carrierTrustLifetime, telemetryReady{lifecycle: telemetryLifecycle})
 	service.Reporter = reporter
-	service.Handover = edgeruntime.Handover{Epoch: processEpoch, Drain: assembly.Drain, SetSilent: client.SetSilent, Warm: runtimeWorker.Pulled()}
+	service.Handover = edgeruntime.Handover{Epoch: processEpoch, Drain: assembly.Drain, SetSilent: client.SetSilent, Warm: runtimeWorker.Pulled(),
+		ExportCertificates: certificateRegistry.ExportEncoded,
+		ImportCertificates: func(ctx context.Context, records [][]byte) tlscert.ImportReport {
+			return certificateRegistry.ImportEncoded(ctx, cfg.NodeID, processEpoch, records)
+		}}
 	if err := service.SetHealthHandler(health); err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()

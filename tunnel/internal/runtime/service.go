@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 	"net"
 	"net/http"
 	"sync"
@@ -127,6 +128,11 @@ type Handover struct {
 	SetSilent func(bool)
 	// Warm is closed once this process has pulled its admissions.
 	Warm <-chan struct{}
+	// ExportCertificates returns the active TLS certificates as opaque records for the replacement
+	// (tlscert.Registry.ExportEncoded); ImportCertificates stages the ones a serving process handed
+	// over, before this process starts (tlscert.Registry.ImportEncoded).
+	ExportCertificates func() ([][]byte, error)
+	ImportCertificates func(ctx context.Context, records [][]byte) tlscert.ImportReport
 }
 
 func (s *Service) Done() <-chan error { return s.done }

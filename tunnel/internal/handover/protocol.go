@@ -16,6 +16,8 @@ import (
 //
 //	new → old  {"op":"hello"}
 //	old → new  {"op":"sockets","epoch":…,"keys":[…],"more":…}  + the sockets (SCM_RIGHTS), in batches
+//	old → new  {"op":"certificates","certs":[…],"more":…}  the active TLS certificates, in batches,
+//	           while the old process still accepts (the new one imports them before it starts)
 //	new → old  {"op":"ready"}      the new process is warm: certificates, admissions and routes loaded
 //	old → new  {"op":"released"}   the old process stopped accepting; the new one accepts from now on
 //
@@ -26,8 +28,9 @@ import (
 const FileName = "handover.sock"
 
 const (
-	maxMessage     = 64 << 10
-	socketsPerSend = 200 // below the kernel's SCM_MAX_FD (253)
+	maxMessage     = 256 << 10
+	certBatchBytes = 128 << 10 // a certificate batch stays under maxMessage once base64-encoded
+	socketsPerSend = 200       // below the kernel's SCM_MAX_FD (253)
 	helloTimeout   = 5 * time.Second
 )
 
@@ -38,6 +41,8 @@ type message struct {
 	Epoch string   `json:"epoch,omitempty"`
 	Keys  []string `json:"keys,omitempty"`
 	More  bool     `json:"more,omitempty"`
+	// Certs are opaque certificate records (private keys inside) for the replacement; see tlscert.
+	Certs [][]byte `json:"certs,omitempty"`
 }
 
 func send(conn *net.UnixConn, m message, files []*os.File) error {
@@ -54,6 +59,7 @@ func send(conn *net.UnixConn, m message, files []*os.File) error {
 		rights = syscall.UnixRights(fds...)
 	}
 	_, _, err = conn.WriteMsgUnix(b, rights, nil)
+	wipeRecords([][]byte{b}) // the message may carry certificate private keys
 	return err
 }
 
@@ -80,6 +86,7 @@ func receive(conn *net.UnixConn) (message, []*os.File, error) {
 		}
 	}
 	var m message
+	defer wipeRecords([][]byte{b[:n]})
 	if flags&(syscall.MSG_TRUNC|syscall.MSG_CTRUNC) != 0 || json.Unmarshal(b[:n], &m) != nil {
 		closeAll(files)
 		return message{}, nil, fmt.Errorf("%w: malformed message", ErrHandover)
@@ -96,8 +103,11 @@ func closeAll(files []*os.File) {
 // Inheritance is a replacement process's side of a handover in progress.
 type Inheritance struct {
 	Epoch string
-	conn  *net.UnixConn
-	udp   chan struct{}
+	// Certificates are the serving process's active certificate records; the caller imports and
+	// wipes them (tlscert.Registry.ImportEncoded).
+	Certificates [][]byte
+	conn         *net.UnixConn
+	udp          chan struct{}
 }
 
 // Inherit takes over the sockets and process epoch of the edge process serving in stateDir. It
@@ -120,6 +130,9 @@ func Inherit(stateDir string) (*Inheritance, error) {
 }
 
 func inherit(conn *net.UnixConn) (*Inheritance, error) {
+	if err := requirePeerUID(conn, os.Geteuid()); err != nil {
+		return nil, err
+	}
 	_ = conn.SetDeadline(time.Now().Add(helloTimeout))
 	if err := send(conn, message{Op: "hello"}, nil); err != nil {
 		return nil, fmt.Errorf("%w: send hello: %w", ErrHandover, err)
@@ -145,10 +158,23 @@ func inherit(conn *net.UnixConn) (*Inheritance, error) {
 			break
 		}
 	}
+	var certs [][]byte
+	for more := true; more; {
+		m, files, err := receive(conn)
+		closeAll(files)
+		if err != nil || m.Op != "certificates" {
+			closeAll(mapFiles(inherited))
+			wipeRecords(certs)
+			wipeRecords(m.Certs)
+			return nil, fmt.Errorf("%w: receive certificates: unexpected %q message: %v", ErrHandover, m.Op, err)
+		}
+		certs = append(certs, m.Certs...)
+		more = m.More
+	}
 	_ = conn.SetDeadline(time.Time{})
 	s := &sockets{inherited: inherited, owned: map[string]*os.File{}, tcp: map[*listener]struct{}{}, accept: make(chan struct{}), udp: make(chan struct{}), released: make(chan struct{})}
 	current = s
-	return &Inheritance{Epoch: epoch, conn: conn, udp: s.udp}, nil
+	return &Inheritance{Epoch: epoch, Certificates: certs, conn: conn, udp: s.udp}, nil
 }
 
 func mapFiles(m map[string]*os.File) []*os.File {
@@ -197,7 +223,7 @@ func (i *Inheritance) Abort() { _ = i.conn.Close() }
 // Offer serves the handover socket in stateDir for this process's replacement. Once a replacement
 // is ready, this process stops accepting, answers "released" and calls onRelease, which starts
 // its drain. Offer returns a stop function that closes the socket.
-func Offer(stateDir, epoch string, onRelease func()) (func(), error) {
+func Offer(stateDir, epoch string, certificates func() ([][]byte, error), onRelease func()) (func(), error) {
 	path := filepath.Join(stateDir, FileName)
 	// A previous process's socket file is stale once this process serves: replace it.
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -218,7 +244,7 @@ func Offer(stateDir, epoch string, onRelease func()) (func(), error) {
 			if err != nil {
 				return
 			}
-			if offer(conn, epoch) {
+			if offer(conn, epoch, certificates) {
 				_ = l.Close()
 				onRelease()
 				// Held open until this process exits: its closing tells the replacement to read UDP.
@@ -231,7 +257,10 @@ func Offer(stateDir, epoch string, onRelease func()) (func(), error) {
 }
 
 // offer runs one exchange; true once this process released its sockets to a ready replacement.
-func offer(conn *net.UnixConn, epoch string) bool {
+func offer(conn *net.UnixConn, epoch string, certificates func() ([][]byte, error)) bool {
+	if requirePeerUID(conn, peerUID()) != nil {
+		return false
+	}
 	_ = conn.SetDeadline(time.Now().Add(helloTimeout))
 	if m, files, err := receive(conn); err != nil || m.Op != "hello" {
 		closeAll(files)
@@ -243,6 +272,9 @@ func offer(conn *net.UnixConn, epoch string) bool {
 		if err := send(conn, message{Op: "sockets", Epoch: epoch, Keys: keys[start:end], More: end < len(keys)}, files[start:end]); err != nil {
 			return false
 		}
+	}
+	if !sendCertificates(conn, certificates) {
+		return false
 	}
 	// The replacement warms up for as long as its own startup allows; an install bounds that.
 	_ = conn.SetDeadline(time.Time{})
@@ -260,3 +292,43 @@ func offer(conn *net.UnixConn, epoch string) bool {
 // held keeps the released exchange's connection open (and out of the collector's reach) until
 // this process exits.
 var held *net.UnixConn
+
+// peerUID is the user a handover peer must be; a variable so a test can name another one.
+var peerUID = os.Geteuid
+
+// sendCertificates sends the serving process's certificate records in batches, always ending with a
+// message that has no More, and wipes them. A record too large for one message is skipped: the
+// replacement then lacks that certificate and the server's next action for it repairs that.
+func sendCertificates(conn *net.UnixConn, certificates func() ([][]byte, error)) bool {
+	var records [][]byte
+	if certificates != nil {
+		var err error
+		if records, err = certificates(); err != nil {
+			return false
+		}
+	}
+	defer wipeRecords(records)
+	var batch [][]byte
+	size := 0
+	for _, record := range records {
+		if len(record) > certBatchBytes {
+			continue
+		}
+		if size+len(record) > certBatchBytes {
+			if send(conn, message{Op: "certificates", Certs: batch, More: true}, nil) != nil {
+				return false
+			}
+			batch, size = nil, 0
+		}
+		batch, size = append(batch, record), size+len(record)
+	}
+	return send(conn, message{Op: "certificates", Certs: batch}, nil) == nil
+}
+
+func wipeRecords(records [][]byte) {
+	for _, record := range records {
+		for i := range record {
+			record[i] = 0
+		}
+	}
+}

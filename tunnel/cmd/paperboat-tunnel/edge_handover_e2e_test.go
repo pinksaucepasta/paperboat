@@ -3,12 +3,18 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,7 +36,50 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/handover"
 	edgeruntime "github.com/pinksaucepasta/paperboat/tunnel/internal/runtime"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/tlscert"
 )
+
+const handoverCertificateHost = "app.example.test"
+
+// handoverRegistry is a process's TLS certificate registry. The serving process holds one active
+// certificate that the server delivered once and acknowledged; the server never sends it again for
+// this epoch, so the replacement has it only if the serving process hands it over.
+func handoverRegistry(t *testing.T, role string) *tlscert.Registry {
+	t.Helper()
+	registry, err := tlscert.NewRegistry(tlscert.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if role != "old" {
+		return registry
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	template := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: handoverCertificateHost}, DNSNames: []string{handoverCertificateHost}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := tlscert.Binding{AccountID: "account_h", TunnelID: "tunnel_h", DomainID: "domain_h", Hostname: handoverCertificateHost, DomainGeneration: 1, CertificateGeneration: 1, EdgeNodeID: handoverNode, EdgeProcessEpoch: handoverEpoch, AssignmentGeneration: 1}
+	bundle := tlscert.Bundle{CertificatePEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), PrivateKeyPEM: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), Issuer: "test-ca", NotBefore: template.NotBefore, NotAfter: template.NotAfter}
+	if err := registry.Stage(context.Background(), binding, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.MarkReady(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Activate(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
 
 const (
 	handoverNode, handoverEpoch, handoverHost = "edge_handover", "edge_epoch_handover", "machine.runtime.example.test"
@@ -72,6 +121,14 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	registry := handoverRegistry(t, role)
+	if inheritance != nil {
+		// No certificate action reaches this process: it serves only what the serving one handed over.
+		report := registry.ImportEncoded(ctx, handoverNode, handoverEpoch, inheritance.Certificates)
+		if _, err := registry.GetCertificate(&tls.ClientHelloInfo{ServerName: handoverCertificateHost}); report.Imported != 1 || err != nil {
+			t.Fatalf("the replacement lacks the serving process's certificate: %+v %v", report, err)
+		}
+	}
 	source := &missSource{admissions: []runtimewire.Admission{handoverAdmission(t, machinePublic)}}
 	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: handoverNode, ProcessEpoch: handoverEpoch})
 	if err != nil {
@@ -143,7 +200,7 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 		}
 	}
 	released := make(chan struct{})
-	if _, err := handover.Offer(dir, handoverEpoch, func() { close(released) }); err != nil {
+	if _, err := handover.Offer(dir, handoverEpoch, registry.ExportEncoded, func() { close(released) }); err != nil {
 		t.Fatal(err)
 	}
 	os.Stdout.WriteString("serving\n")
