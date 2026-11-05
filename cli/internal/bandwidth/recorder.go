@@ -61,7 +61,7 @@ type Recorder struct {
 }
 
 type counterIdentity struct {
-	accessSessionID, streamID, consumer, mode, nodeID string
+	accessSessionID, streamID, consumer, mode, nodeID, peerAccountID string
 }
 
 // Open recovers pending absolute counters. Only one recorder owns a host's
@@ -146,7 +146,7 @@ func (r *Recorder) idle(now time.Time) bool {
 }
 
 func key(report api.NativeUsageReport) string {
-	value, _ := json.Marshal([]string{report.AccessSessionID, report.StreamID, report.Consumer, report.Mode, report.NodeID, report.IntervalStart.Format(time.RFC3339)})
+	value, _ := json.Marshal([]string{report.AccessSessionID, report.StreamID, report.Consumer, report.Mode, report.NodeID, report.IntervalStart.Format(time.RFC3339), report.PeerAccountID})
 	return fmt.Sprintf("%x", sha256.Sum256(value))
 }
 
@@ -155,11 +155,11 @@ func (r *Recorder) add(binding Binding, path Path, n int64, upload bool, now tim
 	defer r.mu.Unlock()
 	r.revision++
 	start := now.Truncate(time.Minute)
-	report := api.NativeUsageReport{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Mode: path.Mode, NodeID: path.NodeID, IntervalStart: start, IntervalEnd: now}
+	report := api.NativeUsageReport{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Mode: path.Mode, NodeID: path.NodeID, IntervalStart: start, IntervalEnd: now, PeerAccountID: binding.PeerAccountID}
 	if !r.idsMinute.Equal(start) {
 		r.ids, r.idsMinute = make(map[counterIdentity]string), start
 	}
-	identity := counterIdentity{binding.AccessSessionID, binding.StreamID, binding.Consumer, path.Mode, path.NodeID}
+	identity := counterIdentity{binding.AccessSessionID, binding.StreamID, binding.Consumer, path.Mode, path.NodeID, binding.PeerAccountID}
 	id, known := r.ids[identity]
 	if !known {
 		id = key(report)

@@ -46,8 +46,11 @@ type Session struct {
 // MeterBinding contains only verified accounting metadata, never credentials.
 type MeterBinding struct {
 	AccessSessionID, StreamID, Consumer string
-	Reverse                             bool
-	Path                                func(string) (string, string)
+	// PeerAccountID is set for a stream admitted from the host's own rules (an offline header): the server
+	// attributes its usage from the peer's access to the host, as there is no access session.
+	PeerAccountID string
+	Reverse       bool
+	Path          func(string) (string, string)
 }
 
 // MeterIncoming measures authorized host application I/O. Reverse is used for
@@ -59,7 +62,11 @@ func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessS
 	if s.owner.meterIncoming == nil {
 		return conn
 	}
-	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, Reverse: reverse, Path: func(direction string) (string, string) {
+	peerAccountID := ""
+	if header.Offline {
+		peerAccountID = s.binding.AccountID
+	}
+	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, PeerAccountID: peerAccountID, Reverse: reverse, Path: func(direction string) (string, string) {
 		if s.carrierPath != nil {
 			return s.carrierPath(direction)
 		}

@@ -8,8 +8,8 @@ import (
 
 type Path struct{ Mode, NodeID string }
 type Binding struct {
-	AccessSessionID, StreamID, Consumer string
-	Reverse                             bool
+	AccessSessionID, StreamID, Consumer, PeerAccountID string
+	Reverse                                            bool
 }
 type Observer func(string) Path
 

@@ -258,7 +258,14 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
 	authErr := c.authorization.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
-	usageErr := c.usage.checkpoint(ctx)
+	// A replacement in the same slot resumes a checkpoint. A retired generation's replacement already runs in
+	// another slot, so its file waits for a later process in this slot: deliver the drained sessions' bytes now.
+	var usageErr error
+	if c.peer.retired.Load() {
+		usageErr = c.usage.Shutdown(ctx)
+	} else {
+		usageErr = c.usage.checkpoint(ctx)
+	}
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
 	// The primary role is released only after the primary listener closed.
 	var unlockErr error

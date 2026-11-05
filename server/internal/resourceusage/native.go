@@ -29,6 +29,9 @@ type NativeReport struct {
 	IntervalEnd     time.Time `json:"interval_end"`
 	Upload          int64     `json:"upload_bytes"`
 	Download        int64     `json:"download_bytes"`
+	// PeerAccountID marks a stream the host admitted from its own signed rules (every managed SSH stream, D1;
+	// exec or terminal offline): it has no access session, AccessSessionID is the host machine itself.
+	PeerAccountID string `json:"peer_account_id,omitempty"`
 }
 type NativeBatch struct {
 	Reports             []NativeReport `json:"reports"`
@@ -61,6 +64,10 @@ func (r NativeReport) validate(now time.Time) error {
 	switch r.Consumer {
 	case "terminal", "exec", "ssh", "file", "file_transfer", "file_transfer_key", "private_http", "private_tcp", "inspector", "config_compare":
 	default:
+		return ErrInvalid
+	}
+	// Host rules admit only terminal, exec and ssh (streamauth.OfflineConsumers), never through an edge.
+	if r.PeerAccountID != "" && (len(r.PeerAccountID) > 256 || r.Mode == "edge" || r.Consumer != "terminal" && r.Consumer != "exec" && r.Consumer != "ssh") {
 		return ErrInvalid
 	}
 	return nil
@@ -103,7 +110,15 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			var ws, kind, id, name, machineName, admittedNode, resourceRoute string
 			var allowed bool
 			var actor sql.NullString
-			err := tx.QueryRow(ctx, `SELECT workspace_id,resource_kind,resource_id,resource_name,machine_name,$4=ANY(capabilities),edge_node_id,resource_route_id,actor_account_id FROM native_usage_authorities WHERE access_session_id=$1 AND machine_id=$2 AND installation_generation=$3 AND retain_until>$5 AND admitted_at<=$6 AND expires_at>=$6 AND ($7<>'edge' OR (edge_node_id<>'' AND ($8='' OR edge_node_id=$8))) FOR SHARE`, r.AccessSessionID, machine, generation, consumerCapability(r.Consumer), now, r.IntervalEnd, r.Mode, r.NodeID).Scan(&ws, &kind, &id, &name, &machineName, &allowed, &admittedNode, &resourceRoute, &actor)
+			var err error
+			if r.PeerAccountID == "" {
+				err = tx.QueryRow(ctx, `SELECT workspace_id,resource_kind,resource_id,resource_name,machine_name,$4=ANY(capabilities),edge_node_id,resource_route_id,actor_account_id FROM native_usage_authorities WHERE access_session_id=$1 AND machine_id=$2 AND installation_generation=$3 AND retain_until>$5 AND admitted_at<=$6 AND expires_at>=$6 AND ($7<>'edge' OR (edge_node_id<>'' AND ($8='' OR edge_node_id=$8))) FOR SHARE`, r.AccessSessionID, machine, generation, consumerCapability(r.Consumer), now, r.IntervalEnd, r.Mode, r.NodeID).Scan(&ws, &kind, &id, &name, &machineName, &allowed, &admittedNode, &resourceRoute, &actor)
+			} else {
+				// A host-rules stream is attributed like its audit event: by the access decision online descriptors use
+				// for the peer the host's native session proved, in the workspace that decides it.
+				// shortcut: decided at report time, so bytes reported after the peer lost access are dropped (not charged).
+				err = tx.QueryRow(ctx, `SELECT d.workspace,'machine',m.id,m.alias,m.alias,d.reason IS NULL AND $1=m.id,'','',$4::text FROM user_machines m CROSS JOIN paperboat.machine_access_decision($4,m.id,$5,false,NULL) d WHERE m.id=$2 AND m.installation_generation=$3 AND m.deleted_at IS NULL`, r.AccessSessionID, machine, generation, r.PeerAccountID, consumerCapability(r.Consumer)).Scan(&ws, &kind, &id, &name, &machineName, &allowed, &admittedNode, &resourceRoute, &actor)
+			}
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
@@ -146,7 +161,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			}
 			// Stable per-minute cumulative records permit replay and out-of-order
 			// updates without creating additional billable measurements.
-			key, _ := json.Marshal([]any{machine, generation, r.AccessSessionID, r.StreamID, r.Consumer, r.Mode, r.NodeID, r.IntervalStart.UTC()})
+			key, _ := json.Marshal([]any{machine, generation, r.AccessSessionID, r.StreamID, r.Consumer, r.Mode, r.NodeID, r.IntervalStart.UTC(), r.PeerAccountID})
 			digest := sha256.Sum256(key)
 			operation := "native:" + hex.EncodeToString(digest[:])
 			var capacity bool

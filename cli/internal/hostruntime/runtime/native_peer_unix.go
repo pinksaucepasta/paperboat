@@ -305,7 +305,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	usage := s.config.usage
 	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, PrepareCarrier: prepareCarrierPeer(prepareTerminalCarrierPeer(s.config.stateRoot, s.config.ownerCatalog), s.config.prepareGeneration), AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
-		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
+		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
 		})

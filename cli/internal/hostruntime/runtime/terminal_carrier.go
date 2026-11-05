@@ -111,7 +111,7 @@ func newTerminalCarrier(ctx context.Context, version string, environ func(string
 	}
 	c.owner, err = native.NewOwner(native.Config{Authority: c.authority, TLS: tlsConfig, PrepareCarrier: prepareTerminalCarrierPeer(base.config.StateRoot, environ("PAPERBOAT_SESSION_OWNER_CATALOG")), RefreshAuthority: func(ctx context.Context) error { return c.authority.RefreshForAdmission(ctx, c.control) }, MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		digest := sha256.Sum256(append(namespace[:], binding.StreamID...))
-		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: fmt.Sprintf("stream_%x", digest), Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
+		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: fmt.Sprintf("stream_%x", digest), Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
 		})

@@ -64,3 +64,46 @@ func assertNativeConsumerWorkspace(t *testing.T, store *db.DB, service *Service,
 		}
 	})
 }
+
+// A stream the host admitted from its own rules (every managed SSH stream, D1) has no access session. Its report
+// names the host as the session and the peer the native session proved; it is recorded under the consumer's kind in
+// the workspace the peer's access decides, with the exact byte counts. A peer without access, or a report naming
+// another resource, records nothing.
+func assertHostRulesUsage(t *testing.T, store *db.DB, service *Service, suffix, owner, stranger string, now time.Time) {
+	t.Helper()
+	t.Run("host-rules-ssh", func(t *testing.T) {
+		ctx := t.Context()
+		machine := "rules_machine_" + suffix
+		exec := func(q string, args ...any) {
+			t.Helper()
+			if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		defer func() {
+			for _, q := range []string{`DELETE FROM resource_bandwidth_events WHERE machine_id=$1`, `DELETE FROM native_usage_reporting_status WHERE machine_id=$1`, `DELETE FROM user_machines WHERE id=$1`} {
+				if _, err := store.SQL().ExecContext(context.Background(), q, machine); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner)
+		report := func(session, peer, stream string) NativeReport {
+			return NativeReport{AccessSessionID: session, PeerAccountID: peer, StreamID: stream, Consumer: "ssh", Mode: "relay", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: 1 << 20, Download: 1<<20 + 7}
+		}
+		receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report(machine, owner, "s1"), report(machine, stranger, "s2"), report("other_"+machine, owner, "s3")}})
+		if err != nil || receipt.Accepted != 1 || len(receipt.RejectedIndices) != 2 || receipt.RejectedIndices[0] != 1 || receipt.RejectedIndices[1] != 2 {
+			t.Fatalf("host-rules reports: %+v %v", receipt, err)
+		}
+		var workspace, actor, kind string
+		var upload, download int64
+		var events int
+		err = store.SQL().QueryRowContext(ctx, `SELECT count(*) OVER (),workspace_id,actor_account_id,resource_kind,upload_bytes,download_bytes FROM resource_bandwidth_events WHERE machine_id=$1`, machine).Scan(&events, &workspace, &actor, &kind, &upload, &download)
+		if err != nil || events != 1 || kind != "ssh" || workspace != "personal:"+owner || actor != owner || upload != 1<<20 || download != 1<<20+7 {
+			t.Fatalf("host-rules event count=%d kind=%q workspace=%q actor=%q bytes=%d/%d: %v", events, kind, workspace, actor, upload, download, err)
+		}
+		if err := (NativeReport{AccessSessionID: machine, PeerAccountID: owner, StreamID: "s4", Consumer: "file_transfer", Mode: "relay", IntervalStart: now, IntervalEnd: now}).validate(now); err == nil {
+			t.Fatal("a host-rules report for a consumer host rules never admit was valid")
+		}
+	})
+}

@@ -20,6 +20,9 @@ type NativeUsageReport struct {
 	IntervalEnd     time.Time `json:"interval_end"`
 	UploadBytes     int64     `json:"upload_bytes"`
 	DownloadBytes   int64     `json:"download_bytes"`
+	// PeerAccountID names the peer of a stream the host admitted from its own signed rules (every managed SSH
+	// stream, D1; exec or terminal offline). It has no access session, so AccessSessionID is the host itself.
+	PeerAccountID string `json:"peer_account_id,omitempty"`
 }
 
 func (c *Client) ReportNativeUsage(ctx context.Context, reports []NativeUsageReport, unrecordedBytes, expiredBytes int64, incomplete bool) error {
