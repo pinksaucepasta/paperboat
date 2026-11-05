@@ -79,27 +79,34 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	return nil
 }
 
-// run asks the server again when a key change is published (machine_access), after a failure, every
-// interval while change delivery is down, and otherwise every managedSSHKeyFallback (PR-03).
+// run re-reads the host keys every interval (a local read) and asks the server when they changed (C066:
+// the server must hold regenerated keys as pending for trust-host), when a key change is published
+// (machine_access), after a failure, every interval while change delivery is down, and otherwise every
+// managedSSHKeyFallback (PR-03).
 func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
 	failed := false
+	last := time.Now()
 	for {
-		timer := time.NewTimer(s.nextReconcile(failed))
+		timer := time.NewTimer(s.interval)
+		published := false
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-s.events.Changed():
 			timer.Stop()
+			published = true
 		case <-timer.C:
 		}
-		if !s.hostKeysChangedOrRetryDue(time.Now()) {
+		now := time.Now()
+		if !s.reconcileDue(now, last, failed, published) {
 			continue
 		}
 		reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
 		err := s.reconcile(reconcileCtx)
 		cancel()
+		last = now
 		// An unreachable authority keeps the last verified keys (reconcile); an explicit refusal
 		// removed them.
 		if failed = err != nil; failed {
@@ -215,25 +222,18 @@ func hostKeysInUseElsewhere(err error) bool {
 // (days), so this bounds how late such a key is removed.
 const managedSSHKeyFallback = 10 * time.Minute
 
-func (s *managedSSHKeyReconciler) nextReconcile(failed bool) time.Duration {
-	if failed || !s.events.Healthy() {
-		return s.interval
-	}
-	return managedSSHKeyFallback
-}
-
-// hostKeysChangedOrRetryDue reports whether a tick should reconcile. Refused host keys do not change
-// by asking again, so the server is asked again only when the keys on disk differ from the refused
-// ones (adopting them) or managedSSHHostKeyInUseRetry has passed.
-func (s *managedSSHKeyReconciler) hostKeysChangedOrRetryDue(now time.Time) bool {
-	if !s.hostKeyInUse.Load() {
-		return true
-	}
+// reconcileDue reports whether this wake-up asks the server. Changed host keys on disk always do.
+// Refused host keys do not change by asking again, so while they are refused only managedSSHHostKeyInUseRetry
+// passing does.
+func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, published bool) bool {
 	if s.readPublicKeys != nil {
 		if keys, err := s.readPublicKeys(); err == nil && len(keys) > 0 && !slices.Equal(keys, s.publicKeys) {
 			s.publicKeys = keys
 			return true
 		}
 	}
-	return now.Sub(s.refusedAt) >= managedSSHHostKeyInUseRetry
+	if s.hostKeyInUse.Load() {
+		return now.Sub(s.refusedAt) >= managedSSHHostKeyInUseRetry
+	}
+	return published || failed || !s.events.Healthy() || now.Sub(last) >= managedSSHKeyFallback
 }
