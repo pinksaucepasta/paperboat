@@ -35,7 +35,7 @@ type Status struct {
 	Healthy    bool      `json:"healthy"`
 }
 
-// ErrRemoved: an operator removed this node; it must not rejoin by heartbeating.
+// ErrRemoved means an operator removed this node; it must not rejoin by heartbeating.
 var ErrRemoved = errors.New("this server node was removed")
 
 // Heartbeat records the node as seen now. A removed node is never brought back by its own heartbeat.
