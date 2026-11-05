@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"tailscale.com/types/key"
+	"tailscale.com/wgengine"
 	"tailscale.com/wgengine/filter"
 )
 
@@ -119,5 +120,31 @@ func TestEveryStartedEngineLearnsItsEndpoints(t *testing.T) {
 		if found == 0 {
 			t.Fatalf("start %d: no endpoint known 3 s after Start", start)
 		}
+	}
+}
+
+// Measured under CPU load: a status read before magicsock stored its endpoints
+// was stamped after the status that had them, applied last, and erased them
+// until magicsock's 20-26 s re-STUN (carrier staging timed out at 25 s).
+func TestEngineRelearnsEndpointsAfterALateStaleStatus(t *testing.T) {
+	server := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::41"), AllowedPeers: map[key.NodePublic]netip.Addr{}}
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(server.LocalEndpoints()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(server.LocalEndpoints()) == 0 {
+		t.Fatal("no endpoint known 3 s after Start")
+	}
+	server.lb.onEngineStatus(&wgengine.Status{AsOf: time.Now()}, nil)
+	deadline = time.Now().Add(2 * time.Second)
+	for len(server.LocalEndpoints()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(server.LocalEndpoints()) == 0 {
+		t.Fatal("a late stale engine status left the engine without endpoints")
 	}
 }

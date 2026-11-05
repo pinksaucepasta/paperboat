@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"time"
 
 	"go4.org/netipx"
 	"tailscale.com/disco"
@@ -74,6 +75,7 @@ type locoBackend struct {
 	clientByAddr map[netip.Addr]key.NodePublic
 	nm           *netmap.NetworkMap
 	eps          []netip.AddrPort // our current local UDP endpoints, sorted
+	epsAsOf      time.Time        // AsOf of the engine status eps came from
 	closeOnce    sync.Once
 }
 
@@ -224,11 +226,29 @@ func (b *locoBackend) onEngineStatus(st *wgengine.Status, err error) {
 	slices.SortFunc(eps, func(a, b netip.AddrPort) int { return a.Compare(b) })
 	eps = slices.Compact(eps)
 	b.mu.Lock()
+	// Concurrent RequestStatus calls can deliver an older snapshot last; an
+	// empty one then erased the endpoints until magicsock's 20-26 s re-STUN.
+	// Drop it, as Tailscale does (ipn/ipnlocal/local.go setWgengineStatus).
+	if st.AsOf.Before(b.epsAsOf) {
+		b.mu.Unlock()
+		return
+	}
+	b.epsAsOf = st.AsOf
 	changed := !slices.Equal(eps, b.eps)
 	if changed {
 		b.eps = eps
 	}
 	b.mu.Unlock()
+	if changed {
+		// getStatus stamps AsOf after reading the endpoints, so a slow older read
+		// can still arrive last (measured: 0 endpoints applied after 4). Read once
+		// more per change; it starts after the stale apply, so it converges.
+		go func() {
+			if e, ok := b.sys.Engine.GetOK(); ok {
+				e.RequestStatus()
+			}
+		}()
+	}
 	if changed && len(eps) > 0 {
 		go b.advertiseEndpoints()
 	}

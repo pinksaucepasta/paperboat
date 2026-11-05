@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"net/netip"
 	"testing"
+	"time"
 
 	"go4.org/mem"
+	"tailscale.com/tailcfg"
 	"tailscale.com/types/ipproto"
 	"tailscale.com/types/key"
+	"tailscale.com/wgengine"
 	"tailscale.com/wgengine/filter"
 )
 
@@ -85,5 +88,23 @@ func TestBootstrapRejectsZeroDiscoveryKey(t *testing.T) {
 	}
 	if len(b.clients) != 0 {
 		t.Fatal("malformed bootstrap changed admission state")
+	}
+}
+
+// Measured under CPU load: a status computed before magicsock found its
+// endpoints arrived after the one that had them, and staging waited 25 s.
+func TestEngineStatusIgnoresOlderSnapshot(t *testing.T) {
+	b := newLocoBackend(key.NewNode())
+	b.dm = &tailcfg.DERPMap{} // direct-only: no peers to advertise to
+	now := time.Now()
+	endpoint := netip.MustParseAddrPort("192.0.2.1:41642")
+	b.onEngineStatus(&wgengine.Status{AsOf: now, LocalAddrs: []tailcfg.Endpoint{{Addr: endpoint}}}, nil)
+	b.onEngineStatus(&wgengine.Status{AsOf: now.Add(-time.Millisecond)}, nil)
+	if s := (&Server{lb: b}); len(s.LocalEndpoints()) != 1 {
+		t.Fatal("an older engine status erased the local endpoints")
+	}
+	b.onEngineStatus(&wgengine.Status{AsOf: now.Add(time.Millisecond)}, nil)
+	if s := (&Server{lb: b}); len(s.LocalEndpoints()) != 0 {
+		t.Fatal("a newer engine status was ignored")
 	}
 }
