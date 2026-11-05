@@ -608,20 +608,35 @@ func (s unixSweep) recordsRemain() (bool, error) {
 	return len(matches) > 0, err
 }
 
-// accountProcesses returns processes whose executable lies under this
-// account's payload roots, excluding this process and its ancestors. The
-// ancestors include the user-side pb that launched this purge.
+// accountProcesses returns the main processes of this account's units and
+// jobs that run its payload (ownedProcesses). Uninstall and reset stop units
+// first; this catches main processes that outlived their unit's stop.
 func (s unixSweep) accountProcesses(ctx context.Context) ([]unixProcess, error) {
+	return s.ownedProcesses(ctx, s.plan.payloadPaths)
+}
+
+// ownedProcesses returns the processes the service manager names as the main
+// process of one of our units or jobs (systemd's MainPID, launchctl's job pid)
+// and that run from roots, excluding this process and its ancestors. A process
+// the user started, in any terminal or inside one of our units, is never in it,
+// whatever its executable: the unit owns its children.
+func (s unixSweep) ownedProcesses(ctx context.Context, roots []string) ([]unixProcess, error) {
 	processes, err := s.processes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := s.jobs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	excluded := processTreeOf(processes, os.Getpid())
 	var matches []unixProcess
 	for _, process := range processes {
-		if excluded[process.pid] || !underAnyRoot(process.exe, s.plan.payloadPaths) {
+		unit, ok := jobs[process.pid]
+		if !ok || !s.ourUnit(unit) || excluded[process.pid] || !underAnyRoot(process.exe, roots) {
 			continue
 		}
+		process.unit = unit
 		matches = append(matches, process)
 	}
 	return matches, nil

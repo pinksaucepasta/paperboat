@@ -23,9 +23,11 @@ import (
 // the native uninstall and guard steps. Processes that exit on SIGTERM are
 // removed from the table then; immortal ones survive SIGKILL.
 type purgeFake struct {
-	commands     []string
-	signals      []string
-	alive        map[int]unixProcess
+	commands []string
+	signals  []string
+	alive    map[int]unixProcess
+	// jobs is the service manager's view: main pid -> unit or job label.
+	jobs         map[int]string
 	termExits    map[int]bool
 	immortal     map[int]bool
 	failCommands map[string]error
@@ -35,7 +37,7 @@ type purgeFake struct {
 }
 
 func newPurgeFake(processes ...unixProcess) *purgeFake {
-	fake := &purgeFake{alive: map[int]unixProcess{}, termExits: map[int]bool{}, immortal: map[int]bool{}, failCommands: map[string]error{}}
+	fake := &purgeFake{alive: map[int]unixProcess{}, jobs: map[int]string{}, termExits: map[int]bool{}, immortal: map[int]bool{}, failCommands: map[string]error{}}
 	for _, process := range processes {
 		fake.alive[process.pid] = process
 	}
@@ -55,6 +57,16 @@ func (f *purgeFake) list(context.Context) ([]unixProcess, error) {
 	}
 	sort.Slice(processes, func(i, j int) bool { return processes[i].pid < processes[j].pid })
 	return processes, nil
+}
+
+func (f *purgeFake) listJobs(context.Context) (map[int]string, error) {
+	jobs := map[int]string{}
+	for pid, unit := range f.jobs {
+		if _, alive := f.alive[pid]; alive {
+			jobs[pid] = unit
+		}
+	}
+	return jobs, nil
 }
 
 func (f *purgeFake) signal(pid int, sig syscall.Signal) error {
@@ -141,6 +153,7 @@ func testSweep(root string, plan unixPurgePlan, fake *purgeFake) unixSweep {
 		run:           fake.run,
 		remove:        os.RemoveAll,
 		processes:     fake.list,
+		jobs:          fake.listJobs,
 		signal:        fake.signal,
 		uninstall:     fake.uninstall,
 		guard:         fake.guard,
@@ -241,6 +254,10 @@ func TestLinuxSweepRemovesEveryGenerationOfOneAccount(t *testing.T) {
 		unixProcess{pid: selfParent, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/pb"},
 		unixProcess{pid: os.Getpid(), ppid: selfParent, exe: "/usr/local/libexec/paperboat/users/u1001/bin/pb"},
 	)
+	// The service manager's main processes; the neighbour's unit and this
+	// process tree's are not this purge's to stop.
+	fake.jobs = map[int]string{4001: "paperboat-hostd-u1001.service", 4002: "paperboat-carrier-u1001.service",
+		4003: "paperboat-hostd-u1002.service", selfParent: "paperboat-updated-u1001.service"}
 	fake.termExits[4001] = true
 	fake.failCommands["/usr/bin/systemctl stop paperboat-session-owner-u1001-g2.service"] = errors.New("not loaded")
 	sweep := testSweep(root, plan, fake)
@@ -334,6 +351,7 @@ func TestPurgeNamesEveryLeftoverAndKeepsGuardOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := newPurgeFake(unixProcess{pid: 4005, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/session-owner"})
+	fake.jobs[4005] = "paperboat-session-owner-u1001-g2.service"
 	fake.immortal[4005] = true
 	sweep := testSweep(root, plan, fake)
 	const protected = "/etc/systemd/system/paperboat-session-owner-u1001-g2.service"
@@ -700,5 +718,48 @@ func TestPurgeRemovesSharedRuntimeDirectoriesWithTheLastAccountOnly(t *testing.T
 		if !accountsRemain && !os.IsNotExist(statErr) {
 			t.Fatalf("shared runtime directory survived the last uninstall: %v", statErr)
 		}
+	}
+}
+
+// A user's own pb (pb connect, exec, ssh, send) of the installed version runs
+// from the account payload but outside our units: uninstall and reset stop the
+// units and their main processes, never it, whatever its executable.
+func TestPurgeAndResetNeverKillAUsersOwnPB(t *testing.T) {
+	const pb = "/usr/local/libexec/paperboat/users/u1001/bin/pb"
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reset=%t", reset), func(t *testing.T) {
+			root := t.TempDir()
+			plantLinuxAccount(t, root)
+			plan, err := newUnixPurgePlan("linux", 1001)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := newPurgeFake(
+				unixProcess{pid: 4001, ppid: 1, exe: pb},                // hostd, still running after its unit stop
+				unixProcess{pid: 4002, ppid: 4001, exe: "/bin/bash"},    // a Paperboat terminal's shell
+				unixProcess{pid: 4003, ppid: 4002, exe: pb},             // pb connect typed in it
+				unixProcess{pid: 4004, ppid: 1, exe: pb, stale: true},   // nohup pb exec, reparented to init
+				unixProcess{pid: 4005, ppid: 900, exe: pb, stale: true}, // pb ssh in a login shell
+			)
+			fake.jobs[4001] = "paperboat-hostd-u1001.service"
+			fake.termExits[4001] = true
+			sweep := testSweep(root, plan, fake)
+			if reset {
+				err = sweep.purgeForReset(context.Background(), func() (string, error) { return pb, nil }, func(context.Context, string) error { return nil })
+			} else {
+				err = sweep.purgeAccount(context.Background())
+			}
+			if err != nil {
+				t.Fatalf("purge failed:\n%s", errorChainText(err))
+			}
+			if want := []string{"terminated 4001"}; !reflect.DeepEqual(fake.signals, want) {
+				t.Fatalf("signals = %v, want only the unit's main process %v", fake.signals, want)
+			}
+			for _, pid := range []int{4003, 4004, 4005} {
+				if _, alive := fake.alive[pid]; !alive {
+					t.Fatalf("user process %d was killed", pid)
+				}
+			}
+		})
 	}
 }

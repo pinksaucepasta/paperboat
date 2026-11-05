@@ -25,7 +25,12 @@ func hostJobs(plan unixPurgePlan) func(context.Context) (map[int]string, error) 
 				return nil, fmt.Errorf("list Paperboat systemd units: %w", err)
 			}
 			jobs := parseSystemdMainPIDs(string(output))
-			// The user daemon is a unit of the account's own manager (linger keeps it running).
+			// The user daemon is a unit of the account's own manager. Without that
+			// manager (uninstall restored linger, nobody logged in) it runs nothing.
+			manager := "user@" + strconv.Itoa(plan.uid) + ".service"
+			if exec.CommandContext(ctx, "/usr/bin/systemctl", "is-active", "--quiet", manager).Run() != nil {
+				return jobs, nil
+			}
 			account, err := user.LookupId(strconv.Itoa(plan.uid))
 			if err != nil {
 				return nil, err

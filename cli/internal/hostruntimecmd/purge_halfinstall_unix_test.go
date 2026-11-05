@@ -71,6 +71,7 @@ func TestDarwinPurgeClearsAHalfInstallAndIsIdempotent(t *testing.T) {
 	pin := "/Library/PrivilegedHelperTools/Paperboat/users/u501/releases/pins/" +
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/pb"
 	fake := newPurgeFake(unixProcess{pid: 900, ppid: 1, exe: pin}, unixProcess{pid: 901, ppid: 1, exe: "/usr/sbin/foreign"})
+	fake.jobs = map[int]string{900: "com.pinksaucepasta.paperboat.carrier.u501.0123456789abcdef0123456789abcdef", 901: "com.apple.foreign"}
 	fake.termExits[900] = true
 	manuals := filepath.Join(root, "usr/local/share/man")
 	if err := documentation.Install(manuals); err != nil {

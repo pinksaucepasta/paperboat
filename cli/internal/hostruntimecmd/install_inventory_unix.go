@@ -279,34 +279,19 @@ func (s unixSweep) versionFiles(paths inventoryPaths, owned, retained map[string
 	return findings, err
 }
 
-// inventoryProcesses returns the main processes of this account's units and
-// jobs and of the shared guard, as the service manager reports them (systemd's
-// MainPID, launchctl's job pid). A process the user started, in any terminal or
-// inside one of our units, is never in this list, whatever its executable.
+// inventoryProcesses returns the owned main processes of this account and of
+// the shared guard (ownedProcesses), each with whether it runs a replaced image.
 func (s unixSweep) inventoryProcesses(ctx context.Context, paths inventoryPaths) ([]unixProcess, error) {
-	all, err := s.processes(ctx)
+	processes, err := s.ownedProcesses(ctx, append(append([]string(nil), s.plan.payloadPaths...), paths.guardBinaries...))
 	if err != nil {
 		return nil, err
 	}
-	jobs, err := s.jobs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	excluded := processTreeOf(all, os.Getpid())
-	roots := append(append([]string(nil), s.plan.payloadPaths...), paths.guardBinaries...)
-	var result []unixProcess
-	for _, process := range all {
-		unit, ok := jobs[process.pid]
-		if !ok || !s.ourUnit(unit) || excluded[process.pid] || !underAnyRoot(process.exe, roots) {
-			continue
-		}
-		process.unit = unit
-		if process.stale, err = s.replacedImage(ctx, process); err != nil {
+	for index := range processes {
+		if processes[index].stale, err = s.replacedImage(ctx, processes[index]); err != nil {
 			return nil, err
 		}
-		result = append(result, process)
 	}
-	return result, nil
+	return processes, nil
 }
 
 // ourUnit reports a unit or job this account's install owns: one carrying its
