@@ -190,13 +190,16 @@ func TestInstallInventoryFailedMidwayUpgradeRemovesTheCandidate(t *testing.T) {
 // its files, so only replaced images go and the inventory fails naming the journal.
 func TestInstallInventoryUnfinishedInstallationFailsLoudly(t *testing.T) {
 	activated := time.Unix(1_800_000_000, 0)
+	// The journal is planted: the next pb install's recovery restores the exact baseline from it, so the
+	// inventory names it and never removes it.
+	journal := "/var/lib/paperboat-installer/users/u1001/install-journal.json"
 	files := append(append([]string(nil), versionFiles(digestA)...), versionFiles(digestB)...)
+	files = append(files, journal)
 	h := newInventoryHost(t, digestB, activated, activated.Add(time.Minute), files,
 		managedProcess(4001, invPin(digestA), "paperboat-hostd-u1001-"+digestA[:32]+".service", activated.Add(time.Second)),
 		unixProcess{pid: 4002, ppid: 1, exe: invGuard, stale: true, unit: "paperboat-machineguard.service"},
 	)
 	h.fake.termExits[4002] = true
-	journal := "/var/lib/paperboat-installer/users/u1001/install-journal.json"
 	h.sources.Pending = journal
 	err := h.sweep.settleInventory(context.Background(), false)
 	var leftovers unixLeftoverError

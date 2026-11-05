@@ -77,6 +77,9 @@ type inventoryFinding struct {
 	unit    string // the native unit a definition declares, if any
 	process *unixProcess
 	note    string
+	// reportOnly items are named but never removed: an unfinished installation's journal is what the
+	// next pb install's recovery restores the exact baseline from.
+	reportOnly bool
 }
 
 func (f inventoryFinding) String() string {
@@ -137,7 +140,7 @@ func (s unixSweep) removeFindings(ctx context.Context, findings []inventoryFindi
 	// only what no unit owns any more. Removal errors surface in the re-scan.
 	s.stopUnits(ctx, units)
 	for _, finding := range findings {
-		if finding.path != "" {
+		if finding.path != "" && !finding.reportOnly {
 			_ = s.removePath(finding.path)
 		}
 	}
@@ -208,7 +211,7 @@ func (s unixSweep) versionLeftovers(ctx context.Context, sources hostinstall.Inv
 		}
 	}
 	if sources.Pending != "" {
-		return append(findings, inventoryFinding{path: sources.Pending, note: " (installation not finished; rerun pb install)"}), nil
+		return append(findings, inventoryFinding{path: sources.Pending, note: " (installation not finished; rerun pb install)", reportOnly: true}), nil
 	}
 	retained := map[string]bool{}
 	for digest := range sources.Retained {
