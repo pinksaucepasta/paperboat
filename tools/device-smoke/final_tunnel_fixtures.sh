@@ -65,7 +65,7 @@ domain-binding)
   : "${FINAL_FIXTURES_URL:?fixtures endpoint}" "${FINAL_FIXTURES_TOKEN_FILE:?its token file}" "${SMOKE_DNS_ZONE:?DNS zone for the test hostname}"
   start_http "$CT_A"; sleep 1
   create_tunnel "$CT_A" "final-f802-$STAMP" || { echo "FAIL tunnel create"; exit 1; }
-  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$SMOKE_DNS_ZONE" "$SMOKE_DNS_ZONE")
+  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$SMOKE_DNS_ZONE" "$SMOKE_DNS_ZONE" "$HTTP_PORT")
   ;;
 *) echo "unknown mode $MODE"; exit 2 ;;
 esac
