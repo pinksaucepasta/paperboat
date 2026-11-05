@@ -109,8 +109,9 @@ The first three go through Paperboat's local web gateway at `127.100.0.1`. It
 ends TLS on this computer with the local certificate Paperboat trusts for the
 domain and forwards the request as plain HTTP to the port, so they are for
 HTTP, HTTPS and WebSocket services only. Anything else, such as a database
-connection string, must use the machine's own address: `pb machine list` and
-the console show it, and `pb access machine hp --port 5432 --listen
+connection string, must use the machine's own address on this computer: `pb
+resolve hp` shows it (another OS user on this computer may get a different
+one for the same machine), and `pb access machine hp --port 5432 --listen
 127.0.0.1:5432` forwards the same port to a local one. Names never resolve to
 that address, because Paperboat does not change this computer's DNS, resolver,
 hosts file or VPN settings. The `host:port` form serves ports from 1024

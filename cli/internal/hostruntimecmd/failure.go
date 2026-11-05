@@ -319,7 +319,7 @@ func (e *installationStageError) Error() string {
 			if e.Cause != nil {
 				cause = ": " + e.Cause.Error()
 			}
-			return "Machine pairing failed while binding the local daemon" + cause + ". The committed runtime was retained; retry pairing with the same enrollment token file."
+			return "Machine pairing failed while binding the local daemon" + cause + ". The committed runtime was retained; rerun the same pair command to finish it (its token file is not needed again)."
 		case "environment_readiness":
 			return "Machine pairing failed while preparing managed environment variables. The committed runtime was retained; unlock your ENV vault to deliver them."
 		}

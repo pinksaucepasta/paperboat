@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,7 +128,8 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		offline, mesh := map[string][]string{}, []float64{}
 		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
 			peer := raw.(map[string]any)
-			endpoint := peer["identity"].(map[string]any)["endpoint_id"].(string)
+			// Keyed by session: each CLI peer is the test daemon generation of one.
+			endpoint := strings.TrimSuffix(peer["identity"].(map[string]any)["endpoint_id"].(string), "_"+testDaemonGeneration)
 			for _, rawScope := range peer["scopes"].([]any) {
 				scope := rawScope.(map[string]any)
 				switch {

@@ -33,10 +33,10 @@ const networkConfigLimit = peernetwork.MaxConfigurationBytes
 const maximumAccountEndpoints = peernetwork.MaxEndpoints
 
 type NetworkRegistration struct {
-	OperationID                                                    string
-	UserID, EndpointID, Role, MachineID                            string
+	OperationID                         string
+	UserID, EndpointID, Role, MachineID string
 	// OwnerEndpointID is what the identity acts for: the CLI session of a daemon generation, or the machine.
-	OwnerEndpointID string
+	OwnerEndpointID                                                string
 	EndpointGeneration, MachineGeneration, ExpectedKeyGeneration   int64
 	WireGuardPublicKey, DiscoPublicKey, QUICCertificateFingerprint []byte
 }
@@ -112,7 +112,6 @@ func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (
 	})
 	return out, err
 }
-
 
 type networkBinding struct {
 	AccountID                       string   `json:"account_id"`

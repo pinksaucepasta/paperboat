@@ -315,6 +315,24 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		t.Fatal(err)
 	}
 	defer serverOwner.Close()
+	// The signed relay authority lasts 60s. A starved setup alone takes about that long (CI 41967595134: the
+	// relay stopped forwarding 60s in, so the delegated dial hung; 41989520217: exec died at QUIC idle timeout),
+	// and the outage and restart phases wait up to 55s together (the restarted relay denied an expired pair,
+	// Denied:4). Renew it before each phase, as the production refresh loop does; expiration must not
+	// masquerade as a transport recovery failure.
+	renewRelayAuthority := func() {
+		refreshed := time.Now().UTC().Truncate(time.Second)
+		// The control plane advances the network generation on every refresh.
+		// Renewing timestamps at the old generation is a conflicting signed grant
+		// and correctly causes the relay to reject its next authentication frame.
+		clientConfig.Generation++
+		serverConfig.Generation++
+		applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+		applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
+		node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
+		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
+		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+	}
 	var descriptor mesh.Addr
 	var previousClient, previousServer uint64
 	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
@@ -338,15 +356,18 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 			time.Sleep(20 * time.Millisecond)
 		}
 		previousClient, previousServer = clientFilter.relayData.Load(), serverFilter.relayData.Load()
+		renewRelayAuthority()
 	}, func(consumer string) {
 		sent, received := clientFilter.relayData.Load(), serverFilter.relayData.Load()
 		if sent <= previousClient || received <= previousServer {
 			t.Fatalf("%s did not traverse peer relay in both directions: before=%d/%d after=%d/%d", consumer, previousClient, previousServer, sent, received)
 		}
 		previousClient, previousServer = sent, received
+		renewRelayAuthority()
 	})
 
 	if delegatedOnly {
+		renewRelayAuthority()
 		var err error
 		identity, err = serverOwner.PrepareCarrierIdentity()
 		if err != nil {
@@ -364,7 +385,7 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		defer old.Close()
 		next, err := old.DialCarrier(ctx, identity.Offer)
 		if err != nil {
-			t.Fatal("delegated carrier failed with direct UDP blocked", err)
+			t.Fatalf("delegated carrier failed with direct UDP blocked: %v; peerrelay=%+v derp=%+v handshake=%d/%d data=%d/%d", err, udp.Snapshot(), relay.Snapshot(), clientFilter.relayHandshake.Load(), serverFilter.relayHandshake.Load(), clientFilter.relayData.Load(), serverFilter.relayData.Load())
 		}
 		defer next.Close()
 		stream := openCarrierTerminal(t, ctx, next, "delegated-relay")
@@ -388,24 +409,6 @@ func testAutomaticPeerRelay(t *testing.T, delegatedOnly bool) {
 		return
 	}
 
-	// The outage and restart phases wait up to 55s together, so after a slow
-	// setup they outlast the signed 60s relay authority (the restarted relay
-	// denied an expired pair, Denied:4). Renew it before each phase pair, as the
-	// production refresh loop does; expiration must not masquerade as a
-	// transport recovery failure.
-	renewRelayAuthority := func() {
-		refreshed := time.Now().UTC().Truncate(time.Second)
-		// The control plane advances the network generation on every refresh.
-		// Renewing timestamps at the old generation is a conflicting signed grant
-		// and correctly causes the relay to reject its next authentication frame.
-		clientConfig.Generation++
-		serverConfig.Generation++
-		applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
-		applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
-		node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
-		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
-		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
-	}
 	renewRelayAuthority()
 	clientFilter.allowDERP.Store(true)
 	serverFilter.allowDERP.Store(true)

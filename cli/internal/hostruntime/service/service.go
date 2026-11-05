@@ -561,17 +561,9 @@ func renderSystemd(config Config) ([]byte, error) {
 		// A retired generation exits 0 after its last connection or hand-over; it must stay down.
 		restart = "on-failure"
 	}
-	// A crash-looping unit backs off: RestartSec grows over RestartSteps to RestartMaxDelaySec (systemd >= 254,
-	// src/core/service.c service_restart_usec_nth), plus a random extra delay so machines that crash together
-	// (a bad release) do not restart together (RestartRandomizedDelaySec, systemd >= 262). Older systemd ignores
-	// both and keeps RestartSec, which must stay above 2 s: 5 starts in 10 s (the default start limit) would
-	// leave the unit failed for good. Prior art: tailscale util/backoff/backoff.go (capped growth, jittered).
 	options = append(options,
 		unit.NewUnitOption("Service", "Restart", restart),
 		unit.NewUnitOption("Service", "RestartSec", "5s"),
-		unit.NewUnitOption("Service", "RestartSteps", "3"),
-		unit.NewUnitOption("Service", "RestartMaxDelaySec", "30s"),
-		unit.NewUnitOption("Service", "RestartRandomizedDelaySec", "5s"),
 		unit.NewUnitOption("Service", "TimeoutStopSec", "60s"),
 		unit.NewUnitOption("Service", "KillMode", "mixed"),
 		unit.NewUnitOption("Service", "UMask", "0077"),

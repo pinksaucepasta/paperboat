@@ -488,6 +488,31 @@ exit "$FAILED"
                 self.assertIn(expected.split()[0], result.stdout, result.stdout + result.stderr)
                 self.assertRegex(result.stdout, r'session-limit:hp\s+' + expected.split()[1], result.stdout)
 
+    def test_update_crossbuild_checks_readiness_after_a_slow_update(self):
+        # Under load `pb update` itself can outlast the readiness budget; a build that is ready when the update
+        # returns must still pass (oracle, load 78: "not ready ... never checked" on a ready fake).
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            pb = home / '.local/bin/pb'
+            pb.parent.mkdir(parents=True)
+            pb.write_text(r"""#!/bin/sh
+case "$1" in
+  --version) printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$HOME/installed")" ;;
+  update) sleep 2; cat "$3" > "$HOME/installed"; printf '{"ok":true,"data":{"version":"%s"}}' "$(cat "$HOME/installed")" ;;
+  ping) exit 0 ;;
+  doctor) printf '{"ok":true,"data":{"overall":"healthy","checks":[{"code":"machine_guard_version","status":"pass"}]}}' ;;
+esac
+""")
+            pb.chmod(0o755)
+            (home / 'installed').write_text('v1')
+            for name, version in (('prev', 'v1'), ('cur', 'v2')):
+                (home / name).write_text(version)
+            command = [sys.executable, str(HERE / 'update_crossbuild.py'), '--previous', str(home / 'prev'), '--previous-version', 'v1',
+                       '--current', str(home / 'cur'), '--current-version', 'v2', '--ping-target', 'peer']
+            result = subprocess.run(command, env=dict(os.environ, HOME=str(home), PAPERBOAT_SMOKE_READY_SECONDS='1'),
+                                    capture_output=True, text=True, timeout=60, cwd=str(HERE))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_update_crossbuild_needs_both_directions_ready_with_a_matched_guard(self):
         # update_crossbuild.py switches N-1 -> N -> N-1 with `pb update --from FILE --force`; each end must
         # report the target version, a healthy doctor and a passing machine_guard_version check.
@@ -526,7 +551,8 @@ esac
             (home / 'bad-guard').unlink()
             # --ping-target: the peer must answer pb ping after each switch
             with_ping = command + ['--ping-target', 'peer']
-            self.assertEqual(subprocess.run(with_ping, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE)).returncode, 0)
+            pinged = subprocess.run(with_ping, env=env, capture_output=True, text=True, timeout=60, cwd=str(HERE))
+            self.assertEqual(pinged.returncode, 0, pinged.stdout + pinged.stderr)
             (home / 'bad-ping').write_text('1')
             env_fast = dict(env, PAPERBOAT_SMOKE_READY_SECONDS='6')
             no_ping = subprocess.run(with_ping, env=env_fast, capture_output=True, text=True, timeout=200, cwd=str(HERE))
@@ -708,8 +734,11 @@ exit "$FAILED"
 ''')
             env = dict(os.environ, COMMAND_EXIT=str(exit_code),
                        FORGED=str(int(forged_receipt)), TRANSPORT_FAIL=str(int(transport_failure)))
+            # No wall-clock bound here: the script itself bounds the only command that can wait (`timeout 120`
+            # around pb exec in test_exec) and nothing reads stdin. A 10 s bound on ~0.15 s of work failed under
+            # oracle's load 78 (CPU starvation, not a product delay).
             return subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
-                                  env=env, capture_output=True, text=True, timeout=10)
+                                  env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def test_success_requires_command_and_transport_success(self):
         for code, forged, transport, expected in [(0, False, False, 0),

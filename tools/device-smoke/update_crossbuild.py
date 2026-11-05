@@ -26,11 +26,12 @@ def version():
 def ping_ok(target, seconds=None):
     """Machines resolve and connect after the update: `pb ping TARGET` succeeds (first contact may need a retry)."""
     deadline = time.monotonic() + (seconds or min(90, READY_SECONDS))
-    while time.monotonic() < deadline:
+    while True:  # at least one attempt, however long the caller took
         if p.command_result(PB, 'ping', target, timeout=60).returncode == 0:
             return True
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(4)
-    return False
 
 
 def switch(binary, expected, guard_required, ping_target=''):
@@ -41,10 +42,12 @@ def switch(binary, expected, guard_required, ping_target=''):
     started = time.monotonic()
     receipt = p.invoke(PB, 'update', '--from', str(binary), '--force', '--json', timeout=600)
     assert receipt.get('version') == expected, 'update installed %r, expected %r' % (receipt.get('version'), expected)
-    deadline = started + READY_SECONDS
+    # The readiness budget starts when the update returns (the update has its own bound) and is checked at
+    # least once: a slow update under load used the whole budget and failed a ready build "never checked".
+    deadline = time.monotonic() + READY_SECONDS
     problem = 'never checked'
     ready = False
-    while time.monotonic() < deadline:
+    while True:
         try:
             # A degraded doctor exits 1 but still prints its checks; read them, do not treat it as a crash.
             result = p.command_result(PB, 'doctor', '--json', timeout=60)
@@ -59,6 +62,8 @@ def switch(binary, expected, guard_required, ping_target=''):
                                                            ' (' + guard[0].get('summary', '') + ')' if guard and guard[0].get('status') != 'pass' else '')
         except Exception as error:  # the daemon restarts during an update
             problem = type(error).__name__
+        if time.monotonic() >= deadline:
+            break
         time.sleep(4)
     if ready:
         if ping_target and not ping_ok(ping_target):

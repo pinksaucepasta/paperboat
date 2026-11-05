@@ -43,7 +43,7 @@ while True:
 
 create_tunnel() { # ct name [--private]
   TUNNEL_CT=$1
-  TUNNEL_ID=$(in_ct "$1" ".local/bin/pb tunnel create $2 --port $HTTP_PORT $3 --wait --timeout 90s --json" | json_field 'd["tunnel"]["id"]') || return 1
+  TUNNEL_ID=$(in_ct "$1" ".local/bin/pb tunnel create $2 --port $HTTP_PORT ${3:-} --wait --timeout 90s --json" | json_field 'd["tunnel"]["id"]') || return 1
   [ -n "$TUNNEL_ID" ]
 }
 
@@ -65,7 +65,7 @@ domain-binding)
   : "${FINAL_FIXTURES_URL:?fixtures endpoint}" "${FINAL_FIXTURES_TOKEN_FILE:?its token file}" "${SMOKE_DNS_ZONE:?DNS zone for the test hostname}"
   start_http "$CT_A"; sleep 1
   create_tunnel "$CT_A" "final-f802-$STAMP" || { echo "FAIL tunnel create"; exit 1; }
-  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$SMOKE_DNS_ZONE" "$SMOKE_DNS_ZONE")
+  (cd "$ROOT" && CHECK=console/scripts/check-domain-binding.js node console/scripts/check-domain-binding-driver.mjs "$TUNNEL_ID" "final-$STAMP.$SMOKE_DNS_ZONE" "$SMOKE_DNS_ZONE" "$HTTP_PORT")
   ;;
 *) echo "unknown mode $MODE"; exit 2 ;;
 esac

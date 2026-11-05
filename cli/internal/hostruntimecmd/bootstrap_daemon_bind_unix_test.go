@@ -41,6 +41,7 @@ func TestDaemonBindFailureNamesWhatTheProbeSaw(t *testing.T) {
 		"not running":   {want: "service is not running"},
 		"other version": {probe: localdaemon.UpdateProbe{Running: true, Version: "dev-old", State: "ready"}, want: `version "dev-old"`},
 		"no answer":     {err: errors.New("dial local API: connection refused"), want: "connection refused"},
+		"degraded":      {probe: localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", Health: []string{"managed_ssh_unavailable"}, HealthTitles: []string{"Managed SSH is unavailable: the host key step failed"}}, want: "the host key step failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -50,7 +51,7 @@ func TestDaemonBindFailureNamesWhatTheProbeSaw(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 			message := runtimeFailureMessage(&installationStageError{Stage: "daemon_readiness", Cause: err})
-			if !strings.Contains(message, "binding the local daemon") || !strings.Contains(message, test.want) {
+			if !strings.Contains(message, "binding the local daemon") || !strings.Contains(message, test.want) || !strings.Contains(message, "rerun the same pair command") {
 				t.Fatalf("message=%q", message)
 			}
 		})

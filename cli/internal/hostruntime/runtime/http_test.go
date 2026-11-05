@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -173,10 +174,9 @@ func (s *orderedService) Shutdown(context.Context) error {
 // A connection accepted just before Shutdown (here still sending its protocol prefix) is in flight:
 // Shutdown returns only after its response, as a retiring generation exits right after.
 func TestHTTPServiceShutdownWaitsForAConnectionAcceptedBeforeIt(t *testing.T) {
-	var finished sync.WaitGroup
-	finished.Add(1)
+	var finished atomic.Bool
 	service, err := NewHTTPService(HTTPConfig{Address: "127.0.0.1:0", NativeHandler: func(c net.Conn) { _ = c.Close() }, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		defer finished.Done()
+		defer finished.Store(true)
 		time.Sleep(200 * time.Millisecond)
 		_, _ = io.WriteString(w, "done")
 	})})
@@ -208,13 +208,11 @@ func TestHTTPServiceShutdownWaitsForAConnectionAcceptedBeforeIt(t *testing.T) {
 		t.Fatalf("in-flight request cut by shutdown: %v", err)
 	}
 	_ = response.Body.Close()
-	inFlight := make(chan struct{})
-	go func() { finished.Wait(); close(inFlight) }()
 	select {
 	case err := <-stopped:
-		select {
-		case <-inFlight:
-		default:
+		// The handler records its end before returning; a channel closed by a goroutine started here
+		// could still be unscheduled when Shutdown has rightly returned (CI runs 41987517683, 41996939687).
+		if !finished.Load() {
 			t.Fatal("shutdown returned while a request it accepted was still running")
 		}
 		if err != nil {

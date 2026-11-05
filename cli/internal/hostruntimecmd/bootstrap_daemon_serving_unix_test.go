@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,10 +23,13 @@ func TestBoundDaemonServesWhenOnlyTheControlPlaneIsUnreachable(t *testing.T) {
 		"ready":                     {localdaemon.UpdateProbe{Running: true, Version: version, State: "ready"}, true},
 		"control plane unreachable": {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", ControlPlaneUnavailableOnly: true}, true},
 		"degraded otherwise":        {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded"}, false},
-		"still starting":            {localdaemon.UpdateProbe{Running: true, Version: version, State: "starting"}, true},
-		"not enrolled":              {localdaemon.UpdateProbe{Running: true, Version: version, State: "awaiting_enrollment"}, false},
-		"old daemon":                {localdaemon.UpdateProbe{Running: true, Version: "dev-old", State: "ready"}, false},
-		"not running":               {localdaemon.UpdateProbe{Version: version, State: "ready"}, false},
+		// pbvm1, 2026-11-05: a second OS user's pair failed on a daemon whose only item was its local access.
+		"local access only":      {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", Health: []string{"local_access_unavailable"}}, true},
+		"local access and other": {localdaemon.UpdateProbe{Running: true, Version: version, State: "degraded", Health: []string{"local_access_unavailable", "machine_list_unavailable"}}, false},
+		"still starting":         {localdaemon.UpdateProbe{Running: true, Version: version, State: "starting"}, true},
+		"not enrolled":           {localdaemon.UpdateProbe{Running: true, Version: version, State: "awaiting_enrollment"}, false},
+		"old daemon":             {localdaemon.UpdateProbe{Running: true, Version: "dev-old", State: "ready"}, false},
+		"not running":            {localdaemon.UpdateProbe{Version: version, State: "ready"}, false},
 	} {
 		if got := boundDaemonServing(test.probe, version); got != test.want {
 			t.Errorf("%s: serving=%t, want %t", name, got, test.want)
@@ -56,12 +60,12 @@ func TestPairingWaitsForAStartingDaemonToSettle(t *testing.T) {
 	if got := pairedMessage(t.Context(), probeAfter("starting", "starting", "ready")); got != "Paperboat machine runtime is ready." {
 		t.Fatalf("a daemon that becomes ready: %q", got)
 	}
-	if !awaitBoundDaemonSettled(t.Context(), probeAfter("starting", "degraded")) {
+	if _, ok := awaitBoundDaemonSettled(t.Context(), probeAfter("starting", "degraded")); !ok {
 		t.Fatal("a degraded daemon has settled; pb status and pb doctor show why")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
-	if awaitBoundDaemonSettled(ctx, probeAfter("starting")) {
+	if _, ok := awaitBoundDaemonSettled(ctx, probeAfter("starting")); ok {
 		t.Fatal("a daemon that is still starting has not settled")
 	}
 	if ctx.Err() == nil {
@@ -69,5 +73,18 @@ func TestPairingWaitsForAStartingDaemonToSettle(t *testing.T) {
 	}
 	if daemonSettleWindow > 2*time.Minute {
 		t.Fatalf("settle window %v is not bounded tightly enough for an interactive pair", daemonSettleWindow)
+	}
+}
+
+// pbvm1, 2026-11-05: a pair bound to a daemon degraded in its local access names the failing step instead of
+// claiming the runtime is ready (or failing as an unexpected error).
+func TestPairingOnADegradedDaemonNamesTheFailingStep(t *testing.T) {
+	title := "Local machine access is unavailable: the machine names step failed"
+	probe := func(context.Context) (localdaemon.UpdateProbe, error) {
+		return localdaemon.UpdateProbe{Running: true, Version: "dev-test", State: "degraded", Health: []string{"local_access_unavailable"}, HealthTitles: []string{title}}, nil
+	}
+	got := pairedMessage(t.Context(), probe)
+	if !strings.Contains(got, title) || !strings.Contains(got, "pb doctor") || strings.Contains(got, "is ready") {
+		t.Fatalf("message=%q", got)
 	}
 }

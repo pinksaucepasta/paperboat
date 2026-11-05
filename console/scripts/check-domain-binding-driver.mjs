@@ -1,10 +1,10 @@
 // F8-02 driver: runs check-domain-binding.js on a tunnel page and creates/deletes the DNS records it asks for through the fixtures endpoint.
-// usage: ORIGIN=<console origin> STATE=<storage state of the owner> FINAL_FIXTURES_URL=<fixtures endpoint> FINAL_FIXTURES_TOKEN_FILE=<its token file> CHECK=console/scripts/check-domain-binding.js node check-domain-binding-driver.mjs <tunnelId> <fresh hostname> <zone>
+// usage: ORIGIN=<console origin> STATE=<storage state of the owner> FINAL_FIXTURES_URL=<fixtures endpoint> FINAL_FIXTURES_TOKEN_FILE=<its token file> CHECK=console/scripts/check-domain-binding.js node check-domain-binding-driver.mjs <tunnelId> <fresh hostname> <zone> <origin port the tunnel serves>
 // (the tunnel needs its service up; removed hostnames are held for a week, so use a new hostname each run)
 // ESM ignores NODE_PATH: PW_MODULE is the path of playwright-core's index.mjs when it is not installed next to this file.
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 import { readFileSync } from "node:fs"
-const [tunnelId, domain, zoneName] = process.argv.slice(2)
+const [tunnelId, domain, zoneName, port] = process.argv.slice(2)
 const origin = process.env.ORIGIN
 const token = readFileSync(process.env.FINAL_FIXTURES_TOKEN_FILE, "utf8").trim()
 const dns = async (method, path, body) => {
@@ -21,7 +21,7 @@ try {
   await page.goto(`${origin}/tunnels/${tunnelId}`)
   await page.waitForLoadState("networkidle").catch(() => {})
   await page.waitForTimeout(4000)
-  await page.evaluate((d) => { window.__domain = d }, domain)
+  await page.evaluate(([d, p]) => { window.__domain = d; window.__port = p }, [domain, port])
   const done = page.evaluate(readFileSync(process.env.CHECK, "utf8"))
   done.catch(() => {}) // a failure below is reported first; the closed page must not mask it
   let records = null

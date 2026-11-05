@@ -94,7 +94,7 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 }
 
 func TestPeerNetworkStableErrors(t *testing.T) {
-	for err, want := range map[error]int{peersessions.ErrDenied: http.StatusForbidden, peersessions.ErrGenerationEvicted: http.StatusForbidden, peersessions.ErrGenerationWithdrawn: http.StatusForbidden, peersessions.ErrConflict: http.StatusConflict, errors.New("database unavailable"): http.StatusServiceUnavailable} {
+	for err, want := range map[error]int{peersessions.ErrDenied: http.StatusForbidden, peersessions.ErrGenerationEvicted: http.StatusForbidden, peersessions.ErrGenerationWithdrawn: http.StatusForbidden, peersessions.ErrGenerationLimit: http.StatusConflict, peersessions.ErrConflict: http.StatusConflict, errors.New("database unavailable"): http.StatusServiceUnavailable} {
 		w := httptest.NewRecorder()
 		peerNetworkError(w, httptest.NewRequest(http.MethodPost, "/", nil), err)
 		if w.Code != want {

@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"strings"
 	"time"
@@ -23,7 +24,9 @@ func (s *Service) approve(ctx context.Context, userID, userCode string) (UserMac
 	var pairingID string
 	var alreadyProvisioned bool
 	var pairingExpired bool
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Approvals of one account queue on its machine lock before their snapshot (planlimits.InTxHolding): taken
+	// inside, concurrent pairings exhausted their serialization retries as each other's pivots.
+	err := planlimits.InTxHolding(ctx, s.db, planlimits.Scope{Account: userID}, planlimits.Machines, func(ctx context.Context, tx *db.Tx) error {
 		pairing, err := tx.Queries().GetUserMachinePairingForCode(ctx, sql.NullString{String: strings.TrimSpace(userCode), Valid: true})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -352,7 +355,9 @@ func (s *Service) Deny(ctx context.Context, userID, userCode string) error {
 		return ErrNotFound
 	}
 	var pairingExpired bool
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Approvals of one account queue on its machine lock before their snapshot (planlimits.InTxHolding): taken
+	// inside, concurrent pairings exhausted their serialization retries as each other's pivots.
+	err := planlimits.InTxHolding(ctx, s.db, planlimits.Scope{Account: userID}, planlimits.Machines, func(ctx context.Context, tx *db.Tx) error {
 		pairing, err := tx.Queries().GetUserMachinePairingForCode(ctx, sql.NullString{String: userCode, Valid: true})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound

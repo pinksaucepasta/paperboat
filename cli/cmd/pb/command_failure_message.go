@@ -24,9 +24,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
-// boundedBrowserLoginFailure looks for a browserLoginFailure in an error chain without trusting its
-// shape: the walk is breadth-first and capped, so a self-referencing cause cannot hang the command.
-func boundedBrowserLoginFailure(err error) (browserLoginFailure, bool) {
+// boundedErrorWalk reports whether match holds for an error in the chain without trusting its shape: the
+// walk is breadth-first and capped, so a self-referencing cause cannot hang the command (errors.Is and
+// errors.As have no cycle guard).
+func boundedErrorWalk(err error, match func(error) bool) bool {
 	queue := []error{err}
 	for visited := 0; len(queue) > 0 && visited < 64; visited++ {
 		current := queue[0]
@@ -34,8 +35,8 @@ func boundedBrowserLoginFailure(err error) (browserLoginFailure, bool) {
 		if current == nil {
 			continue
 		}
-		if login, ok := current.(browserLoginFailure); ok {
-			return login, true
+		if match(current) {
+			return true
 		}
 		switch wrapped := current.(type) {
 		case interface{ Unwrap() error }:
@@ -44,7 +45,18 @@ func boundedBrowserLoginFailure(err error) (browserLoginFailure, bool) {
 			queue = append(queue, wrapped.Unwrap()...)
 		}
 	}
-	return browserLoginFailure{}, false
+	return false
+}
+
+// boundedBrowserLoginFailure finds a browserLoginFailure in an error chain with boundedErrorWalk.
+func boundedBrowserLoginFailure(err error) (browserLoginFailure, bool) {
+	var found browserLoginFailure
+	ok := boundedErrorWalk(err, func(current error) bool {
+		login, is := current.(browserLoginFailure)
+		found = login
+		return is
+	})
+	return found, ok
 }
 
 func commandFailureMessage(err error, failure commandFailure) string {
@@ -54,7 +66,7 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if message := sshFailureMessage(err); message != "" {
 		return message
 	}
-	if errors.Is(err, ErrPreviewOwnerSessionUnavailable) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+	if boundedErrorWalk(err, func(e error) bool { return e == ErrPreviewOwnerSessionUnavailable }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`."
 	}
 	if preference, ok := soleCommandOwner(err).(preferenceLoadFailure); ok {

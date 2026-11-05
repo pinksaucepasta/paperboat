@@ -16,14 +16,14 @@ U=f'sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 
 def R(c,timeout=300,check=True):
  r=subprocess.run(SSHX(c),capture_output=True,text=True,timeout=timeout)
  (run/'steps.log').open('a').write('$ '+c[:160]+'\n'+r.stdout[-2000:]+r.stderr[-2000:]+'\n')
- if check and r.returncode:raise SystemExit('step failed: '+c[:100])
+ if check and r.returncode:raise SystemExit('step failed: '+c[:100]+' :: '+(r.stderr or r.stdout or '').strip()[-500:])
  return r.stdout
 now=lambda:datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds')
 R(f'mkdir -p ~/gap5/{name}')
 if cand!='-':subprocess.run(PUT(cand,f'gap5/{name}/candidate'),check=True)
 subprocess.run(PUT(str(pathlib.Path(__file__).with_name('probe.py')),'gap5/probe.py'),check=True)
-R(f'chmod 755 ~/gap5/{name}/candidate 2>/dev/null; sudo docker cp ~/gap5/probe.py {CT}:/tmp/probe.py')
-R(f"{U} sh -c 'mkdir -p /home/pbt/{name} && head -c 20000000 /dev/urandom > /home/pbt/{name}/big.bin'")
+R(f'chmod 755 ~/gap5/{name}/candidate 2>/dev/null; sudo docker cp ~/gap5/probe.py {CT}:/tmp/probe.py && sudo docker exec {CT} chown pbt /tmp/probe.py')
+R(f"{U} sh -c 'mkdir -p /home/pbt/{name} && head -c 65536 /dev/urandom > /home/pbt/{name}/big.bin'")
 R(f"{U} bash -c 'nohup python3 /tmp/probe.py {TG} {pv} {tn} /home/pbt/{name}/p /home/pbt/{name}/stop > /home/pbt/{name}/probe.out 2>&1 &'")
 # Held browser terminal: a guest joins one owner session by code through the console's own page (WASM browser
 # terminal) from the controller host, types a 200 ms echo ticker and records each new marker (web/webheld.mjs).
@@ -31,7 +31,7 @@ NOWEB=os.environ.get('NO_WEB')=='1';webp=None
 if not NOWEB:
  W=pathlib.Path(__file__).resolve().parent;TOK=os.environ['QV_WEBTOKEN'];wname='smoke-web-'+name
  subprocess.run(PUT(str(W/'mksession.py'),'gap5/mksession.py'),check=True)
- sid=R(f'sudo docker cp ~/gap5/mksession.py {CT}:/tmp/mksession.py && {U} python3 /tmp/mksession.py {TG} {wname}').strip().splitlines()[-1]
+ sid=R(f'sudo docker cp ~/gap5/mksession.py {CT}:/tmp/mksession.py && sudo docker exec {CT} chown pbt /tmp/mksession.py && {U} python3 /tmp/mksession.py {TG} {wname}').strip().splitlines()[-1]
  (run/'web-session').write_text(sid)
  subprocess.run([sys.executable,str(W/'code.py'),TOK,SRV,sid,str(run/'web.code')],check=True,stdout=subprocess.DEVNULL)
  wenv={**os.environ,'SESSION':sid,'CODEFILE':str(run/'web.code'),'OUT':str(run/'web-events.jsonl'),'STOP':str(run/'web.stop'),'MAX_S':'1500'}  # PW_MODULE, PW_CHROMIUM, PB_CONSOLE_ORIGIN come from the environment
@@ -51,6 +51,11 @@ else:raise SystemExit('held terminal not ready')
 # Probes start >30 s before the update: the analysis window opens 30 s before it, and probe
 # start-up (the controller resolver's first lookup takes 5 s) must stay outside it (prefix1).
 time.sleep(45)
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)));import excess  # the one scoring module (windows, excess, verdicts)
+# What is measured, recorded before the update: pb before it, the candidate under test, the probe's and scorer's file hash.
+build=excess.build_info(excess.pb_version(R('~/.local/bin/pb version --json',check=False)),
+ excess.pb_version(R(f'~/gap5/{name}/candidate version --json',check=False)) if cand!='-' else dict(version='none (no update)',commit='-'),pathlib.Path(__file__).with_name('probe.py'))
+(run/'build.json').write_text(json.dumps(build))
 t0=now();(run/'update-start.utc').write_text(t0)
 if cand=='-':
  time.sleep(60);r=subprocess.CompletedProcess([],0,stdout='none')
@@ -79,33 +84,8 @@ for _ in range(300):
 R(f'{U} cat /home/pbt/{name}/held/result.json > ~/gap5/{name}/held-result.json; {U} cat /home/pbt/{name}/held/markers.json > ~/gap5/{name}/held-markers.json',check=False)
 R(f'{U} cat /home/pbt/{name}/p/events.jsonl > ~/gap5/{name}/events.jsonl; {U} rm -f /home/pbt/{name}/big.bin',check=False)
 subprocess.run(['rsync','-a',(os.path.expanduser(f'~/gap5/{name}/') if LOCAL else f'{H}:gap5/{name}/'),str(run)+'/','--exclude=candidate'],timeout=300)
-ev=[json.loads(l) for l in open(run/'events.jsonl')]
-ts=lambda s:datetime.datetime.fromisoformat(s).timestamp()
-try:
- hr=json.loads((run/'held-result.json').read_text() or '{}');hm=json.loads((run/'held-markers.json').read_text() or '[]')
- ev+=[dict(f='term_cli',t=ts(m['at']),ok=True,ms=None) for m in hm]
- if hr.get('failure_type'):ev.append(dict(f='term_cli',t=ts(hr.get('failure_at') or hr['finished']),ok=False,ms=None,why=hr['failure_type']))
-except Exception as e:ev.append(dict(f='term_cli',t=time.time(),ok=False,ms=None,why='no held result: '+type(e).__name__))
-web=run/'web-events.jsonl'
-if web.exists():ev+=[json.loads(l) for l in open(web)]
-ts=lambda s:datetime.datetime.fromisoformat(s).timestamp()
-u0,u1=ts(t0),ts(t1)
-rows=[]
-for feat in ['exec_short','exec_long','exec_stdin','exec_stdin_large','ssh_stream','ssh_connect','send','preview','tunnel','term_cli','term_web']:
- e=[x for x in ev if x['f']==feat]
- if not e:rows.append(dict(feature=feat,events=0));continue
- ok=[x['t'] for x in e if x['ok']];bad=[x for x in e if not x['ok']]
- win=[t for t in ok if u0-30<=t<=u1+60]
- gaps=[(b-a,a) for a,b in zip(win,win[1:])]
- worst=max(gaps) if gaps else (None,None)
- after=[t for t in ok if bad and t>max(x['t'] for x in bad)]
- starts=[x for x in ev if x['f']==feat+'_start'];ends=[x for x in ev if x['f']==feat+'_end']
- if feat=='send':
-  # A send's pause is how much longer it took than sends before the update.
-  base=sorted(x['ms'] for x in e if x['ok'] and x['t']<u0-1) or [0]
-  med=base[len(base)//2]
-  during=[x['ms'] for x in e if u0-30<=x['t']<=u1+60]
-  worst=(round(max(0,max(during or [0])-med)/1000,3),None)
- rows.append(dict(feature=feat,restarts=max(0,len(starts)-1),cut=[x.get('rc') for x in ends],events=len(e),worst_gap_s=round(worst[0],3) if worst[0] is not None else None,worst_at=datetime.datetime.fromtimestamp(worst[1],datetime.timezone.utc).isoformat()[11:23] if worst[1] else None,failures=len(bad),failures_in_update=len([x for x in bad if u0-1<=x['t']<=u1+60]),recovered=(not bad) or bool(after),max_latency_ms=max((x['ms'] or 0) for x in e)))
-s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows)
+ts=excess.iso
+ev=excess.load_events(run)
+rows=excess.score(ev,[(ts(t0),ts(t1))])
+s=dict(run=name,update_exit=r.stdout.strip(),update_start=t0[11:23],update_end=t1[11:23],rows=rows,build=build,updates=[(t0,t1)])
 (run/'summary.json').write_text(json.dumps(s,indent=1));print(json.dumps(s))
