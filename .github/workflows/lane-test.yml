@@ -119,6 +119,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
           python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
           make policy-checks static-analysis
+      # Shell integration tests (pb env hook) skip when the shell is missing.
+      - name: install zsh and fish
+        if: matrix.module == 'cli'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zsh fish >/dev/null
       - name: go test -race
         run: |
           set -o pipefail
@@ -195,6 +199,9 @@ jobs:
         run: |
           set -o pipefail
           run=(); v=(); [ -z "$RUN" ] || { run=(-run "$RUN"); v=(--verbose); }
+          # Two disposable OS users for the machine guard's cross-user ownership tests (PB_TWO_USER_UIDS).
+          for u in pbtwo1 pbtwo2; do id "$u" >/dev/null 2>&1 || sudo useradd -m "$u"; done
+          export PB_TWO_USER_UIDS="$(id -u pbtwo1),$(id -u pbtwo2)"
           ../tools/cli-root-tests.sh -json "${run[@]}" | python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/root.jsonl" "${v[@]}"
       - name: migration tests (each on its own empty database)
         if: matrix.module == 'server' && !cancelled()
