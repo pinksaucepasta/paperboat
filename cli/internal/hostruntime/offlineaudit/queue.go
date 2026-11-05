@@ -35,7 +35,6 @@ const (
 
 	ReasonNoScope     = "no_scope"
 	ReasonBacklogFull = "backlog_full"
-	ReasonPeerUnknown = "peer_unknown"
 )
 
 // ErrFull refuses a new offline session: it needs Paperboat online.
@@ -50,8 +49,8 @@ type Event struct {
 	OperationID    string    `json:"operation_id"`
 	OccurredAt     time.Time `json:"occurred_at"`
 	Reason         string    `json:"reason,omitempty"`
-	// The fields below belong to the ssh_session_* kinds: Origin says whether Paperboat was
-	// reachable, SessionID (an end's) is the started event's EventID.
+	// Origin says whether Paperboat was reachable. The fields after it belong to the ssh_session_*
+	// kinds: SessionID (an end's) is the started event's EventID.
 	Origin     string `json:"origin,omitempty"`
 	Generation uint64 `json:"generation,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`

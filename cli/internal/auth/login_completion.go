@@ -29,6 +29,8 @@ type LoginCompletion struct {
 	// nil and may replace only a profile belonging to the validated account.
 	PreviousSessionID  *string
 	AllowAccountChange bool
+	// APIToken records a session started with an API token (config.Profile.APIToken).
+	APIToken bool
 }
 
 // CompleteLogin enrolls the authenticated endpoint before activating its local
@@ -52,7 +54,7 @@ func CompleteLogin(ctx context.Context, r LoginCompletion) (config.Profile, erro
 	if r.ExpectedAccountID != "" && me.ID != r.ExpectedAccountID {
 		return config.Profile{}, errors.New("approved account differs from the expected account")
 	}
-	p := config.Profile{Issuer: issuer, Account: config.Account{ID: me.ID, Email: me.Email, DisplayName: me.DisplayName}, CLIClientSessionID: r.SessionID, AccessExpiresAt: r.Credential.ExpiresAt}
+	p := config.Profile{Issuer: issuer, Account: config.Account{ID: me.ID, Email: me.Email, DisplayName: me.DisplayName}, CLIClientSessionID: r.SessionID, AccessExpiresAt: r.Credential.ExpiresAt, APIToken: r.APIToken}
 	if err = r.Store.Recover(issuer); err != nil {
 		return config.Profile{}, err
 	}

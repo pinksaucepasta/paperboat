@@ -116,7 +116,7 @@ func nativeDispatchHijack(ctx context.Context, writer http.ResponseWriter) (net.
 }
 func (c *NativeDispatchClient) call(
 	ctx context.Context, operation string, header *streamauth.Header,
-	binding *nativeprivate.Binding, stream bool,
+	binding *nativeprivate.Binding, peer *nativeDispatchPeer, stream bool,
 ) (net.Conn, nativeDispatchResponse, error) {
 	var result nativeDispatchResponse
 	if c == nil || ctx == nil {
@@ -131,7 +131,7 @@ func (c *NativeDispatchClient) call(
 		if lastErr != nil && !time.Now().Before(deadline) {
 			return nil, result, errors.Join(lastErr, context.DeadlineExceeded)
 		}
-		connection, answer, err := c.callOnce(ctx, operation, header, binding, stream, deadline)
+		connection, answer, err := c.callOnce(ctx, operation, header, binding, peer, stream, deadline)
 		result = answer
 		if err == nil || operation != "stream" || !nativeDispatchTemporary(err) {
 			return connection, result, err
@@ -166,7 +166,7 @@ func nativeDispatchTemporary(err error) bool {
 
 func (c *NativeDispatchClient) callOnce(
 	ctx context.Context, operation string, header *streamauth.Header,
-	binding *nativeprivate.Binding, stream bool, deadline time.Time,
+	binding *nativeprivate.Binding, peer *nativeDispatchPeer, stream bool, deadline time.Time,
 ) (net.Conn, nativeDispatchResponse, error) {
 	var result nativeDispatchResponse
 	attemptDeadline := time.Now().Add(c.config.DialTimeout)
@@ -175,7 +175,7 @@ func (c *NativeDispatchClient) callOnce(
 	}
 	setupCtx, cancel := context.WithDeadline(ctx, attemptDeadline)
 	defer cancel()
-	envelope := nativeDispatchEnvelope{Binding: binding}
+	envelope := nativeDispatchEnvelope{Binding: binding, Peer: peer}
 	var err error
 	if header != nil {
 		envelope.Header, err = header.MarshalBinary()
@@ -246,7 +246,7 @@ func (c *NativeDispatchClient) callOnce(
 	return nil, result, nil
 }
 func (c *NativeDispatchClient) Authorize(ctx context.Context, header streamauth.Header) (string, error) {
-	_, response, err := c.call(ctx, "authorize", &header, nil, false)
+	_, response, err := c.call(ctx, "authorize", &header, nil, nil, false)
 	if err == nil && response.AccessSessionID == "" {
 		err = ErrStreamAuthorization
 	}
@@ -276,15 +276,23 @@ func (c *NativeDispatchClient) Authorize(ctx context.Context, header streamauth.
 	return response.AccessSessionID, err
 }
 func (c *NativeDispatchClient) Open(ctx context.Context, header streamauth.Header) (net.Conn, error) {
-	connection, _, err := c.call(ctx, "stream", &header, nil, true)
+	connection, _, err := c.call(ctx, "stream", &header, nil, nil, true)
+	return connection, err
+}
+
+// OpenOffline hands the worker a stream this carrier admitted from its own signed rules (an offline header): the
+// worker serves it for the peer the carrier proved and admitted, as a single-process host would.
+func (c *NativeDispatchClient) OpenOffline(ctx context.Context, header streamauth.Header, admitted OfflinePeerConn) (net.Conn, error) {
+	accountID, endpointID, _, _, _ := admitted.OfflinePeer()
+	connection, _, err := c.call(ctx, "stream", &header, nil, &nativeDispatchPeer{AccountID: accountID, EndpointID: endpointID}, true)
 	return connection, err
 }
 func (c *NativeDispatchClient) OpenPrivate(ctx context.Context, binding nativeprivate.Binding) (net.Conn, error) {
-	connection, _, err := c.call(ctx, "private", nil, &binding, true)
+	connection, _, err := c.call(ctx, "private", nil, &binding, nil, true)
 	return connection, err
 }
 func (c *NativeDispatchClient) SSHTarget(ctx context.Context) (managedssh.HostTarget, error) {
-	_, response, err := c.call(ctx, "ssh-target", nil, nil, false)
+	_, response, err := c.call(ctx, "ssh-target", nil, nil, nil, false)
 	if err != nil {
 		return managedssh.HostTarget{}, err
 	}
@@ -294,7 +302,7 @@ func (c *NativeDispatchClient) SSHTarget(ctx context.Context) (managedssh.HostTa
 	return *response.SSH, nil
 }
 func (c *NativeDispatchClient) Current(ctx context.Context, binding nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
-	_, response, err := c.call(ctx, "current", nil, &binding, false)
+	_, response, err := c.call(ctx, "current", nil, &binding, nil, false)
 	if err != nil {
 		return time.Time{}, nil, err
 	}
@@ -306,7 +314,7 @@ func (c *NativeDispatchClient) Current(ctx context.Context, binding nativeprivat
 		return time.Time{}, nil, err
 	}
 	lease.Poll(func(checkCtx context.Context) error {
-		_, _, err := c.call(checkCtx, "current", nil, &binding, false)
+		_, _, err := c.call(checkCtx, "current", nil, &binding, nil, false)
 		if errors.Is(err, ErrStreamAuthorization) || errors.Is(err, hostdproto.ErrFenced) {
 			return admission.ErrRevoked
 		}

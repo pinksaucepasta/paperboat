@@ -19,15 +19,17 @@ func TestOfflineAuditBacklogLandsOnceInTheDecidingWorkspacePostgres(t *testing.T
 	}
 	now := time.Now().UTC()
 	events := []OfflineAuditEvent{
-		{EventID: "evt_started_" + f.suffix, Kind: "offline_session_started", Capability: "terminal", PeerEndpointID: "cli_" + f.suffix, PeerAccountID: f.account, OperationID: "op_" + f.suffix, OccurredAt: now.Add(-time.Hour)},
-		{EventID: "evt_refused_" + f.suffix, Kind: "offline_session_refused", Capability: "exec", PeerEndpointID: "cli_other_" + f.suffix, PeerAccountID: "gone_" + f.suffix, OperationID: "op_refused_" + f.suffix, OccurredAt: now.Add(-time.Minute), Reason: "no_scope"},
+		{EventID: "evt_started_" + f.suffix, Kind: "offline_session_started", Capability: "terminal", PeerEndpointID: "cli_" + f.suffix, PeerAccountID: f.account, OperationID: "op_" + f.suffix, OccurredAt: now.Add(-time.Hour), Origin: "offline"},
+		{EventID: "evt_refused_" + f.suffix, Kind: "offline_session_refused", Capability: "exec", PeerEndpointID: "cli_other_" + f.suffix, PeerAccountID: "gone_" + f.suffix, OperationID: "op_refused_" + f.suffix, OccurredAt: now.Add(-time.Minute), Reason: "no_scope", Origin: "offline"},
+		// A signed-in computer's exec is always admitted from the host's rules (D1), online too.
+		{EventID: "evt_online_" + f.suffix, Kind: "offline_session_started", Capability: "exec", PeerEndpointID: "cli_" + f.suffix, PeerAccountID: f.account, OperationID: "op_online_" + f.suffix, OccurredAt: now.Add(-time.Minute), Origin: "online"},
 	}
 	receipt, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, events)
-	if err != nil || receipt.Accepted != 2 || receipt.Duplicates != 0 {
+	if err != nil || receipt.Accepted != 3 || receipt.Duplicates != 0 {
 		t.Fatalf("first upload: %+v %v", receipt, err)
 	}
 	type row struct{ event, result, workspace, origin, actor string }
-	rows, err := f.store.SQL().QueryContext(f.ctx, `SELECT event_type,result,coalesce(activity_workspace_id,''),metadata->>'origin',coalesce(actor_user_id,'') FROM paperboat.audit_events WHERE resource_type IN ('machine_access','user_machine') AND resource_id=$1 AND idempotency_key LIKE 'offline:%' ORDER BY event_type`, f.machine)
+	rows, err := f.store.SQL().QueryContext(f.ctx, `SELECT event_type,result,coalesce(activity_workspace_id,''),metadata->>'origin',coalesce(actor_user_id,'') FROM paperboat.audit_events WHERE resource_type IN ('machine_access','user_machine') AND resource_id=$1 AND idempotency_key LIKE 'offline:%' ORDER BY event_type,metadata->>'origin'`, f.machine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,22 +42,24 @@ func TestOfflineAuditBacklogLandsOnceInTheDecidingWorkspacePostgres(t *testing.T
 		got = append(got, r)
 	}
 	rows.Close()
-	if len(got) != 2 || got[0].event != accessDeniedEvent || got[0].result != "denied" || got[0].actor != "" || got[1].event != accessStartedEvent || got[1].actor != f.account {
+	if len(got) != 3 || got[0].event != accessDeniedEvent || got[0].result != "denied" || got[0].actor != "" || got[1].event != accessStartedEvent || got[1].actor != f.account || got[2].event != accessStartedEvent {
 		t.Fatalf("audit rows %+v", got)
 	}
-	for _, r := range got {
-		if r.origin != "offline" || r.workspace != "personal:"+f.account {
-			t.Fatalf("event %s: origin %q workspace %q, want offline in personal:%s", r.event, r.origin, r.workspace, f.account)
+	for i, origin := range []string{"offline", "offline", "online"} {
+		if r := got[i]; r.origin != origin || r.workspace != "personal:"+f.account {
+			t.Fatalf("event %s: origin %q workspace %q, want %s in personal:%s", r.event, r.origin, r.workspace, origin, f.account)
 		}
 	}
-	if again, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, events); err != nil || again.Accepted != 0 || again.Duplicates != 2 {
+	if again, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, events); err != nil || again.Accepted != 0 || again.Duplicates != 3 {
 		t.Fatalf("re-upload: %+v %v", again, err)
 	}
 	future := events[0]
 	future.EventID, future.OccurredAt = "evt_future_"+f.suffix, now.Add(time.Hour)
 	unknownReason := events[1]
 	unknownReason.EventID, unknownReason.Reason = "evt_reason_"+f.suffix, "because"
-	for name, batch := range map[string][]OfflineAuditEvent{"future": {future}, "reason": {unknownReason}, "empty": nil} {
+	noOrigin := events[0]
+	noOrigin.EventID, noOrigin.Origin = "evt_no_origin_"+f.suffix, ""
+	for name, batch := range map[string][]OfflineAuditEvent{"future": {future}, "reason": {unknownReason}, "origin": {noOrigin}, "empty": nil} {
 		if _, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, batch); !errors.Is(err, ErrOfflineAuditInvalid) {
 			t.Errorf("%s: %v, want ErrOfflineAuditInvalid", name, err)
 		}

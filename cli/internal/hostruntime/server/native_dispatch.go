@@ -42,17 +42,48 @@ type NativeDispatchConfig struct {
 	// Fence admits one dispatch under the accepting worker's own hostd lease.
 	// During a handover both generations accept on the shared listener; each
 	// admits only while its own hostd keeps it active.
-	Fence       func(context.Context) (func(), <-chan struct{}, error)
-	Authorize   func(context.Context, streamauth.Header) (string, error)
-	ServeStream func(context.Context, streamauth.Header, net.Conn) error
-	Current     NativePrivateTCPCurrent
-	DialPrivate func(context.Context, nativeprivate.Binding) (net.Conn, error)
-	SSHTarget   func(context.Context) (managedssh.HostTarget, error)
+	Fence     func(context.Context) (func(), <-chan struct{}, error)
+	Authorize func(context.Context, streamauth.Header) (string, error)
+	// AdmitOffline decides whether this worker serves a stream its carrier admitted from the host's signed rules
+	// (offline header, peer named by the carrier); nil refuses them.
+	AdmitOffline func(context.Context, streamauth.Header) error
+	ServeStream  func(context.Context, streamauth.Header, net.Conn) error
+	Current      NativePrivateTCPCurrent
+	DialPrivate  func(context.Context, nativeprivate.Binding) (net.Conn, error)
+	SSHTarget    func(context.Context) (managedssh.HostTarget, error)
 }
 type nativeDispatchEnvelope struct {
 	Header  json.RawMessage        `json:"header,omitempty"`
 	Binding *nativeprivate.Binding `json:"binding,omitempty"`
+	// Peer is the account and endpoint the carrier proved and admitted from its signed rules, for an offline
+	// header only. The dispatch token authenticates the carrier, the only party that can name it.
+	Peer *nativeDispatchPeer `json:"peer,omitempty"`
 }
+
+type nativeDispatchPeer struct {
+	AccountID  string `json:"account_id"`
+	EndpointID string `json:"endpoint_id"`
+}
+
+// offlineDispatchConn serves a carrier-admitted offline stream for its peer (OfflinePeerConn), so the worker
+// authorizes its requests exactly as a single-process host authorizes a native.OfflineConn.
+type offlineDispatchConn struct {
+	net.Conn
+	peer   nativeDispatchPeer
+	header streamauth.Header
+}
+
+func (c *offlineDispatchConn) OfflinePeer() (accountID, endpointID, consumer, operationID string, deadline time.Time) {
+	return c.peer.AccountID, c.peer.EndpointID, c.header.Consumer, c.header.OperationID, time.Unix(c.header.DeadlineUnix, 0)
+}
+
+func (c *offlineDispatchConn) CloseWrite() error {
+	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
+}
+
 type nativeDispatchResponse struct {
 	AccessSessionID string                 `json:"access_session_id,omitempty"`
 	ValidUntil      time.Time              `json:"valid_until,omitempty"`
@@ -201,12 +232,20 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		var header streamauth.Header
 		operation := strings.TrimPrefix(r.URL.Path, NativeDispatchPath)
 		needsHeader := operation == "authorize" || operation == "stream"
+		if envelope.Peer != nil && (operation != "stream" || envelope.Peer.AccountID == "" || envelope.Peer.EndpointID == "") {
+			http.Error(w, "invalid dispatch peer", http.StatusBadRequest)
+			return
+		}
 		if needsHeader {
 			if envelope.Binding != nil {
 				http.Error(w, "invalid dispatch binding", http.StatusBadRequest)
 				return
 			}
 			header, err = streamauth.Parse(envelope.Header, serverclock.Now().UTC())
+			// SSH is served by the carrier itself; only terminal and exec run offline in a worker.
+			if err == nil && header.Offline != (envelope.Peer != nil) || header.Offline && header.Consumer != "terminal" && header.Consumer != "exec" {
+				err = streamauth.ErrInvalid
+			}
 			if err != nil || !nativeDispatchConsumer(header.Consumer) {
 				if err == nil {
 					err = streamauth.ErrInvalid
@@ -222,8 +261,18 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		response := nativeDispatchResponse{}
 		switch operation {
 		case "authorize", "stream":
-			response.AccessSessionID, err = config.Authorize(r.Context(), header)
-			if err != nil || response.AccessSessionID == "" {
+			if header.Offline {
+				err = streamauth.ErrInvalid
+				if config.AdmitOffline != nil {
+					err = config.AdmitOffline(r.Context(), header)
+				}
+			} else {
+				response.AccessSessionID, err = config.Authorize(r.Context(), header)
+				if err == nil && response.AccessSessionID == "" {
+					err = ErrStreamAuthorization
+				}
+			}
+			if err != nil {
 				recordNativeAdmissionFailure("resource_authorize", err)
 				if reportAuthorizationFailure(r.Context(), err) {
 					http.Error(w, "dispatch authority unavailable", http.StatusServiceUnavailable)
@@ -268,7 +317,11 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				}
 				stop := context.AfterFunc(lifetime, func() { _ = connection.Close() })
 				defer stop()
-				if err := config.ServeStream(lifetime, header, native.LimitConnection(connection, header.MaximumBytes)); err != nil {
+				served := native.LimitConnection(connection, header.MaximumBytes)
+				if header.Offline {
+					served = &offlineDispatchConn{Conn: served, peer: *envelope.Peer, header: header}
+				}
+				if err := config.ServeStream(lifetime, header, served); err != nil {
 					recordNativeAdmissionFailure("application", err)
 				}
 				return
