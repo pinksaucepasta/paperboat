@@ -1,6 +1,7 @@
 package native
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -19,20 +20,28 @@ type scopeConn struct {
 	err   error
 }
 
+// refused reports a withdrawn or expired admission. A lease that ended because its
+// connection closed is not a refusal: the stream then returns the connection's own
+// cause, so a restart or peer close stays a reconnect, not a permanent refusal.
+func (c *scopeConn) refused() bool {
+	err := c.lease.Check()
+	return errors.Is(err, admission.ErrRevoked) || errors.Is(err, admission.ErrExpired)
+}
+
 func (c *scopeConn) Read(p []byte) (int, error) {
-	if c.lease.Check() != nil {
+	if c.refused() {
 		return 0, tailnet.ErrAdmission
 	}
 	return c.Conn.Read(p)
 }
 func (c *scopeConn) Write(p []byte) (int, error) {
-	if c.lease.Check() != nil {
+	if c.refused() {
 		return 0, tailnet.ErrAdmission
 	}
 	return c.Conn.Write(p)
 }
 func (c *scopeConn) CloseWrite() error {
-	if c.lease.Check() != nil {
+	if c.refused() {
 		return tailnet.ErrAdmission
 	}
 	if half, ok := c.Conn.(interface{ CloseWrite() error }); ok {
