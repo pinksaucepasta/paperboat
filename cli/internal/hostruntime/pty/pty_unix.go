@@ -292,14 +292,20 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 		return result, err
 	default:
 	}
-	if err := p.Signal(Terminate); err != nil && !processGone(err) {
-		return ExitResult{}, err
+	signalErr := p.Signal(Terminate)
+	// Darwin refuses a signal to a group whose leader has exited but is not reaped yet (EPERM; ESRCH once
+	// reaped, macOS run 42033323127). Such a refusal stands only if the process is still there after grace.
+	if signalErr != nil && !processGone(signalErr) && !errors.Is(signalErr, syscall.EPERM) {
+		return ExitResult{}, signalErr
 	}
 	graceCtx, cancel := context.WithTimeout(ctx, grace)
 	result, err := p.Wait(graceCtx)
 	cancel()
 	if err == nil {
 		return result, p.CloseIO()
+	}
+	if errors.Is(signalErr, syscall.EPERM) {
+		return ExitResult{}, signalErr
 	}
 	if ctx.Err() != nil {
 		return ExitResult{}, ctx.Err()
