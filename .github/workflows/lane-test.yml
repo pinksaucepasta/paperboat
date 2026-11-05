@@ -135,6 +135,42 @@ jobs:
               go test -race -count="$COUNT" -timeout 30m "${run[@]}" "$pkg" || failed=1
           done
           exit $failed
+      # F21-15: the server behind a real PgBouncer in transaction mode (PlanetScale's pooler), with its own role,
+      # because the test stores role defaults (ALTER ROLE ... SET) that must not reach the other packages' role.
+      - name: server behind PgBouncer (transaction pooling)
+        if: matrix.module == 'server' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'PgBouncer'))
+        run: |
+          export PGPASSWORD=postgres
+          psql -h localhost -U postgres -qc "create role pgb_app login superuser password 'pgb_app_test'"
+          psql -h localhost -U postgres -qc "create database lane_pgbouncer_test owner pgb_app"
+          sudo apt-get install -y --no-install-recommends pgbouncer >/dev/null
+          # The package starts its own service on 6432; stop it so this job's bouncer owns the port.
+          sudo systemctl stop pgbouncer
+          pgbouncer --version
+          cat > /tmp/pgbouncer.ini <<'INI'
+          [databases]
+          lane_pgbouncer_test = host=127.0.0.1 port=5432 dbname=lane_pgbouncer_test
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          auth_type = scram-sha-256
+          auth_file = /tmp/pgbouncer-users.txt
+          pool_mode = transaction
+          max_prepared_statements = 1000
+          default_pool_size = 20
+          logfile = /tmp/pgbouncer.log
+          pidfile = /tmp/pgbouncer.pid
+          INI
+          sed -i 's/^          //' /tmp/pgbouncer.ini
+          # PgBouncer logs in to PostgreSQL with SCRAM, so its auth file holds the role's SCRAM secret (PgBouncer docs).
+          secret=$(psql -h localhost -U postgres -Atc "select rolpassword from pg_authid where rolname='pgb_app'")
+          printf '"pgb_app" "%s"\n' "$secret" > /tmp/pgbouncer-users.txt
+          pgbouncer -d /tmp/pgbouncer.ini
+          sleep 1
+          trap 'tail -20 /tmp/pgbouncer.log' EXIT
+          PAPERBOAT_TEST_PGBOUNCER_DSN="postgres://pgb_app:pgb_app_test@127.0.0.1:6432/lane_pgbouncer_test?sslmode=disable" \
+          PAPERBOAT_TEST_DATABASE_DSN="postgres://pgb_app:pgb_app_test@127.0.0.1:5432/lane_pgbouncer_test?sslmode=disable" \
+            go test -race -count=1 -v -run '^TestServerRunsBehindTransactionPoolingPgBouncerOnPostgres$' ./internal/db
       - name: cli tests that need root (under sudo)
         if: matrix.module == 'cli' && !cancelled()
         run: |
