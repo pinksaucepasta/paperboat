@@ -150,7 +150,8 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 		in.RuntimeVersions = json.RawMessage(`{}`)
 	}
 	var result UserMachine
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Setup may occupy a seat: it queues on the account's machine lock before its snapshot, as approve does.
+	err := planlimits.InTxHolding(ctx, s.db, planlimits.Scope{Account: userID}, planlimits.Machines, func(ctx context.Context, tx *db.Tx) error {
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}

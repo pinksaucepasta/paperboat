@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -28,7 +29,16 @@ func TestSDKSessionAuditAttribution(t *testing.T) {
 		t.Fatal("missing signer accepted")
 	}
 	f.service.controlSigner = signer
-	event := OfflineAuditEvent{EventID: "sdk_audit_end_" + f.suffix, Kind: "sdk_operation_ended", Capability: "exec", PeerEndpointID: session, PeerAccountID: f.account, OperationID: claims.OperationID, SessionID: claims.AssignmentID, Outcome: "uncertain", OccurredAt: time.Now().UTC()}
+	// The host reports the peer's network endpoint: the token session's daemon generation.
+	endpoint := session + "_0123456789abcdef0123456789abcdef"
+	fingerprint := bytes.Repeat([]byte{7}, 32)
+	if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'cli',1,1,$4,$5,now()-interval '1 minute',now()+interval '1 hour','sdk-audit',$5)`, fingerprint, f.account, session, bytes.Repeat([]byte{1}, 140), make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,cli_client_session_id,role,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,'cli',1,0,1,$4,$4,('fd7a:115c:a1e0::'::inet + nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, f.account, endpoint, session, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	event := OfflineAuditEvent{EventID: "sdk_audit_end_" + f.suffix, Kind: "sdk_operation_ended", Capability: "exec", PeerEndpointID: endpoint, PeerAccountID: f.account, OperationID: claims.OperationID, SessionID: claims.AssignmentID, Outcome: "uncertain", OccurredAt: time.Now().UTC()}
 	receipt, err := f.service.RecordOfflineAuditBacklog(ctx, f.machine, 1, []OfflineAuditEvent{event})
 	if err != nil || receipt.Accepted != 1 {
 		t.Fatalf("operation outcome: %v", err)

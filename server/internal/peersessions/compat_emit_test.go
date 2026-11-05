@@ -18,7 +18,7 @@ func TestEmitCompatNetworkConfiguration(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	binding := func(id, address string) networkBinding {
-		return networkBinding{AccountID: "usr_compat", EndpointID: id, Role: "machine", MachineID: id, EndpointGeneration: 1, MachineGeneration: 1, KeyGeneration: 1,
+		return networkBinding{AccountID: "usr_compat", EndpointID: id, OwnerEndpointID: id, Role: "machine", MachineID: id, EndpointGeneration: 1, MachineGeneration: 1, KeyGeneration: 1,
 			WireGuardPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", DiscoPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 			QUICCertificateFingerprint: "0000000000000000000000000000000000000000000000000000000000000000", QUICPublicKey: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
 			VirtualAddress: address, Endpoints: []string{"203.0.113.7:41641"}}

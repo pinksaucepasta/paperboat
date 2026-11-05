@@ -63,8 +63,9 @@ type Tx struct {
 }
 
 // directMaxConns bounds the direct pool: session state holds one connection each (the machine-events LISTEN, the
-// worker leader, a team identity sync, each address reconcile), so it stays small.
-const directMaxConns = 4
+// worker leader, a team identity sync, each address reconcile, each InTxUnderSessionLock transaction), so it stays
+// small.
+const directMaxConns = 6
 
 func Open(cfg config.Database) (*DB, error) {
 	if cfg.Driver != "postgres" && cfg.Driver != "pgx" {
@@ -430,7 +431,16 @@ func rollbackFailedTx(tx pgx.Tx) error {
 }
 
 func (d *DB) runInTx(ctx context.Context, options pgx.TxOptions, fn func(context.Context, *Tx) error) error {
-	tx, err := d.pool.BeginTx(ctx, options)
+	return runInTxOn(ctx, d.pool, options, fn)
+}
+
+// txBeginner is a pool or one held connection.
+type txBeginner interface {
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+}
+
+func runInTxOn(ctx context.Context, conn txBeginner, options pgx.TxOptions, fn func(context.Context, *Tx) error) error {
+	tx, err := conn.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}

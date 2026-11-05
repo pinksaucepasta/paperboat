@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,8 +88,11 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,$4,1,1,$5,$6,$7,$8,'offline-access',$9)`, fingerprint[:], account, endpoint, name, certificate, quic[:], now, now.Add(time.Hour), signer.Public().(ed25519.PublicKey))
 		private, public := networkX25519Key(t)
 		request := NetworkRegistration{OperationID: "register_" + endpoint, UserID: account, EndpointID: endpoint, Role: name, EndpointGeneration: 1, WireGuardPublicKey: public, DiscoPublicKey: networkDiscoPublic(t, private), QUICCertificateFingerprint: fingerprint[:]}
+		request.OwnerEndpointID = endpoint
 		if role == wire.RoleMachine {
 			request.MachineID, request.MachineGeneration = endpoint, 1
+		} else {
+			request.EndpointID = daemonEndpoint(endpoint)
 		}
 		if _, err := service.Register(ctx, request); err != nil {
 			t.Fatal(err)
@@ -124,7 +128,8 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		offline, mesh := map[string][]string{}, []float64{}
 		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
 			peer := raw.(map[string]any)
-			endpoint := peer["identity"].(map[string]any)["endpoint_id"].(string)
+			// Keyed by session: each CLI peer is the test daemon generation of one.
+			endpoint := strings.TrimSuffix(peer["identity"].(map[string]any)["endpoint_id"].(string), "_"+testDaemonGeneration)
 			for _, rawScope := range peer["scopes"].([]any) {
 				scope := rawScope.(map[string]any)
 				switch {

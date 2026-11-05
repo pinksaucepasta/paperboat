@@ -41,10 +41,10 @@ FROM paperboat.peer_network_identities n
 JOIN LATERAL (SELECT * FROM paperboat.peer_endpoint_certificates c WHERE c.fingerprint=n.quic_certificate_fingerprint LIMIT 1) c ON true
 LEFT JOIN LATERAL (SELECT * FROM paperboat.user_machines m WHERE m.id=n.endpoint_id LIMIT 1) m ON n.role='machine'
 LEFT JOIN LATERAL (SELECT * FROM paperboat.control_environments e WHERE e.id=m.environment_id LIMIT 1) e ON true
-LEFT JOIN LATERAL (SELECT * FROM paperboat.cli_client_sessions s WHERE s.id=n.endpoint_id LIMIT 1) s ON n.role='cli'
+LEFT JOIN LATERAL (SELECT * FROM paperboat.cli_client_sessions s WHERE s.id=n.owner_endpoint_id LIMIT 1) s ON n.role='cli'
 WHERE n.user_id=$1 AND n.revoked_at IS NULL
  AND EXISTS(SELECT 1 FROM paperboat.users u WHERE u.id=$1 AND u.status='active')
- AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
+ AND c.user_id=n.user_id AND c.endpoint_id=n.owner_endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role
  AND c.revoked_at IS NULL AND c.issued_at<=$2 AND c.expires_at>$2
  AND NOT EXISTS(SELECT 1 FROM paperboat.peer_endpoint_certificate_revocations r WHERE r.user_id=$1 AND r.certificate_fingerprint=c.fingerprint)
  AND ((n.role='machine' AND m.id=n.machine_id AND m.user_id=n.user_id AND m.owner_team_id IS NULL AND m.state IN ('online','offline')

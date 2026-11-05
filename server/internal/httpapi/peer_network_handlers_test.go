@@ -18,10 +18,22 @@ import (
 )
 
 type peerNetworkStub struct {
-	register peersessions.NetworkRegistration
-	config   peersessions.NetworkConfigRequest
-	carrier  peersessions.CarrierOfferReport
-	err      error
+	register  peersessions.NetworkRegistration
+	config    peersessions.NetworkConfigRequest
+	carrier   peersessions.CarrierOfferReport
+	lifecycle []string
+	err       error
+}
+
+const testDaemonGeneration = "0123456789abcdef0123456789abcdef"
+
+func (s *peerNetworkStub) BeginDrain(_ context.Context, user, owner, endpoint string) error {
+	s.lifecycle = append(s.lifecycle, "drain "+user+" "+owner+" "+endpoint)
+	return s.err
+}
+func (s *peerNetworkStub) Withdraw(_ context.Context, user, owner, endpoint string) error {
+	s.lifecycle = append(s.lifecycle, "withdraw "+user+" "+owner+" "+endpoint)
+	return s.err
 }
 
 func (s *peerNetworkStub) Register(_ context.Context, in peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error) {
@@ -41,14 +53,14 @@ func TestPeerNetworkCLIRegistrationDerivesIdentity(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
 	disco := bytes.Repeat([]byte{9}, 32)
 	fingerprint := bytes.Repeat([]byte{8}, 32)
-	body := []byte(`{"operation_id":"operation_123","wireguard_public_key":"` + base64.RawURLEncoding.EncodeToString(key) + `","disco_public_key":"` + base64.RawURLEncoding.EncodeToString(disco) + `","expected_key_generation":0,"quic_certificate_fingerprint":"` + hex.EncodeToString(fingerprint) + `"}`)
+	body := []byte(`{"operation_id":"operation_123","daemon_generation":"` + testDaemonGeneration + `","wireguard_public_key":"` + base64.RawURLEncoding.EncodeToString(key) + `","disco_public_key":"` + base64.RawURLEncoding.EncodeToString(disco) + `","expected_key_generation":0,"quic_certificate_fingerprint":"` + hex.EncodeToString(fingerprint) + `"}`)
 	stub := &peerNetworkStub{}
 	r := httptest.NewRequest(http.MethodPost, "/v1/peer-network/register", bytes.NewReader(body))
 	client := &auth.ClientPrincipal{SessionID: "cli_1"}
 	r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "account_1"}, Client: client}))
 	w := httptest.NewRecorder()
 	peerNetworkRegister(stub).ServeHTTP(w, r)
-	if w.Code != http.StatusOK || stub.register.UserID != "account_1" || stub.register.EndpointID != "cli_1" || stub.register.Role != "cli" || !bytes.Equal(stub.register.DiscoPublicKey, disco) {
+	if w.Code != http.StatusOK || stub.register.UserID != "account_1" || stub.register.EndpointID != "cli_1_"+testDaemonGeneration || stub.register.OwnerEndpointID != "cli_1" || stub.register.Role != "cli" || !bytes.Equal(stub.register.DiscoPublicKey, disco) {
 		t.Fatalf("status=%d registration=%+v body=%s", w.Code, stub.register, w.Body.String())
 	}
 }
@@ -70,18 +82,19 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 	if w.Code != http.StatusOK || stub.config.UserID != "account_1" || stub.config.EndpointID != "machine_1" || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatalf("status=%d config=%+v", w.Code, stub.config)
 	}
-	cliRequest := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader(body))
+	cliBody := bytes.Replace(body, []byte(`{"operation_id":"operation_123",`), []byte(`{"operation_id":"operation_123","daemon_generation":"`+testDaemonGeneration+`",`), 1)
+	cliRequest := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader(cliBody))
 	cliRequest = cliRequest.WithContext(context.WithValue(cliRequest.Context(), authContextKey{}, principal{User: auth.User{ID: "account_2"}, Client: &auth.ClientPrincipal{SessionID: "cli_2"}}))
 	w = httptest.NewRecorder()
 	peerNetworkConfig(stub).ServeHTTP(w, cliRequest)
-	if w.Code != http.StatusOK || stub.config.UserID != "account_2" || stub.config.EndpointID != "cli_2" || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceKind != "machine_access" || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
+	if w.Code != http.StatusOK || stub.config.UserID != "account_2" || stub.config.EndpointID != "cli_2_"+testDaemonGeneration || len(stub.config.AdmittedCertificates) != 1 || stub.config.AdmittedCertificates[0].EndpointID != "peer_live" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceKind != "machine_access" || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatal("CLI principal or admitted-scope request binding lost")
 	}
 
 }
 
 func TestPeerNetworkStableErrors(t *testing.T) {
-	for err, want := range map[error]int{peersessions.ErrDenied: http.StatusForbidden, peersessions.ErrConflict: http.StatusConflict, errors.New("database unavailable"): http.StatusServiceUnavailable} {
+	for err, want := range map[error]int{peersessions.ErrDenied: http.StatusForbidden, peersessions.ErrGenerationEvicted: http.StatusForbidden, peersessions.ErrGenerationWithdrawn: http.StatusForbidden, peersessions.ErrGenerationLimit: http.StatusConflict, peersessions.ErrConflict: http.StatusConflict, errors.New("database unavailable"): http.StatusServiceUnavailable} {
 		w := httptest.NewRecorder()
 		peerNetworkError(w, httptest.NewRequest(http.MethodPost, "/", nil), err)
 		if w.Code != want {
@@ -171,5 +184,40 @@ func TestMachineCarrierOfferDerivesIdentityFromTheProof(t *testing.T) {
 		if w, stub := report(body); w.Code != http.StatusBadRequest || stub.carrier.MachineID != "" {
 			t.Fatalf("%s: status=%d report=%+v", name, w.Code, stub.carrier)
 		}
+	}
+}
+
+// A daemon generation's drain and withdraw act on its own endpoint of the caller's session; a malformed generation
+// is refused before any state changes.
+func TestPeerNetworkGenerationLifecycle(t *testing.T) {
+	stub := &peerNetworkStub{}
+	request := func(path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "account_1"}, Client: &auth.ClientPrincipal{SessionID: "cli_1"}}))
+		w := httptest.NewRecorder()
+		step := stub.Withdraw
+		if path == "/v1/peer-network/drain" {
+			step = stub.BeginDrain
+		}
+		peerNetworkGeneration(step).ServeHTTP(w, r)
+		return w
+	}
+	if w := request("/v1/peer-network/drain", `{"daemon_generation":"`+testDaemonGeneration+`"}`); w.Code != http.StatusOK {
+		t.Fatalf("drain status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := request("/v1/peer-network/withdraw", `{"daemon_generation":"`+testDaemonGeneration+`"}`); w.Code != http.StatusOK {
+		t.Fatalf("withdraw status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := request("/v1/peer-network/withdraw", `{"daemon_generation":"NOT-HEX"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad generation status=%d", w.Code)
+	}
+	want := []string{"drain account_1 cli_1 cli_1_" + testDaemonGeneration, "withdraw account_1 cli_1 cli_1_" + testDaemonGeneration}
+	if strings.Join(stub.lifecycle, "|") != strings.Join(want, "|") {
+		t.Fatalf("lifecycle = %q", stub.lifecycle)
+	}
+	w := httptest.NewRecorder()
+	peerNetworkError(w, httptest.NewRequest(http.MethodPost, "/", nil), peersessions.ErrGenerationEvicted)
+	if !strings.Contains(w.Body.String(), "peer_network_generation_evicted") {
+		t.Fatalf("evicted code missing: %s", w.Body.String())
 	}
 }
