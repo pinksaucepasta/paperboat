@@ -148,7 +148,9 @@ func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *tes
 	waitDynamicCondition(t, ctx, func() bool { _, ok := routes.Lookup("machine.runtime.example.test"); return ok })
 
 	// Stopping this edge (an install handover) tells the host first, on its runtime route.
-	drainer, ok := component.(interface{ Drain(context.Context, time.Time) })
+	drainer, ok := component.(interface {
+		Drain(context.Context, time.Time)
+	})
 	if !ok {
 		t.Fatal("carrier component does not drain")
 	}
