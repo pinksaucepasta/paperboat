@@ -296,6 +296,11 @@ type TerminalTarget struct {
 	InputQueue        *TerminalInputQueue
 	// InputOwner names one pb connect across redials (see localdaemon input owners); empty elsewhere.
 	InputOwner string
+	// ResumeSecret is the host's current secret for this attachment, kept by the daemon (never sent to the CLI,
+	// never logged). Resume makes the attach use it, with the previous access session, instead of a credential
+	// (EternalTerminal's passkey, ~/ref/EternalTerminal/src/base/ServerClientConnection.cpp:93).
+	ResumeSecret []byte
+	Resume       bool
 }
 
 // Shared reports a role-scoped session attachment. Runtime authorization remains
