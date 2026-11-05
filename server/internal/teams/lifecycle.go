@@ -11,6 +11,10 @@ import (
 // Personal resources and independent Git credentials remain personally owned.
 func revokeDepartingResourcesTx(ctx context.Context, tx *db.Tx, team, account string) error {
 	for _, query := range []string{
+		`UPDATE api_tokens SET revoked_at=now(),revoked_by=account_id
+WHERE team_id=$1 AND revoked_at IS NULL AND ($2='' OR account_id=$2)`,
+		`UPDATE cli_client_sessions s SET state='revoked',revoked_at=now(),revocation_reason='api_token_revoked',version=s.version+1
+FROM api_tokens t WHERE s.api_token_id=t.id AND s.state='active' AND t.team_id=$1 AND ($2='' OR t.account_id=$2)`,
 		`UPDATE team_resource_bindings b SET active=false,generation=b.generation+1
 WHERE b.team_id=$1 AND b.active AND ($2='' OR (b.owner_account=$2 AND b.resource_kind<>'env'
 AND NOT (b.resource_kind='machine' AND EXISTS(SELECT 1 FROM user_machines m WHERE m.id=b.resource_id AND m.owner_team_id=$1))))`,

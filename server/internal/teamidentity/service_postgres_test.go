@@ -9,9 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
 type fakeWorkOS struct {
@@ -203,6 +206,33 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatalf("bob member=%v err=%v", bobActive, err)
 	}
 
+	// Both team tokens must stop authenticating; personal and other members' tokens survive.
+	tokens := apitokens.New(store, audit.NewWriter(store), config.Default().APITokens, "")
+	type credential struct {
+		secret  string
+		revoked bool
+	}
+	var credentials []credential
+	for _, item := range []struct {
+		account, name string
+		ws            workspace.Scope
+		revoked       bool
+	}{
+		{alice, "directory-one", workspace.Scope{ID: team, TeamID: team}, true},
+		{alice, "directory-two", workspace.Scope{ID: team, TeamID: team}, true},
+		{alice, "personal", workspace.Scope{ID: "personal"}, false},
+		{bob, "retained", workspace.Scope{ID: team, TeamID: team}, false},
+	} {
+		_, secret, err := tokens.Create(ctx, item.account, item.ws, apitokens.CreateInput{Name: item.name}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tokens.Authenticate(ctx, secret); err != nil {
+			t.Fatalf("before departure: %v", err)
+		}
+		credentials = append(credentials, credential{secret, item.revoked})
+	}
+
 	// Deprovisioning: alice suspended in the directory, the owner removed from it.
 	fake.mu.Lock()
 	fake.state.Users = []DirectoryUser{{ID: "du_alice", Email: "alice@" + domain, Active: false}, {ID: "du_bob", Email: "bob@" + domain, Active: true}}
@@ -215,6 +245,16 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	_ = store.SQL().QueryRowContext(ctx, `SELECT active FROM paperboat.team_members WHERE team_id=$1 AND account_id=$2`, team, owner).Scan(&ownerActive)
 	if aliceActive || !ownerActive {
 		t.Fatalf("after deprovisioning alice=%v owner=%v", aliceActive, ownerActive)
+	}
+
+	for i, credential := range credentials {
+		_, err := tokens.Authenticate(ctx, credential.secret)
+		if credential.revoked && !errors.Is(err, apitokens.ErrInvalid) {
+			t.Fatalf("departed member token %d: got %v, want api token invalid", i, err)
+		}
+		if !credential.revoked && err != nil {
+			t.Fatalf("unrelated token %d refused: %v", i, err)
+		}
 	}
 
 	// JIT: dave signs in through the team's SSO and becomes a member.
