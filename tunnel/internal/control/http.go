@@ -42,6 +42,10 @@ type HTTPConfig struct {
 	Client         *http.Client
 	ControlFailure func(context.Context, string, error)
 	ControlTrace   func(context.Context, string) (string, string, func(string, string))
+	// NodeReady, when set, is closed once the server has recorded this edge process as ready.
+	// Requests the server refuses from an unready node (browser access, private access grants,
+	// on-demand certificates) wait for it within their own context.
+	NodeReady <-chan struct{}
 }
 
 type HTTPClient struct {
@@ -50,6 +54,7 @@ type HTTPClient struct {
 	client         *http.Client
 	controlFailure func(context.Context, string, error)
 	controlTrace   func(context.Context, string) (string, string, func(string, string))
+	nodeReady      <-chan struct{}
 	signerMu       sync.RWMutex
 	signer         DistributionRequestSigner
 	// routesVersion and routesHeld are the last canonical route answer; the server answers
@@ -95,7 +100,23 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	}
 	client.Timeout = config.Timeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrControlUnavailable }
-	return &HTTPClient{base: base, credential: config.Credential, client: client, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure}, nil
+	return &HTTPClient{base: base, credential: config.Credential, client: client, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
+}
+
+// ErrNodeNotReady: the request was not sent because the edge process is not ready yet.
+var ErrNodeNotReady = errors.New("edge node is not ready yet")
+
+// awaitNodeReady holds a request the server would refuse from an unready node; it sends nothing.
+func (c *HTTPClient) awaitNodeReady(ctx context.Context) error {
+	if c.nodeReady == nil {
+		return nil
+	}
+	select {
+	case <-c.nodeReady:
+		return nil
+	case <-ctx.Done():
+		return errors.Join(ErrNodeNotReady, ctx.Err())
+	}
 }
 
 // SetDistributionRequestSigner installs the node-private signer used for

@@ -35,6 +35,9 @@ type RuntimeCarrierWorker struct {
 	// endpointFullInterval, the server's admission lifetime).
 	EndpointFullInterval time.Duration
 	Timeout              time.Duration
+	// Ready, when set, holds every pull and report until the server has recorded this process
+	// as ready (NodeWorker.Ready): it refuses them from an unready node.
+	Ready <-chan struct{}
 	// runtimeSet and endpointSet are the latest runtime and endpoint admissions; only the worker
 	// goroutine touches them. endpointPause stops fast pulls until the next full pull after one
 	// fails (for example on a server that does not serve them yet).
@@ -71,6 +74,13 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 	w.wake = make(chan struct{}, 1)
 	go func() {
 		defer close(w.done)
+		if w.Ready != nil {
+			select {
+			case <-run.Done():
+				return
+			case <-w.Ready:
+			}
+		}
 		w.reconcile(run)
 		ticker := time.NewTicker(w.Interval)
 		defer ticker.Stop()

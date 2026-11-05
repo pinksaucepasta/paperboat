@@ -25,11 +25,15 @@ type Snapshot struct {
 type State struct {
 	mu       sync.RWMutex
 	snapshot Snapshot
+	readied  chan struct{}
 }
 
 func New(nodeID string) *State {
-	return &State{snapshot: Snapshot{NodeID: nodeID, Phase: Starting, Live: true}}
+	return &State{snapshot: Snapshot{NodeID: nodeID, Phase: Starting, Live: true}, readied: make(chan struct{})}
 }
+
+// Readied is closed when the node first becomes ready.
+func (s *State) Readied() <-chan struct{} { return s.readied }
 
 func (s *State) MarkReady() bool {
 	s.mu.Lock()
@@ -38,6 +42,7 @@ func (s *State) MarkReady() bool {
 		return false
 	}
 	s.snapshot.Phase, s.snapshot.Ready = Ready, true
+	close(s.readied)
 	return true
 }
 

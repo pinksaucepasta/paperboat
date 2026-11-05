@@ -91,6 +91,9 @@ func (c *BrowserAccessClient) call(ctx context.Context, action string, input, ou
 	if c == nil || c.HTTP == nil || ctx == nil || connectorprotocol.ValidateIdentifier(c.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(c.ProcessEpoch) != nil {
 		return ErrControlInvalid
 	}
+	if err := c.HTTP.awaitNodeReady(ctx); err != nil {
+		return err
+	}
 	ctx, finish := c.HTTP.startRequest(ctx, "connector_admission")
 	defer func() { finish(resultErr) }()
 	body, err := json.Marshal(input)

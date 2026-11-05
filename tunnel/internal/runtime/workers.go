@@ -151,14 +151,16 @@ type NodeWorker struct {
 	Now          func() time.Time
 	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
 	OnAnswer func(control.NodeAnswer) error
-	// Registered, when set, is closed once the first registration and heartbeat succeed.
-	// Control requests the server checks against this process's node row wait on it.
-	Registered chan struct{}
+	// Ready, when set, is closed once the server has recorded this process as ready (a
+	// heartbeat reporting ready succeeded). The server refuses runtime, private access and
+	// browser access requests from an unready node, so their callers wait on it.
+	Ready chan struct{}
 
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	done    chan struct{}
-	lastErr error
+	readyOnce sync.Once
+	mu        sync.Mutex
+	cancel    context.CancelFunc
+	done      chan struct{}
+	lastErr   error
 }
 
 func (w *NodeWorker) Start(ctx context.Context) error {
@@ -174,9 +176,6 @@ func (w *NodeWorker) Start(ctx context.Context) error {
 	if err := w.apply(answer); err != nil {
 		return err
 	}
-	if w.Registered != nil {
-		close(w.Registered)
-	}
 	workerCtx, cancel := context.WithCancel(ctx)
 	w.cancel, w.done = cancel, make(chan struct{})
 	go w.run(workerCtx)
@@ -185,38 +184,42 @@ func (w *NodeWorker) Start(ctx context.Context) error {
 
 func (w *NodeWorker) run(ctx context.Context) {
 	defer close(w.done)
-	if w.Pulse != nil {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case at, ok := <-w.Pulse:
-				if !ok {
-					return
-				}
-				w.recordError(ctx, w.heartbeat(ctx, at))
-			}
-		}
+	tick := w.Pulse
+	if tick == nil {
+		ticker := time.NewTicker(w.Interval)
+		defer ticker.Stop()
+		tick = ticker.C
 	}
-	ticker := time.NewTicker(w.Interval)
-	defer ticker.Stop()
+	// The server hears that the node is ready at once, not one interval later, because ready
+	// callers wait for it.
+	readied := w.Manager.Readied()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case at := <-ticker.C:
+		case <-readied:
+			readied = nil
+			w.recordError(ctx, w.heartbeat(ctx, w.now()))
+		case at, ok := <-tick:
+			if !ok {
+				return
+			}
 			w.recordError(ctx, w.heartbeat(ctx, at))
 		}
 	}
 }
 
 func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
-	answer, err := w.Sink.Heartbeat(ctx, w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, at))
+	observation := w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, at)
+	answer, err := w.Sink.Heartbeat(ctx, observation)
 	if errors.Is(err, control.ErrNodeObservationStale) {
 		answer, err = w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
 	}
 	if err != nil {
 		return err
+	}
+	if observation.Ready && w.Ready != nil {
+		w.readyOnce.Do(func() { close(w.Ready) })
 	}
 	return w.apply(answer)
 }
@@ -306,6 +309,10 @@ type RouteWorker struct {
 	Pulse    <-chan time.Time
 	// Wake runs a reconcile now, at most one per routeWakeGap (a carrier connected).
 	Wake <-chan struct{}
+	// NodeReady, when set, holds the accessor admission pull until the server has recorded this
+	// process as ready (NodeWorker.Ready), then reconciles at once: it refuses that pull from an
+	// unready node. Routes themselves do not wait.
+	NodeReady <-chan struct{}
 	// Ready must probe the complete candidate generation, including its edge
 	// and origin paths, before the generation is promoted. It is required for
 	// the canonical config-generation contract; legacy assignments continue to
@@ -420,10 +427,14 @@ func (w *RouteWorker) run(ctx context.Context) {
 		defer ticker.Stop()
 		tick = ticker.C
 	}
+	nodeReady := w.NodeReady
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-nodeReady:
+			nodeReady = nil
+			w.recordReconcile(ctx, w.reconcile(ctx))
 		case _, ok := <-tick:
 			if !ok {
 				return
@@ -545,6 +556,13 @@ func (w *RouteWorker) reconcileAccessor(ctx context.Context) error {
 	if w.AccessorSource != nil || w.AccessorAdmissions != nil {
 		if w.AccessorSource == nil || w.AccessorAdmissions == nil {
 			return route.ErrInvalid
+		}
+		if w.NodeReady != nil {
+			select {
+			case <-w.NodeReady:
+			default:
+				return nil
+			}
 		}
 		values, err := w.AccessorSource.PrivateAccessCarrierAdmissions(ctx, w.NodeID, w.ProcessEpoch)
 		if err != nil {

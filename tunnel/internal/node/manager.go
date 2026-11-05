@@ -200,6 +200,9 @@ func (m *Manager) Snapshot() ManagerSnapshot {
 	return snapshot
 }
 
+// Readied is closed when the node first becomes ready.
+func (m *Manager) Readied() <-chan struct{} { return m.state.Readied() }
+
 func (m *Manager) Observation(nodeID, processEpoch string, at time.Time) control.NodeObservation {
 	snapshot := m.Snapshot()
 	phase := m.state.Snapshot().Phase

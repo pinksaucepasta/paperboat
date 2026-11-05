@@ -206,7 +206,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	client, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: deployment.ControlURL, Credential: credential, Timeout: deployment.ControlTimeout, TLS: tlsConfig, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
+	// nodeReady is closed by nodeWorker once the server has recorded this process as ready.
+	// Everything the server refuses from an unready node waits on it.
+	nodeReady := make(chan struct{})
+	client, err := control.NewHTTPClient(control.HTTPConfig{NodeReady: nodeReady, BaseURL: deployment.ControlURL, Credential: credential, Timeout: deployment.ControlTimeout, TLS: tlsConfig, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
 		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
 	}})
 	if err != nil {
@@ -244,8 +247,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		_ = certificateReceiver.Close()
 		return nil, fmt.Errorf("create TLS certificate distribution client: %w", err)
 	}
-	registered := make(chan struct{}) // closed by nodeWorker once this process is registered
-	onDemandRequester, err := control.NewOnDemandCertificateRequester(certificateClient, cfg.NodeID, processEpoch, registered)
+	onDemandRequester, err := control.NewOnDemandCertificateRequester(certificateClient, cfg.NodeID, processEpoch)
 	if err != nil {
 		_ = certificateReceiver.Close()
 		_ = certificateClient.Close()
@@ -353,7 +355,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		reporter.ObserveFailure(ctx, "browser_terminal_stream", cause)
 	}
-	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout}
+	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Ready: nodeReady, Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, Endpoints: previewRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, EndpointInterval: deployment.PreviewCarrierPollInterval(), Timeout: deployment.ControlTimeout}
 	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
 	if err != nil {
 		return nil, err
@@ -424,13 +426,13 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM}, Interval: deployment.ControlInterval, Registered: registered, OnAnswer: func(answer control.NodeAnswer) error {
+	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM}, Interval: deployment.ControlInterval, Ready: nodeReady, OnAnswer: func(answer control.NodeAnswer) error {
 		if answer.IngressLimits == nil {
 			return nil
 		}
 		return durableRoutes.SetIngressLimits(*answer.IngressLimits)
 	}}
-	routeWorker := &edgeruntime.RouteWorker{Unavailable: unavailableRoutes, Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, Wake: durableRoutes.Connected(), PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
+	routeWorker := &edgeruntime.RouteWorker{NodeReady: nodeReady, Unavailable: unavailableRoutes, Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, Wake: durableRoutes.Connected(), PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
 	usageWorker := &edgeruntime.UsageWorker{Reporter: reporter, Queue: queue, Sink: client, Prepare: meter, Persist: meter.Persist, Interval: 250 * time.Millisecond}
 	controlDependency := &edgeruntime.ControlDependency{Reporter: reporter, Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
 	trusted, err := edgehttp.ParseTrustedProxies(append(deployment.TrustedProxyCIDRs, "127.0.0.1/32"))

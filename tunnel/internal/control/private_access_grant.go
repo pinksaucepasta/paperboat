@@ -82,6 +82,9 @@ func (c *PrivateAccessGrantClient) authorize(ctx context.Context, grant string, 
 	if c == nil || c.http == nil || ctx == nil || len(grant) == 0 || len(grant) > 16<<10 || input.Validate(validationTime) != nil {
 		return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
 	}
+	if err := c.http.awaitNodeReady(ctx); err != nil {
+		return PrivateAccessGrantDecision{}, err
+	}
 	ctx, finish := c.http.startRequest(ctx, "connector_admission")
 	defer func() { finish(resultErr) }()
 	failure := func(category string, status int, sentinel, cause error) error {

@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -251,28 +250,23 @@ type OnDemandCertificateRequester struct {
 	client       *CertificateDistributionClient
 	nodeID       string
 	processEpoch string
-	registered   <-chan struct{}
 }
 
-// NewOnDemandCertificateRequester takes the channel the node worker closes once this
-// process is registered: the public listener accepts handshakes before that.
-func NewOnDemandCertificateRequester(client *CertificateDistributionClient, nodeID, processEpoch string, registered <-chan struct{}) (*OnDemandCertificateRequester, error) {
-	if client == nil || registered == nil || connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(processEpoch) != nil {
+func NewOnDemandCertificateRequester(client *CertificateDistributionClient, nodeID, processEpoch string) (*OnDemandCertificateRequester, error) {
+	if client == nil || connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(processEpoch) != nil {
 		return nil, ErrCertificateDistributionInvalid
 	}
-	return &OnDemandCertificateRequester{client: client, nodeID: nodeID, processEpoch: processEpoch, registered: registered}, nil
+	return &OnDemandCertificateRequester{client: client, nodeID: nodeID, processEpoch: processEpoch}, nil
 }
 
+// RequestCertificate runs on a TLS handshake, which the public listener accepts before the
+// node is ready, so it waits for readiness within the handshake's budget.
 func (r *OnDemandCertificateRequester) RequestCertificate(ctx context.Context, hostname string) error {
-	if r == nil || r.client == nil || ctx == nil {
+	if r == nil || r.client == nil || r.client.client == nil || ctx == nil {
 		return ErrCertificateDistributionInvalid
 	}
-	// The server verifies the proof against this process epoch's node row, so a request
-	// sent before registration is refused; wait for it within the handshake's budget.
-	select {
-	case <-r.registered:
-	case <-ctx.Done():
-		return fmt.Errorf("on-demand certificate: edge node not registered yet: %w", ctx.Err())
+	if err := r.client.client.awaitNodeReady(ctx); err != nil {
+		return err
 	}
 	return r.client.RequestCertificate(ctx, r.nodeID, r.processEpoch, hostname)
 }
