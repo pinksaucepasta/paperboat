@@ -36,6 +36,8 @@ type UpdateProbe struct {
 	Running                     bool   `json:"running"`
 	// Health is the codes of the daemon's health items, so a failed install names the step that failed.
 	Health []string `json:"health,omitempty"`
+	// HealthTitles are the same items' titles (they name the failing step, e.g. "the machine names step failed").
+	HealthTitles []string `json:"health_titles,omitempty"`
 }
 
 // ProbeCurrentUserForUpdate runs as the enrolled user, preserving local API
@@ -56,6 +58,7 @@ func ProbeCurrentUserForUpdate(ctx context.Context) (UpdateProbe, error) {
 	result.ControlPlaneUnavailableOnly = len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
 	for _, item := range snapshot.Health {
 		result.Health = append(result.Health, item.Code)
+		result.HealthTitles = append(result.HealthTitles, item.Title)
 	}
 	return result, nil
 }

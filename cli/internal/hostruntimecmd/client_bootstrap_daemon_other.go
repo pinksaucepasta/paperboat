@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -71,6 +73,9 @@ func awaitBoundDaemon(ctx context.Context, probe func(context.Context) (localdae
 			if !lastProbe.Running {
 				return fmt.Errorf("the installed local daemon service is not running: %w", ctx.Err())
 			}
+			if lastProbe.State == "degraded" && len(lastProbe.HealthTitles) > 0 {
+				return fmt.Errorf("the installed local daemon is degraded (%s): %w", strings.Join(lastProbe.HealthTitles, "; "), ctx.Err())
+			}
 			return fmt.Errorf("the installed local daemon did not become ready at version %s (state %q, version %q): %w", expectedVersion, lastProbe.State, lastProbe.Version, ctx.Err())
 		case <-ticker.C:
 		}
@@ -81,13 +86,20 @@ func awaitBoundDaemon(ctx context.Context, probe func(context.Context) (localdae
 // this enrollment: binding proves the cutover, not the control plane. A daemon still starting (its
 // first refresh not published yet) or degraded only because the control plane does not answer yet is
 // bound; on a slow server either can last longer than any fixed wait, and pairing reported failure on
-// machines that worked (2026-10-22). The daemon's state stays visible in pb status and pb doctor. Not
-// enrolled, degraded for another reason, the wrong version, or not running is not bound.
+// machines that worked (2026-10-22). A daemon degraded only in its local access to other machines is bound
+// too: that item appears only after it read the machine list with the new enrollment, and the daemon retries
+// it by itself (pbvm1, 2026-11-05: a second OS user's pair failed and left an unfinished enrollment). The
+// daemon's state stays visible in pb status and pb doctor. Not enrolled, degraded for another reason, the
+// wrong version, or not running is not bound.
 func boundDaemonServing(probe localdaemon.UpdateProbe, expectedVersion string) bool {
 	if !probe.Running || probe.Version != expectedVersion {
 		return false
 	}
-	return probe.State == "ready" || probe.State == "starting" || probe.State == "degraded" && probe.ControlPlaneUnavailableOnly
+	return probe.State == "ready" || probe.State == "starting" || probe.State == "degraded" && (probe.ControlPlaneUnavailableOnly || localAccessOnly(probe.Health))
+}
+
+func localAccessOnly(codes []string) bool {
+	return len(codes) > 0 && !slices.ContainsFunc(codes, func(code string) bool { return code != "local_access_unavailable" })
 }
 
 // daemonSettleWindow bounds how long pairing waits, after binding, for a daemon that is still starting
@@ -101,25 +113,28 @@ const daemonSettleWindow = 60 * time.Second
 func pairedMessage(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) string {
 	settleCtx, cancel := context.WithTimeout(ctx, daemonSettleWindow)
 	defer cancel()
-	if awaitBoundDaemonSettled(settleCtx, probe) {
+	if settled, ok := awaitBoundDaemonSettled(settleCtx, probe); ok {
+		if settled.State == "degraded" && len(settled.HealthTitles) > 0 {
+			return "Paperboat is paired, but its local service is degraded: " + strings.Join(settled.HealthTitles, "; ") + ". Paperboat retries it by itself; run `pb doctor` to follow it."
+		}
 		return "Paperboat machine runtime is ready."
 	}
 	return "Paperboat is paired; its local service is still starting. Run `pb status` to see when it is ready."
 }
 
 // awaitBoundDaemonSettled reports whether the bound daemon left "starting" (ready, or degraded with its
-// own reason, which pb status and pb doctor show) before ctx ends.
-func awaitBoundDaemonSettled(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) bool {
+// own reason, which pb status and pb doctor show) before ctx ends, and what it settled on.
+func awaitBoundDaemonSettled(ctx context.Context, probe func(context.Context) (localdaemon.UpdateProbe, error)) (localdaemon.UpdateProbe, bool) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		state, err := probe(ctx)
 		if err == nil && state.Running && state.State != "" && state.State != "starting" {
-			return true
+			return state, true
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return localdaemon.UpdateProbe{}, false
 		case <-ticker.C:
 		}
 	}
