@@ -174,7 +174,6 @@ type targetCarrierFixture struct {
 	primaryAddress  mesh.Addr
 	parent          *native.Session
 	extraTarget     *terminalCarrier
-	generation      *productionNativePeerService
 	unknownRelay    bool
 	// primaryTaken lets the generation report the machine's endpoints once it took the primary role.
 	primaryTaken      bool

@@ -5,7 +5,6 @@ package hostruntimecmd
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -21,8 +20,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
@@ -48,10 +45,9 @@ func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	return runNativeCarrier(ctx, config)
 }
 
-// runCarrierProcess serves one carrier generation. retire (SIGQUIT) means a newer
-// generation took over: stop admitting SSH, keep serving open SSH bridges and
-// other streams up to runtimewire.DrainLimit, then exit 0 so the unit
-// stays down.
+// runCarrierProcess serves one carrier generation. The serving carrier exits
+// 0 after the update released its network (release-network), and on retire
+// (SIGQUIT) for a generation that is no longer active, so its unit stays down.
 func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, ready, watchdog func() error, interval time.Duration, retire <-chan os.Signal) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -79,7 +75,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 	if err != nil {
 		return err
 	}
-	generation, err := carrierGeneration(ctx, config, capability)
+	generation, err := carrierGeneration(config)
 	if err != nil {
 		return err
 	}
@@ -98,7 +94,12 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 	if err := carrier.Start(runCtx); err != nil {
 		return err
 	}
-	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, MoveTerminals: carrier.MoveTerminals, GenerationOffer: carrier.GenerationOffer, PreparePeer: carrier.PreparePeer, Ready: make(chan error, 1)}
+	privateControl := &carriercontrol.Server{Endpoint: config.ControlEndpoint, Token: capability, SHA256: config.Source.SHA256, SSH: ssh, MoveTerminals: carrier.MoveTerminals, StartNetwork: carrier.StartNetwork, Ready: make(chan error, 1)}
+	released := make(chan struct{})
+	privateControl.ReleaseNetwork = func(ctx context.Context) error {
+		defer close(released)
+		return carrier.ReleaseNetwork(ctx)
+	}
 	privateControl.RefreshTarget = func(ctx context.Context) error {
 		target, err := dispatch.SSHTarget(ctx)
 		if err != nil {
@@ -145,19 +146,17 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 		defer ticker.Stop()
 		ticks = ticker.C
 	}
-	var drained chan error
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-retire:
-			if drained == nil {
-				drained = make(chan error, 1)
-				go func() { drained <- carrier.Drain(runCtx) }()
-			}
-		case err := <-drained:
-			if err != nil {
-				diagnosticlog.TryWarn("carrier retirement closed open streams at the drain limit", "stage", "retire_drain")
+			return nil
+		case <-released:
+			// The network and the primary role are already free; let the answer reach the installer.
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
 			}
 			return nil
 		case err := <-done:
@@ -175,9 +174,8 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 }
 
 // carrierGeneration places this process among the account's carrier
-// generations: whether it is the active one, and how it reaches a newer one a
-// client of it moves to (that generation's private control socket).
-func carrierGeneration(ctx context.Context, config hostinstall.CarrierConfig, capability []byte) (hostruntime.CarrierGeneration, error) {
+// generations: whether the account's descriptor names it as the active one.
+func carrierGeneration(config hostinstall.CarrierConfig) (hostruntime.CarrierGeneration, error) {
 	if config.Generation == "" {
 		return hostruntime.CarrierGeneration{}, nil
 	}
@@ -185,24 +183,5 @@ func carrierGeneration(ctx context.Context, config hostinstall.CarrierConfig, ca
 		name, err := hostinstall.ActiveCarrierGeneration(ctx, config.Instance)
 		return name == config.Generation, err
 	}
-	prepare := func(ctx context.Context, peer string, exchange native.CarrierExchange) (native.CarrierOffer, error) {
-		next, err := hostinstall.ReadCarrierGeneration(ctx, config.Instance, exchange.Offer.Claims.OwnerInstance)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		client, err := carriercontrol.NewClient(next.ControlEndpoint, capability, next.Source.SHA256)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		body, err := json.Marshal(exchange)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		offer, err := client.PreparePeer(ctx, peer, body)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		return native.ParseCarrierOffer(offer)
-	}
-	return hostruntime.CarrierGeneration{Name: config.Generation, Active: active, PreparePeer: prepare}, nil
+	return hostruntime.CarrierGeneration{Name: config.Generation, Active: active}, nil
 }

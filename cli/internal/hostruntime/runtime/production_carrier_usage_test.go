@@ -27,10 +27,10 @@ func (s *carrierUsageSink) ReportNativeUsage(_ context.Context, reports []api.Na
 	return nil
 }
 
-// An SSH session that keeps running across an update is served to its end by the retired carrier. Its replacement
-// runs in another slot and never reopens the retired one's usage file, so the retired carrier delivers the session's
+// An SSH session served until the update released the network is metered by that carrier. Its replacement
+// runs in another slot and never reopens the released one's usage file, so the released carrier delivers the session's
 // last bytes when it exits; a carrier that is only restarting checkpoints them for the next process in its slot.
-func TestRetiredCarrierDeliversDrainedSessionUsageAtExit(t *testing.T) {
+func TestReleasedCarrierDeliversSessionUsageAtExit(t *testing.T) {
 	for _, retired := range []bool{true, false} {
 		sink := &carrierUsageSink{}
 		recorder, err := bandwidth.Open(filepath.Join(t.TempDir(), "carrier-0-bandwidth-usage.json"), sink, nil)
@@ -44,9 +44,7 @@ func TestRetiredCarrierDeliversDrainedSessionUsageAtExit(t *testing.T) {
 		if _, err := metered.Write(make([]byte, 1<<20)); err != nil {
 			t.Fatal(err)
 		}
-		peer := &productionNativePeerService{}
-		peer.retired.Store(retired)
-		carrier := &ProductionCarrier{peer: peer, authorization: serviceGroup{}, usage: &hostBandwidthService{recorder: recorder}}
+		carrier := &ProductionCarrier{peer: &productionNativePeerService{}, authorization: serviceGroup{}, usage: &hostBandwidthService{recorder: recorder}, released: retired}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		if err := carrier.Shutdown(ctx); err != nil {
 			t.Fatal(err)

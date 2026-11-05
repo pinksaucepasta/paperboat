@@ -82,16 +82,8 @@ func (f *targetCarrierFixture) ensureNativePrimary(t *testing.T, ctx context.Con
 
 func (f *targetCarrierFixture) prepareGeneration(ctx context.Context, peer string, request native.CarrierExchange) (native.CarrierOffer, error) {
 	f.mu.Lock()
-	extra, generation := f.extraTarget, f.generation
+	extra := f.extraTarget
 	f.mu.Unlock()
-	if generation != nil && request.Offer.Claims.AllApplications {
-		// The production carrier reaches the other process over carriercontrol.
-		body, err := json.Marshal(request)
-		if err != nil {
-			return native.CarrierOffer{}, err
-		}
-		return generation.preparePeer(ctx, peer, body)
-	}
 	if extra != nil && bytes.Equal(extra.offer.Claims.Certificate, request.Offer.Claims.Certificate) {
 		if err := extra.network.AddPeer(peer, request.DiscoPublicKey, request.Endpoints); err != nil {
 			return native.CarrierOffer{}, err

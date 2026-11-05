@@ -39,9 +39,6 @@ type request struct {
 	WorkerID     string `json:"worker_id,omitempty"`
 	WorkerEpoch  uint64 `json:"worker_epoch,omitempty"`
 	Offer        []byte `json:"offer,omitempty"`
-	// PeerID and Exchange name the client a prepare-peer call readies this generation for.
-	PeerID   string `json:"peer_id,omitempty"`
-	Exchange []byte `json:"exchange,omitempty"`
 }
 
 type response struct {
@@ -50,8 +47,6 @@ type response struct {
 	Error  string `json:"error,omitempty"`
 	// SSHStreams answers only open-ssh, so clients that never ask never see it.
 	SSHStreams *int `json:"ssh_streams,omitempty"`
-	// Offer answers generation-offer and prepare-peer: this generation's signed carrier offer.
-	Offer []byte `json:"offer,omitempty"`
 }
 
 // maximumMessage bounds a control request or response; an offer is at most 8 KiB.
@@ -66,12 +61,6 @@ func (r request) valid() bool {
 	if r.Schema != schema || !validHash(r.SHA256) || len(r.Offer) != 0 && r.Operation != "move-terminals" {
 		return false
 	}
-	if r.Operation == "prepare-peer" {
-		return r.SourceSHA256 == "" && r.WorkerID == "" && r.WorkerEpoch == 0 && r.PeerID != "" && len(r.PeerID) <= 128 && len(r.Exchange) > 0 && len(r.Exchange) <= 12<<10
-	}
-	if r.PeerID != "" || len(r.Exchange) != 0 {
-		return false
-	}
 	if r.Operation == "disable-ssh" || r.Operation == "enable-ssh" {
 		return r.SourceSHA256 == "" && validWorkerID(r.WorkerID) && r.WorkerEpoch != 0
 	}
@@ -81,7 +70,7 @@ func (r request) valid() bool {
 	switch r.Operation {
 	case "move-terminals":
 		return r.SourceSHA256 == "" && len(r.Offer) > 0 && len(r.Offer) <= 8<<10
-	case "health", "retire-ssh", "resume-ssh", "open-ssh", "generation-offer":
+	case "health", "retire-ssh", "resume-ssh", "open-ssh", "release-network", "start-network":
 		return r.SourceSHA256 == ""
 	case "retire-source":
 		return validHash(r.SourceSHA256)
@@ -122,10 +111,10 @@ type Server struct {
 	SHA256        string
 	SSH           *managedssh.Host
 	MoveTerminals func(context.Context, []byte) error
-	// GenerationOffer is this generation's signed offer when it serves as a
-	// delegated generation; PreparePeer readies it for a client moving to it.
-	GenerationOffer func() ([]byte, error)
-	PreparePeer     func(ctx context.Context, peerID string, exchange []byte) ([]byte, error)
+	// ReleaseNetwork takes the machine's network down on the serving carrier;
+	// StartNetwork brings it up on the standby one (one identity at a time).
+	ReleaseNetwork func(context.Context) error
+	StartNetwork   func(context.Context) error
 	// WorkerFence admits only the named active worker epoch and reports when
 	// that lease is lost. The release callback remains held through the SSH
 	// policy mutation and its cancellation watcher.
@@ -171,15 +160,15 @@ func (s *Server) handler() http.Handler {
 				} else {
 					operationErr = s.MoveTerminals(r.Context(), req.Offer)
 				}
-			case "generation-offer":
+			case "release-network":
 				operationErr = ErrUnavailable
-				if s.GenerationOffer != nil {
-					result.Offer, operationErr = s.GenerationOffer()
+				if s.ReleaseNetwork != nil {
+					operationErr = s.ReleaseNetwork(r.Context())
 				}
-			case "prepare-peer":
+			case "start-network":
 				operationErr = ErrUnavailable
-				if s.PreparePeer != nil {
-					result.Offer, operationErr = s.PreparePeer(r.Context(), req.PeerID, req.Exchange)
+				if s.StartNetwork != nil {
+					operationErr = s.StartNetwork(r.Context())
 				}
 			case "open-ssh":
 				open := s.SSH.OpenStreams()
@@ -379,8 +368,11 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 		return response{}, ErrInvalid
 	}
 	timeout := 5 * time.Second
-	if req.Operation == "move-terminals" || req.Operation == "prepare-peer" {
+	switch req.Operation {
+	case "move-terminals":
 		timeout = native.CarrierMoveBudget + 5*time.Second
+	case "release-network", "start-network":
+		timeout = networkHandoffBudget
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -443,30 +435,19 @@ func (c *Client) CheckSourceRetirement(ctx context.Context, sourceSHA256 string)
 	return c.call(ctx, "retire-source", sourceSHA256)
 }
 
-// GenerationOffer is the generation's signed carrier offer.
-func (c *Client) GenerationOffer(ctx context.Context) ([]byte, error) {
-	result, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "generation-offer"})
-	if err == nil && len(result.Offer) == 0 {
-		err = ErrUnavailable
-	}
-	return result.Offer, err
-}
+// ReleaseNetwork has the serving carrier take the machine's network down and free the primary role.
+func (c *Client) ReleaseNetwork(ctx context.Context) error { return c.call(ctx, "release-network", "") }
 
-// PreparePeer readies the generation for peerID's move (the candidate
-// exchange arrives on the client's connection to an older generation) and
-// returns its current offer.
-func (c *Client) PreparePeer(ctx context.Context, peerID string, exchange []byte) ([]byte, error) {
-	result, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "prepare-peer", PeerID: peerID, Exchange: exchange})
-	if err == nil && len(result.Offer) == 0 {
-		err = ErrUnavailable
-	}
-	return result.Offer, err
-}
+// StartNetwork has the standby carrier bring the machine's network up on the same identity.
+func (c *Client) StartNetwork(ctx context.Context) error { return c.call(ctx, "start-network", "") }
 
 func (c *Client) MoveTerminals(ctx context.Context, offer []byte) error {
 	_, err := c.do(ctx, request{Schema: schema, SHA256: c.sha256, Operation: "move-terminals", Offer: offer})
 	return err
 }
+
+// networkHandoffBudget bounds one half of the network handoff; the pause a client sees is far shorter.
+const networkHandoffBudget = 15 * time.Second
 
 // controlWriteTimeout exceeds every client-side operation bound (move-terminals
 // CarrierMoveBudget + 5 s).

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/nativegen"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
@@ -14,7 +13,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
@@ -61,12 +59,6 @@ type productionNativePeerConfig struct {
 	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
 	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
 	networkEvents *machineevents.Subscription
-	// carrierGeneration, when set, serves as the delegated carrier generation of
-	// that name: its own disco key, sockets, relay routes and signed offer under
-	// the machine identity, never the primary listener another generation holds.
-	carrierGeneration string
-	// prepareGeneration readies another carrier generation for a client moving to it.
-	prepareGeneration func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)
 }
 
 type productionNativePeerService struct {
@@ -78,12 +70,6 @@ type productionNativePeerService struct {
 	lastErr         error
 	cleanupErr      error
 	startGeneration func(context.Context) (*productionNativePeerGeneration, error)
-	// streams counts application streams being served; a retired generation drains them.
-	streams atomic.Int64
-	// promote asks the supervisor to make the delegated generation primary (becomePrimary).
-	promote chan struct{}
-	// retired stops the supervisor from starting another generation: a retired carrier only drains.
-	retired atomic.Bool
 }
 
 type productionNativePeerGeneration struct {
@@ -100,18 +86,8 @@ type productionNativePeerGeneration struct {
 	run    context.Context
 	serve  func(context.Context, *native.Session) error
 	region *tailcfg.DERPRegion
-	// carrier and network serve a delegated generation (carrierGeneration);
-	// stopRenew ends its renewal and offer reports once it is primary.
-	carrier   *native.CarrierIdentity
-	network   *tailnet.CarrierNetwork
-	stopRenew context.CancelFunc
-	// reports holds the latest offer for the generation's one reporter
-	// (reportCarrierGeneration); withdrawn, under reportMu, drops any later one.
-	reports   chan native.CarrierOffer
-	reportMu  sync.Mutex
-	withdrawn bool
-	done      sync.WaitGroup
-	once      sync.Once
+	done sync.WaitGroup
+	once sync.Once
 }
 
 const productionNativePeerRestartDelay = time.Second
@@ -208,7 +184,7 @@ func newProductionNativePeerService(config productionNativePeerConfig) (*product
 	if config.controlURL == "" || config.issuer == "" || config.stateRoot == "" || config.machineID == "" || config.generation == 0 || config.transport == nil || config.identity == nil || config.keys == nil || (config.dispatch == nil && (config.authorizer == nil || config.serve == nil || config.transfer == nil)) {
 		return nil, ErrProductionInvalid
 	}
-	service := &productionNativePeerService{config: config, promote: make(chan struct{}, 1)}
+	service := &productionNativePeerService{config: config}
 	service.startGeneration = service.buildGeneration
 	return service, nil
 }
@@ -282,16 +258,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	api := clientapi.New(s.config.controlURL, clientconfig.Credential{}, &http.Client{Transport: s.config.transport, Timeout: 15 * time.Second})
 	api.SetMachineAuth(s.config.identity)
-	s.mu.Lock()
-	delegated := s.config.carrierGeneration
-	s.mu.Unlock()
 	var control tailnet.NetworkAPI = api
-	if delegated != "" {
-		// Only the primary registers the machine's network and reports endpoints.
-		control = &generationNetwork{NetworkAPI: api}
-		// The generation publishes its signed offer with this machine-authenticated client.
-		nativegen.Use(api)
-	}
 	request, cancelRequest := context.WithTimeout(ctx, 15*time.Second)
 	err = authority.RestoreOrRegister(request, control)
 	cancelRequest()
@@ -305,7 +272,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, PrepareCarrier: prepareCarrierPeer(prepareTerminalCarrierPeer(s.config.stateRoot, s.config.ownerCatalog), s.config.prepareGeneration), AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, PrepareCarrier: prepareTerminalCarrierPeer(s.config.stateRoot, s.config.ownerCatalog), AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -371,13 +338,6 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	if len(regions) != 0 {
 		generation.region = regions[0]
 	}
-	if delegated != "" {
-		if err := s.startDelegatedGeneration(runCtx, ctx, generation, delegated); err != nil {
-			cancel()
-			return nil, errors.Join(err, generation.stop())
-		}
-		return generation, nil
-	}
 	generation.run = runCtx
 	generation.serve = func(serveCtx context.Context, session *native.Session) error {
 		return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
@@ -436,9 +396,6 @@ func (g *productionNativePeerGeneration) stop() error {
 			result = g.owner.Close()
 			diagnosticlog.TryInfo("carrier shutdown", "stage", "owner_complete", "failed", result != nil)
 		}
-		if g.network != nil {
-			result = errors.Join(result, g.network.Close())
-		}
 		g.done.Wait()
 		diagnosticlog.TryInfo("carrier shutdown", "stage", "workers_complete")
 		if g.apps != nil {
@@ -477,9 +434,6 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 				return
 			case <-timer.C:
 			}
-			if s.retired.Load() {
-				return
-			}
 			next, err := s.startGeneration(ctx)
 			s.recordPeerState(ctx, next, err)
 			if err == nil {
@@ -494,17 +448,6 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.promote:
-			err := s.promoteGeneration(ctx, generation)
-			if err == nil {
-				continue
-			}
-			// The restart below builds a primary generation: open streams end, the machine is reachable again.
-			s.recordPeerState(ctx, nil, err)
-			stopErr := generation.stop()
-			s.mu.Lock()
-			s.lastErr = errors.Join(s.lastErr, stopErr)
-			s.mu.Unlock()
 		case err := <-generation.errors:
 			if ctx.Err() != nil {
 				return
@@ -548,10 +491,6 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			s.mu.Lock()
 			s.lastErr = errors.Join(s.lastErr, stopErr)
 			s.mu.Unlock()
-		}
-		if s.retired.Load() {
-			// A retired carrier only drains what is open; it never starts primary work a newer generation takes over.
-			return
 		}
 		timer := time.NewTimer(productionNativePeerRestartDelay)
 		select {
@@ -682,8 +621,6 @@ func (s *productionNativePeerService) currentIdentityFingerprint() (string, erro
 }
 
 func (s *productionNativePeerService) serveStream(ctx context.Context, header streamauth.Header, stream net.Conn) error {
-	s.streams.Add(1)
-	defer s.streams.Add(-1)
 	if s.config.dispatch != nil && header.Consumer != "ssh" {
 		remote, err := s.config.dispatch.Open(ctx, header)
 		if err != nil {

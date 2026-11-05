@@ -118,6 +118,12 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		if err := removeCarrierGeneration(ctx, canonical); err != nil {
 			return err
 		}
+		// A failed network handover may have released the previous carrier's network and exited it.
+		if baseline.Carrier != nil {
+			if err := startCarrierIfStopped(ctx, *baseline.Carrier); err != nil {
+				return err
+			}
+		}
 	}
 	current, err := readCarrierConfigFile(ctx, s.paths.instance)
 	if err != nil && !installNotExistOnly(err) {

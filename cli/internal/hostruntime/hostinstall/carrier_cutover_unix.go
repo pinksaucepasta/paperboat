@@ -7,21 +7,26 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
-// A source upgrade starts the new carrier generation in its own unit and waits
-// until it serves while the old generation keeps serving everything. The update
-// then marks the new generation active and, once it commits, retires the old
-// one, which finishes its open streams and exits (make-before-break). Prior art:
-// Teleport graceful restart (lib/service/signals.go) and nginx binary upgrade
-// (~/ref/nginx/src/os/unix/ngx_process_cycle.c). Nothing is refused meanwhile.
+// A source upgrade starts the new carrier generation in its own unit as a
+// standby: it prepares everything but the machine's network and waits until it
+// answers. The update then marks it active and, once the new hostd and worker
+// serve, hands the network over: the serving carrier releases it and exits, the
+// candidate starts it on the same identity (switchNetwork). Only that switch
+// pauses connections; sessions live in the session owners and the worker.
+// Prior art: Tailscale restarts tailscaled with the same persisted node key
+// (~/ref/tailscale/clientupdate/clientupdate.go restartSystemdUnit,
+// control/controlclient/direct.go register reuses persist.PrivateNodeKey).
 type unixCarrierUpgrade struct {
 	candidate, previous CarrierConfig
 	terminals           *terminalHandover
+	capability          []byte
 }
 
 func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths installPaths) (_ *unixCarrierUpgrade, resultErr error) {
@@ -72,30 +77,38 @@ func stageUnixCarrierUpgrade(ctx context.Context, request Request, paths install
 	if err != nil {
 		return nil, err
 	}
-	// Every connected client opens its new connections on the candidate from
-	// here; open streams stay on the old generation until they close. A client
-	// that declines stays on the old one until it retires.
-	moveErr := moveCarrierClients(ctx, candidate, capability, client)
-	diagnosticlog.TryInfo("carrier cutover", "stage", "move_clients", "failed", moveErr != nil)
 	terminals, moveErr := stageTerminalHandover(ctx, request, retained, client)
 	if moveErr != nil {
 		diagnosticlog.TryWarn("terminal handover unavailable", "fallback", "reconnect")
 	}
-	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals}, nil
+	return &unixCarrierUpgrade{candidate: candidate, previous: retained, terminals: terminals, capability: append([]byte(nil), capability...)}, nil
 }
 
-// moveCarrierClients has the serving generation offer the candidate's signed
-// generation offer to every client connected to it (Owner.OfferCarrier).
-func moveCarrierClients(ctx context.Context, candidate CarrierConfig, capability []byte, previous *carriercontrol.Client) error {
-	next, err := carriercontrol.NewClient(candidate.ControlEndpoint, capability, candidate.Source.SHA256)
+// switchNetwork hands the machine's network to the candidate: the serving
+// carrier releases it (and exits), then the candidate starts it. A failure
+// leaves the lifecycle rollback to restart the previous carrier.
+func (u *unixCarrierUpgrade) switchNetwork(ctx context.Context) error {
+	if u == nil {
+		return nil
+	}
+	defer clear(u.capability)
+	previous, err := carriercontrol.NewClient(u.previous.ControlEndpoint, u.capability, u.previous.Source.SHA256)
 	if err != nil {
 		return err
 	}
-	offer, err := next.GenerationOffer(ctx)
+	next, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256)
 	if err != nil {
 		return err
 	}
-	return previous.MoveTerminals(ctx, offer)
+	started := time.Now()
+	releaseErr := previous.ReleaseNetwork(ctx)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "network_released", "failed", releaseErr != nil, "duration_ms", time.Since(started).Milliseconds())
+	if releaseErr != nil {
+		return releaseErr
+	}
+	startErr := next.StartNetwork(ctx)
+	diagnosticlog.TryInfo("carrier cutover", "stage", "network_started", "failed", startErr != nil, "duration_ms", time.Since(started).Milliseconds())
+	return startErr
 }
 
 // activate marks the already serving candidate generation active: readers of
@@ -115,6 +128,7 @@ func (u *unixCarrierUpgrade) finish(ctx context.Context, failed bool) error {
 	if u == nil {
 		return nil
 	}
+	clear(u.capability)
 	err := u.terminals.finish(ctx, failed)
 	if failed {
 		return err
@@ -154,4 +168,27 @@ func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error)
 		return false, nil
 	}
 	return true, service.QuitCarrier(ctx, controller)
+}
+
+// startCarrierIfStopped restarts a carrier whose process exited after it
+// released the machine's network, and waits until it serves again.
+func startCarrierIfStopped(ctx context.Context, c CarrierConfig) error {
+	installer, err := carrierInstaller(c)
+	if err != nil {
+		return err
+	}
+	native, ok := installerController(c).(service.NativeLifecycleController)
+	if !ok {
+		return service.ErrInvalidDefinition
+	}
+	status, err := native.Inspect(ctx, installer.DefinitionPath())
+	if err != nil {
+		return err
+	}
+	if !status.Running {
+		if err := native.Start(ctx, installer.DefinitionPath()); err != nil {
+			return err
+		}
+	}
+	return waitCarrierReady(ctx, c)
 }

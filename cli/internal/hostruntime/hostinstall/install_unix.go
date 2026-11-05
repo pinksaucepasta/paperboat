@@ -235,6 +235,10 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if err := activateUnixNativeRoles(ctx, nil, hostd, updater, request.HelperListenAddress, runtime.GOOS != "linux"); err != nil {
 			return err
 		}
+		// The network moves last: until here the serving carrier kept every connection.
+		if err := carrierUpgrade.switchNetwork(ctx); err != nil {
+			return err
+		}
 
 		if intent == unixPreparedUpdate {
 			return commitValidatedPreparedUpdate(ctx, request, paths, hooks.Validate)

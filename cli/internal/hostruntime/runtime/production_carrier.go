@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
@@ -20,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 // ProductionCarrier owns one native connection carrier generation of the
@@ -32,13 +32,15 @@ type ProductionCarrier struct {
 	usage         *hostBandwidthService
 	ssh           *managedssh.Host
 	unlock        func() error
-	// A delegated generation takes the primary role when the generation holding
-	// it exits (awaitPrimary); unlockPrimary then releases it at shutdown.
-	slot          int
+	// standby is an update's candidate: it prepares everything except the
+	// machine's network, which StartNetwork brings up once the serving carrier
+	// released it. primaryLock is the serving carrier's slot 0 lock, taken first.
+	standby       bool
 	primaryLock   string
-	active        func(context.Context) (bool, error)
-	stopTakeover  context.CancelFunc
-	takeoverDone  chan struct{}
+	mu            sync.Mutex
+	runCtx        context.Context
+	networkUp     bool
+	released      bool
 	unlockPrimary func() error
 }
 
@@ -50,8 +52,6 @@ type CarrierGeneration struct {
 	// Active says whether the account's descriptor names this generation now;
 	// an update's candidate is not active until the update marks it.
 	Active func(context.Context) (bool, error)
-	// PreparePeer readies another generation for a client of this one moving to it.
-	PreparePeer func(context.Context, string, native.CarrierExchange) (native.CarrierOffer, error)
 }
 
 // carrierSlots bounds the generations serving at once (one active, the rest
@@ -62,9 +62,8 @@ const carrierSlots = 4
 
 // NewProductionCarrier loads an already enrolled machine identity. Initial
 // enrollment and current SSH target publication remain installer/worker work.
-// Only the active generation in slot 0 serves the machine's primary network;
-// every other generation is delegated (an update's candidate, or a restart while
-// an older generation still drains on the primary network).
+// Only the active generation in slot 0 starts the machine's network; every
+// other generation is standby (an update's candidate) until StartNetwork.
 func NewProductionCarrier(ctx context.Context, version string, environ func(string) string, dispatch *server.NativeDispatchClient, ssh *managedssh.Host, generation CarrierGeneration) (_ *ProductionCarrier, resultErr error) {
 	if ctx == nil || environ == nil || dispatch == nil || ssh == nil {
 		return nil, ErrProductionInvalid
@@ -85,15 +84,13 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 			resultErr = errors.Join(resultErr, unlock())
 		}
 	}()
-	delegated := ""
+	standby := false
 	if generation.Name != "" {
 		active, err := generation.Active(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if !active || slot != 0 {
-			delegated = generation.Name
-		}
+		standby = !active || slot != 0
 	}
 	name := fmt.Sprintf("carrier-%d", slot)
 	config, controlURL, transport := base.config, base.controlURL, base.transport
@@ -128,59 +125,17 @@ func NewProductionCarrier(ctx context.Context, version string, environ func(stri
 		controlURL: controlURL.String(), issuer: strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/"),
 		ownerCatalog: environ("PAPERBOAT_SESSION_OWNER_CATALOG"), stateRoot: config.StateRoot, machineID: identity.MachineID, generation: uint64(base.generation),
 		transport: transport, identity: machineIdentity, keys: keys, dispatch: dispatch, ssh: ssh, usage: usage, offlineAudit: audit,
-		networkEvents:     events.Subscribe(carrierRenewalTopics...),
-		carrierGeneration: delegated, prepareGeneration: generation.PreparePeer,
+		networkEvents: events.Subscribe(carrierRenewalTopics...),
 	})
 	if err != nil {
 		return nil, err
 	}
 	carrier := &ProductionCarrier{peer: peer, authorization: serviceGroup{events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, identity.MachineID, config.StateRoot, transport, tokens, operationID)}, usage: usageService, ssh: ssh, unlock: unlock}
-	if delegated != "" {
-		carrier.slot, carrier.active = slot, generation.Active
+	carrier.standby = standby
+	if slot != 0 {
 		carrier.primaryLock = filepath.Join(config.StateRoot, "runtime", "carrier-0.lock")
 	}
 	return carrier, nil
-}
-
-// primaryTakeoverInterval is how often a delegated generation tries the primary
-// role, as netbird polls a non-blocking flock (~/ref/netbird/proxy/internal/flock/flock_unix.go:39).
-const primaryTakeoverInterval = time.Second
-
-// awaitPrimary takes the primary role (slot 0's lock) once the generation that
-// holds it exits, if this generation is the active one and not retired, then
-// promotes the peer service in place. Only the slot 0 holder serves the
-// primary network, so the role is never contested; a retired generation never
-// takes it.
-func (c *ProductionCarrier) awaitPrimary(ctx context.Context) {
-	defer close(c.takeoverDone)
-	ticker := time.NewTicker(primaryTakeoverInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		if c.peer.retired.Load() {
-			return
-		}
-		unlock := func() error { return nil }
-		if c.slot != 0 {
-			var err error
-			if unlock, err = lockTerminalCarrier(c.primaryLock); err != nil {
-				continue
-			}
-		}
-		active, err := c.active(ctx)
-		if err != nil || !active || c.peer.retired.Load() {
-			_ = unlock()
-			continue
-		}
-		c.unlockPrimary = unlock
-		diagnosticlog.TryInfo("carrier generation", "stage", "primary_role_taken")
-		c.peer.becomePrimary()
-		return
-	}
 }
 
 // lockCarrierSlot takes the first free slot of carrierSlots.
@@ -221,18 +176,80 @@ func (c *ProductionCarrier) Start(ctx context.Context) error {
 	if err := c.authorization.Start(ctx); err != nil {
 		return errors.Join(err, c.usage.Shutdown(context.WithoutCancel(ctx)))
 	}
-	if err := c.peer.Start(ctx); err != nil {
+	c.runCtx = ctx
+	if c.standby {
+		return nil
+	}
+	if err := c.startPeer(ctx); err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		return errors.Join(err, c.authorization.Shutdown(cleanupCtx), c.usage.Shutdown(cleanupCtx))
 	}
-	if c.primaryLock != "" {
-		var takeover context.Context
-		takeover, c.stopTakeover = context.WithCancel(ctx)
-		c.takeoverDone = make(chan struct{})
-		go c.awaitPrimary(takeover)
-	}
 	return nil
+}
+
+func (c *ProductionCarrier) startPeer(ctx context.Context) error {
+	if err := c.peer.Start(ctx); err != nil {
+		return err
+	}
+	c.networkUp = true
+	return nil
+}
+
+// StartNetwork brings a standby carrier's network up on the machine's own
+// identity once the serving carrier released it (ReleaseNetwork frees slot 0's
+// lock). It waits for that release until ctx ends, and is idempotent.
+func (c *ProductionCarrier) StartNetwork(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.networkUp {
+		return nil
+	}
+	if c.runCtx == nil {
+		return ErrProductionInvalid
+	}
+	for c.primaryLock != "" && c.unlockPrimary == nil {
+		unlock, err := lockTerminalCarrier(c.primaryLock)
+		if err == nil {
+			c.unlockPrimary = unlock
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if err := c.startPeer(c.runCtx); err != nil {
+		return errors.Join(err, c.unlockPrimaryRole())
+	}
+	diagnosticlog.TryInfo("carrier generation", "stage", "network_started")
+	return nil
+}
+
+// ReleaseNetwork takes the serving carrier's network down and frees the
+// primary role for the standby carrier. The process exits afterwards.
+func (c *ProductionCarrier) ReleaseNetwork(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.released = true
+	err := c.peer.Shutdown(ctx)
+	c.networkUp = false
+	if c.unlock != nil {
+		err = errors.Join(err, c.unlock())
+		c.unlock = nil
+	}
+	diagnosticlog.TryInfo("carrier generation", "stage", "network_released", "failed", err != nil)
+	return errors.Join(err, c.unlockPrimaryRole())
+}
+
+func (c *ProductionCarrier) unlockPrimaryRole() error {
+	if c.unlockPrimary == nil {
+		return nil
+	}
+	err := c.unlockPrimary()
+	c.unlockPrimary = nil
+	return err
 }
 
 // PrepareSSHRetirement fences new SSH only when all accepted bridges ended.
@@ -251,64 +268,27 @@ func (c *ProductionCarrier) Shutdown(ctx context.Context) error {
 	}
 	// Close listeners and bridges before their identity refresh and usage owner.
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "start")
-	if c.stopTakeover != nil {
-		c.stopTakeover()
-		<-c.takeoverDone
-	}
 	peerErr := c.peer.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "peer_complete", "failed", peerErr != nil)
 	authErr := c.authorization.Shutdown(ctx)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "authorization_complete", "failed", authErr != nil)
-	// A replacement in the same slot resumes a checkpoint. A retired generation's replacement already runs in
-	// another slot, so its file waits for a later process in this slot: deliver the drained sessions' bytes now.
+	// A replacement in the same slot resumes a checkpoint. A released carrier's replacement already runs in
+	// another slot, so its file waits for a later process in this slot: deliver its sessions' bytes now.
 	var usageErr error
-	if c.peer.retired.Load() {
+	if c.released {
 		usageErr = c.usage.Shutdown(ctx)
 	} else {
 		usageErr = c.usage.checkpoint(ctx)
 	}
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "usage_checkpoint_complete", "failed", usageErr != nil)
 	// The primary role is released only after the primary listener closed.
-	var unlockErr error
-	if c.unlockPrimary != nil {
-		unlockErr = c.unlockPrimary()
-	}
+	unlockErr := c.unlockPrimaryRole()
 	if c.unlock != nil {
 		unlockErr = errors.Join(unlockErr, c.unlock())
 	}
 	result := errors.Join(peerErr, authErr, usageErr, unlockErr)
 	diagnosticlog.TryInfo("carrier shutdown", "stage", "complete", "failed", result != nil)
 	return result
-}
-
-// Drain lets a retired generation finish: new SSH is fenced, and it returns
-// once no SSH bridge or other application stream is open, or at
-// runtimewire.DrainLimit. Clients already open new connections on the
-// newer generation it offered (MoveTerminals).
-func (c *ProductionCarrier) Drain(ctx context.Context) error {
-	c.peer.retired.Store(true)
-	ssh := make(chan error, 1)
-	go func() { ssh <- c.ssh.Drain(ctx) }()
-	streams := c.peer.drainStreams(ctx, runtimewire.DrainLimit)
-	return errors.Join(streams, <-ssh)
-}
-
-// GenerationOffer is this delegated generation's signed offer.
-func (c *ProductionCarrier) GenerationOffer() ([]byte, error) {
-	offer, err := c.peer.generationOffer()
-	if err != nil {
-		return nil, err
-	}
-	return offer.MarshalBinary()
-}
-
-// PreparePeer readies this delegated generation for a client moving to it.
-func (c *ProductionCarrier) PreparePeer(ctx context.Context, peerID string, exchange []byte) ([]byte, error) {
-	offer, err := c.peer.preparePeer(ctx, peerID, exchange)
-	if err != nil {
-		return nil, err
-	}
-	return offer.MarshalBinary()
 }
 
 func (c *ProductionCarrier) MoveTerminals(ctx context.Context, encoded []byte) error {
