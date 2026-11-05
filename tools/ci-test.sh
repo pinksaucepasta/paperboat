@@ -38,7 +38,28 @@ fi
 lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 sha=$(git rev-parse --short HEAD)
 branch="ci/$lane-$sha-$(date +%H%M%S)-$$"
-trap 'git push -q --no-verify origin --delete "$branch" >/dev/null 2>&1 || true' EXIT
+
+# A ci branch is deleted only once no run on it is queued or in progress: deleting it under a queued run
+# wasted that run (2026-11-05, GitHub took longer than this script waited to list a dispatched run).
+# Unknown (the API call failed) keeps the branch too; the next ci-test of this lane removes it.
+active_runs() {
+  gh run list --workflow lane-test.yml --branch "$1" --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null ||
+    echo unknown
+}
+remove_branch() {
+  local active
+  active=$(active_runs "$1")
+  if [ "$active" = 0 ]; then
+    git push -q --no-verify origin --delete "$1" >/dev/null 2>&1 || true
+  else
+    echo "ci-test: kept $1: its run is not finished ($active active); the next ci-test of this lane removes it" >&2
+  fi
+}
+for old in $(git ls-remote --heads origin "ci/$lane-*" 2>/dev/null | awk '{sub("refs/heads/", "", $2); print $2}'); do
+  # A concurrent ci-test of this lane (its pid ends the name) may not have a listed run yet.
+  kill -0 "${old##*-}" 2>/dev/null || remove_branch "$old"
+done
+trap 'remove_branch "$branch"' EXIT
 
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
 # is the only run, and it carries the module/-run inputs.
@@ -51,14 +72,16 @@ push_err=$(git push -q --no-verify origin "$commit:refs/heads/$branch" 2>&1) ||
 args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run" -f "count=$count")
 gh workflow run lane-test.yml "${args[@]}"
 
+# GitHub can take minutes to list a dispatched run when its queue is long: look for 15 min, one API call
+# every 30 s (the 5000/h budget is shared by every lane), and survive a failed call.
 id=""
-for _ in $(seq 30); do
+for attempt in $(seq 30); do
+  sleep 30
   id=$(gh run list --workflow lane-test.yml --branch "$branch" --event workflow_dispatch -L1 \
-    --json databaseId --jq '.[0].databaseId // empty')
+    --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null) || id=""
   [ -n "$id" ] && break
-  sleep 3
 done
-[ -n "$id" ] || { echo "ci-test: the run did not start" >&2; exit 1; }
+[ -n "$id" ] || { echo "ci-test: GitHub listed no run for $branch within 15 min" >&2; exit 1; }
 url=$(gh run view "$id" --json url --jq .url)
 echo "ci-test: ${modules[*]:-all modules}${run:+ -run $run} at $sha: $url" >&2
 
