@@ -189,8 +189,9 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 		if err := admission.Validate(r.nodeID, r.processEpoch, now); err != nil {
 			return err
 		}
-		if admission.AssignmentGeneration < currentGenerations[assignmentFenceKey(admission)] && !currentAdmissions[admission] {
-			return ErrDurableAdmissionConflict
+		if held := currentGenerations[assignmentFenceKey(admission)]; admission.AssignmentGeneration < held && !currentAdmissions[admission] {
+			// Opaque server ids and numbers only: the operator reads which assignment went backwards.
+			return fmt.Errorf("%w: assignment %s of route %s is at generation %d, held %d", ErrDurableAdmissionConflict, admission.AssignmentID, admission.RouteID, admission.AssignmentGeneration, held)
 		}
 		key := durableIdentityKey(admission.Identity)
 		entry, exists := next[key]

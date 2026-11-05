@@ -177,5 +177,7 @@ func TestDurableAdmissionFenceIsPerAssignment(t *testing.T) {
 	stale.AssignmentGeneration = 6
 	if err := registry.Replace([]DurableAdmission{stale, engine}, now); !errors.Is(err, ErrDurableAdmissionConflict) {
 		t.Fatalf("older replay of the same assignment: %v, want conflict", err)
+	} else if !strings.Contains(err.Error(), "assignment assignment_connector of route route_1 is at generation 6, held 7") {
+		t.Fatalf("the conflict does not name the assignment and both generations: %v", err)
 	}
 }
