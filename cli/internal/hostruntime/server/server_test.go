@@ -860,3 +860,24 @@ func TestBlockedFrameDoesNotStopTheConnectionReading(t *testing.T) {
 		t.Fatal("probe not answered while a frame was blocked")
 	}
 }
+
+// A client that waits for each response before its next request never runs two operations at once,
+// so it must never meet the concurrency limit.
+func TestServeFreesTheOperationSlotBeforeTheResponse(t *testing.T) {
+	server := testServer(t, func(context.Context, protocol.Frame) (Authorization, error) {
+		return Authorization{JournalBinding: "user:1"}, nil
+	}, func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+		return operation.Outcome{}
+	}, 1)
+	client, peer := net.Pipe()
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(30 * time.Second))
+	go server.Serve(peer)
+	hello(t, client)
+	for i := range 2000 {
+		response := sendRequest(t, client, request(fmt.Sprintf("req_%d", i), "op_00000001", json.RawMessage(`{"action":"list"}`)))
+		if response.Type != "response" {
+			t.Fatalf("sequential request %d: %s %s", i, response.Type, response.Payload)
+		}
+	}
+}

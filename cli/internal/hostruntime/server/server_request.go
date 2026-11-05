@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -33,7 +34,14 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
-		defer func() { <-s.sem }()
+		// The slot is freed before the final frame: a client that sends its next request as soon as it
+		// reads this response must not meet the limit with an operation that has already answered.
+		var release sync.Once
+		defer release.Do(func() { <-s.sem })
+		respond := func(f protocol.Frame) error {
+			release.Do(func() { <-s.sem })
+			return writer.write(f)
+		}
 		deadline := time.Duration(frame.DeadlineMS) * time.Millisecond
 		if deadline > s.config.MutationDeadline {
 			deadline = s.config.MutationDeadline
@@ -46,9 +54,9 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		authorization, err := authorizer.Authorize(opCtx, frame)
 		if err != nil {
 			if reportAuthorizationFailure(opCtx, err) {
-				_ = writer.write(errorFrame(frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
+				_ = respond(errorFrame(frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
 			} else {
-				_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
+				_ = respond(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
 			}
 			cancel()
 			return
@@ -56,7 +64,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		if authorization.JournalBinding == "" {
 			cancel()
 			s.recordOperation("auth", "rejected")
-			_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
+			_ = respond(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
 			return
 		}
 		journalOperationID := requestJournalOperationID(frame)
@@ -64,7 +72,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		owner, ok := s.registerOperation(activeKey, cancel)
 		if !ok {
 			cancel()
-			_ = writer.write(errorFrame(frame.RequestID, "unavailable", "server is stopping", true))
+			_ = respond(errorFrame(frame.RequestID, "unavailable", "server is stopping", true))
 			return
 		}
 		defer func() {
@@ -79,7 +87,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			Payload    json.RawMessage `json:"payload"`
 		}{Binding: authorization.JournalBinding, Capability: frame.Capability, Payload: frame.Payload})
 		if err != nil {
-			_ = writer.write(errorFrame(frame.RequestID, "invalid_request", "invalid operation", false))
+			_ = respond(errorFrame(frame.RequestID, "invalid_request", "invalid operation", false))
 			return
 		}
 		execute := func(ctx context.Context) operation.Outcome {
@@ -99,18 +107,18 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		if err != nil {
 			code := operationErrorCode(err)
 			s.recordOperation(componentForCapability(frame.Capability), metricResult(code, false))
-			_ = writer.write(errorFrame(frame.RequestID, code, operationErrorMessage(code), errors.Is(err, context.DeadlineExceeded)))
+			_ = respond(errorFrame(frame.RequestID, code, operationErrorMessage(code), errors.Is(err, context.DeadlineExceeded)))
 			return
 		}
 		if outcome.ErrorCode != "" {
 			s.recordOperation(componentForCapability(frame.Capability), metricResult(outcome.ErrorCode, false))
-			_ = writer.write(errorFrameWithDetails(frame.RequestID, outcome.ErrorCode, "operation failed", transientOutcome(outcome.ErrorCode), outcome.Result))
+			_ = respond(errorFrameWithDetails(frame.RequestID, outcome.ErrorCode, "operation failed", transientOutcome(outcome.ErrorCode), outcome.Result))
 			return
 		}
 		stream, hasStream, streamErr := s.openStream(connectionCtx, authorization, frame, outcome, replay)
 		if streamErr != nil {
 			reportStreamOpenFailure(connectionCtx, frame.Capability, streamErr)
-			_ = writer.write(errorFrame(frame.RequestID, "unavailable", "output stream could not be opened", true))
+			_ = respond(errorFrame(frame.RequestID, "unavailable", "output stream could not be opened", true))
 			return
 		}
 		s.recordOperation(componentForCapability(frame.Capability), metricResult("", replay))
@@ -119,14 +127,14 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			streamID, streamErr = terminalState.bind(authorization, frame, outcome)
 			if streamErr != nil {
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
-				_ = writer.write(errorFrame(frame.RequestID, "invalid_request", "terminal stream could not be bound", false))
+				_ = respond(errorFrame(frame.RequestID, "invalid_request", "terminal stream could not be bound", false))
 				return
 			}
 			outcome.Result, streamErr = addStreamID(outcome.Result, streamID)
 			if streamErr != nil {
 				terminalState.remove(streamID)
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
-				_ = writer.write(errorFrame(frame.RequestID, "unavailable", "terminal stream could not be opened", true))
+				_ = respond(errorFrame(frame.RequestID, "unavailable", "terminal stream could not be opened", true))
 				return
 			}
 		}
@@ -134,7 +142,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			Result json.RawMessage `json:"result"`
 			Replay bool            `json:"replay"`
 		}{Result: outcome.Result, Replay: replay})
-		if err := writer.write(protocol.Frame{Type: "response", RequestID: frame.RequestID, Version: protocol.ProtocolVersion, OperationID: frame.OperationID, Payload: responsePayload}); err != nil {
+		if err := respond(protocol.Frame{Type: "response", RequestID: frame.RequestID, Version: protocol.ProtocolVersion, OperationID: frame.OperationID, Payload: responsePayload}); err != nil {
 			if hasStream {
 				terminalState.remove(streamID)
 				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
