@@ -432,6 +432,12 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			}
 			return dispatchAuthorize(ctx, header)
 		}
+		dispatchConfig.AuthorizeResume = func(_ context.Context, header streamauth.Header) (string, error) {
+			if dependencies.Capabilities != nil && !dependencies.Capabilities.Enabled("terminal.v1") {
+				return "", server.ErrStreamAuthorization
+			}
+			return header.Resume, nil
+		}
 		if dispatchConfig.SSHTarget == nil && dependencies.ManagedSSH != nil {
 			dispatchConfig.SSHTarget = func(context.Context) (managedssh.HostTarget, error) {
 				target, ok := dependencies.ManagedSSH.Target()

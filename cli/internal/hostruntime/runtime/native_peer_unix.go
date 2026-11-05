@@ -621,7 +621,15 @@ func (s *productionNativePeerService) currentIdentityFingerprint() (string, erro
 
 func (s *productionNativePeerService) serveStream(ctx context.Context, header streamauth.Header, stream net.Conn) error {
 	if s.config.dispatch != nil && header.Consumer != "ssh" {
-		remote, err := s.config.dispatch.Open(ctx, header)
+		var remote net.Conn
+		var err error
+		if resume, ok := stream.(server.ResumePeerConn); ok {
+			// A resume has no credential for the worker to verify: forward the peer this carrier admitted.
+			accountID, endpointID, _, _, standing := resume.ResumePeer()
+			remote, err = s.config.dispatch.OpenResume(ctx, header, server.NativeDispatchResumePeer{AccountID: accountID, EndpointID: endpointID, Standing: standing})
+		} else {
+			remote, err = s.config.dispatch.Open(ctx, header)
+		}
 		if err != nil {
 			return err
 		}

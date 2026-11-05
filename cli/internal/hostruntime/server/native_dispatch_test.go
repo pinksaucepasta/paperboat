@@ -291,3 +291,63 @@ func TestNativeDispatchKeepsAdmissionDuringWorkerMaintenance(t *testing.T) {
 		t.Fatal("permanent authorization rejection became retryable")
 	}
 }
+
+// A terminal resume carries no credential, so the carrier vouches for the peer it admitted. The worker must
+// serve it as a ResumePeerConn for exactly that peer, never through the credential check, and refuse a resume
+// header that does not name the carrier's peer.
+func TestNativeDispatchResumeStreamCarriesTheCarrierProvenPeer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	served := make(chan ResumePeerConn, 1)
+	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
+		Fence: func(context.Context) (func(), <-chan struct{}, error) { return func() {}, make(chan struct{}), nil },
+		Authorize: func(context.Context, streamauth.Header) (string, error) {
+			return "", errors.New("a resume must not reach the credential check")
+		},
+		AuthorizeResume: func(_ context.Context, h streamauth.Header) (string, error) { return h.Resume, nil },
+		ServeStream: func(_ context.Context, _ streamauth.Header, conn net.Conn) error {
+			resume, ok := conn.(ResumePeerConn)
+			if !ok {
+				return errors.New("worker stream is not a ResumePeerConn")
+			}
+			served <- resume
+			_, err := io.Copy(io.Discard, conn)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close(ctx)
+	worker := httptest.NewServer(handler)
+	defer worker.Close()
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, err := streamauth.NewResume("terminal-session", "stream", "access-session", time.Now().Add(2*time.Second), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Open(ctx, header); !errors.Is(err, ErrStreamAuthorization) {
+		t.Fatalf("a resume without the carrier's peer was admitted: %v", err)
+	}
+	connection, err := client.OpenResume(ctx, header, NativeDispatchResumePeer{AccountID: "account", EndpointID: "endpoint", Standing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	select {
+	case resume := <-served:
+		account, endpoint, session, resource, standing := resume.ResumePeer()
+		if account != "account" || endpoint != "endpoint" || session != "terminal-session" || resource != "access-session" || !standing {
+			t.Fatalf("peer=%q/%q session=%q resource=%q standing=%v", account, endpoint, session, resource, standing)
+		}
+	case <-ctx.Done():
+		t.Fatal("resume stream never reached the worker's terminal server")
+	}
+	credentialed, _ := streamauth.New("operation", "terminal", "stream", "allowed", time.Now().Add(2*time.Second), 1<<20)
+	if _, err := client.OpenResume(ctx, credentialed, NativeDispatchResumePeer{AccountID: "account", EndpointID: "endpoint"}); !errors.Is(err, ErrStreamAuthorization) {
+		t.Fatalf("a credentialed stream carried a resume peer: %v", err)
+	}
+}

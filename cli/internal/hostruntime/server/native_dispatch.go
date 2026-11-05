@@ -42,17 +42,47 @@ type NativeDispatchConfig struct {
 	// Fence admits one dispatch under the accepting worker's own hostd lease.
 	// During a handover both generations accept on the shared listener; each
 	// admits only while its own hostd keeps it active.
-	Fence       func(context.Context) (func(), <-chan struct{}, error)
-	Authorize   func(context.Context, streamauth.Header) (string, error)
-	ServeStream func(context.Context, streamauth.Header, net.Conn) error
-	Current     NativePrivateTCPCurrent
-	DialPrivate func(context.Context, nativeprivate.Binding) (net.Conn, error)
-	SSHTarget   func(context.Context) (managedssh.HostTarget, error)
+	Fence     func(context.Context) (func(), <-chan struct{}, error)
+	Authorize func(context.Context, streamauth.Header) (string, error)
+	// AuthorizeResume admits a credential-free terminal resume the carrier already proved from its current
+	// authority; it only gates the feature. Unset, every resume is refused.
+	AuthorizeResume func(context.Context, streamauth.Header) (string, error)
+	ServeStream     func(context.Context, streamauth.Header, net.Conn) error
+	Current         NativePrivateTCPCurrent
+	DialPrivate     func(context.Context, nativeprivate.Binding) (net.Conn, error)
+	SSHTarget       func(context.Context) (managedssh.HostTarget, error)
 }
 type nativeDispatchEnvelope struct {
-	Header  json.RawMessage        `json:"header,omitempty"`
-	Binding *nativeprivate.Binding `json:"binding,omitempty"`
+	Header  json.RawMessage           `json:"header,omitempty"`
+	Binding *nativeprivate.Binding    `json:"binding,omitempty"`
+	Resume  *NativeDispatchResumePeer `json:"resume,omitempty"`
 }
+
+// NativeDispatchResumePeer is the peer the carrier proved for a terminal resume; the dispatch token vouches for it.
+type NativeDispatchResumePeer struct {
+	AccountID  string `json:"account_id"`
+	EndpointID string `json:"endpoint_id"`
+	Standing   bool   `json:"standing,omitempty"`
+}
+
+// dispatchResumeConn is a worker-side terminal stream that moves one attachment for the carrier-proven peer.
+type dispatchResumeConn struct {
+	net.Conn
+	peer                NativeDispatchResumePeer
+	sessionID, resource string
+}
+
+func (c *dispatchResumeConn) ResumePeer() (accountID, endpointID, sessionID, resource string, standing bool) {
+	return c.peer.AccountID, c.peer.EndpointID, c.sessionID, c.resource, c.peer.Standing
+}
+
+func (c *dispatchResumeConn) CloseWrite() error {
+	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
+}
+
 type nativeDispatchResponse struct {
 	AccessSessionID string                 `json:"access_session_id,omitempty"`
 	ValidUntil      time.Time              `json:"valid_until,omitempty"`
@@ -222,7 +252,20 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		response := nativeDispatchResponse{}
 		switch operation {
 		case "authorize", "stream":
-			response.AccessSessionID, err = config.Authorize(r.Context(), header)
+			// A resume header and the carrier-proven peer come together or not at all, and only on a stream.
+			if (header.Resume != "") != (envelope.Resume != nil) || (envelope.Resume != nil && (operation != "stream" || envelope.Resume.AccountID == "" || envelope.Resume.EndpointID == "")) {
+				http.Error(w, "invalid dispatch resume", http.StatusBadRequest)
+				return
+			}
+			authorize := config.Authorize
+			if header.Resume != "" {
+				authorize = config.AuthorizeResume
+			}
+			if authorize == nil {
+				err = ErrStreamAuthorization
+			} else {
+				response.AccessSessionID, err = authorize(r.Context(), header)
+			}
 			if err != nil || response.AccessSessionID == "" {
 				recordNativeAdmissionFailure("resource_authorize", err)
 				if reportAuthorizationFailure(r.Context(), err) {
@@ -268,7 +311,11 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				}
 				stop := context.AfterFunc(lifetime, func() { _ = connection.Close() })
 				defer stop()
-				if err := config.ServeStream(lifetime, header, native.LimitConnection(connection, header.MaximumBytes)); err != nil {
+				stream := native.LimitConnection(connection, header.MaximumBytes)
+				if envelope.Resume != nil {
+					stream = &dispatchResumeConn{Conn: stream, peer: *envelope.Resume, sessionID: header.OperationID, resource: header.Resume}
+				}
+				if err := config.ServeStream(lifetime, header, stream); err != nil {
 					recordNativeAdmissionFailure("application", err)
 				}
 				return
