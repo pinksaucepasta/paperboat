@@ -140,6 +140,7 @@ func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunn
 func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentReferenceSource) (*tunnelcert.DNS01Zones, error) {
 	certificateConfig := cfg.Certificates
 	dnsProvider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		Resolver:       zoneResolver,
 		ZoneID:         certificateConfig.DNSZoneID,
 		TokenReference: certificateConfig.DNSTokenReference,
 		TokenSource:    secrets,
@@ -150,7 +151,7 @@ func newCloudflareDNSZones(cfg config.Config, secrets tunnelcert.EnvironmentRefe
 		return nil, fmt.Errorf("%w: DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
 	publicDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-		ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
+		Resolver: zoneResolver, ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
 		TokenSource: secrets, HTTPClient: providerHTTPClient("cloudflare-public-dns", cfg.HTTP.RequestTimeout),
 		WriteBase: certificateConfig.DNSWriteBase,
 	})
@@ -201,7 +202,7 @@ func newRegionalCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, er
 	provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
 		ZoneID: cfg.RegionalDNSZoneID, TokenReference: cfg.Certificates.DNSTokenReference, TokenSource: secrets,
 		HTTPClient: providerHTTPClient("cloudflare-regional-dns", cfg.HTTP.RequestTimeout), WriteBase: cfg.Certificates.DNSWriteBase,
-		Resolver: authoritativeResolver{lookupNS: net.DefaultResolver.LookupNS},
+		Resolver: zoneResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("regional DNS provider: %w", err)
@@ -246,6 +247,9 @@ func checkRegionalCertificateSecrets(cfg config.Config, secrets tunnelcert.Envir
 type authoritativeResolver struct {
 	lookupNS func(context.Context, string) ([]*net.NS, error)
 }
+
+// zoneResolver is the one resolver every DNS-01 and address propagation check uses.
+var zoneResolver = authoritativeResolver{lookupNS: net.DefaultResolver.LookupNS}
 
 // nameservers walks up from name to the closest enclosing zone that has NS records.
 func (r authoritativeResolver) nameservers(ctx context.Context, name string) ([]string, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 // DNS publication is part of the existing server reconciliation lifecycle.
 // Deployment-owned verified public address metadata is required before the
 // first write. Registration/heartbeats cannot populate that metadata.
-func newEdgeDNSReconciler(database *db.DB, cfg config.Config, zoneID string, resolver tunnelcert.AddressResolver) (*tunnelcert.AddressReconciler, error) {
+func newEdgeDNSReconciler(database *db.DB, cfg config.Config, zoneID string) (*tunnelcert.AddressReconciler, error) {
 	admission, err := tunnelcert.NewDatabaseCloudflareAddressAdmission(database, zoneID)
 	if err != nil {
 		return nil, err
@@ -33,15 +32,15 @@ func newEdgeDNSReconciler(database *db.DB, cfg config.Config, zoneID string, res
 	if err != nil {
 		return nil, err
 	}
-	return tunnelcert.NewAddressReconciler(database, provider, resolver)
+	return tunnelcert.NewAddressReconciler(database, provider, zoneResolver)
 }
 
 func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context) error, error) {
-	public, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.PublicDNSZoneID, net.DefaultResolver)
+	public, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.PublicDNSZoneID)
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.DNSZoneID, net.DefaultResolver)
+	runtime, err := newEdgeDNSReconciler(database, cfg, cfg.Certificates.DNSZoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func newRegionalDNS(database *db.DB, cfg config.Config) (*servernodes.RegionalDN
 	if cfg.RegionalDomain == "" || cfg.RegionalDNSZoneID == "" {
 		return nil, nil
 	}
-	publisher, err := newEdgeDNSReconciler(database, cfg, cfg.RegionalDNSZoneID, authoritativeResolver{lookupNS: net.DefaultResolver.LookupNS})
+	publisher, err := newEdgeDNSReconciler(database, cfg, cfg.RegionalDNSZoneID)
 	if err != nil {
 		return nil, err
 	}
