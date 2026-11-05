@@ -230,6 +230,7 @@ func writeErrorDetails(w http.ResponseWriter, r *http.Request, status int, code,
 		// A refusal's code is otherwise only in the response body; the request log
 		// line has the status alone, which made account-wide 409s untraceable.
 		slog.InfoContext(r.Context(), "http_refusal", "status", status, "code", code, "path", r.URL.Path, "support_reference", supportReference(r.Context()))
+		recordSupportRejection(r, status, code, causes...)
 	}
 	writeJSON(w, status, ErrorResponse{Error: APIError{
 		SupportReference: supportReference(r.Context()),

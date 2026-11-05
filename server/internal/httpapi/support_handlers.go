@@ -95,6 +95,30 @@ func captureSupportFailure(r *http.Request, status int, code string, stack *sent
 	}
 }
 
+// recordSupportRejection stores a refusal under the support reference its response carries, so the reference
+// resolves for support (reference, code, time, account; support_reports retention).
+func recordSupportRejection(r *http.Request, status int, code string, causes ...error) {
+	sc, _ := r.Context().Value(supportContextKey{}).(supportContext)
+	if sc.service == nil || errors.Is(r.Context().Err(), context.Canceled) {
+		return
+	}
+	owner := ""
+	if sc.owner != nil {
+		if id := sc.owner.Load(); id != nil {
+			owner = *id
+		}
+	}
+	if p, ok := principalFromContext(r.Context()); ok {
+		owner = p.User.ID
+	}
+	var cause error
+	if len(causes) > 0 {
+		cause = causes[0]
+	}
+	ctx := supportreport.WithFailureIdentity(r.Context(), owner, requestIDFromContext(r.Context()), sc.reference)
+	sc.service.RecordRejection(ctx, "paperboat-server", supportOperation(r.URL.Path), code, supportreport.WithDiagnosticStatus(status, cause))
+}
+
 func logHTTPRejection(r *http.Request, status int, code string, err error) {
 	sc, _ := r.Context().Value(supportContextKey{}).(supportContext)
 	logger := sc.logger
