@@ -590,5 +590,15 @@ func runtimeAdmissionEqual(left, right datacarrier.ExpectedAdmission) bool {
 
 // The carrier stays connected while its route is refused; this line names the route and the reason.
 func logRuntimeAttachFailure(a datacarrier.ExpectedAdmission, err error) {
+	if !attachFailureIsRefusal(err) {
+		return
+	}
 	edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "runtime_route_attach_refused", edgetelemetry.OutcomeRejected, "route_id", a.RouteID, "host_id", a.Identity.HostID, "session_id", a.Identity.SessionID, "attachment_generation", a.AttachmentGeneration, "error", err.Error())
+}
+
+// attachFailureIsRefusal is false for a registry that closed because this process is shutting down:
+// no host was refused, and a replaced process logged 24 such lines at its last millisecond during the
+// 2026-11-05 handover, which the deploy gate counts as refused route attaches.
+func attachFailureIsRefusal(err error) bool {
+	return !errors.Is(err, edgehttp.ErrDataCarrierPreviewRegistryClosed)
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -299,5 +300,14 @@ func TestRuntimeCarrierRequestPullCoalescesAndSeesNewAdmissions(t *testing.T) {
 	}
 	if waited := time.Since(asked); waited < missPullInterval/2 {
 		t.Fatalf("second requested pull ran after %v, want it paced to about %v", waited, missPullInterval)
+	}
+}
+
+func TestAttachFailureOfAClosingRegistryIsNotARefusal(t *testing.T) {
+	if attachFailureIsRefusal(edgehttp.ErrDataCarrierPreviewRegistryClosed) || attachFailureIsRefusal(fmt.Errorf("attach: %w", edgehttp.ErrDataCarrierPreviewRegistryClosed)) {
+		t.Fatal("a registry closed by shutdown was logged as a refusal")
+	}
+	if !attachFailureIsRefusal(errors.New("route conflict")) {
+		t.Fatal("a real refusal is no longer logged")
 	}
 }
