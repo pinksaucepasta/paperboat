@@ -748,7 +748,7 @@ func New(opts Options) (*App, error) {
 		ClientUpdatePolicy:       clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
-		ServerNodes:              &servernodes.Enroller{DB: store, Config: opts.Config},
+		ServerNodes:              newServerNodeEnroller(store, opts.Config),
 		Database:                 store,
 		OperatorBackups:          backupService,
 		TestFixtures:             fixturesService,
@@ -972,6 +972,14 @@ func New(opts Options) (*App, error) {
 			return nil, dnsErr
 		}
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_dns", dnsWorker, progress))
+	} else if opts.Config.RegionalDomain != "" && opts.Config.RegionalDNSZoneID != "" {
+		// Server nodes without the edge certificate runtime (a staging stack): only the regional name loop.
+		regionalWorker, regionalErr := newRegionalDNSWorker(store, opts.Config)
+		if regionalErr != nil {
+			_ = store.Close()
+			return nil, regionalErr
+		}
+		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_dns", regionalWorker, progress))
 	}
 	if diagnosticUploadService != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_diagnostic_uploads", diagnosticUploadService.Worker(time.Minute), progress))
@@ -1025,4 +1033,14 @@ func consoleBillingURL(origin string) string {
 		return ""
 	}
 	return strings.TrimRight(origin, "/") + "/billing"
+}
+
+// newServerNodeEnroller dials only public addresses, unless selfhost_allow_private_ingress (refused in production)
+// allows a staging stack's private and loopback addresses, as for self-host enrollment.
+func newServerNodeEnroller(store *db.DB, cfg config.Config) *servernodes.Enroller {
+	e := &servernodes.Enroller{DB: store, Config: cfg}
+	if cfg.SelfhostAllowPrivateIngress {
+		e.Dial = func(_ context.Context, address string) (string, error) { return address, nil }
+	}
+	return e
 }

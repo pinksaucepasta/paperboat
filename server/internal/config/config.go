@@ -56,7 +56,7 @@ type Config struct {
 	// ServerInstances is how many server instances share this database (0 or 1: one). Above one, every
 	// per-process secret must be shared configuration: startup refuses generated signing keys (F21-56).
 	ServerInstances int `json:"server_instances"`
-	// SelfhostAllowPrivateIngress lets self-hosted node claim and ingress verification accept private
+	// SelfhostAllowPrivateIngress lets self-hosted node claim and ingress verification (and server-node enrollment) accept private
 	// (RFC 1918 / ULA) addresses: a staging stack on a LAN. Refused in production, where it would open the
 	// claim dialer to internal addresses.
 	SelfhostAllowPrivateIngress bool `json:"selfhost_allow_private_ingress"`

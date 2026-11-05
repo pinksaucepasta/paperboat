@@ -44,19 +44,51 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 	if err != nil {
 		return nil, err
 	}
-	var regional *servernodes.RegionalDNS
-	if cfg.RegionalDomain != "" && cfg.RegionalDNSZoneID != "" {
-		publisher, err := newEdgeDNSReconciler(database, cfg, cfg.RegionalDNSZoneID)
-		if err != nil {
-			return nil, err
-		}
-		issuer, _, _, err := newPublicCertificateIssuer(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("regional certificate issuer: %w", err)
-		}
-		regional = &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey}
+	regional, err := newRegionalDNS(database, cfg)
+	if err != nil {
+		return nil, err
 	}
 	return edgeDNSWorker(database, public, runtime, regional), nil
+}
+
+// newRegionalDNS is the regional server-node name loop (certificate + DNS), nil when not configured.
+func newRegionalDNS(database *db.DB, cfg config.Config) (*servernodes.RegionalDNS, error) {
+	if cfg.RegionalDomain == "" || cfg.RegionalDNSZoneID == "" {
+		return nil, nil
+	}
+	publisher, err := newEdgeDNSReconciler(database, cfg, cfg.RegionalDNSZoneID)
+	if err != nil {
+		return nil, err
+	}
+	issuer, _, _, err := newPublicCertificateIssuer(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("regional certificate issuer: %w", err)
+	}
+	return &servernodes.RegionalDNS{DB: database, Publisher: publisher, Domain: cfg.RegionalDomain, Issuer: issuer, Key: cfg.Secrets.EncryptionKey}, nil
+}
+
+// newRegionalDNSWorker runs only the regional loop every 10 s, for nodes without the edge certificate runtime.
+func newRegionalDNSWorker(database *db.DB, cfg config.Config) (func(context.Context) error, error) {
+	regional, err := newRegionalDNS(database, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			finishProgress := workers.BeginIteration(ctx, 10*time.Second)
+			if err := regional.Sync(ctx); err != nil {
+				workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
+			}
+			finishProgress(nil)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		}
+	}, nil
 }
 
 // edgeDNSWorker withdraws the per-hostname DNS records edges used to get, then idles on an empty list: managed
