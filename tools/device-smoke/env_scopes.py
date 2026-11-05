@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """F10-01: set, list and unset personal values and per-machine overrides; they reach new terminals and execs; never logged.
 
-  env_scopes.py TARGET [--password-file ABSOLUTE_OWNER_ONLY_FILE]
+  env_scopes.py TARGET [--password-file ABSOLUTE_OWNER_ONLY_FILE] [--rotate]
 
 Run on a machine with an unlocked ENV vault (--password-file unlocks it first with `pb env vault unlock`).
 TARGET is another machine of the same account; the machine this runs on is the second machine, so every
@@ -153,6 +153,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     parser.add_argument('--password-file', help='absolute owner-only file with the ENV vault password; unlocks the vault first')
+    parser.add_argument('--rotate', action='store_true', help='also rotate the personal scope keys (pb env rotate) and check the value survives')
     args = parser.parse_args()
     if args.password_file:
         code, _, err = run('env', 'vault', 'unlock', '--password-file', args.password_file, '--json')
@@ -177,6 +178,14 @@ def main():
         if terminal_sees(args.target, name, marker) != personal:
             raise RuntimeError('a new terminal on the target does not see the personal value')
         result['personal_in_exec_and_terminal'] = True
+        if args.rotate:
+            code, _, err = run('env', 'rotate', '--json', timeout=180)
+            if code:
+                raise RuntimeError('pb env rotate failed: ' + err[:120])
+            wait_sees(args.target, name, personal, 'after pb env rotate a new exec does not see the personal value')
+            if sees(me, name) != personal:
+                raise RuntimeError('after pb env rotate a new exec on this machine does not see the personal value')
+            result['rotate_preserves_values'] = True
 
         code, _, err = run('env', 'set', name, '--machine', target_id, '--value-stdin', '--json', stdin=override)
         if code:

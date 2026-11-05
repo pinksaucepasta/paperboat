@@ -46,6 +46,7 @@ def main():
     parser.add_argument('--device-role', choices=['owner', 'member'], default='owner')
     # Team creation now needs a paid Checkout, so a retained paid team is the fixture.
     parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
+    parser.add_argument('--delete', action='store_true', help='the --team fixture is a paid throwaway: delete it at the end')
     args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     root = profile_root()
@@ -78,7 +79,7 @@ def main():
     state = root / 'owned-team.json'
     state.write_text(json.dumps({'team_id': team_id, 'owner': owner['account']['id']}))
     state.chmod(0o600)
-    created = False
+    created = args.delete  # a throwaway fixture is deleted (and checked) like a created team
     was_member = False
     primary_error = None
     text = invoke(pb, 'team', raw=True, input='', timeout=15)

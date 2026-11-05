@@ -14,6 +14,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 
 ACCESS_ROWS = {'C002', 'C124', 'C125', 'C126', 'C139', 'C141'}
 PB = Path.home() / '.local/bin/pb'
@@ -144,6 +145,33 @@ def rows(args):
     r.expect(code == 0 and target.exists() and target.stat().st_size > 1000 and 'pb update --from' in o + e, 'bundle was not saved with install instructions')
     r.expect(run('update', 'bundle', '--output', str(target))[0] != 0, 'bundle overwrote an existing output file')
     target.unlink(missing_ok=True)
+    out.append(r)
+
+    r = Row('C185', 'config sync init'); r.help()
+    with tempfile.TemporaryDirectory(prefix='pbsmoke-sync-init-') as home:
+        home = os.path.realpath(home)  # macOS /var is a symlink; init refuses linked parents by design
+        env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, 'config'))  # never the real file
+
+        def init(*extra):
+            result = subprocess.run([str(PB), 'config', 'sync', *extra, '--json'], capture_output=True, text=True,
+                                    timeout=60, stdin=subprocess.DEVNULL, env=env)
+            return result.returncode, (json.loads(result.stdout or '{}').get('data') or {}), result.stdout + result.stderr
+        _, where, _ = init('path')
+        code, made, _ = init('init')
+        path = Path(where.get('path', '/nonexistent'))
+        r.expect(code == 0 and made.get('path') == str(path) and str(path).startswith(home), 'init did not create the file at its path')
+        r.expect(path.exists() and path.stat().st_mode & 0o077 == 0, 'the created file is missing or readable by others')
+        before = path.read_bytes() if path.exists() else b''
+        code, _, text = init('init')
+        r.expect(code != 0 and not BAD.search(text) and path.read_bytes() == before, 'a second init overwrote the file or gave no clear error')
+    out.append(r)
+
+    r = Row('C263', 'account delete'); r.help()
+    code, o, e = run('account', 'delete')
+    r.expect(code == 0 and '/settings/account' in o + e, 'account delete does not print the console link')
+    d = r.json_ok()
+    r.expect(isinstance(d, dict) and str(d.get('console_url', '')).endswith('/settings/account'), 'account delete --json lacks console_url')
+    r.expect(run('auth', 'status', '--json')[0] == 0, 'the account is no longer signed in after account delete')
     out.append(r)
     for ident, name in (('C218', 'update check'), ('C219', 'update download')):
         r = Row(ident, name); r.help()

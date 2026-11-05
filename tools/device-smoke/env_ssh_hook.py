@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F16-01..03 / C243: ENV reaches plain ssh shells through `pb env hook`.
+"""F16-01..03 / C243 / C264 / C265: ENV reaches plain ssh shells through `pb env hook`.
 
   env_ssh_hook.py SSH_HOST
 
@@ -8,6 +8,9 @@ for the active workspace. Sets a random personal probe value, installs the bash 
 line), then checks that a non-interactive `ssh host cmd` and an interactive ssh shell see the
 value (compared by SHA-256, never printed), that a cached hook run is fast, that a missing runtime
 or missing login loads nothing within the budget, and that uninstall removes only its line.
+C264: with the variable unset in an interactive shell, `pb env load` (the hook's pb function) loads it there.
+C265: `pb env run -- sh -c ...` gives the child the value with the variable unset in the caller, and passes
+the child's exit code through.
 Cleans up the probe and the hook on every exit.
 
 A macOS host is detected over ssh (`uname -s`): its login shell is zsh, so the hook goes in ~/.zshenv
@@ -87,6 +90,12 @@ def main():
         report['noninteractive'] = probe_hash_line(must(ssh(host, show), 'ssh host cmd')) == want
         interactive = ssh(host, None, stdin=show + '\nexit\n', tty=True)
         report['interactive'] = probe_hash_line(interactive.stdout.replace('\r', '')) == want
+        load = ssh(host, None, stdin=f'unset {PROBE}; pb env load >/dev/null 2>&1; {show}\nexit\n', tty=True)
+        report['env_load'] = probe_hash_line(load.stdout.replace('\r', '')) == want
+        injected = must(ssh(host, f"unset {PROBE}; {PB} env run -- sh -c '{show}'"), 'env run')
+        report['env_run'] = probe_hash_line(injected) == want
+        passed = ssh(host, f"{PB} env run -- sh -c 'exit 7'; echo rc=$?").stdout
+        report['env_run_exit_code'] = 'rc=7' in passed
         emit = f'{PB} env hook --emit {shell} >/dev/null'
         timing = must(ssh(host, f'{emit}; s=$({now}); {emit}; e=$({now}); echo $(((e-s){ms}))'),
                       'timing')
@@ -101,6 +110,7 @@ def main():
         rc_after = must(ssh(host, f'cat {rc} 2>/dev/null; true'), 'read shell rc file')
         report['uninstall_restores_rc'] = rc_after == rc_before
         report['ok'] = (report['noninteractive'] and report['interactive'] and report['cached_ms'] < 500
+                        and report['env_load'] and report['env_run'] and report['env_run_exit_code']
                         and report['quiet_output_bytes'] == 0 and quiet_ms < 3000
                         and report['uninstall_restores_rc'])
     finally:

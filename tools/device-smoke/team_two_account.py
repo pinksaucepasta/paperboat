@@ -143,12 +143,12 @@ def main():
         if any(m['id'] == mm for m in owner('--workspace', team, 'machine', 'list')['machines']):
             raise Failure('an unapproved machine is visible in the team')
         owner('team', 'machine', 'approve', team, mm, '--generation', generation())
-        if not any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team)['machines']):
+        if not any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', [])):
             raise Failure('an approved machine is not active in the team')
         member('team', 'machine', 'unshare', team, mm, '--generation', str(member('team', 'get', team)['generation']))
         member('team', 'machine', 'share', team, mm, '--generation', str(member('team', 'get', team)['generation']))
         owner('team', 'machine', 'decline', team, mm, '--generation', generation())
-        if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team)['machines']):
+        if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', [])):
             raise Failure('a declined machine is active in the team')
 
     def transfer_and_remove():
@@ -164,11 +164,11 @@ def main():
         cleanup.append(lambda: owner('team', 'role', team, member_id, 'member', '--generation', generation()))
         member('team', 'machine', 'share', team, mm, '--generation', str(member('team', 'get', team)['generation']))
         member('team', 'machine', 'transfer-to-team', team, mm, '--confirm', mm, '--generation', str(member('team', 'get', team)['generation']))
-        listed = [m for m in owner('team', 'get', team)['machines'] if m['machine_id'] == mm]
+        listed = [m for m in owner('team', 'get', team).get('machines', []) if m['machine_id'] == mm]
         if not listed or not listed[0]['active']:
             raise Failure(f'a transferred machine is not an active team machine: {listed}')
         owner('team', 'machine', 'remove', team, mm, '--confirm', mm, '--generation', generation())
-        if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team)['machines']):
+        if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', [])):
             raise Failure('a removed team machine is still active')
         # `auth status` reads the local credential file; only a real server call shows the credential is dead.
         refused('member', 'team', 'list')
@@ -177,7 +177,7 @@ def main():
         tunnel = None
         code, value = parse(*owner_raw('tunnel', 'create', f'lane-b-f12-{int(time.time())}', '--port', '8123', '--json'))
         if isinstance(value, dict):
-            tunnel = (value.get('error') or {}).get('target') or value.get('id') or value.get('tunnel_id')
+            tunnel = (value.get('error') or {}).get('target') or (value.get('tunnel') or {}).get('id') or value.get('id')
         if not tunnel:
             raise Failure(f'could not create the throwaway tunnel: {value}')
         cleanup.append(lambda: delete_tunnel(tunnel))
