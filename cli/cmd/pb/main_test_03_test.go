@@ -39,7 +39,9 @@ func (r *execChunkReader) Read(value []byte) (int, error) {
 	return copy(value, chunk), nil
 }
 
-func TestForwardExecInputSwitchesConnectionsWithoutReplayingUncertainChunk(t *testing.T) {
+// A chunk a cut connection failed on, and everything the connection accepted before, is replayed to the replacement
+// from the journal's base; the execution drops what it already received (execprocess WriteAt).
+func TestForwardExecInputSwitchesConnectionsAndReplaysTheJournal(t *testing.T) {
 	first := &execInputTestConn{writeErr: tunnel.ErrTransportLost}
 	second := &execInputTestConn{}
 	connections := newExecConnectionRef(first)
@@ -66,7 +68,7 @@ func TestForwardExecInputSwitchesConnectionsWithoutReplayingUncertainChunk(t *te
 	if len(first.writes) != 1 || string(first.writes[0]) != "uncertain" {
 		t.Fatalf("first writes = %q", first.writes)
 	}
-	if len(second.writes) != 1 || string(second.writes[0]) != "next" || !second.closeWrite {
+	if len(second.writes) != 1 || string(second.writes[0]) != "uncertainnext" || !second.closeWrite {
 		t.Fatalf("second writes = %q closeWrite=%v", second.writes, second.closeWrite)
 	}
 }

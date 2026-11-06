@@ -222,7 +222,7 @@ func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
 			t.Fatal("missing input record", err)
 		}
 		frame, err := protocol.DecodeTerminalInput(data)
-		if err != nil || frame.StreamID != 7 || frame.Sequence != uint64(index+1) || !bytes.Equal(frame.Data, chunk) {
+		if err != nil || frame.StreamID != 7 || frame.Sequence != uint64(index*16384+1) || !bytes.Equal(frame.Data, chunk) {
 			t.Fatal("stdin framing lost bytes or ordering", err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestHelperExecEOFFollowsAllInputWithoutWaitingForResponse(t *testing.T) {
 		t.Fatal("missing ordered EOF", err)
 	}
 	frame, err := protocol.DecodeTerminalEOF(data)
-	if err != nil || frame.StreamID != 7 || frame.Sequence != 3 {
+	if err != nil || frame.StreamID != 7 || frame.Sequence != 16384+48+1 {
 		t.Fatal("EOF lost the exact input binding/sequence", err)
 	}
 	if input.Len() != 0 {

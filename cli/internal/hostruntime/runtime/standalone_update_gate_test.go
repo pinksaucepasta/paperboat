@@ -588,5 +588,5 @@ func TestWorkerUpdateDrainWaitsForCommittedTransferChunk(t *testing.T) {
 
 func transferUpdateBusy(err error) bool {
 	var failure *filetransfer.Error
-	return errors.As(err, &failure) && failure.Code == filetransfer.ResourceLimit
+	return errors.As(err, &failure) && (failure.Code == filetransfer.ResourceLimit || failure.Code == filetransfer.UpdateInProgress)
 }
