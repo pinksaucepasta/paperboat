@@ -273,7 +273,8 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	if err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
-	if client, err = o.freshClientAfterPeerClose(descriptor, peerID, client); err != nil {
+	client, restarted, err := o.freshClientAfterPeerClose(descriptor, peerID, client)
+	if err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
 	}
 	// A peer whose own endpoints the signed configuration gives is reachable directly with no relay
@@ -317,7 +318,11 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	started := time.Now()
 	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path_category", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
-	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
+	sessionConfig := peerquic.DevelopmentSessionConfig(class)
+	if restarted {
+		sessionConfig.HandshakeTimeout = peerRestartHandshake
+	}
+	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, sessionConfig)
 	handshakeEnd(err)
 	pathAfter, _ := o.authority.PeerPath(peerID)
 	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path_category", pathAfter, "failed", err != nil)

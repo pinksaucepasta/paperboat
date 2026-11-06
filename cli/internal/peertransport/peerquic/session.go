@@ -42,6 +42,10 @@ type SessionConfig struct {
 	KeepAlivePeriod   time.Duration
 	MaxIdleTimeout    time.Duration
 	InitialPacketSize uint16
+	// HandshakeTimeout is how long a dial waits for the handshake to complete before it gives up (0: one second,
+	// the most any dial waits). A dial right after the peer restarted uses a short one: its first flight may meet
+	// an engine that is not answering yet, and the retry that follows succeeds in milliseconds.
+	HandshakeTimeout time.Duration
 }
 
 func DevelopmentSessionConfig(class Class) SessionConfig {
@@ -68,7 +72,7 @@ func (c SessionConfig) WithInitialPacketSize(size uint16) (SessionConfig, error)
 }
 
 func (c SessionConfig) validate() error {
-	if !validClass(c.Class) || c.KeepAlivePeriod <= 0 || c.MaxIdleTimeout <= 2*c.KeepAlivePeriod || c.InitialPacketSize < 1200 {
+	if !validClass(c.Class) || c.KeepAlivePeriod <= 0 || c.MaxIdleTimeout <= 2*c.KeepAlivePeriod || c.InitialPacketSize < 1200 || c.HandshakeTimeout < 0 {
 		return errors.New("invalid peer QUIC session configuration")
 	}
 	return nil
@@ -123,7 +127,9 @@ func dialPacket(ctx context.Context, packetConn net.PacketConn, remote net.Addr,
 	// ET ClientConnection.cpp:pollReconnect retries fresh sockets each second.
 	// quic-go connection.go:695 bounds silence only before handshake completion.
 	configured := quicConfig.Clone()
-	configured.HandshakeIdleTimeout = time.Second
+	if configured.HandshakeIdleTimeout <= 0 || configured.HandshakeIdleTimeout > time.Second {
+		configured.HandshakeIdleTimeout = time.Second
+	}
 	configured.Tracer = func(_ context.Context, _ bool, id quic.ConnectionID) qlogwriter.Trace {
 		return &wireTrace{pto: pto, id: id.String()}
 	}
@@ -448,7 +454,7 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 		maximumStreams = -1
 	}
 	return &quic.Config{
-		HandshakeIdleTimeout:           10 * time.Second,
+		HandshakeIdleTimeout:           handshakeTimeout(sessionConfig),
 		MaxIdleTimeout:                 sessionConfig.MaxIdleTimeout,
 		KeepAlivePeriod:                sessionConfig.KeepAlivePeriod,
 		InitialPacketSize:              sessionConfig.InitialPacketSize,
@@ -462,6 +468,14 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 		InitialConnectionReceiveWindow: 512 << 10,
 		MaxConnectionReceiveWindow:     16 << 20,
 	}
+}
+
+// handshakeTimeout is the session's own bound, or the long one that dialPacket clamps to one second.
+func handshakeTimeout(c SessionConfig) time.Duration {
+	if c.HandshakeTimeout > 0 {
+		return c.HandshakeTimeout
+	}
+	return 10 * time.Second
 }
 
 func validClass(class Class) bool {

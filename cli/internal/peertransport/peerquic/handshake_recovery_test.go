@@ -61,3 +61,30 @@ func TestSilentHandshakeReturnsBeforePTOBackoffStrandsRecovery(t *testing.T) {
 		t.Fatalf("established connection expired: %v", err)
 	}
 }
+
+// The first dial after a peer's clean close gives up on a silent handshake in a fraction of the usual second, so the
+// retry that follows a lost first flight is not delayed by the full idle timeout.
+func TestHandshakeTimeoutBoundsASilentFirstFlight(t *testing.T) {
+	clientTLS, _ := probeTLSConfigs(t)
+	serverUDP, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverUDP.Close()
+	clientUDP, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive)
+	config.HandshakeTimeout = 250 * time.Millisecond
+	started := time.Now()
+	_, err = peerquic.DialPacket(t.Context(), &restartPacketSocket{clientUDP, serverUDP.LocalAddr()}, clientTLS, config)
+	var idle *quic.IdleTimeoutError
+	if !errors.As(err, &idle) || time.Since(started) > 700*time.Millisecond {
+		t.Fatalf("the short handshake timeout was not honoured: type=%T elapsed=%s", err, time.Since(started))
+	}
+	config.HandshakeTimeout = -time.Second
+	if _, err := peerquic.DialPacket(t.Context(), &restartPacketSocket{clientUDP, serverUDP.LocalAddr()}, clientTLS, config); err == nil {
+		t.Fatal("a negative handshake timeout was accepted")
+	}
+}

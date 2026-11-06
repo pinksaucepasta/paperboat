@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
@@ -86,16 +87,24 @@ func (o *Owner) watchPeerClose(s *Session) {
 	}
 }
 
-func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, error) {
+// peerRestartHandshake is the handshake timeout of the first dial after a peer's clean close: the restarted peer may not be
+// answering yet, and the dial that follows a lost first flight completes in milliseconds (pbvm4: 1.0 s lost, then 28 ms).
+// Prior art for a fixed short reconnect cadence: EternalTerminal retries every second (~/ref/EternalTerminal/src/base/
+// ClientConnection.cpp:276); Tailscale's defaults (heartbeat 3 s, ping timeout 5 s, ~/ref/tailscale/wgengine/magicsock/
+// magicsock.go:4082-4110) are slower, which is why only a dial that knows the peer just restarted shortens its wait.
+const peerRestartHandshake = 300 * time.Millisecond
+
+func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, bool, error) {
 	o.mu.Lock()
 	closed := o.restarted[peerID]
 	delete(o.restarted, peerID)
 	o.mu.Unlock()
 	if !closed {
-		return client, nil
+		return client, false, nil
 	}
 	if o.authority.RetireIdleClient(client) {
-		return o.authority.Client(descriptor, peerID)
+		fresh, err := o.authority.Client(descriptor, peerID)
+		return fresh, true, err
 	}
 	// Other sessions to the peer still own the client (an exec loop's, not released yet), so it cannot be retired, but
 	// the peer restarted and took its WireGuard keys with it: data on the old keys is dropped until WireGuard's own 15 s
@@ -104,5 +113,5 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	// alive does not mean the peer did not restart: the same restart closed it, and its close is a few milliseconds
 	// behind (pbvm4: 2 of 5 updates paused 16 s when this was skipped).
 	o.authority.ResetPeerPath(client)
-	return client, nil
+	return client, true, nil
 }
