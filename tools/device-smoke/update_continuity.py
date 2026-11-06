@@ -128,9 +128,9 @@ def main():
         if again_pid != held_pid:
             raise RuntimeError('terminal reconnected to a different shell')
         if exec_process is not None:
-            out, _ = exec_process.communicate(timeout=180)
+            out, err = exec_process.communicate(timeout=180)
             if exec_process.returncode != 0 or 'EXEC_FINISHED' not in out:
-                raise RuntimeError('running exec did not finish normally across the update')
+                raise RuntimeError('running exec did not finish normally across the update: rc=%s stdout=%r stderr=%r' % (exec_process.returncode, out[-120:], err[-300:]))
             exec_process = None
         current = owners()
         if not held & set(current):
