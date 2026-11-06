@@ -9,6 +9,7 @@ generation's session owner exits once its last session is closed.
 import argparse
 import json
 from pathlib import Path
+import os
 import subprocess
 import sys
 import time
@@ -21,8 +22,9 @@ PB = Path.home() / '.local/bin/pb'
 
 
 def owners():
-    # ps, not pgrep -af: macOS pgrep prints no arguments with -a
-    out = subprocess.run(['ps', '-axo', 'pid=,args='], capture_output=True, text=True).stdout
+    # ps, not pgrep -af (macOS pgrep prints no arguments with -a); only this user's owners: another account
+    # on the host keeps its own owner running for good
+    out = subprocess.run(['ps', '-U', str(os.getuid()), '-o', 'pid=,args='], capture_output=True, text=True).stdout
     found = {}
     for line in out.splitlines():
         parts = line.split()

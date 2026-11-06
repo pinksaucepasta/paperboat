@@ -1191,8 +1191,9 @@ class UpdateSurvivalMarkers(unittest.TestCase):
                    "  202 /p/pins/aa/pb daemon __runtime-session-owner --generation g1\n"
                    "  203 /p/pins/bb/pb daemon __runtime-session-owner --generation g2\n"
                    "  204 /p/pins/bb/pb daemon __runtime-carrier --generation g2\n")
-        with patch('update_continuity.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=listing)):
+        with patch('update_continuity.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=listing)) as run:
             self.assertEqual(update_continuity.owners(), {'g1': ['202'], 'g2': ['203']})
+        self.assertEqual(run.call_args.args[0][:3], ['ps', '-U', str(os.getuid())])  # one account's owners only
 
 if __name__ == '__main__':
     unittest.main()
