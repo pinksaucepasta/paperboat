@@ -421,10 +421,15 @@ def black_hole(a, sessions):
             drop_restore(block)
         row('N13 black hole 60 s: the client shows it is reconnecting within 30 s', detected is not None and detected < 30,
             f'{detected:.1f} s' if detected is not None else 'never shown while the network was down')
-        t0 = time.monotonic()
+        t0, size = time.monotonic(), len(c1.output)
         try:
+            # BH90 is printed 90 s after the loop started, 25 s after the network returned whatever the client does, so
+            # it only proves completion; the first output after the return is when the link resumed.
+            while len(c1.output) == size and time.monotonic() - t0 < 150:
+                c1.settle(0.5)
+            first = time.monotonic() - t0
             c1.expect('BH90', 150)
-            row('N13 black hole 60 s: session resumes on its own', True, f'{time.monotonic() - t0:.1f} s after the network returned')
+            row('N13 black hole 60 s: session resumes on its own', first < 150, f'first output {first:.1f} s after the network returned')
         except RuntimeError:
             row('N13 black hole 60 s: session resumes on its own', False, 'no output 150 s after the network returned')
             return
