@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
 const PolicySchemaV1 = "paperboat.availability-policy/v1"
@@ -104,20 +105,11 @@ func (r *Resolver) Resolve(ctx context.Context) (resolution Resolution, resultEr
 		}
 		return Resolution{}, controlFailure(statusErr)
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 16<<10))
-	decoder.DisallowUnknownFields()
 	var envelope struct {
 		Data Resolution `json:"data"`
 	}
-	var extra any
-	if err := decoder.Decode(&envelope); err != nil {
+	if err := wirejson.DecodeReader(io.LimitReader(response.Body, 16<<10), &envelope); err != nil {
 		return Resolution{}, controlFailure(errors.Join(ErrInvalid, err))
-	}
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err != nil {
-			return Resolution{}, controlFailure(errors.Join(ErrInvalid, err))
-		}
-		return Resolution{}, controlFailure(ErrInvalid)
 	}
 	if envelope.Data.Schema != PolicySchemaV1 || envelope.Data.UserMachineID == "" || !validMode(envelope.Data.Mode) || envelope.Data.Version < 0 {
 		return Resolution{}, controlFailure(ErrInvalid)

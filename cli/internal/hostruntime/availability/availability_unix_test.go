@@ -63,6 +63,35 @@ func TestResolverUsesExactProofAndStrictResponse(t *testing.T) {
 	}
 }
 
+// A server field added later must not break machines (AGENTS.md: clients ignore unknown response fields), while
+// the schema and required values are still checked.
+func TestResolverIgnoresUnknownResponseFields(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{name: "extra fields", body: `{"data":{"schema":"` + PolicySchemaV1 + `","machine_id":"um_1","mode":"keep_awake","version":3,"added_later":true},"added_top":1}`},
+		{name: "wrong schema", body: `{"data":{"schema":"other","machine_id":"um_1","mode":"keep_awake","version":3,"added_later":true}}`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client := server.Client()
+			client.Timeout = time.Second
+			resolver, err := NewResolver(server.URL+"/v1/helper-runtime-policies/resolve", tokenStub{}, &proofStub{}, func() (string, error) { return "operation", nil }, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := resolver.Resolve(context.Background())
+			if (err != nil) != test.wantErr || (err == nil && (result.Version != 3 || result.UserMachineID != "um_1")) {
+				t.Fatalf("resolution=%+v err=%v wantErr=%v", result, err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolverPreservesTypedSafeStatusAndDecodeCauses(t *testing.T) {
 	for _, test := range []struct {
 		name        string

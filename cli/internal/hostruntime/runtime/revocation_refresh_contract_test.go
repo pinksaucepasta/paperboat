@@ -110,3 +110,34 @@ func TestRevocationRefreshSendsLiveOperationsAndEndsRevoked(t *testing.T) {
 		t.Fatalf("idle host refresh = %v, requests %v", err, requests)
 	}
 }
+
+// The server may add fields to the revocation answer at any time (AGENTS.md: clients ignore unknown response
+// fields); the revoked IDs it lists are still read, and a malformed list is still refused.
+func TestRevocationRefreshIgnoresUnknownResponseFields(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		want       []string
+		wantErr    bool
+	}{
+		{name: "extra field", body: `{"jtis":["jti-a"],"added_later":{"x":1}}`, want: []string{"jti-a"}},
+		{name: "wrong type", body: `{"jtis":"jti-a","added_later":1}`, wantErr: true},
+		{name: "trailing document", body: `{"jtis":[]}{"jtis":[]}`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			service, err := newRevocationRefreshService(server.URL+"/v1/helper-trust/revocations", revocationTestAuth{}, revocationTestAuth{}, func() (string, error) {
+				return "operation_revocation_refresh", nil
+			}, auth.NewRevocationCache(), server.Client().Transport, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := service.fetch(context.Background(), nil)
+			if (err != nil) != test.wantErr || fmt.Sprint(got) != fmt.Sprint(test.want) {
+				t.Fatalf("jtis=%v err=%v, want %v wantErr=%v", got, err, test.want, test.wantErr)
+			}
+		})
+	}
+}

@@ -12,13 +12,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
 type revocationTokenSource interface {
@@ -101,13 +101,10 @@ func (s *revocationRefreshService) fetch(ctx context.Context, live []string) ([]
 	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 || len(encoded) > 1<<20 {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
-	decoder.DisallowUnknownFields()
 	var document struct {
 		JTIs []string `json:"jtis"`
 	}
-	var extra any
-	if decoder.Decode(&document) != nil || decoder.Decode(&extra) != io.EOF {
+	if wirejson.Decode(encoded, &document) != nil {
 		return nil, ErrProductionInvalid
 	}
 	return document.JTIs, nil
