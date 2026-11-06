@@ -16,7 +16,7 @@ import (
 // (~/ref/headscale/hscontrol/poll.go:172-200, "wait up to 10 seconds for the node to reconnect").
 const defaultRouteReconnectGrace = 10 * time.Second
 
-const routeReconnectInterval = 250 * time.Millisecond
+const routeReconnectInterval = 150 * time.Millisecond
 
 // activeHelperRoute is GetActiveHelperRouteForEnvironment for a request that issues a descriptor: a missing route of a
 // machine that reports online is waited for, up to the grace, before it is reported missing.

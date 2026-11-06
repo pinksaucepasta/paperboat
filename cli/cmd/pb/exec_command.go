@@ -413,12 +413,16 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	return finishExecResult(c.Writer, c.ErrWriter, request.OperationID, jsonOutput, sawTerminalEvent, code, err)
 }
 
-const execReattachAttempts = 20
+const execReattachAttempts = 40
 
-// execRecoveryBackoff grows by 100 ms per attempt up to 2 s; 20 attempts span
-// about 30 s.
+// execRecoveryBackoff polls every 150 ms for the first 20 attempts, the length of a network handover (the pause of a
+// call that reattaches is the sleep after the machine is back, so it stays short), then backs off by 100 ms per
+// attempt up to 2 s; 40 attempts span about 33 s.
 func execRecoveryBackoff(attempt int) time.Duration {
-	return min(time.Duration(attempt)*100*time.Millisecond, 2*time.Second)
+	if attempt <= 20 {
+		return 150 * time.Millisecond
+	}
+	return min(time.Duration(attempt-20)*100*time.Millisecond, 2*time.Second)
 }
 func retryableExecReattachment(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError

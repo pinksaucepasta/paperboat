@@ -91,3 +91,18 @@ func TestExecReattachmentRetriesMachineOffline(t *testing.T) {
 		t.Fatal("a missing machine was retried")
 	}
 }
+
+// The pause of a call that waits out a handover is the sleep after the machine is back: the first 3 s poll quickly.
+func TestExecRecoveryBackoffPollsQuicklyThenBacksOff(t *testing.T) {
+	for attempt := 1; attempt <= 20; attempt++ {
+		if got := execRecoveryBackoff(attempt); got != 150*time.Millisecond {
+			t.Fatalf("attempt %d waits %v", attempt, got)
+		}
+	}
+	if execRecoveryBackoff(21) != 100*time.Millisecond || execRecoveryBackoff(40) != 2*time.Second {
+		t.Fatalf("backoff after the handover window: %v %v", execRecoveryBackoff(21), execRecoveryBackoff(40))
+	}
+	if machineBlipInterval > 150*time.Millisecond {
+		t.Fatalf("handover polling interval %v", machineBlipInterval)
+	}
+}

@@ -14,7 +14,7 @@ import (
 // other error returns at once, and a machine that stays offline reports it when the grace ends.
 var machineBlipGrace = 15 * time.Second
 
-var machineBlipInterval = 500 * time.Millisecond
+var machineBlipInterval = 150 * time.Millisecond
 
 func machineOfflineError(err error) bool {
 	var remote *api.APIError
