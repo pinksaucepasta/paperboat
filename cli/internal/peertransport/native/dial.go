@@ -29,7 +29,11 @@ func retryablePeerDial(err error) bool {
 func (o *Owner) failedPeerDial(ctx context.Context, peerID string, client *tailnet.UDPClient, err error) error {
 	failure := o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 	if ctx.Err() == nil && retryablePeerDial(failure) && !o.keepingRelayPath(peerID) {
-		o.authority.RetireIdleClient(client)
+		if !o.authority.RetireIdleClient(client) {
+			// Other flows still own the client, so its stale WireGuard state cannot be dropped with it. Start a fresh
+			// initiation for the next attempt: WireGuard repeats an unanswered one only after its 5 s RekeyTimeout.
+			o.authority.ResetPeerPath(client)
+		}
 	}
 	return failure
 }
