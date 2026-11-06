@@ -18,6 +18,10 @@ type peerHandshake struct {
 	users int
 }
 
+// restartQuickWindow bounds how long dials to a restarted peer keep the short handshake wait after its first
+// handshake was lost. A path slower than the short wait would otherwise never complete.
+const restartQuickWindow = 3 * time.Second
+
 // Pending QUIC handshakes must not keep each other's stale WireGuard lease
 // alive. Serialize setup per peer; admitted sessions and other peers stay free.
 func (o *Owner) dialAttempt(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {

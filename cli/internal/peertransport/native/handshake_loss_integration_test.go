@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -146,7 +147,7 @@ func testNativeLostHandshake(t *testing.T, live, restart bool) {
 	}
 }
 
-func listenWithLostHandshake(t *testing.T, parent context.Context, receiver *tailnet.Authority, region *tailcfg.DERPRegion, serverTLS *tls.Config, lost int32) (mesh.Addr, *atomic.Int32, <-chan error, func()) {
+func listenWithLostHandshake(t *testing.T, parent context.Context, receiver *tailnet.Authority, region *tailcfg.DERPRegion, serverTLS *tls.Config, lost ...int32) (mesh.Addr, *atomic.Int32, <-chan error, func()) {
 	t.Helper()
 	server, err := receiver.Listen(region)
 	if err != nil {
@@ -182,7 +183,7 @@ func listenWithLostHandshake(t *testing.T, parent context.Context, receiver *tai
 				defer stop()
 				// Lose only the next association's datagrams. The already admitted
 				// association and all later UDP flows continue using the real peer engine.
-				if ordinal == lost {
+				if slices.Contains(lost, ordinal) {
 					buffer := make([]byte, 2048)
 					for {
 						if _, _, err := socket.ReadFrom(buffer); err != nil {

@@ -218,6 +218,7 @@ type Owner struct {
 	sessions         map[*Session]struct{}
 	handshakes       map[string]*peerHandshake
 	restarted        map[string]bool      // peers that closed a dialed session on purpose; guarded by mu
+	restartQuick     map[string]time.Time // peers whose restart-time handshake was lost, until; guarded by mu
 	relayPaths       map[string]time.Time // peer relay paths found by a failed handshake, kept until; guarded by mu
 	workers          sync.WaitGroup
 }
@@ -319,13 +320,28 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path_category", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	sessionConfig := peerquic.DevelopmentSessionConfig(class)
-	if restarted {
+	o.mu.Lock()
+	quick := restarted || time.Now().Before(o.restartQuick[peerID])
+	o.mu.Unlock()
+	if quick {
 		sessionConfig.HandshakeTimeout = peerRestartHandshake
 	}
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, sessionConfig)
 	handshakeEnd(err)
 	pathAfter, _ := o.authority.PeerPath(peerID)
 	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path_category", pathAfter, "failed", err != nil)
+	o.mu.Lock()
+	switch {
+	case err == nil:
+		delete(o.restartQuick, peerID)
+	case restarted:
+		// The dials queued behind this one, and its own retry, need not wait a full second each.
+		if o.restartQuick == nil {
+			o.restartQuick = make(map[string]time.Time)
+		}
+		o.restartQuick[peerID] = time.Now().Add(restartQuickWindow)
+	}
+	o.mu.Unlock()
 	if err != nil {
 		if pathAfter == "peer_relay" && pathBefore != pathAfter {
 			o.keepRelayPath(peerID, started)
