@@ -55,6 +55,13 @@ func retryableInitialConnectFailure(err error) (retryable bool) {
 		if dns, ok := current.(*net.DNSError); ok {
 			return dns.IsTimeout || dns.IsTemporary
 		}
+		// launchd removes the daemon's socket file while it restarts (pb update): a dial that finds no socket is the same
+		// transient state as a refused one. A missing file anywhere else stays an error.
+		if op, ok := current.(*net.OpError); ok && op.Op == "dial" {
+			if call, ok := op.Err.(*os.SyscallError); ok && call.Err == syscall.ENOENT {
+				return true
+			}
+		}
 		switch current {
 		case context.Canceled, context.DeadlineExceeded:
 			return false

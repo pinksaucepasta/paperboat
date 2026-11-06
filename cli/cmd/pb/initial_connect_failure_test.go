@@ -40,6 +40,8 @@ func TestInitialConnectFailureProof(t *testing.T) {
 		retry bool
 	}{
 		{"ready API", fmt.Errorf("wrapper: %w", apiReady), true},
+		{"daemon socket missing while it restarts", errors.Join(localapi.ErrTransportUnavailable, &net.OpError{Op: "dial", Net: "unix", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ENOENT}}), true},
+		{"missing file that is not a dial", errors.Join(localapi.ErrTransportUnavailable, &os.PathError{Op: "open", Path: "x", Err: syscall.ENOENT}), false},
 		{"tunnel API", &api.APIError{Status: 503, Code: "tunnel_unavailable"}, true},
 		{"typed native transport response", fmt.Errorf("wrapper: %w", &localapi.RemoteError{StatusCode: 503, Code: "peer_transport_unavailable"}), true},
 		{"terminal service unavailable", &localapi.RemoteError{StatusCode: 503, Code: "terminal_service_unavailable"}, true},
