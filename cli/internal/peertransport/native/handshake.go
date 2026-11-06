@@ -18,8 +18,8 @@ type peerHandshake struct {
 	users int
 }
 
-// restartQuickWindow bounds how long dials to a restarted peer keep the short handshake wait after its first
-// handshake was lost. A path slower than the short wait would otherwise never complete.
+// restartQuickWindow bounds how long dials to a restarted peer keep the short handshake wait after its restart mark was
+// consumed. A path slower than the short wait would otherwise never complete.
 const restartQuickWindow = 3 * time.Second
 
 // Pending QUIC handshakes must not keep each other's stale WireGuard lease
@@ -91,24 +91,45 @@ func (o *Owner) watchPeerClose(s *Session) {
 	}
 }
 
-// peerRestartHandshake is the handshake timeout of the first dial after a peer's clean close: the restarted peer may not be
-// answering yet, and the dial that follows a lost first flight completes in milliseconds (pbvm4: 1.0 s lost, then 28 ms).
+// peerRestartHandshake is the floor of the handshake timeout of dials to a peer that just closed cleanly: the restarted
+// peer may not be answering yet, and the dial that follows a lost first flight completes in milliseconds (pbvm4: 1.0 s
+// lost, then 28 ms). The wait grows with the peer's own measured handshake (restartHandshake): a fixed 300 ms can never
+// complete on a relay or long-haul path.
 // Prior art for a fixed short reconnect cadence: EternalTerminal retries every second (~/ref/EternalTerminal/src/base/
 // ClientConnection.cpp:276); Tailscale's defaults (heartbeat 3 s, ping timeout 5 s, ~/ref/tailscale/wgengine/magicsock/
 // magicsock.go:4082-4110) are slower, which is why only a dial that knows the peer just restarted shortens its wait.
 const peerRestartHandshake = 300 * time.Millisecond
 
-func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, bool, error) {
+// restartHandshake is the handshake timeout for dials to a restarted peer whose last handshake took `took`: three times
+// that, so a lost first flight and its retransmit still fit, never below peerRestartHandshake. A path that needs a third
+// of the normal second or more gets the normal timeout (0), as a short cap would only make every dial fail.
+func restartHandshake(took time.Duration) time.Duration {
+	wait := max(peerRestartHandshake, 3*took)
+	if wait >= time.Second {
+		return 0
+	}
+	return wait
+}
+
+// freshClientAfterPeerClose consumes the peer's restart mark on whichever dial comes first (the WireGuard state it
+// retires or resets belongs to the peer, not to the dial) and opens the restart window: every dial to the peer, of any
+// class, uses the short handshake wait until one succeeds or restartQuickWindow ends.
+func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, error) {
 	o.mu.Lock()
 	closed := o.restarted[peerID]
 	delete(o.restarted, peerID)
+	if closed {
+		if o.restartQuick == nil {
+			o.restartQuick = make(map[string]time.Time)
+		}
+		o.restartQuick[peerID] = time.Now().Add(restartQuickWindow)
+	}
 	o.mu.Unlock()
 	if !closed {
-		return client, false, nil
+		return client, nil
 	}
 	if o.authority.RetireIdleClient(client) {
-		fresh, err := o.authority.Client(descriptor, peerID)
-		return fresh, true, err
+		return o.authority.Client(descriptor, peerID)
 	}
 	// Other sessions to the peer still own the client (an exec loop's, not released yet), so it cannot be retired, but
 	// the peer restarted and took its WireGuard keys with it: data on the old keys is dropped until WireGuard's own 15 s
@@ -117,5 +138,5 @@ func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, c
 	// alive does not mean the peer did not restart: the same restart closed it, and its close is a few milliseconds
 	// behind (pbvm4: 2 of 5 updates paused 16 s when this was skipped).
 	o.authority.ResetPeerPath(client)
-	return client, true, nil
+	return client, nil
 }
