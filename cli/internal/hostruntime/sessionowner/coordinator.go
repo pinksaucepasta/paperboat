@@ -260,9 +260,13 @@ func (c Catalog) staging(d, active Descriptor) bool {
 	if err != nil || time.Since(info.ModTime()) >= stagingWindow {
 		return false
 	}
-	// Only a generation published after the active one is a candidate. The generation an update
-	// replaced was published before it, so it retires when its last session closes, not
-	// stagingWindow after its own install (F14-04).
+	// A candidate runs other code than the active generation and was published after it. The
+	// generation an update replaced was published before it, and once republished as an archive
+	// reader it carries the active code (recordRetired, Ensure), so neither waits out
+	// stagingWindow: it retires when its last session closes (F14-04).
+	if d.Source.SHA256 == active.Source.SHA256 {
+		return false
+	}
 	activePath, err := Find(c.Root, active.Generation)
 	if err != nil {
 		return true
