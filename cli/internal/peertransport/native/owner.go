@@ -217,10 +217,8 @@ type Owner struct {
 	closed           bool
 	sessions         map[*Session]struct{}
 	handshakes       map[string]*peerHandshake
-	restarted        map[string]bool          // peers that closed a dialed session on purpose; guarded by mu
-	restartQuick     map[string]time.Time     // peers whose clean close was just consumed: short handshake wait until; guarded by mu
-	handshakeTook    map[string]time.Duration // each peer's last successful handshake; guarded by mu
-	relayPaths       map[string]time.Time     // peer relay paths found by a failed handshake, kept until; guarded by mu
+	restart          restartTracker       // clean closes of peers, the short handshake waits they open, measured handshakes; guarded by mu
+	relayPaths       map[string]time.Time // peer relay paths found by a failed handshake, kept until; guarded by mu
 	workers          sync.WaitGroup
 }
 
@@ -326,15 +324,13 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	handshakeEnd(err)
 	pathAfter, _ := o.authority.PeerPath(peerID)
 	diagnosticlog.TryInfo("native handshake path", "stage", "end", "path_category", pathAfter, "failed", err != nil)
+	o.mu.Lock()
 	if err == nil {
-		o.mu.Lock()
-		delete(o.restartQuick, peerID)
-		if o.handshakeTook == nil {
-			o.handshakeTook = make(map[string]time.Duration)
-		}
-		o.handshakeTook[peerID] = time.Since(started)
-		o.mu.Unlock()
+		o.restart.succeeded(peerID, time.Since(started), time.Now())
+	} else {
+		o.restart.failed(peerID, time.Now())
 	}
+	o.mu.Unlock()
 	if err != nil {
 		if pathAfter == "peer_relay" && pathBefore != pathAfter {
 			o.keepRelayPath(peerID, started)

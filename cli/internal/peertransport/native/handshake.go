@@ -18,10 +18,6 @@ type peerHandshake struct {
 	users int
 }
 
-// restartQuickWindow bounds how long dials to a restarted peer keep the short handshake wait after its restart mark was
-// consumed. A path slower than the short wait would otherwise never complete.
-const restartQuickWindow = 3 * time.Second
-
 // Pending QUIC handshakes must not keep each other's stale WireGuard lease
 // alive. Serialize setup per peer; admitted sessions and other peers stay free.
 func (o *Owner) dialAttempt(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
@@ -83,10 +79,7 @@ func (o *Owner) watchPeerClose(s *Session) {
 	var closed *quic.ApplicationError
 	if !s.closing.Load() && errors.As(context.Cause(s.quic.Connection.Context()), &closed) && closed.Remote && closed.ErrorCode == 0 {
 		o.mu.Lock()
-		if o.restarted == nil {
-			o.restarted = make(map[string]bool)
-		}
-		o.restarted[s.peerID] = true
+		o.restart.markClosed(s.peerID, time.Now())
 		o.mu.Unlock()
 	}
 }
@@ -119,25 +112,15 @@ func (o *Owner) handshakeWait(peerID string) time.Duration {
 	local := o.authority.PeerIsLocal(peerID)
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if !local && !time.Now().Before(o.restartQuick[peerID]) {
-		return 0
-	}
-	return restartHandshake(o.handshakeTook[peerID])
+	return o.restart.wait(peerID, local, time.Now())
 }
 
 // freshClientAfterPeerClose consumes the peer's restart mark on whichever dial comes first (the WireGuard state it
 // retires or resets belongs to the peer, not to the dial) and opens the restart window: every dial to the peer, of any
-// class, uses the short handshake wait until one succeeds or restartQuickWindow ends.
+// class, uses the short handshake wait until one succeeds (restartTracker.wait).
 func (o *Owner) freshClientAfterPeerClose(descriptor mesh.Addr, peerID string, client *tailnet.UDPClient) (*tailnet.UDPClient, error) {
 	o.mu.Lock()
-	closed := o.restarted[peerID]
-	delete(o.restarted, peerID)
-	if closed {
-		if o.restartQuick == nil {
-			o.restartQuick = make(map[string]time.Time)
-		}
-		o.restartQuick[peerID] = time.Now().Add(restartQuickWindow)
-	}
+	closed := o.restart.consume(peerID, time.Now())
 	o.mu.Unlock()
 	if !closed {
 		return client, nil
