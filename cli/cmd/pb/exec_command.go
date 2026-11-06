@@ -415,10 +415,14 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 
 const execReattachAttempts = 40
 
-// execRecoveryBackoff polls every 150 ms for the first 20 attempts, the length of a network handover (the pause of a
-// call that reattaches is the sleep after the machine is back, so it stays short), then backs off by 100 ms per
-// attempt up to 2 s; 40 attempts span about 33 s.
+// execRecoveryBackoff tries at once, then polls every 150 ms for the first 20 attempts, the length of a network handover
+// (the pause of a call that reattaches is the sleep after the machine is back, so it stays short), then backs off by
+// 100 ms per attempt up to 2 s; 40 attempts span about 33 s. A successor that is already up costs no sleep, like
+// EternalTerminal, which dials on loss and sleeps only after a failed attempt (ClientConnection.cpp:210).
 func execRecoveryBackoff(attempt int) time.Duration {
+	if attempt == 1 {
+		return 0
+	}
 	if attempt <= 20 {
 		return 150 * time.Millisecond
 	}

@@ -94,7 +94,10 @@ func TestExecReattachmentRetriesMachineOffline(t *testing.T) {
 
 // The pause of a call that waits out a handover is the sleep after the machine is back: the first 3 s poll quickly.
 func TestExecRecoveryBackoffPollsQuicklyThenBacksOff(t *testing.T) {
-	for attempt := 1; attempt <= 20; attempt++ {
+	if execRecoveryBackoff(1) != 0 {
+		t.Fatalf("the first reattach attempt waits %v", execRecoveryBackoff(1))
+	}
+	for attempt := 2; attempt <= 20; attempt++ {
 		if got := execRecoveryBackoff(attempt); got != 150*time.Millisecond {
 			t.Fatalf("attempt %d waits %v", attempt, got)
 		}
