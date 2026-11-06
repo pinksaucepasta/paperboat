@@ -1074,6 +1074,11 @@ func edgeRejectionFaultCode(status int) string {
 }
 
 func captureEdgeFailure(r *http.Request, status int, code string, cause error) {
+	// An edge that hung up (a replaced edge process cancels its in-flight calls as it exits) met no
+	// server failure: no report, no error log, as captureSupportFailure does for other handlers.
+	if errors.Is(r.Context().Err(), context.Canceled) {
+		return
+	}
 	ctx := r.Context()
 	ctx = supportreport.WithFailureIdentity(ctx, "", serverdiagnostics.RequestID(ctx))
 	supportreport.CaptureFromContext(ctx, "paperboat-server", "http_edge", "http_handler", code, supportreport.WithDiagnosticStatus(status, cause))

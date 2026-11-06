@@ -250,7 +250,10 @@ func serviceError(w http.ResponseWriter, r *http.Request, err error) {
 		if r.URL.Path == runtimewire.EdgePullPath || r.URL.Path == runtimewire.EdgeObservePath || r.URL.Path == runtimewire.EdgeEndpointPullPath {
 			operation = "http_edge"
 		}
-		supportreport.CaptureFromContext(r.Context(), "paperboat-server", operation, "service_error", "carrier_unavailable", statusErr)
+		// A caller that hung up (a replaced edge cancels its in-flight calls as it exits) met no outage.
+		if !errors.Is(r.Context().Err(), context.Canceled) {
+			supportreport.CaptureFromContext(r.Context(), "paperboat-server", operation, "service_error", "carrier_unavailable", statusErr)
+		}
 		writeError(w, 503, "runtime_carrier_unavailable")
 	}
 }
