@@ -212,14 +212,31 @@ func (s *Session) Accept(ctx context.Context) (net.Conn, error) {
 // OpenAuthorized sends the canonical operation credential before exposing the
 // stream. Network admission and application authorization remain independent.
 func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, accessSessionID, capability string) (net.Conn, error) {
-	if !s.owner.authority.Allows(s.peerID, accessSessionID, capability, "dial") {
-		return nil, tailnet.ErrAdmission
+	resource := accessSessionID
+	if !s.owner.authority.Allows(s.peerID, resource, capability, "dial") {
+		// A terminal resume carries no credential of its own. When its access session has left the signed scope
+		// (an old session, a refreshed configuration) the host's standing rule for this peer admits it, as the host
+		// does on its side (standingResource); only a withdrawn rule refuses it here.
+		resource = s.dialStandingResource(header, capability)
+		if resource == "" {
+			return nil, tailnet.ErrAdmission
+		}
 	}
 	encoded, err := header.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-	return s.openAdmitted(ctx, header, encoded, accessSessionID, capability)
+	return s.openAdmitted(ctx, header, encoded, resource, capability)
+}
+
+// dialStandingResource is the host machine's id when its signed rules let this peer dial capability there, for a
+// resume stream only; empty otherwise.
+func (s *Session) dialStandingResource(header streamauth.Header, capability string) string {
+	machineID := s.binding.MachineID
+	if header.Resume == "" || capability != "terminal" || machineID == "" || !s.owner.authority.Allows(s.peerID, machineID, capability, "dial") {
+		return ""
+	}
+	return machineID
 }
 
 // AcceptAuthorized validates the operation credential first, then requires
