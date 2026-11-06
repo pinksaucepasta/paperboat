@@ -203,3 +203,18 @@ func TestSuppliedUpdateRidesOutTheNewDaemonsFirstTimedOutStep(t *testing.T) {
 		t.Fatalf("daemon whose first step attempt timed out and then recovered: %v", err)
 	}
 }
+
+// An offline bundle's version is known only after the helper verified it. A validator built without it waited
+// the whole ready timeout for a daemon that "reports" no version and then rolled back a good update (F14-08):
+// it fails at once instead.
+func TestSuppliedValidationWithoutATargetVersionFailsAtOnce(t *testing.T) {
+	previous := suppliedUpdateReadyTimeout
+	suppliedUpdateReadyTimeout = 5 * time.Second
+	t.Cleanup(func() { suppliedUpdateReadyTimeout = previous })
+	p := &scriptedParticipants{probes: []updated.UnixParticipantProbe{{Running: true, Version: "2", UpdaterVersion: "2", State: "ready", Machines: 1}}}
+	started := time.Now()
+	err := awaitDaemon(t.Context(), p, "", updated.UnixParticipantProbe{Running: true, Version: "1", State: "ready", Machines: 1})
+	if err == nil || !strings.Contains(err.Error(), "version being installed is unknown") || time.Since(started) > time.Second {
+		t.Fatalf("an empty target version must fail at once: %v after %v", err, time.Since(started))
+	}
+}

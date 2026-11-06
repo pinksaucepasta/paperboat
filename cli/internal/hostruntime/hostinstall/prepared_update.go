@@ -17,4 +17,16 @@ type PreparedUpdateHooks struct {
 	Prepare          func(context.Context) error
 	Validate         func(context.Context) error
 	AuthorizeRestore func(context.Context, installsource.Source, string) error
+	// Bind builds Stage and Validate from the request the installation really runs with. A supplied
+	// offline bundle has no source until the privileged helper has verified it, so the caller cannot know
+	// the target version when it builds the hooks.
+	Bind func(Request) (stage, validate func(context.Context) error)
+}
+
+// bound returns the hooks with Stage and Validate built for the resolved request.
+func (h PreparedUpdateHooks) bound(request Request) PreparedUpdateHooks {
+	if h.Bind != nil {
+		h.Stage, h.Validate = h.Bind(request)
+	}
+	return h
 }

@@ -87,11 +87,17 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return err
 	}
 	if args[0] == "install-supplied" || args[0] == "commit-supplied" || args[0] == "rollback-supplied" {
-		var stage, validate, recover func(context.Context) error
+		var recover func(context.Context) error
+		hooks := hostinstall.PreparedUpdateHooks{}
 		if args[0] == "install-supplied" {
-			stage, validate, recover = suppliedUpdateValidator(ctx, request)
+			// Bound to the request the installation runs with: an offline bundle's version is known only
+			// once the helper has verified the bundle.
+			hooks.Bind = func(resolved hostinstall.Request) (stage, validate func(context.Context) error) {
+				stage, validate, recover = suppliedUpdateValidator(ctx, resolved)
+				return stage, validate
+			}
 		}
-		err := hostinstall.SuppliedBinary(ctx, request, args[0], hostinstall.PreparedUpdateHooks{Stage: stage, Validate: validate})
+		err := hostinstall.SuppliedBinary(ctx, request, args[0], hooks)
 		if err != nil && recover != nil {
 			err = errors.Join(err, recover(context.WithoutCancel(ctx)))
 		}

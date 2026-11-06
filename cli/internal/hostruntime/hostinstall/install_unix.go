@@ -37,6 +37,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		return err
 	}
 	paths := platformPaths(request.UID)
+	hooks = hooks.bound(request)
 	// hostd owns the runtime control plane; the root host service applies only the power policy.
 	legacyHost, err := hostInstallerWithMissing(request, paths, true)
 	if err != nil {

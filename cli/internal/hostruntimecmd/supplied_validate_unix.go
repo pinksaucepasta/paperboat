@@ -76,6 +76,10 @@ func degradedSteps(codes []string) string {
 }
 
 func awaitDaemon(ctx context.Context, participants updated.UnixParticipants, version string, baseline updated.UnixParticipantProbe) error {
+	if version == "" {
+		// Waiting for a daemon to report no version can only time out and roll back a good update.
+		return errors.New("the version being installed is unknown, so the new daemon cannot be validated")
+	}
 	readyCtx, cancel := context.WithTimeout(ctx, suppliedUpdateReadyTimeout)
 	defer cancel()
 	requireInventory := baseline.Machines > 0 || baseline.State == "ready"
