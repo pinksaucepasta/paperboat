@@ -21,11 +21,12 @@ PB = Path.home() / '.local/bin/pb'
 
 
 def owners():
-    out = subprocess.run(['pgrep', '-af', '__runtime-session-owner'], capture_output=True, text=True).stdout
+    # ps, not pgrep -af: macOS pgrep prints no arguments with -a
+    out = subprocess.run(['ps', '-axo', 'pid=,args='], capture_output=True, text=True).stdout
     found = {}
     for line in out.splitlines():
         parts = line.split()
-        if '--generation' in parts:
+        if '__runtime-session-owner' in parts and '--generation' in parts:
             found.setdefault(parts[parts.index('--generation') + 1], []).append(parts[0])
     return found
 

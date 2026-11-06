@@ -1185,6 +1185,14 @@ class UpdateSurvivalMarkers(unittest.TestCase):
         self.assertEqual(len(typed), 2)
         for line in typed:
             self.assertNotRegex(line, r"PB_[A-Z]+_%s")
+    def test_owners_reads_session_owner_generations_from_ps_output(self):
+        import update_continuity
+        listing = ("  101 /sbin/launchd\n"
+                   "  202 /p/pins/aa/pb daemon __runtime-session-owner --generation g1\n"
+                   "  203 /p/pins/bb/pb daemon __runtime-session-owner --generation g2\n"
+                   "  204 /p/pins/bb/pb daemon __runtime-carrier --generation g2\n")
+        with patch('update_continuity.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=listing)):
+            self.assertEqual(update_continuity.owners(), {'g1': ['202'], 'g2': ['203']})
 
 if __name__ == '__main__':
     unittest.main()
