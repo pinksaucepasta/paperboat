@@ -250,6 +250,8 @@ type Policy struct {
 	TerminalCreateMaxAttempts int
 	// TerminalOperationMaxAge ends a close or delete_history still pending this long after it was queued (0: never).
 	TerminalOperationMaxAge time.Duration
+	// RouteReconnectGrace bounds the wait for a machine's runtime route during a descriptor request (0: the default).
+	RouteReconnectGrace time.Duration
 }
 type Service struct {
 	inventoryFlights            inventoryFlights

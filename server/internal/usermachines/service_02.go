@@ -801,7 +801,12 @@ func (s *Service) ExecDescriptor(ctx context.Context, userID, sourceMachineID, u
 	if row.State != "online" || row.SeatState != "occupied" || !row.Online || !slices.Contains(row.ObservedCapabilities, incoming) || !slices.Contains(row.ConfiguredCapabilities, incoming) {
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable
 	}
-	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, row.EnvironmentID)
+	// A client that can do without the edge route (nativeOnly) must not wait for it.
+	routeLookup := s.db.Queries().GetActiveHelperRouteForEnvironment
+	if !nativeOnly {
+		routeLookup = s.activeHelperRoute
+	}
+	route, err := routeLookup(ctx, row.EnvironmentID)
 	edge := err == nil
 	if errors.Is(err, sql.ErrNoRows) && !nativeOnly {
 		return ExecDescriptor{}, ErrMachineCapabilityUnavailable

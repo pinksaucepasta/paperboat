@@ -116,7 +116,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if routeMachine.State == "revoked" || routeMachine.State == "disconnected" || routeMachine.State == "deleted" || sessionID != "" && !slices.Contains(routeMachine.ObservedCapabilities, "terminal_host") {
 		return FileTransferDescriptor{}, ErrProvisioningUnavailable
 	}
-	route, err := s.db.Queries().GetActiveHelperRouteForEnvironment(ctx, routeMachine.EnvironmentID)
+	route, err := s.activeHelperRoute(ctx, routeMachine.EnvironmentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return FileTransferDescriptor{}, ErrProvisioningUnavailable
 	}
