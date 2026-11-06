@@ -38,7 +38,10 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 			}
 			return bindErr
 		}
-		duplicateInput := frame.Sequence == binding.inputSequence
+		// An exec's frame Sequence is its stdin byte offset + 1: a sender that reattaches resends from its journal and
+		// the execution drops what it already received, so no contiguity check applies.
+		execInput := binding.kind == "exec"
+		duplicateInput := frame.Sequence == binding.inputSequence && !execInput
 		if duplicateInput {
 			if binding.kind == "exec" || binding.kind == "ssh" {
 				return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("stream input sequence is not contiguous")}
@@ -47,7 +50,7 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 				return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("terminal input sequence is not contiguous")}
 			}
 		}
-		if frame.Sequence != binding.inputSequence+1 && !duplicateInput {
+		if frame.Sequence != binding.inputSequence+1 && !duplicateInput && !execInput {
 			return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("terminal input sequence is not contiguous")}
 		}
 		if err := validateTerminalBinding(binding); err != nil {
@@ -59,7 +62,10 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 			if !ok {
 				return ErrCapabilityUnavailable
 			}
-			if err := handler.HandleExecInput(ctx, binding.authorization, binding.operationID, frame.Data); err != nil {
+			if frame.Sequence == 0 {
+				return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("exec input offset is missing")}
+			}
+			if err := handler.HandleExecInput(ctx, binding.authorization, binding.operationID, frame.Sequence-1, frame.Data); err != nil {
 				return err
 			}
 		} else if binding.kind == "ssh" {
@@ -128,7 +134,7 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 			}
 			return bindErr
 		}
-		if frame.Sequence != binding.inputSequence+1 || binding.kind != "ssh" && binding.kind != "exec" {
+		if binding.kind != "ssh" && binding.kind != "exec" || binding.kind == "ssh" && frame.Sequence != binding.inputSequence+1 || binding.kind == "exec" && frame.Sequence == 0 {
 			return &protocol.Error{Code: protocol.InvalidFrame, Cause: errors.New("input EOF sequence is not contiguous")}
 		}
 		if err := validateTerminalBinding(binding); err != nil {
@@ -139,7 +145,7 @@ func (s *Server) handleTerminalDataWithWriter(ctx context.Context, message []byt
 			if !ok {
 				return ErrCapabilityUnavailable
 			}
-			if err := handler.HandleExecEOF(ctx, binding.authorization, binding.operationID); err != nil {
+			if err := handler.HandleExecEOF(ctx, binding.authorization, binding.operationID, frame.Sequence-1); err != nil {
 				return err
 			}
 		} else {

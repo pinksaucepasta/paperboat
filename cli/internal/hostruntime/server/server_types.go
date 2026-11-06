@@ -178,8 +178,8 @@ type legacyTerminalInputHandler interface {
 }
 
 type ExecDataHandler interface {
-	HandleExecInput(context.Context, Authorization, string, []byte) error
-	HandleExecEOF(context.Context, Authorization, string) error
+	HandleExecInput(context.Context, Authorization, string, uint64, []byte) error
+	HandleExecEOF(context.Context, Authorization, string, uint64) error
 	HandleExecResize(context.Context, Authorization, string, uint16, uint16) error
 }
 

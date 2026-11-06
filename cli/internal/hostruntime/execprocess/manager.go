@@ -24,6 +24,9 @@ var (
 	ErrCapacity          = errors.New("exec capacity reached")
 	ErrNotFound          = errors.New("exec operation not found")
 	ErrReplayUnavailable = errors.New("exec event replay unavailable")
+	// ErrInputGap: a stdin chunk starts after the bytes the execution has received, so a sender that lost bytes in a
+	// cut connection resent from too late. The execution is not given input out of order.
+	ErrInputGap          = errors.New("exec stdin resent from a later offset than the execution received")
 	ErrUpdateInProgress  = errors.New("exec admission is fenced for update")
 	ErrUpdateUnavailable = errors.New("exec update admission unavailable")
 )
@@ -111,6 +114,12 @@ type Execution struct {
 	manager           *Manager
 	request           Request
 	hash              [sha256.Size]byte
+
+	// inputMu orders stdin and counts the bytes the process has received: a sender that reattaches after a cut
+	// connection resends from its journal and the prefix already received is dropped (WriteAt).
+	inputMu     sync.Mutex
+	inputBytes  uint64
+	inputClosed bool
 
 	mu              sync.Mutex
 	state           State
@@ -456,7 +465,62 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 func (e *Execution) Write(data []byte) (int, error) {
 	return e.WriteContext(context.Background(), data)
 }
+
+// WriteAt gives the process the part of data at and after the bytes it already received: data starts at
+// stdin byte offset. A chunk entirely received before is a no-op; one that starts later than the received count is
+// ErrInputGap.
+func (e *Execution) WriteAt(ctx context.Context, offset uint64, data []byte) error {
+	e.inputMu.Lock()
+	defer e.inputMu.Unlock()
+	if offset > e.inputBytes {
+		return ErrInputGap
+	}
+	skip := e.inputBytes - offset
+	if skip >= uint64(len(data)) {
+		return nil
+	}
+	_, err := e.writeLocked(ctx, data[skip:])
+	return err
+}
+
+// CloseInputAt closes stdin once all bytes before offset were received; closing again is a no-op.
+func (e *Execution) CloseInputAt(offset uint64) error {
+	e.inputMu.Lock()
+	defer e.inputMu.Unlock()
+	if offset > e.inputBytes {
+		return ErrInputGap
+	}
+	return e.closeInputLocked()
+}
+
+func (e *Execution) closeInputLocked() error {
+	if e.inputClosed {
+		return nil
+	}
+	e.mu.Lock()
+	process := e.process
+	e.mu.Unlock()
+	if process == nil {
+		return ErrInvalid
+	}
+	if err := process.CloseInput(); err != nil {
+		return err
+	}
+	e.inputClosed = true
+	return nil
+}
+
 func (e *Execution) WriteContext(ctx context.Context, data []byte) (int, error) {
+	e.inputMu.Lock()
+	defer e.inputMu.Unlock()
+	return e.writeLocked(ctx, data)
+}
+func (e *Execution) writeLocked(ctx context.Context, data []byte) (int, error) {
+	n, err := e.writeProcess(ctx, data)
+	e.inputBytes += uint64(max(n, 0))
+	return n, err
+}
+func (e *Execution) writeProcess(ctx context.Context, data []byte) (int, error) {
 	e.mu.Lock()
 	process := e.process
 	e.mu.Unlock()
@@ -471,13 +535,9 @@ func (e *Execution) WriteContext(ctx context.Context, data []byte) (int, error) 
 	return process.Write(data)
 }
 func (e *Execution) CloseInput() error {
-	e.mu.Lock()
-	process := e.process
-	e.mu.Unlock()
-	if process == nil {
-		return ErrInvalid
-	}
-	return process.CloseInput()
+	e.inputMu.Lock()
+	defer e.inputMu.Unlock()
+	return e.closeInputLocked()
 }
 func (e *Execution) Signal(signal pty.Signal) error {
 	e.mu.Lock()

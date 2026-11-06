@@ -24,6 +24,9 @@ type ExecRequest struct {
 	Columns      uint16
 	Rows         uint16
 	FromSequence uint64
+	// InputOffset is the stdin byte offset of the first byte this connection will write: a reattaching sender resends
+	// its journal from there and the execution drops what it already received.
+	InputOffset uint64
 }
 
 type ExecResult struct {
@@ -79,7 +82,7 @@ type helperExecConn struct {
 	events             chan ExecEvent
 	done               chan struct{}
 	readLoopDone       chan struct{}
-	inputSeq           atomic.Uint64
+	inputOffset        atomic.Uint64 // stdin bytes written on this connection, on top of request.InputOffset
 	resizeSeq          atomic.Uint64
 	writeMu            sync.Mutex
 	pendingMu          sync.Mutex
@@ -383,8 +386,12 @@ func (c *helperExecConn) Write(p []byte) (int, error) {
 		binary.BigEndian.PutUint32(message[1:5], c.streamID)
 		copy(message[13:], p[:size])
 		c.writeMu.Lock()
-		binary.BigEndian.PutUint64(message[5:13], c.inputSeq.Add(1))
+		// The frame sequence is the stdin byte offset of the chunk + 1 (the host drops what it already received).
+		binary.BigEndian.PutUint64(message[5:13], c.request.InputOffset+c.inputOffset.Load()+1)
 		err := c.message.WriteMessage(context.Background(), helperBinaryMessage, message)
+		if err == nil {
+			c.inputOffset.Add(uint64(size))
+		}
 		c.writeMu.Unlock()
 		if err != nil {
 			return written, err
@@ -403,7 +410,7 @@ func (c *helperExecConn) CloseWrite() error {
 	// EOF belongs to the ordered input stream. An independent control request
 	// can arrive before buffered stdin on another QUIC stream.
 	frame, err := protocol.EncodeTerminalEOF(protocol.TerminalEOFFrame{
-		StreamID: c.streamID, Sequence: c.inputSeq.Add(1),
+		StreamID: c.streamID, Sequence: c.request.InputOffset + c.inputOffset.Load() + 1,
 	}, nil)
 	if err != nil {
 		return err

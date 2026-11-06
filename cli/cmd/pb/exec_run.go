@@ -361,11 +361,24 @@ func writeExecEvent(c *command.Context, encoder *json.Encoder, event tunnel.Exec
 	return err
 }
 
+// execInputWindow bounds the stdin a reattaching exec can resend: the journal keeps this many of the newest bytes.
+const execInputWindow = 4 << 20
+
+// execConnectionRef is the exec's current connection and its stdin journal. A connection cut by a network handover
+// loses whatever stdin it had accepted but not delivered, and the CLI cannot tell how much: so every byte read from
+// stdin stays in the journal, the replacement connection gets the whole retained window with its stdin offsets
+// (InputOffset), and the execution drops the prefix it already received.
 type execConnectionRef struct {
 	mu      sync.Mutex
 	conn    tunnel.ExecConn
 	changed chan struct{}
 	eof     bool
+
+	inputMu  sync.Mutex
+	journal  []byte // stdin read so far, from byte offset base
+	base     uint64
+	sent     uint64 // stdin byte offset written to the current connection
+	freezing bool   // a reattach dials from base: the window must not move until its connection is set
 }
 
 func newExecConnectionRef(connection tunnel.ExecConn) *execConnectionRef {
@@ -378,13 +391,35 @@ func (r *execConnectionRef) Current() tunnel.ExecConn {
 	return r.conn
 }
 
+// BeginReattach returns the stdin offset the replacement connection starts at and keeps the window still until Set.
+func (r *execConnectionRef) BeginReattach() uint64 {
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
+	r.freezing = true
+	return r.base
+}
+
+// AbortReattach releases the window after a reattach that did not produce a connection.
+func (r *execConnectionRef) AbortReattach() {
+	r.inputMu.Lock()
+	r.freezing = false
+	r.inputMu.Unlock()
+}
+
 func (r *execConnectionRef) Set(connection tunnel.ExecConn) error {
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
 	r.mu.Lock()
 	r.conn = connection
 	eof := r.eof
 	close(r.changed)
 	r.changed = make(chan struct{})
 	r.mu.Unlock()
+	r.freezing = false
+	r.sent = r.base
+	if err := r.flushLocked(connection); err != nil {
+		return err
+	}
 	if eof {
 		return connection.CloseWrite()
 	}
@@ -417,6 +452,46 @@ func (r *execConnectionRef) Wait(ctx context.Context) (tunnel.ExecConn, error) {
 	}
 }
 
+// flushLocked writes the journal from r.sent to connection; inputMu is held.
+func (r *execConnectionRef) flushLocked(connection tunnel.ExecConn) error {
+	for r.sent < r.base+uint64(len(r.journal)) {
+		pending := r.journal[r.sent-r.base:]
+		written, err := connection.Write(pending)
+		if err != nil || written <= 0 || written > len(pending) {
+			if err == nil {
+				err = io.ErrShortWrite
+			}
+			return err
+		}
+		r.sent += uint64(written)
+	}
+	return nil
+}
+
+// SendInput journals data and writes what the current connection has not been given. A failed write keeps the bytes
+// in the journal for the next connection.
+func (r *execConnectionRef) SendInput(ctx context.Context, data []byte) (tunnel.ExecConn, error) {
+	r.inputMu.Lock()
+	r.journal = append(r.journal, data...)
+	if !r.freezing && len(r.journal) > execInputWindow {
+		drop := len(r.journal) - execInputWindow
+		r.journal = append(r.journal[:0], r.journal[drop:]...)
+		r.base += uint64(drop)
+		r.sent = max(r.sent, r.base)
+	}
+	r.inputMu.Unlock()
+	connection, err := r.Wait(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
+	if err := r.flushLocked(connection); err != nil {
+		return connection, err
+	}
+	return connection, nil
+}
+
 func (r *execConnectionRef) CloseInput() error {
 	r.mu.Lock()
 	r.eof = true
@@ -436,27 +511,18 @@ func forwardExecInput(ctx context.Context, reader io.Reader, connections *execCo
 			return io.ErrShortBuffer
 		}
 		if n > 0 {
-			connection, err := connections.Wait(ctx)
-			if err != nil {
-				return err
-			}
-			remaining := buffer[:n]
-			for len(remaining) > 0 {
-				written, writeErr := connection.Write(remaining)
-				if writeErr != nil || written <= 0 || written > len(remaining) {
-					if writeErr == nil {
-						writeErr = io.ErrShortWrite
-					}
-					connections.Clear(connection)
-					abortErr := abortExecAttachment(connection)
-					cause := appendExecFailure(writeErr, abortErr)
-					if execInputClosedOnly(cause) || classifyCommandFailure(cause).kind == commandUnexpected {
-						return cause
-					}
-					observeExecFailure(ctx, cause)
-					break
+			connection, writeErr := connections.SendInput(ctx, buffer[:n])
+			if writeErr != nil {
+				if connection == nil {
+					return writeErr
 				}
-				remaining = remaining[written:]
+				connections.Clear(connection)
+				abortErr := abortExecAttachment(connection)
+				cause := appendExecFailure(writeErr, abortErr)
+				if execInputClosedOnly(cause) || classifyCommandFailure(cause).kind == commandUnexpected {
+					return cause
+				}
+				observeExecFailure(ctx, cause)
 			}
 		}
 		if n == 0 && readErr == nil {

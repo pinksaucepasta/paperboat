@@ -262,7 +262,8 @@ func (d *Dispatcher) HandleTerminalActivity(_ context.Context, authorization Aut
 	return d.config.Sessions.ActivateParticipantAtGeneration(sessionID, attachmentID, "", "", 0)
 }
 
-func (d *Dispatcher) HandleExecInput(_ context.Context, authorization Authorization, operationID string, data []byte) error {
+// HandleExecInput gives an execution the stdin chunk that starts at byte offset; bytes it already received are dropped.
+func (d *Dispatcher) HandleExecInput(ctx context.Context, authorization Authorization, operationID string, offset uint64, data []byte) error {
 	if d.config.Exec == nil || authorization.ClientID == "" || operationID == "" || len(data) == 0 {
 		return execprocess.ErrInvalid
 	}
@@ -270,11 +271,10 @@ func (d *Dispatcher) HandleExecInput(_ context.Context, authorization Authorizat
 	if err != nil {
 		return err
 	}
-	_, err = execution.Write(data)
-	return err
+	return execution.WriteAt(ctx, offset, data)
 }
 
-func (d *Dispatcher) HandleExecEOF(_ context.Context, authorization Authorization, operationID string) error {
+func (d *Dispatcher) HandleExecEOF(_ context.Context, authorization Authorization, operationID string, offset uint64) error {
 	if d.config.Exec == nil || authorization.ClientID == "" || operationID == "" {
 		return execprocess.ErrInvalid
 	}
@@ -282,7 +282,7 @@ func (d *Dispatcher) HandleExecEOF(_ context.Context, authorization Authorizatio
 	if err != nil {
 		return err
 	}
-	return execution.CloseInput()
+	return execution.CloseInputAt(offset)
 }
 
 func (d *Dispatcher) HandleExecResize(_ context.Context, authorization Authorization, operationID string, columns, rows uint16) error {

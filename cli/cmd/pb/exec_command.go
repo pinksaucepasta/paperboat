@@ -385,6 +385,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		previousFailure := err
 		var replacement tunnel.ExecConn
+		// The replacement connection starts at the oldest stdin offset still journaled; Set resends from there.
+		request.InputOffset = connectionRef.BeginReattach()
 		err = recovery.Run(c.Context, func(ctx context.Context) error {
 			fresh, err := client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
 			if err != nil {
@@ -394,6 +396,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			return err
 		})
 		if err != nil || replacement == nil {
+			connectionRef.AbortReattach()
 			err = appendExecFailure(previousFailure, err)
 			break
 		}

@@ -23,6 +23,7 @@ type remoteRequest struct {
 	Request            *Request
 	From               uint64
 	Data               []byte
+	Offset             uint64 // stdin byte offset of Data (write_at) or of the end of stdin (close_input_at)
 	Signal             pty.Signal
 	Dimensions         pty.Dimensions
 	ReaderID           uint64
@@ -141,6 +142,14 @@ func (e *remoteExecution) Write(data []byte) (int, error) {
 func (e *remoteExecution) WriteContext(ctx context.Context, data []byte) (int, error) {
 	out, err := e.invoke(ctx, "write", remoteRequest{Data: data})
 	return out.Written, err
+}
+func (e *remoteExecution) WriteAt(ctx context.Context, offset uint64, data []byte) error {
+	_, err := e.invoke(ctx, "write_at", remoteRequest{Data: data, Offset: offset})
+	return err
+}
+func (e *remoteExecution) CloseInputAt(offset uint64) error {
+	_, err := e.invoke(context.Background(), "close_input_at", remoteRequest{Offset: offset})
+	return err
 }
 func (e *remoteExecution) CloseInput() error {
 	_, err := e.invoke(context.Background(), "close_input", remoteRequest{})
@@ -383,6 +392,10 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body json.RawMessage
 			return nil, ErrInvalid
 		}
 		out.Written, err = owner.WriteContext(ctx, request.Data)
+	case "write_at":
+		err = e.WriteAt(ctx, request.Offset, request.Data)
+	case "close_input_at":
+		err = e.CloseInputAt(request.Offset)
 	case "close_input":
 		err = e.CloseInput()
 	case "signal":

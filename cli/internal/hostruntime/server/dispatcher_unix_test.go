@@ -112,7 +112,7 @@ func TestExecDispatcherStreamsInputStdoutStderrAndExactExit(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err := dispatcher.HandleExecInput(context.Background(), authorization, "operation_dispatch", []byte("value\n")); err != nil {
+	if err := dispatcher.HandleExecInput(context.Background(), authorization, "operation_dispatch", 0, []byte("value\n")); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr strings.Builder
