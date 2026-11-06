@@ -276,6 +276,11 @@ func (c *NativeDispatchClient) Authorize(ctx context.Context, header streamauth.
 	return response.AccessSessionID, err
 }
 func (c *NativeDispatchClient) Open(ctx context.Context, header streamauth.Header) (net.Conn, error) {
+	if header.Resume != "" {
+		// A resume carries no credential; only OpenResume vouches for its peer.
+		recordNativeAdmissionFailure("resume_unwrapped", ErrStreamAuthorization)
+		return nil, ErrStreamAuthorization
+	}
 	connection, _, err := c.call(ctx, "stream", &header, nil, nil, true)
 	return connection, err
 }

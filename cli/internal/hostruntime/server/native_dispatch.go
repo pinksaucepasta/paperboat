@@ -254,6 +254,7 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 		case "authorize", "stream":
 			// A resume header and the carrier-proven peer come together or not at all, and only on a stream.
 			if (header.Resume != "") != (envelope.Resume != nil) || (envelope.Resume != nil && (operation != "stream" || envelope.Resume.AccountID == "" || envelope.Resume.EndpointID == "")) {
+				recordNativeAdmissionFailure("resume_peer", ErrStreamAuthorization)
 				http.Error(w, "invalid dispatch resume", http.StatusBadRequest)
 				return
 			}
