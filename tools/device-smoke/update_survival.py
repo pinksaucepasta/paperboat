@@ -113,7 +113,7 @@ def main():
                 held = Terminal([str(PB), 'connect', args.target, '--name', session_name, *quiet])
                 held.expect(b'\x1b[?2004h')
                 held.expect(held.marker('READY', 'stty -echo; '))
-                held.send("printf '\\nPB_SHELL_%s\\n' \"$$\"\r")
+                held.send("printf '\\nPB_SHELL''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
                 held.expect('PB_SHELL_')
                 shell_pid = held.expect('\n').decode().strip()
                 if not shell_pid.isdigit():
