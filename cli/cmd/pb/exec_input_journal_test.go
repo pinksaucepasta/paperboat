@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
@@ -114,7 +115,7 @@ func TestExecReattachRetriesWhenTheReplacementDropsDuringTheStdinResend(t *testi
 	}
 	var request tunnel.ExecRequest
 	var dialed []*cutConn
-	dial := func(api.ExecDescriptor) (tunnel.ExecConn, error) {
+	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) {
 		connection := &cutConn{host: host, offset: request.InputOffset, deliver: -1}
 		if len(dialed) == 0 {
 			connection.failAt = 1 // the replacement drops on its first write
@@ -161,5 +162,30 @@ func TestExecStdinJournalNeverTrimsBytesNoConnectionAccepted(t *testing.T) {
 	}
 	if string(host.received) != string(data) {
 		t.Fatalf("the execution received %d bytes, want %d", len(host.received), len(data))
+	}
+}
+
+// A daemon that accepts the socket and never answers cannot hang a reattach attempt: it times out as a retryable
+// peer-stream failure and the bounded recovery tries again.
+func TestExecReattachAttemptTimesOutAndIsRetried(t *testing.T) {
+	old := execReattachAttemptTimeout
+	execReattachAttemptTimeout = 50 * time.Millisecond
+	defer func() { execReattachAttemptTimeout = old }()
+	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
+	var request tunnel.ExecRequest
+	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
+	silent := func(ctx context.Context, _ api.ExecDescriptor) (tunnel.ExecConn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	start := time.Now()
+	_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, silent)
+	if err == nil || !retryableExecReattachment(err) || time.Since(start) > 2*time.Second {
+		t.Fatalf("a silent daemon: err=%v after %v", err, time.Since(start))
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err = reattachExecConnection(canceled, ref, &request, descriptor, silent); retryableExecReattachment(err) {
+		t.Fatalf("a canceled command was retried: %v", err)
 	}
 }

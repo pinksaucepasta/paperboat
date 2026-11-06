@@ -104,13 +104,15 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			request.Columns, request.Rows = 80, 24
 		}
 	}
-	dial := func(current api.ExecDescriptor) (tunnel.ExecConn, error) {
+	dial := func(attempt context.Context, current api.ExecDescriptor) (tunnel.ExecConn, error) {
 		// Keep caller cancellation attached while dialing, then detach the
 		// established carrier so actionRemoteExec can complete the remote cancel
 		// RPC before transport teardown.
 		dialCtx, cancelDial := context.WithCancel(context.WithoutCancel(c.Context))
 		defer cancelDial()
 		stopCallerCancel := context.AfterFunc(c.Context, cancelDial)
+		stopAttempt := context.AfterFunc(attempt, cancelDial)
+		defer stopAttempt()
 		connection, dialErr := d.peerApplications.DialExec(dialCtx, execConnectInfo(machine, current, client.Workspace()), request)
 		if dialErr != nil {
 			stopCallerCancel()
@@ -124,7 +126,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		return connection, nil
 	}
-	connection, err := dial(descriptor)
+	connection, err := dial(c.Context, descriptor)
 	initialUncertain := false
 	if err != nil {
 		var uncertain *tunnel.ExecStartUncertainError
@@ -137,7 +139,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			}})
 			err = initial.Run(c.Context, func(context.Context) error {
 				var attemptErr error
-				connection, attemptErr = dial(descriptor)
+				connection, attemptErr = dial(c.Context, descriptor)
 				return attemptErr
 			})
 		}
@@ -409,6 +411,20 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 
 const execReattachAttempts = 40
 
+// execReattachAttemptTimeout bounds one reattach attempt; the daemon's own peer open takes up to 10 s.
+var execReattachAttemptTimeout = 15 * time.Second
+
+func reattachExecDial(
+	attempt context.Context, descriptor func(context.Context) (api.ExecDescriptor, error),
+	dial func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error),
+) (tunnel.ExecConn, error) {
+	fresh, err := descriptor(attempt)
+	if err != nil {
+		return nil, err
+	}
+	return dial(attempt, fresh)
+}
+
 // errExecInputFlush marks a replacement connection that dropped again while the stdin journal was written to it.
 var errExecInputFlush = errors.New("stdin could not be resent on the replacement connection")
 
@@ -417,15 +433,18 @@ var errExecInputFlush = errors.New("stdin could not be resent on the replacement
 // bounded recovery tries again from the journal.
 func reattachExecConnection(
 	ctx context.Context, ref *execConnectionRef, request *tunnel.ExecRequest,
-	descriptor func(context.Context) (api.ExecDescriptor, error), dial func(api.ExecDescriptor) (tunnel.ExecConn, error),
+	descriptor func(context.Context) (api.ExecDescriptor, error),
+	dial func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error),
 ) (tunnel.ExecConn, error) {
 	request.InputOffset = ref.BeginReattach()
-	fresh, err := descriptor(ctx)
+	// A daemon that accepts the socket and never answers must not hang one attempt until Ctrl-C.
+	attempt, cancel := context.WithTimeout(ctx, execReattachAttemptTimeout)
+	defer cancel()
+	replacement, err := reattachExecDial(attempt, descriptor, dial)
 	if err != nil {
-		return nil, err
-	}
-	replacement, err := dial(fresh)
-	if err != nil {
+		if ctx.Err() == nil && errors.Is(attempt.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("the reattach attempt got no answer in %v: %w", execReattachAttemptTimeout, tunnel.ErrPeerStreamOpen)
+		}
 		return nil, err
 	}
 	if setErr := ref.Set(replacement); setErr != nil {
