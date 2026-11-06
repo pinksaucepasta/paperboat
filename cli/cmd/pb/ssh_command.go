@@ -179,8 +179,13 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	_, machine, target, err := resolveSSHCommandTargetWarm(ctx, alias)
-	if err != nil {
+	var machine api.UserMachine
+	var target api.ManagedSSHTarget
+	if _, err := retryWhileMachineOffline(ctx.Context, func() (struct{}, error) {
+		var resolveErr error
+		_, machine, target, resolveErr = resolveSSHCommandTargetWarm(ctx, alias)
+		return struct{}{}, resolveErr
+	}); err != nil {
 		return friendlyCommandError(err)
 	}
 	if _, err := managedssh.ResolveDestination(managedssh.DestinationInput{AliasDomain: domain, Alias: machine.Alias, RegisteredPort: target.Port, RequestedUser: proxyUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform}); err != nil {
@@ -204,7 +209,10 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	}
 	// Bounds only the stream setup: a dial to an offline target otherwise waits until OpenSSH gives up.
 	dialCtx, cancelDial := context.WithTimeout(command.Context(), sshDialTimeout)
-	connection, err := d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace), operationID)
+	// The target's carrier restarts for a pb update: a dial that finds its transport closed is repeated for a few seconds.
+	connection, err := retryWhile(dialCtx, sshHandoverGrace, sshHandoverBlip, func() (tunnel.Conn, error) {
+		return d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace), operationID)
+	})
 	cancelDial()
 	if err != nil {
 		if notReady := sshTargetHealth(command.Context(), machine.ID, machine.Alias); notReady != nil {
@@ -244,6 +252,16 @@ func explainSSHDial(alias string, err error) error {
 		return &sshDialError{"Paperboat could not reach " + alias + ": it may be offline, or its Paperboat service is not running; check it in `pb status`", err}
 	}
 	return err
+}
+
+// sshHandoverGrace bounds the repeated dial while the target's network is handed over (about a second on pbvm4).
+const sshHandoverGrace = 10 * time.Second
+
+// sshHandoverBlip is a dial failure that a moment later no longer applies: the peer transport was lost or is not
+// there yet. A refusal, a timeout or a stopped local service is not.
+func sshHandoverBlip(err error) bool {
+	var remote *localapi.RemoteError
+	return errors.Is(err, tunnel.ErrTransportLost) || errors.As(err, &remote) && remote.Code == "peer_transport_unavailable"
 }
 
 // sshDialTimeout bounds opening the SSH stream to the target (a warm connection takes well under a second).

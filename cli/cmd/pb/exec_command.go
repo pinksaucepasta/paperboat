@@ -419,7 +419,7 @@ func execRecoveryBackoff(attempt int) time.Duration {
 }
 func retryableExecReattachment(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError
-	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err)
+	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err) || machineOfflineError(err)
 }
 
 func safeExecError(err error) string {

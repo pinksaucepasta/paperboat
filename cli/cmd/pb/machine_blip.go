@@ -23,10 +23,16 @@ func machineOfflineError(err error) bool {
 
 // retryWhileMachineOffline runs call again while it answers machine_offline, for at most machineBlipGrace.
 func retryWhileMachineOffline[T any](ctx context.Context, call func() (T, error)) (T, error) {
-	deadline := time.Now().Add(machineBlipGrace)
+	return retryWhile(ctx, machineBlipGrace, machineOfflineError, call)
+}
+
+// retryWhile runs call again while retryable says its error is a handover blip, until grace ends or ctx is done; the
+// last result is returned either way.
+func retryWhile[T any](ctx context.Context, grace time.Duration, retryable func(error) bool, call func() (T, error)) (T, error) {
+	deadline := time.Now().Add(grace)
 	for {
 		value, err := call()
-		if !machineOfflineError(err) || !time.Now().Add(machineBlipInterval).Before(deadline) {
+		if err == nil || !retryable(err) || !time.Now().Add(machineBlipInterval).Before(deadline) {
 			return value, err
 		}
 		timer := time.NewTimer(machineBlipInterval)
