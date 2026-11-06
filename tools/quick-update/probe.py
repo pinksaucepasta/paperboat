@@ -47,7 +47,7 @@ def call(feat,cmd,timeout,input=None,stdout=subprocess.DEVNULL,verify=None,code=
  ok=r.returncode==0 and (verify is None or verify(r));k={}
  if not ok:
   k=dict(rc=r.returncode,err='timeout' if r.returncode is None else 'mismatch' if r.returncode==0 else code(r) if code else 'exit%d'%r.returncode)
-  fail(feat,tail(r.stderr))
+  fail(feat,tail(r.stderr)+(' | stdout: '+tail(r.stdout) if KEEP and isinstance(r.stdout,bytes) and r.stdout else ''))  # private runs only: a failed --json call's error message
  ev(feat,ok,int((time.time()-s)*1000),**extra,**k)
 def loop(feat,cmd,every,timeout=30):
  while not stop():

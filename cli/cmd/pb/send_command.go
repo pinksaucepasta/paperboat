@@ -116,7 +116,16 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		return &api.APIError{Code: "machine_capability_unavailable", Message: "This machine is not configured to receive files."}
 	}
 	if sessionID == "" && (!destination.Online || !destination.Capabilities.FileReceive.Observed) {
-		return &api.APIError{Code: "machine_offline", Message: "The destination machine is offline."}
+		destination, err = retryWhileMachineOffline(ctx.Context, func() (api.UserMachine, error) {
+			current, resolveErr := resolveUserMachine(ctx.Context, client, destination.ID)
+			if resolveErr == nil && (!current.Online || !current.Capabilities.FileReceive.Observed) {
+				return current, &api.APIError{Code: "machine_offline", Message: "The destination machine is offline."}
+			}
+			return current, resolveErr
+		})
+		if err != nil {
+			return friendlyCommandError(err)
+		}
 	}
 	if !jsonOutput {
 		fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.Alias, destination.ID)
@@ -147,7 +156,9 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	requestID := "request_" + requestUUID.String()
 	operationID := newIdempotencyKey()
-	acceptance, err := client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute)}, operationID)
+	acceptance, err := retryWhileMachineOffline(ctx.Context, func() (api.TeamInboxRequest, error) {
+		return client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute)}, operationID)
+	})
 	if err != nil {
 		if limit := serverTransferLimit(err, prepared.Sources); limit != nil {
 			return limit
@@ -189,7 +200,9 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			descriptorRequestID, descriptorDigest = "", ""
 		}
 		declared := api.TransferDeclaration{Mode: sendTransferMode(ctx.Context, cobraCommand, client), Bytes: batchTotal(prepared.Sources)}
-		descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
+		descriptor, err := retryWhileMachineOffline(ctx.Context, func() (api.FileTransfer, error) {
+			return client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
+		})
 		if err != nil {
 			return friendlyCommandError(err)
 		}
