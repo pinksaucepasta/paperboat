@@ -137,3 +137,29 @@ func TestExecReattachRetriesWhenTheReplacementDropsDuringTheStdinResend(t *testi
 		t.Fatalf("the execution received %q, want %q", got, "abcdef")
 	}
 }
+
+// Stdin no connection has accepted yet stays in the journal even past the window: trimming it would make the
+// replacement start after bytes the execution never received.
+func TestExecStdinJournalNeverTrimsBytesNoConnectionAccepted(t *testing.T) {
+	host := &hostStdin{}
+	ref := newExecConnectionRef(&cutConn{host: host, failAt: 1}) // every write fails
+	data := make([]byte, execInputWindow+1<<20)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if connection, err := ref.SendInput(context.Background(), data); err == nil {
+		t.Fatal("the write on the dead connection did not fail")
+	} else {
+		ref.Clear(connection)
+	}
+	replacement := &cutConn{host: host, offset: ref.BeginReattach(), deliver: -1}
+	if replacement.offset != 0 {
+		t.Fatalf("the replacement starts at stdin offset %d, bytes before it were never delivered", replacement.offset)
+	}
+	if err := ref.Set(replacement); err != nil {
+		t.Fatal(err)
+	}
+	if string(host.received) != string(data) {
+		t.Fatalf("the execution received %d bytes, want %d", len(host.received), len(data))
+	}
+}

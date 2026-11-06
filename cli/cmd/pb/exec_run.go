@@ -474,10 +474,10 @@ func (r *execConnectionRef) SendInput(ctx context.Context, data []byte) (tunnel.
 	r.inputMu.Lock()
 	r.journal = append(r.journal, data...)
 	if !r.freezing && len(r.journal) > execInputWindow {
-		drop := len(r.journal) - execInputWindow
+		// Only bytes some connection already accepted may leave the window: dropping unsent ones loses stdin.
+		drop := min(len(r.journal)-execInputWindow, int(r.sent-r.base))
 		r.journal = append(r.journal[:0], r.journal[drop:]...)
 		r.base += uint64(drop)
-		r.sent = max(r.sent, r.base)
 	}
 	r.inputMu.Unlock()
 	connection, err := r.Wait(ctx)
