@@ -1169,5 +1169,15 @@ class RemoteTimeout(unittest.TestCase):
                 self.assertEqual(remote_timeout.timeout_words('ssh host'), words)
 
 
+class UpdateSurvivalMarkers(unittest.TestCase):
+    def test_typed_shell_markers_are_split_so_the_echo_cannot_match(self):
+        import re
+        source = pathlib.Path(__file__).with_name('update_survival.py').read_text()
+        typed = re.findall(r"held\.send\(\"printf '[^\"]*", source)
+        self.assertEqual(len(typed), 2)
+        for line in typed:
+            self.assertNotRegex(line, r"PB_[A-Z]+_%s")
+
+
 if __name__ == '__main__':
     unittest.main()

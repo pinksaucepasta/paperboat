@@ -148,7 +148,7 @@ def main():
                 raise RuntimeError('update failed rc=%s: %s' % (update_result.returncode, text[-400:]))
             result['update_started'] = True
             if held is not None:
-                held.send("printf '\\nPB_AGAIN_%s\\n' \"$$\"\r")
+                held.send("printf '\\nPB_AGAIN''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
                 held.expect('PB_AGAIN_', timeout=180)
                 # judged with the rest: a lost shell must not hide whether the preview, tunnel and transfer survived
                 if held.expect('\n', timeout=10).decode().strip() == shell_pid:
