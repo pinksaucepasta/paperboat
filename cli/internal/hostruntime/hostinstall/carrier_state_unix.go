@@ -104,6 +104,17 @@ func (s unixCarrierInstallation) Capture(ctx context.Context) ([]byte, error) {
 	return json.Marshal(baseline)
 }
 
+// restoreBaselineCarrier brings the previous generation back as the serving one. Its descriptor names it active before
+// its process starts: a carrier started while the failed candidate is still the active generation waits as a standby
+// for a network handover that never comes, and the machine stays offline (pbvm4 rollback injection, 31 s exec failures
+// for minutes after "previous version restored").
+func restoreBaselineCarrier(ctx context.Context, baseline CarrierConfig, publish func(CarrierConfig) error, start func(context.Context, CarrierConfig) error) error {
+	if err := publish(baseline); err != nil {
+		return err
+	}
+	return start(ctx, baseline)
+}
+
 func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error {
 	var baseline unixCarrierBaseline
 	if err := decodeInstallJSON(bytes.NewReader(body), &baseline, 256<<10); err != nil {
@@ -121,7 +132,13 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		}
 		// A failed network handover may have released the previous carrier's network and exited it.
 		if baseline.Carrier != nil {
-			if err := startCarrierIfStopped(ctx, *baseline.Carrier); err != nil {
+			if baseline.Carrier.Validate() != nil {
+				return ErrInvalidRequest
+			}
+			if err := baseline.Carrier.Source.Verify(baseline.Carrier.Executable); err != nil {
+				return err
+			}
+			if err := restoreBaselineCarrier(ctx, *baseline.Carrier, publishCarrierDescriptor, startCarrierIfStopped); err != nil {
 				return err
 			}
 		}

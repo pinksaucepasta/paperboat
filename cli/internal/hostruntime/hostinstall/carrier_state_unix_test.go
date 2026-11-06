@@ -67,3 +67,21 @@ func TestCarrierOnlyRollbackPreservesInstalledRuntime(t *testing.T) {
 		}
 	}
 }
+
+// The restarted baseline carrier decides serving or standby from the active descriptor when it starts.
+func TestRestoreBaselineCarrierPublishesItsDescriptorBeforeStartingIt(t *testing.T) {
+	var steps []string
+	publish := func(CarrierConfig) error { steps = append(steps, "publish"); return nil }
+	start := func(context.Context, CarrierConfig) error { steps = append(steps, "start"); return nil }
+	if err := restoreBaselineCarrier(context.Background(), CarrierConfig{}, publish, start); err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 2 || steps[0] != "publish" || steps[1] != "start" {
+		t.Fatalf("steps %v: the baseline must be active before it starts", steps)
+	}
+	steps = nil
+	failed := func(CarrierConfig) error { return os.ErrPermission }
+	if err := restoreBaselineCarrier(context.Background(), CarrierConfig{}, failed, start); err == nil || len(steps) != 0 {
+		t.Fatalf("a baseline that could not be made active was started: %v %v", steps, err)
+	}
+}
