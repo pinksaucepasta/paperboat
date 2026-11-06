@@ -11,6 +11,7 @@ import (
 	"time"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=direct-peer-contacts
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"tailscale.com/ipn/ipnstate"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=direct-peer-contacts
 	"tailscale.com/tailcfg"
@@ -156,10 +157,12 @@ func (s *Server) awaitRelayOrDirect(ctx context.Context, peer key.NodePublic) er
 		select {
 		case err := <-relay:
 			if err == nil {
+				diagnosticlog.TryInfo("native underlay session", "stage", "ready_by_relay")
 				return nil
 			}
 			relay = nil // the relay handshake ended without an answer; only a direct answer is left
 		case <-direct:
+			diagnosticlog.TryInfo("native underlay session", "stage", "ready_by_direct")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -184,6 +187,7 @@ func (s *Server) pingDirect(ctx context.Context, peer key.NodePublic) <-chan str
 	// ctx ends, as magicsock re-pings unconfirmed endpoints (tailscale wgengine/magicsock/endpoint.go sendDiscoPingsLocked).
 	go func() {
 		for wait := directPingFirstRetry; ; wait = min(2*wait, directPingMaxRetry) {
+			diagnosticlog.TryInfo("native underlay session", "stage", "direct_ping_sent")
 			s.lb.sys.Engine.Get().Ping(addr, tailcfg.PingDisco, 0, func(r *ipnstate.PingResult) {
 				if r != nil && r.Err == "" {
 					once.Do(func() { close(answered) })

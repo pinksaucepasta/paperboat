@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"go4.org/netipx"
 	"tailscale.com/disco"
 	"tailscale.com/net/dns"
@@ -429,8 +430,10 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 	b.logf("got meow from %v", src.String())
 	if !b.allowedPeers[src].IsValid() {
 		b.logf("ignoring meow from %v: not in allowedClients", src.String())
+		diagnosticlog.TryInfo("native underlay session", "stage", "meow_not_admitted")
 		return false
 	}
+	diagnosticlog.TryInfo("native underlay session", "stage", "meow_admitted")
 
 	if n, ok := b.clients[src]; ok {
 		// A node made from the signed contact before any meow carries the configured disco key; the meow

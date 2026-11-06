@@ -337,8 +337,10 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 		// waiting for admission. Retry on the current route, not the initial one.
 		region := s.lb.peerDERPRegion(peer)
 		lastSendErr = mc.SendDERPPacketToRegion(peer, region, packet)
+		diagnosticlog.TryInfo("native underlay session", "stage", "meow_send", "failed", lastSendErr != nil)
 		select {
 		case <-ready:
+			diagnosticlog.TryInfo("native underlay session", "stage", "meow_acked")
 			// The first advertisement in onMeow can arrive before the remote
 			// has admitted us. Its acknowledgment proves that admission is now
 			// installed, so send our candidates again for direct discovery.
