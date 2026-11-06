@@ -111,6 +111,20 @@ func restartHandshake(took time.Duration) time.Duration {
 	return wait
 }
 
+// handshakeWait is the handshake timeout of a dial to peerID: the restart wait while its restart window is open, and
+// always for a peer on this machine, which answers in milliseconds. An updated daemon is a new process and holds no
+// restart mark for the peer whose carrier the same update replaced, so a local peer cannot depend on one. 0 is the
+// normal timeout.
+func (o *Owner) handshakeWait(peerID string) time.Duration {
+	local := o.authority.PeerIsLocal(peerID)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !local && !time.Now().Before(o.restartQuick[peerID]) {
+		return 0
+	}
+	return restartHandshake(o.handshakeTook[peerID])
+}
+
 // freshClientAfterPeerClose consumes the peer's restart mark on whichever dial comes first (the WireGuard state it
 // retires or resets belongs to the peer, not to the dial) and opens the restart window: every dial to the peer, of any
 // class, uses the short handshake wait until one succeeds or restartQuickWindow ends.

@@ -817,3 +817,16 @@ func testTLS(t *testing.T, name string) (*tls.Config, string) {
 	testQUICKeys.Store(hex.EncodeToString(fingerprint[:]), base64.RawURLEncoding.EncodeToString(public))
 	return &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, NextProtos: []string{peerquic.ALPN}, Certificates: []tls.Certificate{{Certificate: [][]byte{raw}, PrivateKey: private}}}, hex.EncodeToString(fingerprint[:])
 }
+
+// testLocalAuthority is testAuthority for an endpoint that runs on the machine named by localMachineID.
+func testLocalAuthority(t *testing.T, self tailnet.NetworkBinding, keys testKeys, localMachineID string) *tailnet.Authority {
+	t.Helper()
+	if public, ok := testQUICKeys.Load(self.QUICCertificateFingerprint); ok {
+		self.QUICPublicKey = public.(string)
+	}
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: self, Keys: keys, LocalMachineID: localMachineID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authority
+}

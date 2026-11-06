@@ -321,11 +321,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	diagnosticlog.TryInfo("native handshake path", "stage", "start", "path_category", pathBefore)
 	handshakeEnd := diagnostics.ReconnectStep(ctx, "quic_handshake")
 	sessionConfig := peerquic.DevelopmentSessionConfig(class)
-	o.mu.Lock()
-	if time.Now().Before(o.restartQuick[peerID]) {
-		sessionConfig.HandshakeTimeout = restartHandshake(o.handshakeTook[peerID])
-	}
-	o.mu.Unlock()
+	sessionConfig.HandshakeTimeout = o.handshakeWait(peerID)
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, sessionConfig)
 	handshakeEnd(err)
 	pathAfter, _ := o.authority.PeerPath(peerID)
