@@ -909,3 +909,56 @@ func TestShutdownAfterTheHandoverServesWhileTheEdgeStillSendsRequests(t *testing
 		t.Fatal("Shutdown did not close after the edge stopped sending it requests")
 	}
 }
+
+// pbvm4 update check: a browser terminal held by the retiring worker stayed attached to silence for 19-25 s (the
+// page never left "attached"): the drain waited for it to leave while the worker could no longer serve it. After the
+// goaways the worker ends the terminals it holds, so the edge moves each browser to the successor at once.
+func TestDrainEndsTheBrowserTerminalsItHoldsAfterTheHandover(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	service, edge := startConnectedRuntimeCarrier(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if hubs, _ := service.Hubs(); len(hubs) != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime carrier never came into service")
+		}
+	}
+	var held atomic.Int32
+	held.Store(1)
+	service.attached = func() int { return int(held.Load()) }
+	sawGoaway := make(chan struct{})
+	service.OnTerminalHandover(func() {
+		select {
+		case <-sawGoaway:
+		default:
+			t.Error("the terminals were ended before the edges heard the goaway")
+		}
+		held.Store(0)
+	})
+	drained := make(chan error, 1)
+	go func() { drained <- service.DrainBrowserTerminals(ctx) }()
+	for {
+		stream, open, err := edge.AcceptStream(ctx)
+		if err != nil {
+			t.Fatalf("no goaway: %v", err)
+		}
+		_ = stream.Close()
+		if open.Kind == sharedprotocol.Goaway {
+			close(sawGoaway)
+			break
+		}
+	}
+	select {
+	case err := <-drained:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the drain waited for a browser terminal that the worker could no longer serve")
+	}
+	if held.Load() != 0 {
+		t.Fatal("the terminals were not ended")
+	}
+}

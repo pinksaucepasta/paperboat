@@ -72,6 +72,41 @@ type BrowserTerminalWebSocketHandlerConfig struct {
 type BrowserTerminalWebSocketHandler struct {
 	config  BrowserTerminalWebSocketHandlerConfig
 	limiter *ConnectionLimiter
+
+	liveMu sync.Mutex
+	live   map[*browserTerminalApplicationConnection]struct{}
+}
+
+// CloseAll ends every browser terminal this handler serves with code and reason. A retiring worker (pb update) does it
+// once its successor serves, so the edge ends the browsers' streams at once and each reconnects to the new generation
+// (terminalend.Moved), instead of waiting on a connection that can no longer be served. Prior art: cloudflared's
+// supervisor unregisters its connection and closes it after the grace period (~/ref/cloudflared/connection/control.go,
+// waitForUnregister), and nginx's old workers close idle connections at graceful shutdown.
+func (h *BrowserTerminalWebSocketHandler) CloseAll(code int, reason string) int {
+	h.liveMu.Lock()
+	connections := make([]*browserTerminalApplicationConnection, 0, len(h.live))
+	for connection := range h.live {
+		connections = append(connections, connection)
+	}
+	h.liveMu.Unlock()
+	for _, connection := range connections {
+		_ = connection.CloseProtocol(code, reason)
+	}
+	return len(connections)
+}
+
+func (h *BrowserTerminalWebSocketHandler) track(connection *browserTerminalApplicationConnection) func() {
+	h.liveMu.Lock()
+	if h.live == nil {
+		h.live = make(map[*browserTerminalApplicationConnection]struct{})
+	}
+	h.live[connection] = struct{}{}
+	h.liveMu.Unlock()
+	return func() {
+		h.liveMu.Lock()
+		delete(h.live, connection)
+		h.liveMu.Unlock()
+	}
 }
 
 func NewBrowserTerminalWebSocketHandler(config BrowserTerminalWebSocketHandlerConfig) (*BrowserTerminalWebSocketHandler, error) {
@@ -212,6 +247,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		plaintext = h.config.Bandwidth.Wrap(tlsConnection, bandwidth.Binding{AccessSessionID: bindingID, StreamID: bindingID, Consumer: consumer}, func(string) bandwidth.Path { return bandwidth.Path{Mode: "edge"} })
 	}
 	application := newBrowserTerminalApplicationConnection(request.Context(), connection, plaintext)
+	defer h.track(application)()
 	if err := h.config.Server.ServeAuthenticated(application, authorizer); err != nil {
 		reportConsumedServeFailure(request.Context(), err)
 	}

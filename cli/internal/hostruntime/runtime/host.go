@@ -403,7 +403,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	var browserTerminalHandler http.Handler
 	if dependencies.BrowserTerminalAuthorizer != nil {
-		browserTerminalHandler, err = server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{
+		var browserTerminals *server.BrowserTerminalWebSocketHandler
+		browserTerminals, err = server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{
 			Server: protocolServer, Authorizer: dependencies.BrowserTerminalAuthorizer, Bandwidth: dependencies.Bandwidth,
 			Identity:       dependencies.BrowserTerminalIdentity,
 			OriginPatterns: append([]string(nil), config.OriginPatterns...),
@@ -412,6 +413,10 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		})
 		if err != nil {
 			return nil, err
+		}
+		browserTerminalHandler = browserTerminals
+		if attachment, ok := dependencies.RuntimeAttachmentService.(*runtimeattachment.Service); ok {
+			attachment.OnTerminalHandover(func() { browserTerminals.CloseAll(1001, "moved") })
 		}
 	}
 	mux := http.NewServeMux()

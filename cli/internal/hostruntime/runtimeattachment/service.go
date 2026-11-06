@@ -51,21 +51,22 @@ type Config struct {
 }
 
 type Service struct {
-	config      Config
-	auth        *machinecontrol.Source
-	client      *http.Client
-	sessions    *preview.MachineAttachmentSessionSource
-	processID   string
-	broadcaster *browserbroadcastserver.Registry
-	selector    edgeplacement.Selector
-	preference  *edgeplacement.Preference
-	lastProbe   time.Time
-	latency     []edgeLatency                       // edge probe times to send with the next control request
-	probeDial   func(context.Context, string) error // tests only; nil dials TCP
-	attached    func() int                          // tests only; nil counts the broadcaster's browsers
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	done        chan struct{}
+	config       Config
+	auth         *machinecontrol.Source
+	client       *http.Client
+	sessions     *preview.MachineAttachmentSessionSource
+	processID    string
+	broadcaster  *browserbroadcastserver.Registry
+	selector     edgeplacement.Selector
+	preference   *edgeplacement.Preference
+	lastProbe    time.Time
+	latency      []edgeLatency                       // edge probe times to send with the next control request
+	probeDial    func(context.Context, string) error // tests only; nil dials TCP
+	attached     func() int                          // tests only; nil counts the broadcaster's browsers
+	endTerminals func()                              // closes the browser terminals this worker holds (OnTerminalHandover)
+	mu           sync.Mutex
+	cancel       context.CancelFunc
+	done         chan struct{}
 
 	// hubs are the live carriers' stream hubs, by carrier key, for endpoint routes (PLAN 3a);
 	// hubsChanged is closed and replaced whenever the set changes.
@@ -126,6 +127,14 @@ func (s *Service) setHub(key string, hub *preview.DataCarrierPreviewHub, goaway 
 	}
 	close(s.hubsChanged)
 	s.hubsChanged = make(chan struct{})
+}
+
+// OnTerminalHandover registers what ends the browser terminals this service holds once its edges have moved to the
+// successor's carriers (set before Start).
+func (s *Service) OnTerminalHandover(end func()) {
+	s.mu.Lock()
+	s.endTerminals = end
+	s.mu.Unlock()
 }
 
 // BindBroadcaster connects browser output to this service's authenticated
@@ -273,6 +282,14 @@ func (s *Service) handOver(ctx context.Context) {
 // Shutdown then closes the carriers.
 func (s *Service) DrainBrowserTerminals(ctx context.Context) error {
 	s.handOver(ctx)
+	// The edges now send to the successor. A browser still on this worker is not served any more by a retiring
+	// generation: end it, and the edge moves it at once instead of leaving it attached to silence.
+	s.mu.Lock()
+	end := s.endTerminals
+	s.mu.Unlock()
+	if end != nil {
+		end()
+	}
 	attached := s.attached
 	if attached == nil && s.broadcaster != nil {
 		attached = s.broadcaster.Attached
