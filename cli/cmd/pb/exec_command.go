@@ -385,15 +385,13 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		previousFailure := err
 		var replacement tunnel.ExecConn
-		// The replacement connection starts at the oldest stdin offset still journaled; Set resends from there.
-		request.InputOffset = connectionRef.BeginReattach()
 		err = recovery.Run(c.Context, func(ctx context.Context) error {
-			fresh, err := client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
-			if err != nil {
-				return err
-			}
-			replacement, err = dial(fresh)
-			return err
+			fresh, fetchErr := reattachExecConnection(ctx, connectionRef, &request,
+				func(ctx context.Context) (api.ExecDescriptor, error) {
+					return client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
+				}, dial)
+			replacement = fresh
+			return fetchErr
 		})
 		if err != nil || replacement == nil {
 			connectionRef.AbortReattach()
@@ -402,10 +400,6 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		inputCloseFailure = nil
 		connection = replacement
-		if setErr := connectionRef.Set(connection); setErr != nil {
-			err = setErr
-			break
-		}
 	}
 	if err != nil {
 		err = appendExecFailure(err, inputCloseFailure)
@@ -414,6 +408,33 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 }
 
 const execReattachAttempts = 40
+
+// errExecInputFlush marks a replacement connection that dropped again while the stdin journal was written to it.
+var errExecInputFlush = errors.New("stdin could not be resent on the replacement connection")
+
+// reattachExecConnection dials the replacement and hands it the stdin journal. The replacement starts at the oldest
+// stdin offset still journaled; a second blip during the resend is a lost transport like the first, so the caller's
+// bounded recovery tries again from the journal.
+func reattachExecConnection(
+	ctx context.Context, ref *execConnectionRef, request *tunnel.ExecRequest,
+	descriptor func(context.Context) (api.ExecDescriptor, error), dial func(api.ExecDescriptor) (tunnel.ExecConn, error),
+) (tunnel.ExecConn, error) {
+	request.InputOffset = ref.BeginReattach()
+	fresh, err := descriptor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	replacement, err := dial(fresh)
+	if err != nil {
+		return nil, err
+	}
+	if setErr := ref.Set(replacement); setErr != nil {
+		ref.Clear(replacement)
+		_ = abortExecAttachment(replacement)
+		return nil, errors.Join(errExecInputFlush, setErr)
+	}
+	return replacement, nil
+}
 
 // execRecoveryBackoff tries at once, then polls every 150 ms for the first 20 attempts, the length of a network handover
 // (the pause of a call that reattaches is the sleep after the machine is back, so it stays short), then backs off by
@@ -430,7 +451,7 @@ func execRecoveryBackoff(attempt int) time.Duration {
 }
 func retryableExecReattachment(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError
-	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err) || machineOfflineError(err)
+	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err) || machineOfflineError(err) || errors.Is(err, errExecInputFlush)
 }
 
 func safeExecError(err error) string {

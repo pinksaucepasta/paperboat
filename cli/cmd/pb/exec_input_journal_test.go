@@ -7,7 +7,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 )
 
 // hostStdin is the execution's stdin: it takes a chunk at its byte offset, drops what it already received and refuses
@@ -96,5 +98,42 @@ func TestExecStdinSurvivesAConnectionCutMidStream(t *testing.T) {
 	}
 	if got := string(host.received); got != "hello world!" {
 		t.Fatalf("the execution received %q, want %q", got, "hello world!")
+	}
+}
+
+// A second blip while the journal is resent is a lost transport, not the end of the command: the reattach goes round
+// again from the same journal, bounded by the same attempts.
+func TestExecReattachRetriesWhenTheReplacementDropsDuringTheStdinResend(t *testing.T) {
+	host := &hostStdin{}
+	first := &cutConn{host: host, deliver: 3, failAt: 2}
+	ref := newExecConnectionRef(first)
+	for _, chunk := range []string{"abc", "def"} {
+		if connection, err := ref.SendInput(context.Background(), []byte(chunk)); err != nil {
+			ref.Clear(connection)
+		}
+	}
+	var request tunnel.ExecRequest
+	var dialed []*cutConn
+	dial := func(api.ExecDescriptor) (tunnel.ExecConn, error) {
+		connection := &cutConn{host: host, offset: request.InputOffset, deliver: -1}
+		if len(dialed) == 0 {
+			connection.failAt = 1 // the replacement drops on its first write
+		}
+		dialed = append(dialed, connection)
+		return connection, nil
+	}
+	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
+	recovery := reattach.New(reattach.Policy{Attempts: 3, Retryable: retryableExecReattachment})
+	var replacement tunnel.ExecConn
+	err := recovery.Run(context.Background(), func(ctx context.Context) error {
+		var attemptErr error
+		replacement, attemptErr = reattachExecConnection(ctx, ref, &request, descriptor, dial)
+		return attemptErr
+	})
+	if err != nil || len(dialed) != 2 || replacement != dialed[1] {
+		t.Fatalf("reattach: err=%v dials=%d", err, len(dialed))
+	}
+	if got := string(host.received); got != "abcdef" {
+		t.Fatalf("the execution received %q, want %q", got, "abcdef")
 	}
 }
