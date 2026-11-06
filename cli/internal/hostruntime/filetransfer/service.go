@@ -125,7 +125,7 @@ func (s *Service) admitMutation(ctx context.Context) (func(), error) {
 	s.slotMu.Lock()
 	defer s.slotMu.Unlock()
 	if s.updateTransaction != "" {
-		return nil, &Error{Code: ResourceLimit}
+		return nil, &Error{Code: UpdateInProgress}
 	}
 	if s.operations == 0 {
 		s.operationDone = make(chan struct{})

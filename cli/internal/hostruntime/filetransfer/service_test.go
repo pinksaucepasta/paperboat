@@ -717,7 +717,8 @@ func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 				deadline := time.Now().Add(time.Second)
 				for {
 					_, err := service.Create(context.Background(), CreateRequest{})
-					if hasCode(err, ResourceLimit) {
+					// The update fence is its own answer, not the concurrency limit: a sender waits it out.
+					if hasCode(err, UpdateInProgress) {
 						break
 					}
 					if time.Now().After(deadline) {

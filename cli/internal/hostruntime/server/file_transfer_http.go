@@ -650,7 +650,7 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 }
 func writeFileTransferError(ctx context.Context, stage string, writer http.ResponseWriter, requestID string, err error) {
 	code := reportFileTransferFailure(ctx, stage, err)
-	writeHTTPErrorDetails(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "no_active_writer", insufficientStorageDetails(err))
+	writeHTTPErrorDetails(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "update_in_progress" || code == "no_active_writer", insufficientStorageDetails(err))
 }
 
 // insufficientStorageDetails carries how much room the files need and the receiver has, when the

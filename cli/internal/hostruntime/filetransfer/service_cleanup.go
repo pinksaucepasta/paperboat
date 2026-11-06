@@ -15,7 +15,7 @@ func (s *Service) CleanupExpired(ctx context.Context) error {
 	releaseMutation, err := s.admitMutation(ctx)
 	if err != nil {
 		var refusal *Error
-		if errors.As(err, &refusal) && refusal.Code == ResourceLimit {
+		if errors.As(err, &refusal) && (refusal.Code == ResourceLimit || refusal.Code == UpdateInProgress) {
 			return nil
 		}
 		return err
