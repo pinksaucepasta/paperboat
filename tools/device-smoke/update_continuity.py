@@ -91,7 +91,7 @@ def main():
     try:
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
-        terminal.send("pb_hold=$$; printf '\\nPB_SHELL_%s\\n' \"$pb_hold\"\r")
+        terminal.send("pb_hold=$$; printf '\\nPB_SHELL''_%s\\n' \"$pb_hold\"\r")
         terminal.expect('PB_SHELL_')
         pid_line = terminal.expect('\n').decode().strip()
         held_pid = pid_line
@@ -119,7 +119,7 @@ def main():
         if after_version == before_version:
             raise RuntimeError('candidate must be a different build')
         # Without any user action the same shell answers.
-        terminal.send("printf '\\nPB_AGAIN_%s\\n' \"$$\"\r")
+        terminal.send("printf '\\nPB_AGAIN''_%s\\n' \"$$\"\r")
         terminal.expect('PB_AGAIN_', timeout=180)
         again_pid = terminal.expect('\n', timeout=10).decode().strip()
         if again_pid != held_pid:

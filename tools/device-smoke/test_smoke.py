@@ -1178,6 +1178,13 @@ class UpdateSurvivalMarkers(unittest.TestCase):
         for line in typed:
             self.assertNotRegex(line, r"PB_[A-Z]+_%s")
 
+    def test_update_continuity_markers_are_split_too(self):
+        import re
+        source = pathlib.Path(__file__).with_name('update_continuity.py').read_text()
+        typed = re.findall(r"terminal\.send\(\"[^\"]*printf '[^\"]*", source)
+        self.assertEqual(len(typed), 2)
+        for line in typed:
+            self.assertNotRegex(line, r"PB_[A-Z]+_%s")
 
 if __name__ == '__main__':
     unittest.main()
