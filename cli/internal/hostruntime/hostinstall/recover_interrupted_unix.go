@@ -76,8 +76,19 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreS
 	if err != nil {
 		return err
 	}
+	// The lifecycle recovery of a replace restores the executable from its verified pin and the metadata BEFORE it
+	// starts any previous service (service.LifecycleManager.rollback calls nativeInstallation.Restore first), and ends
+	// by removing this journal. Rolling the files back before it would remove the running executable's path for
+	// nothing; after it, the journal is gone and only the leftover rollback copy of the worker remains. Every step is
+	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
 	if err = restoreServices(ctx); err != nil {
 		return err
 	}
+	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
+		return errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
+	} else if err != nil {
+		return err
+	}
+	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
 	return rollbackFiles(paths, journal)
 }

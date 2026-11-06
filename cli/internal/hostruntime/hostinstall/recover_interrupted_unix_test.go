@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -119,3 +120,75 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 		t.Fatalf("a live installer's journal was recovered: restored=%v err=%v", restored, err)
 	}
 }
+
+// A lifecycle recovery restores the worker, then the services, and removes the journal last. Interrupting it between
+// those steps leaves the journal, so the next start runs the whole recovery again; once it completes, the rollback
+// copy of the worker is not left behind.
+func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
+	paths, request, previous := interruptedInstall(t)
+	if err := os.WriteFile(paths.workerRollback, []byte("old worker"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	pin := filepath.Join(filepath.Dir(paths.root), filepath.Base(paths.root)+"-pin")
+	image, err := os.ReadFile(paths.worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(pin, image, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(pin) })
+	if err = os.WriteFile(paths.worker, []byte("candidate"), 0755); err != nil { // the killed install had activated it
+		t.Fatal(err)
+	}
+	interrupted := true
+	runs, startedOnCandidate := 0, 0
+	restore := func(context.Context) error {
+		runs++
+		if err := os.Rename(pin, paths.worker+".next"); err != nil { // worker first: the pin is the restore source
+			if !os.IsNotExist(err) {
+				return err
+			}
+			if err = os.WriteFile(paths.worker+".next", image, 0755); err != nil {
+				return err
+			}
+		}
+		if err := os.Rename(paths.worker+".next", paths.worker); err != nil {
+			return err
+		}
+		if interrupted { // the process dies after the worker is back and before the services are started
+			return errInterruptedRecovery
+		}
+		if body, _ := os.ReadFile(paths.worker); !bytes.Equal(body, image) {
+			startedOnCandidate++ // services would start on the wrong binary
+		}
+		return removeJournal(paths.journal)
+	}
+	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != errInterruptedRecovery {
+		t.Fatalf("interrupted run: %v", err)
+	}
+	if _, err = os.Lstat(paths.journal); err != nil {
+		t.Fatalf("an interrupted recovery must keep the journal so it runs again: %v", err)
+	}
+	interrupted = false
+	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil || runs != 2 {
+		t.Fatalf("a finished recovery ran again: runs=%d err=%v", runs, err)
+	}
+	if startedOnCandidate != 0 {
+		t.Fatal("services were started while the worker still held the candidate")
+	}
+	if body, _ := os.ReadFile(paths.worker); !bytes.Equal(body, image) {
+		t.Fatal("the worker is not the previous binary")
+	}
+	for _, leftover := range []string{paths.workerRollback, paths.workerNext, paths.journal} {
+		if _, err = os.Lstat(leftover); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind: %v", leftover, err)
+		}
+	}
+	_, _, _ = request, previous, pin
+}
+
+var errInterruptedRecovery = errors.New("interrupted")
