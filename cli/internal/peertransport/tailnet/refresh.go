@@ -75,8 +75,10 @@ func (a *Authority) RestoreOrRegister(ctx context.Context, client NetworkAPI) er
 		return err
 	}
 	if err := a.Restore(ctx); err == nil {
+		diagnosticlog.TryInfo("native packet lifecycle", "stage", "restore_ok")
 		return nil
 	}
+	diagnosticlog.TryInfo("native packet lifecycle", "stage", "restore_failed")
 	return a.Register(ctx, client, false)
 }
 
@@ -169,6 +171,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 	request.MembershipGrants = a.membershipGrants.Load()
 	request.Authority = api.PeerNetworkAuthorityUntilRevoked
 	result, err := client.PeerNetworkConfiguration(ctx, request)
+	diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_answered", "failed", err != nil, "duration_ms", time.Since(started).Milliseconds())
 	if err == nil && request.Endpoints != nil {
 		a.endpointsReported(*request.Endpoints)
 	}
