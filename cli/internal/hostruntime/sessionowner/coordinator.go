@@ -165,7 +165,7 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 	}
 	var result error
 	for _, d := range all {
-		if d.Generation == c.Active.Generation || c.Catalog.staging(d) {
+		if d.Generation == c.Active.Generation || c.Catalog.staging(d, c.Active) {
 			continue
 		}
 		status, err := c.nativeState(ctx, d)
@@ -243,7 +243,7 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 // that does not confirm in time keeps running and is retried next pass.
 const ownerRetireTimeout = 5 * time.Second
 
-// stagingWindow bounds how long a newly published generation is treated as an
+// stagingWindow bounds how long a generation published after the active one is treated as an
 // update's staged candidate. Like nginx's new workers starting before the old
 // ones drain (~/ref/nginx/src/os/unix/ngx_process_cycle.c), the candidate must
 // not be retired by the still-active updater while the installer prepares it
@@ -251,13 +251,24 @@ const ownerRetireTimeout = 5 * time.Second
 // orphan is retired once the window passes.
 const stagingWindow = 10 * time.Minute
 
-func (c Catalog) staging(d Descriptor) bool {
+func (c Catalog) staging(d, active Descriptor) bool {
 	path, err := Find(c.Root, d.Generation)
 	if err != nil {
 		return false
 	}
 	info, err := os.Lstat(path)
-	return err == nil && time.Since(info.ModTime()) < stagingWindow
+	if err != nil || time.Since(info.ModTime()) >= stagingWindow {
+		return false
+	}
+	// Only a generation published after the active one is a candidate. The generation an update
+	// replaced was published before it, so it retires when its last session closes, not
+	// stagingWindow after its own install (F14-04).
+	activePath, err := Find(c.Root, active.Generation)
+	if err != nil {
+		return true
+	}
+	activeInfo, err := os.Lstat(activePath)
+	return err != nil || info.ModTime().After(activeInfo.ModTime())
 }
 
 func (c Coordinator) recordRetired(ctx context.Context, d Descriptor, retained uint64) error {
