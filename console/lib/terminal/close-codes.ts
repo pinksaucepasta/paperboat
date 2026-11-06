@@ -113,3 +113,13 @@ export function ticketCloseCode(reason: unknown): CloseCode | null {
   if (reason.status === 429) return "too_many_pending"
   return "edge_unavailable"
 }
+
+/**
+ * The wait before the next automatic reconnect. A brief cut (a `pb update` network handover, a Wi-Fi
+ * blip) heals in seconds, so the first minute of an outage retries every second, as EternalTerminal
+ * does (src/base/ClientConnection.cpp); after that the wait doubles up to 15 s.
+ */
+export function nextReconnectDelay(previousMs: number, outageMs: number): number {
+  if (outageMs < 60_000) return 1000
+  return Math.min(Math.max(previousMs, 1000) * 2, 15_000)
+}

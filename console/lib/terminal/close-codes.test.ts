@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ApiError, retryAfterMs } from "@/lib/api"
-import { reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 
 const refusal = (status: number, code: string) => new ApiError(status, code, "stub")
 
@@ -53,5 +53,15 @@ describe("terminal close codes", () => {
     expect(retryAfterMs(at("99999"))).toBe(600_000)
     expect(retryAfterMs(new Response(null), 0)).toBeUndefined()
     expect(retryAfterMs(at(new Date(5000).toUTCString()), 2000)).toBe(3000)
+  })
+})
+
+describe("reconnect delay", () => {
+  test("the first minute of an outage retries every second, then backs off to 15 s", () => {
+    expect(nextReconnectDelay(1000, 0)).toBe(1000)
+    expect(nextReconnectDelay(1000, 59_999)).toBe(1000)
+    expect(nextReconnectDelay(1000, 60_000)).toBe(2000)
+    expect(nextReconnectDelay(8000, 90_000)).toBe(15_000)
+    expect(nextReconnectDelay(15_000, 600_000)).toBe(15_000)
   })
 })

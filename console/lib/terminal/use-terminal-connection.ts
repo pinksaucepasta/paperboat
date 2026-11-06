@@ -29,7 +29,7 @@ import {
   type MobileModifiers,
 } from "@/lib/terminal/mobile-keys"
 import { createLivenessProbe } from "@/lib/terminal/liveness-probe"
-import { reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
+import { nextReconnectDelay, reconnectWait, terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
 
 /**
@@ -216,6 +216,8 @@ export function useTerminalConnection({
   const resizeTimerRef = useRef<number | undefined>(undefined)
   const ticketAbortRef = useRef<AbortController | null>(null)
   const retryDelayRef = useRef(1000)
+  // When the current outage began (0 while attached); see nextReconnectDelay.
+  const outageStartRef = useRef(0)
   // An immediate reconnect (close-codes.ts reconnectWait) was used since the last attach.
   const immediateSpentRef = useRef(false)
   const disposedRef = useRef(false)
@@ -407,12 +409,13 @@ export function useTerminalConnection({
     }
   }, [setFilePasteBusy, showFilePasteNotice])
 
-  // `waitMs` is the server's Retry-After; otherwise the backoff doubles up to 15 s.
+  // `waitMs` is the server's Retry-After; otherwise nextReconnectDelay.
   const scheduleReconnect = useCallback(
     (waitMs?: number) => {
       setPhaseValue("reconnecting")
+      if (outageStartRef.current === 0) outageStartRef.current = Date.now()
       const wait = waitMs ?? retryDelayRef.current
-      if (waitMs === undefined) retryDelayRef.current = Math.min(wait * 2, 15000)
+      if (waitMs === undefined) retryDelayRef.current = nextReconnectDelay(wait, Date.now() - outageStartRef.current)
       window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = window.setTimeout(() => {
         void startConnectionRef.current?.(true)
@@ -798,6 +801,7 @@ export function useTerminalConnection({
         setPhaseValue("attached")
         setConnectedEdge(ticketEdgeRef.current)
         retryDelayRef.current = 1000
+        outageStartRef.current = 0
         immediateSpentRef.current = false
         setError("")
         const nextRole: TerminalRole = event.role === "owner" || event.role === "interactive" ? event.role : "viewer"
