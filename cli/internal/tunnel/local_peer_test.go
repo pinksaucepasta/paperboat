@@ -838,3 +838,24 @@ func TestDaemonStopReadsAsDaemonLost(t *testing.T) {
 		_ = connection.Close()
 	}
 }
+
+// pb update restarts the local daemon under a running `pb exec`: the daemon ends the stream with a closed frame and
+// exits, so Wait's request to it fails with a broken pipe. That is a lost link the exec reattaches from, not a failure
+// of the command (macOS: update_continuity lost the running exec in 3 of 4 runs).
+func TestLocalExecPeerWaitAfterTheDaemonClosedTheStreamIsATransportLoss(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	connection, err := NewLocalExecPeerConn(localClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := (&localPeerWriter{writer: localServer}).write(localPeerClosed, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = localServer.Close()
+	for range connection.Events() {
+	}
+	if _, err := connection.Wait(); !errors.Is(err, ErrTransportLost) {
+		t.Fatalf("Wait after the daemon closed the stream = %v, want a transport loss", err)
+	}
+}

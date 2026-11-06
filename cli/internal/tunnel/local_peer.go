@@ -853,6 +853,10 @@ func (c *localPeerConn) Wait() (int, error) {
 			return result.code, result.err
 		default:
 		}
+		// The daemon closed the link (it restarted): the exec may still run, so say it was lost, not that the write failed.
+		if !errors.Is(err, ErrPeerTerminalInvalid) {
+			err = errors.Join(ErrLocalDaemonLost, err)
+		}
 		return 1, err
 	}
 	select {
