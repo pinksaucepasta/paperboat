@@ -77,9 +77,9 @@ func TestInterruptedInstallIsRecoveredOnceAndTheUpdaterReadsTheInstalledSource(t
 		t.Fatal("the stale journal was accepted by the readiness probe")
 	}
 	restored := 0
-	restore := func(context.Context) error { restored++; return nil }
+	restore := func(context.Context) (bool, error) { restored++; return false, nil }
 	for round := 0; round < 2; round++ {
-		if err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
+		if _, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 	interruptedInstallWriterWait = 200 * time.Millisecond
 	defer func() { interruptedInstallWriterWait = previousWait }()
 	restored := false
-	if err = recoverInterruptedInstall(context.Background(), paths, func(context.Context) error { restored = true; return nil }); err != nil {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, func(context.Context) (bool, error) { restored = true; return false, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil || restored {
@@ -143,38 +143,41 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 	}
 	interrupted := true
 	runs, startedOnCandidate := 0, 0
-	restore := func(context.Context) error {
+	restore := func(context.Context) (bool, error) {
 		runs++
 		if err := os.Rename(pin, paths.worker+".next"); err != nil { // worker first: the pin is the restore source
 			if !os.IsNotExist(err) {
-				return err
+				return false, err
 			}
 			if err = os.WriteFile(paths.worker+".next", image, 0755); err != nil {
-				return err
+				return false, err
 			}
 		}
 		if err := os.Rename(paths.worker+".next", paths.worker); err != nil {
-			return err
+			return false, err
 		}
 		if interrupted { // the process dies after the worker is back and before the services are started
-			return errInterruptedRecovery
+			return false, errInterruptedRecovery
 		}
 		if body, _ := os.ReadFile(paths.worker); !bytes.Equal(body, image) {
 			startedOnCandidate++ // services would start on the wrong binary
 		}
-		return removeJournal(paths.journal)
+		return true, removeJournal(paths.journal)
 	}
-	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != errInterruptedRecovery {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != errInterruptedRecovery {
 		t.Fatalf("interrupted run: %v", err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil {
 		t.Fatalf("an interrupted recovery must keep the journal so it runs again: %v", err)
 	}
 	interrupted = false
-	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
+	if restartSelf, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil || !restartSelf {
+		t.Fatalf("second run restartSelf=%v err=%v", restartSelf, err)
+	}
+	if false {
 		t.Fatalf("second run: %v", err)
 	}
-	if err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil || runs != 2 {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil || runs != 2 {
 		t.Fatalf("a finished recovery ran again: runs=%d err=%v", runs, err)
 	}
 	if startedOnCandidate != 0 {
@@ -192,3 +195,29 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 }
 
 var errInterruptedRecovery = errors.New("interrupted")
+
+// The journal is the only thing a later start can retry from. A native rollback that fails must not have removed
+// it first (it was removed before the rollback, so nothing retried and every later install was refused as pending).
+func TestFileRollbackKeepsTheJournalUntilTheNativeRollbackSucceeded(t *testing.T) {
+	paths, _, _ := interruptedInstall(t)
+	installation := unixCarrierInstallation{paths: paths}
+	native := filepath.Join(paths.updateState, "native-install.json")
+	if err := os.WriteFile(native, []byte("{}"), 0644); err != nil { // wrong mode: the native rollback refuses it
+		t.Fatal(err)
+	}
+	if err := installation.finishFileRollback(); err == nil {
+		t.Fatal("a refused native rollback was reported as done")
+	}
+	if _, err := os.Lstat(paths.journal); err != nil {
+		t.Fatalf("the journal was removed although the native rollback failed: %v", err)
+	}
+	if err := os.Remove(native); err != nil {
+		t.Fatal(err)
+	}
+	if err := installation.finishFileRollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(paths.journal); !os.IsNotExist(err) {
+		t.Fatalf("the journal outlived a finished rollback: %v", err)
+	}
+}

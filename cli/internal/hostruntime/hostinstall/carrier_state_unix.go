@@ -185,7 +185,7 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		if err := s.restoreLegacy(ctx, baseline.Legacy); err != nil {
 			return err
 		}
-		return errors.Join(removeInstallFile(s.paths.workerNext), removeJournal(s.paths.journal), updated.RollbackUnixNativeInstall(s.paths.updateState))
+		return s.finishFileRollback()
 	}
 	if baseline.CarrierOnly {
 		return service.ErrLifecycleUncertain
@@ -234,7 +234,20 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	if err := startBaselineHostd(ctx, s.request, baseline.Worker); err != nil {
 		return err
 	}
-	return errors.Join(removeInstallFile(s.paths.workerNext), removeJournal(s.paths.journal), updated.RollbackUnixNativeInstall(s.paths.updateState))
+	return s.finishFileRollback()
+}
+
+// finishFileRollback ends a restore. The journal goes last and only after the native rollback succeeded: a
+// failure here must leave it for the next start to retry (without it nothing retries, and every later install is
+// refused as pending).
+func (s unixCarrierInstallation) finishFileRollback() error {
+	if err := updated.RollbackUnixNativeInstall(s.paths.updateState); err != nil {
+		return err
+	}
+	if err := removeInstallFile(s.paths.workerNext); err != nil {
+		return err
+	}
+	return removeJournal(s.paths.journal)
 }
 
 // startBaselineHostd restarts the previous hostd generation if it handed its
