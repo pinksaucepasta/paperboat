@@ -126,6 +126,10 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	}
 	// Native declarations and recovery helpers can outlive a committed update.
 	// Their environment is a launch snapshot, not the installed version owner.
+	// An install killed halfway leaves a journal every reader below rejects; undo it before reading any state.
+	if err := hostinstall.RecoverInterrupted(ctx, uid); err != nil {
+		return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
+	}
 	installed, err := hostinstall.LoadEnrolledOwner(uid)
 	installedSource := installed.Source
 	if err != nil {
