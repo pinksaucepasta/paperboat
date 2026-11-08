@@ -19,18 +19,19 @@ import (
 
 type freshResetCleanupError struct{ err error }
 
+// errFreshResetStateRetained marks a reset that skipped removing user state (Inbox location or service termination unproven).
+var errFreshResetStateRetained = errors.New("user state was retained")
+
 func (e freshResetCleanupError) Error() string {
 	steps := uninstallFailureStepNames(e.err)
 	if len(steps) == 0 {
 		return "Paperboat fresh enrollment reset was incomplete. Retry the installer."
 	}
 	message := "Paperboat fresh enrollment reset was incomplete. Failed: " + strings.Join(steps, ", ") + "." + purgeIncompleteDetail(e.err)
-	// Credentials and state are kept only when the services could not be stopped (performFreshEnrollmentCleanup
-	// skips the state removal then); a later failed step, such as the SSH configuration, happens after they are gone.
-	for _, step := range steps {
-		if step == "stop local daemon" || step == "remove system Paperboat runtime" {
-			return message + " Credentials and state were retained because service termination could not be confirmed; retry the installer."
-		}
+	// Credentials and state are kept exactly when performFreshEnrollmentCleanup skipped the state removal; a later
+	// failed step, such as the SSH configuration, happens after they are gone.
+	if errors.Is(e.err, errFreshResetStateRetained) {
+		return message + " Credentials and state were retained so a retry can find them; retry the installer."
 	}
 	return message + " Retry the installer."
 }
@@ -264,10 +265,10 @@ func performFreshEnrollmentCleanup(inboxErr error, removeDaemon, removeSSHConfig
 		{name: "discard unfinished enrollment", run: discardEnrollment},
 		{name: "remove user Paperboat state", run: func() error {
 			if inboxErr != nil {
-				return errors.New("Paperboat Inbox location could not be proven; state removal was skipped")
+				return fmt.Errorf("%w: Paperboat Inbox location could not be proven; state removal was skipped", errFreshResetStateRetained)
 			}
 			if !daemonStopped || !runtimePurged {
-				return errors.New("Paperboat service termination was not confirmed; credentials and state were retained for a safe retry")
+				return fmt.Errorf("%w: Paperboat service termination was not confirmed", errFreshResetStateRetained)
 			}
 			return purgeState()
 		}},

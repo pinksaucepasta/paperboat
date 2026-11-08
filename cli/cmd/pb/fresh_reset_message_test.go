@@ -67,6 +67,9 @@ func TestFailedResetSaysCredentialsWereRetainedOnlyWhenServiceTerminationFailed(
 		{"daemon stop fails", func() error {
 			return performFreshEnrollmentCleanup(nil, fail, ok, ok, ok, ok, ok)
 		}, true, "stop local daemon"},
+		{"inbox location unproven", func() error {
+			return performFreshEnrollmentCleanup(syscall.ENOENT, ok, ok, ok, ok, ok, ok)
+		}, true, "resolve Paperboat Inbox preservation"},
 		{"SSH configuration fails after state removal", func() error {
 			return performFreshEnrollmentCleanup(nil, ok, fail, ok, ok, ok, ok)
 		}, false, "remove managed OpenSSH configuration"},
