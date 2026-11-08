@@ -51,7 +51,7 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			}
 			token, err := bootstrap.ReadEnrollmentTokenFile(tokenFile)
 			if err != nil {
-				return err
+				return localArgumentError("pb reset cannot use the enrollment token file: it must be an absolute path without repeated slashes or dot segments, a regular file that only you can read, holding the token")
 			}
 			stateRoot, _ := command.Flags().GetString("state-root")
 			if stateRoot == "" {

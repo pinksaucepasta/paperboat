@@ -129,6 +129,55 @@ esac
 	}
 }
 
+// F1-01 (pbmac, 2026-11-06): macOS TMPDIR ends with "/", the installer staged its token file at ".../T//paperboat-install.X/enrollment-token"
+// and pb reset rejected the unclean path with a bare "could not finish the command".
+func TestInstallerStagesACleanTokenFilePathWhenTMPDIRHasATrailingSlash(t *testing.T) {
+	root := t.TempDir()
+	product, seen := filepath.Join(root, "product"), filepath.Join(root, "token-path")
+	fixture := `#!/bin/sh
+set -eu
+case "$1" in
+reset) shift; while [ "$#" -gt 0 ]; do [ "$1" = --enrollment-token-file ] && printf '%s' "$2" > "$SEEN"; shift; done; exit 19 ;;
+*) exit 19 ;;
+esac
+`
+	writeInstallerFixture(t, product, fixture)
+	digest := sha256.Sum256([]byte(fixture))
+	body, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(body)
+	for key, value := range map[string]string{
+		"PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION": "2026.10.15.1",
+		"PAPERBOAT_PRODUCT_DARWIN_ARM64_URL":     "https://github.com/example/paperboat/releases/download/2026.10.15.1/pb-darwin-arm64",
+		"PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256":  hex.EncodeToString(digest[:]),
+		"PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH":  fmt.Sprint(len(fixture)),
+		"PAPERBOAT_PRODUCT_REPOSITORY":           "example/paperboat",
+	} {
+		script = strings.ReplaceAll(script, "@"+key+"@", value)
+	}
+	installer := filepath.Join(root, "install.sh")
+	writeInstallerFixture(t, installer, script)
+	writeInstallerFixture(t, filepath.Join(root, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 1 ;; esac\n")
+	writeInstallerFixture(t, filepath.Join(root, "curl"), "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then cp \"$PRODUCT\" \"$2\"; exit; fi; shift; done\nexit 1\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "sh", installer, "--enrollment-token", "fixture-token")
+	command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TMPDIR="+root+"/", "PRODUCT="+product, "SEEN="+seen,
+		"PAPERBOAT_INSTALL_DIR=", "PAPERBOAT_ENROLLMENT_TOKEN=")
+	if output, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("fixture reset exits 19, installer succeeded: %s", output)
+	}
+	path, err := os.ReadFile(seen)
+	if err != nil || len(path) == 0 {
+		t.Fatalf("reset was not given a token file: %v", err)
+	}
+	if filepath.Clean(string(path)) != string(path) {
+		t.Fatalf("token file path is not clean: %q", path)
+	}
+}
+
 func writeInstallerFixture(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
