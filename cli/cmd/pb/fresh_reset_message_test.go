@@ -49,3 +49,38 @@ func TestFreshResetNamesAnUncleanEnrollmentTokenFilePath(t *testing.T) {
 		}
 	}
 }
+
+// Review of b1e57bd05: "credentials were retained" is true only when service termination failed; a reset that fails at a
+// later step (state already removed) must not tell the user their credentials were kept.
+func TestFailedResetSaysCredentialsWereRetainedOnlyWhenServiceTerminationFailed(t *testing.T) {
+	ok := func() error { return nil }
+	fail := func() error { return syscall.ENOENT }
+	for _, tc := range []struct {
+		name     string
+		cleanup  func() error
+		retained bool
+		step     string
+	}{
+		{"runtime purge fails", func() error {
+			return performFreshEnrollmentCleanup(nil, ok, ok, ok, fail, ok, ok)
+		}, true, "remove system Paperboat runtime"},
+		{"daemon stop fails", func() error {
+			return performFreshEnrollmentCleanup(nil, fail, ok, ok, ok, ok, ok)
+		}, true, "stop local daemon"},
+		{"SSH configuration fails after state removal", func() error {
+			return performFreshEnrollmentCleanup(nil, ok, fail, ok, ok, ok, ok)
+		}, false, "remove managed OpenSSH configuration"},
+	} {
+		err := tc.cleanup()
+		if err == nil {
+			t.Fatalf("%s: cleanup succeeded", tc.name)
+		}
+		message := freshResetCleanupError{err: err}.Error()
+		if !strings.Contains(message, "Failed: ") || !strings.Contains(message, tc.step) {
+			t.Errorf("%s: message does not name the step %q: %q", tc.name, tc.step, message)
+		}
+		if got := strings.Contains(message, "retained"); got != tc.retained {
+			t.Errorf("%s: mentions retained credentials = %v, want %v: %q", tc.name, got, tc.retained, message)
+		}
+	}
+}
