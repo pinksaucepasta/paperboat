@@ -79,7 +79,7 @@ func TestInterruptedInstallIsRecoveredOnceAndTheUpdaterReadsTheInstalledSource(t
 		t.Fatal("the stale journal was accepted by the readiness probe")
 	}
 	restored := 0
-	restore := func(context.Context) (func(context.Context) error, error) { restored++; return nil, nil }
+	restore := func(context.Context, Request) (func(context.Context) error, error) { restored++; return nil, nil }
 	for round := 0; round < 2; round++ {
 		if _, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil {
 			t.Fatalf("round %d: %v", round, err)
@@ -115,7 +115,7 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 	interruptedInstallWriterWait = 200 * time.Millisecond
 	defer func() { interruptedInstallWriterWait = previousWait }()
 	restored := false
-	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil })
+	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context, Request) (func(context.Context) error, error) { restored = true; return nil, nil })
 	if err != nil || !recovery.InstallRunning {
 		t.Fatalf("a live installer's journal was not reported as running: %+v %v", recovery, err)
 	}
@@ -146,7 +146,7 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 	}
 	interrupted := true
 	runs, startedOnCandidate := 0, 0
-	restore := func(context.Context) (func(context.Context) error, error) {
+	restore := func(context.Context, Request) (func(context.Context) error, error) {
 		runs++
 		if err := os.Rename(pin, paths.worker+".next"); err != nil { // worker first: the pin is the restore source
 			if !os.IsNotExist(err) {
@@ -233,11 +233,40 @@ func TestASecondRecovererIsToldItIsBusy(t *testing.T) {
 	}
 	defer first.Close()
 	restored := false
-	_, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil })
+	_, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context, Request) (func(context.Context) error, error) { restored = true; return nil, nil })
 	if !errors.Is(err, ErrRecoveryBusy) || restored {
 		t.Fatalf("second recoverer: err=%v restored=%v", err, restored)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil {
 		t.Fatalf("the journal of a recovery in progress was touched: %v", err)
+	}
+}
+
+// An unreadable pending request of a killed first enrollment is reported, not fatal: failing on it every attempt
+// would keep the updater in its retry backoff with the files never undone.
+func TestAnUnreadablePendingEnrollmentIsReportedNotFatal(t *testing.T) {
+	paths, request, _ := interruptedInstall(t)
+	if err := os.Remove(paths.metadata); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := loadJournal(paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.PreviousMetadata, journal.Pending = nil, []byte(`{"schema":"not-a-request"}`)
+	if err = writeJournal(paths.journal, journal); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	restore := func(_ context.Context, request Request) (func(context.Context) error, error) {
+		restored = request.Schema == ""
+		return nil, nil
+	}
+	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore)
+	if err != nil || recovery.Cleanup == nil || !restored {
+		t.Fatalf("err=%v cleanup=%v restored without a request=%v", err, recovery.Cleanup, restored)
+	}
+	if _, err = os.Lstat(paths.journal); !os.IsNotExist(err) {
+		t.Fatalf("journal left behind: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"runtime"
@@ -150,6 +151,11 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			journal, err = newInstallJournal(paths, request.Source)
 			if err != nil {
 				return err
+			}
+			if len(journal.PreviousMetadata) == 0 {
+				if journal.Pending, err = json.Marshal(request); err != nil {
+					return err
+				}
 			}
 			if err := writeJournal(paths.journal, journal); err != nil {
 				return err

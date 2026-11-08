@@ -39,13 +39,9 @@ func RecoverInterrupted(ctx context.Context, uid int, self string) (Recovery, er
 		return Recovery{}, ErrInvalidRequest
 	}
 	paths := platformPaths(uid)
-	return recoverInterruptedInstall(ctx, paths, uid, service.ExecRunner{}, func(ctx context.Context) (func(context.Context) error, error) {
-		request, err := loadInstallMetadata(paths.metadata, uid)
-		if installNotExistOnly(err) {
-			return nil, nil // a first enrollment has no earlier services to put back
-		}
-		if err != nil {
-			return nil, err
+	return recoverInterruptedInstall(ctx, paths, uid, service.ExecRunner{}, func(ctx context.Context, request Request) (func(context.Context) error, error) {
+		if request.Schema == "" {
+			return nil, nil // nothing records which services to put back
 		}
 		hostd, updater, err := pendingInstallers(request, paths)
 		if err != nil {
@@ -78,7 +74,7 @@ type Recovery struct {
 	Cleanup error
 }
 
-func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context) (func(context.Context) error, error)) (result Recovery, resultErr error) {
+func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context, Request) (func(context.Context) error, error)) (result Recovery, resultErr error) {
 	if _, err := os.Lstat(paths.journal); installNotExistOnly(err) {
 		return Recovery{}, nil
 	} else if err != nil {
@@ -118,8 +114,16 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
 	// First: nothing the killed attempt staged for its version stays. It is cleanup: what cannot be proven to be the
 	// candidate's (an unreadable descriptor) stays and is reported, and the services are restored regardless.
-	cleanup := withdrawInterruptedCandidate(ctx, paths, uid, runner, journal.Source)
-	finishSelf, err := restoreServices(ctx)
+	request, active, err := recoveryRequest(paths, uid, journal)
+	var cleanup error
+	if errors.Is(err, errPendingUnreadable) {
+		cleanup, err = err, nil // the files are still undone; the unprovable services and candidate stay, reported
+	}
+	if err != nil {
+		return Recovery{}, err
+	}
+	cleanup = errors.Join(cleanup, withdrawInterruptedCandidate(ctx, paths, request, active, runner, journal.Source))
+	finishSelf, err := restoreServices(ctx, request)
 	if err != nil {
 		return Recovery{}, err
 	}
@@ -149,26 +153,46 @@ func lockInterruptedRecovery(root string) (io.Closer, error) {
 	return file, nil
 }
 
+// recoveryRequest is the installation a recovery returns to and its active source: the installed record, or for a
+// killed first enrollment the request it was installing, with no active source (nothing of it stays). The zero
+// Request when neither exists (a journal from before Pending was recorded).
+func recoveryRequest(paths installPaths, uid int, journal installJournal) (Request, string, error) {
+	installed, err := loadInstallMetadata(paths.metadata, uid)
+	if err == nil {
+		return installed, installed.Source.SHA256, nil
+	}
+	if !installNotExistOnly(err) {
+		return Request{}, "", err
+	}
+	if len(journal.Pending) == 0 {
+		return Request{}, "", nil
+	}
+	pending, err := decodeInstallRequest(journal.Pending, uid)
+	if err != nil {
+		return Request{}, "", errors.Join(errPendingUnreadable, err)
+	}
+	return pending, "", nil
+}
+
+var errPendingUnreadable = errors.New("the interrupted first enrollment's request could not be read; its services and session owner stay")
+
 // withdrawInterruptedCandidate undoes the session owner a killed install started for its candidate source and the
 // candidate's pin, as the install's own failure path does (candidateSessionOwner.withdraw, then the inventory): the
 // inventory cannot tell that descriptor from history once recovery reactivates the previous worker (pbvm1 F14-03:
-// both stayed through a later good update). It runs under the install lock, so no install is staging a pin. A
-// descriptor of that generation on other code is history republished on the active code, not the candidate.
-func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid int, runner service.Runner, candidate installsource.Source) error {
-	installed, err := loadInstallMetadata(paths.metadata, uid)
-	if installNotExistOnly(err) {
-		return nil // shortcut: a killed first enrollment leaves its candidate to the next install's inventory
+// both stayed through a later good update). request and active are recoveryRequest's. It runs under the install
+// lock, so no install is staging a pin. A descriptor of that generation on other code is history republished on the
+// active code, not the candidate.
+func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, request Request, active string, runner service.Runner, candidate installsource.Source) error {
+	if request.Schema == "" || active == candidate.SHA256 {
+		return nil
 	}
-	if err != nil || installed.Source.SHA256 == candidate.SHA256 {
-		return err
-	}
-	catalog := sessionOwnerCatalogAt(paths, installed)
+	catalog := sessionOwnerCatalogAt(paths, request)
 	catalog.Runner = runner
 	if _, err := os.Lstat(catalog.Root); installNotExistOnly(err) {
 		return nil // no catalogue: no session owner was ever staged
 	}
-	return errors.Join(withdrawCandidateOwner(ctx, paths.metadata, uid, catalog, candidate),
-		pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256))
+	return errors.Join(withdrawCandidateOwner(ctx, paths.metadata, request.UID, catalog, candidate),
+		pruneSessionOwnerPinsAt(ctx, catalog, paths, request.UID, request.StateRoot, active))
 }
 
 // withdrawCandidateOwner withdraws the session owner of candidate unless its descriptor is history republished on

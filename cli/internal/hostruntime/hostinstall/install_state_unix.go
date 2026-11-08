@@ -33,6 +33,9 @@ type installJournal struct {
 	Stage            string               `json:"stage"`
 	HadWorker        bool                 `json:"had_worker"`
 	UpdatedAt        time.Time            `json:"updated_at"`
+	// Pending is the request a first enrollment installs (no PreviousMetadata): recovery of a killed enrollment
+	// rebuilds its services and catalogue from it, since no installation record exists yet.
+	Pending json.RawMessage `json:"pending,omitempty"`
 }
 
 func newInstallJournal(paths installPaths, source installsource.Source) (installJournal, error) {
@@ -241,6 +244,18 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 	if err != nil {
 		return Request{}, err
 	}
+	request, err := decodeInstallRequest(body, sudoUID)
+	if err != nil {
+		return Request{}, err
+	}
+	if !request.EnrollmentPending && request.InstallationGeneration < 1 {
+		return Request{}, ErrInvalidRequest
+	}
+	return request, nil
+}
+
+// decodeInstallRequest reads a recorded request and checks that it names this platform and sudoUID's exact account.
+func decodeInstallRequest(body []byte, sudoUID int) (Request, error) {
 	request, err := Decode(strings.NewReader(string(body)))
 	if err != nil {
 		return Request{}, hostInstallFailure("reading installation state failed", ErrInvalidRequest, err)
@@ -260,9 +275,6 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 		return Request{}, hostInstallFailure("reading installation state failed", ErrInvalidRequest, err)
 	}
 	if group.Gid != strconv.Itoa(request.GID) {
-		return Request{}, ErrInvalidRequest
-	}
-	if !request.EnrollmentPending && request.InstallationGeneration < 1 {
 		return Request{}, ErrInvalidRequest
 	}
 	return request, nil

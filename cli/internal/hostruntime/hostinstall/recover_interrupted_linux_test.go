@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func TestInterruptedUpdateLeavesNoCandidateSessionOwnerOrPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restore := func(context.Context) (func(context.Context) error, error) { return nil, nil }
+	restore := func(context.Context, Request) (func(context.Context) error, error) { return nil, nil }
 	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, runner, restore); err != nil {
 		t.Fatal(err)
 	}
@@ -125,12 +126,78 @@ func TestAnUnreadableCandidateDescriptorDoesNotStopRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := false
-	restore := func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }
+	restore := func(context.Context, Request) (func(context.Context) error, error) { restored = true; return nil, nil }
 	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, &withdrawRunner{}, restore)
 	if err != nil || !restored || recovery.Cleanup == nil {
 		t.Fatalf("err=%v restored=%v cleanup=%v", err, restored, recovery.Cleanup)
 	}
 	if _, err = os.Lstat(paths.journal); !os.IsNotExist(err) {
 		t.Fatalf("journal left behind: %v", err)
+	}
+}
+
+// A killed first enrollment has no installation record yet, so recovery could not rebuild its services or catalogue
+// and left its session owner, descriptor and pin for "the next install". The journal now carries the request it was
+// installing: recovery restores its services from it and removes the candidate it staged.
+func TestKilledFirstEnrollmentLeavesNoCandidateSessionOwnerOrPin(t *testing.T) {
+	paths, request, _ := interruptedInstall(t)
+	if err := os.Remove(paths.metadata); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := loadJournal(paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.PreviousMetadata = nil
+	if journal.Pending, err = json.Marshal(request); err != nil {
+		t.Fatal(err)
+	}
+	if err = writeJournal(paths.journal, journal); err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.ReadFile(paths.worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinDir := filepath.Join(paths.root, "pins", request.Source.SHA256)
+	if err = os.MkdirAll(pinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(pinDir, "pb"), image, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &withdrawRunner{}
+	catalog := sessionOwnerCatalogAt(paths, request)
+	catalog.Runner = runner
+	runtimeRoot := filepath.Join(paths.root, "runtime")
+	if err = os.Mkdir(runtimeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d := sessionowner.Descriptor{Schema: sessionowner.Schema, Generation: request.Source.SHA256[:32], Instance: paths.instance, Source: request.Source,
+		Executable: filepath.Join(pinDir, "pb"), RuntimeRoot: runtimeRoot, InitialStore: true, Endpoint: filepath.Join(paths.root, "owner", "control.sock"),
+		UID: request.UID, GID: request.GID, Workspace: paths.root, Shell: "/bin/sh"}
+	if err = catalog.Publish(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := sessionowner.Find(catalog.Root, d.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restoredFrom Request
+	restore := func(_ context.Context, request Request) (func(context.Context) error, error) {
+		restoredFrom = request
+		return nil, nil
+	}
+	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, runner, restore)
+	if err != nil || recovery.Cleanup != nil {
+		t.Fatalf("err=%v cleanup=%v", err, recovery.Cleanup)
+	}
+	if restoredFrom.Source != request.Source {
+		t.Fatal("the services were not restored from the enrollment's own request")
+	}
+	for _, leftover := range []string{descriptor, pinDir, paths.journal, paths.metadata} {
+		if _, err = os.Lstat(leftover); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the recovery of a killed first enrollment: %v", leftover, err)
+		}
 	}
 }
