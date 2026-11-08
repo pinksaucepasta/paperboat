@@ -215,11 +215,19 @@ func TestExecReattachKeepsAPermanentErrorThatRacesTheAttemptTimer(t *testing.T) 
 type stallConn struct {
 	cutConn
 	aborted chan struct{}
-	once    sync.Once // Detach is idempotent, as helperExecConn's closeOnce makes it
+	once    sync.Once     // Detach is idempotent, as helperExecConn's closeOnce makes it
+	writing chan struct{} // optional: signalled when a write starts blocking
 }
 
-func (c *stallConn) Write([]byte) (int, error) { <-c.aborted; return 0, io.ErrClosedPipe }
-func (c *stallConn) Detach() error             { c.once.Do(func() { close(c.aborted) }); return nil }
+func (c *stallConn) Write([]byte) (int, error) {
+	select {
+	case c.writing <- struct{}{}:
+	default:
+	}
+	<-c.aborted
+	return 0, io.ErrClosedPipe
+}
+func (c *stallConn) Detach() error { c.once.Do(func() { close(c.aborted) }); return nil }
 
 // A replacement that connects and then stalls while the stdin journal is resent is cut at the attempt deadline and
 // retried, instead of hanging the reattach until Ctrl-C.
@@ -249,5 +257,31 @@ func TestExecReattachBoundsTheStdinResend(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a stalled stdin resend hung the reattach")
+	}
+}
+
+// A stdin write blocked on the lost connection's full flow-control window holds the journal lock. The recovery loop
+// aborts that connection before BeginReattach, which unblocks the write (helperExecConn.Detach closes the session:
+// TestHelperExecDetachUnblocksAStdinWriteOnAFullWindow), so the reattach is never held by it.
+func TestExecReattachIsNotHeldByAStdinWriteOnAFullWindow(t *testing.T) {
+	stalled := &stallConn{cutConn: cutConn{host: &hostStdin{}}, aborted: make(chan struct{}), writing: make(chan struct{}, 1)}
+	ref := newExecConnectionRef(stalled)
+	sent := make(chan error, 1)
+	go func() { _, err := ref.SendInput(context.Background(), []byte("stdin")); sent <- err }()
+	<-stalled.writing
+	ref.Clear(stalled) // the recovery loop's order: clear, abort, then BeginReattach
+	_ = abortExecAttachment(stalled)
+	begun := make(chan uint64, 1)
+	go func() { begun <- ref.BeginReattach() }()
+	select {
+	case offset := <-begun:
+		if offset != 0 {
+			t.Fatalf("the reattach starts at stdin offset %d, want 0 (nothing was accepted)", offset)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stdin write blocked on a full window held the reattach")
+	}
+	if err := <-sent; err == nil {
+		t.Fatal("the write on the aborted connection reported success")
 	}
 }

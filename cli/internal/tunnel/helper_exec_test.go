@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -274,5 +276,63 @@ func TestHelperExecStreamsSeparatedOutputAndExactExit(t *testing.T) {
 	}
 	if len(events) != 4 || events[0].State != "started" || events[1].EventSequence != 2 || events[1].Stream != "stdout" || string(events[1].Data) != "out" || events[2].EventSequence != 3 || events[2].Stream != "stderr" || string(events[2].Data) != "err" || events[3].EventSequence != 4 || events[3].State != "exited" {
 		t.Fatalf("events=%#v", events)
+	}
+}
+
+// fullWindowStream is a stream whose peer stopped granting flow control: a write blocks until its session closes, as a
+// quic-go stream write fails once its connection is closed.
+type fullWindowStream struct {
+	writing, closed chan struct{}
+}
+
+func (s *fullWindowStream) Write([]byte) (int, error) {
+	select {
+	case s.writing <- struct{}{}:
+	default:
+	}
+	<-s.closed
+	return 0, net.ErrClosed
+}
+func (s *fullWindowStream) Read([]byte) (int, error)       { <-s.closed; return 0, io.EOF }
+func (*fullWindowStream) Close() error                     { return nil }
+func (*fullWindowStream) SetWriteDeadline(time.Time) error { return nil }
+
+type closingStreamGroup struct {
+	stream *fullWindowStream
+	once   sync.Once
+}
+
+func (g *closingStreamGroup) OpenStream(context.Context) (nativeStream, error) { return g.stream, nil }
+func (g *closingStreamGroup) Close() error {
+	g.once.Do(func() { close(g.stream.closed) })
+	return nil
+}
+
+// A stdin write blocked on a full flow-control window holds writeMu with no deadline. Detach (the CLI's abort of a lost
+// attachment) does not take writeMu: it closes the session, so the write returns and the CLI's stdin journal is freed.
+func TestHelperExecDetachUnblocksAStdinWriteOnAFullWindow(t *testing.T) {
+	stream := &fullWindowStream{writing: make(chan struct{}, 1), closed: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	message := &nativeMessageConnection{connection: &closingStreamGroup{stream: stream}, control: stream, input: stream,
+		ctx: ctx, cancel: cancel}
+	connection := &helperExecConn{message: message, streamID: 7, done: make(chan struct{}),
+		request: ExecRequest{OperationID: "operation_exec_1"}}
+	written := make(chan error, 1)
+	go func() { _, err := connection.Write([]byte("stdin")); written <- err }()
+	<-stream.writing
+	detached := make(chan struct{})
+	go func() { _ = connection.Detach(); close(detached) }()
+	select {
+	case <-detached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Detach waited for the blocked stdin write")
+	}
+	select {
+	case err := <-written:
+		if err == nil {
+			t.Fatal("the write on the detached connection reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Detach did not unblock the stdin write")
 	}
 }
