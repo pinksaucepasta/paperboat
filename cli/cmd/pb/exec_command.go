@@ -448,7 +448,14 @@ func reattachExecConnection(
 		}
 		return nil, err
 	}
-	if setErr := ref.Set(replacement); setErr != nil {
+	// The resend is part of the attempt: a replacement that connects and then stalls its writes is cut at the same
+	// deadline (the write has no context of its own, so closing the connection is what unblocks it).
+	stopAbort := context.AfterFunc(attempt, func() { _ = abortExecAttachment(replacement) })
+	setErr := ref.Set(replacement)
+	if !stopAbort() {
+		setErr = errors.Join(setErr, fmt.Errorf("the replacement took the stdin resend past %v", execReattachAttemptTimeout))
+	}
+	if setErr != nil {
 		ref.Clear(replacement)
 		_ = abortExecAttachment(replacement)
 		return nil, errors.Join(errExecInputFlush, setErr)

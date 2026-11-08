@@ -202,9 +202,52 @@ func TestExecReattachKeepsAPermanentErrorThatRacesTheAttemptTimer(t *testing.T) 
 		<-ctx.Done()
 		return api.ExecDescriptor{}, missing
 	}
-	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) { return nil, errors.New("not dialed") }
+	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) {
+		return nil, errors.New("not dialed")
+	}
 	_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
 	if !errors.Is(err, missing) || retryableExecReattachment(err) {
 		t.Fatalf("the permanent error became %v (retryable %v)", err, retryableExecReattachment(err))
+	}
+}
+
+// stallConn accepts the connection and then never completes a write until it is aborted.
+type stallConn struct {
+	cutConn
+	aborted chan struct{}
+	once    sync.Once // Detach is idempotent, as helperExecConn's closeOnce makes it
+}
+
+func (c *stallConn) Write([]byte) (int, error) { <-c.aborted; return 0, io.ErrClosedPipe }
+func (c *stallConn) Detach() error             { c.once.Do(func() { close(c.aborted) }); return nil }
+
+// A replacement that connects and then stalls while the stdin journal is resent is cut at the attempt deadline and
+// retried, instead of hanging the reattach until Ctrl-C.
+func TestExecReattachBoundsTheStdinResend(t *testing.T) {
+	old := execReattachAttemptTimeout
+	execReattachAttemptTimeout = 50 * time.Millisecond
+	defer func() { execReattachAttemptTimeout = old }()
+	host := &hostStdin{}
+	ref := newExecConnectionRef(&cutConn{host: host, failAt: 1})
+	if connection, err := ref.SendInput(context.Background(), []byte("stdin")); err != nil {
+		ref.Clear(connection)
+	}
+	var request tunnel.ExecRequest
+	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
+	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) {
+		return &stallConn{cutConn: cutConn{host: host}, aborted: make(chan struct{})}, nil
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !retryableExecReattachment(err) {
+			t.Fatalf("a stalled resend: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stalled stdin resend hung the reattach")
 	}
 }
