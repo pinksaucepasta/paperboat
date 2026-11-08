@@ -167,6 +167,9 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		}
 		return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
 	}
+	if recovery.Cleanup != nil {
+		fmt.Fprintf(stderr, "paperboat-updated: the interrupted installation was undone, but part of what it staged stays: %v\n", recovery.Cleanup)
+	}
 	if !recovery.InstallRunning {
 		_ = os.Remove(marker) // nothing is left to recover
 	}

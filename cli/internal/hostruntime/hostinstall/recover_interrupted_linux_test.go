@@ -83,3 +83,54 @@ func TestInterruptedUpdateLeavesNoCandidateSessionOwnerOrPin(t *testing.T) {
 		t.Fatalf("journal left behind: %v", err)
 	}
 }
+
+// Withdrawing the killed attempt's candidate is cleanup. An unreadable candidate descriptor used to fail the whole
+// recovery before the services were restored, so the updater stayed in its retry backoff forever with the machine
+// half updated. The services and files are restored, the journal removed, and the leftover reported.
+func TestAnUnreadableCandidateDescriptorDoesNotStopRecovery(t *testing.T) {
+	paths, request, _ := interruptedInstall(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(paths.root, "candidate")
+	if err = os.WriteFile(staged, append(image, 0), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := installsource.Inspect(staged, "candidate", installsource.Custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := loadJournal(paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.Source = candidate
+	if err = writeJournal(paths.journal, journal); err != nil {
+		t.Fatal(err)
+	}
+	catalog := sessionOwnerCatalogAt(paths, request)
+	if err = os.Mkdir(catalog.Root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := sessionowner.Find(catalog.Root, candidate.SHA256[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(descriptor, []byte("{not a descriptor"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	restore := func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }
+	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, &withdrawRunner{}, restore)
+	if err != nil || !restored || recovery.Cleanup == nil {
+		t.Fatalf("err=%v restored=%v cleanup=%v", err, restored, recovery.Cleanup)
+	}
+	if _, err = os.Lstat(paths.journal); !os.IsNotExist(err) {
+		t.Fatalf("journal left behind: %v", err)
+	}
+}

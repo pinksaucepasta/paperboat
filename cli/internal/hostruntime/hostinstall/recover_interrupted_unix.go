@@ -73,6 +73,9 @@ type Recovery struct {
 	FinishSelf func(context.Context) error
 	// InstallRunning: the journal belongs to an installer that is still running; nothing was recovered.
 	InstallRunning bool
+	// Cleanup is what could not be withdrawn of the killed attempt's candidate (withdrawInterruptedCandidate). The
+	// recovery itself completed: a leftover is reported, never a reason to leave the services unrestored.
+	Cleanup error
 }
 
 func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context) (func(context.Context) error, error)) (result Recovery, resultErr error) {
@@ -113,21 +116,20 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 	// by removing this journal. Rolling the files back before it would remove the running executable's path for
 	// nothing; after it, the journal is gone and only the leftover rollback copy of the worker remains. Every step is
 	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
-	// First, while the journal still makes a failure retry: nothing the killed attempt staged for its version stays.
-	if err := withdrawInterruptedCandidate(ctx, paths, uid, runner, journal.Source); err != nil {
-		return Recovery{}, err
-	}
+	// First: nothing the killed attempt staged for its version stays. It is cleanup: what cannot be proven to be the
+	// candidate's (an unreadable descriptor) stays and is reported, and the services are restored regardless.
+	cleanup := withdrawInterruptedCandidate(ctx, paths, uid, runner, journal.Source)
 	finishSelf, err := restoreServices(ctx)
 	if err != nil {
 		return Recovery{}, err
 	}
 	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
-		return Recovery{FinishSelf: finishSelf}, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
+		return Recovery{FinishSelf: finishSelf, Cleanup: cleanup}, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
 	} else if err != nil {
 		return Recovery{}, err
 	}
 	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
-	return Recovery{FinishSelf: finishSelf}, rollbackFiles(paths, journal)
+	return Recovery{FinishSelf: finishSelf, Cleanup: cleanup}, rollbackFiles(paths, journal)
 }
 
 // lockInterruptedRecovery is held by whichever of the updater service and the activation helper recovers;
@@ -165,6 +167,13 @@ func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid i
 	if _, err := os.Lstat(catalog.Root); installNotExistOnly(err) {
 		return nil // no catalogue: no session owner was ever staged
 	}
+	return errors.Join(withdrawCandidateOwner(ctx, paths.metadata, uid, catalog, candidate),
+		pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256))
+}
+
+// withdrawCandidateOwner withdraws the session owner of candidate unless its descriptor is history republished on
+// other code.
+func withdrawCandidateOwner(ctx context.Context, metadata string, uid int, catalog sessionowner.Catalog, candidate installsource.Source) error {
 	generation, err := sourceGeneration(candidate)
 	if err != nil {
 		return err
@@ -175,8 +184,5 @@ func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid i
 	}
 	d, err := sessionowner.Read(path)
 	owner := candidateSessionOwner{catalog: catalog, generation: generation, existed: err == nil && d.Source.SHA256 != candidate.SHA256}
-	if err := owner.withdraw(ctx, paths.metadata, uid); err != nil {
-		return err
-	}
-	return pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256)
+	return owner.withdraw(ctx, metadata, uid)
 }
