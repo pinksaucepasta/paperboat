@@ -296,7 +296,11 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 		// reads this status, so that must not fail it (dadape rolled back .1→.2 on 170 candidate_changed probes).
 		// Any other verification failure, or a handoff for another candidate, still fails status.
 		consumedByActivation := handoff != nil && handoff.Candidate == state.CandidateVersion && errors.Is(candidateErr, workerupdate.ErrStagedPayloadConsumed)
-		if candidateErr != nil && !consumedByActivation {
+		// A candidate that no longer verifies (its staged payload replaced by a supplied install, superseded by a newer
+		// release, or tampered) is not offered for approval, and the approval re-verifies it; it must not make status
+		// and check fail, or the user cannot even see that a newer update exists (F14-09: `pb update check` and `status`
+		// failed with updater_candidate_changed until the next download).
+		if candidateErr != nil && !consumedByActivation && !errors.Is(candidateErr, workerupdate.ErrPreparedCandidate) {
 			return candidateErr
 		}
 		if candidateErr == nil {

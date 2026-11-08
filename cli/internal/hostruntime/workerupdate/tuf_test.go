@@ -194,3 +194,31 @@ func validEligibilityIndex(t *testing.T) (releaseindex.Index, time.Time) {
 		ManifestSHA256: manifest, DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan,
 	}, now
 }
+
+// A deferral granted for release N is not an error for release N+1: `pb update check` and the automatic check judge the new release
+// on its own (F14-09). A deferral for the same version bound to another plan still fails closed.
+func TestTUFSourceIgnoresADeferralGrantedForAnOlderRelease(t *testing.T) {
+	index, now := validEligibilityIndex(t)
+	older, err := releasepolicy.Default("2026.08.30.1", strings.Repeat("d", 64), 1, "routine", "worker-test-seed", []releasepolicy.PlatformTarget{{Platform: "linux", Architecture: "amd64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted, err := older.GrantDeferral(releasepolicy.DeferralRequest{Version: older.Version, RequestedSecs: 3600, Reason: "maintenance"}, now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := TUFSource{
+		MachineID:     "machine_1",
+		FailureDomain: FailureDomainSourceFunc(func(context.Context, FailureDomainRequest) (string, error) { return "iad-1", nil }),
+		Deferral:      DeferralSourceFunc(func(context.Context) (releasepolicy.Deferral, bool, error) { return granted, true, nil }),
+	}
+	if _, err := source.eligible(context.Background(), index, now, true); err != nil {
+		t.Fatalf("a deferral for an older release failed the check of the new one: %v", err)
+	}
+	sameVersion := granted
+	sameVersion.Version = index.Version
+	source.Deferral = DeferralSourceFunc(func(context.Context) (releasepolicy.Deferral, bool, error) { return sameVersion, true, nil })
+	if _, err := source.eligible(context.Background(), index, now, true); !errors.Is(err, ErrDeferralUnavailable) {
+		t.Fatalf("a grant bound to another plan of this version must fail closed: %v", err)
+	}
+}

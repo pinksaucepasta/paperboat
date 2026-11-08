@@ -70,16 +70,19 @@ func TestControlStatusAnswersDuringApprovedActivationWithUnverifiablePayload(t *
 	if err := os.WriteFile(staged, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := status(); controlErrorCode(err) != "candidate_changed" {
-		t.Fatalf("status hid a tampered candidate: %v", err)
+	// A candidate that no longer verifies (replaced by a supplied install, superseded, tampered) is never
+	// offered for approval, but it must not make `pb update status` and `pb update check` fail: the user
+	// re-downloads (F14-09).
+	if response, err := status(); err != nil || response.Candidate != nil {
+		t.Fatalf("status with an unverifiable candidate: %+v %v", response, err)
 	}
 	h := &unixActivationHandoff{Schema: unixHandoffSchema, Previous: active, Candidate: j.CandidateVersion, ApprovalID: approval}
 	if err := writeUnixHandoff(root, h); err != nil {
 		t.Fatal(err)
 	}
 	// Activation in progress but the payload still in place and mismatched: still reported.
-	if _, err := status(); controlErrorCode(err) != "candidate_changed" {
-		t.Fatalf("status hid a tampered candidate during activation: %v", err)
+	if response, err := status(); err != nil || response.Candidate != nil {
+		t.Fatalf("status with an unverifiable candidate during activation: %+v %v", response, err)
 	}
 	// The native install moves the payload: status answers for the activation's readiness probe.
 	if err := os.Remove(staged); err != nil {
@@ -89,12 +92,12 @@ func TestControlStatusAnswersDuringApprovedActivationWithUnverifiablePayload(t *
 	if err != nil || !response.Pending || response.UpdaterVersion == "" || response.Candidate != nil {
 		t.Fatalf("status during the approved activation: %+v %v", response, err)
 	}
-	// A handoff for another candidate does not excuse the missing payload.
+	// A handoff for another candidate: the candidate is still not offered.
 	h.Candidate = "2026.10.28.9"
 	if err := writeUnixHandoff(root, h); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := status(); controlErrorCode(err) != "candidate_changed" {
-		t.Fatalf("status accepted a missing payload for another activation: %v", err)
+	if response, err := status(); err != nil || response.Candidate != nil {
+		t.Fatalf("status for another activation's missing payload: %+v %v", response, err)
 	}
 }

@@ -131,6 +131,12 @@ func (s TUFSource) eligible(ctx context.Context, index releaseindex.Index, now t
 	if err != nil {
 		return false, errors.Join(ErrDeferralUnavailable, err)
 	}
+	// A deferral covers only the release it was granted for. One for an older release says nothing about this one: ignoring it
+	// lets the new release be judged on its own, where failing closed made `pb update check` error out the moment a newer
+	// release was published (F14-09). A malformed grant, or another plan of this same version, still fails closed.
+	if present && deferral.Version != index.Version && deferral.Validate() == nil {
+		present = false
+	}
 	if present {
 		active, err := index.DeploymentPlan.DeferralActive(deferral, now)
 		if err != nil {
