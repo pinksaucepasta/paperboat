@@ -226,8 +226,18 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 	if e = coordinator.Reconcile(ctx); e != nil {
 		t.Fatalf("retirement retry: %v", e)
 	}
+	// The candidate an update staged runs the next build, not the active one.
+	candidatePin := filepath.Join(root, "candidate-pb")
+	if e = os.WriteFile(candidatePin, append(append([]byte(nil), image...), 0), 0755); e != nil {
+		t.Fatal(e)
+	}
+	candidateSource, e := installsource.Inspect(candidatePin, "candidate-qualification", installsource.Custom)
+	if e != nil {
+		t.Fatal(e)
+	}
 	empty := old
 	empty.Generation, empty.InitialStore = generation(4), false
+	empty.Source, empty.Executable = candidateSource, candidatePin
 	empty.Endpoint = filepath.Join(root, "empty-run", "control.sock")
 	if e = os.Mkdir(filepath.Dir(empty.Endpoint), 0700); e != nil {
 		t.Fatal(e)
