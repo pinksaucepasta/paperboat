@@ -347,8 +347,30 @@ var signInRoutes = map[string]bool{
 	"POST /v1/operator/setup":          true,
 }
 
+// failureLimitedRoutes exchange a secret (enrollment token, pairing verifier, join code) before
+// anyone is signed in. Only rejected attempts use up the network's budget, so a fleet behind one
+// NAT enrolling or renewing is not throttled; guessing is (OWASP Authentication Cheat Sheet,
+// "Protect Against Automated Attacks"; same Check-then-Allow-on-failure shape as apiTokenAuth).
+var failureLimitedRoutes = map[string]bool{
+	"POST /v1/machines/pairings":              true,
+	"POST /v1/machines/pairings/reset":        true,
+	"POST /v1/machines/pairings/installation": true,
+	"POST /v1/helper-enrollments":             true,
+	"POST /v1/helper-identity-renewals":       true,
+}
+
+// failureLimited covers the routes above plus the guest terminal join-code and ticket routes,
+// whose path carries a session id: guesses must not spread across sessions.
+func failureLimited(r *http.Request) bool {
+	if failureLimitedRoutes[r.Method+" "+r.URL.Path] {
+		return true
+	}
+	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/terminal-sessions/")
+	return ok && r.Method == http.MethodPost && (strings.HasSuffix(rest, "/code-join") || strings.HasSuffix(rest, "/guest-browser-ticket"))
+}
+
 // signInLimit limits sign-in requests per client network in memory, before any database work
-// (PLAN F21-14, Lane X #15).
+// (PLAN F21-14, Lane X #15), and failed secret exchanges the same way.
 func signInLimit(limiter *ratelimit.Limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if signInRoutes[r.Method+" "+r.URL.Path] {
@@ -356,6 +378,18 @@ func signInLimit(limiter *ratelimit.Limiter, next http.Handler) http.Handler {
 				writeRateLimited(w, r, wait)
 				return
 			}
+		} else if failureLimited(r) {
+			key := "exchange-failure:" + resolvedRequestNetwork(r)
+			if ok, wait := limiter.Check(key); !ok {
+				writeRateLimited(w, r, wait)
+				return
+			}
+			recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(recorder, r)
+			if recorder.status >= 400 && recorder.status < 500 {
+				limiter.Allow(key)
+			}
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

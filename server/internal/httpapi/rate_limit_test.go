@@ -37,3 +37,43 @@ func TestSignInLimitAppliesToSignInRoutesOnly(t *testing.T) {
 		t.Fatalf("a non-sign-in route was limited: %d", rec.Code)
 	}
 }
+
+// Secret-exchange routes (pairing, helper enrollment, guest join code and ticket) charge the
+// network only for rejected attempts, and guesses spread across terminal sessions share one budget.
+func TestFailedSecretExchangesAreLimitedPerNetwork(t *testing.T) {
+	handler := signInLimit(ratelimit.New(60, 2, 1000), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Reject") != "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	send := func(path string, reject bool) int {
+		rec := httptest.NewRecorder()
+		request := httptest.NewRequest("POST", path, nil)
+		if reject {
+			request.Header.Set("X-Test-Reject", "1")
+		}
+		handler.ServeHTTP(rec, request)
+		return rec.Code
+	}
+	for i := range 5 {
+		if code := send("/v1/helper-enrollments", false); code != http.StatusNoContent {
+			t.Fatalf("success %d was limited: %d", i+1, code)
+		}
+	}
+	if code := send("/v1/terminal-sessions/ts_a/code-join", true); code != http.StatusNotFound {
+		t.Fatalf("first guess: %d", code)
+	}
+	if code := send("/v1/terminal-sessions/ts_b/guest-browser-ticket", true); code != http.StatusNotFound {
+		t.Fatalf("second guess on another session: %d", code)
+	}
+	for _, path := range []string{"/v1/terminal-sessions/ts_c/code-join", "/v1/machines/pairings", "/v1/helper-identity-renewals", "/v1/machines/pairings/reset", "/v1/machines/pairings/installation"} {
+		if code := send(path, false); code != http.StatusTooManyRequests {
+			t.Fatalf("%s after the failures: %d, want 429", path, code)
+		}
+	}
+	if code := send("/v1/terminal-sessions/ts_c/other", false); code != http.StatusNoContent {
+		t.Fatalf("an unrelated terminal route was limited: %d", code)
+	}
+}
