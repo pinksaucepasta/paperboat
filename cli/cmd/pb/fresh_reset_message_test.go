@@ -44,7 +44,7 @@ func TestFreshResetNamesAnUncleanEnrollmentTokenFilePath(t *testing.T) {
 		"text": commandFailureMessage(err, classifyCommandFailure(err)),
 		"json": classifyCLIJSONError(err).Message,
 	} {
-		if !strings.Contains(message, "enrollment token file") || !strings.Contains(message, "repeated slashes") {
+		if !strings.Contains(message, "enrollment token file") || !strings.Contains(message, "repeated slashes") || !strings.Contains(message, "0600") || !strings.Contains(message, "512 bytes") || !strings.Contains(message, "Windows") {
 			t.Errorf("%s message does not name the token file path: %q", name, message)
 		}
 	}
