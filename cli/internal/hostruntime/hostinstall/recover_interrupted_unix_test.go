@@ -115,8 +115,9 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 	interruptedInstallWriterWait = 200 * time.Millisecond
 	defer func() { interruptedInstallWriterWait = previousWait }()
 	restored := false
-	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }); err != nil {
-		t.Fatal(err)
+	recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil })
+	if err != nil || !recovery.InstallRunning {
+		t.Fatalf("a live installer's journal was not reported as running: %+v %v", recovery, err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil || restored {
 		t.Fatalf("a live installer's journal was recovered: restored=%v err=%v", restored, err)
@@ -173,8 +174,8 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 		t.Fatalf("an interrupted recovery must keep the journal so it runs again: %v", err)
 	}
 	interrupted = false
-	if finishSelf, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil || finishSelf == nil {
-		t.Fatalf("second run finishSelf=%v err=%v", finishSelf != nil, err)
+	if recovery, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil || recovery.FinishSelf == nil {
+		t.Fatalf("second run finishSelf=%v err=%v", recovery.FinishSelf != nil, err)
 	}
 	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil || runs != 2 {
 		t.Fatalf("a finished recovery ran again: runs=%d err=%v", runs, err)
@@ -218,5 +219,25 @@ func TestFileRollbackKeepsTheJournalUntilTheNativeRollbackSucceeded(t *testing.T
 	}
 	if _, err := os.Lstat(paths.journal); !os.IsNotExist(err) {
 		t.Fatalf("the journal outlived a finished rollback: %v", err)
+	}
+}
+
+// The updater service and the activation helper can both start a recovery. The one that finds the other recovering
+// must not read the half-restored installation and carry on as if nothing were pending (it used to get "nothing to
+// do" after its 3 s wait): it gets ErrRecoveryBusy and nothing is restored twice.
+func TestASecondRecovererIsToldItIsBusy(t *testing.T) {
+	paths, request, _ := interruptedInstall(t)
+	first, err := lockInterruptedRecovery(paths.updateState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	restored := false
+	_, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil })
+	if !errors.Is(err, ErrRecoveryBusy) || restored {
+		t.Fatalf("second recoverer: err=%v restored=%v", err, restored)
+	}
+	if _, err = os.Lstat(paths.journal); err != nil {
+		t.Fatalf("the journal of a recovery in progress was touched: %v", err)
 	}
 }

@@ -151,8 +151,12 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	if *helper {
 		self = ""
 	}
-	finishSelf, err := hostinstall.RecoverInterrupted(ctx, uid, self)
+	recovery, err := hostinstall.RecoverInterrupted(ctx, uid, self)
 	marker := filepath.Join(stateRoot, recoveryFailingMarker)
+	if errors.Is(err, hostinstall.ErrRecoveryBusy) {
+		// The other one finishes it; until then the installation is half restored. Exit and start again.
+		return failInitialization(err)
+	}
 	if err != nil {
 		wait := recoveryRetryWait(marker, time.Now())
 		fmt.Fprintf(stderr, "paperboat-updated: recovering the interrupted installation failed, retrying in %s: %v\n", wait, err)
@@ -163,8 +167,10 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		}
 		return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
 	}
-	_ = os.Remove(marker)
-	if finishSelf != nil {
+	if !recovery.InstallRunning {
+		_ = os.Remove(marker) // nothing is left to recover
+	}
+	if finishSelf := recovery.FinishSelf; finishSelf != nil {
 		// Last step: this updater's own service returns to its pre-install state. Either it still runs the
 		// replaced executable and its supervisor starts it on the restored one, or it is stopped or removed.
 		return failInitialization(errors.Join(errors.New("the interrupted installation was undone; the updater's own service returns to its state before it"), finishSelf(ctx)))

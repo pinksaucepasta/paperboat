@@ -5,7 +5,10 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -24,15 +27,16 @@ var interruptedInstallWriterWait = 3 * time.Second
 // restored and the journal removed, once. A live writer keeps its journal and is left alone.
 //
 // self is the lifecycle component the caller runs as (the updater service), or "" for a caller outside every
-// component (the activation helper), which restores them all. The caller's own service must not be stopped by the
-// recovery: a non-nil finishSelf (service.LifecycleManager.RecoverWithin) is returned only once everything else is
-// undone, and the caller runs it as its very last step, then exits.
-func RecoverInterrupted(ctx context.Context, uid int, self string) (finishSelf func(context.Context) error, err error) {
+// component (the activation helper), which restores them all.
+//
+// The updater service and the activation helper may both start a recovery: the one that finds the other already
+// recovering gets ErrRecoveryBusy and must not read the installation, which is half restored until the other is done.
+func RecoverInterrupted(ctx context.Context, uid int, self string) (Recovery, error) {
 	if os.Geteuid() != 0 {
-		return nil, ErrNotPrivileged
+		return Recovery{}, ErrNotPrivileged
 	}
 	if uid < 0 {
-		return nil, ErrInvalidRequest
+		return Recovery{}, ErrInvalidRequest
 	}
 	paths := platformPaths(uid)
 	return recoverInterruptedInstall(ctx, paths, uid, service.ExecRunner{}, func(ctx context.Context) (func(context.Context) error, error) {
@@ -59,32 +63,50 @@ func RecoverInterrupted(ctx context.Context, uid int, self string) (finishSelf f
 	})
 }
 
-func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context) (func(context.Context) error, error)) (finishSelf func(context.Context) error, resultErr error) {
+// ErrRecoveryBusy is another process undoing the same interrupted installation right now.
+var ErrRecoveryBusy = errors.New("another Paperboat process is undoing the interrupted installation; retry shortly")
+
+// Recovery is what RecoverInterrupted did.
+type Recovery struct {
+	// FinishSelf, when set, is left for the caller's own component once everything else is undone
+	// (service.LifecycleManager.RecoverWithin): the caller runs it as its very last step, then exits.
+	FinishSelf func(context.Context) error
+	// InstallRunning: the journal belongs to an installer that is still running; nothing was recovered.
+	InstallRunning bool
+}
+
+func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context) (func(context.Context) error, error)) (result Recovery, resultErr error) {
 	if _, err := os.Lstat(paths.journal); installNotExistOnly(err) {
-		return nil, nil
+		return Recovery{}, nil
 	} else if err != nil {
-		return nil, err
+		return Recovery{}, err
 	}
+	// Taken before the install lock and only by recoverers, so a held install lock without it is a live installer.
+	recovering, err := lockInterruptedRecovery(paths.updateState)
+	if err != nil {
+		return Recovery{}, err
+	}
+	defer recovering.Close()
 	waitCtx, cancel := context.WithTimeout(ctx, interruptedInstallWriterWait)
 	defer cancel()
 	lock, err := updated.LockUnixNativeInstall(waitCtx, paths.updateState)
 	if err != nil {
 		if ctx.Err() == nil && errors.Is(err, updated.ErrActivationPending) {
-			return nil, nil // the installer is still running and owns its journal
+			return Recovery{InstallRunning: true}, nil // the installer is still running and owns its journal
 		}
-		return nil, err
+		return Recovery{}, err
 	}
 	defer func() {
 		if resultErr = withCleanup("interrupted installation recovery cleanup failed", resultErr, lock.Close()); resultErr != nil {
-			finishSelf = nil // something is left to retry: the updater stays up for its next start
+			result = Recovery{} // something is left to retry: the updater stays up for its next start
 		}
 	}()
 	journal, err := loadJournal(paths.journal)
 	if installNotExistOnly(err) {
-		return nil, nil // committed while this waited for the lock
+		return Recovery{}, nil // committed while this waited for the lock
 	}
 	if err != nil {
-		return nil, err
+		return Recovery{}, err
 	}
 	// The lifecycle recovery of a replace restores the executable from its verified pin and the metadata BEFORE it
 	// starts any previous service (service.LifecycleManager.rollback calls nativeInstallation.Restore first), and ends
@@ -93,19 +115,36 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
 	// First, while the journal still makes a failure retry: nothing the killed attempt staged for its version stays.
 	if err := withdrawInterruptedCandidate(ctx, paths, uid, runner, journal.Source); err != nil {
-		return nil, err
+		return Recovery{}, err
 	}
-	finishSelf, err = restoreServices(ctx)
+	finishSelf, err := restoreServices(ctx)
+	if err != nil {
+		return Recovery{}, err
+	}
+	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
+		return Recovery{FinishSelf: finishSelf}, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
+	} else if err != nil {
+		return Recovery{}, err
+	}
+	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
+	return Recovery{FinishSelf: finishSelf}, rollbackFiles(paths, journal)
+}
+
+// lockInterruptedRecovery is held by whichever of the updater service and the activation helper recovers;
+// ErrRecoveryBusy when the other one does. flock is released when the holder exits, however it exits.
+func lockInterruptedRecovery(root string) (io.Closer, error) {
+	file, err := os.OpenFile(filepath.Join(root, "interrupted-recovery.lock"), os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
-		return finishSelf, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
-	} else if err != nil {
-		return nil, err
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		closeErr := file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrRecoveryBusy
+		}
+		return nil, errors.Join(err, closeErr)
 	}
-	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
-	return finishSelf, rollbackFiles(paths, journal)
+	return file, nil
 }
 
 // withdrawInterruptedCandidate undoes the session owner a killed install started for its candidate source and the
