@@ -71,9 +71,10 @@ case $(uname -m) in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) 
 
 command -v curl >/dev/null 2>&1 || { echo "pb installer: curl is required" >&2; exit 1; }
 
-# macOS TMPDIR ends with "/": pb rejects a token file path that is not clean (no "//").
+# TMPDIR may end in "/" (macOS) or repeat slashes: pb rejects a token file path that is not clean, so use the resolved directory.
 tmp_root=${TMPDIR:-/tmp}
 temporary=$(mktemp -d "${tmp_root%/}/paperboat-install.XXXXXX")
+temporary=$(cd "$temporary" && pwd -P)
 cleanup() { rm -rf -- "$temporary"; }
 trap cleanup EXIT HUP INT TERM
 if [ "$pair" = true ]; then

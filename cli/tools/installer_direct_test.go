@@ -133,6 +133,23 @@ esac
 // and pb reset rejected the unclean path with a bare "could not finish the command".
 func TestInstallerStagesACleanTokenFilePathWhenTMPDIRHasATrailingSlash(t *testing.T) {
 	root := t.TempDir()
+	spaced := filepath.Join(root, "a b")
+	if err := os.Mkdir(spaced, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, tmpdir := range map[string]string{
+		"unset":             "",
+		"trailing slash":    root + "/",
+		"repeated trailing": root + "//",
+		"leading and tail":  "/" + root + "//",
+		"spaces":            spaced + "//",
+	} {
+		t.Run(name, func(t *testing.T) { checkInstallerStagesCleanTokenPath(t, tmpdir) })
+	}
+}
+
+func checkInstallerStagesCleanTokenPath(t *testing.T, tmpdir string) {
+	root := t.TempDir()
 	product, seen := filepath.Join(root, "product"), filepath.Join(root, "token-path")
 	fixture := `#!/bin/sh
 set -eu
@@ -164,7 +181,7 @@ esac
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "sh", installer, "--enrollment-token", "fixture-token")
-	command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TMPDIR="+root+"/", "PRODUCT="+product, "SEEN="+seen,
+	command.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "TMPDIR="+tmpdir, "PRODUCT="+product, "SEEN="+seen,
 		"PAPERBOAT_INSTALL_DIR=", "PAPERBOAT_ENROLLMENT_TOKEN=")
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("fixture reset exits 19, installer succeeded: %s", output)
