@@ -5,6 +5,8 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -191,5 +193,31 @@ func TestUpdaterStopIsCleanWhicheverCancellationArrivesFirst(t *testing.T) {
 		if err := runNotifiedUpdater(ctx, runner, notifier); err != nil {
 			t.Fatalf("a requested stop exited with failure: %v", err)
 		}
+	}
+}
+
+// A recovery that fails every time (a rollback that can never finish) used to exit after each attempt and be
+// restarted every 5 s forever. Each failed attempt now waits as long as recovery has been failing, so the restarts
+// back off exponentially, capped at 10 minutes, and keep retrying.
+func TestFailedRecoveryRetriesBackOffToTenMinutes(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), recoveryFailingMarker)
+	now := time.Now()
+	if wait := recoveryRetryWait(marker, now); wait != 5*time.Second {
+		t.Fatalf("first failure waits %s, want 5s", wait)
+	}
+	for _, test := range []struct{ failing, want time.Duration }{
+		{failing: 40 * time.Second, want: 40 * time.Second},
+		{failing: 3 * time.Minute, want: 3 * time.Minute},
+		{failing: 2 * time.Hour, want: 10 * time.Minute},
+	} {
+		if err := os.Chtimes(marker, now, now.Add(-test.failing)); err != nil {
+			t.Fatal(err)
+		}
+		if wait := recoveryRetryWait(marker, now); wait < test.want-time.Second || wait > test.want {
+			t.Fatalf("failing for %s waits %s, want %s", test.failing, wait, test.want)
+		}
+	}
+	if info, err := os.Stat(marker); err != nil || now.Sub(info.ModTime()) < time.Hour {
+		t.Fatalf("a later failure must keep the first failure's time: %v", err)
 	}
 }

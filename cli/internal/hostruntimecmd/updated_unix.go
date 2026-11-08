@@ -37,6 +37,24 @@ var (
 	healRetryWait    = 30 * time.Second
 )
 
+// recoveryFailingMarker exists while the interrupted-install recovery keeps failing; its mtime is the first failure.
+const recoveryFailingMarker = "recovery-failing"
+
+// recoveryRetryWait is how long a failed recovery waits before the updater exits and its supervisor (Restart=always,
+// launchd KeepAlive) runs it again: as long as it has been failing, so the waits double, from 5 s up to 10 min.
+// In process because systemd's RestartSteps needs systemd 254 (Ubuntu 22.04 has 249, Debian 12 252) and never resets
+// after a good run before 258, and launchd has only a fixed ThrottleInterval.
+func recoveryRetryWait(marker string, now time.Time) time.Duration {
+	if file, err := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
+		_ = file.Close()
+	}
+	failing := 5 * time.Second
+	if info, err := os.Stat(marker); err == nil {
+		failing = max(failing, now.Sub(info.ModTime()))
+	}
+	return min(failing, 10*time.Minute)
+}
+
 // healMachineGuard also ends every updater start (after an update or a
 // rollback) with the install inventory, under the same installation lock.
 func healMachineGuard(ctx context.Context, stateRoot string, uid int, source installsource.Source, binary string, stderr io.Writer) {
@@ -130,9 +148,18 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	// Recovery is the updater service's job: the activation helper runs as another unit, so "self" would be wrong.
 	if !*helper {
 		finishSelf, err := hostinstall.RecoverInterrupted(ctx, uid)
+		marker := filepath.Join(stateRoot, recoveryFailingMarker)
 		if err != nil {
+			wait := recoveryRetryWait(marker, time.Now())
+			fmt.Fprintf(stderr, "paperboat-updated: recovering the interrupted installation failed, retrying in %s: %v\n", wait, err)
+			_ = notifier.ExtendStart(wait + time.Minute)
+			select {
+			case <-ctx.Done():
+			case <-time.After(wait):
+			}
 			return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
 		}
+		_ = os.Remove(marker)
 		if finishSelf != nil {
 			// Last step: this updater's own service returns to its pre-install state. Either it still runs the
 			// replaced executable and its supervisor starts it on the restored one, or it is stopped or removed.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -62,6 +63,11 @@ func (n *ProcessNotifier) Stopping() error {
 	return n.notify(daemon.SdNotifyStopping + "\nSTATUS=stopping")
 }
 func (n *ProcessNotifier) Watchdog() error { return n.notify(daemon.SdNotifyWatchdog) }
+
+// ExtendStart keeps systemd from failing a start that is still in progress (TimeoutStartSec) for d more.
+func (n *ProcessNotifier) ExtendStart(d time.Duration) error {
+	return n.notify(fmt.Sprintf("EXTEND_TIMEOUT_USEC=%d", d.Microseconds()))
+}
 
 func (n *ProcessNotifier) status(value string) error { return n.notify("STATUS=" + value) }
 

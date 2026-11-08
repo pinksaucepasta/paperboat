@@ -12,3 +12,4 @@ func (*ProcessNotifier) Degraded(string) error           { return nil }
 func (*ProcessNotifier) Draining() error                 { return nil }
 func (*ProcessNotifier) Stopping() error                 { return nil }
 func (*ProcessNotifier) Watchdog() error                 { return nil }
+func (*ProcessNotifier) ExtendStart(time.Duration) error { return nil }
