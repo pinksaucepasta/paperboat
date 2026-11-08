@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -53,9 +54,9 @@ func TestRecoverWithinNeverStopsTheCallersOwnService(t *testing.T) {
 	calls = nil
 	mu.Unlock()
 
-	restartSelf, err := manager.RecoverWithin(context.Background(), "updater")
-	if err != nil || !restartSelf {
-		t.Fatalf("restartSelf=%v err=%v", restartSelf, err)
+	finishSelf, err := manager.RecoverWithin(context.Background(), "updater")
+	if err != nil || finishSelf == nil {
+		t.Fatalf("finishSelf=%v err=%v", finishSelf != nil, err)
 	}
 	mu.Lock()
 	joined := strings.Join(calls, ",")
@@ -69,8 +70,52 @@ func TestRecoverWithinNeverStopsTheCallersOwnService(t *testing.T) {
 		}
 	}
 	// The recovery is done once: the next start finds nothing.
-	restartSelf, err = manager.RecoverWithin(context.Background(), "updater")
-	if err != nil || restartSelf {
-		t.Fatalf("a finished recovery ran again: restartSelf=%v err=%v", restartSelf, err)
+	finishSelf, err = manager.RecoverWithin(context.Background(), "updater")
+	if err != nil || finishSelf != nil {
+		t.Fatalf("a finished recovery ran again: finishSelf=%v err=%v", finishSelf != nil, err)
+	}
+}
+
+type killedOnInstall struct{ *fakeTransactionalComponent }
+
+func (k killedOnInstall) Install(context.Context) error { panic("killed") }
+
+// An install on a machine that had no updater installs the updater, then dies. The updater recovers it from inside
+// its own service, whose pre-install state is "not installed": removing it in the rollback loop would end the
+// recovery with the other roles unrestored and the journal left behind. Every other role is restored and the
+// journal removed first; the updater's own removal is handed back as the caller's last step.
+func TestRecoverWithinRemovesTheCallersOwnServiceLast(t *testing.T) {
+	var calls []string
+	var mu sync.Mutex
+	hostd := newFakeTransactionalComponent("hostd", &calls, &mu)
+	updater := newFakeTransactionalComponent("updater", &calls, &mu)
+	host := killedOnInstall{newFakeTransactionalComponent("host", &calls, &mu)}
+	manager := lifecycleForTest(t, hostd, updater, host)
+	func() {
+		defer func() { _ = recover() }()
+		_ = manager.Install(context.Background())
+	}()
+	mu.Lock()
+	calls = nil
+	mu.Unlock()
+
+	finishSelf, err := manager.RecoverWithin(context.Background(), "updater")
+	if err != nil || finishSelf == nil {
+		t.Fatalf("finishSelf=%v err=%v", finishSelf != nil, err)
+	}
+	mu.Lock()
+	joined := strings.Join(calls, ",")
+	mu.Unlock()
+	if joined != "hostd:restore" {
+		t.Fatalf("recovery calls %q, want only hostd restored before the caller's last step", joined)
+	}
+	if _, err := os.Lstat(manager.journal); !os.IsNotExist(err) {
+		t.Fatalf("the journal must be gone before the caller removes its own service: %v", err)
+	}
+	if err := finishSelf(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := updater.Inspect(context.Background()); status.Installed || status.Running {
+		t.Fatalf("the updater was not put back to not installed: %+v", status)
 	}
 }

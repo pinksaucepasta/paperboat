@@ -21,77 +21,82 @@ var interruptedInstallWriterWait = 3 * time.Second
 // its whole run, so a journal found while the lock is free has no writer: the interrupted services and files are
 // restored and the journal removed, once. A live writer keeps its journal and is left alone.
 //
-// It runs inside the updater, whose own service must not be stopped by the recovery: restartSelf reports that the
-// updater still runs the replaced executable, and the caller exits so its supervisor starts it on the restored one.
-func RecoverInterrupted(ctx context.Context, uid int) (restartSelf bool, err error) {
+// It runs inside the updater, whose own service must not be stopped by the recovery: a non-nil finishSelf
+// (service.LifecycleManager.RecoverWithin) is returned only once everything else is undone, and the caller runs it
+// as its very last step, then exits.
+func RecoverInterrupted(ctx context.Context, uid int) (finishSelf func(context.Context) error, err error) {
 	if os.Geteuid() != 0 {
-		return false, ErrNotPrivileged
+		return nil, ErrNotPrivileged
 	}
 	if uid < 0 {
-		return false, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	paths := platformPaths(uid)
-	return recoverInterruptedInstall(ctx, paths, func(ctx context.Context) (bool, error) {
+	return recoverInterruptedInstall(ctx, paths, func(ctx context.Context) (func(context.Context) error, error) {
 		request, err := loadInstallMetadata(paths.metadata, uid)
 		if installNotExistOnly(err) {
-			return false, nil // a first enrollment has no earlier services to put back
+			return nil, nil // a first enrollment has no earlier services to put back
 		}
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		hostd, updater, err := pendingInstallers(request, paths)
 		if err != nil {
-			return false, errors.Join(ErrInvalidRequest, err)
+			return nil, errors.Join(ErrInvalidRequest, err)
 		}
 		host, err := hostInstallerWithMissing(request, paths, true)
 		if err != nil {
-			return false, errors.Join(ErrInvalidRequest, err)
+			return nil, errors.Join(ErrInvalidRequest, err)
 		}
 		lifecycle, err := newLifecycleManager(request, paths, host, hostd, updater)
 		if err != nil {
-			return false, errors.Join(ErrInvalidRequest, err)
+			return nil, errors.Join(ErrInvalidRequest, err)
 		}
 		return lifecycle.RecoverWithin(ctx, service.UpdaterKind)
 	})
 }
 
-func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreServices func(context.Context) (bool, error)) (restartSelf bool, resultErr error) {
+func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreServices func(context.Context) (func(context.Context) error, error)) (finishSelf func(context.Context) error, resultErr error) {
 	if _, err := os.Lstat(paths.journal); installNotExistOnly(err) {
-		return false, nil
+		return nil, nil
 	} else if err != nil {
-		return false, err
+		return nil, err
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, interruptedInstallWriterWait)
 	defer cancel()
 	lock, err := updated.LockUnixNativeInstall(waitCtx, paths.updateState)
 	if err != nil {
 		if ctx.Err() == nil && errors.Is(err, updated.ErrActivationPending) {
-			return false, nil // the installer is still running and owns its journal
+			return nil, nil // the installer is still running and owns its journal
 		}
-		return false, err
+		return nil, err
 	}
-	defer func() { resultErr = withCleanup("interrupted installation recovery cleanup failed", resultErr, lock.Close()) }()
+	defer func() {
+		if resultErr = withCleanup("interrupted installation recovery cleanup failed", resultErr, lock.Close()); resultErr != nil {
+			finishSelf = nil // something is left to retry: the updater stays up for its next start
+		}
+	}()
 	journal, err := loadJournal(paths.journal)
 	if installNotExistOnly(err) {
-		return false, nil // committed while this waited for the lock
+		return nil, nil // committed while this waited for the lock
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	// The lifecycle recovery of a replace restores the executable from its verified pin and the metadata BEFORE it
 	// starts any previous service (service.LifecycleManager.rollback calls nativeInstallation.Restore first), and ends
 	// by removing this journal. Rolling the files back before it would remove the running executable's path for
 	// nothing; after it, the journal is gone and only the leftover rollback copy of the worker remains. Every step is
 	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
-	restartSelf, err = restoreServices(ctx)
+	finishSelf, err = restoreServices(ctx)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
-		return restartSelf, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
+		return finishSelf, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
 	} else if err != nil {
-		return false, err
+		return nil, err
 	}
 	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
-	return restartSelf, rollbackFiles(paths, journal)
+	return finishSelf, rollbackFiles(paths, journal)
 }

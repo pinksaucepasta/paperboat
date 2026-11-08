@@ -77,7 +77,7 @@ func TestInterruptedInstallIsRecoveredOnceAndTheUpdaterReadsTheInstalledSource(t
 		t.Fatal("the stale journal was accepted by the readiness probe")
 	}
 	restored := 0
-	restore := func(context.Context) (bool, error) { restored++; return false, nil }
+	restore := func(context.Context) (func(context.Context) error, error) { restored++; return nil, nil }
 	for round := 0; round < 2; round++ {
 		if _, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
 			t.Fatalf("round %d: %v", round, err)
@@ -113,7 +113,7 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 	interruptedInstallWriterWait = 200 * time.Millisecond
 	defer func() { interruptedInstallWriterWait = previousWait }()
 	restored := false
-	if _, err = recoverInterruptedInstall(context.Background(), paths, func(context.Context) (bool, error) { restored = true; return false, nil }); err != nil {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil || restored {
@@ -143,26 +143,26 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 	}
 	interrupted := true
 	runs, startedOnCandidate := 0, 0
-	restore := func(context.Context) (bool, error) {
+	restore := func(context.Context) (func(context.Context) error, error) {
 		runs++
 		if err := os.Rename(pin, paths.worker+".next"); err != nil { // worker first: the pin is the restore source
 			if !os.IsNotExist(err) {
-				return false, err
+				return nil, err
 			}
 			if err = os.WriteFile(paths.worker+".next", image, 0755); err != nil {
-				return false, err
+				return nil, err
 			}
 		}
 		if err := os.Rename(paths.worker+".next", paths.worker); err != nil {
-			return false, err
+			return nil, err
 		}
 		if interrupted { // the process dies after the worker is back and before the services are started
-			return false, errInterruptedRecovery
+			return nil, errInterruptedRecovery
 		}
 		if body, _ := os.ReadFile(paths.worker); !bytes.Equal(body, image) {
 			startedOnCandidate++ // services would start on the wrong binary
 		}
-		return true, removeJournal(paths.journal)
+		return func(context.Context) error { return nil }, removeJournal(paths.journal)
 	}
 	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != errInterruptedRecovery {
 		t.Fatalf("interrupted run: %v", err)
@@ -171,11 +171,8 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 		t.Fatalf("an interrupted recovery must keep the journal so it runs again: %v", err)
 	}
 	interrupted = false
-	if restartSelf, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil || !restartSelf {
-		t.Fatalf("second run restartSelf=%v err=%v", restartSelf, err)
-	}
-	if false {
-		t.Fatalf("second run: %v", err)
+	if finishSelf, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil || finishSelf == nil {
+		t.Fatalf("second run finishSelf=%v err=%v", finishSelf != nil, err)
 	}
 	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil || runs != 2 {
 		t.Fatalf("a finished recovery ran again: runs=%d err=%v", runs, err)

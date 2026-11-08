@@ -221,31 +221,33 @@ func (m *LifecycleManager) Recover(ctx context.Context) error {
 
 // RecoverWithin is Recover for a caller that itself runs as one of the managed components (the updater): that
 // component is never stopped by the rollback, whose stop would end the caller mid-recovery and leave the rest
-// undone. Its definition is restored; restartSelf reports that it still runs the replaced executable, so the
-// caller must exit and let its supervisor start it again on the restored one.
-func (m *LifecycleManager) RecoverWithin(ctx context.Context, self string) (restartSelf bool, err error) {
+// undone. A non-nil finishSelf is what is left for the caller's own component once every other one is restored
+// and the journal is removed: a no-op when it still runs the replaced executable (its definition is restored, the
+// caller must exit and let its supervisor start it on the restored one), or the stop or removal its pre-operation
+// state needs, which ends the caller. The caller runs it as its very last step, then exits.
+func (m *LifecycleManager) RecoverWithin(ctx context.Context, self string) (finishSelf func(context.Context) error, err error) {
 	return m.recover(ctx, self)
 }
 
-func (m *LifecycleManager) recover(ctx context.Context, self string) (restartSelf bool, err error) {
+func (m *LifecycleManager) recover(ctx context.Context, self string) (finishSelf func(context.Context) error, err error) {
 	if m == nil || ctx == nil {
-		return false, ErrLifecycleInvalid
+		return nil, ErrLifecycleInvalid
 	}
 	unlock, err := lockLifecycle(m.lockPath)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer unlock()
 	journal, err := m.readJournal()
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, errors.Join(ErrLifecycleUncertain, err)
+		return nil, errors.Join(ErrLifecycleUncertain, err)
 	}
 	if authorizer, ok := m.nativeInstallation.(NativeInstallationRecoveryAuthorizer); ok && len(journal.NativeInstallation) != 0 {
 		if err := authorizer.AuthorizeRecovery(ctx, append([]byte(nil), journal.NativeInstallation...)); err != nil {
-			return false, errors.Join(ErrLifecycleUncertain, err)
+			return nil, errors.Join(ErrLifecycleUncertain, err)
 		}
 	}
 	captured := make(map[string]bool, len(journal.Order))
@@ -258,13 +260,16 @@ func (m *LifecycleManager) recover(ctx context.Context, self string) (restartSel
 		}
 		status, err := component.Inspect(ctx)
 		if err != nil || status.ID != component.ID() || status.Installed || status.Enabled || status.Running || status.Ready || len(status.Definition) != 0 {
-			return false, errors.Join(ErrLifecycleUncertain, err)
+			return nil, errors.Join(ErrLifecycleUncertain, err)
 		}
 	}
-	if restartSelf, err = m.rollbackKeeping(ctx, journal, self); err != nil {
-		return false, errors.Join(ErrLifecycleUncertain, err)
+	if finishSelf, err = m.rollbackKeeping(ctx, journal, self); err != nil {
+		return nil, errors.Join(ErrLifecycleUncertain, err)
 	}
-	return restartSelf, m.removeJournal()
+	if err := m.removeJournal(); err != nil {
+		return nil, err // the journal stays, so the next start recovers again: keep the caller alive for it
+	}
+	return finishSelf, nil
 }
 
 // RequireRecovered verifies journal custody and refuses pending native recovery
@@ -473,17 +478,16 @@ func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJourna
 	return err
 }
 
-// rollbackKeeping never stops the component named self; restartSelf reports that it was left running the
-// replaced image.
-func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycleJournal, self string) (restartSelf bool, resultErr error) {
+// rollbackKeeping never stops the component named self: finishSelf is left for it (see RecoverWithin).
+func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycleJournal, self string) (finishSelf func(context.Context) error, resultErr error) {
 	// Decided before the installation is restored: afterwards the executable looks unchanged.
 	swapped := journal.Operation == lifecycleReplace && m.runsReplacedImage != nil && m.imageSwapped != nil && m.imageSwapped(journal.NativeInstallation)
 	if journal.Operation == lifecycleReplace {
 		if m.nativeInstallation == nil {
-			return false, ErrLifecycleInvalid
+			return nil, ErrLifecycleInvalid
 		}
 		if err := m.nativeInstallation.Restore(ctx, journal.NativeInstallation); err != nil {
-			return false, err
+			return nil, err
 		}
 	}
 	components := make(map[string]TransactionalComponent, len(m.components))
@@ -511,10 +515,15 @@ func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycl
 		// stop it so the restore below starts it on the restored executable.
 		restart := swapped && before.Running && m.runsReplacedImage(before)
 		if restart && component.ID() == self {
-			restart, restartSelf = false, true // stopping the caller's own service would end this recovery
+			restart, finishSelf = false, func(context.Context) error { return nil } // stopping the caller's own service would end this recovery
 		}
 		current, inspectErr := component.Inspect(ctx)
 		if !restart && inspectErr == nil && sameComponentStatus(current, before) {
+			continue
+		}
+		if component.ID() == self && !before.Running {
+			// Restoring it stops or removes the caller's own service: done last, by the caller, after the journal is gone.
+			finishSelf = func(ctx context.Context) error { return component.Restore(ctx, before) }
 			continue
 		}
 		if restart {
@@ -532,7 +541,7 @@ func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycl
 			joined = errors.Join(joined, fmt.Errorf("restore %s: %w", component.ID(), ErrLifecycleUncertain), err)
 		}
 	}
-	return restartSelf, joined
+	return finishSelf, joined
 }
 
 func sameComponentStatus(left, right NativeComponentStatus) bool {

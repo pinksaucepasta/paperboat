@@ -128,15 +128,16 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	// Their environment is a launch snapshot, not the installed version owner.
 	// An install killed halfway leaves a journal every reader below rejects; undo it before reading any state.
 	// Recovery is the updater service's job: the activation helper runs as another unit, so "self" would be wrong.
-	restartSelf := false
 	if !*helper {
-		if restartSelf, err = hostinstall.RecoverInterrupted(ctx, uid); err != nil {
+		finishSelf, err := hostinstall.RecoverInterrupted(ctx, uid)
+		if err != nil {
 			return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
 		}
-	}
-	if restartSelf {
-		// This updater still runs the executable the recovery replaced; its supervisor starts it on the restored one.
-		return failInitialization(errors.New("the interrupted installation was undone; restarting the updater on the restored executable"))
+		if finishSelf != nil {
+			// Last step: this updater's own service returns to its pre-install state. Either it still runs the
+			// replaced executable and its supervisor starts it on the restored one, or it is stopped or removed.
+			return failInitialization(errors.Join(errors.New("the interrupted installation was undone; the updater's own service returns to its state before it"), finishSelf(ctx)))
+		}
 	}
 	installed, err := hostinstall.LoadEnrolledOwner(uid)
 	installedSource := installed.Source
