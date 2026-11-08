@@ -142,6 +142,8 @@ type updateStatusResult struct {
 	NextCheck         time.Time                          `json:"next_check,omitempty"`
 	LastFailure       string                             `json:"last_failure,omitempty"`
 	Candidate         *workerupdate.PreparedCandidate    `json:"candidate,omitempty"`
+	// CandidateRejected: a downloaded update failed verification (unsafe file, another target, signature).
+	CandidateRejected *updated.CandidateRejection `json:"candidate_rejected,omitempty"`
 }
 
 func actionUpdateStatus(command *cobra.Command, _ []string) error {
@@ -168,7 +170,7 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate}
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
 	// A prepared candidate is verified release evidence even when the last
 	// periodic observation predates its download. Preserve a newer observation.
@@ -205,6 +207,20 @@ func updateStatusCommandResult(cliVersion string, response updated.ControlRespon
 	return result
 }
 
+// updateRejectionText is the plain-language reason of a rejected downloaded update.
+func updateRejectionText(reason string) string {
+	switch reason {
+	case "unsafe_file":
+		return "its file has unsafe ownership or permissions"
+	case "wrong_target":
+		return "it is not built for this machine"
+	case "signature":
+		return "its signature did not verify"
+	default:
+		return "it is not a valid downloaded update"
+	}
+}
+
 func daemonSnapshotAvailable(snapshot localapi.Snapshot) bool {
 	return snapshot.DaemonVersion != "" && (snapshot.DaemonState == "ready" || snapshot.DaemonState == "degraded")
 }
@@ -236,6 +252,9 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	}
 	if result.UpdateAvailable && result.Candidate == nil && !result.ActivationPending {
 		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is available. Run `pb update` to download and review it.\n", result.LatestVersion)
+	}
+	if result.CandidateRejected != nil {
+		fmt.Fprintf(command.OutOrStdout(), "The downloaded update %s failed verification (%s). Run `pb update download` to fetch it again.\n", result.CandidateRejected.Version, updateRejectionText(result.CandidateRejected.Reason))
 	}
 	if result.Candidate != nil {
 		writePreparedUpdate(command, result.Candidate)

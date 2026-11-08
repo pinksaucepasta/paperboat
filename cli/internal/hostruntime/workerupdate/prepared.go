@@ -18,7 +18,31 @@ var (
 	ErrPreparedCandidate = errors.New("prepared update is unavailable or invalid")
 	// ErrStagedPayloadConsumed: the staged payload is gone, as after the native install moved it.
 	ErrStagedPayloadConsumed = errors.New("prepared update payload was already moved by its activation")
+	// The reasons a downloaded candidate stops verifying (each also is ErrPreparedCandidate). Only the first is
+	// benign: the payload was replaced, consumed or removed (a supplied install, a newer download). The others say
+	// the staged file is unsafe, built for another target or not signed, which a user must be told.
+	ErrPreparedPayloadChanged = errors.New("the downloaded update's payload was replaced or removed")
+	ErrPreparedUnsafe         = errors.New("the downloaded update's file has unsafe ownership or permissions")
+	ErrPreparedWrongTarget    = errors.New("the downloaded update is not built for this machine")
+	ErrPreparedNotSigned      = errors.New("the downloaded update's signature did not verify")
 )
+
+// PreparedRejection names why a downloaded candidate no longer verifies. benign is true for a replaced or removed payload,
+// which status and check leave unreported; any other reason must be shown with a re-download hint.
+func PreparedRejection(err error) (reason string, benign bool) {
+	switch {
+	case errors.Is(err, ErrPreparedPayloadChanged), errors.Is(err, ErrStagedPayloadConsumed):
+		return "payload_changed", true
+	case errors.Is(err, ErrPreparedUnsafe):
+		return "unsafe_file", false
+	case errors.Is(err, ErrPreparedWrongTarget):
+		return "wrong_target", false
+	case errors.Is(err, ErrPreparedNotSigned):
+		return "signature", false
+	default:
+		return "invalid", false
+	}
+}
 
 // PreparedCandidate identifies the signed artifact, never its private staging path
 // or the executable extracted from a signed macOS package.
@@ -226,23 +250,26 @@ func (m *Manager) verifyPrepared(ctx context.Context, j updateflow.Journal) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if j.StagedPath != m.config.BinaryStaged || j.CandidateID == "" || j.ArtifactPlatform != m.active.Platform || j.ArtifactArchitecture != m.active.Architecture {
+	if j.StagedPath != m.config.BinaryStaged || j.CandidateID == "" {
 		return ErrPreparedCandidate
+	}
+	if j.ArtifactPlatform != m.active.Platform || j.ArtifactArchitecture != m.active.Architecture {
+		return errors.Join(ErrPreparedCandidate, ErrPreparedWrongTarget)
 	}
 	if stagedConsumed(j.StagedPath) {
-		return errors.Join(ErrPreparedCandidate, ErrStagedPayloadConsumed)
+		return errors.Join(ErrPreparedCandidate, ErrStagedPayloadConsumed, ErrPreparedPayloadChanged)
 	}
 	if err := safeRuntimeFile(j.StagedPath, m.config.OwnerUID, true); err != nil {
-		return errors.Join(ErrPreparedCandidate, err)
+		return errors.Join(ErrPreparedCandidate, ErrPreparedUnsafe, err)
 	}
 	if !regularMatches(j.StagedPath, j.CandidateLength, j.CandidateDigest) {
-		return ErrPreparedCandidate
+		return errors.Join(ErrPreparedCandidate, ErrPreparedPayloadChanged)
 	}
 	if err := binarytarget.Validate(j.StagedPath, j.ArtifactPlatform, j.ArtifactArchitecture); err != nil {
-		return errors.Join(ErrPreparedCandidate, err)
+		return errors.Join(ErrPreparedCandidate, ErrPreparedWrongTarget, err)
 	}
 	if err := m.config.NativeVerifier.Verify(ctx, j.StagedPath, j.ArtifactPlatform, j.ArtifactArchitecture); err != nil {
-		return errors.Join(ErrPreparedCandidate, err)
+		return errors.Join(ErrPreparedCandidate, ErrPreparedNotSigned, err)
 	}
 	return nil
 }

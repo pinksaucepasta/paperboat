@@ -336,3 +336,59 @@ func TestPrepareDownloadsAgainWhenTheStagedPayloadNoLongerVerifies(t *testing.T)
 		t.Fatalf("artifact downloads=%d, want 2", f.fetcher.fetchCalls)
 	}
 }
+
+// A downloaded candidate that stops verifying is reported by reason: a replaced or removed payload is benign, an unsafe file, another
+// target or a bad signature is not (status shows those with a re-download hint).
+func TestPreparedRejectionNamesWhyACandidateStoppedVerifying(t *testing.T) {
+	prepare := func(t *testing.T) fixture {
+		t.Helper()
+		f := newFixture(t)
+		if _, err := f.manager.Prepare(context.Background(), f.candidate); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	reason := func(t *testing.T, f fixture) (string, bool) {
+		t.Helper()
+		_, err := f.manager.PreparedCandidate()
+		if !errors.Is(err, ErrPreparedCandidate) {
+			t.Fatalf("want ErrPreparedCandidate, got %v", err)
+		}
+		return PreparedRejection(err)
+	}
+	t.Run("payload replaced is benign", func(t *testing.T) {
+		f := prepare(t)
+		if err := os.WriteFile(f.paths.staged, []byte("altered executable"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if got, benign := reason(t, f); got != "payload_changed" || !benign {
+			t.Fatalf("reason=%q benign=%v", got, benign)
+		}
+	})
+	t.Run("payload removed is not an error at all", func(t *testing.T) {
+		f := prepare(t)
+		if err := os.Remove(f.paths.staged); err != nil {
+			t.Fatal(err)
+		}
+		// A missing payload reads as installed and waiting for its finish steps: no candidate, no rejection.
+		if got, err := f.manager.PreparedCandidate(); err != nil || got.ID != "" {
+			t.Fatalf("candidate=%+v err=%v", got, err)
+		}
+	})
+	t.Run("unsafe file mode is reported", func(t *testing.T) {
+		f := prepare(t)
+		if err := os.Chmod(f.paths.staged, 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if got, benign := reason(t, f); got != "unsafe_file" || benign {
+			t.Fatalf("reason=%q benign=%v", got, benign)
+		}
+	})
+	t.Run("another target is reported", func(t *testing.T) {
+		f := prepare(t)
+		f.manager.active.Architecture = "other-architecture"
+		if got, benign := reason(t, f); got != "wrong_target" || benign {
+			t.Fatalf("reason=%q benign=%v", got, benign)
+		}
+	})
+}

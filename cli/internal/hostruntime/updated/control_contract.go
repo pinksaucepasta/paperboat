@@ -32,14 +32,24 @@ type ControlRequest struct {
 	Force      bool                    `json:"force,omitempty"`
 	Settings   *autoupdate.Preferences `json:"settings,omitempty"`
 }
+
+// CandidateRejection names the downloaded version and why it failed verification.
+type CandidateRejection struct {
+	Version string `json:"version"`
+	Reason  string `json:"reason"`
+}
+
 type ControlResponse struct {
-	UpdaterVersion    string                             `json:"updater_version,omitempty"`
-	Schema            string                             `json:"schema"`
-	Status            string                             `json:"status"`
-	Version           string                             `json:"version,omitempty"`
-	Updated           bool                               `json:"updated"`
-	Pending           bool                               `json:"pending,omitempty"`
-	Candidate         *workerupdate.PreparedCandidate    `json:"candidate,omitempty"`
+	UpdaterVersion string                          `json:"updater_version,omitempty"`
+	Schema         string                          `json:"schema"`
+	Status         string                          `json:"status"`
+	Version        string                          `json:"version,omitempty"`
+	Updated        bool                            `json:"updated"`
+	Pending        bool                            `json:"pending,omitempty"`
+	Candidate      *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
+	// CandidateRejected reports a downloaded update that no longer verifies for a reason a user must know (an unsafe
+	// file, another target, a signature that did not verify). A replaced or removed payload is not reported.
+	CandidateRejected *CandidateRejection                `json:"candidate_rejected,omitempty"`
 	ActivationFailure string                             `json:"activation_failure,omitempty"`
 	Observation       autoupdate.Observation             `json:"observation"`
 	ErrorCode         string                             `json:"error_code,omitempty"`

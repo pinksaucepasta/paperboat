@@ -296,12 +296,17 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 		// reads this status, so that must not fail it (dadape rolled back .1→.2 on 170 candidate_changed probes).
 		// Any other verification failure, or a handoff for another candidate, still fails status.
 		consumedByActivation := handoff != nil && handoff.Candidate == state.CandidateVersion && errors.Is(candidateErr, workerupdate.ErrStagedPayloadConsumed)
-		// A candidate that no longer verifies (its staged payload replaced by a supplied install, superseded by a newer
-		// release, or tampered) is not offered for approval, and the approval re-verifies it; it must not make status
-		// and check fail, or the user cannot even see that a newer update exists (F14-09: `pb update check` and `status`
-		// failed with updater_candidate_changed until the next download).
-		if candidateErr != nil && !consumedByActivation && !errors.Is(candidateErr, workerupdate.ErrPreparedCandidate) {
-			return candidateErr
+		// A candidate that no longer verifies is never offered for approval (the approval re-verifies it) and must not make
+		// status and check fail: the user could not even see that a newer update exists (F14-09: both failed with
+		// updater_candidate_changed until the next download). A replaced, consumed or removed payload is benign and silent;
+		// an unsafe file, another target or a signature that did not verify is reported, with what to run.
+		if candidateErr != nil && !consumedByActivation {
+			if !errors.Is(candidateErr, workerupdate.ErrPreparedCandidate) {
+				return candidateErr
+			}
+			if reason, benign := workerupdate.PreparedRejection(candidateErr); !benign {
+				response.CandidateRejected = &CandidateRejection{Version: state.CandidateVersion, Reason: reason}
+			}
 		}
 		if candidateErr == nil {
 			response.Candidate = &candidate
