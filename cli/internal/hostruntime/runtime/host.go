@@ -410,6 +410,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			OriginPatterns: append([]string(nil), config.OriginPatterns...),
 			MaxConnections: resources.MaxAttachments * resources.MaxSessions,
 			Limiter:        connectionLimiter,
+			Diagnostics:    diagnostics.FromContext(ctx),
 		})
 		if err != nil {
 			return nil, err

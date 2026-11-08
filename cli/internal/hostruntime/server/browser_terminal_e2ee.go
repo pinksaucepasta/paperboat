@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
@@ -67,6 +69,7 @@ type BrowserTerminalWebSocketHandlerConfig struct {
 	MaxConnections  int
 	MaxMessageBytes int64
 	Limiter         *ConnectionLimiter
+	Diagnostics     *diagnostics.Recorder // the attach timeline's recorder; nil records nothing
 }
 
 type BrowserTerminalWebSocketHandler struct {
@@ -130,6 +133,13 @@ func NewBrowserTerminalWebSocketHandler(config BrowserTerminalWebSocketHandlerCo
 }
 
 func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	// Timeline of one browser attach (update verdicts): each step's duration lands in the diagnostics.
+	traced := request.Context()
+	if h.config.Diagnostics != nil {
+		traced = diagnostics.WithRecorder(traced, h.config.Diagnostics)
+	}
+	traced = diagnostics.WithReconnect(traced, "browser", "target", rand.Text()[:20])
+	endAuth := diagnostics.ReconnectStep(traced, "browser_auth")
 	token, ok := bearerToken(request.Header.Values("Authorization"))
 	if !ok {
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -170,6 +180,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
+	endAuth(nil)
 	if !h.limiter.acquire() {
 		writer.Header().Set("Retry-After", "1")
 		http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -177,6 +188,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	}
 	defer h.limiter.release()
 
+	endAccept := diagnostics.ReconnectStep(traced, "browser_accept")
 	subprotocol := BrowserTerminalWebSocketSubprotocol
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		Subprotocols:    []string{subprotocol},
@@ -200,6 +212,8 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		return
 	}
 
+	endAccept(nil)
+	endTLS := diagnostics.ReconnectStep(traced, "browser_tls")
 	stream := newBrowserTerminalWebSocketStream(request.Context(), connection)
 	tlsConnection := tls.Server(stream, &tls.Config{
 		MinVersion:   tls.VersionTLS13,
@@ -222,6 +236,8 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		return
 	}
 
+	endTLS(nil)
+	endAuthorize := diagnostics.ReconnectStep(traced, "browser_authorize")
 	var plaintext net.Conn = tlsConnection
 	if h.config.Bandwidth != nil {
 		capability, consumer := "terminal.v1", "terminal"
@@ -246,6 +262,8 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		}
 		plaintext = h.config.Bandwidth.Wrap(tlsConnection, bandwidth.Binding{AccessSessionID: bindingID, StreamID: bindingID, Consumer: consumer}, func(string) bandwidth.Path { return bandwidth.Path{Mode: "edge"} })
 	}
+	endAuthorize(nil)
+	diagnostics.ReconnectEvent(traced, "redial_step", "serving", nil)
 	application := newBrowserTerminalApplicationConnection(request.Context(), connection, plaintext)
 	defer h.track(application)()
 	if err := h.config.Server.ServeAuthenticated(application, authorizer); err != nil {
