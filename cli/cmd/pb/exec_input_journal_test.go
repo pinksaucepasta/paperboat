@@ -285,3 +285,30 @@ func TestExecReattachIsNotHeldByAStdinWriteOnAFullWindow(t *testing.T) {
 		t.Fatal("the write on the aborted connection reported success")
 	}
 }
+
+// Attempts alone did not bound a recovery: 40 attempts each hanging to their own timeout took 10 minutes, while the
+// backoff comment promised about half a minute. One recovery now ends at execReattachWindow, as a spent budget.
+func TestExecRecoveryEndsAtTheReattachWindow(t *testing.T) {
+	oldAttempt, oldWindow := execReattachAttemptTimeout, execReattachWindow
+	execReattachAttemptTimeout, execReattachWindow = 100*time.Millisecond, 300*time.Millisecond
+	defer func() { execReattachAttemptTimeout, execReattachWindow = oldAttempt, oldWindow }()
+	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
+	var request tunnel.ExecRequest
+	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
+	silent := func(ctx context.Context, _ api.ExecDescriptor) (tunnel.ExecConn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Retryable: retryableExecReattachment})
+	start := time.Now()
+	_, err := recoverExecConnection(context.Background(), recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
+		return reattachExecConnection(ctx, ref, &request, descriptor, silent)
+	})
+	// Unbounded, 40 attempts of 100 ms take 4 s.
+	if elapsed := time.Since(start); !errors.Is(err, reattach.ErrExhausted) || elapsed > 2*time.Second {
+		t.Fatalf("recovery: err=%v after %v", err, elapsed)
+	}
+	if recovery.Remaining() == 0 {
+		t.Fatal("the window did not end the recovery; the attempt budget did")
+	}
+}

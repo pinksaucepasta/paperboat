@@ -274,8 +274,8 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	emittedStarted := false
 	lastEventSequence := uint64(0)
 	// The command keeps running in its session owner through pb update; the
-	// stream may be gone while the runtime restarts, so reattach for about
-	// 30 s instead of 300 ms (pbvm4 feat runs: update restarts take seconds).
+	// stream may be gone while the runtime restarts, so reattach for up to
+	// execReattachWindow instead of 300 ms (pbvm4 feat runs: update restarts take seconds).
 	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: retryableExecReattachment})
 	var code int
 	var inputCloseFailure error
@@ -387,13 +387,11 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		previousFailure := err
 		var replacement tunnel.ExecConn
-		err = recovery.Run(c.Context, func(ctx context.Context) error {
-			fresh, fetchErr := reattachExecConnection(ctx, connectionRef, &request,
+		replacement, err = recoverExecConnection(c.Context, recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
+			return reattachExecConnection(ctx, connectionRef, &request,
 				func(ctx context.Context) (api.ExecDescriptor, error) {
 					return client.MachineExecDescriptor(ctx, machine.ID, request.OperationID)
 				}, dial)
-			replacement = fresh
-			return fetchErr
 		})
 		if err != nil || replacement == nil {
 			connectionRef.AbortReattach()
@@ -413,6 +411,28 @@ const execReattachAttempts = 40
 
 // execReattachAttemptTimeout bounds one reattach attempt; the daemon's own peer open takes up to 10 s.
 var execReattachAttemptTimeout = 15 * time.Second
+
+// execReattachWindow bounds one recovery: the ~24 s execRecoveryBackoff sleeps across all attempts plus one attempt
+// at its execReattachAttemptTimeout. Attempts alone do not bound time: 40 attempts that each hang to 15 s take 10 min.
+var execReattachWindow = 40 * time.Second
+
+// recoverExecConnection runs one recovery under execReattachWindow; the attempt budget stays recovery's own.
+func recoverExecConnection(
+	ctx context.Context, recovery *reattach.Recovery, attempt func(context.Context) (tunnel.ExecConn, error),
+) (tunnel.ExecConn, error) {
+	bounded, cancel := context.WithTimeout(ctx, execReattachWindow)
+	defer cancel()
+	var replacement tunnel.ExecConn
+	err := recovery.Run(bounded, func(ctx context.Context) error {
+		var attemptErr error
+		replacement, attemptErr = attempt(ctx)
+		return attemptErr
+	})
+	if err != nil && ctx.Err() == nil && bounded.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("the machine did not answer within %v: %w", execReattachWindow, reattach.ErrExhausted)
+	}
+	return replacement, err
+}
 
 func reattachExecDial(
 	attempt context.Context, descriptor func(context.Context) (api.ExecDescriptor, error),
@@ -453,7 +473,7 @@ func reattachExecConnection(
 	stopAbort := context.AfterFunc(attempt, func() { _ = abortExecAttachment(replacement) })
 	setErr := ref.Set(replacement)
 	if !stopAbort() {
-		setErr = errors.Join(setErr, fmt.Errorf("the replacement took the stdin resend past %v", execReattachAttemptTimeout))
+		setErr = errors.Join(setErr, errors.New("the replacement did not take the stdin resend before the reattach deadline"))
 	}
 	if setErr != nil {
 		ref.Clear(replacement)
@@ -465,7 +485,7 @@ func reattachExecConnection(
 
 // execRecoveryBackoff tries at once, then polls every 150 ms for the first 20 attempts, the length of a network handover
 // (the pause of a call that reattaches is the sleep after the machine is back, so it stays short), then backs off by
-// 100 ms per attempt up to 2 s; 40 attempts span about 33 s. A successor that is already up costs no sleep, like
+// 100 ms per attempt up to 2 s; 40 attempts sleep about 24 s in all (execReattachWindow bounds the whole recovery). A successor that is already up costs no sleep, like
 // EternalTerminal, which dials on loss and sleeps only after a failed attempt (ClientConnection.cpp:210).
 func execRecoveryBackoff(attempt int) time.Duration {
 	if attempt == 1 {
