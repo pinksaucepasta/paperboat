@@ -41,7 +41,9 @@ var (
 const recoveryFailingMarker = "recovery-failing"
 
 // recoveryRetryWait is how long a failed recovery waits before the updater exits and its supervisor (Restart=always,
-// launchd KeepAlive) runs it again: as long as it has been failing, so the waits double, from 5 s up to 10 min.
+// launchd KeepAlive) runs it again: the time recovery has been failing (the marker's age), at least 5 s, at most
+// 10 min. Waiting as long as it has already been failing makes each attempt come at about twice the time since the
+// first failure: waits of 5 s, 10 s, 25 s, 55 s, ... until the cap (TestFailedRecoveryRetriesBackOffToTenMinutes).
 // In process because systemd's RestartSteps needs systemd 254 (Ubuntu 22.04 has 249, Debian 12 252) and never resets
 // after a good run before 258, and launchd has only a fixed ThrottleInterval.
 func recoveryRetryWait(marker string, now time.Time) time.Duration {
@@ -53,6 +55,15 @@ func recoveryRetryWait(marker string, now time.Time) time.Duration {
 		failing = max(failing, now.Sub(info.ModTime()))
 	}
 	return min(failing, 10*time.Minute)
+}
+
+// grantedRecoveryWait is the part of wait the service manager allows. systemd fails a start still running after
+// TimeoutStartSec (90 s by default) unless it accepted the extension; launchd has no start timeout (extend is a no-op).
+func grantedRecoveryWait(wait time.Duration, extend func(time.Duration) error) time.Duration {
+	if extend(wait+time.Minute) != nil {
+		return min(wait, 30*time.Second)
+	}
+	return wait
 }
 
 // healMachineGuard also ends every updater start (after an update or a
@@ -158,9 +169,10 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return failInitialization(err)
 	}
 	if err != nil {
-		wait := recoveryRetryWait(marker, time.Now())
+		wait := grantedRecoveryWait(recoveryRetryWait(marker, time.Now()), notifier.ExtendStart)
 		fmt.Fprintf(stderr, "paperboat-updated: recovering the interrupted installation failed, retrying in %s: %v\n", wait, err)
-		_ = notifier.ExtendStart(wait + time.Minute)
+		// The unit's status line (systemctl status) shows it while this waits.
+		_ = notifier.Degraded(fmt.Sprintf("recovering the interrupted installation failed; next attempt in %s", wait))
 		select {
 		case <-ctx.Done():
 		case <-time.After(wait):

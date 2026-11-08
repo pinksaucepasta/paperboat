@@ -221,3 +221,39 @@ func TestFailedRecoveryRetriesBackOffToTenMinutes(t *testing.T) {
 		t.Fatalf("a later failure must keep the first failure's time: %v", err)
 	}
 }
+
+// Simulates restarts after each failed attempt (5 s restart delay): each attempt comes at about twice the time since
+// the first failure, until the 10-minute cap.
+func TestFailedRecoveryWaitsDoubleUntilTheCap(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), recoveryFailingMarker)
+	start := time.Now()
+	elapsed, previous := time.Duration(0), time.Duration(0)
+	for attempt := 0; attempt < 12; attempt++ {
+		wait := recoveryRetryWait(marker, start.Add(elapsed))
+		if attempt == 0 {
+			if err := os.Chtimes(marker, start, start); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if wait > 10*time.Minute || previous > 0 && wait < min(2*previous, 10*time.Minute) {
+			t.Fatalf("attempt %d waits %s after %s", attempt, wait, previous)
+		}
+		previous = wait
+		elapsed += wait + 5*time.Second
+	}
+	if previous != 10*time.Minute {
+		t.Fatalf("the waits never reached the cap: %s", previous)
+	}
+}
+
+// systemd stops a start that runs past TimeoutStartSec unless it accepted the extension: without it the wait must
+// end well within the default 90 s, or the 10-minute wait would be cut by SIGTERM.
+func TestRecoveryWaitStaysWithinWhatTheServiceManagerGranted(t *testing.T) {
+	refused := func(time.Duration) error { return errors.New("notify socket closed") }
+	if got := grantedRecoveryWait(10*time.Minute, refused); got != 30*time.Second {
+		t.Fatalf("refused extension waits %s", got)
+	}
+	if got := grantedRecoveryWait(10*time.Minute, func(time.Duration) error { return nil }); got != 10*time.Minute {
+		t.Fatalf("granted extension waits %s", got)
+	}
+}
