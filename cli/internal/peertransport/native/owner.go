@@ -328,7 +328,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	if err == nil {
 		o.restart.succeeded(peerID, time.Since(started), time.Now())
 	} else {
-		o.restart.failed(peerID, time.Now())
+		o.restart.failed(peerID, sessionConfig.HandshakeTimeout, time.Now())
 	}
 	o.mu.Unlock()
 	if err != nil {

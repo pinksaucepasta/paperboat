@@ -76,13 +76,21 @@ func (r *restartTracker) wait(peer string, local bool, now time.Time) time.Durat
 	return restartHandshake(m.took) // a local peer with no measurement gets the floor
 }
 
-// failed extends an open window after a handshake that used it did not complete.
-func (r *restartTracker) failed(peer string, now time.Time) {
+// failed records a handshake that did not complete within wait. An open window is extended. Outside one, a short wait
+// can only be a local peer's (wait returns 0 for every other dial) and its timeout says the handshake needs at least
+// wait: that becomes the measurement, so a loaded machine gets three times it and then the normal timeout instead of
+// the floor forever, and the next success records the real figure. Like mosh, which assumes a slow path (SRTT 1 s)
+// until it has measured one (~/ref/mosh/src/network/network.cc:234, timeout() at :592).
+func (r *restartTracker) failed(peer string, wait time.Duration, now time.Time) {
 	if w := r.windows[peer]; w != nil && !w.start.IsZero() {
 		w.until = now.Add(restartQuickWindow)
 		if limit := w.start.Add(restartQuickMax); w.until.After(limit) {
 			w.until = limit
 		}
+		return
+	}
+	if wait > 0 {
+		r.succeeded(peer, wait, now)
 	}
 }
 
