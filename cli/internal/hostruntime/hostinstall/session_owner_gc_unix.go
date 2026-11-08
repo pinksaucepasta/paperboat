@@ -11,34 +11,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"golang.org/x/sys/unix"
 )
 
-// PruneSessionOwnerPins runs after reconciliation under the native control
-// lock. All catalogue references, including retained history, keep their pin.
-// Unix owner pins have a separate namespace from native rollback/update slots.
-func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordinator) error {
-	if ctx == nil || coordinator.Active.Validate() != nil || os.Geteuid() != 0 {
-		return ErrInvalidRequest
-	}
-	paths := platformPaths(coordinator.Active.UID)
-	if coordinator.Catalog.Root != filepath.Join(paths.root, "session-owners") || coordinator.Active.Instance != paths.instance {
-		return ErrInvalidRequest
-	}
-	active := coordinator.Active
-	return pruneSessionOwnerPinsAt(ctx, coordinator.Catalog, paths, active.UID, active.RuntimeRoot, active.Source.SHA256, pinStagingWindow)
-}
-
 // pruneSessionOwnerPinsAt removes every pin of paths that neither the active source, a catalogue descriptor nor a
-// carrier names. A pin younger than staging is kept: an install may not have published its descriptor yet.
-func pruneSessionOwnerPinsAt(ctx context.Context, catalog sessionowner.Catalog, paths installPaths, uid int, runtimeRoot, active string, staging time.Duration) error {
-	descriptors, err := catalog.ReadAll(ctx, paths.instance)
-	if err != nil {
-		return err
+// carrier names. The caller holds the native installation lock: an install holds it for its whole run and stages
+// its candidate's pin before publishing the descriptor that names it (pbvm4 run20), so no window is needed.
+func pruneSessionOwnerPinsAt(ctx context.Context, catalog sessionowner.Catalog, paths installPaths, uid int, runtimeRoot, active string) error {
+	var descriptors []sessionowner.Descriptor
+	if _, err := os.Lstat(catalog.Root); !installNotExistOnly(err) {
+		if descriptors, err = catalog.ReadAll(ctx, paths.instance); err != nil {
+			return err
+		}
 	}
 	root := filepath.Join(filepath.Dir(paths.workerRollback), "pins")
 	keep := map[string]bool{filepath.Join(root, active, "pb"): true}
@@ -66,12 +53,8 @@ func pruneSessionOwnerPinsAt(ctx context.Context, catalog sessionowner.Catalog, 
 		}
 		keep[carrier.Executable] = true
 	}
-	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(catalog), staging)
+	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(catalog))
 }
-
-// pinStagingWindow matches the catalogue's staging window: a pin this new may
-// belong to an install that has not published its descriptor yet.
-const pinStagingWindow = 10 * time.Minute
 
 // pinSweepBound is how many pin directories one sweep reads: every
 // session-owner reference, the active and one retiring carrier, and one
@@ -111,7 +94,7 @@ func openProtectedPinDirectory(path string) (int, error) {
 	return fd, nil
 }
 
-func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string]bool, maximum int, staging time.Duration) (resultErr error) {
+func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string]bool, maximum int) (resultErr error) {
 	if ctx == nil || maximum < 2 || maximum > pinSweepBound(sessionowner.Catalog{Maximum: sessionowner.MaxCatalogEntries}) {
 		return ErrInvalidRequest
 	}
@@ -137,12 +120,6 @@ func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string
 			continue
 		}
 		if _, err := hex.DecodeString(name); err != nil {
-			continue
-		}
-		// An update stages its candidate's pin before publishing the
-		// descriptor that references it; a sweep in between must not delete
-		// it (pbvm4 run20: install failed opening its own candidate pin).
-		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < staging {
 			continue
 		}
 		child, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

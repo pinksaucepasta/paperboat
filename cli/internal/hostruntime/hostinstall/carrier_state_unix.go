@@ -380,8 +380,8 @@ func activateUnixNativeRoles(ctx context.Context, host, hostd, updater *service.
 	return nil
 }
 
-// reconcileInstalledCarrier keeps the active carrier generation running and
-// retires and removes every other carrier and hostd generation (sweepGenerations).
+// reconcileInstalledCarrier keeps the active carrier generation running, retires and removes every other carrier and
+// hostd generation (sweepGenerations), then every pin nothing names.
 // carrierReconcileBound bounds how long one reconcile pass waits for the active carrier while it holds the update lock.
 const carrierReconcileBound = 5 * time.Second
 
@@ -429,7 +429,14 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, _ ...func(c
 	if err := EnsureExistingCarrier(ensureCtx, active); err != nil {
 		return err
 	}
-	return sweepGenerations(ctx, request, active.Generation, false)
+	err = sweepGenerations(ctx, request, active.Generation, false)
+	// Pins go last in the same pass: a generation's pin outlives it until nothing names it any more (pbvm1 F14-04:
+	// the replaced build's pin stayed after its drain, once the install's own inventory had run).
+	catalog, _, catalogErr := sessionOwnerCatalog(request)
+	if catalogErr != nil {
+		return errors.Join(err, catalogErr)
+	}
+	return errors.Join(err, pruneSessionOwnerPinsAt(ctx, catalog, paths, request.UID, request.StateRoot, request.Source.SHA256))
 }
 
 func (s unixCarrierInstallation) legacyComponents() ([]*service.NativeTransactionalComponent, error) {

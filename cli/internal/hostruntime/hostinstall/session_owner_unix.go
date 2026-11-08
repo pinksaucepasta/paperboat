@@ -164,11 +164,7 @@ func InstalledSessionOwnerCoordinator(ctx context.Context, uid int) (sessionowne
 	c, d, err := NativeSessionOwnerConfig(ctx, request)
 	paths := platformPaths(uid)
 	installing := func() bool { return installationMayOwnCandidates(paths, uid, request.Source) }
-	coordinator := sessionowner.Coordinator{Catalog: c, Active: d, Installing: installing}
-	if err == nil {
-		err = PruneSessionOwnerPins(ctx, coordinator)
-	}
-	return coordinator, err
+	return sessionowner.Coordinator{Catalog: c, Active: d, Installing: installing}, err
 }
 
 // installationMayOwnCandidates reports an installation that may own a session owner newer than source: one holding

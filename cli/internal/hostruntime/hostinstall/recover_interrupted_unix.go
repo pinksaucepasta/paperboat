@@ -111,9 +111,8 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 // withdrawInterruptedCandidate undoes the session owner a killed install started for its candidate source and the
 // candidate's pin, as the install's own failure path does (candidateSessionOwner.withdraw, then the inventory): the
 // inventory cannot tell that descriptor from history once recovery reactivates the previous worker (pbvm1 F14-03:
-// both stayed through a later good update). It runs under the install lock, so no install is staging a pin and the
-// staging window does not apply. A descriptor of that generation on other code is history republished on the active
-// code, not the candidate.
+// both stayed through a later good update). It runs under the install lock, so no install is staging a pin. A
+// descriptor of that generation on other code is history republished on the active code, not the candidate.
 func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid int, runner service.Runner, candidate installsource.Source) error {
 	installed, err := loadInstallMetadata(paths.metadata, uid)
 	if installNotExistOnly(err) {
@@ -140,5 +139,5 @@ func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid i
 	if err := owner.withdraw(ctx, paths.metadata, uid); err != nil {
 		return err
 	}
-	return pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256, 0)
+	return pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256)
 }

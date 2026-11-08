@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-	"time"
 )
 
 // Since the terminal ceiling became 256 (b9ebbc8d), the installed catalogue's Maximum is 257 and the
@@ -31,10 +30,10 @@ func TestSessionOwnerPinSweepAcceptsTheInstalledCatalogueBound(t *testing.T) {
 		parent = "/Library"
 	}
 	missing := filepath.Join(parent, "paperboat-pin-sweep-missing-"+hex.EncodeToString(nonce[:8]))
-	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog), pinStagingWindow); err != nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)); err != nil {
 		t.Fatalf("sweep with the installed catalogue's bound %d: %v", pinSweepBound(catalog), err)
 	}
-	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)+1, pinStagingWindow); err == nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), missing, nil, pinSweepBound(catalog)+1); err == nil {
 		t.Fatal("sweep accepted a bound above the catalogue ceiling")
 	}
 }
@@ -105,24 +104,10 @@ func TestSessionOwnerPinPrunePreservesReferencesAndUntrustedFiles(t *testing.T) 
 	if err := os.WriteFile(neighbour, []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Every pin above is older than an install's staging window.
-	entries, err := os.ReadDir(root)
-	if err != nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), root, map[string]bool{retained: true}, 22); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * pinStagingWindow)
-	for _, entry := range entries {
-		if err := os.Chtimes(filepath.Join(root, entry.Name()), old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// pbvm4 run20: an update's freshly staged candidate pin, not yet named by
-	// any descriptor, must survive the sweep.
-	staged := pin("candidate staged by a running install")
-	if err := pruneUnixSessionOwnerPins(context.Background(), root, map[string]bool{retained: true}, 22, pinStagingWindow); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{staged, retained, wrongHash, writableDirectory, writableFile, foreignOwner, pipePin, linked, neighbour} {
+	for _, path := range []string{retained, wrongHash, writableDirectory, writableFile, foreignOwner, pipePin, linked, neighbour} {
 		if _, err := os.Lstat(path); err != nil {
 			t.Fatalf("preserved path disappeared: %s: %v", filepath.Base(path), err)
 		}
@@ -138,7 +123,7 @@ func TestSessionOwnerPinPrunePreservesReferencesAndUntrustedFiles(t *testing.T) 
 	if err := os.Chmod(root, 0777); err != nil {
 		t.Fatal(err)
 	}
-	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 22, pinStagingWindow); err == nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 22); err == nil {
 		t.Fatal("accepted writable pin root")
 	}
 	if _, err := os.Lstat(retained); err != nil {
@@ -171,19 +156,15 @@ func TestSessionOwnerPinPruneBoundsEachSweep(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(directory, "pb"), []byte(body), 0755); err != nil {
 			t.Fatal(err)
 		}
-		old := time.Now().Add(-2 * pinStagingWindow)
-		if err := os.Chtimes(directory, old, old); err != nil {
-			t.Fatal(err)
-		}
 	}
-	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 2, pinStagingWindow); err != nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 2); err != nil {
 		t.Fatal(err)
 	}
 	remaining, err := os.ReadDir(root)
 	if err != nil || len(remaining) != 1 {
 		t.Fatalf("bounded sweep remaining=%d: %v", len(remaining), err)
 	}
-	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 2, pinStagingWindow); err != nil {
+	if err := pruneUnixSessionOwnerPins(context.Background(), root, nil, 2); err != nil {
 		t.Fatal(err)
 	}
 	remaining, err = os.ReadDir(root)
