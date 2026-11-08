@@ -119,3 +119,31 @@ func TestRecoverWithinRemovesTheCallersOwnServiceLast(t *testing.T) {
 		t.Fatalf("the updater was not put back to not installed: %+v", status)
 	}
 }
+
+// The activation helper is another unit, outside every component: its recovery (self "") restores every role, the
+// updater's own removal included, inside the rollback, and leaves nothing for last. Skipping recovery in the helper
+// left the install journal behind, and the helper failed on it until the updater service took the lock.
+func TestRecoverWithinNoSelfRestoresEveryRole(t *testing.T) {
+	var calls []string
+	var mu sync.Mutex
+	hostd := newFakeTransactionalComponent("hostd", &calls, &mu)
+	updater := newFakeTransactionalComponent("updater", &calls, &mu)
+	host := killedOnInstall{newFakeTransactionalComponent("host", &calls, &mu)}
+	manager := lifecycleForTest(t, hostd, updater, host)
+	func() {
+		defer func() { _ = recover() }()
+		_ = manager.Install(context.Background())
+	}()
+	finishSelf, err := manager.RecoverWithin(context.Background(), "")
+	if err != nil || finishSelf != nil {
+		t.Fatalf("finishSelf=%v err=%v", finishSelf != nil, err)
+	}
+	for _, component := range []*fakeTransactionalComponent{hostd, updater} {
+		if status, _ := component.Inspect(context.Background()); status.Installed {
+			t.Fatalf("%s was not restored to not installed: %+v", component.id, status)
+		}
+	}
+	if _, err := os.Lstat(manager.journal); !os.IsNotExist(err) {
+		t.Fatalf("journal left behind: %v", err)
+	}
+}

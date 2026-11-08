@@ -145,26 +145,29 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	// Native declarations and recovery helpers can outlive a committed update.
 	// Their environment is a launch snapshot, not the installed version owner.
 	// An install killed halfway leaves a journal every reader below rejects; undo it before reading any state.
-	// Recovery is the updater service's job: the activation helper runs as another unit, so "self" would be wrong.
-	if !*helper {
-		finishSelf, err := hostinstall.RecoverInterrupted(ctx, uid)
-		marker := filepath.Join(stateRoot, recoveryFailingMarker)
-		if err != nil {
-			wait := recoveryRetryWait(marker, time.Now())
-			fmt.Fprintf(stderr, "paperboat-updated: recovering the interrupted installation failed, retrying in %s: %v\n", wait, err)
-			_ = notifier.ExtendStart(wait + time.Minute)
-			select {
-			case <-ctx.Done():
-			case <-time.After(wait):
-			}
-			return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
+	// The activation helper runs as another unit: it restores every role, the updater's too, and has no own
+	// service to leave for last.
+	self := service.UpdaterKind
+	if *helper {
+		self = ""
+	}
+	finishSelf, err := hostinstall.RecoverInterrupted(ctx, uid, self)
+	marker := filepath.Join(stateRoot, recoveryFailingMarker)
+	if err != nil {
+		wait := recoveryRetryWait(marker, time.Now())
+		fmt.Fprintf(stderr, "paperboat-updated: recovering the interrupted installation failed, retrying in %s: %v\n", wait, err)
+		_ = notifier.ExtendStart(wait + time.Minute)
+		select {
+		case <-ctx.Done():
+		case <-time.After(wait):
 		}
-		_ = os.Remove(marker)
-		if finishSelf != nil {
-			// Last step: this updater's own service returns to its pre-install state. Either it still runs the
-			// replaced executable and its supervisor starts it on the restored one, or it is stopped or removed.
-			return failInitialization(errors.Join(errors.New("the interrupted installation was undone; the updater's own service returns to its state before it"), finishSelf(ctx)))
-		}
+		return failInitialization(runtimeFailure("recovering the interrupted installation failed", err))
+	}
+	_ = os.Remove(marker)
+	if finishSelf != nil {
+		// Last step: this updater's own service returns to its pre-install state. Either it still runs the
+		// replaced executable and its supervisor starts it on the restored one, or it is stopped or removed.
+		return failInitialization(errors.Join(errors.New("the interrupted installation was undone; the updater's own service returns to its state before it"), finishSelf(ctx)))
 	}
 	installed, err := hostinstall.LoadEnrolledOwner(uid)
 	installedSource := installed.Source

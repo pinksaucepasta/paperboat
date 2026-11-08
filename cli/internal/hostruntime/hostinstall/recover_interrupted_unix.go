@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
 
@@ -21,10 +20,11 @@ var interruptedInstallWriterWait = 3 * time.Second
 // its whole run, so a journal found while the lock is free has no writer: the interrupted services and files are
 // restored and the journal removed, once. A live writer keeps its journal and is left alone.
 //
-// It runs inside the updater, whose own service must not be stopped by the recovery: a non-nil finishSelf
-// (service.LifecycleManager.RecoverWithin) is returned only once everything else is undone, and the caller runs it
-// as its very last step, then exits.
-func RecoverInterrupted(ctx context.Context, uid int) (finishSelf func(context.Context) error, err error) {
+// self is the lifecycle component the caller runs as (the updater service), or "" for a caller outside every
+// component (the activation helper), which restores them all. The caller's own service must not be stopped by the
+// recovery: a non-nil finishSelf (service.LifecycleManager.RecoverWithin) is returned only once everything else is
+// undone, and the caller runs it as its very last step, then exits.
+func RecoverInterrupted(ctx context.Context, uid int, self string) (finishSelf func(context.Context) error, err error) {
 	if os.Geteuid() != 0 {
 		return nil, ErrNotPrivileged
 	}
@@ -52,7 +52,7 @@ func RecoverInterrupted(ctx context.Context, uid int) (finishSelf func(context.C
 		if err != nil {
 			return nil, errors.Join(ErrInvalidRequest, err)
 		}
-		return lifecycle.RecoverWithin(ctx, service.UpdaterKind)
+		return lifecycle.RecoverWithin(ctx, self)
 	})
 }
 
