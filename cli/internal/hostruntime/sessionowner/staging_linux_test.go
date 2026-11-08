@@ -27,12 +27,15 @@ func TestStagingProtectsOnlyAGenerationPublishedAfterTheActiveOne(t *testing.T) 
 		}
 		return Descriptor{Generation: generation(n), Source: installsource.Source{SHA256: sha}}
 	}
-	replaced := publish(1, 3*time.Minute, "old")
-	active := publish(2, 2*time.Minute, "new")
+	replaced := publish(1, 5*time.Hour, "old")
+	active := publish(2, 4*time.Hour, "new")
 	candidate := publish(3, time.Minute, "next")
-	orphan := publish(4, 2*stagingWindow, "next")
+	// A slow install: its validation and handover took far longer than any fixed window.
+	slow := publish(4, 3*time.Hour, "next")
 	// recordRetired and the archive reopen republish the replaced generation on the active code.
 	archive := publish(5, 30*time.Second, "new")
+	installing := true
+	coordinator := Coordinator{Catalog: c, Active: active, Installing: func() bool { return installing }}
 	for _, tc := range []struct {
 		name string
 		d    Descriptor
@@ -40,14 +43,18 @@ func TestStagingProtectsOnlyAGenerationPublishedAfterTheActiveOne(t *testing.T) 
 	}{
 		{"the generation the update replaced retires at once", replaced, false},
 		{"a candidate published after the active one is protected", candidate, true},
+		{"a live candidate is never retired because time passed", slow, true},
 		{"an archive republished on the active code retires at once", archive, false},
-		{"a crashed install's orphan retires once the window passed", orphan, false},
 	} {
-		if got := c.staging(tc.d, active); got != tc.want {
-			t.Errorf("%s: staging=%v, want %v", tc.name, got, tc.want)
+		if got := coordinator.candidate(tc.d); got != tc.want {
+			t.Errorf("%s: candidate=%v, want %v", tc.name, got, tc.want)
 		}
 	}
+	installing = false
+	if coordinator.candidate(candidate) {
+		t.Error("with no installation running, a newer generation is a crashed install's orphan and retires")
+	}
 	if !c.staging(candidate, Descriptor{Generation: generation(9)}) {
-		t.Error("an active descriptor that cannot be read keeps the conservative window")
+		t.Error("an active descriptor that cannot be read keeps the candidate")
 	}
 }

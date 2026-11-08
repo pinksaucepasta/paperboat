@@ -132,6 +132,16 @@ func LockUnixNativeInstall(ctx context.Context, root string) (io.Closer, error) 
 	}
 }
 
+// TryLockUnixNativeInstall takes the activation lock without waiting; ErrActivationPending while an installation or
+// an update operation holds it. Whatever an installation stages is collected only under it.
+func TryLockUnixNativeInstall(root string) (io.Closer, error) {
+	lock, err := unixActivationLock(root)
+	if err != nil {
+		return nil, err
+	}
+	return lock, nil
+}
+
 // PrepareUnixNativeInstall requires the caller to hold the activation lock.
 func PrepareUnixNativeInstall(root string) error {
 	if pending, err := nativeInstallPending(root); err != nil || pending {

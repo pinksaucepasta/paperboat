@@ -110,7 +110,8 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 	}()
 	// Native uninstall already succeeded, but its cleanup/catalogue commit
 	// was interrupted. Unknown IPC content preserves the old descriptor.
-	coordinator := Coordinator{Catalog: catalog, Active: active}
+	installing := true // the update that stages a candidate below is still running
+	coordinator := Coordinator{Catalog: catalog, Active: active, Installing: func() bool { return installing }}
 	unknown := filepath.Join(oldRun, "unknown")
 	if e = os.WriteFile(unknown, []byte("task-owned unexpected object"), 0600); e != nil {
 		t.Fatal(e)
@@ -242,7 +243,7 @@ func TestArchivedHistoryAdmitsNewTerminalWithoutNativeStartup(t *testing.T) {
 	if path, _ := Find(catalog.Root, empty.Generation); func() bool { _, err := os.Lstat(path); return err != nil }() {
 		t.Fatal("reconcile retired a freshly staged candidate generation")
 	}
-	backdate(t, catalog, empty)
+	installing = false // no installation runs any more: the candidate is an orphan
 	emptyStore, err := store.Open(ctx, store.Config{Root: empty.StoreRoot()})
 	if err != nil {
 		t.Fatal(err)
@@ -369,14 +370,14 @@ func (r *absentOwnerRunner) Output(_ context.Context, name string, args ...strin
 	return "LoadState=not-found\n", nil
 }
 
-// backdate ages a published descriptor past the staging window.
+// backdate makes a published descriptor clearly older than the active one.
 func backdate(t *testing.T, catalog Catalog, d Descriptor) {
 	t.Helper()
 	path, err := Find(catalog.Root, d.Generation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * stagingWindow)
+	old := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}

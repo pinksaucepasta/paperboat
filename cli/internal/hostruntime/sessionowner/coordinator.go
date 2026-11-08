@@ -72,6 +72,9 @@ func WaitReady(ctx context.Context, d Descriptor) (*workloadbridge.Client, error
 type Coordinator struct {
 	Catalog Catalog
 	Active  Descriptor
+	// Installing reports an installation running now or committed since Active was read: either may own a
+	// generation published after Active. Nil counts as installing.
+	Installing func() bool
 }
 
 func (c Coordinator) descriptor(ctx context.Context, generation string) (Descriptor, error) {
@@ -165,7 +168,7 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 	}
 	var result error
 	for _, d := range all {
-		if d.Generation == c.Active.Generation || c.Catalog.staging(d, c.Active) {
+		if d.Generation == c.Active.Generation || c.candidate(d) {
 			continue
 		}
 		status, err := c.nativeState(ctx, d)
@@ -243,28 +246,29 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 // that does not confirm in time keeps running and is retried next pass.
 const ownerRetireTimeout = 5 * time.Second
 
-// stagingWindow bounds how long a generation published after the active one is treated as an
-// update's staged candidate. Like nginx's new workers starting before the old
-// ones drain (~/ref/nginx/src/os/unix/ngx_process_cycle.c), the candidate must
-// not be retired by the still-active updater while the installer prepares it
-// (pbvm4 run1: retiring it stopped its carrier mid-move). A crashed install's
-// orphan is retired once the window passes.
-const stagingWindow = 10 * time.Minute
+// candidate reports a generation Reconcile leaves to the installation that may still own it.
+func (c Coordinator) candidate(d Descriptor) bool {
+	return c.Catalog.staging(d, c.Active) && (c.Installing == nil || c.Installing())
+}
 
+// staging reports a possible update candidate: a generation that runs other code than the active one and was
+// published after it. Like nginx's new workers starting before the old ones drain
+// (~/ref/nginx/src/os/unix/ngx_process_cycle.c), the candidate must not be retired by the still-active updater while
+// the installer prepares it (pbvm4 run1: retiring it stopped its carrier mid-move), however long that takes: Reconcile
+// keeps it while Coordinator.Installing, the installation lock, says an install may own it. A crashed install's
+// orphan is withdrawn by its recovery, or retired once no installation runs. The generation an update replaced was
+// published before the active one, and once republished as an archive reader it carries the active code
+// (recordRetired, Ensure), so it is never a candidate: it retires when its last session closes (F14-04).
 func (c Catalog) staging(d, active Descriptor) bool {
+	if d.Source.SHA256 == active.Source.SHA256 {
+		return false
+	}
 	path, err := Find(c.Root, d.Generation)
 	if err != nil {
 		return false
 	}
 	info, err := os.Lstat(path)
-	if err != nil || time.Since(info.ModTime()) >= stagingWindow {
-		return false
-	}
-	// A candidate runs other code than the active generation and was published after it. The
-	// generation an update replaced was published before it, and once republished as an archive
-	// reader it carries the active code (recordRetired, Ensure), so neither waits out
-	// stagingWindow: it retires when its last session closes (F14-04).
-	if d.Source.SHA256 == active.Source.SHA256 {
+	if err != nil {
 		return false
 	}
 	activePath, err := Find(c.Root, active.Generation)

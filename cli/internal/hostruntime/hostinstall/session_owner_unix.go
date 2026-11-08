@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -161,12 +162,28 @@ func InstalledSessionOwnerCoordinator(ctx context.Context, uid int) (sessionowne
 		return sessionowner.Coordinator{}, err
 	}
 	c, d, err := NativeSessionOwnerConfig(ctx, request)
-	coordinator := sessionowner.Coordinator{Catalog: c, Active: d}
+	paths := platformPaths(uid)
+	installing := func() bool { return installationMayOwnCandidates(paths, uid, request.Source) }
+	coordinator := sessionowner.Coordinator{Catalog: c, Active: d, Installing: installing}
 	if err == nil {
 		err = PruneSessionOwnerPins(ctx, coordinator)
 	}
 	return coordinator, err
 }
+
+// installationMayOwnCandidates reports an installation that may own a session owner newer than source: one holding
+// the activation lock now (an install holds it for its whole run, however long), or one that committed since source
+// was read. An unknown answer keeps the candidate.
+func installationMayOwnCandidates(paths installPaths, uid int, source installsource.Source) bool {
+	lock, err := updated.TryLockUnixNativeInstall(paths.updateState)
+	if err != nil {
+		return true
+	}
+	defer lock.Close()
+	installed, err := loadInstallMetadata(paths.metadata, uid)
+	return err != nil || installed.Source.SHA256 != source.SHA256
+}
+
 func InstalledSessionOwnerRecorded(ctx context.Context, uid int, source installsource.Source) (bool, error) {
 	request, err := LoadEnrolledOwner(uid)
 	if err != nil {
