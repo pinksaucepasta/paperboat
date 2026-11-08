@@ -442,7 +442,8 @@ func reattachExecConnection(
 	defer cancel()
 	replacement, err := reattachExecDial(attempt, descriptor, dial)
 	if err != nil {
-		if ctx.Err() == nil && errors.Is(attempt.Err(), context.DeadlineExceeded) {
+		// Only the attempt's own expiry becomes retryable: a permanent answer racing the timer stays permanent.
+		if ctx.Err() == nil && attempt.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("the reattach attempt got no answer in %v: %w", execReattachAttemptTimeout, tunnel.ErrPeerStreamOpen)
 		}
 		return nil, err

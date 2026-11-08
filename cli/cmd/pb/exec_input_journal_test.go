@@ -189,3 +189,22 @@ func TestExecReattachAttemptTimesOutAndIsRetried(t *testing.T) {
 		t.Fatalf("a canceled command was retried: %v", err)
 	}
 }
+
+// A permanent answer that arrives as the attempt timer fires is the answer: it is not turned into a retryable timeout.
+func TestExecReattachKeepsAPermanentErrorThatRacesTheAttemptTimer(t *testing.T) {
+	old := execReattachAttemptTimeout
+	execReattachAttemptTimeout = 20 * time.Millisecond
+	defer func() { execReattachAttemptTimeout = old }()
+	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
+	var request tunnel.ExecRequest
+	missing := &api.APIError{Code: "user_machine_not_found"}
+	descriptor := func(ctx context.Context) (api.ExecDescriptor, error) {
+		<-ctx.Done()
+		return api.ExecDescriptor{}, missing
+	}
+	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) { return nil, errors.New("not dialed") }
+	_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
+	if !errors.Is(err, missing) || retryableExecReattachment(err) {
+		t.Fatalf("the permanent error became %v (retryable %v)", err, retryableExecReattachment(err))
+	}
+}
