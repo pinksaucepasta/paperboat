@@ -99,5 +99,7 @@ func InstalledSessionOwnerCoordinator(ctx context.Context, instance string) (ses
 		return sessionowner.Coordinator{}, sessionowner.ErrInvalid
 	}
 	c, d, err := NativeSessionOwnerConfig(ctx, request)
+	// shortcut: no Installing probe on Windows, so Reconcile keeps every newer generation on other code and a crashed
+	// install's orphan never retires; add a Windows install-lock probe with Windows support (post-launch, PLAN 1.1).
 	return sessionowner.Coordinator{Catalog: c, Active: d}, err
 }
