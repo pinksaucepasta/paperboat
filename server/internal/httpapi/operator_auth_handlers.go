@@ -20,11 +20,11 @@ func operatorCookie(r *http.Request) string {
 	}
 	return cookie.Value
 }
-func setOperatorCookie(w http.ResponseWriter, secure bool, session operatorauth.Session) {
-	http.SetCookie(w, &http.Cookie{Name: operatorSessionCookie, Value: session.Token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt})
+func setOperatorCookie(w http.ResponseWriter, session operatorauth.Session) {
+	http.SetCookie(w, &http.Cookie{Name: operatorSessionCookie, Value: session.Token, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt})
 }
-func clearOperatorCookie(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{Name: operatorSessionCookie, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+func clearOperatorCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: operatorSessionCookie, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 }
 func operatorOriginAllowed(r *http.Request, opts Options) bool {
 	origin := r.Header.Get("Origin")
@@ -67,9 +67,11 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 			return
 		}
 		step, err := service.Discover(r.Context(), email)
+		// An unknown email gets the same answer as an operator's, so this cannot enumerate
+		// operator accounts (OWASP Authentication Cheat Sheet, "Authentication Responses");
+		// sign-in then fails with the generic invalid_credentials.
 		if expectedHTTPErrorOnly(err, operatorauth.ErrInvalid) {
-			writeError(w, r, 404, "operator_not_found", "Operator email was not found.")
-			return
+			step, err = "password", nil
 		}
 		if err != nil {
 			writeError(w, r, 503, "operator_unavailable", "Operator authentication is unavailable.", err)
@@ -79,7 +81,7 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"next": step}})
 	})
 	finish := func(w http.ResponseWriter, r *http.Request, session operatorauth.Session) {
-		setOperatorCookie(w, strings.HasPrefix(opts.Config.HTTP.PublicBaseURL, "https://"), session)
+		setOperatorCookie(w, session)
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"email": session.Account.Email, "role": session.Account.Role, "csrf_token": session.CSRF}})
 	}
@@ -156,7 +158,7 @@ func registerOperatorAuthentication(mux *http.ServeMux, opts Options) {
 			writeError(w, r, 503, "operator_unavailable", "Operator sign-out is unavailable.", err)
 			return
 		}
-		clearOperatorCookie(w, strings.HasPrefix(opts.Config.HTTP.PublicBaseURL, "https://"))
+		clearOperatorCookie(w)
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"status": "signed_out"}})
 	})
