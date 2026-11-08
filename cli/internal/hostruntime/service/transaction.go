@@ -478,6 +478,11 @@ func (m *LifecycleManager) rollback(ctx context.Context, journal lifecycleJourna
 	return err
 }
 
+// selfRemover uninstalls the component its caller runs as with nothing left to do after the stop that ends the caller.
+type selfRemover interface {
+	RemoveSelf(context.Context) error
+}
+
 // rollbackKeeping never stops the component named self: finishSelf is left for it (see RecoverWithin).
 func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycleJournal, self string) (finishSelf func(context.Context) error, resultErr error) {
 	// Decided before the installation is restored: afterwards the executable looks unchanged.
@@ -524,6 +529,9 @@ func (m *LifecycleManager) rollbackKeeping(ctx context.Context, journal lifecycl
 		if component.ID() == self && !before.Running {
 			// Restoring it stops or removes the caller's own service: done last, by the caller, after the journal is gone.
 			finishSelf = func(ctx context.Context) error { return component.Restore(ctx, before) }
+			if remover, ok := component.(selfRemover); ok && !before.Installed {
+				finishSelf = remover.RemoveSelf // the stop ends the caller: nothing may be left to do after it
+			}
 			continue
 		}
 		if restart {

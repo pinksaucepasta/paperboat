@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -128,6 +129,30 @@ func (c *NativeTransactionalComponent) Repair(ctx context.Context) error {
 
 func (c *NativeTransactionalComponent) Stop(ctx context.Context) error {
 	return c.controller.Stop(ctx, c.installer.definitionPath)
+}
+
+// RemoveSelf uninstalls the component its caller runs as. Its stop ends the caller, so the declaration goes first:
+// on systemd its boot links are dropped (disable keeps a running unit running), the unit file removed, then the
+// loaded unit stopped; on launchd the plist is removed, then the job booted out by label. Tailscale's uninstall
+// (~/ref/tailscale/cmd/tailscaled/install_darwin.go uninstallSystemDaemonDarwin) stops, then removes the plist, from
+// outside the daemon; run from inside the service the removal comes first, so the stop that kills the caller is last.
+func (c *NativeTransactionalComponent) RemoveSelf(ctx context.Context) error {
+	if c == nil || ctx == nil {
+		return ErrLifecycleInvalid
+	}
+	path := c.installer.definitionPath
+	if c.installer.config.Platform != "darwin" {
+		if err := c.controller.Disable(ctx, path); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := syncServiceDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return c.controller.Stop(ctx, path)
 }
 
 func (c *NativeTransactionalComponent) Uninstall(ctx context.Context) error {
