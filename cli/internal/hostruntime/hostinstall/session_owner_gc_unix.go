@@ -29,37 +29,44 @@ func PruneSessionOwnerPins(ctx context.Context, coordinator sessionowner.Coordin
 	if coordinator.Catalog.Root != filepath.Join(paths.root, "session-owners") || coordinator.Active.Instance != paths.instance {
 		return ErrInvalidRequest
 	}
-	descriptors, err := coordinator.Catalog.ReadAll(ctx, coordinator.Active.Instance)
+	active := coordinator.Active
+	return pruneSessionOwnerPinsAt(ctx, coordinator.Catalog, paths, active.UID, active.RuntimeRoot, active.Source.SHA256, pinStagingWindow)
+}
+
+// pruneSessionOwnerPinsAt removes every pin of paths that neither the active source, a catalogue descriptor nor a
+// carrier names. A pin younger than staging is kept: an install may not have published its descriptor yet.
+func pruneSessionOwnerPinsAt(ctx context.Context, catalog sessionowner.Catalog, paths installPaths, uid int, runtimeRoot, active string, staging time.Duration) error {
+	descriptors, err := catalog.ReadAll(ctx, paths.instance)
 	if err != nil {
 		return err
 	}
 	root := filepath.Join(filepath.Dir(paths.workerRollback), "pins")
-	keep := map[string]bool{filepath.Join(root, coordinator.Active.Source.SHA256, "pb"): true}
+	keep := map[string]bool{filepath.Join(root, active, "pb"): true}
 	for _, d := range descriptors {
-		if d.UID != coordinator.Active.UID || d.RuntimeRoot != coordinator.Active.RuntimeRoot || d.Executable != filepath.Join(root, d.Source.SHA256, "pb") {
+		if d.UID != uid || d.RuntimeRoot != runtimeRoot || d.Executable != filepath.Join(root, d.Source.SHA256, "pb") {
 			return ErrInvalidRequest
 		}
 		keep[d.Executable] = true
 	}
 	// A retired carrier generation still serves from its pin until it exits.
-	carriers, err := filepath.Glob(carrierGenerationPath(coordinator.Active.Instance, "*"))
+	carriers, err := filepath.Glob(carrierGenerationPath(paths.instance, "*"))
 	if err != nil {
 		return err
 	}
-	for _, path := range append(carriers, carrierConfigPath(coordinator.Active.Instance)) {
-		carrier, err := readCarrierFile(ctx, coordinator.Active.Instance, path)
+	for _, path := range append(carriers, carrierConfigPath(paths.instance)) {
+		carrier, err := readCarrierFile(ctx, paths.instance, path)
 		if installNotExistOnly(err) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if carrier.UID != coordinator.Active.UID || carrier.Executable != filepath.Join(root, carrier.Source.SHA256, "pb") {
+		if carrier.UID != uid || carrier.Executable != filepath.Join(root, carrier.Source.SHA256, "pb") {
 			return ErrInvalidRequest
 		}
 		keep[carrier.Executable] = true
 	}
-	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(coordinator.Catalog))
+	return pruneUnixSessionOwnerPins(ctx, root, keep, pinSweepBound(catalog), staging)
 }
 
 // pinStagingWindow matches the catalogue's staging window: a pin this new may
@@ -104,7 +111,7 @@ func openProtectedPinDirectory(path string) (int, error) {
 	return fd, nil
 }
 
-func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string]bool, maximum int) (resultErr error) {
+func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string]bool, maximum int, staging time.Duration) (resultErr error) {
 	if ctx == nil || maximum < 2 || maximum > pinSweepBound(sessionowner.Catalog{Maximum: sessionowner.MaxCatalogEntries}) {
 		return ErrInvalidRequest
 	}
@@ -135,7 +142,7 @@ func pruneUnixSessionOwnerPins(ctx context.Context, root string, keep map[string
 		// An update stages its candidate's pin before publishing the
 		// descriptor that references it; a sweep in between must not delete
 		// it (pbvm4 run20: install failed opening its own candidate pin).
-		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < pinStagingWindow {
+		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < staging {
 			continue
 		}
 		child, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

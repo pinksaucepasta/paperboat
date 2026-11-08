@@ -21,7 +21,11 @@ func sessionOwnerCatalog(request Request) (sessionowner.Catalog, string, error) 
 		return sessionowner.Catalog{}, "", ErrInvalidRequest
 	}
 	paths := platformPaths(request.UID)
-	return sessionowner.Catalog{Root: filepath.Join(paths.root, "session-owners"), ConfigRoot: "/", User: request.User, Group: request.Group, Maximum: config.DefaultResources.MaxSessions + 1, Runner: service.ExecRunner{}}, paths.instance, nil
+	return sessionOwnerCatalogAt(paths, request), paths.instance, nil
+}
+
+func sessionOwnerCatalogAt(paths installPaths, request Request) sessionowner.Catalog {
+	return sessionowner.Catalog{Root: filepath.Join(paths.root, "session-owners"), ConfigRoot: "/", User: request.User, Group: request.Group, Maximum: config.DefaultResources.MaxSessions + 1, Runner: service.ExecRunner{}}
 }
 
 func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowner.Catalog, sessionowner.Descriptor, error) {

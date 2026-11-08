@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
 
@@ -36,7 +38,7 @@ func interruptedInstall(t *testing.T) (installPaths, Request, []byte) {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	paths := installPaths{root: root, worker: filepath.Join(root, "pb"), workerNext: filepath.Join(root, "pb.next"),
 		workerRollback: filepath.Join(root, "pb.rollback"), metadata: filepath.Join(root, "metadata"),
-		journal: filepath.Join(root, "install-journal"), updateState: filepath.Join(root, "update")}
+		journal: filepath.Join(root, "install-journal"), updateState: filepath.Join(root, "update"), instance: "u" + strconv.Itoa(request.UID)}
 	if err = os.Mkdir(paths.updateState, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func TestInterruptedInstallIsRecoveredOnceAndTheUpdaterReadsTheInstalledSource(t
 	restored := 0
 	restore := func(context.Context) (func(context.Context) error, error) { restored++; return nil, nil }
 	for round := 0; round < 2; round++ {
-		if _, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil {
+		if _, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 	}
@@ -103,7 +105,7 @@ func TestInterruptedInstallIsRecoveredOnceAndTheUpdaterReadsTheInstalledSource(t
 
 // A journal whose installer is still running belongs to it: recovery must not roll it back.
 func TestRunningInstallKeepsItsJournal(t *testing.T) {
-	paths, _, _ := interruptedInstall(t)
+	paths, request, _ := interruptedInstall(t)
 	lock, err := updated.LockUnixNativeInstall(context.Background(), paths.updateState)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +115,7 @@ func TestRunningInstallKeepsItsJournal(t *testing.T) {
 	interruptedInstallWriterWait = 200 * time.Millisecond
 	defer func() { interruptedInstallWriterWait = previousWait }()
 	restored := false
-	if _, err = recoverInterruptedInstall(context.Background(), paths, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }); err != nil {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, func(context.Context) (func(context.Context) error, error) { restored = true; return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil || restored {
@@ -164,17 +166,17 @@ func TestInterruptedRecoveryRunsAgainFromTheTop(t *testing.T) {
 		}
 		return func(context.Context) error { return nil }, removeJournal(paths.journal)
 	}
-	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != errInterruptedRecovery {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != errInterruptedRecovery {
 		t.Fatalf("interrupted run: %v", err)
 	}
 	if _, err = os.Lstat(paths.journal); err != nil {
 		t.Fatalf("an interrupted recovery must keep the journal so it runs again: %v", err)
 	}
 	interrupted = false
-	if finishSelf, err := recoverInterruptedInstall(context.Background(), paths, restore); err != nil || finishSelf == nil {
+	if finishSelf, err := recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil || finishSelf == nil {
 		t.Fatalf("second run finishSelf=%v err=%v", finishSelf != nil, err)
 	}
-	if _, err = recoverInterruptedInstall(context.Background(), paths, restore); err != nil || runs != 2 {
+	if _, err = recoverInterruptedInstall(context.Background(), paths, request.UID, service.ExecRunner{}, restore); err != nil || runs != 2 {
 		t.Fatalf("a finished recovery ran again: runs=%d err=%v", runs, err)
 	}
 	if startedOnCandidate != 0 {

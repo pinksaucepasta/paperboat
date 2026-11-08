@@ -8,6 +8,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
 
@@ -32,7 +35,7 @@ func RecoverInterrupted(ctx context.Context, uid int, self string) (finishSelf f
 		return nil, ErrInvalidRequest
 	}
 	paths := platformPaths(uid)
-	return recoverInterruptedInstall(ctx, paths, func(ctx context.Context) (func(context.Context) error, error) {
+	return recoverInterruptedInstall(ctx, paths, uid, service.ExecRunner{}, func(ctx context.Context) (func(context.Context) error, error) {
 		request, err := loadInstallMetadata(paths.metadata, uid)
 		if installNotExistOnly(err) {
 			return nil, nil // a first enrollment has no earlier services to put back
@@ -56,7 +59,7 @@ func RecoverInterrupted(ctx context.Context, uid int, self string) (finishSelf f
 	})
 }
 
-func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreServices func(context.Context) (func(context.Context) error, error)) (finishSelf func(context.Context) error, resultErr error) {
+func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int, runner service.Runner, restoreServices func(context.Context) (func(context.Context) error, error)) (finishSelf func(context.Context) error, resultErr error) {
 	if _, err := os.Lstat(paths.journal); installNotExistOnly(err) {
 		return nil, nil
 	} else if err != nil {
@@ -88,6 +91,10 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreS
 	// by removing this journal. Rolling the files back before it would remove the running executable's path for
 	// nothing; after it, the journal is gone and only the leftover rollback copy of the worker remains. Every step is
 	// repeatable: until the journal is removed, a run that was interrupted anywhere starts over from the top.
+	// First, while the journal still makes a failure retry: nothing the killed attempt staged for its version stays.
+	if err := withdrawInterruptedCandidate(ctx, paths, uid, runner, journal.Source); err != nil {
+		return nil, err
+	}
 	finishSelf, err = restoreServices(ctx)
 	if err != nil {
 		return nil, err
@@ -99,4 +106,39 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, restoreS
 	}
 	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
 	return finishSelf, rollbackFiles(paths, journal)
+}
+
+// withdrawInterruptedCandidate undoes the session owner a killed install started for its candidate source and the
+// candidate's pin, as the install's own failure path does (candidateSessionOwner.withdraw, then the inventory): the
+// inventory cannot tell that descriptor from history once recovery reactivates the previous worker (pbvm1 F14-03:
+// both stayed through a later good update). It runs under the install lock, so no install is staging a pin and the
+// staging window does not apply. A descriptor of that generation on other code is history republished on the active
+// code, not the candidate.
+func withdrawInterruptedCandidate(ctx context.Context, paths installPaths, uid int, runner service.Runner, candidate installsource.Source) error {
+	installed, err := loadInstallMetadata(paths.metadata, uid)
+	if installNotExistOnly(err) {
+		return nil // shortcut: a killed first enrollment leaves its candidate to the next install's inventory
+	}
+	if err != nil || installed.Source.SHA256 == candidate.SHA256 {
+		return err
+	}
+	catalog := sessionOwnerCatalogAt(paths, installed)
+	catalog.Runner = runner
+	if _, err := os.Lstat(catalog.Root); installNotExistOnly(err) {
+		return nil // no catalogue: no session owner was ever staged
+	}
+	generation, err := sourceGeneration(candidate)
+	if err != nil {
+		return err
+	}
+	path, err := sessionowner.Find(catalog.Root, generation)
+	if err != nil {
+		return err
+	}
+	d, err := sessionowner.Read(path)
+	owner := candidateSessionOwner{catalog: catalog, generation: generation, existed: err == nil && d.Source.SHA256 != candidate.SHA256}
+	if err := owner.withdraw(ctx, paths.metadata, uid); err != nil {
+		return err
+	}
+	return pruneSessionOwnerPinsAt(ctx, catalog, paths, installed.UID, installed.StateRoot, installed.Source.SHA256, 0)
 }
