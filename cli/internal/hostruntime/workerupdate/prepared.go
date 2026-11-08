@@ -94,10 +94,15 @@ func (m *Manager) Prepare(ctx context.Context, release Release) (PreparedCandida
 		return PreparedCandidate{}, ErrBlocked
 	}
 	if previous.Stage == updateflow.StageAwaitingApproval && previous.CandidateID == candidate.ID {
-		if err = m.verifyPrepared(ctx, previous); err != nil {
+		err = m.verifyPrepared(ctx, previous)
+		if err == nil {
+			return candidate, nil
+		}
+		if !errors.Is(err, ErrPreparedCandidate) {
 			return PreparedCandidate{}, err
 		}
-		return candidate, nil
+		// The staged payload was replaced, consumed or damaged: download it again below. Returning the error left
+		// `pb update download` and `pb update --approve` failing with candidate_changed for good (F14-09).
 	}
 	journal := m.newJournal()
 	m.record(ctx, EventScheduled, journal, release, "")

@@ -306,3 +306,33 @@ func TestRestartedCandidateRequiresExactApprovedStagingBinding(t *testing.T) {
 		})
 	}
 }
+
+// A downloaded candidate whose staged payload no longer verifies (replaced by a supplied install, consumed, damaged) is downloaded
+// again by the next prepare; it used to fail with the verification error every time, so `pb update download` could not repair it (F14-09).
+func TestPrepareDownloadsAgainWhenTheStagedPayloadNoLongerVerifies(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	candidate, err := f.manager.Prepare(ctx, f.candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(f.paths.staged, []byte("altered executable"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.manager.PreparedCandidate(); !errors.Is(err, ErrPreparedCandidate) {
+		t.Fatalf("a damaged payload was offered: %v", err)
+	}
+	again, err := f.manager.Prepare(ctx, f.candidate)
+	if err != nil || again != candidate {
+		t.Fatalf("prepare did not repair the candidate: %+v %v", again, err)
+	}
+	if got, err := f.manager.PreparedCandidate(); err != nil || got != candidate {
+		t.Fatalf("repaired candidate: %+v %v", got, err)
+	}
+	if !regularMatches(f.paths.staged, f.candidate.Length, f.candidate.SHA256) {
+		t.Fatal("the staged payload was not downloaded again")
+	}
+	if f.fetcher.fetchCalls != 2 {
+		t.Fatalf("artifact downloads=%d, want 2", f.fetcher.fetchCalls)
+	}
+}
