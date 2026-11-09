@@ -309,7 +309,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	if err != nil {
 		return ConnectionDescriptor{}, err
 	}
-	if _, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,launch_cwd=coalesce(nullif($3,''),launch_cwd),last_runtime_sync_at=now(),last_runtime_sequence=$4,last_activity_at=CASE WHEN $5::timestamptz IS NULL THEN last_activity_at ELSE greatest(coalesce(last_activity_at,$5),$5) END,updated_at=now() WHERE id=$1`, sessionID, snapshot.State, cleanTerminalMetadata(snapshot.CWD, 1024), int64(snapshot.LatestSequence), snapshot.LastActiveAt); err != nil {
+	if _, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,closed_reason=`+terminalSnapshotClosedReasonSQL+`,launch_cwd=coalesce(nullif($3,''),launch_cwd),last_runtime_sync_at=now(),last_runtime_sequence=$4,last_activity_at=CASE WHEN $5::timestamptz IS NULL THEN last_activity_at ELSE greatest(coalesce(last_activity_at,$5),$5) END,updated_at=now() WHERE id=$1`, sessionID, snapshot.State, cleanTerminalMetadata(snapshot.CWD, 1024), int64(snapshot.LatestSequence), snapshot.LastActiveAt); err != nil {
 		return ConnectionDescriptor{}, err
 	}
 	if snapshot.State == "closed" || snapshot.State == "exited" || snapshot.State == "deleted" {

@@ -3172,6 +3172,7 @@ type UserMachineTerminalSession struct {
 	Title                        sql.NullString
 	ClosedAt                     sql.NullTime
 	OwnerTeamID                  sql.NullString
+	ClosedReason                 sql.NullString
 }
 
 type UserMachineTerminalSessionOperation struct {

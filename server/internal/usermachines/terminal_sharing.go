@@ -59,6 +59,7 @@ type SharedTerminalSession struct {
 	CreatedAt             time.Time             `json:"created_at"`
 	UpdatedAt             time.Time             `json:"updated_at"`
 	ExpiresAt             *time.Time            `json:"expires_at,omitempty"`
+	ClosedReason          string                `json:"closed_reason,omitempty"`
 	Target                SharedTerminalTarget  `json:"target"`
 	OwnerAccount          string                `json:"owner_account"`
 	CanManage             bool                  `json:"can_manage"`
@@ -115,10 +116,10 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
     WHERE team.team_id=p.team_id AND team.deleted_at IS NULL AND NOT team.suspended)))
 
 ), sessions AS (
- SELECT s.id,s.name,s.launch_cwd,s.desired_state,s.runtime_state,s.last_activity_at,s.closed_at,s.is_default,s.created_at,s.updated_at,s.owner_account,s.owner_team_id,'machine'::text kind,m.id target_id,m.alias target_name,m.id machine_id,m.environment_id,m.installation_generation,m.state,m.online,m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host'] terminal_ready FROM user_machine_terminal_sessions s JOIN user_machines m ON m.id=s.user_machine_id WHERE s.deleted_at IS NULL AND m.deleted_at IS NULL
+ SELECT s.id,s.name,s.launch_cwd,s.desired_state,s.runtime_state,s.last_activity_at,s.closed_at,s.closed_reason,s.is_default,s.created_at,s.updated_at,s.owner_account,s.owner_team_id,'machine'::text kind,m.id target_id,m.alias target_name,m.id machine_id,m.environment_id,m.installation_generation,m.state,m.online,m.configured_capabilities @> ARRAY['terminal_host'] AND m.observed_capabilities @> ARRAY['terminal_host'] terminal_ready FROM user_machine_terminal_sessions s JOIN user_machines m ON m.id=s.user_machine_id WHERE s.deleted_at IS NULL AND m.deleted_at IS NULL
  AND (s.owner_account=$1 OR s.id IN (SELECT id FROM browser_candidates) OR s.id IN (SELECT b.resource_id FROM team_resource_bindings b
   JOIN team_members tm ON tm.team_id=b.team_id AND tm.account_id=$1 AND tm.active WHERE b.resource_kind='terminal_session' AND b.active)))
-	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),coalesce(terminal_session_role($1,x.id),''),x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL,x.created_at,x.updated_at
+	 SELECT x.id,x.name,x.launch_cwd,x.desired_state,x.runtime_state,x.last_activity_at,x.closed_at,x.closed_reason,x.is_default,x.owner_account,x.kind,x.target_id,x.target_name,x.machine_id,x.environment_id,x.installation_generation,x.state,x.online,x.terminal_ready,coalesce(b.team_id,''),coalesce(t.generation,0),coalesce(terminal_session_role($1,x.id),''),x.owner_account=$1,EXISTS(SELECT 1 FROM team_terminal_session_grants ag WHERE ag.team_id=b.team_id AND ag.terminal_session_id=x.id AND ag.audience='all_members' AND ag.active),bc.id IS NOT NULL,x.created_at,x.updated_at
 	 FROM sessions x LEFT JOIN team_resource_bindings b ON b.resource_kind='terminal_session' AND b.resource_id=x.id AND b.active LEFT JOIN teams t ON t.team_id=b.team_id AND t.deleted_at IS NULL
 	 LEFT JOIN browser_candidates bc ON bc.id=x.id
 	WHERE ($2::text[] IS NULL OR x.id=ANY($2))
@@ -160,18 +161,20 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 		var state, role, runtimeState string
 		var lastActive sql.NullTime
 		var closedAt sql.NullTime
+		var closedReason sql.NullString
 		var isDefault bool
 		var online bool
 		var allMembers bool
 		var observedTerminal bool
 		var browserCandidate bool
-		if err = rows.Scan(&v.ID, &v.Name, &v.StartedIn, &v.DesiredState, &runtimeState, &lastActive, &closedAt, &isDefault, &v.OwnerAccount, &v.Target.Kind, &v.Target.ID, &v.Target.Name, &v.Target.MachineID, &v.Target.EnvironmentID, &v.Target.MachineGeneration, &state, &online, &observedTerminal, &v.Sharing.TeamID, &v.Sharing.Generation, &role, &v.CanManage, &allMembers, &browserCandidate, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.StartedIn, &v.DesiredState, &runtimeState, &lastActive, &closedAt, &closedReason, &isDefault, &v.OwnerAccount, &v.Target.Kind, &v.Target.ID, &v.Target.Name, &v.Target.MachineID, &v.Target.EnvironmentID, &v.Target.MachineGeneration, &state, &online, &observedTerminal, &v.Sharing.TeamID, &v.Sharing.Generation, &role, &v.CanManage, &allMembers, &browserCandidate, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
 		v.Machine = cleanTerminalMetadata(v.Target.Name, 128)
 		v.StartedIn = cleanTerminalMetadata(v.StartedIn, 1024)
 		v.RuntimeState = runtimeState
+		v.ClosedReason = closedReason.String
 		v.IsDefault = isDefault
 		v.State = terminalDisplayState(v.DesiredState, runtimeState, false, 0)
 		if lastActive.Valid {
@@ -495,12 +498,13 @@ func (s *Service) describeTerminalSession(ctx context.Context, account string, i
 		if helperruntime.IsSessionUnknown(err) {
 			if closed, markErr := s.markConfirmedTerminalSessionAbsent(ctx, item.ID); markErr == nil && closed {
 				item.RuntimeState, item.State = "closed", terminalDisplayState(item.DesiredState, "closed", true, 0)
+				item.ClosedReason = terminalClosedHostGone
 			}
 		}
 		return item, nil
 	}
 	var closedAt sql.NullTime
-	if err = s.db.SQL().QueryRowContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,launch_cwd=coalesce(nullif($3,''),launch_cwd),last_runtime_sync_at=now(),last_runtime_sequence=$4,last_activity_at=CASE WHEN $5::timestamptz IS NULL THEN last_activity_at ELSE greatest(coalesce(last_activity_at,$5),$5) END,updated_at=now() WHERE id=$1 RETURNING closed_at,desired_state`, item.ID, snap.State, cleanTerminalMetadata(snap.CWD, 1024), int64(snap.LatestSequence), snap.LastActiveAt).Scan(&closedAt, &item.DesiredState); err != nil {
+	if err = s.db.SQL().QueryRowContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,closed_reason=`+terminalSnapshotClosedReasonSQL+`,launch_cwd=coalesce(nullif($3,''),launch_cwd),last_runtime_sync_at=now(),last_runtime_sequence=$4,last_activity_at=CASE WHEN $5::timestamptz IS NULL THEN last_activity_at ELSE greatest(coalesce(last_activity_at,$5),$5) END,updated_at=now() WHERE id=$1 RETURNING closed_at,desired_state,coalesce(closed_reason,'')`, item.ID, snap.State, cleanTerminalMetadata(snap.CWD, 1024), int64(snap.LatestSequence), snap.LastActiveAt).Scan(&closedAt, &item.DesiredState, &item.ClosedReason); err != nil {
 		return item, err
 	}
 	item.ExpiresAt = terminalSessionExpiresAt(snap.State, closedAt)

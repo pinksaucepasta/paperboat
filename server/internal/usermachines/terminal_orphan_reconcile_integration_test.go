@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -25,6 +26,7 @@ func (hostSessionUnknown) DiagnosticProtocolCode() string { return "not_found_or
 type hostWithSessions struct {
 	helperruntime.Client
 	has         map[string]bool
+	exited      map[string]bool
 	unreachable bool
 	mu          sync.Mutex
 	asked       map[string]int
@@ -45,6 +47,9 @@ func (h *hostWithSessions) Terminal(_ context.Context, _, _, operation, session,
 	}
 	if !h.has[session] {
 		return helperruntime.Snapshot{}, fmt.Errorf("terminal %s: %w", operation, hostSessionUnknown{})
+	}
+	if h.exited[session] {
+		return helperruntime.Snapshot{ID: session, State: "exited", Generation: 1}, nil
 	}
 	return helperruntime.Snapshot{ID: session, State: "running", Generation: 1}, nil
 }
@@ -122,7 +127,7 @@ func TestPostgresOrphanTerminalSessionsCloseOnlyOnHostUnknown(t *testing.T) {
 
 	// An unreachable host closes nothing and confirms nothing.
 	host.unreachable = true
-	if err := service.reconcileOrphanTerminalSessions(context.Background()); err != nil {
+	if err := service.reconcileTerminalSessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := state(unknown); got != "running" {
@@ -141,7 +146,7 @@ func TestPostgresOrphanTerminalSessionsCloseOnlyOnHostUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	asked := host.askedCount(unknown)
-	if err := service.reconcileOrphanTerminalSessions(context.Background()); err != nil {
+	if err := service.reconcileTerminalSessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if host.askedCount(unknown) != asked {
@@ -153,7 +158,7 @@ func TestPostgresOrphanTerminalSessionsCloseOnlyOnHostUnknown(t *testing.T) {
 
 	// One reachable sweep: the unknown row closes, the known row is confirmed, the young row is not asked.
 	host.unreachable = false
-	if err := service.reconcileOrphanTerminalSessions(context.Background()); err != nil {
+	if err := service.reconcileTerminalSessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := state(unknown); got != "closed" {
@@ -168,10 +173,90 @@ func TestPostgresOrphanTerminalSessionsCloseOnlyOnHostUnknown(t *testing.T) {
 
 	// Confirmed and closed rows are not asked again.
 	asksBefore := host.askedCount(known) + host.askedCount(unknown)
-	if err := service.reconcileOrphanTerminalSessions(context.Background()); err != nil {
+	if err := service.reconcileTerminalSessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if asksAfter := host.askedCount(known) + host.askedCount(unknown); asksAfter != asksBefore {
 		t.Fatalf("confirmed or closed sessions were asked again: %d -> %d", asksBefore, asksAfter)
+	}
+}
+
+// The host is the source of truth. A machine that was offline and comes back has its sessions asked about without
+// anyone opening a page: gone ones close, exited ones are recorded, live ones stay. Rows the host has not confirmed
+// for 30 days close with their own reason; each end says why through the API.
+func TestPostgresTerminalSessionsReconcileOnReconnectAndAgeOut(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	service, host, owner, machine := terminalOrphanFixture(t, store)
+	ids := map[string]string{}
+	for name, syncedAgo := range map[string]string{"gone": "1 hour", "fresh": "1 minute", "exited": "1 hour", "alive": "1 hour", "near": "29 days", "ancient": "31 days"} {
+		ids[name] = "terminal_" + uuid.NewString()
+		insertOrphanSession(t, store, ids[name], owner, machine, name+"-"+fmt.Sprint(time.Now().UnixNano()), 40*24*time.Hour)
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_terminal_sessions SET last_runtime_sync_at=now()-$2::interval WHERE id=$1`, ids[name], syncedAgo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	host.has = map[string]bool{ids["alive"]: true, ids["exited"]: true, ids["near"]: true}
+	host.exited = map[string]bool{ids["exited"]: true}
+	state := func(name string) (runtime, reason string, closed bool, synced time.Time) {
+		t.Helper()
+		var r sql.NullString
+		if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_state,closed_reason,closed_at IS NOT NULL,last_runtime_sync_at FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, ids[name]).Scan(&runtime, &r, &closed, &synced); err != nil {
+			t.Fatal(err)
+		}
+		return runtime, r.String, closed, synced
+	}
+
+	// Offline: nobody is asked; only the 30-day age-out acts.
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.reconcileTerminalSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if runtime, reason, closed, _ := state("ancient"); runtime != "closed" || reason != "unreachable_timeout" || !closed {
+		t.Fatalf("session unconfirmed for 31 days = %s/%q closed_at=%v, want closed/unreachable_timeout", runtime, reason, closed)
+	}
+	for _, name := range []string{"gone", "near"} {
+		if runtime, reason, _, _ := state(name); runtime != "running" || reason != "" || host.askedCount(ids[name]) != 0 {
+			t.Fatalf("%s on an offline machine = %s/%q asked=%d, want running, no reason, not asked", name, runtime, reason, host.askedCount(ids[name]))
+		}
+	}
+
+	// Back online: every stale session is asked about at once.
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.reconcileTerminalSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if runtime, reason, closed, _ := state("gone"); runtime != "closed" || reason != "host_gone" || !closed {
+		t.Fatalf("session the host lost = %s/%q closed_at=%v, want closed/host_gone", runtime, reason, closed)
+	}
+	if runtime, reason, closed, _ := state("exited"); runtime != "exited" || reason != "exited" || !closed {
+		t.Fatalf("session whose process exited = %s/%q closed_at=%v, want exited/exited", runtime, reason, closed)
+	}
+	for _, name := range []string{"alive", "near"} {
+		if runtime, reason, closed, synced := state(name); runtime != "running" || reason != "" || closed || time.Since(synced) > time.Minute {
+			t.Fatalf("%s = %s/%q closed_at=%v synced %s ago, want running and just confirmed", name, runtime, reason, closed, time.Since(synced))
+		}
+	}
+	if runtime, _, _, _ := state("fresh"); runtime != "running" || host.askedCount(ids["fresh"]) != 0 {
+		t.Fatalf("recently confirmed session = %s asked=%d, want running and not asked", runtime, host.askedCount(ids["fresh"]))
+	}
+
+	// The API says why each ended.
+	items, err := service.TerminalSessionCatalog(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := map[string]string{}
+	for _, item := range items {
+		reasons[item.ID] = item.ClosedReason
+	}
+	for name, want := range map[string]string{"gone": "host_gone", "exited": "exited", "ancient": "unreachable_timeout", "alive": ""} {
+		if got, listed := reasons[ids[name]]; !listed || got != want {
+			t.Fatalf("catalog closed_reason of %s = %q (listed=%v), want %q", name, got, listed, want)
+		}
 	}
 }

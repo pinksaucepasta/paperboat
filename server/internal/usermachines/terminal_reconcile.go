@@ -17,7 +17,26 @@ const (
 	// A create the host refused or lost never gets a snapshot, so this is what closes it.
 	terminalOrphanBound = 2 * time.Minute
 	terminalOrphanBatch = 32
+	// terminalReprobeAfter is how long the host's last answer about a live session stands on an online machine
+	// before the sweep asks again. It is also what re-checks every session of a machine that was offline and came
+	// back: their last answer is older than this, so the next sweep asks the host (Kubernetes-style level-triggered
+	// reconcile; the host is the source of truth).
+	terminalReprobeAfter = 15 * time.Minute
+	// terminalUnreachableAfter closes a live session the host has not confirmed for this long (the machine never
+	// came back); it matches the closed-record retention, so the row is then removed 30 days later.
+	terminalUnreachableAfter = 30 * 24 * time.Hour
+	terminalUnreachableBatch = 100
 )
+
+// Why a session ended, shown by the console. Written once, with the close.
+const (
+	terminalClosedHostGone    = "host_gone"           // the host answered "unknown session"
+	terminalClosedUnreachable = "unreachable_timeout" // the host did not confirm it for terminalUnreachableAfter
+)
+
+// terminalSnapshotClosedReasonSQL is the closed_reason a host snapshot ($2 = its state) leaves: a session already
+// closed keeps its reason, a live state clears it. Used where $2 is the snapshot state.
+const terminalSnapshotClosedReasonSQL = `CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_reason,CASE WHEN $2='exited' THEN 'exited' ELSE 'host_closed' END) ELSE NULL END`
 
 // terminalLiveStatePredicate is the one definition of "a live terminal session" (it counts toward nothing but
 // the sweep and the detail views). Columns are unqualified: it runs against user_machine_terminal_sessions.
@@ -27,7 +46,7 @@ const terminalLiveStatePredicate = `deleted_at IS NULL AND (
 
 // markTerminalSessionAbsent records that the host no longer has the session: it stops counting and is shown closed.
 func (s *Service) markTerminalSessionAbsent(ctx context.Context, sessionID string) error {
-	_, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),last_runtime_sync_at=now(),updated_at=now()
+	_, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),closed_reason=coalesce(closed_reason,'host_gone'),last_runtime_sync_at=now(),updated_at=now()
  WHERE id=$1 AND runtime_state NOT IN ('closed','exited','deleted')`, sessionID)
 	return err
 }
@@ -37,7 +56,7 @@ func (s *Service) markTerminalSessionAbsent(ctx context.Context, sessionID strin
 // not close it. Sessions the host never confirmed are left to reconcileOrphanTerminalSessions.
 // It reports whether it closed the row.
 func (s *Service) markConfirmedTerminalSessionAbsent(ctx context.Context, sessionID string) (bool, error) {
-	result, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),last_runtime_sync_at=now(),updated_at=now()
+	result, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),closed_reason=coalesce(closed_reason,'host_gone'),last_runtime_sync_at=now(),updated_at=now()
  WHERE id=$1 AND runtime_state NOT IN ('closed','exited','deleted') AND last_runtime_sync_at IS NOT NULL`, sessionID)
 	if err != nil {
 		return false, err
@@ -54,18 +73,36 @@ type terminalHost struct {
 	environmentID, ingress string
 }
 
-// reconcileOrphanTerminalSessions asks the host about live sessions it has never confirmed (a create the host
-// refused or lost). Only the host's own "session unknown" answer closes a row. A host that cannot be reached
-// changes nothing, and a host that answers a snapshot confirms the row so it is not asked again.
-func (s *Service) reconcileOrphanTerminalSessions(ctx context.Context) error {
+// closeUnreachableTerminalSessions closes live sessions the host has not confirmed for terminalUnreachableAfter,
+// whether the machine stayed offline or never answered: nothing is left to ask, and the row must not show
+// "Unavailable" forever. A session never confirmed counts from its creation.
+func (s *Service) closeUnreachableTerminalSessions(ctx context.Context) error {
+	_, err := s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state='closed',closed_at=coalesce(closed_at,now()),closed_reason=$3,updated_at=now()
+ WHERE id IN (SELECT id FROM user_machine_terminal_sessions
+  WHERE `+terminalLiveStatePredicate+` AND coalesce(last_runtime_sync_at,created_at) < $1
+  ORDER BY coalesce(last_runtime_sync_at,created_at),id LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+		s.now().UTC().Add(-terminalUnreachableAfter), terminalUnreachableBatch, terminalClosedUnreachable)
+	return err
+}
+
+// reconcileTerminalSessions asks the host about live sessions on online machines whose last answer is missing
+// (a create the host refused or lost) or older than terminalReprobeAfter (including every session of a machine
+// that just came back online), and closes the ones that have outlived terminalUnreachableAfter. Only the host's own
+// "session unknown" answer closes a probed row. A host that cannot be reached changes nothing, and a host that
+// answers a snapshot records its state, so a session the host closed or that exited ends here too.
+func (s *Service) reconcileTerminalSessions(ctx context.Context) error {
 	if s.controlSigner == nil || s.controlRuntime == nil {
 		return nil
 	}
+	return errors.Join(s.closeUnreachableTerminalSessions(ctx), s.probeStaleTerminalSessions(ctx))
+}
+
+func (s *Service) probeStaleTerminalSessions(ctx context.Context) error {
 	rows, err := s.db.SQL().QueryContext(ctx, `SELECT id,user_machine_id,owner_account FROM user_machine_terminal_sessions
- WHERE `+terminalLiveStatePredicate+` AND last_runtime_sync_at IS NULL AND created_at < $1
+ WHERE `+terminalLiveStatePredicate+` AND created_at < $1 AND (last_runtime_sync_at IS NULL OR last_runtime_sync_at < $2)
    AND EXISTS(SELECT 1 FROM user_machines m WHERE m.id=user_machine_id AND m.online AND m.deleted_at IS NULL)
- ORDER BY updated_at,id LIMIT $2`,
-		s.now().UTC().Add(-terminalOrphanBound), terminalOrphanBatch)
+ ORDER BY updated_at,id LIMIT $3`,
+		s.now().UTC().Add(-terminalOrphanBound), s.now().UTC().Add(-terminalReprobeAfter), terminalOrphanBatch)
 	if err != nil {
 		return err
 	}
@@ -126,24 +163,24 @@ func (s *Service) reconcileOrphanTerminalSessions(ctx context.Context) error {
 }
 
 // checkTerminalSession asks the host for one session. The host's "unknown" answer closes the row and its snapshot
-// confirms it. Any other host outcome changes nothing; only signing and database errors are returned.
+// is recorded. Any other host outcome changes nothing; only signing and database errors are returned.
 func (s *Service) checkTerminalSession(ctx context.Context, o terminalOrphan, host terminalHost) error {
 	now := s.now().UTC()
 	token, err := s.signProcessCredential(ctx, mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: o.ownerAccount, JTI: newID("token"), IssuedAt: now, ExpiresAt: now.Add(time.Minute), CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: host.environmentID, MachineID: o.userMachineID, UserID: o.ownerAccount, CLIClientSessionID: "control-plane", SessionID: o.sessionID})
 	if err != nil {
 		return err
 	}
-	_, observeErr := s.controlRuntime.Terminal(ctx, host.ingress, token, "snapshot", o.sessionID, newID("operation"))
+	snapshot, observeErr := s.controlRuntime.Terminal(ctx, host.ingress, token, "snapshot", o.sessionID, newID("operation"))
 	switch {
 	case observeErr == nil:
-		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET last_runtime_sync_at=now() WHERE id=$1`, o.sessionID)
+		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET runtime_state=$2,closed_at=CASE WHEN $2 IN ('closed','exited','deleted') THEN coalesce(closed_at,now()) ELSE NULL END,closed_reason=`+terminalSnapshotClosedReasonSQL+`,last_runtime_sync_at=now(),updated_at=now() WHERE id=$1`, o.sessionID, snapshot.State)
 		return err
 	case helperruntime.IsSessionUnknown(observeErr):
 		return s.markTerminalSessionAbsent(ctx, o.sessionID)
 	default:
 		// Move the row to the back of the queue: a host that does not answer must not hold the batch
 		// for the orphans behind it.
-		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET updated_at=now() WHERE id=$1 AND last_runtime_sync_at IS NULL`, o.sessionID)
+		_, err = s.db.SQL().ExecContext(ctx, `UPDATE user_machine_terminal_sessions SET updated_at=now() WHERE id=$1`, o.sessionID)
 		return err
 	}
 }

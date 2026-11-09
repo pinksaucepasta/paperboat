@@ -2157,7 +2157,7 @@ func (q *Queries) GetReplayableMachineControlRenewal(ctx context.Context, arg Ge
 }
 
 const getSharedUserMachineTerminalSession = `-- name: GetSharedUserMachineTerminalSession :one
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s WHERE s.id=$1 AND s.deleted_at IS NULL AND terminal_session_role($2,s.id) IN ('viewer','interactive')
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s WHERE s.id=$1 AND s.deleted_at IS NULL AND terminal_session_role($2,s.id) IN ('viewer','interactive')
 `
 
 type GetSharedUserMachineTerminalSessionParams struct {
@@ -2189,6 +2189,7 @@ func (q *Queries) GetSharedUserMachineTerminalSession(ctx context.Context, arg G
 		&i.Title,
 		&i.ClosedAt,
 		&i.OwnerTeamID,
+		&i.ClosedReason,
 	)
 	return i, err
 }
@@ -3358,7 +3359,7 @@ func (q *Queries) GetUserMachineRuntimeMetrics(ctx context.Context) (GetUserMach
 }
 
 const getUserMachineTerminalSession = `-- name: GetUserMachineTerminalSession :one
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.id=$1 AND s.user_machine_id=$2
   AND s.owner_account=$3 AND machine_capability_allowed($3,m.id,'terminal') AND m.deleted_at IS NULL AND s.deleted_at IS NULL
@@ -3394,12 +3395,13 @@ func (q *Queries) GetUserMachineTerminalSession(ctx context.Context, arg GetUser
 		&i.Title,
 		&i.ClosedAt,
 		&i.OwnerTeamID,
+		&i.ClosedReason,
 	)
 	return i, err
 }
 
 const getUserMachineTerminalSessionByIdempotencyKey = `-- name: GetUserMachineTerminalSessionByIdempotencyKey :one
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.user_machine_id=$1 AND s.owner_account=$2 AND machine_capability_allowed($2,m.id,'terminal')
   AND s.idempotency_key=$3 AND s.deleted_at IS NULL
@@ -3435,12 +3437,13 @@ func (q *Queries) GetUserMachineTerminalSessionByIdempotencyKey(ctx context.Cont
 		&i.Title,
 		&i.ClosedAt,
 		&i.OwnerTeamID,
+		&i.ClosedReason,
 	)
 	return i, err
 }
 
 const getUserMachineTerminalSessionByIdempotencyKeyInWorkspace = `-- name: GetUserMachineTerminalSessionByIdempotencyKeyInWorkspace :one
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.user_machine_id=$1 AND s.owner_account=$2
   AND s.owner_team_id IS NOT DISTINCT FROM $3::text
@@ -3487,6 +3490,7 @@ func (q *Queries) GetUserMachineTerminalSessionByIdempotencyKeyInWorkspace(ctx c
 		&i.Title,
 		&i.ClosedAt,
 		&i.OwnerTeamID,
+		&i.ClosedReason,
 	)
 	return i, err
 }
@@ -3565,7 +3569,7 @@ func (q *Queries) GetUserMachineTerminalSessionHostForUser(ctx context.Context, 
 }
 
 const getUserMachineTerminalSessionInWorkspace = `-- name: GetUserMachineTerminalSessionInWorkspace :one
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.id=$1 AND s.user_machine_id=$2
   AND s.owner_account=$3 AND s.owner_team_id IS NOT DISTINCT FROM $4::text
@@ -3612,6 +3616,7 @@ func (q *Queries) GetUserMachineTerminalSessionInWorkspace(ctx context.Context, 
 		&i.Title,
 		&i.ClosedAt,
 		&i.OwnerTeamID,
+		&i.ClosedReason,
 	)
 	return i, err
 }
@@ -4121,7 +4126,7 @@ func (q *Queries) ListRevokedUserMachineEnvironmentsForUser(ctx context.Context,
 }
 
 const listUserMachineTerminalSessions = `-- name: ListUserMachineTerminalSessions :many
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.user_machine_id=$1 AND s.owner_account=$2 AND machine_capability_allowed($2,m.id,'terminal')
   AND m.deleted_at IS NULL AND s.deleted_at IS NULL
@@ -4163,6 +4168,7 @@ func (q *Queries) ListUserMachineTerminalSessions(ctx context.Context, arg ListU
 			&i.Title,
 			&i.ClosedAt,
 			&i.OwnerTeamID,
+			&i.ClosedReason,
 		); err != nil {
 			return nil, err
 		}
@@ -4175,7 +4181,7 @@ func (q *Queries) ListUserMachineTerminalSessions(ctx context.Context, arg ListU
 }
 
 const listUserMachineTerminalSessionsByIDs = `-- name: ListUserMachineTerminalSessionsByIDs :many
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.id=ANY($1::text[]) AND s.user_machine_id=$2
   AND s.owner_account=$3 AND machine_capability_allowed($3,m.id,'terminal') AND m.deleted_at IS NULL AND s.deleted_at IS NULL
@@ -4218,6 +4224,7 @@ func (q *Queries) ListUserMachineTerminalSessionsByIDs(ctx context.Context, arg 
 			&i.Title,
 			&i.ClosedAt,
 			&i.OwnerTeamID,
+			&i.ClosedReason,
 		); err != nil {
 			return nil, err
 		}
@@ -4230,7 +4237,7 @@ func (q *Queries) ListUserMachineTerminalSessionsByIDs(ctx context.Context, arg 
 }
 
 const listUserMachineTerminalSessionsByIDsInWorkspace = `-- name: ListUserMachineTerminalSessionsByIDsInWorkspace :many
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.id=ANY($1::text[]) AND s.user_machine_id=$2
   AND s.owner_account=$3 AND s.owner_team_id IS NOT DISTINCT FROM $4::text
@@ -4284,6 +4291,7 @@ func (q *Queries) ListUserMachineTerminalSessionsByIDsInWorkspace(ctx context.Co
 			&i.Title,
 			&i.ClosedAt,
 			&i.OwnerTeamID,
+			&i.ClosedReason,
 		); err != nil {
 			return nil, err
 		}
@@ -4296,7 +4304,7 @@ func (q *Queries) ListUserMachineTerminalSessionsByIDsInWorkspace(ctx context.Co
 }
 
 const listUserMachineTerminalSessionsInWorkspace = `-- name: ListUserMachineTerminalSessionsInWorkspace :many
-SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id FROM user_machine_terminal_sessions s
+SELECT s.id, s.user_machine_id, s.name, s.idempotency_key, s.is_default, s.launch_cwd, s.desired_state, s.runtime_state, s.last_activity_at, s.last_runtime_sync_at, s.last_runtime_sequence, s.deleted_at, s.version, s.created_at, s.updated_at, s.transfer_destination_machine_id, s.owner_account, s.title, s.closed_at, s.owner_team_id, s.closed_reason FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id=s.user_machine_id
 WHERE s.user_machine_id=$1 AND s.owner_account=$2
   AND s.owner_team_id IS NOT DISTINCT FROM $3::text
@@ -4344,6 +4352,7 @@ func (q *Queries) ListUserMachineTerminalSessionsInWorkspace(ctx context.Context
 			&i.Title,
 			&i.ClosedAt,
 			&i.OwnerTeamID,
+			&i.ClosedReason,
 		); err != nil {
 			return nil, err
 		}
@@ -4882,7 +4891,7 @@ func (q *Queries) MarkUserMachineTerminalSessionOperationApplied(ctx context.Con
 
 const markUserMachineTerminalSessionRuntimeClosed = `-- name: MarkUserMachineTerminalSessionRuntimeClosed :exec
 UPDATE user_machine_terminal_sessions
-SET runtime_state='closed',closed_at=coalesce(closed_at,now()),updated_at=now(),version=version+1
+SET runtime_state='closed',closed_at=coalesce(closed_at,now()),closed_reason=coalesce(closed_reason,'user_closed'),updated_at=now(),version=version+1
 WHERE id=$1 AND deleted_at IS NULL
 `
 

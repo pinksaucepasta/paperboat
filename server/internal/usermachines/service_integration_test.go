@@ -1256,11 +1256,12 @@ func TestTerminalSessionRetentionExpiresOnlyConfirmedClosedRows(t *testing.T) {
 	}
 	var acknowledgedState string
 	var acknowledgedClosedAt sql.NullTime
-	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_state,closed_at FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, ids["ack"]).Scan(&acknowledgedState, &acknowledgedClosedAt); err != nil {
+	var acknowledgedReason sql.NullString
+	if err := store.SQL().QueryRowContext(ctx, `SELECT runtime_state,closed_at,closed_reason FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, ids["ack"]).Scan(&acknowledgedState, &acknowledgedClosedAt, &acknowledgedReason); err != nil {
 		t.Fatal(err)
 	}
-	if acknowledgedState != "closed" || !acknowledgedClosedAt.Valid {
-		t.Fatalf("close acknowledgement state=%q closed_at=%+v, want confirmed closed state and timestamp", acknowledgedState, acknowledgedClosedAt)
+	if acknowledgedState != "closed" || !acknowledgedClosedAt.Valid || acknowledgedReason.String != "user_closed" {
+		t.Fatalf("close acknowledgement state=%q closed_at=%+v reason=%q, want confirmed closed state, timestamp and user_closed", acknowledgedState, acknowledgedClosedAt, acknowledgedReason.String)
 	}
 	if err := service.expireClosedTerminalSessions(ctx); err != nil {
 		t.Fatal(err)

@@ -1286,7 +1286,7 @@ WHERE id IN (
 
 -- name: MarkUserMachineTerminalSessionRuntimeClosed :exec
 UPDATE user_machine_terminal_sessions
-SET runtime_state='closed',closed_at=coalesce(closed_at,now()),updated_at=now(),version=version+1
+SET runtime_state='closed',closed_at=coalesce(closed_at,now()),closed_reason=coalesce(closed_reason,'user_closed'),updated_at=now(),version=version+1
 WHERE id=sqlc.arg(id) AND deleted_at IS NULL;
 
 -- name: RetryUserMachineTerminalSessionOperation :exec

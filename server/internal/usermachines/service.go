@@ -391,7 +391,7 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 				workers.IterationFailure(ctx, "pending_revocation", "machine_revocation_failed", s.RetryPendingRevocations(ctx))
 				workers.IterationFailure(ctx, "terminal_session_operation", "terminal_operation_failed", s.processDueTerminalSessionOperations(ctx))
 				workers.IterationFailure(ctx, "terminal_session_cleanup", "terminal_cleanup_failed", s.expireClosedTerminalSessions(ctx))
-				workers.IterationFailure(ctx, "terminal_session_orphans", "terminal_orphan_reconcile_failed", s.reconcileOrphanTerminalSessions(ctx))
+				workers.IterationFailure(ctx, "terminal_session_orphans", "terminal_orphan_reconcile_failed", s.reconcileTerminalSessions(ctx))
 				_, progressErr := s.db.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
 				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", progressErr)
 				workers.IterationFailure(ctx, "access_session_retention", "access_session_retention_failed", s.retireExpiredAccessSessions(ctx))
