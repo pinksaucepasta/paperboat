@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -104,19 +103,9 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if len(raw) > 128<<10 {
 		return errors.New("cannot read bounded issuer JWKS")
 	}
-	var jwks struct {
-		Keys []struct{ Kty, Crv, Kid, X string }
-	}
-	if json.Unmarshal(raw, &jwks) != nil || len(jwks.Keys) == 0 || len(jwks.Keys) > 16 {
-		return errors.New("invalid issuer JWKS")
-	}
-	trusted := map[string]ed25519.PublicKey{}
-	for _, k := range jwks.Keys {
-		b, e := base64.RawURLEncoding.Strict().DecodeString(k.X)
-		if e != nil || k.Kty != "OKP" || k.Crv != "Ed25519" || k.Kid == "" || len(b) != 32 || trusted[k.Kid] != nil {
-			return errors.New("invalid issuer signing key")
-		}
-		trusted[k.Kid] = ed25519.PublicKey(b)
+	trusted, err := derpquic.ParseJWKS(raw)
+	if err != nil {
+		return err
 	}
 	credentialInfo, err := os.Stat(*controlCredential)
 	if err != nil {
@@ -168,6 +157,11 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err = server.SetConnectionLimit(int(lease.CapacityLimit)); err != nil {
 		return err
 	}
+	server.SetKeyRefresher(func() error {
+		refresh, stop := context.WithTimeout(context.WithoutCancel(processCtx), 5*time.Second)
+		defer stop()
+		return control.Observe(refresh, server, false)
+	})
 	var peerService *peerrelay.Server
 	if *servicePath != "" || *serviceKeyPath != "" || *serviceAddresses != "" {
 		if *servicePath == "" || *serviceKeyPath == "" || *serviceAddresses == "" {

@@ -65,7 +65,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 				return ErrOverload
 			}
 		}
-		grant, err := s.verifier.Verify(string(body), p.state(), time.Now())
+		grant, err := s.verify(string(body), p.state(), time.Now())
 		if errors.Is(err, ErrExpired) {
 			expired = true
 			continue

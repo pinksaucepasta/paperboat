@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
@@ -49,6 +50,9 @@ type Lease struct {
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs. Such an answer carries no quota list.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
+	// JWKS is the issuer trust document (keys plus withdrawn_key_ids); the relay trusts exactly its keys,
+	// so a rotation or withdrawal applies within one observation.
+	JWKS json.RawMessage `json:"jwks,omitempty"`
 }
 
 // Revocation fences one endpoint this relay holds: grants below MinGeneration, the first
@@ -65,9 +69,13 @@ type diskState struct {
 	PendingEpoch string `json:"pending_epoch"`
 }
 type Client struct {
-	cfg   Config
+	cfg Config
+	// mu serializes observations: Run polls while a grant naming an unknown key id may refresh out of band.
+	mu    sync.Mutex
 	lease Lease
-	lock  *os.File
+	// jwks is the trust document last applied, so a steady one is not parsed again.
+	jwks []byte
+	lock *os.File
 	// sentSubjects is the digest of the subjects list the control plane last accepted in full; an
 	// observation sends only the digest while the set is unchanged (~400 KB every 3 s at 4,096
 	// connections otherwise).
@@ -279,6 +287,8 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !server.MatchesControlService(c.lease.PeerRelay) {
 		return ErrFenced
 	}
@@ -313,6 +323,13 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 			return ErrControl
 		}
 	}
+	if len(out.JWKS) != 0 && !bytes.Equal(out.JWKS, c.jwks) {
+		keys, err := derpquic.ParseJWKS(out.JWKS)
+		if err != nil || server.SetKeys(keys) != nil {
+			return ErrControl
+		}
+		c.jwks = out.JWKS
+	}
 	if out.SubjectsRequired {
 		// The control plane lost or never had this set: send it in full next time, and keep the
 		// quota list, which such an answer does not carry.
@@ -330,6 +347,12 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	return nil
 }
 
+func (c *Client) leaseExpiry() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lease.ExpiresAt
+}
+
 // Run tolerates transient control loss only within the acknowledged lease.
 func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 	timer := time.NewTimer(0)
@@ -340,7 +363,7 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 			return ctx.Err()
 		case <-timer.C:
 		}
-		deadline := time.Unix(c.lease.ExpiresAt, 0)
+		deadline := time.Unix(c.leaseExpiry(), 0)
 		if !time.Now().Before(deadline) {
 			server.Drain(time.Now())
 			server.Close()
@@ -360,7 +383,7 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 			return err
 		}
 		delay := Interval
-		if remain := time.Until(time.Unix(c.lease.ExpiresAt, 0)); remain < delay {
+		if remain := time.Until(time.Unix(c.leaseExpiry(), 0)); remain < delay {
 			delay = remain
 		}
 		if delay < 0 {

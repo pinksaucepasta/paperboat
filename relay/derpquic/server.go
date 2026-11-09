@@ -38,7 +38,10 @@ type Stats struct {
 type Server struct {
 	connectionLimit                      int
 	service                              *localService
-	verifier                             Verifier
+	verifier                             Verifier // Keys unused: the trusted set is keys
+	keys                                 atomic.Pointer[map[string]ed25519.PublicKey]
+	refresher                            atomic.Pointer[func() error]
+	keysRefreshedAt                      atomic.Int64
 	mu                                   sync.Mutex
 	peers                                map[key.NodePublic]*peerConn
 	fences                               map[string]*grantFence
@@ -98,15 +101,14 @@ func NewServer(v Verifier) (*Server, error) {
 	if v.Issuer == "" || v.NodeID == "" || v.NodeGeneration == 0 || v.ProcessEpoch == "" || len(v.Keys) == 0 {
 		return nil, ErrAdmission
 	}
-	keys := make(map[string]ed25519.PublicKey, len(v.Keys))
-	for id, k := range v.Keys {
-		if id == "" || len(k) != 32 {
-			return nil, ErrAdmission
-		}
-		keys[id] = append(ed25519.PublicKey(nil), k...)
+	keys, err := copyKeys(v.Keys)
+	if err != nil {
+		return nil, err
 	}
-	v.Keys = keys
-	return &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}, nil
+	v.Keys = nil
+	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s.keys.Store(&keys)
+	return s, nil
 }
 
 func (p *peerConn) context() context.Context {

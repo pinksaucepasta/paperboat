@@ -200,7 +200,10 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		return g, ErrAdmission
 	}
 	pub := v.Keys[header.KeyID]
-	if len(pub) != 32 || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictJSON(b, &g) != nil {
+	if len(pub) != 32 {
+		return Grant{}, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
+	}
+	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictJSON(b, &g) != nil {
 		return Grant{}, ErrAdmission
 	}
 	leaf := state.PeerCertificates[0]
