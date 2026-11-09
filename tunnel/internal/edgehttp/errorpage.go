@@ -35,8 +35,8 @@ body{margin:0;min-height:100svh;background:linear-gradient(to bottom,#4275f8 0%,
 main{display:flex;min-height:100svh;flex-direction:column;align-items:center;justify-content:center;padding:96px 24px}
 .brand{position:absolute;top:24px;left:24px;display:flex;align-items:center;gap:12px}
 .brand svg{height:18px;display:block;fill:currentColor}
-.content{display:flex;width:100%;max-width:28rem;flex-direction:column;gap:24px}
-.text{display:flex;flex-direction:column;gap:6px}
+.content{display:flex;width:100%;max-width:36rem;flex-direction:column;gap:24px}
+.text{display:flex;flex-direction:column;gap:12px}
 h1{margin:0;font-size:clamp(1.75rem,4vw,2.5rem);line-height:1.1;font-weight:600;letter-spacing:-.03em;text-wrap:balance}
 p{margin:0}
 .message{font-size:1rem;line-height:1.5;color:rgba(255,255,255,.75)}
@@ -44,6 +44,7 @@ p{margin:0}
 .action:hover{background:rgba(255,255,255,.9)}
 .action:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:2px}
 .meta{font-size:.8125rem;line-height:1.4;color:rgba(255,255,255,.65);overflow-wrap:anywhere}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.95em;user-select:all}
 @media (prefers-color-scheme:dark){
 body{background:#121212;color:#f5f5f5}
 .message{color:#9b9b9b}
@@ -60,7 +61,7 @@ body{background:#121212;color:#f5f5f5}
 <div class="content">
 <div class="text"><h1>{{.Title}}</h1><p class="message">{{.Message}}</p></div>
 {{if .ActionText}}<a class="action" href="{{.ActionURL}}">{{.ActionText}}</a>{{end}}
-<p class="meta">Error {{.Status}} · Reference {{.Reference}} · {{.Time}}</p>
+<p class="meta">Error {{.Status}} · Reference <code class="ref">{{.Reference}}</code> · {{.Time}}</p>
 </div>
 </main></body></html>
 `))

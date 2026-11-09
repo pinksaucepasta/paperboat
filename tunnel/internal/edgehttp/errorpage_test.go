@@ -167,7 +167,7 @@ func TestErrorPageTitleReferenceAndDarkMode(t *testing.T) {
 		if !reference.MatchString(ref) {
 			t.Fatalf("%d: reference header %q", status, ref)
 		}
-		footer := "Error " + strconv.Itoa(status) + " · Reference " + ref + " · "
+		footer := "Error " + strconv.Itoa(status) + " · Reference <code class=\"ref\">" + ref + "</code> · "
 		if !strings.Contains(body, footer) {
 			t.Errorf("%d: footer %q missing: %q", status, footer, body)
 		}
