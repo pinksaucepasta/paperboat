@@ -101,7 +101,7 @@ function Plan({
   const resets = allowanceWindow(billing).end
   const end = billing.period_end && time.date(billing.period_end, "date")
   const manage = billing.product_code && billing.can_manage && (
-    <Button variant="outline" disabled={portal.isPending} onClick={() => portal.mutate()}>
+    <Button variant="outline" size="lg" disabled={portal.isPending} onClick={() => portal.mutate()}>
       {portal.isPending && <CircleNotchIcon className="animate-spin" />}
       Manage billing
     </Button>

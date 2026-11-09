@@ -40,6 +40,37 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
 - Icons: Phosphor. `regular` by default, `fill` for the selected item. Server-imported modules use
   `@phosphor-icons/react/dist/ssr`.
 
+## Pages
+
+- **One column.** Every page's content sits in the SectionPage column (`max-w-6xl`, centered, the
+  header's gutters). Lists, tables and dashboards fill it. Pages made only of label–value rows
+  (Account, Billing) keep to `max-w-3xl` at the column's left edge, never centered, so the content's
+  left edge is the same on every page.
+- **No page title on section pages.** The breadcrumb names the page; the primary action sits at the
+  right of the first toolbar or Section heading. An `h1` belongs only to an object's page (a machine, a
+  tunnel, a team), where it is the object's editable name.
+- **Buttons.** `size="lg"` for page, toolbar, Section and dialog-footer actions; the default size for
+  actions inside a list row; `variant="outline"` for secondary, `secondary` for a quiet one. One primary
+  (default variant) per view.
+- **Empty states.** A list that has never had items uses `Empty` (`className="py-16"`, icon, title,
+  one line, the action). A search or filter with no matches is one muted centered line in the table.
+
+## Loading states
+
+- A loading state is the loaded page with placeholders for the data: the same toolbar (real search
+  fields, tabs and buttons), the same headings, the same row heights and card sizes. Text known
+  without data (labels, column headers, tab names, radio choices) renders as text, not a grey bar. A
+  placeholder for a line of text is its line height: a `Skeleton` of the text's cap height with
+  `my-*` making up the rest (`my-0.5 h-4` for `text-sm`).
+- Reuse `components/skeletons.tsx` (`SectionSkeleton`, `ListSkeleton`, `EmptySkeleton`) or render
+  the real component with an empty body; never a generic grey box.
+- What every page needs (user, workspaces, billing) is read on the server in the layout
+  (`WithSession`); a page may add its own first reads (`<WithSession reads={…}>`) so its first HTML is
+  filled in. Data already in the query cache never shows a skeleton again.
+- `scripts/check-skeletons.mjs` holds every API read, then releases it: zero layout shift after the
+  data lands and no control may move. Run it at 1440 and 390 wide, light and dark, before pushing a
+  page change.
+
 ## Aligning things with text
 
 Icons, status dots and badges beside text line up with the **letters**, not the line box: the

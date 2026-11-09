@@ -32,7 +32,7 @@ export function GitHubConnection() {
       title="GitHub"
       action={
         data.connected ? (
-          <Button variant="outline" onClick={() => setDisconnecting(true)}>
+          <Button variant="outline" size="lg" onClick={() => setDisconnecting(true)}>
             Disconnect
           </Button>
         ) : (
