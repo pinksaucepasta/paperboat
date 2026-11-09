@@ -734,3 +734,60 @@ func TestRecoveredPreviousInstallationRestartsTheDaemonOnIt(t *testing.T) {
 		t.Fatalf("committed candidate must not restart the daemon: %+v %v restarts=%d", committed, err, participants.restarts)
 	}
 }
+
+// lockProbingController tries to take the activation lock from inside Retire, as a successor's
+// queueActivationWithApproval does while the exiting helper is still retiring its handoff.
+type lockProbingController struct {
+	controllerFixture
+	root  string
+	probe error
+}
+
+func (c *lockProbingController) Retire(context.Context) error {
+	lock, err := unixActivationLock(c.root)
+	if lock != nil {
+		lock.Close()
+	}
+	c.probe = err
+	return nil
+}
+
+// A successor that took the lock between the helper's release and its retirement installed a new
+// handoff while the old helper still looked Running, so nothing started it ("Activation: pending").
+func TestActivationHelperHoldsTheLockWhileRetiring(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires protected activation custody")
+	}
+	for _, test := range []struct {
+		name    string
+		handoff *unixActivationHandoff
+	}{
+		{"no handoff", nil},
+		{"automatic updates off", &unixActivationHandoff{Schema: unixHandoffSchema, Candidate: "2026.10.13.2", ApprovalID: strings.Repeat("a", 64), Previous: workerupdate.Release{Version: "2026.10.13.1", SHA256: strings.Repeat("b", 64), Length: 1}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if test.handoff != nil {
+				if err := writeUnixHandoff(root, test.handoff); err != nil {
+					t.Fatal(err)
+				}
+			}
+			controller := &lockProbingController{root: root}
+			service := &Service{config: Config{StateRoot: root, ActivationController: controller}}
+			if err := service.RunActivationHelper(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if !errors.Is(controller.probe, ErrActivationPending) {
+				t.Fatalf("a queue attempt during retirement got %v, want ErrActivationPending", controller.probe)
+			}
+			lock, err := unixActivationLock(root)
+			if err != nil {
+				t.Fatalf("the lock was not released after the helper returned: %v", err)
+			}
+			lock.Close()
+		})
+	}
+}

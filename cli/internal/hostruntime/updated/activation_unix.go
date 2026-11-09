@@ -447,9 +447,6 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 		return err
 	}
 	if handoff == nil {
-		if err := releaseLock(); err != nil {
-			return err
-		}
 		return s.config.ActivationController.Retire(ctx)
 	}
 	var activationErr error
@@ -464,9 +461,6 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 		return err
 	}
 	if !preferences.Enabled && !handoff.Manual && !handoff.Started {
-		if err := releaseLock(); err != nil {
-			return err
-		}
 		return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
 	}
 	executable, err := os.Executable()
@@ -550,12 +544,12 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 	}
 	// No participant restart is needed when staging failed before cutover.
 	// After replacement, native validation has already proven exact processes.
-	if closeErr := releaseLock(); closeErr != nil {
-		resultErr = errors.Join(resultErr, closeErr)
-	}
+	// The lock is held through retirement: a successor that queued in between would install its new
+	// handoff while this helper still looks Running, so nothing would start it. The kernel frees the
+	// flock if retirement stops this process.
 	if diagnosticErr := errors.Join(activationErr, resultErr); diagnosticErr != nil && !diagnosticWritten {
 		// Retirement can stop this native helper. Emit the bounded cause before
-		// asking its supervisor to retire it, including any lock-release failure.
+		// asking its supervisor to retire it.
 		writeActivationFailure(os.Stderr, diagnosticErr, handoff.Previous.Version, handoff.Candidate)
 		diagnosticWritten = true
 	}
