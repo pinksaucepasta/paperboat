@@ -133,6 +133,9 @@ func pairCommand() *cobra.Command {
 			}
 			code := pairBootstrap(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
 			if code != 0 {
+				if created, err := identityStore.Registration(); err == nil {
+					pairingFailed(actionContext(command, nil), registration.MachineID, created.MachineID)
+				}
 				if jsonOutput {
 					// The runtime writes one curated "pb: ..." failure line; JSON
 					// callers need that cause instead of a generic native exit.

@@ -127,7 +127,7 @@ func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.
 // that fails afterwards can still be investigated and the next one still replaces the old record.
 func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing.T) {
 	isolatedReplacementNote(t)
-	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
+	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	command := freshEnrollmentResetCommand()
@@ -183,11 +183,16 @@ func TestFinishMachineReplacementCutsOverOnlyAfterTheNewMachineWorks(t *testing.
 	if err := finishMachineReplacement(ctx, "machine_new"); err != nil || len(calls) != 0 {
 		t.Fatalf("no note: err=%v calls=%v", err, calls)
 	}
-	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
+	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := finishMachineReplacement(ctx, "machine_old"); err != nil || len(calls) != 0 {
-		t.Fatalf("same record: err=%v calls=%v", err, calls)
+	// A note that names only the machine that just paired is done with: nothing is replaced, and it is not
+	// kept to mark that working machine as left behind later.
+	if err := finishMachineReplacement(ctx, "machine_old"); err != nil || len(calls) != 0 || bootstrap.LoadReplacement(time.Now()) != "" {
+		t.Fatalf("same record: err=%v calls=%v note=%q", err, calls, bootstrap.LoadReplacement(time.Now()))
+	}
+	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 	replaceErr = errors.New("connection reset")
 	err := finishMachineReplacement(ctx, "machine_new")
@@ -211,18 +216,20 @@ func TestFinishMachineReplacementCutsOverOnlyAfterTheNewMachineWorks(t *testing.
 func TestPairThatFailsNeverReplacesTheOldRecord(t *testing.T) {
 	isolatedReplacementNote(t)
 	noServer(t)
-	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
+	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	original := pairBootstrap
 	t.Cleanup(func() { pairBootstrap = original })
-	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 1 }
+	reached := false
+	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { reached = true; return 1 }
 	command := pairCommand()
+	command.PersistentFlags().String("server", "", "") // the root command's flag
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
 	command.SetArgs([]string{"--server", "https://api.example.test", "--enrollment-token-file", freshResetTokenFile(t), "--state-root", t.TempDir()})
-	if err := command.Execute(); err == nil {
-		t.Fatal("a failed pairing reported success")
+	if err := command.Execute(); err == nil || !reached {
+		t.Fatalf("a failed pairing: err=%v, pairing reached=%v", err, reached)
 	}
 	if bootstrap.LoadReplacement(time.Now()) != "machine_old" {
 		t.Fatal("a failed pairing dropped the note")

@@ -125,14 +125,15 @@ var freshEnrollmentCleanup = runFreshEnrollmentCleanup
 var rememberReplacedMachineFunc = rememberReplacedMachine
 
 // rememberReplacedMachine notes, before anything is removed, which machine record the next pairing of this
-// computer replaces; the note survives the wipe (freshEnrollmentPreserved). It returns that ID, or "" when
-// this computer has no record (never added, or a note from an earlier failed reset is kept as it is).
+// computer replaces; the note survives the wipe (freshEnrollmentPreserved) and keeps the records earlier
+// resets and failed pairings left behind. It returns that ID, or "" when this computer has no record
+// (never added, or a note from an earlier failed reset is kept as it is).
 func rememberReplacedMachine() (string, error) {
 	machineID, err := configuredMachineID()
 	if err != nil || machineID == "" {
 		return "", nil
 	}
-	return machineID, bootstrap.SaveReplacement(machineID, time.Now())
+	return machineID, bootstrap.SaveReplacement(machineID, false, time.Now())
 }
 
 var replaceUserMachine = func(c *command.Context, replacementID, retiredID string) error {
@@ -144,19 +145,44 @@ var replaceUserMachine = func(c *command.Context, replacementID, retiredID strin
 }
 
 // finishMachineReplacement is the cutover of a reset (make-before-break): pairing calls it only after the
-// new machine is verified (signed configuration fetched, daemon bound), and only then is the old record
-// removed. The server moves the old local address and name to the new machine in the same transaction.
+// new machine is verified (signed configuration fetched, daemon bound), and only then are the records this
+// computer left behind removed. The server moves the old local address and name to the new machine in the
+// same transaction; the newest record goes first, so the oldest one's address and name are the ones kept.
 func finishMachineReplacement(c *command.Context, machineID string) error {
-	retired := bootstrap.LoadReplacement(time.Now())
-	if retired == "" || retired == machineID {
-		return nil
-	}
-	if err := replaceUserMachine(c, machineID, retired); err != nil {
-		return machineReplacementError{step: replaceStepCutover, retiredID: retired, cause: err}
+	left := bootstrap.LoadReplacements(time.Now())
+	for index := len(left) - 1; index >= 0; index-- {
+		retired := left[index].MachineID
+		if retired == machineID {
+			continue
+		}
+		if err := replaceUserMachine(c, machineID, retired); err != nil {
+			return machineReplacementError{step: replaceStepCutover, retiredID: retired, cause: err}
+		}
 	}
 	// A note left behind only makes the next pairing ask again, which is a no-op.
 	_ = bootstrap.ClearReplacement()
 	return nil
+}
+
+// pairingFailed runs when a pairing ended in failure. before and after are this computer's machine record
+// before and after the attempt: a record that appeared was accepted by the server, but its local
+// installation did not finish. It is noted as unfinished, and it takes over the unfinished records of
+// earlier attempts right away (it holds a session of the account), so a computer whose pairing keeps
+// failing has one record in the account, not one per attempt. Records that worked stay until a pairing
+// succeeds (finishMachineReplacement). Failures here are ignored: the note keeps every record for the
+// next pairing, and the pairing's own error is the one to report.
+func pairingFailed(c *command.Context, before, after string) {
+	if before != "" || after == "" {
+		return
+	}
+	now := time.Now()
+	left := bootstrap.LoadReplacements(now)
+	for index := len(left) - 1; index >= 0; index-- {
+		if retired := left[index].MachineID; left[index].Unfinished && retired != after && replaceUserMachine(c, after, retired) == nil {
+			_ = bootstrap.ForgetReplacement(retired, now)
+		}
+	}
+	_ = bootstrap.SaveReplacement(after, true, now)
 }
 
 type replaceStep int

@@ -102,7 +102,10 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	if c.Bool("json") {
 		out, errOut = io.Discard, &failure
 	}
+	before, _ := configuredMachineID()
 	if code := hostruntimecmd.Execute(c.Context, arguments, os.Stdin, out, errOut); code != 0 {
+		created, _ := configuredMachineID()
+		pairingFailed(c, before, created)
 		return errors.New(runtimeFailureLine(failure.String(), "pairing failed"))
 	}
 	machineID, err := configuredMachineID()

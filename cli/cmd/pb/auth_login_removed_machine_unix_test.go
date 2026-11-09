@@ -132,7 +132,7 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	s := newRemovedScenario(t, &loginDeviceFixture{})
 	// An older reset left a note naming another record; pairing would replace it, so the re-add must clear it.
-	if err := bootstrap.SaveReplacement("machine_stale", time.Now()); err != nil {
+	if err := bootstrap.SaveReplacement("machine_stale", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
