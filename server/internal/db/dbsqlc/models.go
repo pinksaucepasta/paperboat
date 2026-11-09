@@ -1743,6 +1743,7 @@ type ManagedNodeAuthority struct {
 	RetiredAt         sql.NullTime
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	Site              sql.NullString
 }
 
 type ManagedSshClientKey struct {

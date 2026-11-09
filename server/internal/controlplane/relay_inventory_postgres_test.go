@@ -32,10 +32,13 @@ func TestHostedRelayInventoryFollowsPoolAndHeartbeatOnPostgres(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	prefix := "zz_relayinv_" + strings.ReplaceAll(now.Format("20060102150405.000000"), ".", "") + "_"
 	account, other := "acct_"+prefix, "other_"+prefix
+	region := "relayinv_" + now.Format("20060102150405")
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1`, account)
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_installations WHERE node_id LIKE $1`, prefix+"%")
+		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, prefix+"%")
+		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, prefix+"%")
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.user_machines WHERE user_id IN ($1,$2)`, account, other)
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, account, other)
@@ -75,6 +78,9 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 	}{{"m1", "a", 30, time.Minute}, {"m2", "a", 12, 10 * time.Minute}, {"mo", "a", 2, time.Minute}, {"m1", "b", 8, 2 * time.Hour}, {"m1", "e", 55, time.Minute}} {
 		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'relay',$3,$4)`, prefix+sample.machine, prefix+sample.node, sample.rtt, now.Add(-sample.age))
 	}
+	// Relay a is a managed node with a site; relay e is the account's own and shows its name.
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, region)
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", region, make([]byte, 32))
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
 	got := map[string]HostedRelay{}
@@ -113,7 +119,7 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 			t.Fatalf("relay %s shows a stale or missing measurement: %+v", suffix, got[prefix+suffix])
 		}
 	}
-	if own := got[prefix+"e"]; !own.SelfHosted || own.Name != "my relay" || got[prefix+"a"].SelfHosted || got[prefix+"a"].Name != "" {
+	if own := got[prefix+"e"]; !own.SelfHosted || own.Name != "my relay" || got[prefix+"a"].SelfHosted || got[prefix+"a"].Name != "" || own.Site != "my relay" || got[prefix+"a"].Site != "Mumbai" || got[prefix+"b"].Site != "" {
 		t.Fatalf("self-hosted flags: own %+v hosted %+v", own, got[prefix+"a"])
 	}
 	// Only-mine pools hide Paperboat's relays.

@@ -13851,6 +13851,9 @@ export interface operations {
                             items: {
                                 id: string;
                                 region: string;
+                                /** @description The city or site the edge runs in. */
+                                site: string;
+                                endpoint_host: string;
                                 /** @enum {string} */
                                 status: "ready" | "draining" | "unavailable";
                                 /** Format: date-time */
@@ -13895,6 +13898,8 @@ export interface operations {
                                 /** @enum {string} */
                                 kind: "managed" | "self_hosted";
                                 region: string;
+                                /** @description The city or site the edge runs in; a self-hosted server's name. */
+                                site: string;
                                 /** @description A self-hosted server's name. */
                                 name?: string;
                                 endpoint_host?: string;
@@ -13917,6 +13922,8 @@ export interface operations {
                                 /** @enum {string} */
                                 kind: "managed" | "self_hosted";
                                 region: string;
+                                /** @description The city or site the edge runs in; a self-hosted server's name. */
+                                site: string;
                                 /** @description A self-hosted server's name. */
                                 name?: string;
                                 endpoint_host?: string;
@@ -13984,6 +13991,8 @@ export interface operations {
                                 /** @enum {string} */
                                 kind: "managed" | "self_hosted";
                                 region: string;
+                                /** @description The city or site the edge runs in; a self-hosted server's name. */
+                                site: string;
                                 /** @description A self-hosted server's name. */
                                 name?: string;
                                 endpoint_host?: string;
@@ -14006,6 +14015,8 @@ export interface operations {
                                 /** @enum {string} */
                                 kind: "managed" | "self_hosted";
                                 region: string;
+                                /** @description The city or site the edge runs in; a self-hosted server's name. */
+                                site: string;
                                 /** @description A self-hosted server's name. */
                                 name?: string;
                                 endpoint_host?: string;
@@ -14071,6 +14082,8 @@ export interface operations {
                             items: {
                                 id: string;
                                 region: string;
+                                /** @description The city or site the relay runs in; a self-hosted relay's name. */
+                                site: string;
                                 /** @enum {string} */
                                 status: "ready" | "draining" | "unavailable";
                                 /** Format: date-time */

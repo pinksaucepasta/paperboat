@@ -15,6 +15,7 @@ type HostedRelay struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name,omitempty"` // a self-hosted relay's name
 	Region        string     `json:"region"`
+	Site          string     `json:"site"` // the city or site; a self-hosted relay shows its name
 	Status        string     `json:"status"`
 	SelfHosted    bool       `json:"self_hosted"`
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
@@ -40,6 +41,7 @@ func (s *EdgeService) ListHostedRelays(ctx context.Context, accountID, after str
 	page := HostedRelayPage{Items: []HostedRelay{}, ObservedAt: at}
 	rows, err := s.store.SQL().QueryContext(ctx, `
 SELECT n.id, COALESCE(n.region,''),
+  COALESCE((SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.capability='relay' AND i.scope_kind IN ('account','team') LIMIT 1),(SELECT m.site FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),''),
   COALESCE((SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.capability='relay' AND i.scope_kind IN ('account','team') LIMIT 1),''),
   EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id AND i.scope_kind IN ('account','team')),
   CASE WHEN n.state='draining' OR n.drain_deadline IS NOT NULL THEN 'draining'
@@ -59,7 +61,7 @@ ORDER BY n.id LIMIT $4`, accountID, after, at, limit+1)
 	for rows.Next() {
 		var relay HostedRelay
 		var heartbeat sql.NullTime
-		if err := rows.Scan(&relay.ID, &relay.Region, &relay.Name, &relay.SelfHosted, &relay.Status, &heartbeat); err != nil {
+		if err := rows.Scan(&relay.ID, &relay.Region, &relay.Site, &relay.Name, &relay.SelfHosted, &relay.Status, &heartbeat); err != nil {
 			return HostedRelayPage{}, err
 		}
 		if heartbeat.Valid {

@@ -25,6 +25,7 @@ type operatorNodeInput struct {
 	PeerWireGuardPublicKey []byte   `json:"peer_wireguard_public_key,omitempty"`
 	PeerDiscoPublicKey     []byte   `json:"peer_disco_public_key,omitempty"`
 	PeerVirtualAddress     string   `json:"peer_virtual_address,omitempty"`
+	Site                   string   `json:"site,omitempty"`
 }
 
 func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
@@ -73,19 +74,19 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			writeJSON(w, 200, SuccessResponse{Data: out})
 		})))
 	}
-	for _, action := range []string{"enroll", "update", "drain", "resume", "retire", "rotate", "verify-ingress"} {
+	for _, action := range []string{"enroll", "update", "drain", "resume", "retire", "rotate", "verify-ingress", "site"} {
 		mux.Handle("POST /v1/admin/nodes/{node_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorNodeInput
 			r.Body = http.MaxBytesReader(w, r.Body, 8192)
 			if !decodeStrictJSON(w, r, &in) {
 				return
 			}
-			if action != "enroll" && action != "update" && (in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != "") {
+			if action != "enroll" && action != "update" && (in.Site != "" && action != "site" || in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != "") {
 				writeError(w, r, 400, "invalid_request", "Only revision is accepted for this node action.")
 				return
 			}
 			p, _ := principalFromContext(r.Context())
-			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), RegionID: in.RegionID, EdgePool: in.EdgePool, FailureDomain: in.FailureDomain, EndpointHost: in.EndpointHost, EndpointTCPPort: in.EndpointTCPPort, EndpointQUICPort: in.EndpointQUICPort, Roles: in.Roles, Transports: in.Transports, CapacityLimit: in.CapacityLimit, Revision: in.Revision, UsagePublicKey: in.UsagePublicKey, PeerWireGuardPublicKey: in.PeerWireGuardPublicKey, PeerDiscoPublicKey: in.PeerDiscoPublicKey, PeerVirtualAddress: in.PeerVirtualAddress, Reason: r.Header.Get("Operator-Reason")})
+			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), RegionID: in.RegionID, EdgePool: in.EdgePool, FailureDomain: in.FailureDomain, EndpointHost: in.EndpointHost, EndpointTCPPort: in.EndpointTCPPort, EndpointQUICPort: in.EndpointQUICPort, Roles: in.Roles, Transports: in.Transports, CapacityLimit: in.CapacityLimit, Revision: in.Revision, UsagePublicKey: in.UsagePublicKey, PeerWireGuardPublicKey: in.PeerWireGuardPublicKey, PeerDiscoPublicKey: in.PeerDiscoPublicKey, PeerVirtualAddress: in.PeerVirtualAddress, Site: in.Site, Reason: r.Header.Get("Operator-Reason")})
 			if err != nil {
 				operatorInfrastructureError(w, r, err)
 				return

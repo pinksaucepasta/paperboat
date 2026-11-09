@@ -26,6 +26,7 @@ type PairEdge struct {
 	ID            string     `json:"id"`
 	Kind          string     `json:"kind"` // managed | self_hosted
 	Region        string     `json:"region"`
+	Site          string     `json:"site"`           // the city or site; a self-hosted server shows its name
 	Name          string     `json:"name,omitempty"` // a self-hosted server's name
 	EndpointHost  string     `json:"endpoint_host,omitempty"`
 	Status        string     `json:"status"`
@@ -90,23 +91,23 @@ func (s *Service) readPair(ctx context.Context, actor string, ws edgeset.Scope, 
 	edges, nodeIDs := make([]PairEdge, 0, 2), make([]string, 0, 2)
 	for _, id := range ids {
 		var e PairEdge
-		var name, installation string
+		var name, installation, site string
 		var heartbeat sql.NullTime
 		err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,coalesce(n.region,''),coalesce(n.endpoint_host,''),`+edgeset.NodeStatusSQL("$2")+`,n.last_heartbeat_at,
- coalesce(i.id,''),coalesce(i.name,'')
+ coalesce(i.id,''),coalesce(i.name,''),coalesce((SELECT m.site FROM paperboat.managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),'')
 FROM paperboat.control_tunnel_nodes n
 LEFT JOIN LATERAL (SELECT i.id,i.name FROM paperboat.selfhost_installations i WHERE i.node_id=n.id AND i.capability='tunnel' AND i.state='active' AND i.scope_kind<>'global'
  AND ((i.scope_kind=$3 AND i.scope_id=$4) OR ($3='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$5))) ORDER BY i.id LIMIT 1) i ON true
-WHERE n.id=$1`, id, now, ws.Kind, ws.ID, ws.Account).Scan(&e.ID, &e.Region, &e.EndpointHost, &e.Status, &heartbeat, &installation, &name)
+WHERE n.id=$1`, id, now, ws.Kind, ws.ID, ws.Account).Scan(&e.ID, &e.Region, &e.EndpointHost, &e.Status, &heartbeat, &installation, &name, &site)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return EdgePair{}, err
 		}
-		e.Kind = "managed"
+		e.Kind, e.Site = "managed", site
 		if installation != "" {
-			e.Kind, e.ID, e.Name = "self_hosted", installation, name
+			e.Kind, e.ID, e.Name, e.Site = "self_hosted", installation, name, name
 		}
 		if heartbeat.Valid {
 			t := heartbeat.Time.UTC()

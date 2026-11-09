@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ func TestEdgePairOnPostgres(t *testing.T) {
 	stamp := randomIdentity()
 	owner, other, admin, member := "pair_owner_"+stamp, "pair_other_"+stamp, "pair_admin_"+stamp, "pair_member_"+stamp
 	team := "pair-team-" + stamp[:8]
+	region := "pairsite_" + strings.ToLower(stamp[:8])
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
@@ -57,6 +59,8 @@ func TestEdgePairOnPostgres(t *testing.T) {
 			{`DELETE FROM paperboat.workspace_edge_sets WHERE scope_id IN ($1,$2)`, []any{owner, team}},
 			{`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id IN ($1,$2)`, []any{owner, team}},
 			{`DELETE FROM paperboat.selfhost_installations WHERE id LIKE $1`, []any{"%" + stamp}},
+			{`DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, []any{"%" + stamp}},
+			{`DELETE FROM paperboat.operator_regions WHERE id=$1`, []any{region}},
 			{`DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, []any{"%" + stamp}},
 			{`DELETE FROM paperboat.user_machines WHERE user_id IN ($1,$2)`, []any{owner, other}},
 			{`DELETE FROM paperboat.team_members WHERE team_id=$1`, []any{team}},
@@ -103,6 +107,12 @@ VALUES($1,'default','1.0','epoch','ready',true,now()-make_interval(secs=>$2::flo
 	}
 	if pair.Primary.Status != "ready" || pair.Primary.Region != "fsn1" || pair.Primary.LastHeartbeat == nil || pair.Primary.BestRTTMillis != nil {
 		t.Fatalf("primary fields=%+v", pair.Primary)
+	}
+	// A managed edge shows the site its operator set; one without a site shows none.
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, region)
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, pair.Primary.ID, region, make([]byte, 32))
+	if shown, showErr := service.EdgePair(ctx, owner, personal); showErr != nil || shown.Primary.Site != "Mumbai" || shown.Fallback == nil || shown.Fallback.Site != "" {
+		t.Fatalf("managed sites=%+v err=%v", shown, showErr)
 	}
 	first := testutil.PublicationMachine(t, store.SQL(), owner)
 	second := first + "_2"
@@ -184,7 +194,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now()-make_interval(secs=>$2::flo
 	// 5. With nothing running the switch goes through: the pool becomes the pair, the pair names installations.
 	exec(`UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, "tunnel_"+stamp)
 	pair, err = service.SetEdgePair(ctx, owner, personal, s2, s1)
-	if err != nil || pair.Primary.ID != s2 || pair.Primary.Kind != "self_hosted" || pair.Primary.Name != "Server s2" || pair.Primary.EndpointHost != n2+".example.test" || id(pair.Fallback) != s1 {
+	if err != nil || pair.Primary.ID != s2 || pair.Primary.Kind != "self_hosted" || pair.Primary.Name != "Server s2" || pair.Primary.Site != "Server s2" || pair.Primary.EndpointHost != n2+".example.test" || id(pair.Fallback) != s1 {
 		t.Fatalf("self-hosted pair=%+v err=%v", pair, err)
 	}
 	if policy, poolErr := service.PoolScoped(ctx, owner, "tunnel", personal); poolErr != nil || policy.Mode != "self-hosted-only" || len(policy.InstallationIDs) != 2 || policy.InstallationIDs[0] != s2 || policy.InstallationIDs[1] != s1 {

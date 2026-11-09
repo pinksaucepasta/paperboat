@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -96,6 +98,7 @@ type NodeMutation struct {
 	PeerWireGuardPublicKey []byte   `json:"peer_wireguard_public_key,omitempty"`
 	PeerDiscoPublicKey     []byte   `json:"peer_disco_public_key,omitempty"`
 	PeerVirtualAddress     string   `json:"peer_virtual_address,omitempty"`
+	Site                   string   `json:"site,omitempty"` // city or site shown next to the region; set on enroll or by the site action
 }
 type NodeMutationResult struct {
 	Node              Node   `json:"node"`
@@ -208,7 +211,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrConflict
 			}
 		case "enroll":
-			if in.Revision != 0 || !validNode(in) || len(s.key) < 32 {
+			if in.Revision != 0 || !validNode(in) || len(s.key) < 32 || (in.Site != "" && !validSite(in.Site)) {
 				return ErrInvalid
 			}
 			var enabled bool
@@ -232,7 +235,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if err != nil {
 				return mapErr(err)
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,$4,$5)`, in.NodeID, in.RegionID, hash[:], cipher, config)
+			_, err = tx.Exec(ctx, `INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,$4,$5,NULLIF($6,''))`, in.NodeID, in.RegionID, hash[:], cipher, config, in.Site)
 			if err != nil {
 				return mapErr(err)
 			}
@@ -266,7 +269,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return err
 			}
 		case "update":
-			if in.Revision < 1 || !validNode(in) {
+			if in.Revision < 1 || !validNode(in) || in.Site != "" {
 				return ErrInvalid
 			}
 			var previousRaw []byte
@@ -302,6 +305,17 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			_, err = tx.Exec(ctx, `UPDATE control_tunnel_nodes SET edge_pool=$2,endpoint_host=$3,endpoint_tcp_port=$4,endpoint_quic_port=$5,carrier_endpoint_host=$3,carrier_endpoint_tcp_port=$4,carrier_endpoint_quic_port=$5,region=$6,failure_domain=$7,roles=$8,transports=$9,capacity_limit=$10,capacity_used=0,capacity_observed_at=now(),state='registered',ready=false,node_generation=node_generation+1,process_epoch='',registry_expires_at=now(),drain_deadline=NULL,public_ingress_ipv4=NULL,public_ingress_ipv6=NULL,public_ingress_verified_at=NULL,peer_relay_wireguard_public_key=$11,peer_relay_disco_public_key=$12,peer_relay_virtual_address=nullif($13,'')::inet,version=version+1,updated_at=now() WHERE id=$1 AND state<>'retired'`, in.NodeID, in.EdgePool, in.EndpointHost, in.EndpointTCPPort, in.EndpointQUICPort, in.RegionID, in.FailureDomain, in.Roles, in.Transports, in.CapacityLimit, nullableBytes(in.PeerWireGuardPublicKey), nullableBytes(in.PeerDiscoPublicKey), in.PeerVirtualAddress)
 			if err != nil {
 				return err
+			}
+		case "site":
+			if in.Revision < 1 || !validSite(in.Site) {
+				return ErrInvalid
+			}
+			tag, err := tx.Exec(ctx, `UPDATE managed_node_authority SET site=$2,revision=revision+1,updated_at=now() WHERE node_id=$1 AND revision=$3 AND retired_at IS NULL`, in.NodeID, in.Site, in.Revision)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return ErrConflict
 			}
 		case "drain", "resume", "retire":
 			if in.Revision < 1 {
@@ -566,6 +580,11 @@ func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 var regionIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 var endpointName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
+
+// validSite: a short display name (a city), printable, no surrounding space.
+func validSite(v string) bool {
+	return len(v) <= 80 && strings.TrimSpace(v) == v && v != "" && utf8.ValidString(v) && !strings.ContainsFunc(v, unicode.IsControl)
+}
 
 func validCommon(actor, key, target, reason string) bool {
 	return identifier.MatchString(actor) && len(key) >= 8 && len(key) <= 200 && identifier.MatchString(key) && identifier.MatchString(target) && identifier.MatchString(reason)

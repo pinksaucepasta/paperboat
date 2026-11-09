@@ -157,3 +157,52 @@ func infraTestDB(t *testing.T) *db.DB {
 	}
 	return store
 }
+
+func TestOperatorNodeSiteIsSetOnEnrollAndByTheSiteAction(t *testing.T) {
+	store := infraTestDB(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	admin := "infra_admin_" + x
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
+	region, err := s.MutateRegion(ctx, admin, "region-create-"+x, RegionMutation{Action: "create", ID: "region_" + x, DisplayName: "Test region", Reason: "case:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32), Site: " Mumbai"}
+	if _, err = s.MutateNode(ctx, admin, "enroll-bad-"+x, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("site with surrounding space: %v", err)
+	}
+	in.Site = "Hyderabad"
+	enrolled, err := s.MutateNode(ctx, admin, "enroll-"+x, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := func() string {
+		var v string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(site,'') FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if got := site(); got != "Hyderabad" {
+		t.Fatalf("site after enroll = %q", got)
+	}
+	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Revision: enrolled.Node.Revision, Site: "Mumbai"}
+	if _, err = s.MutateNode(ctx, admin, "site-"+x, set); err != nil || site() != "Mumbai" {
+		t.Fatalf("site action: site=%q err=%v", site(), err)
+	}
+	if _, err = s.MutateNode(ctx, admin, "site-stale-"+x, set); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale revision: %v", err)
+	}
+	set.Revision, set.Site = enrolled.Node.Revision+1, ""
+	if _, err = s.MutateNode(ctx, admin, "site-empty-"+x, set); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty site: %v", err)
+	}
+	in.Action, in.Revision = "update", enrolled.Node.Revision+1
+	if _, err = s.MutateNode(ctx, admin, "update-site-"+x, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("update carrying a site: %v", err)
+	}
+}

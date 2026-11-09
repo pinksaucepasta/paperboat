@@ -38,7 +38,7 @@ func TestHostedEdgeInventoryAppliesAccountAndFreshnessOnPostgres(t *testing.T) {
 		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.selfhost_installations WHERE node_id LIKE $1`, prefix+"%")
 		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, prefix+"%")
 		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, prefix+"%")
-		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.operator_regions WHERE id=$1`, regionID)
+		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.operator_regions WHERE id=$1 OR id=$2`, regionID, regionID+"_on")
 		_, _ = database.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.users WHERE id=$1`, account)
 	})
 	exec := func(query string, args ...any) {
@@ -62,10 +62,13 @@ VALUES($1,'default','1.0','epoch', $2,$3,$4,'fsn1','domain',ARRAY[$5]::text[],AR
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','test edge','tunnel','account',$4,$5,true)`, prefix+"installation", prefix+"e", make([]byte, 32), account, prefix+"claim")
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',false)`, regionID)
 	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, prefix+"f", regionID, make([]byte, 32))
+	// Edge a is a managed node of an enabled region: it shows its site.
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, regionID+"_on")
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", regionID+"_on", make([]byte, 32))
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
 	first, err := service.ListHostedEdges(ctx, account, prefix, 2)
-	if err != nil || len(first.Items) != 2 || first.Items[0].ID != prefix+"a" || first.Items[0].Status != "ready" || first.Items[1].Status != "unavailable" || first.NextCursor != prefix+"b" {
+	if err != nil || len(first.Items) != 2 || first.Items[0].ID != prefix+"a" || first.Items[0].Status != "ready" || first.Items[1].Status != "unavailable" || first.Items[0].Site != "Mumbai" || first.Items[0].EndpointHost != "edge.example.test" || first.Items[1].Site != "" || first.NextCursor != prefix+"b" {
 		t.Fatalf("first page=%+v error=%v", first, err)
 	}
 	second, err := service.ListHostedEdges(ctx, account, first.NextCursor, 2)

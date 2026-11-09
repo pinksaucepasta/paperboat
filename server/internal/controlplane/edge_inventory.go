@@ -16,6 +16,8 @@ var ErrInvalidEdgePage = errors.New("invalid edge page")
 type HostedEdge struct {
 	ID            string     `json:"id"`
 	Region        string     `json:"region"`
+	Site          string     `json:"site"`
+	EndpointHost  string     `json:"endpoint_host"`
 	Status        string     `json:"status"`
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
 }
@@ -34,6 +36,7 @@ func (s *EdgeService) ListHostedEdges(ctx context.Context, accountID, after stri
 	page := HostedEdgePage{Items: []HostedEdge{}, ObservedAt: at}
 	rows, err := s.store.SQL().QueryContext(ctx, `
 SELECT n.id, COALESCE(n.region,''),
+  COALESCE((SELECT m.site FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),''), COALESCE(n.endpoint_host,''),
   `+edgeset.NodeStatusSQL("$3")+`,
   n.last_heartbeat_at
 FROM control_tunnel_nodes n
@@ -52,7 +55,7 @@ ORDER BY n.id LIMIT $4`, accountID, after, at, limit+1)
 	for rows.Next() {
 		var edge HostedEdge
 		var heartbeat sql.NullTime
-		if err := rows.Scan(&edge.ID, &edge.Region, &edge.Status, &heartbeat); err != nil {
+		if err := rows.Scan(&edge.ID, &edge.Region, &edge.Site, &edge.EndpointHost, &edge.Status, &heartbeat); err != nil {
 			return HostedEdgePage{}, err
 		}
 		if heartbeat.Valid {

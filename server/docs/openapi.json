@@ -19813,6 +19813,8 @@
                             "required": [
                               "id",
                               "region",
+                              "site",
+                              "endpoint_host",
                               "status"
                             ],
                             "properties": {
@@ -19820,6 +19822,13 @@
                                 "type": "string"
                               },
                               "region": {
+                                "type": "string"
+                              },
+                              "site": {
+                                "type": "string",
+                                "description": "The city or site the edge runs in."
+                              },
+                              "endpoint_host": {
                                 "type": "string"
                               },
                               "status": {
@@ -19917,6 +19926,7 @@
                             "id",
                             "kind",
                             "region",
+                            "site",
                             "status"
                           ],
                           "properties": {
@@ -19933,6 +19943,10 @@
                             },
                             "region": {
                               "type": "string"
+                            },
+                            "site": {
+                              "type": "string",
+                              "description": "The city or site the edge runs in; a self-hosted server's name."
                             },
                             "name": {
                               "type": "string",
@@ -19971,6 +19985,7 @@
                             "id",
                             "kind",
                             "region",
+                            "site",
                             "status"
                           ],
                           "properties": {
@@ -19987,6 +20002,10 @@
                             },
                             "region": {
                               "type": "string"
+                            },
+                            "site": {
+                              "type": "string",
+                              "description": "The city or site the edge runs in; a self-hosted server's name."
                             },
                             "name": {
                               "type": "string",
@@ -20127,6 +20146,7 @@
                             "id",
                             "kind",
                             "region",
+                            "site",
                             "status"
                           ],
                           "properties": {
@@ -20143,6 +20163,10 @@
                             },
                             "region": {
                               "type": "string"
+                            },
+                            "site": {
+                              "type": "string",
+                              "description": "The city or site the edge runs in; a self-hosted server's name."
                             },
                             "name": {
                               "type": "string",
@@ -20181,6 +20205,7 @@
                             "id",
                             "kind",
                             "region",
+                            "site",
                             "status"
                           ],
                           "properties": {
@@ -20197,6 +20222,10 @@
                             },
                             "region": {
                               "type": "string"
+                            },
+                            "site": {
+                              "type": "string",
+                              "description": "The city or site the edge runs in; a self-hosted server's name."
                             },
                             "name": {
                               "type": "string",
@@ -20332,6 +20361,7 @@
                             "required": [
                               "id",
                               "region",
+                              "site",
                               "status",
                               "self_hosted"
                             ],
@@ -20341,6 +20371,10 @@
                               },
                               "region": {
                                 "type": "string"
+                              },
+                              "site": {
+                                "type": "string",
+                                "description": "The city or site the relay runs in; a self-hosted relay's name."
                               },
                               "status": {
                                 "type": "string",
