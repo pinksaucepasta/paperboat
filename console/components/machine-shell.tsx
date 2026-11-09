@@ -21,6 +21,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SectionSkeleton } from "@/components/skeletons"
 
 const MachineContext = createContext<Machine | null>(null)
 
@@ -69,10 +70,24 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   )
 
   if (isPending) {
+    // While the machine loads, the open tab draws its own loading state: its lists only need the
+    // machine's id (and read the rest defensively). Overview would show empty facts, so it gets
+    // its sections' placeholders.
+    const loading = { id: machineId, alias: "", tags: [] } as unknown as Machine
     return (
       <>
         {header}
         <MachineSkeleton base={base} tab={tab} />
+        <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
+          {tab ? (
+            <MachineContext value={loading}>{children}</MachineContext>
+          ) : (
+            <div className="flex flex-col gap-10">
+              <SectionSkeleton title="Details" rows={6} />
+              <SectionSkeleton title="Network" rows={2} />
+            </div>
+          )}
+        </div>
       </>
     )
   }
