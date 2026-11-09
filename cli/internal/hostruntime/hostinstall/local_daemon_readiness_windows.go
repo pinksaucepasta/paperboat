@@ -76,6 +76,49 @@ func PreparePendingWindowsDaemonReplacement(ctx context.Context, ownerSID string
 	return resume, nil
 }
 
+// RemoveWindowsLocalDaemonService is pb service uninstall: it stops and removes only this
+// account's LocalDaemon SCM service. Hostd, the updater, the enrollment and the binaries
+// stay, as Linux and macOS leave everything but the user's daemon unit. Idempotent.
+func RemoveWindowsLocalDaemonService(ctx context.Context, ownerSID string) (resultErr error) {
+	if allowed, err := checkAdministrator(); err != nil {
+		return err
+	} else if !allowed {
+		return ErrNotPrivileged
+	}
+	// The same lock as install, repair and the updater: none of them may start or
+	// re-register the service halfway through its removal.
+	unlock, err := lockWindowsLocalDaemonMigration(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = withCleanup("Windows installation cleanup failed", resultErr, unlock()) }()
+	instance, err := WindowsInstanceForSID(ownerSID)
+	if err != nil {
+		return err
+	}
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		return err
+	}
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return err
+	}
+	lockPath, err := windowsLocalDaemonLockPath(config.StateRoot)
+	if err != nil {
+		return err
+	}
+	// windowsRoleInstallers returns hostd, updater, daemon in that order.
+	_, _, daemon, err := windowsRoleInstallers(layout, true)
+	if err != nil {
+		return err
+	}
+	if err := localdaemon.StopWindowsOwnerService(ctx, lockPath, config.OwnerSID); err != nil {
+		return hostInstallFailure("stop Paperboat local daemon service", err)
+	}
+	return daemon.Uninstall(ctx)
+}
+
 func readWindowsLocalDaemonSnapshot(ctx context.Context, ownerSID, stateRoot string) (localapi.Snapshot, error) {
 	paths, err := localapi.WindowsPaths(stateRoot, ownerSID)
 	if err != nil {

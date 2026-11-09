@@ -177,6 +177,10 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) (
 			return installer.Uninstall(ctx)
 		case elevation.ActionStop:
 			return hostinstall.Stop(ctx, request.OwnerSID)
+		case elevation.ActionDaemonInstall:
+			return hostinstall.EnsureWindowsLocalDaemonService(ctx, request.OwnerSID, true)
+		case elevation.ActionDaemonRemove:
+			return hostinstall.RemoveWindowsLocalDaemonService(ctx, request.OwnerSID)
 		case elevation.ActionInstall, elevation.ActionInstallCommit, elevation.ActionCommit, elevation.ActionUninstall:
 			installRequest, err := hostinstall.Decode(bytes.NewReader(request.Payload))
 			if err != nil {

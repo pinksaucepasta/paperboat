@@ -117,9 +117,10 @@ func RunWindowsWithReady(ctx context.Context, config WindowsConfig, ready func()
 	// canonical LocalDaemon before starting Updated. Calling the same migration
 	// here would wait on the installer's Global mutex while SCM waits for this
 	// updater to publish readiness. Only an updater started outside that
-	// protected path must run the legacy migration itself.
+	// protected path must run the legacy migration itself. It starts an
+	// installed service and never recreates one pb service uninstall removed.
 	if finalizeLocalDaemon && persisted.Committed && !config.LocalDaemonReady() {
-		if err := hostinstall.EnsureWindowsLocalDaemonService(ctx, config.OwnerSID); err != nil {
+		if err := hostinstall.EnsureWindowsLocalDaemonService(ctx, config.OwnerSID, false); err != nil {
 			return err
 		}
 	}

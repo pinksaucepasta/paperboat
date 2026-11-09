@@ -4,12 +4,17 @@ package localdaemon
 
 import (
 	"context"
-	"errors"
 	"os"
 	"runtime"
 
 	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
+
+// CreateCurrentUserService is pb service install. Linux and macOS install the unit the way a
+// command that finds no daemon does; Windows needs administrator rights to register its service.
+func CreateCurrentUserService(ctx context.Context, executable, configPath, serverURL string) error {
+	return InstallCurrentUserService(ctx, executable, configPath, serverURL)
+}
 
 func UninstallCurrentUserService(ctx context.Context, executable string) error {
 	return RemoveCurrentUserService(ctx, executable)
@@ -66,7 +71,7 @@ func startUserService(ctx context.Context, controller hostservice.NativeLifecycl
 			return err
 		}
 		if !installed {
-			return errors.New("Paperboat local daemon service is not installed; run pb service install")
+			return ErrServiceNotInstalled
 		}
 		return controller.Start(ctx, path)
 	}
@@ -75,7 +80,7 @@ func startUserService(ctx context.Context, controller hostservice.NativeLifecycl
 		return err
 	}
 	if !state.Registered {
-		return errors.New("Paperboat local daemon service is not installed; run pb service install")
+		return ErrServiceNotInstalled
 	}
 	return controller.Start(ctx, path)
 }

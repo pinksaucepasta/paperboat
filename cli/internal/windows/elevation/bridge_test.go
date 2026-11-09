@@ -6,7 +6,7 @@ import (
 )
 
 func TestOperationDurationBoundsRuntimeActivation(t *testing.T) {
-	for _, action := range []string{ActionCommit, ActionUninstall, ActionStop, ActionConfigInstall, ActionConfigRemove, ActionBrowserDomain} {
+	for _, action := range []string{ActionCommit, ActionUninstall, ActionStop, ActionConfigInstall, ActionConfigRemove, ActionDaemonInstall, ActionDaemonRemove, ActionBrowserDomain} {
 		if got := operationDuration(OperationRuntimeService, action); got != RuntimeActivationDuration {
 			t.Fatalf("runtime action %q duration = %s, want %s", action, got, RuntimeActivationDuration)
 		}

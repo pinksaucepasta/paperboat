@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/spf13/cobra"
 )
 
 const daemonServiceName = "paperboatd"
 
 var (
-	installDaemonService = localdaemon.InstallCurrentUserService
+	installDaemonService = localdaemon.CreateCurrentUserService
 	removeDaemonService  = localdaemon.UninstallCurrentUserService
 	startDaemonService   = localdaemon.StartCurrentUserService
 	stopDaemonService    = localdaemon.StopCurrentUserService
@@ -34,8 +36,20 @@ func serviceCommand() *cobra.Command {
 	cmd.AddCommand(serviceInstallCommand(), serviceUninstallCommand(), serviceStartCommand(), serviceStopCommand(), serviceRestartCommand(), serviceStatusCommand())
 	return cmd
 }
+
+const serviceTimeout = 30 * time.Second
+
 func serviceContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(cmd.Context(), 30*time.Second)
+	return context.WithTimeout(cmd.Context(), serviceTimeout)
+}
+
+// serviceRegistrationContext bounds registering or removing the service. On Windows that waits for the
+// user to answer an administrator prompt and for the elevated helper, which has its own bound.
+func serviceRegistrationContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+	if runtime.GOOS == "windows" {
+		return context.WithTimeout(cmd.Context(), serviceTimeout+elevation.RuntimeActivationDuration)
+	}
+	return serviceContext(cmd)
 }
 func executableForService() (string, error) {
 	executable, err := serviceExecutable()
@@ -142,12 +156,14 @@ func serviceInstallCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := serviceContext(cmd)
+		ctx, cancel := serviceRegistrationContext(cmd)
 		defer cancel()
 		if err = installDaemonService(ctx, executable, configPath, serverURL); err != nil {
 			return fmt.Errorf("install Paperboat local daemon service: %w", err)
 		}
-		if err = awaitDaemonReady(ctx); err != nil {
+		readyCtx, cancelReady := context.WithTimeout(ctx, serviceTimeout)
+		defer cancelReady()
+		if err = awaitDaemonReady(readyCtx); err != nil {
 			return err
 		}
 		return writeDaemonCommandResult(cmd, map[string]any{"service": daemonServiceName, "action": "install", "completed": true}, "Paperboat daemon service installed and ready")
@@ -164,7 +180,7 @@ func serviceUninstallCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := serviceContext(cmd)
+		ctx, cancel := serviceRegistrationContext(cmd)
 		defer cancel()
 		if err = removeDaemonService(ctx, executable); err != nil {
 			return fmt.Errorf("uninstall Paperboat local daemon service: %w", err)

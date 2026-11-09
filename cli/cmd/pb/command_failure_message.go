@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
@@ -65,6 +66,11 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	}
 	if message := sshFailureMessage(err); message != "" {
 		return message
+	}
+	// Linux and macOS register the service again from any command that needs the daemon. Windows needs
+	// administrator rights for that, so its commands stop here and name the one that asks for them.
+	if boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+		return "The Paperboat background service is not installed. Run `pb service install`, then retry."
 	}
 	if boundedErrorWalk(err, func(e error) bool { return e == ErrPreviewOwnerSessionUnavailable }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`."

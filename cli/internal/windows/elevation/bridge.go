@@ -25,6 +25,8 @@ const (
 	ActionStop             = "stop"
 	ActionConfigInstall    = "config_install"
 	ActionConfigRemove     = "config_remove"
+	ActionDaemonInstall    = "daemon_install"
+	ActionDaemonRemove     = "daemon_remove"
 	ActionBrowserDomain    = "browser_domain"
 
 	ActionOpenSSHSetup   = "setup"
@@ -163,7 +165,7 @@ func operationDuration(operation, action string) time.Duration {
 		return RuntimeInstallDuration
 	}
 
-	if operation == OperationRuntimeService && (action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionBrowserDomain) {
+	if operation == OperationRuntimeService && (action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionDaemonInstall || action == ActionDaemonRemove || action == ActionBrowserDomain) {
 		return RuntimeActivationDuration
 	}
 	return MaxOperationDuration

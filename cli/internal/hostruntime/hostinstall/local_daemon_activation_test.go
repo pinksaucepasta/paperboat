@@ -65,3 +65,25 @@ func TestActivateLocalDaemonDoesNotReportReadinessAfterStartFailure(t *testing.T
 		t.Fatalf("error=%v ready=%t", err, ready)
 	}
 }
+
+func TestActivateMissingLocalDaemonWithoutInstallLeavesItAbsent(t *testing.T) {
+	err := activateLocalDaemon(context.Background(), localDaemonActivation{
+		Start:     func(context.Context) error { t.Fatal("started a service that is not installed"); return nil },
+		WaitReady: func(context.Context) error { t.Fatal("waited for a service that is not installed"); return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActivateInstalledLocalDaemonWithoutInstallStartsIt(t *testing.T) {
+	started, ready := 0, 0
+	err := activateLocalDaemon(context.Background(), localDaemonActivation{
+		Installed: true,
+		Start:     func(context.Context) error { started++; return nil },
+		WaitReady: func(context.Context) error { ready++; return nil },
+	})
+	if err != nil || started != 1 || ready != 1 {
+		t.Fatalf("error=%v started=%d ready=%d", err, started, ready)
+	}
+}

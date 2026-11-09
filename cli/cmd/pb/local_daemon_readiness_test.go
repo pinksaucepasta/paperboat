@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
 
 type localDaemonSnapshotClientFunc func(context.Context) (localapi.Snapshot, error)
@@ -309,5 +311,19 @@ func TestLocalDaemonServiceArgumentsAreUnixOnly(t *testing.T) {
 	// The Windows SCM service refuses launch overrides: pb status and pb doctor passed them and could not start a stopped daemon.
 	if config, server := localDaemonServiceArguments("windows", `C:\Users\u\config.json`, "https://api.example.test"); config != "" || server != "" {
 		t.Fatalf("windows config=%q server=%q", config, server)
+	}
+}
+
+// Windows cannot register the daemon service from an ordinary command (that needs administrator
+// rights), so a missing service must name the command that does instead of a generic failure.
+func TestMissingDaemonServiceNamesTheInstallCommand(t *testing.T) {
+	cold := fmt.Errorf("connect local daemon at pipe: %w", os.ErrNotExist)
+	for _, err := range []error{
+		fmt.Errorf("read local Paperboat diagnostics: %w", errors.Join(cold, fmt.Errorf("%w: %w", localdaemon.ErrServiceNotInstalled, os.ErrNotExist))),
+		fmt.Errorf("start Paperboat local daemon service: %w", localdaemon.ErrServiceNotInstalled),
+	} {
+		if got := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(got, "`pb service install`") {
+			t.Fatalf("message = %q", got)
+		}
 	}
 }

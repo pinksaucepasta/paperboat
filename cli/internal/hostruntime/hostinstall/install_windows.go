@@ -1078,11 +1078,11 @@ func prepareWindowsLocalDaemonMigrationAndState(ctx context.Context, ownerSID, s
 	return errors.Join(migrationErr, stateErr)
 }
 
-// EnsureWindowsLocalDaemonService upgrades an existing Windows installation
-// from the owner-scoped scheduled task to the protected LocalDaemon SCM
-// service. It is idempotent and is also called by the updater so an in-place
-// upgrade from a pre-SCM release cannot leave the task behind.
-func EnsureWindowsLocalDaemonService(ctx context.Context, ownerSID string) (resultErr error) {
+// EnsureWindowsLocalDaemonService starts the account's LocalDaemon SCM service and
+// waits until it is ready. It is idempotent. With create (pb service install) a
+// missing service is registered first; without it (the updater) a missing service
+// stays missing, because pb service uninstall removed it on purpose.
+func EnsureWindowsLocalDaemonService(ctx context.Context, ownerSID string, create bool) (resultErr error) {
 	if allowed, err := checkAdministrator(); err != nil {
 		return err
 	} else if !allowed {
@@ -1122,20 +1122,23 @@ func EnsureWindowsLocalDaemonService(ctx context.Context, ownerSID string) (resu
 	if err != nil {
 		return err
 	}
-	install := func(installCtx context.Context) error {
-		executable, err := windowsRoleRuntime(layout, service.DaemonKind)
-		if err != nil {
-			return err
+	var install func(context.Context) error
+	if create {
+		install = func(installCtx context.Context) error {
+			executable, err := windowsRoleRuntime(layout, service.DaemonKind)
+			if err != nil {
+				return err
+			}
+			installer, err := service.New(service.Config{
+				Platform: "windows", Kind: service.DaemonKind, Instance: instance, ConfigRoot: filepath.Dir(layout.UpdateStateRoot),
+				Executable: executable, User: "Paperboat", Group: "Paperboat",
+				Arguments: []string{"daemon", "__runtime-local-daemon", "--instance", instance}, Controller: service.WindowsController{},
+			})
+			if err != nil {
+				return err
+			}
+			return installer.Install(installCtx)
 		}
-		installer, err := service.New(service.Config{
-			Platform: "windows", Kind: service.DaemonKind, Instance: instance, ConfigRoot: filepath.Dir(layout.UpdateStateRoot),
-			Executable: executable, User: "Paperboat", Group: "Paperboat",
-			Arguments: []string{"daemon", "__runtime-local-daemon", "--instance", instance}, Controller: service.WindowsController{},
-		})
-		if err != nil {
-			return err
-		}
-		return installer.Install(installCtx)
 	}
 	// The stable SCM definition already owns the canonical executable. An
 	// idempotent readiness repair must start it, not run Installer.Install:

@@ -89,12 +89,11 @@ func installWindowsCurrentUserService(ctx context.Context, executable, configPat
 		return err
 	}
 	if installed {
-		// Managed installations own one silent SCM service. Never recreate the
-		// old interactive ONLOGON task after migration merely because a CLI
-		// command observed a cold local pipe.
 		return invokeWindowsOwnerServiceStart(ctx, ownerSID)
 	}
-	return fmt.Errorf("managed Paperboat local daemon service is not installed; repair the Paperboat installation: %w", windows.ERROR_SERVICE_DOES_NOT_EXIST)
+	// A command that observed a cold local pipe starts the service; it never registers
+	// one. That needs administrator rights and is pb service install (CreateCurrentUserService).
+	return fmt.Errorf("%w: %w", ErrServiceNotInstalled, windows.ERROR_SERVICE_DOES_NOT_EXIST)
 }
 
 // RemoveWindowsLegacyTask removes the pre-SCM ONLOGON task for exactly one
