@@ -21,6 +21,8 @@ const request = cache(async () => {
   const selected = jar.get("pb-workspace")?.value
   const workspace = selected && workspacePattern.test(selected) ? selected : "personal"
   const cookie = jar.toString()
+  // Set when the control plane answers 401: the cookie is there but the session is over.
+  const state = { ended: false }
 
   const get = async <T>(path: string): Promise<T | undefined> => {
     try {
@@ -28,6 +30,7 @@ const request = cache(async () => {
         headers: { accept: "application/json", cookie },
         signal: AbortSignal.timeout(3_000),
       })
+      if (response.status === 401) state.ended = true
       if (!response.ok) return
       const body = (await response.json()) as { data?: T }
       return body.data
@@ -37,7 +40,7 @@ const request = cache(async () => {
   }
   // The browser keeps its time zone in pb-tz (Providers); with the locale it lets the server write dates as the browser will.
   const viewer = viewerFrom(jar.get("pb-tz")?.value, (await headers()).get("accept-language"))
-  return { workspace, get, viewer }
+  return { workspace, get, viewer, state }
 })
 
 type Session = {
@@ -87,8 +90,8 @@ export type PageRead = { key: readonly unknown[]; path: string; field?: string }
 /** The session data, plus a page's own reads (see `WithSession`), for every console page. */
 export async function prefetchSession(
   reads?: (workspace: string) => PageRead[],
-): Promise<{ state: DehydratedState; workspace: string; viewer?: Viewer }> {
-  const { workspace, get, viewer } = await request()
+): Promise<{ state: DehydratedState; workspace: string; viewer?: Viewer; ended: boolean }> {
+  const { workspace, get, viewer, state: auth } = await request()
   const list = reads?.(workspace) ?? []
   const [data, ...results] = await Promise.all([
     session(),
@@ -100,7 +103,7 @@ export async function prefetchSession(
     const result = results[index]
     if (result) queryClient.setQueryData(read.key, read.field ? result[read.field] : result)
   })
-  return { state: dehydrate(queryClient), workspace, viewer }
+  return { state: dehydrate(queryClient), workspace, viewer, ended: auth.ended }
 }
 
 /**
