@@ -10,8 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 //go:embed man/man1/*.1
@@ -43,7 +41,7 @@ func Install(directory string) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	current := make(map[string]bool, len(entries))
+	current, wrote := make(map[string]bool, len(entries)), false
 	for _, entry := range entries {
 		data, err := manuals.ReadFile("man/man1/" + entry.Name())
 		if err != nil {
@@ -54,12 +52,60 @@ func Install(directory string) (resultErr error) {
 			current[entry.Name()] = true // 268 pages with two fsyncs each outlasted the updater's deadline on a loaded 1-vCPU VM (pbvm1 F14-09)
 			continue
 		}
-		if err := atomicfile.Write(path, page, atomicfile.Options{Mode: 0644, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		if err := writePage(path, page); err != nil {
 			return fmt.Errorf("install manual %s: %w", entry.Name(), err)
 		}
-		current[entry.Name()] = true
+		current[entry.Name()], wrote = true, true
+	}
+	// One directory sync makes every rename durable. The pages are regenerable, and a page the crash left empty
+	// differs in size, so the next refresh rewrites it (dpkg unpacks the same way and syncs once at the end).
+	if wrote {
+		if err := syncDirectory(section); err != nil {
+			return err
+		}
 	}
 	return removeOwned(section, current)
+}
+
+// syncFile is the only fsync of a refresh; tests count it.
+var syncFile = func(file *os.File) error { return file.Sync() }
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	return errors.Join(syncFile(directory), directory.Close())
+}
+
+// writePage replaces path with page through a temporary file in the same directory and a rename: readers see the
+// old or the new page. Like atomicfile it refuses a destination that is not a regular file; unlike it, it does
+// not sync (a refresh of 268 pages with two fsyncs each outlasted the updater's deadline, pbvm1 F14-09).
+func writePage(path string, page []byte) (resultErr error) {
+	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+		return errors.New("destination is not a regular file")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, os.Remove(temporary.Name()))
+		}
+	}()
+	if _, err := temporary.Write(page); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if err := temporary.Chmod(0644); err != nil {
+		return errors.Join(err, temporary.Close())
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary.Name(), path)
 }
 
 // unchanged reports whether path is already a regular, world-readable file holding exactly page.

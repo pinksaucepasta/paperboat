@@ -150,3 +150,44 @@ func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
 		t.Fatalf("a page with the wrong mode was kept: %v", err)
 	}
 }
+
+// pbvm1 F14-09: a version hop changes the pages, and every changed page cost a temp file, an fsync and a directory
+// fsync (about 540 for 268 pages), which outlasted the helper's 30 s deadline on a loaded 1-vCPU VM. A refresh of
+// every page syncs once, and leaves no temporary file.
+func TestManualRefreshOfEveryPageSyncsOnce(t *testing.T) {
+	var syncs int
+	previous := syncFile
+	syncFile = func(file *os.File) error { syncs++; return file.Sync() }
+	defer func() { syncFile = previous }()
+	dir := t.TempDir()
+	if err := Install(dir); err != nil { // every page is new
+		t.Fatal(err)
+	}
+	if syncs != 1 {
+		t.Fatalf("a first install of every page synced %d times, want 1", syncs)
+	}
+	section := filepath.Join(dir, "man1")
+	entries, err := os.ReadDir(section)
+	if err != nil || len(entries) < 100 {
+		t.Fatalf("pages: %d %v", len(entries), err)
+	}
+	for _, entry := range entries { // a version hop: every page differs
+		if err := os.WriteFile(filepath.Join(section, entry.Name()), []byte("old"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	syncs = 0
+	if err := Install(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(dir); err != nil || syncs != 1 { // nothing left to write: no sync at all
+		t.Fatalf("a refresh with nothing to write synced (total %d): %v", syncs, err)
+	}
+	after, err := os.ReadDir(section)
+	if syncs != 1 || err != nil || len(after) != len(entries) {
+		t.Fatalf("a refresh of every page synced %d times (want 1), %d files (want %d): %v", syncs, len(after), len(entries), err)
+	}
+	if body, err := os.ReadFile(filepath.Join(section, "pb.1")); err != nil || !bytes.HasPrefix(body, []byte(manualMarker)) {
+		t.Fatalf("page not refreshed: %v", err)
+	}
+}
