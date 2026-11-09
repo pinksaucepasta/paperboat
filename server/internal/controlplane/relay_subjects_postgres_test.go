@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -409,7 +410,7 @@ func TestRelaySubjectsObservationBodyCarriesFullListPostgres(t *testing.T) {
 	if len(lease.Revocations) != len(list) {
 		t.Fatalf("revocations = %d, want %d (no identity rows)", len(lease.Revocations), len(list))
 	}
-	want, err := n.service.signer.JWKSJSON()
+	want, err := n.service.trustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("lease trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
@@ -499,17 +500,17 @@ func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
 		do("jwks", "/v1/trust/jwks", nil, n.service.handleJWKS)
 		return out
 	}
-	for name, raw := range served() {
-		if w := trustWithdrawn(t, raw); len(w) != 0 {
-			t.Fatalf("%s names withdrawn keys %v before any revocation", name, w)
-		}
+	// Other tests of the package may have revoked keys of their own; only k1 is this test's.
+	before := trustWithdrawn(t, served()["jwks"])
+	if slices.Contains(before, "k1") {
+		t.Fatalf("k1 withdrawn before the revocation: %v", before)
 	}
 	if err := n.service.RevokeSigningKey(ctx, operator, "revoke-"+n.id, "k1", "compromise", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	for name, raw := range served() {
-		if w := trustWithdrawn(t, raw); len(w) != 1 || w[0] != "k1" {
-			t.Fatalf("%s withdrawn_key_ids = %v, want [k1]: %s", name, w, raw)
+		if w := trustWithdrawn(t, raw); !slices.Equal(w, slices.Sorted(slices.Values(append(slices.Clone(before), "k1")))) {
+			t.Fatalf("%s withdrawn_key_ids = %v, want %v plus k1: %s", name, w, before, raw)
 		}
 		keys, err := jwks.Parse(raw)
 		if err != nil || len(keys) != 1 || keys["k2"] == nil {
@@ -535,7 +536,7 @@ func TestRelayStartAnswersTrustDocumentPostgres(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &lease); err != nil {
 		t.Fatal(err)
 	}
-	want, err := n.service.signer.JWKSJSON()
+	want, err := n.service.trustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("start trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
