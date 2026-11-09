@@ -248,7 +248,9 @@ function StreamDialog({
               {secret}
             </CopyRow>
             <DialogFooter>
-              <Button onClick={() => close(false)}>Done</Button>
+              <Button size="lg" onClick={() => close(false)}>
+                Done
+              </Button>
             </DialogFooter>
           </>
         ) : (
@@ -288,7 +290,7 @@ function StreamDialog({
             )}
             {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
             <DialogFooter>
-              <Button type="submit" disabled={save.isPending}>
+              <Button type="submit" size="lg" disabled={save.isPending}>
                 {save.isPending ? "Checking…" : stream ? "Save" : "Start streaming"}
               </Button>
             </DialogFooter>

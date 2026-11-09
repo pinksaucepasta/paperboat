@@ -165,11 +165,7 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
       {failure && <p className="text-destructive">{failure.message}</p>}
       {failure?.teams && <Blocking teams={failure.teams} />}
       <div>
-        <Button
-          type="submit"
-          className="bg-destructive text-white hover:bg-destructive/90"
-          disabled={!matches || remove.isPending}
-        >
+        <Button type="submit" variant="destructive" size="lg" disabled={!matches || remove.isPending}>
           {remove.isPending ? "Deleting…" : "Delete my account"}
         </Button>
       </div>

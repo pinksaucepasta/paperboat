@@ -36,7 +36,7 @@ export function GitHubConnection() {
             Disconnect
           </Button>
         ) : (
-          <Button disabled={connect.isPending} onClick={() => connect.mutate()}>
+          <Button size="lg" disabled={connect.isPending} onClick={() => connect.mutate()}>
             <GithubLogoIcon data-icon="inline-start" weight="fill" />
             {connect.isPending ? "Opening GitHub…" : "Connect GitHub"}
           </Button>

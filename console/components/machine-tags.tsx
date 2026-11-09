@@ -140,10 +140,11 @@ function EditTags({ machine, onClose }: { machine: Machine; onClose: () => void 
           </p>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" size="lg" onClick={onClose}>
             Cancel
           </Button>
           <Button
+            size="lg"
             disabled={save.isPending || !all.data || conflict}
             onClick={() => save.mutate(review?.confirm)}
           >
