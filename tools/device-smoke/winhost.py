@@ -55,7 +55,9 @@ if($t){& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1";[void]$p.WaitForExi
 """
 
 READ = ("if(-not(Test-Path -LiteralPath $req.path -PathType Leaf)){exit 3}\n"
-        "[Convert]::ToBase64String([IO.File]::ReadAllBytes($req.path))")
+        # FileShare ReadWrite: a running process may still have the file open for writing (a job's output).
+        "$f=New-Object IO.FileStream($req.path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)\n"
+        "$m=New-Object IO.MemoryStream;$f.CopyTo($m);$f.Close();[Convert]::ToBase64String($m.ToArray())")
 WRITE = ("$d=Split-Path -Parent $req.path;if($d){[void](New-Item -ItemType Directory -Force -Path $d)}\n"
          "[IO.File]::WriteAllBytes($req.path,[Convert]::FromBase64String($req.data))")
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
