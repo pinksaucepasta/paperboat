@@ -258,7 +258,31 @@ func normalizeSharedLockPath(path string) string {
 	if err == nil {
 		path = abs
 	}
+	// GetFinalPathNameByHandle answers with long names; TEMP and similar variables often hold 8.3 short names
+	// (C:\Users\RUNNER~1), the same object spelled differently. Only 8.3 names are expanded, never links.
+	if expanded, err := longPathName(path); err == nil {
+		path = expanded
+	}
 	return strings.ToLower(filepath.Clean(path))
+}
+
+func longPathName(path string) (string, error) {
+	encoded, err := windows.UTF16FromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, len(encoded)+260)
+	n, err := windows.GetLongPathName(&encoded[0], &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		return "", err
+	}
+	if n > uint32(len(buffer)) {
+		buffer = make([]uint16, n)
+		if n, err = windows.GetLongPathName(&encoded[0], &buffer[0], uint32(len(buffer))); err != nil {
+			return "", err
+		}
+	}
+	return windows.UTF16ToString(buffer[:n]), nil
 }
 
 func writeSharedLockOwner(path string, data []byte) (resultErr error) {

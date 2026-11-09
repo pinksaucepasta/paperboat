@@ -119,3 +119,31 @@ func TestPendingRevocationMutationMigratesLegacyNetworkDirectoryBeforeLock(t *te
 		t.Fatalf("pending record lock remained after mutation: %v", err)
 	}
 }
+
+// TEMP often holds the 8.3 spelling of a path; the lock parent check compares objects, not spellings.
+func TestSharedLockAcceptsAnEightDotThreePathSpelling(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "a directory with a long name")
+	if err := createSharedLockDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := windows.UTF16PtrFromString(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetShortPathName(encoded, &buffer[0], uint32(len(buffer)))
+	if err != nil || n == 0 {
+		t.Skipf("short names are disabled on this volume: %v", err)
+	}
+	short := windows.UTF16ToString(buffer[:n])
+	if short == root {
+		t.Skip("the volume produced no distinct short name")
+	}
+	lock := newSharedLock(filepath.Join(short, "profile.json.lock"))
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock under the short spelling %s: %v", short, err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+}
