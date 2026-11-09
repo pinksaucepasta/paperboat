@@ -54,7 +54,8 @@ const leaves = () =>
     .filter((el) => {
       if (el.closest("[hidden]") || (el.closest("svg") && el.tagName.toLowerCase() !== "svg")) return false
       const r = el.getBoundingClientRect()
-      if (r.width < 2 || r.height < 2 || r.bottom <= 48 || r.top >= innerHeight) return false
+      // Above the fold and on screen (text overflowing past the right edge can't be placed).
+      if (r.width < 2 || r.height < 2 || r.bottom <= 48 || r.top >= innerHeight || r.left >= innerWidth) return false
       const style = getComputedStyle(el)
       if (style.visibility === "hidden" || style.opacity === "0") return false
       const text = [...el.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim())
