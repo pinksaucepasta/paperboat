@@ -14,7 +14,8 @@ func TestOperationDurationBoundsRuntimeActivation(t *testing.T) {
 	if got := operationDuration(OperationRuntimeService, ActionRepair); got != MaxOperationDuration {
 		t.Fatalf("repair duration = %s, want maintenance duration %s", got, MaxOperationDuration)
 	}
-	if RuntimeActivationDuration <= 0 || RuntimeActivationDuration >= MaxOperationDuration || RuntimeActivationDuration > 90*time.Second {
+	// Below the maintenance window, and above the 77 s + 60 s a real in-place update took on Windows (see the constant).
+	if RuntimeActivationDuration < 150*time.Second || RuntimeActivationDuration >= MaxOperationDuration {
 		t.Fatalf("invalid runtime activation duration %s", RuntimeActivationDuration)
 	}
 }

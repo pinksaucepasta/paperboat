@@ -39,8 +39,12 @@ const (
 	MaxOperationDuration = 5 * time.Minute
 	// Runtime activation only touches local files and SCM registrations. It
 	// must not leave a one-shot installer waiting behind an opaque privileged
-	// child for the general five-minute maintenance window.
-	RuntimeActivationDuration = 90 * time.Second
+	// child for the general five-minute maintenance window. Measured on a
+	// Windows 11 laptop with Defender on (2026-11-10, in-place update): 77 s
+	// from stopping the services to all of the new ones running (each fresh
+	// 99 MB executable is scanned on first start), then up to 60 s of readiness
+	// checks; 90 s expired in the final health check and rolled a good update back.
+	RuntimeActivationDuration = 3 * time.Minute
 	// Install may first wait for an already-approved signed update's bounded
 	// recovery, then has the usual local activation budget. Other operations
 	// retain their shorter deadlines.
