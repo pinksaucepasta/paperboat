@@ -24,7 +24,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -378,11 +377,6 @@ func runOperation(ctx context.Context, executable, operation, action string, pay
 func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, handler func(context.Context, Request) error) error {
 	if ctx == nil || handler == nil {
 		return fmt.Errorf("%w: invalid elevated helper arguments", ErrElevationProtocol)
-	}
-	// The elevated helper works on LocalSystem-owned files; see EnableAdministrativeFilePrivileges for why
-	// that cannot be left to the token's defaults.
-	if err := windowssecurity.EnableAdministrativeFilePrivileges(); err != nil {
-		return fmt.Errorf("%w: enable the administrator's file privileges: %v", ErrElevationProtocol, err)
 	}
 	paths, err := validateBridgePaths(requestPath, resultPath, cancelPath)
 	if err != nil {

@@ -31,8 +31,8 @@ func TestProtectedDirectoryIsCreatedFromATokenWithRestoreDisabled(t *testing.T) 
 	}
 }
 
-// setRestorePrivilege enables or disables SeRestorePrivilege in the process token; a token that does not hold it
-// (not elevated) skips the test.
+// setRestorePrivilege enables or disables SeRestorePrivilege and SeBackupPrivilege in the process token, the two an
+// elevated console holds disabled; a token that does not hold them (not elevated) skips the test.
 func setRestorePrivilege(t *testing.T, enabled bool) {
 	t.Helper()
 	var token windows.Token
@@ -40,21 +40,22 @@ func setRestorePrivilege(t *testing.T, enabled bool) {
 		t.Fatal(err)
 	}
 	defer token.Close()
-	name, _ := windows.UTF16PtrFromString("SeRestorePrivilege")
-	var luid windows.LUID
-	if err := windows.LookupPrivilegeValue(nil, name, &luid); err != nil {
-		t.Fatal(err)
-	}
-	privileges := windows.Tokenprivileges{PrivilegeCount: 1}
-	if enabled {
-		privileges.Privileges[0] = windows.LUIDAndAttributes{Luid: luid, Attributes: windows.SE_PRIVILEGE_ENABLED}
-	} else {
+	for _, privilege := range []string{"SeRestorePrivilege", "SeBackupPrivilege"} {
+		name, _ := windows.UTF16PtrFromString(privilege)
+		var luid windows.LUID
+		if err := windows.LookupPrivilegeValue(nil, name, &luid); err != nil {
+			t.Fatal(err)
+		}
+		privileges := windows.Tokenprivileges{PrivilegeCount: 1}
 		privileges.Privileges[0] = windows.LUIDAndAttributes{Luid: luid}
-	}
-	if err := windows.AdjustTokenPrivileges(token, false, &privileges, 0, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if windows.GetLastError() == windows.ERROR_NOT_ALL_ASSIGNED {
-		t.Skip("the process token does not hold SeRestorePrivilege (not elevated)")
+		if enabled {
+			privileges.Privileges[0].Attributes = windows.SE_PRIVILEGE_ENABLED
+		}
+		if err := windows.AdjustTokenPrivileges(token, false, &privileges, 0, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if windows.GetLastError() == windows.ERROR_NOT_ALL_ASSIGNED {
+			t.Skip("the process token does not hold " + privilege + " (not elevated)")
+		}
 	}
 }

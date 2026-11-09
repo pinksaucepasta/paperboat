@@ -518,9 +518,6 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	if !elevation.IsCurrentProcessElevated() {
 		return elevation.ErrNotElevated
 	}
-	if err := windowssecurity.EnableAdministrativeFilePrivileges(); err != nil {
-		return err
-	}
 	plan, err := readWindowsUninstallPlan(planPath)
 	if err != nil {
 		return err

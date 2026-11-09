@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -208,8 +209,12 @@ func removeEmptyDirectory(path string) error {
 	return os.Remove(path)
 }
 
+// removeOwnedPath removes a guard directory. Its state is readable by LocalSystem only, so an administrator needs
+// the backup and restore privileges to list and delete it; an elevated console holds them disabled (an SSH session
+// has them enabled, which hid the failure: "openfdat ...\MachineGuard\diagnostics: Access is denied").
 func removeOwnedPath(path string) error {
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+	err := windowssecurity.WithBackupRestorePrivileges(func() error { return os.RemoveAll(path) })
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

@@ -25,7 +25,14 @@ var (
 // Nested calls restore their caller's exact impersonation, and a thread that
 // cannot be restored is never returned to Go's pool.
 func WithRestorePrivilege(operation func() error) (result error) {
-	return withIsolatedRestorePrivilege(nil, operation)
+	return withIsolatedPrivileges(nil, operation, "SeRestorePrivilege")
+}
+
+// WithBackupRestorePrivileges is WithRestorePrivilege plus SeBackupPrivilege: together they let an
+// administrator list and remove a tree whose ACL names only LocalSystem (the machine guard's state). Like
+// WithRestorePrivilege it touches only an isolated token on the pinned thread, for this one operation.
+func WithBackupRestorePrivileges(operation func() error) (result error) {
+	return withIsolatedPrivileges(nil, operation, "SeRestorePrivilege", "SeBackupPrivilege")
 }
 
 // WithRestorePrivilegeAndOwner runs operation with SeRestorePrivilege enabled
@@ -36,10 +43,10 @@ func WithRestorePrivilegeAndOwner(owner *windows.SID, operation func() error) (r
 	if owner == nil || !owner.IsValid() || operation == nil {
 		return windows.ERROR_INVALID_SID
 	}
-	return withIsolatedRestorePrivilege(owner, operation)
+	return withIsolatedPrivileges(owner, operation, "SeRestorePrivilege")
 }
 
-func withIsolatedRestorePrivilege(owner *windows.SID, operation func() error) (result error) {
+func withIsolatedPrivileges(owner *windows.SID, operation func() error, privileges ...string) (result error) {
 	if operation == nil {
 		return windows.ERROR_INVALID_PARAMETER
 	}
@@ -91,8 +98,10 @@ func withIsolatedRestorePrivilege(owner *windows.SID, operation func() error) (r
 		}
 		runtime.UnlockOSThread()
 	}()
-	if err := enableRestorePrivilege(isolated); err != nil {
-		return err
+	for _, privilege := range privileges {
+		if err := enablePrivilege(isolated, privilege); err != nil {
+			return err
+		}
 	}
 	if owner != nil {
 		requested := tokenOwner{Owner: owner}
@@ -118,8 +127,10 @@ type tokenOwner struct {
 	Owner *windows.SID
 }
 
-func enableRestorePrivilege(token windows.Token) error {
-	name, err := windows.UTF16PtrFromString("SeRestorePrivilege")
+// enablePrivilege fails when the token does not hold the privilege (AdjustTokenPrivileges succeeds with
+// ERROR_NOT_ALL_ASSIGNED in that case).
+func enablePrivilege(token windows.Token, privilege string) error {
+	name, err := windows.UTF16PtrFromString(privilege)
 	if err != nil {
 		return err
 	}
