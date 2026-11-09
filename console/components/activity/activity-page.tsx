@@ -154,7 +154,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
               <div key={index} className="flex min-h-12 items-center gap-4 py-2">
                 <Skeleton className="h-3.5 w-16 shrink-0" />
                 <Skeleton className="size-6 shrink-0 rounded-md" />
-                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-4 w-3/4" />
               </div>
             ))}
           </div>

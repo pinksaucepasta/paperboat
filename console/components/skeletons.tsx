@@ -19,14 +19,30 @@ export function SectionSkeleton({ title, rows }: { title: string; rows: number }
   )
 }
 
-/** Two-line list rows (a name over a detail line, `min-h-14` like the lists) while they load. */
-export function ListSkeleton({ rows, rowClassName = "min-h-14" }: { rows: number; rowClassName?: string }) {
+/**
+ * Two-line list rows (a name over a detail line, `min-h-14` like the lists) while they load;
+ * `detail` is the detail line's width, `action` adds a button-sized placeholder on the right.
+ */
+export function ListSkeleton({
+  rows,
+  rowClassName = "min-h-14",
+  detail = "w-80",
+  action,
+}: {
+  rows: number
+  rowClassName?: string
+  detail?: string
+  action?: boolean
+}) {
   return (
     <div className="flex flex-col border-t border-divider">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className={cn("flex flex-col justify-center border-b border-divider py-2", rowClassName)}>
-          <Skeleton className="my-0.5 h-4 w-40" />
-          <Skeleton className="my-0.5 h-4 w-80 max-w-full" />
+        <div key={index} className={cn("flex items-center gap-3 border-b border-divider py-2", rowClassName)}>
+          <div className="flex min-w-0 flex-1 flex-col justify-center">
+            <Skeleton className="my-0.5 h-4 w-40" />
+            <Skeleton className={cn("my-0.5 h-4 max-w-full", detail)} />
+          </div>
+          {action && <Skeleton className="h-7 w-16 shrink-0" />}
         </div>
       ))}
     </div>

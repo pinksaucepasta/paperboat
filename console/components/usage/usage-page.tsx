@@ -293,7 +293,9 @@ function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
         <div className="flex items-baseline justify-between text-xs text-muted-foreground">
           <span className="font-medium">Traffic</span>
         </div>
-        <div className="h-48" />
+        <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-48 w-full">
+          <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        </svg>
         <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
           <span>&nbsp;</span>
         </div>

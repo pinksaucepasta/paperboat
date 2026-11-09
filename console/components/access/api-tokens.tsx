@@ -62,7 +62,7 @@ export function ApiTokens() {
           <h2 className="text-sm font-medium">Active</h2>
           <div className="ml-auto">{create}</div>
         </div>
-        <ListSkeleton rows={3} />
+        <ListSkeleton rows={3} detail="w-[36rem]" action />
       </section>
     )
   }
