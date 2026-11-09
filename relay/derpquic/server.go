@@ -608,7 +608,9 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 		return ErrOverload
 	}
 	g.Generation = minGeneration
-	g.ExpiresAt = time.Now().Add(time.Minute).Unix()
+	// A revoked grant stays valid on this relay until its exp, up to MaxGrantLifetime after issue on a
+	// clock up to MaxClockSkew behind the issuer's, so the fence outlives every such grant.
+	g.ExpiresAt = time.Now().Add(MaxGrantLifetime + MaxClockSkew).Unix()
 	s.fences[id] = &grantFence{Grant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}
 	for k, p := range s.peers {
 		if p.grant.AccountID == account && p.grant.EndpointID == endpoint {
