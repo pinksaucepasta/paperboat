@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -249,10 +250,11 @@ func (s *Service) run(ctx context.Context, ready func() error) (resultErr error)
 		if pending, err := nativeInstallPending(s.config.StateRoot); err != nil {
 			return err
 		} else if pending {
-			if err := releaseLock(); err != nil {
-				return err
+			// An installer holds this lock for its whole run, so a marker seen under the lock is a dead
+			// installer's: restore the pre-install transaction instead of refusing activation forever.
+			if err := RollbackUnixNativeInstall(s.config.StateRoot); err != nil {
+				return fmt.Errorf("roll back the interrupted native install: %w", err)
 			}
-			goto serveControl
 		}
 		handoff, handoffErr := readUnixHandoff(s.config.StateRoot)
 		if handoffErr != nil {
@@ -305,7 +307,6 @@ func (s *Service) run(ctx context.Context, ready func() error) (resultErr error)
 	} else if !errors.Is(lockErr, ErrActivationPending) {
 		return lockErr
 	}
-serveControl:
 	listener, err := s.control.listen()
 	if err != nil {
 		return err
