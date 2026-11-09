@@ -23,7 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
-func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Writer) error {
+func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, stderr io.Writer) error {
 	if len(args) != 0 && (len(args) != 1 || args[0] != "--preserve-cli") {
 		return errors.New("purge accepts no arguments")
 	}
@@ -44,7 +44,11 @@ func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Wr
 	if output.exceeded {
 		return runtimeFailure("privileged cleanup result exceeded its bound", err)
 	}
-	return readPurgeResult(output.data, errors.Join(err, runtimeContextFailure(ctx)))
+	removed, err := readPurgeReport(output.data, errors.Join(err, runtimeContextFailure(ctx)))
+	if len(removed) > 0 {
+		fmt.Fprintf(stderr, "Paperboat's service state could not be read, so everything it owns was removed by its known names: %s.\n", strings.Join(removed, ", "))
+	}
+	return err
 }
 
 // purgeSystemInstallation is the root side of uninstall and reset. The order is
@@ -56,18 +60,28 @@ func purgeSystemInstallation(ctx context.Context) error {
 }
 
 func purgeSystemInstallationScoped(ctx context.Context, preserveCLI bool) error {
+	_, err := purgeSystemInstallationReport(ctx, preserveCLI)
+	return err
+}
+
+// purgeSystemInstallationReport is purgeSystemInstallationScoped that also returns the Paperboat items it removed
+// by their known names because the native lifecycle state could not be read (nil when it could).
+func purgeSystemInstallationReport(ctx context.Context, preserveCLI bool) (removed []string, _ error) {
 	if os.Geteuid() != 0 {
-		return errors.New("complete uninstall requires administrator approval")
+		return nil, errors.New("complete uninstall requires administrator approval")
 	}
 	plan, err := newUnixPurgePlan(runtime.GOOS, invokingServiceUID())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sweep := newHostUnixSweep(plan)
+	sweep.removedByName = &removed
 	if preserveCLI {
-		return sweep.purgeForReset(ctx, hostinstall.ResetCLIForCurrentAccount, hostinstall.UninstallPersistedPreservingCLI)
+		err = sweep.purgeForReset(ctx, hostinstall.ResetCLIForCurrentAccount, hostinstall.UninstallPersistedPreservingCLI)
+		return removed, err
 	}
-	return sweep.purgeAccount(ctx)
+	err = sweep.purgeAccount(ctx)
+	return removed, err
 }
 
 // purgeForReset keeps the account CLI that prove accepts. A CLI it cannot
@@ -252,6 +266,8 @@ type unixSweep struct {
 	clock         func() time.Time
 	terminateWait time.Duration
 	killWait      time.Duration
+	// removedByName, when set, receives what the sweep removed after the native lifecycle state could not be read.
+	removedByName *[]string
 }
 
 const unixPurgePollInterval = 50 * time.Millisecond
@@ -295,8 +311,15 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 	if err != nil {
 		result = errors.Join(result, withPurgeStage("final_inventory", err))
 	}
+	var inventory []string
+	lifecycleUnknown := false
 	if metadataPresent {
-		if err := s.uninstall(ctx); err != nil {
+		if err := s.uninstall(ctx); errors.Is(err, service.ErrLifecycleUncertain) || errors.Is(err, service.ErrLifecycleInvalid) {
+			// The lifecycle state is unreadable or corrupt, so what it would have stopped is unknown: the sweep
+			// below removes everything Paperboat owns by its known names, and the final inventory decides success.
+			lifecycleUnknown = true
+			inventory, _ = s.leftovers(ctx)
+		} else if err != nil {
 			result = errors.Join(result, withPurgeStage("native_uninstall", err))
 		}
 	}
@@ -328,6 +351,17 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 
 	leftovers, err := s.leftovers(ctx)
 	result = errors.Join(result, withPurgeStage("final_inventory", err))
+	if lifecycleUnknown && s.removedByName != nil {
+		still := map[string]bool{}
+		for _, item := range leftovers {
+			still[item] = true
+		}
+		for _, item := range inventory {
+			if !still[item] {
+				*s.removedByName = append(*s.removedByName, item)
+			}
+		}
+	}
 	if len(leftovers) > 0 {
 		result = errors.Join(result, withPurgeStage("final_inventory", unixLeftoverError{items: leftovers}))
 	}

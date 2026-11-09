@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -761,5 +762,60 @@ func TestPurgeAndResetNeverKillAUsersOwnPB(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A machine whose lifecycle state is corrupt (service-lifecycle.json unreadable) must still be removable: the native
+// uninstall cannot say what to stop, so the sweep removes everything Paperboat owns by its known names, the final
+// inventory decides success, and the removed items are reported. Any other native failure still fails.
+func TestPurgeRemovesByNameWhenTheLifecycleStateIsCorrupt(t *testing.T) {
+	for _, cause := range []error{service.ErrLifecycleUncertain, service.ErrLifecycleInvalid} {
+		root := t.TempDir()
+		plantLinuxAccount(t, root)
+		plan, err := newUnixPurgePlan("linux", 1001)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := newPurgeFake(unixProcess{pid: 4001, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/pb"})
+		fake.jobs[4001] = "paperboat-hostd-u1001.service"
+		fake.uninstallErr = withPurgeStage("uninstall_recover", errors.Join(cause, errors.New("decode service-lifecycle.json")))
+		var removed []string
+		sweep := testSweep(root, plan, fake)
+		sweep.removedByName = &removed
+		if err := sweep.purgeAccount(context.Background()); err != nil {
+			t.Fatalf("a corrupt lifecycle state (%v) blocked the uninstall: %v", cause, err)
+		}
+		assertGone(t, root, "etc/systemd/system/paperboat-hostd-u1001.service", "var/lib/paperboat/users/u1001", "var/lib/paperboat-installer/users/u1001/install-metadata.json", "usr/local/libexec/paperboat/users/u1001")
+		assertPresent(t, root, "usr/local/libexec/paperboat/users/u10010/bin/pb", "etc/systemd/system/paperboat-hostd-u1002.service")
+		if len(fake.alive) != 0 {
+			t.Fatalf("a Paperboat process still runs: %v", fake.alive)
+		}
+		for _, want := range []string{"/etc/systemd/system/paperboat-hostd-u1001.service", "/var/lib/paperboat-installer/users/u1001", "process 4001 (/usr/local/libexec/paperboat/users/u1001/bin/pb)"} {
+			if !slices.Contains(removed, want) {
+				t.Fatalf("the removal report lacks %q: %v", want, removed)
+			}
+		}
+	}
+}
+
+// The by-name removal never hides what it could not remove: a process that survives is still a leftover, so the
+// uninstall fails and names it.
+func TestPurgeAfterACorruptLifecycleStillFailsOnALeftover(t *testing.T) {
+	root := t.TempDir()
+	plantLinuxAccount(t, root)
+	plan, err := newUnixPurgePlan("linux", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newPurgeFake(unixProcess{pid: 4005, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/session-owner"})
+	fake.jobs[4005] = "paperboat-session-owner-u1001-g2.service"
+	fake.immortal[4005] = true
+	fake.uninstallErr = errors.Join(service.ErrLifecycleUncertain, errors.New("corrupt"))
+	var removed []string
+	sweep := testSweep(root, plan, fake)
+	sweep.removedByName = &removed
+	err = sweep.purgeAccount(context.Background())
+	if err == nil || !strings.Contains(errorChainText(err), "process 4005") {
+		t.Fatalf("a surviving process was not reported: %v", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -126,5 +127,28 @@ func TestPurgeResultCarriesWhatRemains(t *testing.T) {
 	success := bytes.Replace(good.Bytes(), []byte(`"ok":true`), []byte(`"ok":true,"remaining":["/x"]`), 1)
 	if readPurgeResult(success, nil) == nil {
 		t.Fatal("success with leftovers accepted")
+	}
+}
+
+// What a cleanup removed by known names (after an unreadable lifecycle state) crosses the privileged boundary on
+// success and is validated like the leftovers: absolute paths or processes only, bounded.
+func TestPurgeResultCarriesWhatWasRemovedByName(t *testing.T) {
+	var output bytes.Buffer
+	removed := []string{"/etc/systemd/system/paperboat-hostd-u1001.service", "process 4001 (/usr/local/libexec/paperboat/users/u1001/bin/pb)"}
+	if err := writePurgeResult(t.Context(), &output, nil, removed...); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readPurgeReport(output.Bytes(), nil)
+	if err != nil || !slices.Equal(got, removed) {
+		t.Fatalf("report=%v err=%v", got, err)
+	}
+	output.Reset()
+	_ = writePurgeResult(t.Context(), &output, nil, "relative/path")
+	if got, err := readPurgeReport(output.Bytes(), nil); err != nil || len(got) != 0 {
+		t.Fatalf("an unsafe item crossed the boundary: %v %v", got, err)
+	}
+	forged := []byte(`{"version":"paperboat.purge-result/v1","ok":true,"removed_by_name":["relative/path"]}` + "\n")
+	if _, err := readPurgeReport(forged, nil); err == nil {
+		t.Fatal("a forged removal report was accepted")
 	}
 }

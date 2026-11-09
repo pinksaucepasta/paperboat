@@ -713,3 +713,33 @@ func TestResetKeepsTheCommandLinkOfTheRetainedCLI(t *testing.T) {
 		t.Fatalf("a full uninstall left the command link: %v", err)
 	}
 }
+
+// A corrupt service-lifecycle.json makes the native uninstall unable to say what to stop. It must say so with the
+// typed uncertainty (the purge sweep keys on it to remove everything by name) and change nothing itself. The state
+// goes in the real (root-owned) location of a uid no account has, and is removed afterwards.
+func TestUninstallWithACorruptLifecycleFileReportsItTypedAndChangesNothing(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires protected installation custody")
+	}
+	request := validRequest(t)
+	request.UID = 2147482990
+	request.GID, request.User, request.Group = request.UID, "pbtest", "pbtest"
+	paths := platformPaths(request.UID)
+	request.Executable = paths.worker
+	t.Cleanup(func() { _ = os.RemoveAll(paths.root) })
+	lifecycle := filepath.Join(paths.root, "service-lifecycle")
+	if err := os.MkdirAll(lifecycle, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := filepath.Join(lifecycle, "service-lifecycle.json")
+	if err := os.WriteFile(corrupt, []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := uninstallValidated(t.Context(), request, paths)
+	if !errors.Is(err, service.ErrLifecycleUncertain) {
+		t.Fatalf("a corrupt lifecycle file was reported as %v, not the typed uncertainty", err)
+	}
+	if body, readErr := os.ReadFile(corrupt); readErr != nil || string(body) != "{corrupt" {
+		t.Fatalf("the failed uninstall changed the lifecycle state: %v", readErr)
+	}
+}
