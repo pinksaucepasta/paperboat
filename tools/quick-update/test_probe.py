@@ -40,5 +40,6 @@ class T(unittest.TestCase):
  def test_private_runs_keep_the_stderr_tail_only(self):
   rows=events(self.prv,'failures.jsonl');self.assertTrue(rows)
   for f in ('exec_short','send','exec_long_end'):self.assertIn('SECRETHOST',[r for r in rows if r['f']==f][0]['stderr'])
-  self.assertTrue(all(len(r['stderr'])<=2048 and 'cannot reach' not in r['stderr'] for r in rows))  # not pb's stdout
+  tails=[r['stderr'].split(' | stdout: ')[0] for r in rows]  # a failed call's stdout rides after that marker
+  self.assertTrue(all(len(t)<=2048 and 'cannot reach' not in t for t in tails))  # the stderr tail is not pb's stdout
 if __name__=='__main__':unittest.main()
