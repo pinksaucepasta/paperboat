@@ -554,6 +554,10 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 {
 			// Not refused (the server lists a refusal): the host has not published its keys yet, or sshd is missing.
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_keys_unpublished", Severity: "info", Title: "Publishing the machine's SSH host keys", Recovery: sshHostKeysUnpublishedRecovery, ETag: "ssh_host_keys_unpublished"}}
+			if machine.Platform == "windows" {
+				// There is no sshd to start on Windows: Paperboat installs its own OpenSSH, and repair is the one command.
+				status.Health[0].Recovery = sshHostKeysUnpublishedWindowsRecovery
+			}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_host_key_changed", Severity: "warning", Title: "SSH host identity is not ready", Recovery: "Review and approve the machine's current SSH host keys", ETag: "ssh_host_key_changed"}}
 		}
@@ -577,6 +581,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 
 const managedSSHWindowsTargetRecovery = "If this stays, install \"App Installer\" (winget) from the Microsoft Store " +
 	"on the machine, then run pb doctor --repair there"
+
+// The Windows form of sshHostKeysUnpublishedRecovery: the same wait, then the Windows step.
+const sshHostKeysUnpublishedWindowsRecovery = "A newly set up machine publishes them within a minute or two. " + managedSSHWindowsTargetRecovery
 
 // A machine shows this from pairing until its host service has installed and published the keys (about a minute
 // on a fresh container, dadape ltc-d7 2026-10-27).

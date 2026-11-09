@@ -435,6 +435,27 @@ func TestInventoryNamesTheWindowsStepForAMachineWithoutManagedSSH(t *testing.T) 
 	}
 }
 
+// A Windows machine that paired without OpenSSH and has no host keys yet is told the Windows step, never to
+// "start an SSH server (sshd)" (Windows Sandbox guest wina-sbx-4, 2026-11-10).
+func TestInventoryNamesTheWindowsStepWhileHostKeysAreUnpublished(t *testing.T) {
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
+	machine.SSHAuthority.TargetGeneration = 4
+	linux := mapMachines([]api.UserMachine{machine})[0]
+	machine.Platform = "windows"
+	windows := mapMachines([]api.UserMachine{machine})[0]
+	for _, status := range []localapi.MachineStatus{linux, windows} {
+		if len(status.Health) != 1 || status.Health[0].Code != "ssh_host_keys_unpublished" || status.Health[0].Severity != "info" {
+			t.Fatalf("status=%#v", status)
+		}
+	}
+	if recovery := windows.Health[0].Recovery; strings.Contains(recovery, "sshd") || !strings.Contains(recovery, "pb doctor --repair") || !strings.Contains(recovery, "App Installer") {
+		t.Fatalf("windows recovery=%q", recovery)
+	}
+	if recovery := linux.Health[0].Recovery; recovery != sshHostKeysUnpublishedRecovery {
+		t.Fatalf("linux recovery=%q", recovery)
+	}
+}
+
 func TestInventoryProjectsOnlyTypedUpdateHealth(t *testing.T) {
 	observed := time.Now().UTC()
 	base := api.UserMachine{ID: "machine_1", Alias: "studio", Availability: api.AvailabilityPolicy{Schema: "paperboat.availability-policy/v1", ObservedAt: &observed}}
