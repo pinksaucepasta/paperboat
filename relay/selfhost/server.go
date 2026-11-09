@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -143,12 +142,8 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			return
 		}
 		// A retry of the applied claim may carry rotated trust documents (issuer JWKS, revocations):
-		// they replace the stored ones and the runtime is rebuilt on them, never kept stale. A retry
-		// from a control-plane instance that is behind carries an older JWKS: it keeps the stored one.
-		if s.Claim != nil && !newerTrust(s.Claim.JWKS, req.JWKS) {
-			req.JWKS = s.Claim.JWKS
-		}
-		if s.Claim == nil || !sameSet(s.Claim.JWKS, req.JWKS) || !sameSet(s.Claim.Revocations, req.Revocations) {
+		// they replace the stored ones and the runtime is rebuilt on them, never kept stale.
+		if s.Claim == nil || !sameJSON(s.Claim.JWKS, req.JWKS) || !sameJSON(s.Claim.Revocations, req.Revocations) {
 			if err := validateClaim(s.Config, req); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
@@ -217,81 +212,10 @@ func respond(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// sameSet compares two documents as the sets they are: formatting, object key order and list order
-// (the state file re-indents; the control plane lists in query order) do not make them different.
-func sameSet(a, b json.RawMessage) bool { return bytes.Equal(a, b) || canonical(a) == canonical(b) }
-
-func canonical(raw json.RawMessage) string {
-	var v any
-	if json.Unmarshal(raw, &v) != nil {
-		return string(raw)
-	}
-	var normalize func(any) any
-	normalize = func(v any) any {
-		switch v := v.(type) {
-		case []any:
-			encoded := make([]string, len(v))
-			for i := range v {
-				b, _ := json.Marshal(normalize(v[i]))
-				encoded[i] = string(b)
-			}
-			slices.Sort(encoded)
-			out := make([]any, len(encoded))
-			for i, e := range encoded {
-				out[i] = json.RawMessage(e)
-			}
-			return out
-		case map[string]any:
-			for k := range v {
-				v[k] = normalize(v[k])
-			}
-		}
-		return v
-	}
-	b, _ := json.Marshal(normalize(v))
-	return string(b)
-}
-
-// newerTrust reports whether a retry's JWKS tells the installation something its stored one does not: a
-// key published or an id withdrawn that it lacks. A retry that only repeats the stored document, or
-// lists a key the stored one already withdrew, is older (TUF: a client never accepts older metadata;
-// shared/jwks.Trust never re-trusts a withdrawn id) and would restart the components on a document that
-// re-trusts it. An unreadable retry counts as newer so validateClaim refuses it.
-func newerTrust(stored, retry json.RawMessage) bool {
-	storedKeys, storedWithdrawn, ok := trustIDs(stored)
-	retryKeys, retryWithdrawn, retryOK := trustIDs(retry)
-	if !ok || !retryOK {
-		return true
-	}
-	novel := false
-	for id := range retryKeys {
-		if storedWithdrawn[id] {
-			return false
-		}
-		novel = novel || !storedKeys[id]
-	}
-	for id := range retryWithdrawn {
-		novel = novel || !storedWithdrawn[id]
-	}
-	return novel
-}
-
-func trustIDs(raw json.RawMessage) (keys, withdrawn map[string]bool, ok bool) {
-	var doc struct {
-		Keys      []struct{ Kid string }
-		Withdrawn []string `json:"withdrawn_key_ids"`
-	}
-	if json.Unmarshal(raw, &doc) != nil {
-		return nil, nil, false
-	}
-	keys, withdrawn = map[string]bool{}, map[string]bool{}
-	for _, k := range doc.Keys {
-		keys[k.Kid] = true
-	}
-	for _, id := range doc.Withdrawn {
-		withdrawn[id] = true
-	}
-	return keys, withdrawn, true
+// sameJSON compares two documents ignoring formatting: the state file stores them re-indented.
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y bytes.Buffer
+	return bytes.Equal(a, b) || json.Compact(&x, a) == nil && json.Compact(&y, b) == nil && bytes.Equal(x.Bytes(), y.Bytes())
 }
 
 func validateClaim(c Config, r ClaimRequest) error {

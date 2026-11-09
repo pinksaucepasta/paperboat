@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log"
@@ -18,7 +19,24 @@ type httpDiagnosticWriter struct {
 	reporter *reporting.Reporter
 }
 
+// Lines net/http and x/net/http2 write for what a remote peer sent (scanners, aborted
+// handshakes, protocol errors; Go 1.27 net/http/server.go, x/net v0.60 http2/server.go).
+// Prior art: Caddy and Tailscale drop TLS handshake errors from the server error log.
+var clientCausedDiagnostics = [][]byte{
+	[]byte("http: TLS handshake error"),
+	[]byte("http2: server: error reading preface"),
+	[]byte("http2: server connection error from"),
+	[]byte("http2: server closing client connection"),
+	[]byte("timeout waiting for SETTINGS frames"),
+	[]byte("timeout waiting for PING response"),
+}
+
 func (w httpDiagnosticWriter) Write(data []byte) (int, error) {
+	for _, prefix := range clientCausedDiagnostics {
+		if bytes.HasPrefix(data, prefix) {
+			return len(data), nil
+		}
+	}
 	w.reporter.ObserveFailure(w.ctx, "http_server", errHTTPServerDiagnostic)
 	return len(data), nil
 }

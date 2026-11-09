@@ -96,3 +96,34 @@ func TestHTTPDiagnosticsPanicAbortAndRecovery(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPDiagnosticWriterIgnoresClientCausedLines(t *testing.T) {
+	if os.Getenv("PB_HTTP_DIAGNOSTIC_HELPER") == "2" {
+		reporter, err := reporting.New("paperboat-tunnel")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reporter.Close()
+		logger := httpDiagnosticLogger(context.Background(), reporter)
+		logger.Printf("http: TLS handshake error from PRIVATE_IP: client sent an HTTP request to an HTTPS server")
+		logger.Printf("http2: server: error reading preface from client PRIVATE_IP: unexpected EOF")
+		logger.Printf("http: Accept error: too many open files; retrying in 5ms")
+		logger.Printf("http: panic serving PRIVATE_IP: PRIVATE_PANIC")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHTTPDiagnosticWriterIgnoresClientCausedLines$")
+	command.Env = append(os.Environ(), "PB_HTTP_DIAGNOSTIC_HELPER=2", "PAPERBOAT_SENTRY_ENABLED=false")
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, stderr.String())
+	}
+	if got := strings.Count(stderr.String(), `"http_server_failed"`); got != 2 {
+		t.Fatalf("http_server_failed events=%d, want 2 (Accept error, panic only):\n%s", got, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "PRIVATE_") {
+		t.Fatal("diagnostic leaked private data")
+	}
+}

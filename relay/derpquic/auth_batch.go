@@ -48,9 +48,6 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	// Parts arrive over up to the read deadline: each is verified on the clock it arrives at, and
 	// every part must still be valid when the merged grant is admitted.
 	earliest := int64(math.MaxInt64)
-	// The injected now is the clock; parts that arrive later are judged at now plus the time waited.
-	began := time.Now()
-	clock := func() time.Time { return now.Add(time.Since(began)) }
 	for i := uint32(0); i < count; i++ {
 		if i != 0 {
 			kind, next, err := readFrame(p.stream)
@@ -68,7 +65,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 				return ErrOverload
 			}
 		}
-		grant, err := s.verify(string(body), p.state(), clock())
+		grant, err := s.verify(string(body), p.state(), time.Now())
 		if errors.Is(err, ErrExpired) {
 			expired = true
 			continue
@@ -93,7 +90,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 			return err
 		}
 	}
-	now = clock()
+	now = time.Now()
 	if expired || earliest <= now.Unix() {
 		return ErrExpired
 	}

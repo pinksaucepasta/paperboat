@@ -231,7 +231,6 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	}
 	edge := NewEdgeService(store, "edge-control-test")
 	edge.clock = func() time.Time { return now }
-	edge.SetCredentialIssuer(testMintProvider(t, "config-active", "config-test", "config-active", "other-key"), "https://issuer.example.test", "")
 	document, err := edge.Revocations(ctx)
 	if err != nil || !containsString(document.JTIs, claims.JTI) {
 		t.Fatalf("revocation document = %#v, %v", document, err)

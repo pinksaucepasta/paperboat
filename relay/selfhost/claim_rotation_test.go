@@ -109,32 +109,3 @@ func TestSupervisorRerunsComponentsOnRotatedTrustDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-// A retry that only reorders the documents, or comes from a control-plane instance that is behind and lists
-// a key the installation already saw withdrawn, restarts nothing and keeps the newer trust.
-func TestClaimRetryIgnoresReorderedAndOlderTrustDocuments(t *testing.T) {
-	dir, secret, client, server := testInstallation(t, false)
-	var applied atomic.Int32
-	server.Config.Handler = Handler(dir, func() { applied.Add(1) }, nil)
-	keyA, keyB := `{"kty":"OKP","crv":"Ed25519","kid":"key-a","x":"dGVzdA"}`, `{"kty":"OKP","crv":"Ed25519","kid":"key-b","x":"dGVzdA"}`
-	claim := testClaim(false)
-	claim.JWKS = json.RawMessage(`{"keys":[` + keyA + `,` + keyB + `]}`)
-	retry := func(want int32, what string) {
-		t.Helper()
-		if status, _ := post(t, client, server.URL+"/v1/selfhost/claim", secret, claim); status != 200 || applied.Load() != want {
-			t.Fatalf("%s: status %d, applied %d, want %d", what, status, applied.Load(), want)
-		}
-	}
-	retry(1, "claim")
-	claim.JWKS = json.RawMessage(`{"keys":[` + keyB + `,` + keyA + `]}`)
-	retry(1, "reordered retry")
-	claim.JWKS = json.RawMessage(`{"keys":[` + keyB + `],"withdrawn_key_ids":["key-a"]}`)
-	retry(2, "rotation retry")
-	rotated := claim.JWKS
-	claim.JWKS = json.RawMessage(`{"keys":[` + keyA + `,` + keyB + `]}`)
-	retry(2, "older retry")
-	got, err := os.ReadFile(filepath.Join(dir, "relay", "jwks.json"))
-	if err != nil || !bytes.Equal(got, rotated) {
-		t.Fatalf("runtime JWKS %q (err %v), want the rotated one kept", got, err)
-	}
-}

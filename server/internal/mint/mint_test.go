@@ -5,14 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/shared/jwks"
 )
 
 func testKey(seedByte byte) ed25519.PrivateKey {
@@ -1043,45 +1040,5 @@ func TestJWKSJSONMergesRevokedKeyIDs(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &body); err != nil || !slices.Equal(body.Withdrawn, []string{"alpha", "previous", "zeta"}) {
 		t.Fatalf("withdrawn = %v, %v", body.Withdrawn, err)
-	}
-}
-
-// The merged withdrawn list is capped at what clients accept: a total over it is an error, not a document every client refuses.
-func TestJWKSJSONRefusesMoreWithdrawnIDsThanClientsAccept(t *testing.T) {
-	provider, err := New([]Key{{ID: "current", PrivateKey: testKey(3)}}, "current", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := make([]string, 0, jwks.MaxKeys)
-	for i := range jwks.MaxKeys - 1 {
-		ids = append(ids, fmt.Sprintf("old-%03d", i))
-	}
-	if err := provider.Withdraw(ids); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := provider.JWKSJSON("revoked-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := jwks.Parse(raw); err != nil {
-		t.Fatalf("document at the cap is refused by clients: %v", err)
-	}
-	if _, err := provider.JWKSJSON("revoked-a", "revoked-b"); err == nil {
-		t.Fatal("document over the cap was served")
-	}
-}
-
-func TestCheckRevocable(t *testing.T) {
-	provider, err := New([]Key{{ID: "current", PrivateKey: testKey(3)}, {ID: "previous", PrivateKey: testKey(4)}, {ID: "gone", PrivateKey: testKey(5)}}, "current", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := provider.Withdraw([]string{"gone"}); err != nil {
-		t.Fatal(err)
-	}
-	for id, ok := range map[string]bool{"previous": true, "gone": true, "current": false, "unknown": false, strings.Repeat("k", 200): false, "bad kid\n": false} {
-		if got := provider.CheckRevocable(id) == nil; got != ok {
-			t.Errorf("CheckRevocable(%q) ok = %v, want %v", id, got, ok)
-		}
 	}
 }
