@@ -21,6 +21,8 @@ func openStore(t testing.TB, hook func(string) error) (*Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows cannot delete state.db while it is open, and TempDir's cleanup runs after this one.
+	t.Cleanup(func() { _ = store.Close() })
 	return store, root
 }
 
