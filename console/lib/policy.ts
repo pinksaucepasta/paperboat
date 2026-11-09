@@ -243,13 +243,22 @@ export function explainPolicy(
   return call<Explanation>("Testing access", `${ws(workspace)}/policy/explain`, { method: "POST", json: fields })
 }
 
-/** A workspace's API tokens, newest first, one server page at a time (load more until the server's total). */
-export const apiTokensQuery = (workspace: string) =>
+/**
+ * A workspace's API tokens in one `state` (live, or revoked and expired), newest first, one server page at
+ * a time (load more until the server's total). Every page also carries both states' totals.
+ */
+export const apiTokensQuery = (workspace: string, state: "active" | "ended", enabled = true) =>
   infiniteQueryOptions({
-    queryKey: queryKeys.apiTokens(workspace),
+    queryKey: queryKeys.apiTokens(workspace, state),
     queryFn: async ({ pageParam, signal }) => {
-      const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
-      return call<{ api_tokens: APIToken[]; total: number; next_cursor?: string }>(
+      const query = new URLSearchParams({ limit: "50", state, ...(pageParam && { cursor: pageParam }) })
+      return call<{
+        api_tokens: APIToken[]
+        total: number
+        active_total: number
+        ended_total: number
+        next_cursor?: string
+      }>(
         "Loading API tokens",
         `${ws(workspace)}/api-tokens?${query}`,
         { signal },
@@ -257,7 +266,7 @@ export const apiTokensQuery = (workspace: string) =>
     },
     initialPageParam: "",
     getNextPageParam: (page) => page.next_cursor || undefined,
-    enabled: Boolean(workspace),
+    enabled: Boolean(workspace) && enabled,
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })
 

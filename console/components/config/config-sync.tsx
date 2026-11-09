@@ -55,7 +55,10 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   })
   const conflicts = useApiQuery({ ...configStatusQuery({ state: "conflict" }), enabled: !scope })
   const environments = status.data?.items ?? []
-  const lastRows = useLastCount(`config:${scope ?? ""}:${q}:${pages.page}`, status.data ? environments.length : undefined)
+  const lastRows = useLastCount(
+    `config:${scope ?? ""}:${q}:${pages.page}`,
+    status.data ? environments.length : undefined,
+  )
 
   if (status.isPending && scope) return <EmptySkeleton />
   if (status.isError) return <LoadError what="config sync" error={status.error} retry={() => status.refetch()} />
@@ -81,7 +84,12 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
           conflicted={conflicts.data?.total ?? 0}
           search={search}
           setSearch={setSearch}
-          idle={{ environments: idle.data?.items ?? [], total: idle.data?.total ?? 0, page: idlePage, go: (page) => setIdleAt({ q, page }) }}
+          idle={{
+            environments: idle.data?.items ?? [],
+            total: idle.data?.total ?? 0,
+            page: idlePage,
+            go: (page) => setIdleAt({ q, page }),
+          }}
         />
       ) : (
         <NotSetUp />
@@ -157,7 +165,11 @@ function AllMachines(props: {
       )}
       {idle.total > 0 && (
         <div className="flex flex-col gap-3">
-          <Button variant="ghost" className="self-start px-0 text-muted-foreground" onClick={() => setShowIdle(!showIdle)}>
+          <Button
+            variant="ghost"
+            className="self-start px-0 text-muted-foreground"
+            onClick={() => setShowIdle(!showIdle)}
+          >
             <CaretRightIcon data-icon="inline-start" className={showIdle ? "rotate-90" : undefined} />
             Not syncing · {idle.total}
           </Button>
@@ -235,9 +247,7 @@ function MachineTable(props: {
                     {environment.alias}
                   </Link>
                 </td>
-                <td className="hidden truncate text-muted-foreground md:table-cell">
-                  {environment.repository_name}
-                </td>
+                <td className="hidden truncate text-muted-foreground md:table-cell">{environment.repository_name}</td>
                 <td className="hidden truncate text-muted-foreground lg:table-cell">
                   {directionLabels[environment.mode ?? ""]}
                 </td>

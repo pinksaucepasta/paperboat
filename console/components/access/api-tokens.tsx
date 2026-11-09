@@ -16,6 +16,7 @@ import {
   revokeApiToken,
   type APIToken,
 } from "@/lib/policy"
+import { queryKeys } from "@/lib/query-keys"
 import { useNow } from "@/lib/use-now"
 import { CopyButton } from "@/components/copy-button"
 import { Time } from "@/components/time"
@@ -43,12 +44,16 @@ const expiries = [7, 30, 90] as const
 /** Settings → API tokens: credentials for scripts and agents that act as you in this workspace. */
 export function ApiTokens() {
   const workspace = useWorkspace()
-  const tokens = useInfiniteQuery(apiTokensQuery(workspace?.id ?? ""))
-  const items = tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []
+  const [showEnded, setShowEnded] = useState(false)
+  // Live tokens lead; revoked and expired ones are history, read from the server only once unfolded.
+  const tokens = useInfiniteQuery(apiTokensQuery(workspace?.id ?? "", "active"))
+  const history = useInfiniteQuery(apiTokensQuery(workspace?.id ?? "", "ended", showEnded))
+  const active = tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []
+  const ended = history.data?.pages.flatMap((page) => page.api_tokens) ?? []
   const total = tokens.data?.pages[0]?.total ?? 0
+  const endedTotal = tokens.data?.pages[0]?.ended_total ?? 0
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<APIToken | null>(null)
-  const [showEnded, setShowEnded] = useState(false)
   const now = useNow(60_000)
   const create = (
     <Button size="lg" onClick={() => setCreating(true)}>
@@ -72,16 +77,14 @@ export function ApiTokens() {
           <EmptyMedia variant="icon">
             <KeyIcon />
           </EmptyMedia>
-          <EmptyTitle>{missing ? "API tokens aren’t available on this server yet" : "Couldn’t load API tokens"}</EmptyTitle>
+          <EmptyTitle>
+            {missing ? "API tokens aren’t available on this server yet" : "Couldn’t load API tokens"}
+          </EmptyTitle>
           {!missing && <EmptyDescription>{tokens.error.message}</EmptyDescription>}
         </EmptyHeader>
       </Empty>
     )
   }
-  // Active tokens first; revoked and expired ones are history, folded away below them. The server has
-  // no state filter, so this splits the pages loaded so far.
-  const active = items.filter((token) => !token.revoked_at && Date.parse(token.expires_at) >= now)
-  const ended = items.filter((token) => !active.includes(token))
   return (
     <div className="flex flex-col gap-6">
       {active.length === 0 && !tokens.hasNextPage ? (
@@ -103,19 +106,37 @@ export function ApiTokens() {
           <TokenList tokens={active} now={now} onRevoke={setRevoking} />
         </section>
       )}
-      {ended.length > 0 && (
+      {endedTotal > 0 && (
         <section className="flex flex-col gap-3">
-          <Button variant="ghost" className="self-start px-0 text-muted-foreground" onClick={() => setShowEnded(!showEnded)}>
+          <Button
+            variant="ghost"
+            className="self-start px-0 text-muted-foreground"
+            onClick={() => setShowEnded(!showEnded)}
+          >
             <CaretRightIcon data-icon="inline-start" className={showEnded ? "rotate-90" : undefined} />
-            Revoked and expired · {ended.length}
+            Revoked and expired · {endedTotal}
           </Button>
+          {showEnded && history.isPending && <ListSkeleton rows={2} detail="w-[36rem]" />}
+          {showEnded && history.isError && (
+            <span className="text-sm text-destructive">Couldn’t load them. Try again.</span>
+          )}
           {showEnded && <TokenList tokens={ended} now={now} onRevoke={setRevoking} />}
+          {showEnded && history.hasNextPage && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>
+                {ended.length} of {endedTotal} loaded
+              </span>
+              <Button variant="secondary" onClick={() => history.fetchNextPage()} disabled={history.isFetchingNextPage}>
+                {history.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          )}
         </section>
       )}
       {tokens.hasNextPage && (
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <span>
-            {items.length} of {total} tokens loaded
+            {active.length} of {total} tokens loaded
           </span>
           <Button variant="secondary" onClick={() => tokens.fetchNextPage()} disabled={tokens.isFetchingNextPage}>
             {tokens.isFetchingNextPage ? "Loading…" : "Load more"}
@@ -159,7 +180,7 @@ function CreateToken({ workspace }: { workspace: string }) {
         expires_in_days: days,
         ...(limited ? { scope: [{ dst: targets, allow: actions }] } : {}),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: apiTokensQuery(workspace).queryKey }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens(workspace) }),
   })
 
   if (create.isSuccess)
@@ -290,7 +311,7 @@ function RevokeToken({ workspace, token, onClose }: { workspace: string; token: 
   const revoke = useMutation({
     mutationFn: () => revokeApiToken(workspace, token.id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: apiTokensQuery(workspace).queryKey })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens(workspace) })
       onClose()
     },
   })
@@ -320,7 +341,15 @@ function RevokeToken({ workspace, token, onClose }: { workspace: string; token: 
   )
 }
 
-function TokenList({ tokens, now, onRevoke }: { tokens: APIToken[]; now: number; onRevoke: (token: APIToken) => void }) {
+function TokenList({
+  tokens,
+  now,
+  onRevoke,
+}: {
+  tokens: APIToken[]
+  now: number
+  onRevoke: (token: APIToken) => void
+}) {
   return (
     <ul className="flex flex-col border-t border-divider">
       {tokens.map((token) => {

@@ -26,8 +26,8 @@ const selectClass =
 export function PolicyTest({ workspace, policy, draft }: { workspace: string; policy: Policy; draft?: string }) {
   const role = useWorkspace()?.role
   const me = useApiQuery(meQuery).data
-  const tokens = useInfiniteQuery(apiTokensQuery(workspace))
-  const live = (tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []).filter((t) => !t.revoked_at)
+  const tokens = useInfiniteQuery(apiTokensQuery(workspace, "active"))
+  const live = tokens.data?.pages.flatMap((page) => page.api_tokens) ?? []
   const admin = role === "owner" || role === "admin"
   const users = admin ? policy.names.users : me ? [me.email] : []
   const team = workspace !== "personal"

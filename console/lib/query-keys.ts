@@ -14,7 +14,9 @@ export const queryKeys = {
   billing: (workspace: string) => ["billing", workspace],
   billingProducts: (workspace: string) => ["billing-products", workspace],
   inboxRequests: (workspace: string) => ["team-inbox", workspace],
-  apiTokens: (workspace: string) => ["api-tokens", workspace],
+  /** A workspace's API tokens, all or one `state`; without `state` it is the prefix of every state (to invalidate). */
+  apiTokens: (workspace: string, state?: "active" | "ended") =>
+    state ? (["api-tokens", workspace, state] as const) : (["api-tokens", workspace] as const),
   tags: (workspace: string) => ["policy", workspace, "tags"],
   githubStatus: ["github-status"],
   /** A tunnels page; `options` as tunnelsPageQuery takes them (lib/tunnels.ts). */

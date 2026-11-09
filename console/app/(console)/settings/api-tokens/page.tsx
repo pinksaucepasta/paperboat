@@ -10,8 +10,8 @@ export const metadata: Metadata = { title: sections.apiTokens.title }
 // The first page of tokens, read on the server so the list is in the first HTML.
 const reads = (workspace: string) => [
   {
-    key: queryKeys.apiTokens(workspace),
-    path: `workspaces/${encodeURIComponent(workspace)}/api-tokens?limit=50`,
+    key: queryKeys.apiTokens(workspace, "active"),
+    path: `workspaces/${encodeURIComponent(workspace)}/api-tokens?limit=50&state=active`,
     infinite: true,
   },
 ]
