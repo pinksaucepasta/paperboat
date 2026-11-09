@@ -184,7 +184,7 @@ func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, pr
 func (s *Service) storePair(ctx context.Context, tx *db.Tx, actor string, ws edgeset.Scope, primaryID, fallbackID string) ([]string, error) {
 	now := s.now().UTC()
 	// The same lock the pool policy takes, so a pool change and a pair change never interleave.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('browser-edge-policy:'||$1||':'||$2,0))`, ws.Kind, ws.ID); err != nil {
+	if err := edgeset.LockWorkspace(ctx, tx, ws); err != nil {
 		return nil, err
 	}
 	var team any

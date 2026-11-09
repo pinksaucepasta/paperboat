@@ -201,15 +201,32 @@ func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, err
 	}
 }
 
+// LockWorkspace takes the lock every writer of a workspace's edge policy holds (the pool policy in selfhost
+// takes the same key), until the transaction ends.
+func LockWorkspace(ctx context.Context, tx *db.Tx, scope Scope) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('browser-edge-policy:'||$1||':'||$2,0))`, scope.Kind, scope.ID)
+	return err
+}
+
 // EnsureTx gives a workspace its first edge set inside the caller's transaction (a machine attaching
-// before the periodic reconcile has seen its workspace). An existing set is left to the reconciler.
+// before the periodic reconcile has seen its workspace). An existing set is left to the reconciler. The first
+// assignment holds the workspace lock and looks again, so it never overwrites a pair chosen while it waited.
 func EnsureTx(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) error {
-	var present bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_edge_sets WHERE scope_kind=$1 AND scope_id=$2)`, scope.Kind, scope.ID).Scan(&present); err != nil {
-		return fmt.Errorf("read workspace edge set: %w", err)
+	present := func() (bool, error) {
+		var found bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_edge_sets WHERE scope_kind=$1 AND scope_id=$2)`, scope.Kind, scope.ID).Scan(&found); err != nil {
+			return false, fmt.Errorf("read workspace edge set: %w", err)
+		}
+		return found, nil
 	}
-	if present {
-		return nil
+	if found, err := present(); err != nil || found {
+		return err
+	}
+	if err := LockWorkspace(ctx, tx, scope); err != nil {
+		return fmt.Errorf("lock workspace edge policy: %w", err)
+	}
+	if found, err := present(); err != nil || found {
+		return err
 	}
 	_, err := ReconcileScope(ctx, tx, scope, now)
 	return err
