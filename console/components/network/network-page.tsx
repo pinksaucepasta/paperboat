@@ -37,6 +37,8 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { TableRowsSkeleton } from "@/components/skeletons"
+import { LoadError } from "@/components/load-error"
 
 /*
  * Your own relays and tunnel servers, and which servers your traffic uses. Machines connect
@@ -120,27 +122,27 @@ export function NetworkPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-divider border-b border-divider">
-                {installations.isPending
-                  ? Array.from({ length: 1 }, (_, index) => (
-                      <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                        <td colSpan={5}>
-                          <Skeleton className="h-5 w-1/3" />
-                        </td>
-                      </tr>
-                    ))
-                  : nodes.map((node) => <NodeRow key={node.id} node={node} />)}
+                {installations.isPending ? (
+                  <TableRowsSkeleton
+                    rows={1}
+                    columns={[
+                      { bar: "w-28" },
+                      { className: "hidden md:table-cell", bar: "w-24" },
+                      { className: "hidden sm:table-cell", bar: "w-36" },
+                      { bar: "w-16" },
+                      { empty: true },
+                    ]}
+                  />
+                ) : (
+                  nodes.map((node) => <NodeRow key={node.id} node={node} />)
+                )}
               </tbody>
             </table>
             {installations.data && (
               <ListPager page={pages.page} size={cursorPageSize} total={installations.data.total} go={pages.go} />
             )}
             {installations.isError && (
-              <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-                Couldn’t load your servers.
-                <Button variant="outline" size="sm" onClick={() => installations.refetch()}>
-                  Retry
-                </Button>
-              </div>
+              <LoadError what="your servers" error={installations.error} retry={() => installations.refetch()} />
             )}
             {installations.isSuccess && nodes.length === 0 && q && (
               <p className="py-12 text-center text-sm text-muted-foreground">No servers match “{q}”</p>
