@@ -78,6 +78,11 @@ func (a *Authority) cutWithdrawnLocked() {
 			cut = true
 		}
 	}
+	if len(a.withdrawing) == 0 {
+		a.relay.mu.Lock()
+		a.relay.retained = nil // the narrowed relay grant takes over at the carrier's next poll
+		a.relay.mu.Unlock()
+	}
 	if cut && a.current != nil && !a.closed {
 		_ = a.replaceLocked()
 	}

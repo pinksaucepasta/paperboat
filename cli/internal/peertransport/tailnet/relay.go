@@ -38,9 +38,14 @@ import (
 )
 
 type relayAuthority struct {
-	mu           sync.Mutex
-	tokens       map[string]string
-	grants       map[string]derpquic.Grant
+	mu     sync.Mutex
+	tokens map[string]string
+	grants map[string]derpquic.Grant
+	// retained is the previous grant set, still presented to the relay while a configuration that only withdrew peers
+	// is within its withdrawal grace (withdrawal.go): the narrowed grant would make the relay drop the withdrawn pair at
+	// once and eat the closes of its sessions, which the grace keeps the path open for. Cleared when the last withdrawn
+	// peer is cut. Guarded by mu.
+	retained     *retainedRelayGrants
 	config       *tls.Config
 	node         RegionalNode
 	factory      magicsock.DERPCarrierFactory
@@ -85,6 +90,12 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			resultErr = ErrStaleAuthority
 		}
 		a.relay.mu.Lock()
+		removed, added := relayGrantDiff(a.relay.grants, grants)
+		if added {
+			a.relay.retained = nil // a grant that adds a pair is never held back
+		} else if removed && len(a.withdrawing) > 0 && a.relay.retained == nil {
+			a.relay.retained = &retainedRelayGrants{tokens: a.relay.tokens, grants: a.relay.grants}
+		}
 		a.relay.tokens = next
 		a.relay.grants = grants
 		a.relay.controlPeers = a.relay.controlPeers[:0]
@@ -522,7 +533,12 @@ var errRelayNotCurrent = fmt.Errorf("relay is not in this machine's current rela
 func (a *Authority) relayToken(node RegionalNode) (string, error) {
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
-	grant := a.relay.grants[node.NodeID]
+	grant, tokens := a.relay.grants[node.NodeID], a.relay.tokens
+	if kept := a.relay.retained; kept != nil {
+		if old, ok := kept.grants[node.NodeID]; ok && old.ExpiresAt > serverclock.Now().Unix() {
+			grant, tokens = old, kept.tokens
+		}
+	}
 	current, listed := a.relay.nodes[regionalID(node.NodeID)]
 	if node.NodeID == "" || listed && (current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256) {
 		return "", ErrAuthority // the relay moved: its region is redefined and magicsock builds a new carrier
@@ -533,7 +549,36 @@ func (a *Authority) relayToken(node RegionalNode) (string, error) {
 	if grant.ExpiresAt <= serverclock.Now().Unix() {
 		return "", ErrRelayGrantExpired
 	}
-	return a.relay.tokens[node.NodeID], nil
+	return tokens[node.NodeID], nil
+}
+
+type retainedRelayGrants struct {
+	tokens map[string]string
+	grants map[string]derpquic.Grant
+}
+
+// relayGrantDiff reports whether next drops some peer scope of previous and whether it adds one; a renewal of the same
+// scopes is neither.
+func relayGrantDiff(previous, next map[string]derpquic.Grant) (removed, added bool) {
+	scopes := func(grants map[string]derpquic.Grant) map[string]bool {
+		set := map[string]bool{}
+		for node, g := range grants {
+			for _, peer := range g.Peers {
+				for _, s := range peer.Scopes {
+					set[fmt.Sprint(node, "|", peer.WireGuardPublicKey, "|", s.ResourceKind, "|", s.ResourceID, "|", s.ResourceGeneration, "|", s.Capability, "|", s.Direction, "|", s.Port)] = true
+				}
+			}
+		}
+		return set
+	}
+	before, after := scopes(previous), scopes(next)
+	for k := range before {
+		removed = removed || !after[k]
+	}
+	for k := range after {
+		added = added || !before[k]
+	}
+	return removed, added
 }
 
 // setRelayNodesLocked installs the current relay set and remembers each region's relay; a.relay.mu held.

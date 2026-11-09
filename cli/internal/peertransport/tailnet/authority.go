@@ -606,6 +606,7 @@ func (a *Authority) dropLocked() {
 	a.relay.recovery = nil
 	a.relay.tokens = nil
 	a.relay.grants = nil
+	a.relay.retained = nil
 	a.relay.usagePeers = nil
 	a.relay.mu.Unlock()
 	if recovery != nil {
