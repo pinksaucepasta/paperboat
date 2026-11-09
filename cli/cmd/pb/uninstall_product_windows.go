@@ -563,7 +563,8 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 		result = nil
 	}
 	if result == nil {
-		result = config.PurgeCredentialStore()
+		// The credential directory is user-writable like the state paths: removed as the user, never as an administrator.
+		result = windowssecurity.WithUnelevatedToken(config.PurgeCredentialStore)
 		for _, path := range plan.UserStatePaths {
 			result = errors.Join(result, retryWindowsRemoval(cleanupCtx, plan.OwnerProfile, path, plan.InboxPaths))
 		}
@@ -971,11 +972,11 @@ func waitForWindowsProcess(ctx context.Context, processID uint32, deadline time.
 
 var errWindowsUserStateRefused = errors.New("a Paperboat user state path is outside the owner's profile or passes through a link; it was not removed")
 
-// checkWindowsUserStatePath authorizes one user state path for removal by the elevated helper. These places are
-// writable by the user, who can plant a junction or symlink there; this process would then delete, as an
-// administrator, wherever it points. The path must lie below the owner's profile, and neither it nor any
-// directory between the profile and it may be a reparse point. Below the path nothing is followed: os.RemoveAll
-// removes a link as an entry, and removePathPreserving refuses to descend into one.
+// checkWindowsUserStatePath refuses a user state path that is not below the owner's profile, or that is or lies
+// below a reparse point. It keeps an honest mistake away from other places; it cannot stop a link planted after
+// the check, which is why the removal itself never runs with administrator rights (retryWindowsRemoval). Below the
+// path nothing is followed: os.RemoveAll removes a link as an entry, and removePathPreserving refuses to descend
+// into one.
 func checkWindowsUserStatePath(profile, path string) error {
 	current := filepath.Clean(profile)
 	relative, err := filepath.Rel(current, filepath.Clean(path))
@@ -1000,21 +1001,31 @@ func checkWindowsUserStatePath(profile, path string) error {
 	return nil
 }
 
+// afterWindowsUserStateCheck runs between the path check and the removal; tests plant a link there.
+var afterWindowsUserStateCheck = func() {}
+
+// retryWindowsRemoval removes one user state path for the elevated helper. The user can write there, so a link
+// can appear at any moment, also between the check and the removal. The whole removal therefore runs as the user
+// without the helper's elevation (what MSI and Chromium's installer do for per-user data): whatever a planted
+// link points at, only what the user could delete anyway can be deleted.
 func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string) error {
-	var last error
-	for {
-		// Before every attempt: the user can change these directories while the helper waits.
-		if err := checkWindowsUserStatePath(profile, path); err != nil {
-			return err
+	return windowssecurity.WithUnelevatedToken(func() error {
+		var last error
+		for {
+			// Before every attempt: the user can change these directories while the helper waits.
+			if err := checkWindowsUserStatePath(profile, path); err != nil {
+				return err
+			}
+			afterWindowsUserStateCheck()
+			last = removePathPreserving(path, preserved)
+			if last == nil {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return windowsUninstallLocalFailure("", last, ctx.Err(), context.Cause(ctx))
+			case <-time.After(250 * time.Millisecond):
+			}
 		}
-		last = removePathPreserving(path, preserved)
-		if last == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return windowsUninstallLocalFailure("", last, ctx.Err(), context.Cause(ctx))
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
+	})
 }
