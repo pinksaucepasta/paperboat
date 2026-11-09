@@ -108,10 +108,14 @@ VALUES($1,'default','1.0','epoch','ready',true,now()-make_interval(secs=>$2::flo
 	if pair.Primary.Status != "ready" || pair.Primary.Region != "fsn1" || pair.Primary.LastHeartbeat == nil || pair.Primary.BestRTTMillis != nil {
 		t.Fatalf("primary fields=%+v", pair.Primary)
 	}
-	// A managed edge shows the site its operator set; one without a site shows none.
+	// A managed edge shows its operator-set site, else its region's display name; one with neither shows none.
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, region)
-	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, pair.Primary.ID, region, make([]byte, 32))
-	if shown, showErr := service.EdgePair(ctx, owner, personal); showErr != nil || shown.Primary.Site != "Mumbai" || shown.Fallback == nil || shown.Fallback.Site != "" {
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, pair.Primary.ID, region, make([]byte, 32))
+	if shown, showErr := service.EdgePair(ctx, owner, personal); showErr != nil || shown.Primary.Site != "Test region" || shown.Fallback == nil || shown.Fallback.Site != "" {
+		t.Fatalf("managed sites=%+v err=%v", shown, showErr)
+	}
+	exec(`UPDATE paperboat.control_tunnel_nodes SET site='Mumbai' WHERE id=$1`, pair.Fallback.ID)
+	if shown, showErr := service.EdgePair(ctx, owner, personal); showErr != nil || shown.Primary.Site != "Test region" || shown.Fallback == nil || shown.Fallback.Site != "Mumbai" {
 		t.Fatalf("managed sites=%+v err=%v", shown, showErr)
 	}
 	first := testutil.PublicationMachine(t, store.SQL(), owner)

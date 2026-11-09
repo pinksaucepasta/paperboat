@@ -26,7 +26,7 @@ type PairEdge struct {
 	ID            string     `json:"id"`
 	Kind          string     `json:"kind"` // managed | self_hosted
 	Region        string     `json:"region"`
-	Site          string     `json:"site"`           // the city or site; a self-hosted server shows its name
+	Site          string     `json:"site"`           // the operator-set site, else the region's display name; a self-hosted server shows its name
 	Name          string     `json:"name,omitempty"` // a self-hosted server's name
 	EndpointHost  string     `json:"endpoint_host,omitempty"`
 	Status        string     `json:"status"`
@@ -94,7 +94,7 @@ func (s *Service) readPair(ctx context.Context, actor string, ws edgeset.Scope, 
 		var name, installation, site string
 		var heartbeat sql.NullTime
 		err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,coalesce(n.region,''),coalesce(n.endpoint_host,''),`+edgeset.NodeStatusSQL("$2")+`,n.last_heartbeat_at,
- coalesce(i.id,''),coalesce(i.name,''),coalesce((SELECT m.site FROM paperboat.managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),(SELECT g.name FROM paperboat.selfhost_installations g WHERE g.node_id=n.id AND g.state='active' AND g.scope_kind='global' ORDER BY g.id LIMIT 1),'')
+ coalesce(i.id,''),coalesce(i.name,''),coalesce(n.site,(SELECT r.display_name FROM paperboat.managed_node_authority m JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE m.node_id=n.id AND m.retired_at IS NULL),'')
 FROM paperboat.control_tunnel_nodes n
 LEFT JOIN LATERAL (SELECT i.id,i.name FROM paperboat.selfhost_installations i WHERE i.node_id=n.id AND i.capability='tunnel' AND i.state='active' AND i.scope_kind<>'global'
  AND ((i.scope_kind=$3 AND i.scope_id=$4) OR ($3='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$5))) ORDER BY i.id LIMIT 1) i ON true

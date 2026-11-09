@@ -36,7 +36,7 @@ func (s *EdgeService) ListHostedEdges(ctx context.Context, accountID, after stri
 	page := HostedEdgePage{Items: []HostedEdge{}, ObservedAt: at}
 	rows, err := s.store.SQL().QueryContext(ctx, `
 SELECT n.id, COALESCE(n.region,''),
-  COALESCE((SELECT m.site FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),(SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.state='active' ORDER BY i.id LIMIT 1),''), COALESCE(n.endpoint_host,''),
+  COALESCE(n.site,(SELECT r.display_name FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=n.id AND m.retired_at IS NULL),''), COALESCE(n.endpoint_host,''),
   `+edgeset.NodeStatusSQL("$3")+`,
   n.last_heartbeat_at
 FROM control_tunnel_nodes n

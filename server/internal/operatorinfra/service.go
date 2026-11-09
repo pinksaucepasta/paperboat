@@ -98,7 +98,7 @@ type NodeMutation struct {
 	PeerWireGuardPublicKey []byte   `json:"peer_wireguard_public_key,omitempty"`
 	PeerDiscoPublicKey     []byte   `json:"peer_disco_public_key,omitempty"`
 	PeerVirtualAddress     string   `json:"peer_virtual_address,omitempty"`
-	Site                   string   `json:"site,omitempty"` // city or site shown next to the region; set on enroll or by the site action
+	Site                   string   `json:"site,omitempty"` // city or site shown next to the region; only the site action takes it
 }
 type NodeMutationResult struct {
 	Node              Node   `json:"node"`
@@ -211,7 +211,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrConflict
 			}
 		case "enroll":
-			if in.Revision != 0 || !validNode(in) || len(s.key) < 32 || (in.Site != "" && !validSite(in.Site)) {
+			if in.Revision != 0 || !validNode(in) || len(s.key) < 32 || in.Site != "" {
 				return ErrInvalid
 			}
 			var enabled bool
@@ -235,7 +235,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if err != nil {
 				return mapErr(err)
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,$4,$5,NULLIF($6,''))`, in.NodeID, in.RegionID, hash[:], cipher, config, in.Site)
+			_, err = tx.Exec(ctx, `INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,$4,$5)`, in.NodeID, in.RegionID, hash[:], cipher, config)
 			if err != nil {
 				return mapErr(err)
 			}
@@ -307,15 +307,16 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return err
 			}
 		case "site":
-			if in.Revision < 1 || !validSite(in.Site) {
+			// Any non-retired node: Paperboat's own pbh installations have no managed_node_authority row.
+			if !validSite(in.Site) {
 				return ErrInvalid
 			}
-			tag, err := tx.Exec(ctx, `UPDATE managed_node_authority SET site=$2,revision=revision+1,updated_at=now() WHERE node_id=$1 AND revision=$3 AND retired_at IS NULL`, in.NodeID, in.Site, in.Revision)
+			tag, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes SET site=$2 WHERE id=$1 AND state<>'retired'`, in.NodeID, in.Site)
 			if err != nil {
 				return err
 			}
 			if tag.RowsAffected() != 1 {
-				return ErrConflict
+				return ErrNotFound
 			}
 		case "drain", "resume", "retire":
 			if in.Revision < 1 {

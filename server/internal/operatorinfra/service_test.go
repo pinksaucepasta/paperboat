@@ -158,7 +158,7 @@ func infraTestDB(t *testing.T) *db.DB {
 	return store
 }
 
-func TestOperatorNodeSiteIsSetOnEnrollAndByTheSiteAction(t *testing.T) {
+func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 	store := infraTestDB(t)
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
@@ -171,37 +171,31 @@ func TestOperatorNodeSiteIsSetOnEnrollAndByTheSiteAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32), Site: " Mumbai"}
-	if _, err = s.MutateNode(ctx, admin, "enroll-bad-"+x, in); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("site with surrounding space: %v", err)
-	}
-	in.Site = "Hyderabad"
+	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)}
 	enrolled, err := s.MutateNode(ctx, admin, "enroll-"+x, in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	site := func() string {
 		var v string
-		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(site,'') FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID).Scan(&v); err != nil {
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(site,'') FROM paperboat.control_tunnel_nodes WHERE id=$1`, in.NodeID).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
 		return v
 	}
-	if got := site(); got != "Hyderabad" {
-		t.Fatalf("site after enroll = %q", got)
-	}
-	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Revision: enrolled.Node.Revision, Site: "Mumbai"}
+	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Site: "Mumbai"}
 	if _, err = s.MutateNode(ctx, admin, "site-"+x, set); err != nil || site() != "Mumbai" {
 		t.Fatalf("site action: site=%q err=%v", site(), err)
 	}
-	if _, err = s.MutateNode(ctx, admin, "site-stale-"+x, set); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale revision: %v", err)
+	set.Site = " Mumbai"
+	if _, err = s.MutateNode(ctx, admin, "site-bad-"+x, set); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("site with surrounding space: %v", err)
 	}
-	set.Revision, set.Site = enrolled.Node.Revision+1, ""
-	if _, err = s.MutateNode(ctx, admin, "site-empty-"+x, set); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("empty site: %v", err)
+	set.Site, set.NodeID = "Mumbai", "no_such_"+x
+	if _, err = s.MutateNode(ctx, admin, "site-none-"+x, set); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown node: %v", err)
 	}
-	in.Action, in.Revision = "update", enrolled.Node.Revision+1
+	in.Action, in.Revision, in.Site = "update", enrolled.Node.Revision, "Mumbai"
 	if _, err = s.MutateNode(ctx, admin, "update-site-"+x, in); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("update carrying a site: %v", err)
 	}

@@ -147,7 +147,7 @@ then enrolls an existing relay/edge machine through
 `POST /v1/admin/nodes/{node_id}/enroll`. Creation/enrollment uses `revision: 0`;
 updates and lifecycle actions use the current returned revision. Region actions
 are `update`, `enable`, `disable`; node actions are `update`, `drain`, `resume`,
-`retire`, `rotate`, `verify-ingress`, `site`. `site` (`{"revision":N,"site":"Mumbai"}`) sets the city or site shown next to the region without restarting the node; enroll accepts `site` too. These configuration, credential, and
+`retire`, `rotate`, `verify-ingress`, `site`. `site` (`{"site":"Mumbai"}`, any non-retired node, no revision) sets the city or site shown next to the region without restarting the node. These configuration, credential, and
 public ingress verification actions require the full
 admin role. Operations staff may read `/v1/admin/regions` and `/v1/admin/nodes`.
 Lists use bounded `limit`/`after`; nodes optionally filter by `region`.

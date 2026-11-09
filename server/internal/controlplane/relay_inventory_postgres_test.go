@@ -78,9 +78,10 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 	}{{"m1", "a", 30, time.Minute}, {"m2", "a", 12, 10 * time.Minute}, {"mo", "a", 2, time.Minute}, {"m1", "b", 8, 2 * time.Hour}, {"m1", "e", 55, time.Minute}} {
 		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'relay',$3,$4)`, prefix+sample.machine, prefix+sample.node, sample.rtt, now.Add(-sample.age))
 	}
-	// Relay a is a managed node with a site; relay e is the account's own and shows its name.
+	// Relay a is a managed node of a region without a site (shows the region's display name), b has an operator site, e is the account's own and shows its name.
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, region)
-	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", region, make([]byte, 32))
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, prefix+"a", region, make([]byte, 32))
+	exec(`UPDATE paperboat.control_tunnel_nodes SET site='Mumbai' WHERE id=$1`, prefix+"b")
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
 	got := map[string]HostedRelay{}
@@ -119,7 +120,7 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 			t.Fatalf("relay %s shows a stale or missing measurement: %+v", suffix, got[prefix+suffix])
 		}
 	}
-	if own := got[prefix+"e"]; !own.SelfHosted || own.Name != "my relay" || got[prefix+"a"].SelfHosted || got[prefix+"a"].Name != "" || own.Site != "my relay" || got[prefix+"a"].Site != "Mumbai" || got[prefix+"b"].Site != "" {
+	if own := got[prefix+"e"]; !own.SelfHosted || own.Name != "my relay" || got[prefix+"a"].SelfHosted || got[prefix+"a"].Name != "" || own.Site != "my relay" || got[prefix+"a"].Site != "Test region" || got[prefix+"b"].Site != "Mumbai" {
 		t.Fatalf("self-hosted flags: own %+v hosted %+v", own, got[prefix+"a"])
 	}
 	// Only-mine pools hide Paperboat's relays.
