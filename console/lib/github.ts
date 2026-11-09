@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { api, ApiError, send } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 /*
  * Connecting GitHub for config sync. `pb config` (or Config sync here) starts it; this console
@@ -34,7 +35,7 @@ export type GitHubLinkReview = {
 }
 
 export const githubStatusQuery = queryOptions({
-  queryKey: ["github-status"],
+  queryKey: queryKeys.githubStatus,
   queryFn: ({ signal }) => api<GitHubStatus>("github/status", { signal }),
   enabled: githubLive,
   staleTime: 30_000,

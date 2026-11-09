@@ -16,6 +16,9 @@ export const queryKeys = {
   inboxRequests: (workspace: string) => ["team-inbox", workspace],
   apiTokens: (workspace: string) => ["api-tokens", workspace],
   tags: (workspace: string) => ["policy", workspace, "tags"],
+  githubStatus: ["github-status"],
+  /** A config-sync status page; `options` as configStatusQuery takes them (lib/config-sync.ts). */
+  configStatus: (options: object) => ["config-sync", options],
   /** `params`: the activity filter as its query string (lib/activity.ts activityParams). */
   activity: (params: string) => ["activity", params],
   machineOverview: ["machines", "overview"],

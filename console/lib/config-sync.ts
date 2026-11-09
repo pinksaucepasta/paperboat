@@ -2,6 +2,7 @@
 
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
+import { queryKeys } from "@/lib/query-keys"
 
 /*
  * Config sync keeps chosen files on each machine (dotfiles and the like) in a Git repository. The
@@ -44,7 +45,7 @@ const readStatus = (raw: StatusPage) => ({
 /** One page of machines' sync, searched and filtered by the server (`machine` is one machine's row). */
 export const configStatusQuery = (options: { q?: string; state?: string; machine?: string; page?: number }) =>
   queryOptions({
-    queryKey: ["config-sync", options],
+    queryKey: queryKeys.configStatus(options),
     queryFn: ({ signal }) =>
       cursorPage<ConfigEnvironment, StatusPage>(
         "config-sync/status",
