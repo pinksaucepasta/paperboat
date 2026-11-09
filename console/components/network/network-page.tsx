@@ -81,7 +81,7 @@ export function NetworkPage() {
   return (
     <div className="flex flex-col gap-10">
       {none ? (
-        <Empty className="py-6">
+        <Empty className="py-16">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <HardDrivesIcon />

@@ -11,7 +11,7 @@ import {
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { useApiQuery, useWorkspace } from "@/lib/api"
+import { clientConfigQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { cleanDomain, isUnder } from "@/lib/domains"
 import {
   addDomain as addMachineDomain,
@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
 
@@ -117,6 +118,8 @@ export function DomainList() {
   const workspace = useWorkspace()
   const ws = workspace?.id ?? ""
   const machineDomains = useMachineDomains()
+  // Paperboat's own domain comes from the client configuration; until it answers the list isn't known.
+  const loading = useApiQuery(clientConfigQuery).isPending
   const [search, setSearch] = useState("")
   const text = useDeferredValue(search.trim().toLowerCase())
   const [adding, setAdding] = useState(false)
@@ -169,21 +172,27 @@ export function DomainList() {
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
-          {shown.map((entry) => (
-            <DomainRow key={entry.name} entry={entry} onOpen={() => setOpen(entry.name)} />
-          ))}
+          {loading
+            ? Array.from({ length: 1 }, (_, index) => (
+                <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
+                  <td colSpan={4}>
+                    <Skeleton className="h-5 w-1/3" />
+                  </td>
+                </tr>
+              ))
+            : shown.map((entry) => <DomainRow key={entry.name} entry={entry} onOpen={() => setOpen(entry.name)} />)}
         </tbody>
       </table>
       {text && !shown.length && (
         <p className="py-12 text-center text-sm text-muted-foreground">No domains match “{search.trim()}”</p>
       )}
-      {!text && !entries.length && (
+      {!loading && !text && !entries.length && (
         <p className="py-12 text-center text-sm text-muted-foreground">
           No domains yet. Add one to give your previews and tunnels an address on your own name.
         </p>
       )}
 
-      <HostnameList />
+      {!loading && <HostnameList />}
 
       {adding && (
         <AddDomainDialog

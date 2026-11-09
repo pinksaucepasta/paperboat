@@ -173,7 +173,7 @@ function TagChips({ tags }: { tags: string[] | undefined }) {
  */
 function PersonalMachines({ tags }: { tags: Map<string, string[]> }) {
   const machines = useMachines()
-  if (machines.isPending) return <Skeleton className="h-24 w-full" />
+  if (machines.isPending) return <OverviewSkeleton />
   if (machines.isError)
     return <p className="text-sm text-destructive">Loading machines failed: {machines.error.message}</p>
   const shared = machines.data.filter((machine) => machine.shared)
@@ -226,7 +226,7 @@ function TeamMachines({ teamId, policy, tags }: { teamId: string; policy: Policy
   const me = useApiQuery(meQuery)
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<Row | null>(null)
-  if (team.isPending || me.isPending) return <Skeleton className="h-24 w-full" />
+  if (team.isPending || me.isPending) return <OverviewSkeleton />
   if (team.isError) return <p className="text-sm text-destructive">Loading the team failed: {team.error.message}</p>
   if (me.isError) return <p className="text-sm text-destructive">Loading your account failed: {me.error.message}</p>
   const emails = memberEmails(team.data, invitations.data)
@@ -319,4 +319,23 @@ function teamGrants(team: Team, machineId: string) {
     everyone: machineCapabilities.filter((c) => everyone?.capabilities.includes(c.id)).map((c) => c.label),
     members: grants.filter((g) => g.audience === "selected_member").length,
   }
+}
+
+/** The Overview's shape while the policy, machines or team load: a section heading and its rows. */
+export function OverviewSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex min-h-8 items-center">
+        <Skeleton className="h-4 w-48" />
+      </div>
+      <div className="flex flex-col border-t border-divider">
+        {Array.from({ length: 2 }, (_, index) => (
+          <div key={index} className="flex min-h-12 items-center justify-between border-b border-divider">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

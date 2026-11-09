@@ -43,6 +43,8 @@ export function HostnameList() {
     enabled: Boolean(workspace),
   })
   const items = list.data?.items ?? []
+  // Most workspaces have no hostnames: show nothing until the first page says otherwise.
+  if (list.isPending) return null
   if (list.data && list.data.total === 0 && !q)
     return (
       <p className="text-sm text-muted-foreground">

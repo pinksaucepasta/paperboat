@@ -5,11 +5,11 @@ import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { notOnServer, PolicyError, policyQuery } from "@/lib/policy"
 import { cn } from "@/lib/utils"
-import { AccessSimple } from "@/components/access/access-simple"
+import { AccessSimple, OverviewSkeleton } from "@/components/access/access-simple"
 import { PolicyEditor } from "@/components/access/policy-editor"
 import { PolicyHistory } from "@/components/access/policy-history"
 import { PolicyTest } from "@/components/access/policy-test"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 const tabs = [
   { id: "simple", title: "Overview" },
@@ -28,10 +28,9 @@ export function AccessPage() {
   // The unsaved file lives here so Test can try it and switching tabs keeps it.
   const [draft, setDraft] = useState<{ base: number; text: string } | null>(null)
 
-  if (!workspace || policy.isPending) return <Skeleton className="h-64 w-full" />
   if (policy.isError) return <PolicyUnavailable error={policy.error} />
   const data = policy.data
-  const text = draft && draft.base === data.version ? draft.text : data.policy
+  const text = data && draft && draft.base === data.version ? draft.text : data?.policy
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,14 +50,19 @@ export function AccessPage() {
                 )}
               >
                 {title}
-                {id === "file" && text !== data.policy && <span className="ml-1 text-muted-foreground">•</span>}
+                {id === "file" && data && text !== data.policy && (
+                  <span className="ml-1 text-muted-foreground">•</span>
+                )}
               </button>
             ))}
           </nav>
         </div>
       </header>
-      {tab === "simple" && <AccessSimple workspace={workspace} policy={data} onEditFile={() => setTab("file")} />}
-      {tab === "file" && (
+      {!workspace || !data || text === undefined ? (
+        <OverviewSkeleton />
+      ) : tab === "simple" ? (
+        <AccessSimple workspace={workspace} policy={data} onEditFile={() => setTab("file")} />
+      ) : tab === "file" ? (
         <PolicyEditor
           workspace={workspace.id}
           policy={data}
@@ -66,11 +70,11 @@ export function AccessPage() {
           onChange={(next) => setDraft({ base: data.version, text: next })}
           onSaved={() => setDraft(null)}
         />
-      )}
-      {tab === "test" && (
+      ) : tab === "test" ? (
         <PolicyTest workspace={workspace.id} policy={data} draft={text !== data.policy ? text : undefined} />
+      ) : (
+        <PolicyHistory workspace={workspace.id} policy={data} />
       )}
-      {tab === "history" && <PolicyHistory workspace={workspace.id} policy={data} />}
     </div>
   )
 }
@@ -79,16 +83,20 @@ function PolicyUnavailable({ error }: { error: Error }) {
   const missing = error instanceof PolicyError && error.code === notOnServer
   const forbidden = error instanceof PolicyError && error.status === 403
   return (
-    <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
-      <ShieldCheckIcon className="size-8 text-muted-foreground" />
-      <p className="font-medium">
-        {missing
-          ? "Access policy isn't available on this server yet"
-          : forbidden
-            ? "No access"
-            : "Couldn't load access"}
-      </p>
-      {!missing && <p className="max-w-sm text-sm text-muted-foreground">{error.message}</p>}
-    </div>
+    <Empty className="py-16">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <ShieldCheckIcon />
+        </EmptyMedia>
+        <EmptyTitle>
+          {missing
+            ? "Access policy isn't available on this server yet"
+            : forbidden
+              ? "No access"
+              : "Couldn't load access"}
+        </EmptyTitle>
+        {!missing && <EmptyDescription>{error.message}</EmptyDescription>}
+      </EmptyHeader>
+    </Empty>
   )
 }
