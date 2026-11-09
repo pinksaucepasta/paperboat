@@ -46,11 +46,56 @@ type SharedTLSListener struct {
 	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
 	unknown *tls.Config
 	// routeGrace and held: right after a handover takeover a name whose host has not re-attached its carrier
-	// yet is held (at most cap(held) at a time) until it is admitted or the grace ends, instead of answering the
-	// not-found page at once (anvit 2026-11-09: 404s up to 6 s after every edge swap).
-	routeGrace func() time.Duration
-	held       chan struct{}
+	// yet is held until it is admitted or the grace ends, instead of answering the not-found page at once (anvit
+	// 2026-11-09: 404s up to 6 s after every edge swap). Only a name that can be ours is held (holdableName: under
+	// our preview, tunnel or runtime domain; or one the authority snapshot names), and held bounds how many.
+	routeGrace   func() time.Duration
+	holdableName func(string) bool
+	held         *holdSet
 }
+
+// holdSet bounds the connections held during a takeover grace: overall, per name, and with a reserve of slots only
+// names the authority snapshot knows may use, so random names under our domains cannot starve a real preview.
+type holdSet struct {
+	mu                       sync.Mutex
+	total, max, perName, rsv int
+	names                    map[string]int
+}
+
+func newHoldSet(max, perName, reserve int) *holdSet {
+	return &holdSet{max: max, perName: perName, rsv: reserve, names: make(map[string]int)}
+}
+
+// acquire takes one hold on name, or reports false when a bound is reached; release gives it back.
+func (h *holdSet) acquire(name string, known bool) (release func(), ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	limit := h.max
+	if !known {
+		limit -= h.rsv
+	}
+	if h.total >= limit || h.names[name] >= h.perName {
+		return nil, false
+	}
+	h.total++
+	h.names[name]++
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.total--
+		if h.names[name]--; h.names[name] == 0 {
+			delete(h.names, name)
+		}
+	}, true
+}
+
+// takeoverHoldMax, takeoverHoldPerName and takeoverHoldReserve size the TLS holds: 256 at once, at most 16 per
+// name, the last 64 for names the authority knows.
+const (
+	takeoverHoldMax     = 256
+	takeoverHoldPerName = 16
+	takeoverHoldReserve = 64
+)
 
 // ServeUnknownNamesWithPage sets the TLS config (the edge certificate selector, wildcard fallback) used to
 // answer names that have no live decision with the branded not-found page instead of dropping TLS.
@@ -71,7 +116,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: make(chan struct{}, 256), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
 	go l.run()
 	return l
 }
@@ -202,7 +247,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
-		if l.awaitAdmission(host) {
+		if l.awaitAdmission(host, hostInDecisions(decisions, host)) {
 			authorizedHTTPS = true
 		} else {
 			if l.unknown != nil {
@@ -228,16 +273,15 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 // awaitAdmission waits, within the takeover grace, for host to be authorized for HTTPS: admitted by its attached
 // carrier, or a public preview whose attachment the server confirms with a current ingress decision (the same two
 // ways dispatch authorizes a name; the first only covers restricted routes).
-func (l *SharedTLSListener) awaitAdmission(host string) bool {
-	if l.routeGrace == nil || l.routeGrace() <= 0 {
+func (l *SharedTLSListener) awaitAdmission(host string, known bool) bool {
+	if l.routeGrace == nil || l.routeGrace() <= 0 || !known && (l.holdableName == nil || !l.holdableName(host)) {
 		return false
 	}
-	select {
-	case l.held <- struct{}{}:
-		defer func() { <-l.held }()
-	default:
+	release, ok := l.held.acquire(host, known)
+	if !ok {
 		return false
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(l.ctx, l.routeGrace())
 	defer cancel()
 	for !(l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)) && !l.previewDecisionExists(ctx, host) {
@@ -248,6 +292,16 @@ func (l *SharedTLSListener) awaitAdmission(host string) bool {
 		}
 	}
 	return true
+}
+
+// hostInDecisions reports whether the authority snapshot names host in any binding.
+func hostInDecisions(decisions []connectorprotocol.IngressDecision, host string) bool {
+	for _, d := range decisions {
+		if d.Binding.Hostname == host {
+			return true
+		}
+	}
+	return false
 }
 
 // previewDecisionExists: the public preview's exact authority refreshes and the current snapshot holds its valid

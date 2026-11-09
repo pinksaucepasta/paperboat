@@ -641,6 +641,7 @@ func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) 
 			shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
 			shared.ServeUnknownNamesWithPage(serverTLS)
 			shared.routeGrace = func() time.Duration { return tc.grace }
+			shared.holdableName = func(string) bool { return true }
 			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 			defer server.Close()
 			go server.ServeTLS(shared, "", "")
@@ -699,6 +700,7 @@ func TestSharedTLSPublicPreviewDecisionAfterTakeoverIsServed(t *testing.T) {
 		func(context.Context, string) error { return nil }, nil)
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return 5 * time.Second }
+	shared.holdableName = func(string) bool { return true }
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")

@@ -482,7 +482,16 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})
 	}
 	previewHTTPSMatcher := edgehttp.NewPreviewCarrierRouteMatcher(previewRoutes)
-	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, OnFailure: func(ctx context.Context, phase string, cause error) {
+	holdableName := func(host string) bool {
+		host = strings.ToLower(host)
+		for _, base := range []string{deployment.PreviewBaseDomain, deployment.TunnelBaseDomain, deployment.RuntimeBaseDomain} {
+			if base != "" && strings.HasSuffix(host, "."+strings.ToLower(base)) {
+				return true
+			}
+		}
+		return false
+	}
+	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, HoldableName: holdableName, OnFailure: func(ctx context.Context, phase string, cause error) {
 		switch phase {
 		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
 			reporter.ObserveFailure(ctx, phase, cause)
