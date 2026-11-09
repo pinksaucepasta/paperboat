@@ -423,10 +423,18 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 	return snapshot, nil
 }
 
-func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr error) {
+func (c *HTTPClient) Revocations(ctx context.Context) ([]byte, error) {
+	return c.trustDocument(ctx, "/v1/trust/revocations")
+}
+
+func (c *HTTPClient) JWKS(ctx context.Context) ([]byte, error) {
+	return c.trustDocument(ctx, "/v1/trust/jwks")
+}
+
+func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byte, resultErr error) {
 	ctx, finish := c.startRequest(ctx, "dependency_health")
 	defer func() { finish(resultErr) }()
-	endpoint := c.base.ResolveReference(&url.URL{Path: "/v1/trust/revocations"})
+	endpoint := c.base.ResolveReference(&url.URL{Path: path})
 	var response *http.Response
 	var err error
 	for attempt := 1; ; attempt++ {
@@ -442,16 +450,16 @@ func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr er
 		}
 	}
 	if err != nil {
-		return nil, &RequestFailure{Path: "/v1/trust/revocations", Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+		return nil, &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxControlDocument))
-		return nil, &RequestFailure{Path: "/v1/trust/revocations", Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
+		return nil, &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, maxControlDocument+1))
 	if err != nil {
-		return nil, &RequestFailure{Path: "/v1/trust/revocations", Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+		return nil, &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	if len(data) == 0 || len(data) > maxControlDocument {
 		return nil, ErrControlUnavailable

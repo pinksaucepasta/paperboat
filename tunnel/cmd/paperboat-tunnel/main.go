@@ -520,7 +520,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}}
 	routeWorker := &edgeruntime.RouteWorker{NodeReady: nodeReady, Unavailable: unavailableRoutes, Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, Wake: durableRoutes.Connected(), PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
 	usageWorker := &edgeruntime.UsageWorker{Reporter: reporter, Queue: queue, Sink: client, Prepare: meter, Persist: meter.Persist, Interval: 250 * time.Millisecond}
-	controlDependency := &edgeruntime.ControlDependency{Reporter: reporter, Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
+	controlDependency := &edgeruntime.ControlDependency{Reporter: reporter, Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, ApplyJWKS: trust.Snapshot.ReplaceJWKS, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
 	trusted, err := edgehttp.ParseTrustedProxies(append(deployment.TrustedProxyCIDRs, "127.0.0.1/32"))
 	if err != nil {
 		return nil, fmt.Errorf("parse edge trusted proxies: %w", err)

@@ -152,8 +152,11 @@ type RouteObserver interface {
 	ObserveRoutes(context.Context, string, []RouteObservation) error
 }
 
-type RevocationSource interface {
+// TrustSource serves the control plane's trust documents: revocations, and the issuer JWKS (keys plus
+// withdrawn_key_ids) so a signing-key rotation or withdrawal reaches a running edge.
+type TrustSource interface {
 	Revocations(context.Context) ([]byte, error)
+	JWKS(context.Context) ([]byte, error)
 }
 
 type NodeRegistration struct {

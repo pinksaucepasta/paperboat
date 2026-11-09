@@ -32,6 +32,7 @@ import (
 type readinessControl struct {
 	t         *testing.T
 	revoked   string
+	jwks      string
 	mu        sync.Mutex
 	epoch     string // registered process epoch
 	ready     bool
@@ -76,6 +77,8 @@ func (c *readinessControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answer(`{}`)
 	case "/v1/trust/revocations":
 		answer(c.revoked)
+	case "/v1/trust/jwks":
+		answer(c.jwks)
 	case "/v1/edge/routes/desired-state":
 		answer(`{"complete":true,"version":"v1","routes":[]}`)
 	case "/v1/edge/routes/observations":
@@ -135,6 +138,10 @@ func TestEdgeStartupSendsNoControlRequestTheServerRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	jwks := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","use":"sig","alg":"EdDSA","kid":"connector","x":"%s"}]}`, base64.RawURLEncoding.EncodeToString(public))
+	fake.mu.Lock()
+	fake.jwks = jwks
+	fake.mu.Unlock()
 	carrierTrust, err := control.NewProcessCarrierServerTrust(nodeID, "installation", "edge.example.test", time.Now().UTC(), time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +156,7 @@ func TestEdgeStartupSendsNoControlRequestTheServerRefuses(t *testing.T) {
 		"control_url":                  server.URL,
 		"control_ca_file":              write("control-ca.pem", string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})), 0o644),
 		"control_credential_file":      write("control.credential", strings.Repeat("c", 48), 0o600),
-		"jwks_file":                    write("jwks.json", fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","use":"sig","alg":"EdDSA","kid":"connector","x":"%s"}]}`, base64.RawURLEncoding.EncodeToString(public)), 0o644),
+		"jwks_file":                    write("jwks.json", jwks, 0o644),
 		"revocations_file":             write("revocations.json", revoked, 0o644),
 		"usage_signing_key_file":       write("usage.key", fmt.Sprintf(`{"key_id":"usage","edge_node_id":%q,"private_key":"%s"}`, nodeID, base64.RawURLEncoding.EncodeToString(private)), 0o600),
 		"connector_advertise_host":     "edge.example.test",

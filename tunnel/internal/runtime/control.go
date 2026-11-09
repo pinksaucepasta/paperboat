@@ -13,8 +13,9 @@ import (
 type ControlDependency struct {
 	Reporter    *reporting.Reporter
 	Source      control.RouteSource
-	TrustSource control.RevocationSource
-	ApplyTrust  func([]byte) error
+	TrustSource control.TrustSource
+	ApplyTrust  func([]byte) error // revocations
+	ApplyJWKS   func([]byte) error
 	NodeID      string
 	Interval    time.Duration
 
@@ -25,7 +26,7 @@ type ControlDependency struct {
 }
 
 func (c *ControlDependency) Start(ctx context.Context) error {
-	if c.Source == nil || c.TrustSource == nil || c.ApplyTrust == nil || c.NodeID == "" || c.Interval <= 0 {
+	if c.Source == nil || c.TrustSource == nil || c.ApplyTrust == nil || c.ApplyJWKS == nil || c.NodeID == "" || c.Interval <= 0 {
 		return ErrWorkerInvalid
 	}
 	if _, err := c.Source.DesiredRoutes(ctx, c.NodeID); err != nil {
@@ -60,7 +61,14 @@ func (c *ControlDependency) refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.ApplyTrust(document)
+	if err := c.ApplyTrust(document); err != nil {
+		return err
+	}
+	keys, err := c.TrustSource.JWKS(ctx)
+	if err != nil {
+		return err
+	}
+	return c.ApplyJWKS(keys)
 }
 
 func (c *ControlDependency) recordError(ctx context.Context, err error) {

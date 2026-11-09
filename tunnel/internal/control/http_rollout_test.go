@@ -79,6 +79,10 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 			_, err := c.Revocations(ctx)
 			return err
 		}, true, 1, nil},
+		{"jwks", "/v1/trust/jwks", `{"keys":[]}`, func(ctx context.Context, c *HTTPClient) error {
+			_, err := c.JWKS(ctx)
+			return err
+		}, true, 1, nil},
 		{"usage report", "/v1/edge/usage-reports", `{"disposition":"accounted"}`, func(ctx context.Context, c *HTTPClient) error {
 			_, err := c.ReportUsage(ctx, UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}})
 			return err
