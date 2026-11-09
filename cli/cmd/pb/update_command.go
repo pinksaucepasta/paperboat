@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
@@ -139,10 +140,12 @@ type updateStatusResult struct {
 	RuntimeState      string                             `json:"runtime_state,omitempty"`
 	ActivationPending bool                               `json:"activation_pending"`
 	ActivationFailure string                             `json:"activation_failure,omitempty"`
-	LastCheck         time.Time                          `json:"last_check,omitempty"`
-	NextCheck         time.Time                          `json:"next_check,omitempty"`
-	LastFailure       string                             `json:"last_failure,omitempty"`
-	Candidate         *workerupdate.PreparedCandidate    `json:"candidate,omitempty"`
+	// ActivationFinishing: the update is installed and the last step (hostd commit, manuals) is being retried.
+	ActivationFinishing bool                            `json:"activation_finishing,omitempty"`
+	LastCheck           time.Time                       `json:"last_check,omitempty"`
+	NextCheck           time.Time                       `json:"next_check,omitempty"`
+	LastFailure         string                          `json:"last_failure,omitempty"`
+	Candidate           *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
 	// CandidateRejected: a downloaded update failed verification (unsafe file, another target, signature).
 	CandidateRejected *updated.CandidateRejection `json:"candidate_rejected,omitempty"`
 }
@@ -171,8 +174,11 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
+	if result.ActivationFailure == "" && response.Transaction.Failure == updateflow.FailureCommit {
+		result.ActivationFailure = string(updateflow.FailureCommit)
+	}
 	// A prepared candidate is verified release evidence even when the last
 	// periodic observation predates its download. Preserve a newer observation.
 	candidateVersion := ""
@@ -259,6 +265,8 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	}
 	if result.Candidate != nil {
 		writePreparedUpdate(command, result.Candidate)
+	} else if result.ActivationFinishing {
+		fmt.Fprintln(command.OutOrStdout(), "Activation: installed, finishing the last step (retrying)")
 	} else if result.ActivationPending {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: pending")
 	} else if result.ActivationFailure != "" {

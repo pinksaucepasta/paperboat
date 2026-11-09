@@ -29,6 +29,10 @@ type TransactionState struct {
 	HealthDeadline time.Time          `json:"health_deadline,omitempty"`
 	RollbackCount  uint32             `json:"rollback_count,omitempty"`
 	Quarantined    bool               `json:"quarantined,omitempty"`
+	// CommitPending reports an installed candidate whose finish (hostd ledger commit, manual refresh) is
+	// being retried; CommitRetryAt is the next attempt.
+	CommitPending bool      `json:"commit_pending,omitempty"`
+	CommitRetryAt time.Time `json:"commit_retry_at,omitempty,omitzero"`
 }
 
 func (m *Manager) TransactionState() (TransactionState, error) {
@@ -48,6 +52,7 @@ func (m *Manager) TransactionState() (TransactionState, error) {
 		ActiveDigest: journal.ActiveDigest, ActiveLength: journal.ActiveLength,
 		Failure: journal.LastFailure, UpdatedAt: journal.StageUpdatedAt,
 		HealthDeadline: journal.HealthDeadline, RollbackCount: journal.RollbackCount,
+		CommitPending: journal.NativeCommitted, CommitRetryAt: journal.NextCommitRetry,
 		Quarantined: journal.Stage == updateflow.StageIdle && journal.CandidateVersion != "" && journal.LastFailure != updateflow.FailureNone,
 	}, nil
 }

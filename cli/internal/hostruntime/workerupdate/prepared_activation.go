@@ -177,12 +177,12 @@ func (m *Manager) finishCommitted(ctx context.Context, journal updateflow.Journa
 		}
 		finish()
 		if err := errors.Join(statusErr, commitErr); err != nil {
-			return Result{Version: committed.Version}, errors.Join(ErrActivationGate, err)
+			return Result{Version: committed.Version}, m.failCommit(journal, signed, errors.Join(ErrActivationGate, err))
 		}
 	}
 	if m.config.FinalizePrepared != nil {
 		if err := m.config.FinalizePrepared(ctx, committed); err != nil {
-			return Result{Version: committed.Version}, err
+			return Result{Version: committed.Version}, m.failCommit(journal, signed, err)
 		}
 	}
 	if err := m.write(m.newJournal()); err != nil {
@@ -193,4 +193,32 @@ func (m *Manager) finishCommitted(ctx context.Context, journal updateflow.Journa
 	}
 	m.record(ctx, EventCommitted, journal, signed, "")
 	return Result{Version: committed.Version, Updated: true}, nil
+}
+
+// maxCommitAttempts bounds the retries of a failing finish after the native commit.
+const maxCommitAttempts = 10
+
+func commitRetryDelay(attempts uint32) time.Duration {
+	return min(5*time.Minute, 5*time.Second<<attempts)
+}
+
+// failCommit records a failed finish after the native commit. The candidate is installed, so the
+// journal keeps the exact approval (the only retry) and schedules the next attempt with backoff;
+// after maxCommitAttempts the attempt ends: idle on the installed version, quarantined, with
+// FailureCommit so status and doctor say the machine needs attention. It returns cause (joined with
+// any journal write failure), never a persisted error text.
+func (m *Manager) failCommit(journal updateflow.Journal, signed Release, cause error) error {
+	journal.NativeCommitted = true
+	journal.CommitAttempts++
+	var next updateflow.Journal
+	if journal.CommitAttempts >= maxCommitAttempts {
+		next = m.idleJournal(journal, updateflow.FailureCommit, signed.Version)
+	} else {
+		journal.NextCommitRetry, journal.StageUpdatedAt = m.now().Add(commitRetryDelay(journal.CommitAttempts)), m.now()
+		next = journal
+	}
+	if err := m.write(next); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
 }

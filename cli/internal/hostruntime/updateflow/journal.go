@@ -57,6 +57,9 @@ const (
 	FailureHealth               Failure = "health_failed"
 	FailureRollback             Failure = "rollback_failed"
 	FailureContradictoryJournal Failure = "recovery_required"
+	// FailureCommit ends an update whose native installation committed but whose hostd ledger commit or
+	// finalization kept failing: the candidate is installed, quarantined, and the machine needs attention.
+	FailureCommit Failure = "commit_failed"
 )
 
 // ActivationPolicy is the verified static policy needed to resume a transaction.
@@ -126,6 +129,12 @@ type Journal struct {
 	DeferredManual               bool                  `json:"deferred_manual,omitempty"`
 	RequiredVersion              string                `json:"required_version,omitempty"`
 	NextCheckAt                  time.Time             `json:"next_check_at,omitempty,omitzero"`
+	// NativeCommitted marks an approved candidate whose native installation committed but whose finish
+	// (hostd ledger commit, manual refresh) is being retried; CommitAttempts counts the failures and
+	// NextCommitRetry is when the updater tries again. No error text is stored, only counts.
+	NativeCommitted bool      `json:"native_committed,omitempty"`
+	CommitAttempts  uint32    `json:"commit_attempts,omitempty"`
+	NextCommitRetry time.Time `json:"next_commit_retry,omitempty,omitzero"`
 }
 
 func (j Journal) Validate() error {
@@ -154,6 +163,9 @@ func (j Journal) Validate() error {
 		return ErrInvalidJournal
 	}
 	if j.Stage == StageAwaitingApproval && j.CandidateID == "" {
+		return ErrInvalidJournal
+	}
+	if j.NativeCommitted && (j.Stage != StageAwaitingApproval || j.ApprovedCandidateID == "") || !j.NativeCommitted && (j.CommitAttempts != 0 || !j.NextCommitRetry.IsZero()) {
 		return ErrInvalidJournal
 	}
 	// A signed deployment manifest must carry its complete activation policy.
@@ -337,7 +349,7 @@ func knownStage(stage Stage) bool {
 	return false
 }
 func knownFailure(f Failure) bool {
-	for _, value := range []Failure{FailureNone, FailureVerification, FailureCompatibility, FailureCandidate, FailureCanary, FailureDrain, FailureHealth, FailureRollback, FailureContradictoryJournal} {
+	for _, value := range []Failure{FailureNone, FailureVerification, FailureCompatibility, FailureCandidate, FailureCanary, FailureDrain, FailureHealth, FailureRollback, FailureContradictoryJournal, FailureCommit} {
 		if value == f {
 			return true
 		}

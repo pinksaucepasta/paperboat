@@ -106,6 +106,44 @@ func SupersedeUntouchedUnixActivation(ctx context.Context, root, executable stri
 	return removeUnixHandoff(root)
 }
 
+// ReleaseCommittedUnixActivation lets an installation, repair or uninstall proceed over a handoff whose native
+// installation already committed but whose finish (hostd ledger commit, manual refresh) is still being retried:
+// the candidate is installed, so nothing is lost by dropping the retry, and refusing would block those commands
+// until the retries run out. It disables the activation job, clears the journal (recreated from the installed
+// version) and removes the handoff. The caller holds the activation lock. It reports false, leaving the handoff
+// alone, for any other handoff.
+func ReleaseCommittedUnixActivation(ctx context.Context, root string, controller UnixActivationController) (bool, error) {
+	if ctx == nil || controller == nil {
+		return false, ErrInvalidConfig
+	}
+	h, err := readUnixHandoff(root)
+	if err != nil || h == nil {
+		return false, err
+	}
+	path := filepath.Join(root, "transaction.json")
+	j, err := updateflow.Load(path)
+	if err != nil || !j.NativeCommitted || j.ApprovedCandidateID != h.ApprovalID {
+		return false, err
+	}
+	if err := controller.Retire(ctx); err != nil {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	noticePath := filepath.Join(root, "owner-maintenance.json")
+	notice, err := autoupdate.LoadOwnerMaintenance(noticePath)
+	if err != nil {
+		return false, err
+	}
+	if notice != nil && notice.CandidateID == h.ApprovalID && notice.Version == h.Candidate {
+		if err := autoupdate.ClearOwnerMaintenance(noticePath); err != nil {
+			return false, err
+		}
+	}
+	return true, removeUnixHandoff(root)
+}
+
 // LockUnixNativeInstall excludes update activation before native crash recovery.
 func LockUnixNativeInstall(ctx context.Context, root string) (io.Closer, error) {
 	// Metadata checks share this lock with activation. Retry contention without

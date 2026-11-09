@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -61,6 +62,13 @@ func TestPreparedSignedUpdatesUseNativeOwnerWithoutChangingApproval(t *testing.T
 				j, err := updateflow.Load(f.paths.journal)
 				if err != nil || j.Stage != updateflow.StageAwaitingApproval || j.ApprovedCandidateID != expected.ID {
 					t.Fatalf("finalization lost exact retry receipt: %+v %v", j, err)
+				}
+				// The failed finish is recorded, not left silent: counted, scheduled, same transaction.
+				if !j.NativeCommitted || j.CommitAttempts != 1 || !j.NextCommitRetry.After(j.StageUpdatedAt.Add(-time.Second)) || j.LastFailure != updateflow.FailureNone {
+					t.Fatalf("failed finish not recorded as commit-pending: %+v", j)
+				}
+				if state, err := f.manager.TransactionState(); err != nil || !state.CommitPending || state.CommitRetryAt.IsZero() {
+					t.Fatalf("status does not show the pending finish: %+v %v", state, err)
 				}
 				return
 			}
@@ -225,6 +233,9 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
 		t.Fatal("the failing finish was not reported")
 	}
+	if j, err := updateflow.Load(f.paths.journal); err != nil || !j.NativeCommitted || j.CommitAttempts != 1 {
+		t.Fatalf("manuals-only failure not recorded as commit-pending: %+v %v", j, err)
+	}
 	// hostd's commit check reads updater status, which asks for the prepared candidate: it must answer.
 	if candidate, err := f.manager.PreparedCandidate(); err != nil || candidate.ID != "" {
 		t.Fatalf("status cannot describe an installed candidate: %+v %v", candidate, err)
@@ -244,8 +255,69 @@ func TestRetryAfterInterruptedFinishCompletesWithoutTheStagedPayload(t *testing.
 		t.Fatalf("retry did not finish the interrupted update: %+v %v native=%d", result, err, nativeCalls)
 	}
 	journal, err := updateflow.Load(f.paths.journal)
-	if err != nil || journal.Stage != updateflow.StageIdle || journal.ActiveVersion != f.candidate.Version {
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.ActiveVersion != f.candidate.Version || journal.NativeCommitted || journal.CommitAttempts != 0 {
 		t.Fatalf("receipt not retired by the retry: %+v %v", journal, err)
+	}
+}
+
+// A finish that never succeeds (hostd keeps refusing the commit) must not block the machine forever: after the
+// attempt cap the journal ends idle on the installed version, the candidate quarantined, with commit_failed so
+// status and doctor say it needs attention; every attempt before that keeps the approval and counts up.
+func TestPersistentCommitFailureEndsQuarantinedAfterTheAttemptCap(t *testing.T) {
+	f := newFixture(t)
+	var completeErr error
+	if f.candidate, completeErr = completeJournalRelease(f.candidate); completeErr != nil {
+		t.Fatal(completeErr)
+	}
+	gate := &commitRefusingGate{}
+	f.manager.config.Gate = gate
+	f.manager.config.ApplyPrepared = func(ctx context.Context, a PreparedActivation) (installsource.Source, error) {
+		if err := a.Prepare(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		body, err := os.ReadFile(a.Executable)
+		if err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.WriteFile(f.paths.current, body, 0700); err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.Remove(a.Executable); err != nil {
+			return installsource.Source{}, err
+		}
+		f.hostd.active = hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(a.Source.Version), APIVersion: 1, Epoch: 42}
+		if err := a.Validate(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		return a.Source, nil
+	}
+	previous := f.manager.active
+	f.manager.config.RecoverPrepared = func(context.Context) (installsource.Source, error) {
+		return f.manager.candidateSource(f.candidate), nil
+	}
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
+		t.Fatal("the refused commit was not reported")
+	}
+	for attempt := uint32(1); attempt < maxCommitAttempts; attempt++ {
+		j, err := updateflow.Load(f.paths.journal)
+		if err != nil || j.Stage != updateflow.StageAwaitingApproval || j.ApprovedCandidateID == "" || !j.NativeCommitted || j.CommitAttempts != attempt {
+			t.Fatalf("attempt %d: approval/commit-pending not kept: %+v %v", attempt, j, err)
+		}
+		f.manager.setActive(previous) // the helper restarts on the previous release
+		if _, err := f.manager.Activate(context.Background(), f.candidate); err == nil {
+			t.Fatalf("attempt %d: the refused commit was not reported", attempt+1)
+		}
+	}
+	j, err := updateflow.Load(f.paths.journal)
+	if err != nil || j.Stage != updateflow.StageIdle || j.LastFailure != updateflow.FailureCommit || j.NativeCommitted || j.ApprovedCandidateID != "" || j.ActiveVersion != f.candidate.Version || j.CandidateVersion != f.candidate.Version {
+		t.Fatalf("persistent commit failure did not reach the terminal state: %+v %v", j, err)
+	}
+	state, err := f.manager.TransactionState()
+	if err != nil || state.CommitPending || !state.Quarantined || state.Failure != updateflow.FailureCommit {
+		t.Fatalf("terminal state not reported: %+v %v", state, err)
+	}
+	if gate.commits != int(maxCommitAttempts) {
+		t.Fatalf("hostd was asked to commit %d times, want %d", gate.commits, maxCommitAttempts)
 	}
 }
 

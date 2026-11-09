@@ -426,9 +426,35 @@ func (s *Service) currentManager() *workerupdate.Manager {
 	return s.manager
 }
 
-// RunActivationHelper is the only process permitted to mutate a handed-off
-// worker transaction. Its executable is the policy-authorized previous release.
-func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
+// errCommitPending marks a helper attempt that ended with the native commit done but its finish
+// (hostd ledger commit, manual refresh) failing; the journal schedules the retry.
+var errCommitPending = errors.New("the update is installed but its finish is being retried")
+
+// RunActivationHelper is the only process permitted to mutate a handed-off worker transaction. Its
+// executable is the policy-authorized previous release. A failing finish after the native commit is
+// retried here, each attempt honouring the journal's backoff and holding the activation lock only
+// while it runs, so an uninstall can take it between attempts; the cap ends it in the journal.
+func (s *Service) RunActivationHelper(ctx context.Context) error {
+	for {
+		err := s.runActivationHelperOnce(ctx)
+		if !errors.Is(err, errCommitPending) {
+			return err
+		}
+		state, stateErr := s.currentManager().TransactionState()
+		if stateErr != nil {
+			return errors.Join(err, stateErr)
+		}
+		timer := time.NewTimer(time.Until(state.CommitRetryAt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(err, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error) {
 	lock, err := unixActivationLock(s.config.StateRoot)
 	if err != nil {
 		return err
@@ -524,6 +550,9 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 	state, stateErr := manager.TransactionState()
 	if stateErr != nil {
 		return errors.Join(err, stateErr)
+	}
+	if state.CommitPending {
+		return errors.Join(err, errCommitPending)
 	}
 	if state.Stage != "idle" {
 		return errors.Join(err, errors.New("update recovery remains pending"))

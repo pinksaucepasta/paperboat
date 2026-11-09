@@ -62,10 +62,10 @@ type ControlResponse struct {
 }
 
 // UpdateHealth is the availability value doctor reads: "recovery_required" when the updater errors or its journal
-// shows a rollback that failed or contradicts itself, otherwise "healthy". A pending activation and a rejected or
+// shows a rollback that failed, an installed update whose commit never finished, or contradicts itself, otherwise "healthy". A pending activation and a rejected or
 // quarantined candidate leave the running version fine, so they are not faults.
 func (r ControlResponse) UpdateHealth() string {
-	if r.Status != "ok" || r.Transaction.Failure == updateflow.FailureRollback || r.Transaction.Failure == updateflow.FailureContradictoryJournal {
+	if r.Status != "ok" || r.Transaction.Failure == updateflow.FailureRollback || r.Transaction.Failure == updateflow.FailureContradictoryJournal || r.Transaction.Failure == updateflow.FailureCommit {
 		return "recovery_required"
 	}
 	return "healthy"

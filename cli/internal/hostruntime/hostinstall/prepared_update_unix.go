@@ -300,7 +300,11 @@ func prepareUnixNativeRecovery(ctx context.Context, paths installPaths, uid int,
 		return err
 	}
 	if active {
-		return updated.ErrActivationPending
+		// A committed installation whose finish is still retrying must not block these commands.
+		controller := service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}
+		if released, releaseErr := updated.ReleaseCommittedUnixActivation(ctx, paths.updateState, controller); releaseErr != nil || !released {
+			return errors.Join(updated.ErrActivationPending, releaseErr)
+		}
 	}
 	return nil
 }

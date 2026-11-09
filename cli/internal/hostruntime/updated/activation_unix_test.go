@@ -863,3 +863,50 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 		})
 	}
 }
+
+// An installation, repair or uninstall must not be blocked while an already committed update only retries its
+// finish (the whole retry budget is ~30 minutes); any other handoff is left alone.
+func TestReleaseCommittedUnixActivationFreesOnlyACommittedFinishRetry(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires protected activation custody")
+	}
+	approval := strings.Repeat("b", 64)
+	for _, test := range []struct {
+		name      string
+		committed bool
+	}{{"commit pending", true}, {"approved but not committed", false}} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			previous := workerupdate.Release{Version: "2026.10.13.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH}
+			if err := writeUnixHandoff(root, &unixActivationHandoff{Schema: unixHandoffSchema, Previous: previous, Candidate: "2026.10.13.2", ApprovalID: approval, Started: true}); err != nil {
+				t.Fatal(err)
+			}
+			j := updateflow.Journal{Schema: updateflow.SchemaV1, TransactionID: "txn", BootID: "hostd", Stage: updateflow.StageAwaitingApproval, StageUpdatedAt: time.Now().UTC(),
+				ActiveVersion: previous.Version, ActiveDigest: previous.SHA256, ActiveLength: 1, ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 1, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 1,
+				CandidateID: approval, ApprovedCandidateID: approval, ArtifactDigest: strings.Repeat("c", 64), ArtifactLength: 1, ArtifactPlatform: runtime.GOOS, ArtifactArchitecture: runtime.GOARCH,
+				CandidateVersion: "2026.10.13.2", CandidateDigest: strings.Repeat("c", 64), CandidateLength: 1, StagedPath: filepath.Join(root, "staged"), NativeCommitted: test.committed}
+			if test.committed {
+				j.CommitAttempts, j.NextCommitRetry = 3, time.Now().Add(time.Minute).UTC()
+			}
+			journal := filepath.Join(root, "transaction.json")
+			if err := updateflow.Write(journal, j, 0, 0); err != nil {
+				t.Fatal(err)
+			}
+			released, err := ReleaseCommittedUnixActivation(context.Background(), root, &controllerFixture{})
+			if err != nil || released != test.committed {
+				t.Fatalf("released=%v err=%v", released, err)
+			}
+			handoff, _ := readUnixHandoff(root)
+			_, journalErr := os.Stat(journal)
+			if test.committed && (handoff != nil || !os.IsNotExist(journalErr)) {
+				t.Fatalf("committed finish retry not cleared: handoff=%v journal=%v", handoff, journalErr)
+			}
+			if !test.committed && (handoff == nil || journalErr != nil) {
+				t.Fatalf("an uncommitted approval was released: handoff=%v journal=%v", handoff, journalErr)
+			}
+		})
+	}
+}

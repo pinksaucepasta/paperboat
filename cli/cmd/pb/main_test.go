@@ -10,6 +10,7 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -811,4 +812,22 @@ func TestUpdateRefusesABadApprovalIDAndAnUnreadableSourceWithAClearMessage(t *te
 		t.Fatalf("--from with --approve: %v", conflict)
 	}
 	assertJSON(conflict, "conflicting_update_flags")
+}
+
+// An update that is installed but whose last step keeps failing must not read as "Activation: complete".
+func TestUpdateStatusShowsAFinishThatIsBeingRetriedOrGaveUp(t *testing.T) {
+	retrying := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{CommitPending: true}}
+	result := updateStatusCommandResult("2026.11.09.1", retrying, nil)
+	var output bytes.Buffer
+	command := &cobra.Command{}
+	command.Flags().Bool("json", false, "")
+	command.SetOut(&output)
+	if err := writeUpdateStatusResult(command, result); err != nil || !result.ActivationFinishing || !strings.Contains(output.String(), "finishing the last step") {
+		t.Fatalf("retrying finish: %+v %q %v", result, output.String(), err)
+	}
+	gaveUp := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{Failure: updateflow.FailureCommit, Quarantined: true}}
+	output.Reset()
+	if err := writeUpdateStatusResult(command, updateStatusCommandResult("2026.11.09.1", gaveUp, nil)); err != nil || !strings.Contains(output.String(), "Activation: failed (commit_failed)") {
+		t.Fatalf("finish that gave up: %q %v", output.String(), err)
+	}
 }
