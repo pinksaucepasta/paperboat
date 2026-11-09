@@ -8,10 +8,10 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -145,8 +145,8 @@ func TestCustomSSHNoGitStrictHostKeyAndAuth(t *testing.T) {
 	}
 	keyFile := filepath.Join(root, "key")
 	hosts := filepath.Join(root, "known_hosts")
-	os.WriteFile(keyFile, key, 0600)
-	os.WriteFile(hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, host.PublicKey())+"\n"), 0600)
+	atomicfiletest.WriteOwnerOnly(t, keyFile, key)
+	atomicfiletest.WriteOwnerOnly(t, hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, host.PublicKey())+"\n"))
 	p := RepositoryCredentialProfile{Transport: "ssh", Auth: "ssh", SSHKeyFile: keyFile, KnownHostsFile: hosts}
 	if err := SaveRepositoryCredentialProfile(root, "repo", p); err != nil {
 		t.Fatal(err)
@@ -209,17 +209,17 @@ func TestCustomSSHNoGitStrictHostKeyAndAuth(t *testing.T) {
 		}
 	}
 	wrong, _ := sshFixtureKey(t)
-	os.WriteFile(hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, wrong.PublicKey())+"\n"), 0600)
+	atomicfiletest.WriteOwnerOnly(t, hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, wrong.PublicKey())+"\n"))
 	if _, err := repo.Fetch(context.Background()); err == nil {
 		t.Fatal("wrong host key accepted")
 	}
-	os.WriteFile(hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, host.PublicKey())+"\n"), 0600)
+	atomicfiletest.WriteOwnerOnly(t, hosts, []byte(knownhosts.Line([]string{ln.Addr().String()}, host.PublicKey())+"\n"))
 	_, wrongPrivate := sshFixtureKey(t)
-	os.WriteFile(keyFile, wrongPrivate, 0600)
+	atomicfiletest.WriteOwnerOnly(t, keyFile, wrongPrivate)
 	if _, err := repo.Fetch(context.Background()); err == nil {
 		t.Fatal("wrong identity accepted")
 	}
-	os.WriteFile(hosts, []byte(knownhosts.Line([]string{"unknown.invalid:22"}, host.PublicKey())+"\n"), 0600)
+	atomicfiletest.WriteOwnerOnly(t, hosts, []byte(knownhosts.Line([]string{"unknown.invalid:22"}, host.PublicKey())+"\n"))
 	if _, err := repo.Fetch(context.Background()); !errors.Is(err, ErrRepositoryCredentials) {
 		t.Fatal("unregistered host did not fail closed before dialing", err)
 	}

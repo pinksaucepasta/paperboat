@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,10 @@ import (
 func writeVaultInputFile(t *testing.T, value []byte, mode os.FileMode) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "secret-input")
+	if mode.Perm() == 0o600 { // the private shape; other modes build the files the command must refuse
+		atomicfiletest.WriteOwnerOnly(t, path, value)
+		return path
+	}
 	if err := os.WriteFile(path, value, mode); err != nil {
 		t.Fatal(err)
 	}

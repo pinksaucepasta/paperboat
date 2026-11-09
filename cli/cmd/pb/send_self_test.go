@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
+
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
@@ -35,7 +37,7 @@ func TestSendToThisComputerCopiesIntoItsOwnInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	inboxPath := filepath.Join(directory, "Inbox")
-	if err := os.Mkdir(inboxPath, 0o700); err != nil {
+	if err := inbox.EnsurePath(inboxPath); err != nil { // secured as the product does; Windows validates its ACL
 		t.Fatal(err)
 	}
 	var requests []string

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 )
@@ -82,7 +84,7 @@ func TestHomeRuntimeDiagnosticsDoesNotUseLivenessAsWorkloadCounts(t *testing.T) 
 			root := t.TempDir()
 			os.Mkdir(filepath.Join(root, "runtime"), 0700)
 			body, _ := json.Marshal(map[string]string{"schema": "paperboat.worker-local/v1", "listen_address": strings.TrimPrefix(server.URL, "http://")})
-			os.WriteFile(filepath.Join(root, "runtime", "worker-local.json"), body, 0600)
+			atomicfiletest.WriteOwnerOnly(t, filepath.Join(root, "runtime", "worker-local.json"), body)
 			report := localDoctorReport{WorkloadCounts: "unavailable"}
 			inspectLocalRuntimeHealth(t.Context(), &report, root)
 			if report.HostRuntime != "ready" || report.WorkloadCounts != tc.want {

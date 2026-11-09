@@ -96,9 +96,14 @@ func TestConcurrentStartupWithMaximumDiagnosticHistory(t *testing.T) {
 	recordsPerSegment := int(defaultSegmentBytes)/len(encoded) - 1
 	segmentData := bytes.Repeat(encoded, recordsPerSegment)
 	now := time.Now().UTC()
+	owner, err := resolveDiagnosticOwner(DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for index := 0; index < DefaultMaximumBytes/defaultSegmentBytes; index++ {
 		name := fmt.Sprintf("events-%020d-%02d.ndjson", now.Add(-time.Duration(index)*time.Second).UnixNano(), 0)
-		if err := os.WriteFile(filepath.Join(directory, name), segmentData, 0o600); err != nil {
+		// Written as the store writes its own files: mode 0600, and the store's protected ACL on Windows.
+		if err := writeDiagnosticAtomic(filepath.Join(directory, name), segmentData, owner); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"os"
 	"path/filepath"
@@ -145,9 +146,7 @@ func TestFileStoreInvalidRecordRetainsParserCauseWithoutExposingContents(t *test
 		t.Fatal(err)
 	}
 	const privateContents = `{"schema":"PRIVATE_DEFERRAL_CONTENT",`
-	if err := os.WriteFile(store.Path, []byte(privateContents), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, store.Path, []byte(privateContents))
 	_, present, err := store.CurrentDeferral(context.Background())
 	var syntaxErr *json.SyntaxError
 	if err == nil || present || !errors.Is(err, ErrInvalidRecord) || (!errors.As(err, &syntaxErr) && !errors.Is(err, io.ErrUnexpectedEOF)) || err.Error() != "release eligibility record is invalid" || strings.Contains(err.Error(), "PRIVATE_DEFERRAL_CONTENT") || strings.Contains(err.Error(), store.Path) {

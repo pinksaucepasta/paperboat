@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http/httptest"
 	"os"
@@ -109,7 +110,7 @@ func TestRepositoryReadHTTPS(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := filepath.Join(root, "ca.pem")
-	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0600)
+	atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 	if err := SaveRepositoryCredentialProfile(root, "repo", RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "reader", Password: "read-secret", CAFile: ca}); err != nil {
 		t.Fatal(err)
 	}

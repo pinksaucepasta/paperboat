@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"os"
 	"path/filepath"
@@ -107,9 +108,7 @@ func TestResumeStorageFailureKeepsCauseAndRecoversWithoutExposingPath(t *testing
 func TestResumeBindingFailureKeepsCauseWithoutExposingMalformedContent(t *testing.T) {
 	root := t.TempDir()
 	secret := "RESUME_PRIVATE_CONTENT_DO_NOT_EXPORT"
-	if err := os.WriteFile(ResumePath(root), []byte(`{"schema":"`+secret+`"`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, ResumePath(root), []byte(`{"schema":"`+secret+`"`))
 	_, err := loadResumeDocument(root)
 	if !errors.Is(err, ErrResumeBinding) || !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("resume binding failure=%v, want binding sentinel and JSON cause", err)

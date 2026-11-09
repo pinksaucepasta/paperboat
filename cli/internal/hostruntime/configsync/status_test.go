@@ -3,6 +3,7 @@ package configsync
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
@@ -74,9 +75,7 @@ func TestReadStatusRejectsSymlinkAndPermissiveFile(t *testing.T) {
 func TestReadStatusKeepsDecodeCauseWithoutEchoingInput(t *testing.T) {
 	path := filepath.Join(shorttemp.Dir(t), "status.json")
 	const malformed = `{"state":"healthy","sync_revision":"private"}`
-	if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, path, []byte(malformed))
 	_, err := ReadStatus(path, 10)
 	var typeErr *json.UnmarshalTypeError
 	if !errors.Is(err, ErrStatusInvalid) || !errors.As(err, &typeErr) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -77,9 +78,7 @@ func TestRuntimeIdentityParserAndMissingFileCausesAreSafe(t *testing.T) {
 		t.Fatal("missing identity lost its safe native cause")
 	}
 	path := filepath.Join(root, "runtime-identity.json")
-	if err := os.WriteFile(path, []byte(`{"credential":! PRIVATE-CREDENTIAL}`), 0o600); err != nil {
-		t.Fatal("fixture write failed")
-	}
+	atomicfiletest.WriteOwnerOnly(t, path, []byte(`{"credential":! PRIVATE-CREDENTIAL}`))
 	_, err = LoadRuntimeIdentity(root, time.Now().UTC())
 	var syntax *json.SyntaxError
 	if !errors.As(err, &syntax) || err.Error() != ErrUnavailable.Error() {

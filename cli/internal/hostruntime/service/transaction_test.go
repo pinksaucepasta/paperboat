@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
 type fakeTransactionalComponent struct {
@@ -288,10 +289,11 @@ func TestLifecycleMalformedJournalFailsClosedWithoutMutation(t *testing.T) {
 	var callMu sync.Mutex
 	component := newFakeTransactionalComponent("hostd", &calls, &callMu)
 	manager := lifecycleForTest(t, component)
-	if err := os.MkdirAll(manager.stateRoot, 0o700); err != nil {
+	// Written as the manager writes its own state, so the journal is refused for its content, not its protection.
+	if err := ensureLifecycleDirectory(manager.stateRoot); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(manager.journal, []byte(`{"version":"paperboat.service-lifecycle/v1","operation":"install","operation":"stop"}`), 0o600); err != nil {
+	if err := writeLifecycleJournal(manager.journal, []byte(`{"version":"paperboat.service-lifecycle/v1","operation":"install","operation":"stop"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Recover(context.Background()); !errors.Is(err, ErrLifecycleUncertain) {

@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"math/big"
@@ -160,7 +161,7 @@ func TestCustomHTTPSNoGitTrustAuthPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := filepath.Join(root, "ca.pem")
-	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600)
+	atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
 	profile := RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "alice", Password: "private-password", CAFile: ca}
 	if err := SaveRepositoryCredentialProfile(root, "repo", profile); err != nil {
 		t.Fatal(err)
@@ -239,7 +240,7 @@ func TestCredentialProfilesPrivateIdentityAndInvalid(t *testing.T) {
 		t.Fatal("cross repository credentials")
 	}
 	path, _ := credentialProfilePath(root, "a")
-	os.Chmod(path, 0644)
+	atomicfiletest.MakeAccessible(t, path)
 	if _, err := LoadRepositoryCredentialProfile(root, "a"); err == nil {
 		t.Fatal("public secret file accepted")
 	}
@@ -300,7 +301,7 @@ func TestConcurrentRepositoryHTTPSProfilesIsolated(t *testing.T) {
 			t.Fatal(err)
 		}
 		ca := filepath.Join(root, "ca.pem")
-		os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600)
+		atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
 		if err := SaveRepositoryCredentialProfile(root, "repo", RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: user, Password: password, CAFile: ca}); err != nil {
 			t.Fatal(err)
 		}
@@ -418,7 +419,7 @@ func TestCustomHTTPSAmbiguousPushObservedWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := filepath.Join(root, "ca.pem")
-	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600)
+	atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
 	SaveRepositoryCredentialProfile(root, "repo", RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "alice", Password: "secret", CAFile: ca})
 	repo := newTransportRepository(t, srv.URL+"/repo.git", "https", root)
 	snap, err := repo.Fetch(context.Background())
@@ -449,7 +450,7 @@ func TestRepositoryExpiredGrantAndFailedCloneRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := filepath.Join(root, "ca.pem")
-	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600)
+	atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
 	p := RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "alice", Password: "wrong", CAFile: ca}
 	SaveRepositoryCredentialProfile(root, "repo", p)
 	repo := newTransportRepository(t, srv.URL+"/repo.git", "https", root)
@@ -601,9 +602,7 @@ func TestGitOperationsOutliveAdmissionAndHonorWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := filepath.Join(credentials, "ca.pem")
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
 	if err := SaveRepositoryCredentialProfile(credentials, "repo", RepositoryCredentialProfile{Transport: "https", Auth: "basic", Username: "reader", Password: "fixture-password", CAFile: ca}); err != nil {
 		t.Fatal(err)
 	}

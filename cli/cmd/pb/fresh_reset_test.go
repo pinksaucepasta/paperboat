@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"os"
 	"os/exec"
@@ -23,9 +24,7 @@ import (
 func freshResetTokenFile(t *testing.T) string {
 	t.Helper()
 	path := t.TempDir() + string(os.PathSeparator) + "token"
-	if err := os.WriteFile(path, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerAndSystemOnly(t, path, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 	return path
 }
 

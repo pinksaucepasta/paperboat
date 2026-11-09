@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 )
 
 type fakeAccessTunnelRuntime struct {
@@ -263,9 +265,7 @@ func TestProductionAccessTunnelRuntimeKeepsMissingTokenCauseWithoutPath(t *testi
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runtimeDir, "worker-local.json"), []byte(`{"schema":"paperboat.worker-local/v1","listen_address":"127.0.0.1:1234"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDir, "worker-local.json"), []byte(`{"schema":"paperboat.worker-local/v1","listen_address":"127.0.0.1:1234"}`))
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
 	_, err := newProductionAccessTunnelRuntime()
 	if !errors.Is(err, ErrAccessTunnelUnavailable) || !errors.Is(err, os.ErrNotExist) {

@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -279,6 +281,10 @@ func readCommandRecoveryFile(t *testing.T, path string) ([]byte, os.FileMode) {
 	}
 	if len(value) == 0 || value[len(value)-1] != '\n' {
 		t.Fatalf("recovery file is not newline terminated: %q", value)
+	}
+	if runtime.GOOS == "windows" { // privacy is a protected DACL there, and Perm() always says 0666
+		atomicfiletest.RequireOwnerOnly(t, path, 0o600)
+		return bytes.TrimSuffix(value, []byte{'\n'}), 0o600
 	}
 	return bytes.TrimSuffix(value, []byte{'\n'}), info.Mode().Perm()
 }

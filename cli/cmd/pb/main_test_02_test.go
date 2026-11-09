@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
@@ -118,10 +119,13 @@ func TestInboxPathJSONExecutesWithDisposableIdentity(t *testing.T) {
 	runtimeRoot := filepath.Join(rootPath, "runtime")
 	stateRoot := filepath.Join(rootPath, "identity")
 	inboxPath := filepath.Join(home, "Paperboat Inbox")
-	for _, directory := range []string{home, runtimeRoot, inboxPath} {
+	for _, directory := range []string{home, runtimeRoot} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := inbox.EnsurePath(inboxPath); err != nil { // secured as the product does; Windows validates its ACL
+		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(rootPath, "config"))

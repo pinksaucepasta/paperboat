@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
@@ -78,9 +80,7 @@ func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testi
 		t.Fatal(err)
 	}
 	descriptor := []byte(fmt.Sprintf(`{"schema":"paperboat.worker-local/v1","listen_address":%q}`, strings.TrimPrefix(server.URL, "http://")))
-	if err := os.WriteFile(filepath.Join(runtimeDirectory, "worker-local.json"), descriptor, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDirectory, "worker-local.json"), descriptor)
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
 	t.Setenv("HTTP_PROXY", proxy.URL)
 	t.Setenv("NO_PROXY", "")
@@ -120,9 +120,7 @@ func TestCollectTunnelHostDiagnosticsRejectsUnsafeResponse(t *testing.T) {
 				t.Fatal(err)
 			}
 			descriptor := []byte(fmt.Sprintf(`{"schema":"paperboat.worker-local/v1","listen_address":%q}`, strings.TrimPrefix(server.URL, "http://")))
-			if err := os.WriteFile(filepath.Join(runtimeDirectory, "worker-local.json"), descriptor, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDirectory, "worker-local.json"), descriptor)
 			t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
 			_, err := collectTunnelHostDiagnostics(t.Context())
 			if err != test.want {

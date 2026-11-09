@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
@@ -32,9 +33,7 @@ func TestRepositoryCredentialProfileFailuresKeepCausesAndHidePaths(t *testing.T)
 		t.Fatal(err)
 	}
 	const canary = "PRIVATE_REPOSITORY_PASSWORD_CANARY"
-	if err := os.WriteFile(path, []byte(`{"password":"`+canary+`",}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, path, []byte(`{"password":"`+canary+`",}`))
 	_, err = LoadRepositoryCredentialProfile(root, "malformed-profile")
 	var syntaxErr *json.SyntaxError
 	if !errors.Is(err, ErrRepositoryCredentials) || !errors.As(err, &syntaxErr) || strings.Contains(err.Error(), canary) || strings.Contains(err.Error(), path) {

@@ -8,11 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/supportbundle"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
-	"github.com/spf13/cobra"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +18,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/supportbundle"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
+	"github.com/spf13/cobra"
 )
 
 type cancelAfterWrite struct {
@@ -625,9 +627,7 @@ func TestCollectTunnelDoctorLocalReportUsesNoProxyAndStrictHealthJSON(t *testing
 				t.Fatalf("Mkdir: %v", err)
 			}
 			descriptor := []byte(fmt.Sprintf(`{"schema":"paperboat.worker-local/v1","listen_address":%q}`, strings.TrimPrefix(server.URL, "http://")))
-			if err := os.WriteFile(filepath.Join(runtimeDirectory, "worker-local.json"), descriptor, 0o600); err != nil {
-				t.Fatalf("WriteFile: %v", err)
-			}
+			atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDirectory, "worker-local.json"), descriptor)
 			t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
 			report, err := collectTunnelDoctorLocalReport(t.Context())
 			if err != nil || report.HostRuntime != test.wantStatus {

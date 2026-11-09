@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"net/http"
 	"os"
@@ -77,9 +78,7 @@ func TestMachineControlPreservesFilesystemAndDecodeCausesPrivately(t *testing.T)
 		"initial document":  []byte(`{"credential":"control-document-private-marker"`),
 		"trailing document": []byte(`{"version":1} {"private_marker":`),
 	} {
-		if err := os.WriteFile(controlPath, contents, 0o600); err != nil {
-			t.Fatal("write malformed control document")
-		}
+		atomicfiletest.WriteOwnerOnly(t, controlPath, contents)
 		_, err := store.MachineControl(now, 0)
 		if err == nil {
 			t.Fatalf("%s was accepted", name)
@@ -160,9 +159,7 @@ func TestRegistrationPreservesDecodeCausesAndRecovers(t *testing.T) {
 		"trailing": append(append([]byte(nil), encoded...), []byte(` {"private-registration-marker": @}`)...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := os.WriteFile(path, contents, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			atomicfiletest.WriteOwnerOnly(t, path, contents)
 			_, err := store.Registration()
 			requireControlCauseAndStaticMessage(t, err, root, "private-registration-marker")
 			var syntaxErr *json.SyntaxError
