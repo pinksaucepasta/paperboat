@@ -2,8 +2,9 @@
 
 import { CaretUpDownIcon, CheckIcon, XIcon } from "@phosphor-icons/react"
 import { useState } from "react"
-import { useMachines } from "@/lib/api"
-import { targetName } from "@/lib/token-scope"
+import { useApiQuery, useMachines, useWorkspace } from "@/lib/api"
+import { memberEmails, teamInvitationsQuery, teamQuery } from "@/lib/teams"
+import { machineOptions, targetName } from "@/lib/token-scope"
 import { cn } from "@/lib/utils"
 import { StatusDot } from "@/components/machine-status"
 import { Badge } from "@/components/ui/badge"
@@ -18,14 +19,27 @@ const visibleChips = 3
  */
 export function TokenMachines({
   tags,
+  names,
   value,
   onChange,
 }: {
   tags: string[]
+  /** The policy's canonical machine names (`names.machines`). */
+  names: string[]
   value: string[]
   onChange: (targets: string[]) => void
 }) {
   const machines = useMachines()
+  const workspace = useWorkspace()
+  // Owners' emails tell apart machines that share an alias; only a team has other owners.
+  const team = workspace?.kind === "team" ? workspace.id : ""
+  const members = useApiQuery({ ...teamQuery(team), enabled: Boolean(team) })
+  const invitations = useApiQuery({ ...teamInvitationsQuery(team), enabled: Boolean(team) })
+  const options = machineOptions(
+    names,
+    machines.data ?? [],
+    members.data ? memberEmails(members.data, invitations.data) : new Map(),
+  )
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState(false)
   const toggle = (target: string) =>
@@ -56,18 +70,14 @@ export function TokenMachines({
                   ))}
                 </CommandGroup>
               )}
-              {(machines.data?.length ?? 0) > 0 && (
+              {options.length > 0 && (
                 <CommandGroup heading="Machines">
-                  {machines.data?.map((machine) => (
-                    <Option
-                      key={machine.id}
-                      target={`machine:${machine.alias}`}
-                      picked={value.includes(`machine:${machine.alias}`)}
-                      onToggle={toggle}
-                    >
+                  {options.map((option) => (
+                    <Option key={option.target} target={option.target} picked={value.includes(option.target)} onToggle={toggle}>
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">{machine.alias}</span>
-                        <StatusDot online={machine.online} />
+                        <span className="truncate">{option.alias}</span>
+                        {option.online !== undefined && <StatusDot online={option.online} />}
+                        {option.owner && <span className="truncate text-xs text-muted-foreground">{option.owner}</span>}
                       </span>
                     </Option>
                   ))}

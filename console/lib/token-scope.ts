@@ -42,6 +42,31 @@ export function tokenScope(machines: string[] | "all", actions: string[]): Scope
   return [{ dst: machines === "all" ? ["machine:*"] : machines, allow: machineActions.filter((a) => actions.includes(a)) }]
 }
 
+export type MachineOption = { target: string; alias: string; owner?: string; online?: boolean }
+
+/**
+ * One option per canonical machine name from the policy (`names.machines`: `alias`, or `owner email/alias`
+ * when two machines shared into a team have the same alias), so a pick is always the unambiguous target.
+ * `online` comes from the machine the name belongs to, matched by alias and, for a disambiguated name, owner.
+ */
+export function machineOptions(
+  names: string[],
+  machines: { alias: string; online: boolean; owner_account?: string }[],
+  emails: Map<string, string>,
+): MachineOption[] {
+  return names.map((name) => {
+    const slash = name.lastIndexOf("/")
+    const owner = slash < 0 ? undefined : name.slice(0, slash)
+    const alias = name.slice(slash + 1)
+    const machine = machines.find(
+      (m) =>
+        m.alias === alias &&
+        (owner === undefined || emails.get(m.owner_account ?? "")?.toLowerCase() === owner.toLowerCase()),
+    )
+    return { target: `machine:${name}`, alias, owner, online: machine?.online }
+  })
+}
+
 /** A target in words: `tag:prod` stays, `machine:hp` → hp. */
 export const targetName = (target: string) => target.replace(/^machine:/, "")
 

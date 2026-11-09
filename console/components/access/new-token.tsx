@@ -278,7 +278,7 @@ function MachinesBlock({ form, onChange }: { form: Form; onChange: (next: Partia
       </div>
       {form.machines === "selected" && (
         <div className="max-w-md">
-          <TokenMachines tags={tags} value={form.targets} onChange={(targets) => onChange({ targets })} />
+          <TokenMachines tags={tags} names={policy.data?.names.machines ?? []} value={form.targets} onChange={(targets) => onChange({ targets })} />
         </div>
       )}
     </Block>
