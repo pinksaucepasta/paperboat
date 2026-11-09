@@ -195,7 +195,7 @@ function NodeRow({ node }: { node: Node }) {
       label={`Actions for ${node.name}`}
       entries={entries}
       row={(actions) => (
-        <tr className="data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
+        <tr className="transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
           <td className="truncate font-medium">{node.name}</td>
           <td className="hidden truncate text-muted-foreground md:table-cell">{runs(node)}</td>
           <td className="hidden truncate font-mono text-code text-muted-foreground sm:table-cell">{node.host}</td>
@@ -428,16 +428,13 @@ function PathCard({
             ))}
           </ul>
           {found.hasNextPage && (
-            <Button
-              variant="secondary"
-              className="self-start"
-              onClick={() => found.fetchNextPage()}
-              disabled={found.isFetchingNextPage}
-            >
-              {found.isFetchingNextPage ? "Loading…" : "Load more"}
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button variant="secondary" onClick={() => found.fetchNextPage()} disabled={found.isFetchingNextPage}>
+                {found.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+              {found.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
+            </div>
           )}
-          {found.isFetchNextPageError && <p className="text-destructive">Couldn’t load more. Try again.</p>}
         </div>
       )}
       {save.isError && <p className="text-destructive">{save.error.message}</p>}
