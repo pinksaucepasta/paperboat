@@ -145,7 +145,16 @@ func TestControlStatusWhilePendingCarriesJournalCandidate(t *testing.T) {
 		return installsource.Source{}, ErrInstallationPending
 	}}}
 	response, err := s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"})
-	if err != nil || !response.Pending || response.Candidate != nil || response.Transaction.CandidateVersion != "2026.10.28.2" || response.Transaction.ActiveVersion != "" || response.Transaction.ActiveDigest != "" || response.Transaction.ActiveLength != 0 {
+	if err != nil || !response.Pending || response.Candidate != nil || response.Transaction.CandidateVersion != "2026.10.28.2" || !response.Transaction.Approved || response.Transaction.ActiveVersion != "" || response.Transaction.ActiveDigest != "" || response.Transaction.ActiveLength != 0 {
 		t.Fatalf("pending status: %+v %v", response, err)
+	}
+	// A candidate that was only downloaded is not reported as approved, so it is not "activating".
+	j.ApprovedCandidateID = ""
+	if err := updateflow.Write(journal, j, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatal(err)
+	}
+	response, err = s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"})
+	if err != nil || !response.Pending || response.Transaction.CandidateVersion != "2026.10.28.2" || response.Transaction.Approved {
+		t.Fatalf("pending status with an unapproved candidate: %+v %v", response, err)
 	}
 }

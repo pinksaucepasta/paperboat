@@ -69,7 +69,9 @@ func TestRuntimeUpdateObservationReportsCandidateAndActivation(t *testing.T) {
 		{"deferred", "deferred", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate}},
 		{"activating", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate, Pending: true}},
 		// After --approve the staged candidate is consumed: only the journal names the target.
-		{"activating from the journal", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0"}}},
+		{"activating from the journal", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0", Approved: true}}},
+		// A candidate that was only downloaded is not activating, even while another installation step is pending.
+		{"downloaded journal candidate while pending", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0"}}},
 		{"pending without a target", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true}},
 		{"journal candidate without a handoff", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0"}}},
 	} {

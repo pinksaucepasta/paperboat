@@ -15,18 +15,20 @@ const TransactionSchemaV1 = "paperboat.update-transaction/v1"
 // diagnostics, and lifecycle events. It never exposes paths, capabilities, or
 // artifact URLs.
 type TransactionState struct {
-	Schema           string             `json:"schema,omitempty"`
-	TransactionID    string             `json:"transaction_id,omitempty"`
-	Stage            updateflow.Stage   `json:"stage,omitempty"`
-	ActiveVersion    string             `json:"active_version,omitempty"`
-	ActiveDigest     string             `json:"active_digest,omitempty"`
-	ActiveLength     int64              `json:"active_length,omitempty"`
-	CandidateVersion string             `json:"candidate_version,omitempty"`
-	Failure          updateflow.Failure `json:"failure,omitempty"`
-	UpdatedAt        time.Time          `json:"updated_at,omitempty"`
-	HealthDeadline   time.Time          `json:"health_deadline,omitempty"`
-	RollbackCount    uint32             `json:"rollback_count,omitempty"`
-	Quarantined      bool               `json:"quarantined,omitempty"`
+	Schema           string           `json:"schema,omitempty"`
+	TransactionID    string           `json:"transaction_id,omitempty"`
+	Stage            updateflow.Stage `json:"stage,omitempty"`
+	ActiveVersion    string           `json:"active_version,omitempty"`
+	ActiveDigest     string           `json:"active_digest,omitempty"`
+	ActiveLength     int64            `json:"active_length,omitempty"`
+	CandidateVersion string           `json:"candidate_version,omitempty"`
+	// Approved reports that the candidate was approved for activation, as opposed to only downloaded.
+	Approved       bool               `json:"approved,omitempty"`
+	Failure        updateflow.Failure `json:"failure,omitempty"`
+	UpdatedAt      time.Time          `json:"updated_at,omitempty"`
+	HealthDeadline time.Time          `json:"health_deadline,omitempty"`
+	RollbackCount  uint32             `json:"rollback_count,omitempty"`
+	Quarantined    bool               `json:"quarantined,omitempty"`
 }
 
 func (m *Manager) TransactionState() (TransactionState, error) {
@@ -42,7 +44,7 @@ func (m *Manager) TransactionState() (TransactionState, error) {
 	}
 	return TransactionState{
 		Schema: TransactionSchemaV1, TransactionID: journal.TransactionID, Stage: journal.Stage,
-		ActiveVersion: journal.ActiveVersion, CandidateVersion: journal.CandidateVersion,
+		ActiveVersion: journal.ActiveVersion, CandidateVersion: journal.CandidateVersion, Approved: journal.ApprovedCandidateID != "",
 		ActiveDigest: journal.ActiveDigest, ActiveLength: journal.ActiveLength,
 		Failure: journal.LastFailure, UpdatedAt: journal.StageUpdatedAt,
 		HealthDeadline: journal.HealthDeadline, RollbackCount: journal.RollbackCount,

@@ -487,7 +487,8 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 			}
 		}
 		// An approved activation consumes the staged candidate, so only the journal still names its target.
-		if target == "" && updaterState.Pending && updaterState.Transaction.CandidateVersion != "" {
+		// A candidate that was only downloaded is not activating, whatever else keeps the installation pending.
+		if target == "" && updaterState.Pending && updaterState.Transaction.Approved && updaterState.Transaction.CandidateVersion != "" {
 			state, target = "activating", updaterState.Transaction.CandidateVersion
 		}
 		return &runtimeUpdateObservation{
