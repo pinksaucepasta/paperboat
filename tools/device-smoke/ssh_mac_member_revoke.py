@@ -30,20 +30,23 @@ MODE = os.environ.get('MODE', 'grant')
 ALIAS = os.environ.get('ALIAS', 'apple')
 USER = os.environ.get('MAC_USER', 'admin')
 TEAM = os.environ['TEAM']
+GATE_MAX = float(os.environ.get('GATE_MAX', '5'))  # seconds to the first working session; the row's bound is 5 (a larger value is for diagnosis only)
 
 PROLOGUE = ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed "s/Host \\*\\.//"); '
             '[ -n "$D" ] && break; sleep 2; done; N=$A.$D; H=%s@$N; PBW="--workspace %s"; ' % (ALIAS, USER, TEAM))
 
 ACCESS = PROLOGUE + r'''t0=$(date +%s.%N); okp=; okpl=
 while [ -z "$okp" ] || [ -z "$okpl" ]; do
-  [ -n "$okpl" ] || { lerr=$(ssh -o ConnectTimeout=4 $H echo ok </dev/null 2>&1 | tr '\n' ' '); grep -q '^ok ' <<<"$lerr" && okpl=$(date +%s.%N); }
-  [ -n "$okp" ] || { perr=$(timeout 20 $PB $PBW ssh $A -- echo ok </dev/null 2>&1 | tr '\n' ' '); grep -q '^ok ' <<<"$perr" && okp=$(date +%s.%N); }
+  [ -n "$okpl" ] || { lerr=$(ssh -o ConnectTimeout=4 $H echo ok </dev/null 2>&1 | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$lerr" && okpl=$(date +%s.%N); }
+  [ -n "$okp" ] || { perr=$(timeout 20 $PB $PBW ssh $A -- echo ok </dev/null 2>&1 | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$perr" && okp=$(date +%s.%N); }
   [ "$(python3 -c "import time;print(int(time.time()-$t0>40))")" = 0 ] || break; sleep 1
 done
 block=$(grep -c "^Host $N\$" ~/.ssh/paperboat_config); kh=$(grep -c "^$N " /run/user/$(id -u)/paperboat/ssh_known_hosts 2>/dev/null)
 echo "RESULT access plain_s=$([ -n "$okpl" ] && python3 -c "print(round($okpl-$t0,1))" || echo none) pb_s=$([ -n "$okp" ] && python3 -c "print(round($okp-$t0,1))" || echo none) config_block=$block known_hosts_lines=$kh last_plain=[$([ -n "$okpl" ] || cut -c1-200 <<<"$lerr")] last_pb=[$([ -n "$okp" ] || cut -c1-200 <<<"$perr")]"'''
 
 HOLD = PROLOGUE + r'''perr=$($PB $PBW ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' '); lerr=$(ssh $H 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' ')
+# the proxy names a team-shared machine on stderr ("apple (team X)"): informational, not an error
+perr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$perr"); lerr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$lerr")
 echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
 $PB $PBW ssh $A -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
 ssh $H 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
@@ -106,11 +109,12 @@ def main():
         owner('$PB team machine share "$TEAM" %s --generation $(gen) --json >/dev/null' % shlex.quote(tid))
         owner('$PB team machine grant "$TEAM" %s --generation $(gen) --member %s --capability managed_ssh --capability exec --json >/dev/null' % (shlex.quote(tid), shlex.quote(bid)))
         access = ' '.join(l for l in member(ACCESS, 120)[1].splitlines() if l.startswith('RESULT access'))
+        paths = member('timeout 30 ~/.local/bin/pb status --json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);d=d.get(\'data\',d);print([(m.get(\'alias\'),m.get(\'selected_path\')) for m in d.get(\'machines\',[]) if m.get(\'selected_path\') not in (None,\'none\')])" 2>&1 | tail -1 | cut -c1-300')[1].strip()
         p, q = re.search(r'plain_s=(\S+)', access), re.search(r'pb_s=(\S+)', access)
-        if not (p and q and 'none' not in (p[1], q[1]) and float(p[1]) <= 5 and float(q[1]) <= 5 and 'config_block=1' in access
+        if not (p and q and 'none' not in (p[1], q[1]) and float(p[1]) <= GATE_MAX and float(q[1]) <= GATE_MAX and 'config_block=1' in access
                 and not re.search(r'known_hosts_lines=0\b', access)):
-            raise RuntimeError('member access gate: ' + access)
-        detail = access
+            raise RuntimeError('member access gate: %s member_selected_paths=%s' % (access, paths))
+        detail = '%s member_selected_paths=%s' % (access, paths)  # relayed or direct, for the evidence
         # the hold script runs in the background on B; A revokes once it prints HOLDING
         member("cat > ~/hold.sh <<'EOS'\n%s\nEOS" % HOLD)
         member('nohup bash ~/hold.sh > ~/hold.out 2>&1 < /dev/null &')
@@ -132,7 +136,7 @@ def main():
             time.sleep(2)
         res = member('cat ~/hold.out')[1]
         ok, why = m.revoke_verdict(res)
-        status, detail = ('PASS' if ok else 'FAIL'), '%s %s %s' % (detail, '' if ok else why + ':', ' | '.join(l for l in res.splitlines() if l.startswith('RESULT'))[-700:])
+        status, detail = ('PASS' if ok else 'FAIL'), '%s %s %s' % (detail, '' if ok else why + ':', re.sub(r'\s+', ' ', res)[-1600:])
     except Exception as error:  # every failure names its step
         detail = '%s %s' % (detail, error)
     finally:
