@@ -110,7 +110,11 @@ FROM generate_series(1,1000) g`, user, machine, cli)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) SELECT $1,$2||'_member_'||g,1,'member',true FROM generate_series(1,1000) g`, team, user)
 	member := user + "_member_7"
 	before := accountTopic(member, "inventory")
+	accessBefore := accountTopic(member, "machine_access")
 	exec(`UPDATE paperboat.team_members SET active=false WHERE team_id=$1`, team)
+	if got := accountTopic(member, "machine_access"); got != accessBefore+1 {
+		t.Fatalf("deactivating 1,000 members moved a member's machine_access topic %d times, want 1", got-accessBefore)
+	}
 	if got := accountTopic(member, "inventory"); got != before+1 {
 		t.Fatalf("deactivating 1,000 members moved a member's inventory topic %d times, want 1", got-before)
 	}
