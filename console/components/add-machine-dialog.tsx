@@ -323,22 +323,32 @@ function EnrollmentStatus({
  */
 export function CommandBlock({ command, label = "Copy command" }: { command: string; label?: string }) {
   const { copied, copy } = useCopy(command)
+  // The text stays readable (screen readers read the command); only the copy icon is the labelled
+  // button. A click anywhere on the block copies too, for the mouse.
   return (
-    <button
-      type="button"
+    <div
       onClick={copy}
-      aria-label={copied ? "Copied" : label}
-      className="group/copy relative flex w-full rounded-lg bg-muted text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="group/copy relative flex w-full cursor-pointer rounded-lg bg-muted text-left hover:bg-accent has-focus-visible:ring-2 has-focus-visible:ring-ring/30"
     >
       <code className="no-scrollbar min-w-0 flex-1 overflow-x-auto py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed whitespace-pre">
         {command}
       </code>
       <span className="pointer-events-none absolute inset-y-0 right-0 flex items-start rounded-r-lg bg-linear-to-l from-muted from-60% to-transparent py-3 pr-3 pl-8 group-hover/copy:from-accent">
-        <CopyIcons
-          copied={copied}
-          className={copied ? undefined : "text-muted-foreground group-hover/copy:text-foreground"}
-        />
+        <button
+          type="button"
+          aria-label={copied ? "Copied" : label}
+          onClick={(event) => {
+            event.stopPropagation()
+            copy()
+          }}
+          className="pointer-events-auto rounded-sm outline-none"
+        >
+          <CopyIcons
+            copied={copied}
+            className={copied ? undefined : "text-muted-foreground group-hover/copy:text-foreground"}
+          />
+        </button>
       </span>
-    </button>
+    </div>
   )
 }
