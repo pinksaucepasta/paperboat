@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import install_path
@@ -71,6 +72,17 @@ def checks(args):
         table['preview-' + name] = (['preview_%s.py' % name, 'victus'], [])
     for name in ('rename', 'settings', 'availability', 'capabilities'):
         table['machine-' + name] = (['machine_lifecycle.py', name], [])
+    # Interactive: its approval link is echoed to stderr while it waits for a browser approval.
+    table['account-login'] = (['account_login.py'], [])
+    # The teammate's sends are driven from outside: its gate line (state inbox_sender_required) is echoed to stderr.
+    table['inbox-approval'] = (['inbox_approval.py', '--team', team, '--source-machine-id', args.teammate_machine_id or '',
+                                '--source-account-id', args.teammate_account_id or ''],
+                               ['--team', '--teammate_machine_id', '--teammate_account_id'])
+    # The Windows device is the team member; the owner's machine is reached through --owner-cmd.
+    table['policy-team'] = (['policy_team.py', '--team', team, '--machine-id', args.owner_machine_id or '',
+                             '--machine-name', args.owner_machine_name or '', '--owner-cmd', args.owner_cmd or '',
+                             '--owner-pb', args.owner_pb, '--member-cmd', 'windows'],
+                            ['--team', '--owner_cmd', '--owner_machine_id', '--owner_machine_name'])
     table['env-vault-lifecycle'] = (['env_vault_lifecycle.py', '{vault_password}', '{vault_recovery}'], [])
     return table
 
@@ -96,7 +108,28 @@ def verdict(returncode, stdout):
             continue
         if isinstance(record, dict) and 'status' in record:
             statuses.append(record['status'])
+    statuses += [line.split()[1] for line in stdout.splitlines() if line.startswith('RESULT ')]  # policy_team.py
     return 'PASS' if returncode == 0 and statuses and set(statuses) == {'PASS'} else 'FAIL'
+
+
+def run_streaming(command, environment, timeout):
+    """subprocess.run with captured output, echoing each `state` line (an approval link, a gate) to stderr as it comes."""
+    with tempfile.TemporaryFile('w+') as errors, subprocess.Popen(
+            command, cwd=HERE, env=environment, stdout=subprocess.PIPE, stderr=errors, text=True,
+            stdin=subprocess.DEVNULL) as process:
+        killer = threading.Timer(timeout, process.kill)
+        killer.start()
+        try:
+            lines = []
+            for line in process.stdout:
+                lines.append(line)
+                if line.startswith('{"state"') or '"state": "approval_required"' in line:
+                    print(line.rstrip(), file=sys.stderr, flush=True)
+            process.wait()
+        finally:
+            killer.cancel()
+        errors.seek(0)
+        return subprocess.CompletedProcess(command, process.returncode, ''.join(lines), errors.read())
 
 
 def run_check(check, argv, args, device):
@@ -120,8 +153,7 @@ def run_check(check, argv, args, device):
                 '{version}': device.run([device.pb_exe, '--version']).stdout.strip().splitlines()[0]})
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
-        done = subprocess.run(command, cwd=HERE, env=environment, capture_output=True, text=True, timeout=args.timeout,
-                              stdin=subprocess.DEVNULL)
+        done = run_streaming(command, environment, args.timeout)
     outcome = verdict(done.returncode, done.stdout)
     detail = ((done.stdout.strip().splitlines() or [''])[-1][:300] if outcome == 'PASS'
               else 'exit %s: %s' % (done.returncode, (done.stderr.strip() or done.stdout.strip())[-300:]))
@@ -134,6 +166,12 @@ def main():
     parser.add_argument('--machine', help="the device's own machine name (command-rows)")
     parser.add_argument('--peer', help='another machine of the account (command-rows, inbox-manage)')
     parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''), help='the retained paid team')
+    parser.add_argument('--teammate-machine-id', help="inbox-approval: the teammate's sending machine")
+    parser.add_argument('--teammate-account-id', help="inbox-approval: the teammate's account")
+    parser.add_argument('--owner-cmd', help="policy-team: ssh/docker prefix that runs pb as the team owner")
+    parser.add_argument('--owner-machine-id', help='policy-team: the owner machine shared into the team')
+    parser.add_argument('--owner-machine-name')
+    parser.add_argument('--owner-pb', default='.local/bin/pb')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')

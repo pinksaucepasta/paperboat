@@ -256,7 +256,8 @@ class SnippetsInPowerShell(unittest.TestCase):
 
 class WindowsChecksRunner(unittest.TestCase):
     def args(self, **values):
-        defaults = dict(machine='m', peer='p', team='t')
+        defaults = dict(machine='m', peer='p', team='t', teammate_machine_id='', teammate_account_id='', owner_cmd='',
+                        owner_machine_id='', owner_machine_name='', owner_pb='pb')
         return SimpleNamespace(**dict(defaults, **values))
 
     def test_verdict_needs_exit_zero_and_only_pass_statuses(self):
@@ -266,6 +267,10 @@ class WindowsChecksRunner(unittest.TestCase):
         self.assertEqual('FAIL', windows_checks.verdict(1, passed))
         self.assertEqual('FAIL', windows_checks.verdict(0, passed + '{"status":"FAIL"}\n'))
         self.assertEqual('FAIL', windows_checks.verdict(0, 'no json at all\n'))
+        self.assertEqual('PASS', windows_checks.verdict(0, 'PASS step\nRESULT PASS\n'))
+        self.assertEqual('FAIL', windows_checks.verdict(0, 'RESULT FAIL a,b\n'))
+        done = windows_checks.run_streaming([sys.executable, '-c', 'import sys;print(\'{"state": "x"}\');print(1);sys.stderr.write("e")'], None, 10)
+        self.assertEqual((0, '{"state": "x"}\n1\n', 'e'), (done.returncode, done.stdout, done.stderr))
 
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks
