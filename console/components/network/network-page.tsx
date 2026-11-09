@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
+import { CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -27,6 +27,7 @@ import {
 } from "@/lib/network"
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
+import { pickerOption } from "@/components/crumb-picker"
 import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
@@ -34,9 +35,11 @@ import { RowMenus, type Entry } from "@/components/row-menus"
 import { Time } from "@/components/time"
 import { Section, SectionHeading } from "@/components/section"
 import { Button } from "@/components/ui/button"
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -459,6 +462,91 @@ function EdgesSection({ workspace, manage }: { workspace: string; manage: boolea
   )
 }
 
+/** An edge to choose in Change edges, described like its row in the Edges table. */
+type EdgeOption = {
+  id: string
+  kind: "managed" | "self_hosted"
+  location: string
+  detail: string
+  operator: string
+  ok: boolean
+  rtt?: number
+  /** "Primary" or "Fallback" when it is one now. */
+  role?: string
+}
+
+/** One edge as the table shows it: location over its host, operator, status dot, latency, current role. */
+function EdgeLabel({ option }: { option: EdgeOption }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">
+          {option.location} <span className="text-muted-foreground">· {option.operator}</span>
+        </span>
+        <span className="truncate font-mono text-xs text-muted-foreground">{option.detail}</span>
+      </span>
+      {option.role && <span className="text-xs text-muted-foreground">{option.role}</span>}
+      <StatusDot online={option.ok} />
+      <span className="w-12 text-right font-mono text-code text-muted-foreground">{latency(option.rtt)}</span>
+    </span>
+  )
+}
+
+/** The Primary or Fallback field: the console's picker (popover + list), like choosing a machine. */
+function EdgeChoice({
+  id,
+  options,
+  value,
+  onChange,
+}: {
+  id: string
+  options: EdgeOption[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const chosen = options.find((option) => option.id === value)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            className="h-auto min-h-12 w-full justify-between py-1.5 font-normal"
+          />
+        }
+      >
+        {chosen ? <EdgeLabel option={chosen} /> : <span className="text-muted-foreground">Choose an edge</span>}
+        <CaretUpDownIcon className="shrink-0 text-muted-foreground" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-(--anchor-width) gap-0 p-0">
+        <Command>
+          <CommandList>
+            <CommandEmpty>No edges</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.id}
+                  value={option.id}
+                  className={pickerOption}
+                  onSelect={() => {
+                    onChange(option.id)
+                    setOpen(false)
+                  }}
+                >
+                  <EdgeLabel option={option} />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /**
  * Picks the pair from Paperboat's edges and your own tunnel servers: both of one kind (the server
  * refuses a mix). Switching kinds needs running previews and tunnels stopped first (409).
@@ -476,17 +564,40 @@ function ChangeEdgesDialog({
   const scope = scopeOf(useWorkspace())
   const managed = useApiQuery(edgesQuery)
   const own = useInfiniteQuery(poolServersQuery("tunnel", scope, ""))
-  const options = [
-    ...(managed.data ?? []).map((edge) => ({
-      id: edge.id,
-      kind: "managed",
-      label: `${placeName(edge.region)} ${shortId(edge.id)} · Paperboat`,
-    })),
-    ...(own.data?.pages.flatMap((page) => page.items) ?? []).map((server) => ({
-      id: server.installation_id,
-      kind: "self_hosted",
-      label: `${server.name} · ${server.endpoint_host} · your server`,
-    })),
+  // The pair's edges carry their host and latency; other Paperboat edges only their id so far.
+  const inPair = (id: string) =>
+    current?.primary.id === id
+      ? { edge: current.primary, role: "Primary" }
+      : current?.fallback?.id === id
+        ? { edge: current.fallback, role: "Fallback" }
+        : undefined
+  const options: EdgeOption[] = [
+    ...(managed.data ?? []).map((edge) => {
+      const known = inPair(edge.id)
+      return {
+        id: edge.id,
+        kind: "managed" as const,
+        location: placeName(edge.region),
+        detail: known?.edge.endpoint_host ?? shortId(edge.id),
+        operator: "Paperboat",
+        ok: edge.status === "ready",
+        rtt: known?.edge.best_rtt_ms,
+        role: known?.role,
+      }
+    }),
+    ...(own.data?.pages.flatMap((page) => page.items) ?? []).map((server) => {
+      const known = inPair(server.installation_id)
+      return {
+        id: server.installation_id,
+        kind: "self_hosted" as const,
+        location: known ? placeName(known.edge.region) : server.name,
+        detail: server.endpoint_host,
+        operator: server.name,
+        ok: server.ready,
+        rtt: known?.edge.best_rtt_ms,
+        role: known?.role,
+      }
+    }),
   ]
   const [primary, setPrimary] = useState(current?.primary.id ?? "")
   const [fallback, setFallback] = useState(current?.fallback?.id ?? "")
@@ -507,45 +618,29 @@ function ChangeEdgesDialog({
       onClose()
     },
   })
-  const failure =
+  const running =
     save.error instanceof ApiError && save.error.code === "previews_running"
-      ? (() => {
-          const count = Number((save.error.details as { count?: number } | undefined)?.count ?? 0)
-          return count
-            ? `Stop ${count} running ${count === 1 ? "preview or tunnel" : "previews and tunnels"} first.`
-            : "Stop running previews and tunnels first."
-        })()
-      : save.error?.message
-  const select = (id: string, value: string, onChange: (value: string) => void) => (
-    <select
-      id={id}
-      className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="" disabled>
-        Choose an edge
-      </option>
-      {options.map((option) => (
-        <option key={option.id} value={option.id}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  )
+      ? Number((save.error.details as { count?: number } | undefined)?.count ?? 0)
+      : undefined
+  const failure =
+    running === undefined
+      ? save.error?.message
+      : running
+        ? `Stop ${running} running ${running === 1 ? "preview or tunnel" : "previews and tunnels"} first.`
+        : "Stop running previews and tunnels first."
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Change edges</DialogTitle>
         </DialogHeader>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="edge-primary">Primary</FieldLabel>
-          {select("edge-primary", primary, setPrimary)}
+          <EdgeChoice id="edge-primary" options={options} value={primary} onChange={setPrimary} />
         </Field>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="edge-fallback">Fallback</FieldLabel>
-          {select("edge-fallback", fallback, setFallback)}
+          <EdgeChoice id="edge-fallback" options={options} value={fallback} onChange={setFallback} />
         </Field>
         {(problem ?? failure) && <p className="text-sm text-destructive">{problem ?? failure}</p>}
         <DialogFooter>
