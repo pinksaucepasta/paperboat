@@ -1,6 +1,13 @@
 "use client"
 
-import { ArrowSquareOutIcon, CaretDownIcon, PauseIcon, PlayIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import {
+  ArrowSquareOutIcon,
+  CaretDownIcon,
+  PauseIcon,
+  PlayIcon,
+  PlusIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -60,19 +67,68 @@ export function TunnelPage({ id }: { id: string }) {
             </Button>
           </div>
         ) : !tunnel ? (
-          // The loaded header: title and address lines at their line heights, Pause and Open.
-          <div className="flex flex-wrap items-start gap-4">
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <Skeleton className="my-1 h-6 w-48" />
-              <Skeleton className="my-0.5 h-4 w-72" />
-            </div>
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-8 w-16" />
-          </div>
+          <TunnelSkeleton />
         ) : (
           <Loaded tunnel={tunnel} />
         )}
       </main>
+    </>
+  )
+}
+
+/**
+ * The loaded page with placeholders for its values: title and status lines at their line heights,
+ * Pause (a running tunnel, the usual case) and Open, the Details labels, the hostnames section and
+ * the danger zone as they are.
+ */
+function TunnelSkeleton() {
+  const inert = { tabIndex: -1, "aria-hidden": true, className: "pointer-events-none" } as const
+  return (
+    <>
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton className="my-1 h-6 w-48" />
+          <Skeleton className="my-0.5 h-4 w-72 max-w-full" />
+        </div>
+        <Button variant="secondary" size="lg" {...inert}>
+          <PauseIcon data-icon="inline-start" />
+          Pause
+        </Button>
+        <Button size="lg" {...inert}>
+          <ArrowSquareOutIcon data-icon="inline-start" />
+          Open
+        </Button>
+      </div>
+      <section className="flex flex-col gap-3">
+        <SectionHeading title="Details" />
+        <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
+          {["Address", "Machine", "Who can open it", "Created", "Tunnel ID", "Expires"].map((label) => (
+            <Detail key={label} label={label}>
+              <Skeleton className="h-4 w-32 max-w-full" />
+            </Detail>
+          ))}
+        </dl>
+      </section>
+      <section className="flex flex-col gap-3">
+        <SectionHeading
+          title="Public hostnames"
+          action={
+            <Button variant="secondary" size="sm" {...inert}>
+              <PlusIcon data-icon="inline-start" />
+              Add
+            </Button>
+          }
+        />
+        <div className="flex h-12 items-center border-y border-divider">
+          <Skeleton className="h-4 w-1/3" />
+        </div>
+      </section>
+      <DangerZone
+        title="Delete tunnel"
+        description="Its address and public hostnames stop working for good."
+        action="Delete"
+        onAction={() => {}}
+      />
     </>
   )
 }

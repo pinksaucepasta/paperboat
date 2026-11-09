@@ -56,7 +56,22 @@ export function EnvVariables({
           </Button>
         </div>
       )}
-      {names.isPending && <Skeleton className="h-12 w-full" />}
+      {/* Rows as they load: the name a placeholder, the rest of the row as it is. */}
+      {names.isPending &&
+        Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="flex min-h-12 items-center gap-3 border-b border-divider py-2 text-sm">
+            <span className="min-w-0 flex-1">
+              <Skeleton className="h-3 w-40 max-w-full" />
+            </span>
+            <span className="text-xs text-muted-foreground">Value hidden</span>
+            <Button variant="ghost" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+              Set value
+            </Button>
+            <Button variant="ghost" size="icon" tabIndex={-1} aria-hidden className="pointer-events-none">
+              <TrashIcon />
+            </Button>
+          </div>
+        ))}
       {names.isError && <p className="py-4 text-sm text-destructive">{names.error.message}</p>}
       {names.data?.length === 0 && (
         <p className="border-b border-divider py-4 text-sm text-muted-foreground">No variables yet.</p>

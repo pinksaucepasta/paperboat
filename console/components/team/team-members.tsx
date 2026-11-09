@@ -237,7 +237,10 @@ function SuspendedNotice({ owner }: { owner: boolean }) {
   )
 }
 
-/** The team header (avatar, name and detail line at their sizes) over member rows. */
+/**
+ * The team header (avatar, name and detail line at their sizes; Invite members, which owners and
+ * admins have) over the members toolbar as it is and member rows as placeholders.
+ */
 function TeamSkeleton() {
   return (
     <div className="flex flex-col gap-10">
@@ -247,8 +250,26 @@ function TeamSkeleton() {
           <Skeleton className="my-1 h-6 w-48" />
           <Skeleton className="my-0.5 h-4 w-64" />
         </div>
+        <Button size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+          Invite members
+        </Button>
       </header>
-      <ListSkeleton rows={4} />
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewToggle
+            value="members"
+            onChange={() => {}}
+            views={[
+              { value: "members", label: "Members" },
+              { value: "invitations", label: "Invitations" },
+            ]}
+          />
+          <div className="ml-auto w-full max-w-sm">
+            <SearchField value="" onChange={() => {}} placeholder="Search by name or email" />
+          </div>
+        </div>
+        <ListSkeleton rows={4} />
+      </section>
     </div>
   )
 }

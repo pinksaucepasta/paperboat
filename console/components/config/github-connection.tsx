@@ -26,14 +26,25 @@ export function GitHubConnection() {
   if (!githubLive) return null
   if (status.isPending)
     return (
-      // The connected row: avatar and "Connected as …" (two lines on a phone), Disconnect on the right.
-      <Section title="GitHub" action={<Skeleton className="h-8 w-24" />}>
-        <div className="flex min-h-12 items-center gap-3 border-b border-divider py-2">
+      // The connected row (the usual case), its words as they are and the account and repository as
+      // placeholders; on a phone it wraps like the loaded line.
+      <Section
+        title="GitHub"
+        action={
+          <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+            Disconnect
+          </Button>
+        }
+      >
+        <div className="flex min-h-12 items-center gap-3 border-b border-divider py-2 text-sm">
           <Skeleton className="size-6 shrink-0 rounded-full" />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Skeleton className="my-[4px] h-3 w-80 max-w-full" />
-            <Skeleton className="my-[4px] h-3 w-40 sm:hidden" />
-          </div>
+          <span>
+            Connected as <Skeleton className="inline-block h-3 w-20 align-middle" />
+            <span className="text-muted-foreground">
+              {" "}
+              · config in <Skeleton className="inline-block h-3 w-40 align-middle" />
+            </span>
+          </span>
         </div>
       </Section>
     )

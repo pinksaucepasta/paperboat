@@ -67,10 +67,14 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
 ## Loading states
 
 - A loading state is the loaded page with placeholders for the data: the same toolbar (real search
-  fields, tabs and buttons), the same headings, the same row heights and card sizes. Text known
-  without data (labels, column headers, tab names, radio choices) renders as text, not a grey bar. A
-  placeholder for a line of text is its line height: a `Skeleton` of the text's cap height with
-  `my-*` making up the rest (`my-0.5 h-4` for `text-sm`).
+  fields, tabs and buttons), the same headings, the same row heights and card sizes.
+- **Fixed text is never a skeleton.** Anything known without data renders as real text in the
+  loading state: labels, section titles, card titles, column headers, button labels, tab names,
+  radio choices, footnotes. Only values get placeholders, each sized like its value (width and
+  line height), so the loaded value lands where its placeholder was. A placeholder for a line of
+  text is its line height: a `Skeleton` of the text's cap height with `my-*` making up the rest
+  (`my-0.5 h-4` for `text-sm`). Text that depends on data ("No tags" against a list of tags) is a
+  value.
 - Reuse `components/skeletons.tsx` (`SectionSkeleton`, `ListSkeleton`, `EmptySkeleton`,
   `TableRowsSkeleton`: one cell per column with the header cell's responsive classes) or render
   the real component with an empty body; never a generic grey box.
@@ -78,7 +82,8 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
   (`WithSession`); a page may add its own first reads (`<WithSession reads={…}>`) so its first HTML is
   filled in. Data already in the query cache never shows a skeleton again.
 - `scripts/check-skeletons.mjs` holds every API read, then releases it: zero layout shift after the
-  data lands and no control may move. Run it at 1440 and 390 wide, light and dark, before pushing a
+  data lands, no control may move, and no placeholder may sit where fixed text loads (text written
+  in the source outside a conditional). Run it at 1440 and 390 wide, light and dark, before pushing a
   page change.
 
 ## Aligning things with text

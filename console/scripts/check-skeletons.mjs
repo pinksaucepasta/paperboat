@@ -8,6 +8,8 @@
 //   - something on the loaded page (a text, an icon, a field, above the fold) has no element or
 //     placeholder at its position (coverage below 90%), or a placeholder sits where nothing loads;
 //   - a text is a literal "…" stand-in or a date in another format than the loaded one;
+//   - a placeholder sits where fixed text loads: a label, title, header or button text written in
+//     the source outside a conditional, which the loading state can show as it is;
 //   - after the reads are released, anything shifts (CLS > 0) or a button, field, tab, heading or
 //     column header moves by more than 2 px.
 // usage: ORIGIN=<console origin> STATE=<playwright storage state> PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core
@@ -15,7 +17,7 @@
 //        [WARM=1: visit each route once first, as a returning visitor whose lists remember their row counts]
 //        node check-skeletons.mjs [route…]
 // Read only: it only navigates. Exits 1 when a route fails.
-import { mkdirSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 const origin = process.env.ORIGIN
@@ -47,6 +49,28 @@ await context.addInitScript(() => {
     }
   }).observe({ type: "layout-shift", buffered: true })
 })
+
+// Fixed text: JSX text and label/title props in the console's source. Not fixed: text inside a
+// conditional branch (after ?, :, && or ||), an alternative that depends on data ("No tags"), and any
+// string the code also uses as a value (`label: "Ready"`, `? "You"`, `return "Paperboat"`), which
+// can be data in one place even where it is a label in another.
+const fixed = new Set()
+const values = new Set()
+for (const dir of ["components", "app", "lib"]) {
+  const root = new URL(`../${dir}/`, import.meta.url)
+  for (const file of readdirSync(root, { recursive: true }).filter((f) => /\.tsx?$/.test(f))) {
+    const src = readFileSync(new URL(file, root), "utf8")
+    for (const m of src.matchAll(/(?:[:?]|return)\s*["“]([^"\n]+)["”]/g)) values.add(m[1])
+    if (!file.endsWith(".tsx")) continue
+    for (const m of src.matchAll(/<[A-Za-z][\w.]*\b[^<>]*>([^<>{}]+)(?=<)/g)) {
+      if (/(\?|:|&&|\|\|)$/.test(src.slice(Math.max(0, m.index - 12), m.index).replace(/[\s(]/g, ""))) continue
+      const text = m[1].replace(/\s+/g, " ").trim()
+      if (/[A-Za-z]/.test(text)) fixed.add(text)
+    }
+    for (const m of src.matchAll(/\b(?:label|title|description|action)="([^"]+)"/g)) fixed.add(m[1])
+  }
+}
+for (const value of values) fixed.delete(value)
 
 // What a person sees in the page body, above the fold: texts, icons, fields and placeholders.
 const leaves = () =>
@@ -99,7 +123,12 @@ function compare(early, loaded) {
     if (/…|\.\.\./.test(e.text) && there && there.text !== e.text) texts.push(`"${e.text}" stands in for "${there.text}"`)
     if (date.test(e.text) && there && date.test(there.text) && there.text !== e.text) texts.push(`date "${e.text}" becomes "${there.text}"`)
   }
-  return { coverage, missing, stray, texts }
+  // Fixed text drawn as a placeholder (and not as itself) in the early state.
+  const placeholdered = loaded
+    .filter((l) => fixed.has(l.text) && early.some((e) => e.skeleton && overlap(e, l) > 0.5))
+    .filter((l) => !early.some((e) => e.text === l.text && overlap(e, l) > 0.3))
+    .map((l) => l.text)
+  return { coverage, missing, stray, texts, placeholdered }
 }
 
 const name = (route) => (route === "/" ? "machines" : route.slice(1).replace(/[/?=&]/g, "_").replace(/machine_[0-9a-f-]+/, "machine"))
@@ -164,6 +193,10 @@ const describe = (label, c) => {
   }
   if (c.stray.length > 2) lines.push(`${label}: ${c.stray.length} placeholders where nothing loads`)
   for (const t of c.texts.slice(0, 3)) lines.push(`${label}: ${t}`)
+  if (c.placeholdered.length) {
+    const sample = [...new Set(c.placeholdered)].slice(0, 6).map((t) => `"${t}"`)
+    lines.push(`${label}: placeholder where fixed text loads: ${sample.join(", ")}`)
+  }
   return lines
 }
 for (const r of rows) {

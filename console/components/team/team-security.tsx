@@ -42,7 +42,7 @@ import { Switch } from "@/components/ui/switch"
  */
 export function TeamSecurity({ team, emails }: { team: Team; emails: Map<string, string> }) {
   const identity = useApiQuery(identityQuery(team.team_id))
-  if (identity.isPending) return <Skeleton className="h-64 w-full" />
+  if (identity.isPending) return <SecuritySkeleton />
   if (identity.isError) return <p className="text-sm text-muted-foreground">{identity.error.message}</p>
   const data = identity.data
   if (!data.eligible) {
@@ -131,6 +131,36 @@ function Domains({ team, identity }: { team: Team; identity: TeamIdentity }) {
 }
 
 const hour = 3600
+const requireSsoAbout = "Members sign in only through your identity provider, except those you exempt."
+const joinAbout = "People from your verified domains become members the first time they sign in with SSO."
+
+/** The sections, their titles and settings as they load, with placeholders for the values. */
+function SecuritySkeleton() {
+  const value = <Skeleton className="my-0.5 h-4 w-32" />
+  const toggle = <Switch disabled aria-hidden tabIndex={-1} />
+  return (
+    <div className="flex flex-col gap-10">
+      <Section title="Domains">
+        <div className="flex min-h-11 items-center border-b border-divider py-1">{value}</div>
+      </Section>
+      <Section title="Single sign-on">
+        <Row label="Identity provider">{value}</Row>
+        <SettingRow label="Require SSO" description={requireSsoAbout}>
+          {toggle}
+        </SettingRow>
+        <SettingRow label="Join on first sign-in" description={joinAbout}>
+          {toggle}
+        </SettingRow>
+        <Row label="Session length">{value}</Row>
+      </Section>
+      <Section title="Directory sync">
+        <Row label="Directory">{value}</Row>
+        <Row label="Last sync">{value}</Row>
+      </Section>
+    </div>
+  )
+}
+
 const sessionChoices = [hour, 8 * hour, 24 * hour, 7 * 24 * hour, 30 * 24 * hour]
 const sessionLabel = (seconds: number) =>
   seconds % (24 * hour) === 0
@@ -167,7 +197,7 @@ function SingleSignOn({ team, identity, emails }: { team: Team; identity: TeamId
         {sso.connections.length ? (
           <State ok={connected}>
             {sso.connections
-              .map((connection) => providerName(connection.type) + (connection.state === "active" ? "" : ` (${connection.state})`))
+              .map((connection) => providerName(connection.type) + (connection.state === "active" ? "" : " (not active)"))
               .join(", ")}
           </State>
         ) : (
@@ -176,14 +206,14 @@ function SingleSignOn({ team, identity, emails }: { team: Team; identity: TeamId
       </Row>
       <Toggle
         label="Require SSO"
-        description="Members sign in only through your identity provider, except those you exempt."
+        description={requireSsoAbout}
         checked={sso.required}
         disabled={!identity.can_manage || change.isPending || (!sso.required && !connected)}
         onChange={(required) => change.mutate({ required })}
       />
       <Toggle
         label="Join on first sign-in"
-        description="People from your verified domains become members the first time they sign in with SSO."
+        description={joinAbout}
         checked={sso.jit}
         disabled={!identity.can_manage || change.isPending}
         onChange={(jit) => change.mutate({ jit })}
