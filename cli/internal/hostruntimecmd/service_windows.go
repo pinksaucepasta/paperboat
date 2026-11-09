@@ -243,7 +243,11 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			if instance, err := hostinstall.WindowsInstanceForSID(request.OwnerSID); err == nil {
 				name = "PaperboatInstall-" + instance + "-startup-error.log"
 			}
-			_ = causetext.Record(hostinstall.WindowsProgramDataRoot(), name, step, "", resultErr)
+			// Never create the protected root here: a first install that fails before the root exists would leave it
+			// with this administrator as owner, and every retry would then refuse it.
+			if info, err := os.Lstat(hostinstall.WindowsProgramDataRoot()); err == nil && info.IsDir() {
+				_ = causetext.Record(hostinstall.WindowsProgramDataRoot(), name, step, "", resultErr)
+			}
 			resultErr = &windowsInstallationStepError{step: step, cause: resultErr}
 		}
 	}()
