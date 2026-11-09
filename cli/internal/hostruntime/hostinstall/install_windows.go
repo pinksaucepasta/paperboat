@@ -2052,7 +2052,12 @@ func Purge(ctx context.Context, ownerSID string) (resultErr error) {
 // PurgeForReset retains the protected canonical CLI slot. No caller-supplied
 // path can become a privileged filesystem exclusion.
 func PurgeForReset(ctx context.Context, ownerSID string) error {
-	return purgeWindows(ctx, ownerSID, true)
+	err := purgeWindows(ctx, ownerSID, true)
+	if err == ErrRemovalAtRestart {
+		// The installation that follows a reset lives with retired files, as after an update.
+		return nil
+	}
+	return err
 }
 
 func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resultErr error) {
@@ -2171,13 +2176,21 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 	}
 	// The account sweep is shared by uninstall and reset, because both reach
 	// Purge. It removes what the ordered steps above missed and names leftovers.
-	result = errors.Join(result, purgeAccountSweepKeepingCLI(ctx, layout, keep))
+	atRestart, sweepErr := purgeAccountSweepKeepingCLI(ctx, layout, keep)
+	result = errors.Join(result, sweepErr)
 	if !preserveCLI && result == nil {
 		sharedLayout, err := service.DefaultLayout("windows")
 		if err != nil {
 			return err
 		}
 		result = purgeWindowsSharedResidue(ctx, sharedLayout, WindowsProgramDataRoot(), instance)
+		if result == nil && atRestart {
+			result = deleteWindowsSharedParentsAtRestart(sharedLayout, WindowsProgramDataRoot())
+		}
+	}
+	if result == nil && atRestart {
+		// Returned bare, so a caller can tell it from a failure by identity.
+		return ErrRemovalAtRestart
 	}
 	return result
 }
@@ -2291,14 +2304,8 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 			result = errors.Join(result, err)
 		}
 	}
-	if purge {
-		instanceRoot, _ := WindowsInstanceRoot(layout.Instance)
-		for _, path := range []string{layout.InstallRoot, filepath.Join(instanceRoot, "service-lifecycle"), layout.UpdateStateRoot, instanceRoot} {
-			if err := RemovePathPreservingCLI(ctx, path, keep); err != nil {
-				result = errors.Join(result, err)
-			}
-		}
-	}
+	// Purge removes the account's directories in its account sweep, after every process that runs an image from
+	// them has been ended: removing them here failed with "Access is denied" while an old CLI was still running.
 	return result
 }
 

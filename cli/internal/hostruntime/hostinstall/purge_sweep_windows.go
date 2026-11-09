@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -32,70 +35,148 @@ const (
 
 var errWindowsAccountLeftovers = errors.New("Paperboat installation items remain after the account sweep")
 
-// purgeAccountSweep is the account-scoped inventory step of Windows teardown.
+// ErrRemovalAtRestart is a purge that removed everything except files another program still holds open. Those are
+// moved aside and registered with Windows for deletion at the next restart; nothing else of the account remains.
+var ErrRemovalAtRestart = errors.New("Paperboat was removed; files that are still in use are deleted when Windows restarts")
+
+// purgeAccountSweepKeepingCLI is the account-scoped inventory step of Windows teardown.
 // It runs at the end of the elevated Purge, so uninstall and reset share one
 // implementation. It stops and deletes this account's SCM services before it
 // terminates processes started from its payload roots, because SCM restart
-// policy would otherwise relaunch them. It removes the payload roots again
-// after termination, applies the machine-guard rule, and then re-scans every
-// item it owns. Every step is attempted, so one failure cannot hide another.
-func purgeAccountSweep(ctx context.Context, layout service.Layout) error {
-	return purgeAccountSweepKeepingCLI(ctx, layout, "")
-}
-
-func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, keep string) error {
+// policy would otherwise relaunch them. Only then does it remove the payload
+// roots (an old CLI still running from the rollback slot holds its image until
+// it is ended), applies the machine-guard rule, and re-scans every item it owns.
+// Every step is attempted, so one failure cannot hide another. atRestart reports
+// that files in use were left to Windows to delete at the next restart.
+func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, keep string) (atRestart bool, _ error) {
 	instanceRoot, err := WindowsInstanceRoot(layout.Instance)
 	if err != nil {
-		return err
+		return false, err
 	}
 	roots := []string{layout.InstallRoot, instanceRoot}
 	var result error
 	result = errors.Join(result, removeAccountServices(ctx, layout.Instance))
 	result = errors.Join(result, terminatePayloadProcesses(roots))
-	for _, root := range roots {
-		if err := removeWindowsAccountPayloadKeepingCLI(ctx, root, keep); err != nil {
+	var deferred []string
+	for _, root := range []string{layout.InstallRoot, layout.UpdateStateRoot, instanceRoot} {
+		pending, err := removeWindowsAccountPayloadKeepingCLI(ctx, root, keep)
+		if err != nil {
 			result = errors.Join(result, hostInstallFailure("remove Paperboat account payload", err))
+		} else if pending {
+			deferred = append(deferred, root)
 		}
 	}
 	result = errors.Join(result, purgeMachineGuardWhenUnshared(ctx, layout.Instance))
-	leftovers, err := accountLeftoversKeepingCLI(ctx, layout, instanceRoot, keep)
+	leftovers, err := accountLeftoversKeepingCLI(ctx, layout, instanceRoot, keep, deferred)
 	if err != nil {
 		result = errors.Join(result, hostInstallFailure("re-scan Paperboat installation items", err))
 	} else if len(leftovers) > 0 {
 		result = errors.Join(result, hostInstallFailure("Paperboat cleanup left items behind: "+strings.Join(leftovers, ", "), errWindowsAccountLeftovers))
 	}
-	return result
+	return len(deferred) > 0, result
 }
 
-// SCM shutdown and image termination can briefly leave a delete handle open.
-// Keep the bounded retry in the elevated account sweep shared by uninstall and
-// reset. Authorization failures never reach a separate caller-side deletion.
-func removeWindowsAccountPayload(ctx context.Context, root string) error {
-	return removeWindowsAccountPayloadKeepingCLI(ctx, root, "")
-}
-
-func removeWindowsAccountPayloadKeepingCLI(ctx context.Context, root, keep string) error {
+// removeWindowsAccountPayloadKeepingCLI removes one owned root. SCM shutdown and image termination can briefly
+// leave a handle or the image mapping open, so a busy file is retried for a bounded time. What is still in use
+// after that cannot be deleted by anyone before its holder exits: it is left to Windows (atRestart).
+func removeWindowsAccountPayloadKeepingCLI(ctx context.Context, root, keep string) (atRestart bool, _ error) {
 	deadline := time.Now().Add(windowsAccountProcessExitTimeout)
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return false, err
 		}
 		err := RemovePathPreservingCLI(ctx, root, keep)
 		if err == nil {
-			return nil
+			return false, nil
 		}
-		if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-			return err
+		if !windowsFileBusy(err) {
+			return false, err
 		}
 		if !time.Now().Before(deadline) {
-			return err
+			return deleteWindowsPayloadAtRestart(root, keep)
 		}
 		select {
 		case <-ctx.Done():
-			return errors.Join(err, ctx.Err())
+			return false, errors.Join(err, ctx.Err())
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// A running program's image answers ERROR_ACCESS_DENIED to deletion, an open handle a sharing or lock violation,
+// and a directory whose deleted child is still held open is not empty yet.
+func windowsFileBusy(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
+		errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_DIR_NOT_EMPTY)
+}
+
+// deleteWindowsPayloadAtRestart registers what is still in use under root for deletion at restart (MoveFileEx
+// MOVEFILE_DELAY_UNTIL_REBOOT, the documented way to remove a file in use). A file is first moved aside under a
+// retired name, as the update does: a reinstall before the restart reuses the original names, and Windows must not
+// delete those. Directories are registered after their content; Windows removes them only if they are empty then.
+func deleteWindowsPayloadAtRestart(root, keep string) (atRestart bool, _ error) {
+	var directories []string
+	var result error
+	register := func(path string) {
+		pointer, err := windows.UTF16PtrFromString(path)
+		if err == nil {
+			err = deleteWindowsFileAtRestart(pointer)
+		}
+		if err != nil {
+			result = errors.Join(result, hostInstallFailure("register a file in use for deletion at restart", err))
+			return
+		}
+		atRestart = true
+	}
+	// WalkDir does not descend into reparse points; they are removed as entries.
+	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if installNotExistOnly(err) {
+				return nil
+			}
+			return err
+		}
+		if keep != "" && cliWithin(path, keep) {
+			return nil // the retained CLI and the directories that hold it
+		}
+		if entry.IsDir() {
+			directories = append(directories, path)
+			return nil
+		}
+		removeErr := os.Remove(path)
+		if removeErr == nil || installNotExistOnly(removeErr) {
+			return nil
+		}
+		if !windowsFileBusy(removeErr) {
+			result = errors.Join(result, removeErr)
+			return nil
+		}
+		if !strings.Contains(entry.Name(), windowsRetiredSuffix) {
+			retired := path + windowsRetiredSuffix + strconv.FormatInt(time.Now().UnixNano(), 36)
+			//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=retire-file-in-use-that-cannot-be-deleted
+			if err := os.Rename(path, retired); err != nil {
+				result = errors.Join(result, hostInstallFailure("a file in use could not be moved aside", removeErr, err))
+				return nil
+			}
+			path = retired
+		}
+		register(path)
+		return nil
+	})
+	result = errors.Join(result, walkErr)
+	for index := len(directories) - 1; index >= 0; index-- {
+		if err := os.Remove(directories[index]); err != nil && !installNotExistOnly(err) {
+			if atRestart {
+				register(directories[index])
+			} else {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	if result != nil {
+		return false, result
+	}
+	return atRestart, nil
 }
 
 func removeAccountServices(ctx context.Context, instance string) (resultErr error) {
@@ -338,12 +419,6 @@ func windowsAccountDirectoryEntries(ctx context.Context) ([]string, error) {
 	return entries, nil
 }
 
-// accountLeftovers gathers the post-sweep inventory for this account only.
-// Other accounts' items are not leftovers of this purge.
-func accountLeftovers(layout service.Layout, instanceRoot string) ([]string, error) {
-	return accountLeftoversKeepingCLI(context.Background(), layout, instanceRoot, "")
-}
-
 // Discover declarations independently of SCM: stopped or interrupted installs
 // can leave a valid owned descriptor after the registration has disappeared.
 func windowsAccountDeclarationInventory(ctx context.Context, instance string) ([]string, error) {
@@ -392,7 +467,9 @@ func windowsAccountDeclarationInventory(ctx context.Context, instance string) ([
 	return paths, nil
 }
 
-func accountLeftoversKeepingCLI(ctx context.Context, layout service.Layout, instanceRoot, keep string) ([]string, error) {
+// accountLeftoversKeepingCLI gathers the post-sweep inventory for this account only. Other accounts' items are not
+// leftovers of this purge, and neither is a root whose remaining files Windows deletes at restart (deferred).
+func accountLeftoversKeepingCLI(ctx context.Context, layout service.Layout, instanceRoot, keep string, deferred []string) ([]string, error) {
 	names, err := listWindowsServiceNames()
 	if err != nil {
 		return nil, err
@@ -404,8 +481,12 @@ func accountLeftoversKeepingCLI(ctx context.Context, layout service.Layout, inst
 	var directories []string
 	for _, item := range []struct{ label, path string }{
 		{"Program Files install directory", layout.InstallRoot},
+		{"ProgramData update state directory", layout.UpdateStateRoot},
 		{"ProgramData instance directory", instanceRoot},
 	} {
+		if slices.Contains(deferred, item.path) {
+			continue
+		}
 		if _, err := os.Stat(item.path); err == nil {
 			onlyCLI, err := CLIOnlyRemains(ctx, item.path, keep)
 			if err != nil {

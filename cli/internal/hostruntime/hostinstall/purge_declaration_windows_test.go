@@ -72,7 +72,7 @@ func TestWindowsPurgeRemovesUnregisteredOwnedDeclaration(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(generationPath) })
 	ctx := context.Background()
 	t.Run("inventory", func(t *testing.T) {
-		items, err := accountLeftoversKeepingCLI(ctx, layout, root, layout.Binary)
+		items, err := accountLeftoversKeepingCLI(ctx, layout, root, layout.Binary, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -134,3 +134,25 @@ func markEmptyWindowsSharedDirectory(ctx context.Context, file *os.File) error {
 	}
 	return err
 }
+
+// deleteWindowsSharedParentsAtRestart completes a removal that left files in use to the restart: the shared
+// directories above them are not empty yet, so they are registered too. Windows deletes a registered directory
+// only if it is empty at the restart, so another account's or a new installation's content keeps it.
+func deleteWindowsSharedParentsAtRestart(shared service.Layout, programData string) error {
+	var result error
+	for _, path := range []string{filepath.Join(shared.InstallRoot, "users"), shared.InstallRoot, filepath.Join(programData, "users"), filepath.Join(shared.UpdateStateRoot, "users"), shared.UpdateStateRoot, programData} {
+		if _, err := os.Lstat(path); err != nil {
+			continue // already removed
+		}
+		if err := rejectWindowsReparseAncestors(path); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		pointer, err := windows.UTF16PtrFromString(path)
+		if err == nil {
+			err = deleteWindowsFileAtRestart(pointer)
+		}
+		result = errors.Join(result, err)
+	}
+	return result
+}

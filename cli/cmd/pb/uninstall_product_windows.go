@@ -60,11 +60,14 @@ type windowsUninstallPlan struct {
 }
 
 type windowsUninstallStatus struct {
-	Schema      string                           `json:"schema"`
-	State       string                           `json:"state"`
-	Failure     *windowsUninstallFailureMetadata `json:"failure,omitempty"`
-	UpdatedAt   time.Time                        `json:"updated_at"`
-	CompletedAt time.Time                        `json:"completed_at,omitempty"`
+	Schema string `json:"schema"`
+	State  string `json:"state"`
+	// RemovalAtRestart qualifies "completed": files that were still in use are registered with Windows for
+	// deletion at the next restart; everything else is gone.
+	RemovalAtRestart bool                             `json:"removal_at_restart,omitempty"`
+	Failure          *windowsUninstallFailureMetadata `json:"failure,omitempty"`
+	UpdatedAt        time.Time                        `json:"updated_at"`
+	CompletedAt      time.Time                        `json:"completed_at,omitempty"`
 }
 
 // Only producer-owned finite fault metadata crosses the process boundary. Native
@@ -551,6 +554,11 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	// The helper owns cleanup until its context-aware operations finish. Do not
 	// detach a worker on deadline and discard its eventual original failure.
 	result = performWindowsSystemUninstall(cleanupCtx, plan.OwnerSID, plan.InboxPaths)
+	// The exact sentinel only: joined with any failure it is a failure.
+	atRestart := result == hostinstall.ErrRemovalAtRestart
+	if atRestart {
+		result = nil
+	}
 	if result == nil {
 		result = config.PurgeCredentialStore()
 		for _, path := range plan.UserStatePaths {
@@ -568,7 +576,9 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 		}
 		return errors.Join(result, status(state, result))
 	}
-	if err := status("completed", nil); err != nil {
+	completed := windowsUninstallStatusValue(ctx, "completed", nil)
+	completed.RemovalAtRestart = atRestart
+	if err := writeProtectedWindowsUninstallJSON(plan.StatusPath, completed); err != nil {
 		return err
 	}
 	return os.Remove(planPath)
@@ -730,7 +740,7 @@ func readWindowsUninstallStatus(statusPath string) (windowsUninstallStatus, erro
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return windowsUninstallStatus{}, windowsUninstallLocalFailure("", errors.New(message), err)
 	}
-	if status.Schema != windowsUninstallStatusSchema || status.UpdatedAt.IsZero() {
+	if status.Schema != windowsUninstallStatusSchema || status.UpdatedAt.IsZero() || status.RemovalAtRestart && status.State != "completed" {
 		return windowsUninstallStatus{}, errors.New(message)
 	}
 	if failure := status.Failure; failure != nil {
