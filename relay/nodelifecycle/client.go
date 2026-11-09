@@ -301,17 +301,12 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || out.CapacityLimit != c.lease.CapacityLimit || !server.MatchesControlService(out.PeerRelay) {
 		return ErrFenced
 	}
-	known := make(map[string]bool, len(subjects))
-	for _, subject := range subjects {
-		known[subject.AccountID+"\x00"+subject.EndpointID] = true
-	}
-	seen := map[string]bool{}
+	// A revocation only restricts: one for an endpoint this relay does not hold fences its future
+	// grants, a repeated one is a no-op (Server.Revoke keeps the highest), so neither drains the relay.
 	for _, rev := range out.Revocations {
-		k := rev.AccountID + "\x00" + rev.EndpointID
-		if !known[k] || rev.MinGeneration < 2 || seen[k] {
+		if rev.MinGeneration < 2 {
 			return ErrFenced
 		}
-		seen[k] = true
 	}
 	for _, rev := range out.Revocations {
 		if server.Revoke(rev.AccountID, rev.EndpointID, rev.MinGeneration) != nil {
