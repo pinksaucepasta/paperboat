@@ -58,17 +58,17 @@ const help = [
   ["pb doctor [machine]", "Diagnoses this computer, or the path to another machine. --repair fixes what it can."],
   ["pb bugreport", "Builds a diagnostic bundle with secrets and contents removed, for a support request."],
   ["pb update", "Updates now. By default pb updates itself at 04:00 local time; pb update settings changes that."],
-  ["pb completion bash|zsh|fish", "Shell completion, including your machine names."],
+  ["pb completion zsh", "Shell completion for zsh (also bash and fish), including your machine names."],
   ["pb uninstall", "Removes Paperboat from this machine completely. Files in the Inbox are kept."],
 ]
 ---
 
 <Page
-  title="Paperboat quickstart: install pb and connect two machines in five minutes"
+  title="Paperboat quickstart: install pb, add a second machine, open a terminal"
   description="Install pb, sign in, add a second machine, open a terminal on it and share a local port. Plus where every command is documented: built-in help, man pages and pb doctor."
   schema={[breadcrumbSchema(Astro.site, [["Docs", "/docs/"]])]}
 >
-  <Head title="Two machines, five minutes">
+  <Head title="Two machines, one terminal between them">
     <p>
       This is the quickstart. The full reference ships inside <code>pb</code> itself, as built-in help and manual pages that always match the
       version you have installed.
@@ -135,7 +135,7 @@ const help = [
     </div>
   </section>
 
-  <Closing title="That was the whole setup." />
+  <Closing />
 </Page>
 
 <style>

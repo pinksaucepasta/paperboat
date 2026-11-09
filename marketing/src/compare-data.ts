@@ -200,7 +200,7 @@ export const paperboat = {
     private_network: ["TCP ports and private names; not a full network"],
     encryption_native: ["End to end; direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
-    teams: ["Yes, five roles; SSO and SCIM on Team"],
+    teams: ["Yes, five roles; SSO and SCIM from 10 seats"],
     access_rules: ["Yes, a policy file with groups, tags and deny rules"],
     api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
@@ -237,7 +237,9 @@ export type Product = {
 
 const install = "Install Paperboat on each machine with the one-line installer and sign in."
 
-// Tailscale — sources opened 2026-10-23.
+// Every price and limit below was re-opened on the vendor's own page on 2026-11-10; a number that
+// cannot be opened there is removed, not kept from memory.
+// Tailscale
 const tailscaleSources = {
   ssh: "https://tailscale.com/kb/1193/tailscale-ssh",
   console: "https://tailscale.com/kb/1216/tailscale-ssh-console",
@@ -320,7 +322,8 @@ const cfZeroTrustSources = {
   users: "https://developers.cloudflare.com/cloudflare-one/team-and-resources/users/seat-management/",
   api: "https://developers.cloudflare.com/api/",
   warp: "https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/",
-  pricing: "https://www.cloudflare.com/plans/zero-trust-services/",
+  // The page that states the numbers as text (the HTML pricing page draws them with script).
+  pricing: "https://www.cloudflare.com/plans/sase-zero-trust.md",
   limits: "https://developers.cloudflare.com/cloudflare-one/account-limits/",
 }
 
@@ -538,7 +541,7 @@ export const products: Product[] = [
           "Paperboat tunnels take your own domains on every plan, including Free, with the DNS records shown for you and the certificate issued automatically.",
         ],
         them: "$ ngrok http 3000 --url api.example.com",
-        us: "$ pb tunnel domain add api api.example.com",
+        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
       },
       {
         title: "Request inspection",
@@ -637,7 +640,7 @@ export const products: Product[] = [
           "Paperboat asks for two CNAME records at whichever DNS provider you already use and issues the certificate itself.",
         ],
         them: "$ cloudflared tunnel route dns api api.example.com",
-        us: "$ pb tunnel domain add api api.example.com",
+        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
       },
       {
         title: "Quick links",
@@ -697,7 +700,7 @@ export const products: Product[] = [
     name: "Teleport",
     label: "Teleport",
     summary:
-      "Teleport is an access platform for companies: SSH, Kubernetes, databases and internal apps behind short-lived certificates, with session recording and audit. Paperboat is lighter: install it on your machines and you are working in a minute, with terminals that survive disconnects, previews and tunnels.",
+      "Teleport is an access platform for companies: SSH, Kubernetes, databases and internal apps behind short-lived certificates, with session recording and audit. Paperboat is lighter: one install per machine and a sign-in, with terminals that survive disconnects, previews and tunnels.",
     cells: cells(teleportSources, {
       terminal_persistent: ["No", "matrix"],
       terminal_replay: ["Recorded sessions play back afterwards", "tsh"],
@@ -743,7 +746,7 @@ export const products: Product[] = [
           ours.terminals,
         ],
         them: "$ tsh ssh dev@devbox\n$ tsh join <session-id>",
-        us: "$ pb devbox\n$ pb session share <session>",
+        us: "$ pb devbox\n$ pb session share <session-id> --team <team> --all",
       },
       {
         title: "Public links",
@@ -1103,7 +1106,7 @@ export const products: Product[] = [
       selfhost: ["The connector only", "tunnel"],
       platforms: ["Linux, macOS, Windows, iOS, Android, ChromeOS", "warp"],
       pricing_model: ["Per user: $7 a month", "pricing"],
-      free_tier: ["Up to 50 users", "limits"],
+      free_tier: ["Up to 50 users", "pricing"],
     }),
     differences: [
       {
@@ -1134,7 +1137,7 @@ export const products: Product[] = [
           "Public hostnames on Cloudflare need the domain's DNS on Cloudflare.",
           "Paperboat asks for two CNAME records at whichever DNS provider you already use.",
         ],
-        us: "$ pb tunnel domain add api api.example.com",
+        us: "$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --wait\n$ pb tunnel domain add api api.example.com --route web",
       },
     ],
     chooseThem: [
@@ -1228,7 +1231,7 @@ export const products: Product[] = [
     ],
     chooseUs: [
       "You're a developer or small team who wants your own machines, not a corporate network.",
-      "You want to be working in a minute, without a gateway to run.",
+      "You want one install per machine and a sign-in, without a gateway to run.",
     ],
     pricing: {
       lines: [

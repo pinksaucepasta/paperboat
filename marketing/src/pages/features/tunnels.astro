@@ -26,7 +26,10 @@ const versus = [
 const domain = [
   { lines: ["$ pb domain add dev.example.com"], note: "Prints two DNS records: a CNAME that proves the domain is yours, and a wildcard that sends its names to Paperboat." },
   { lines: ["$ pb domain verify dev.example.com"], note: "Once the records exist. One certificate is issued for the domain and every name one level under it." },
-  { lines: ["$ pb tunnel domain add api api.dev.example.com"], note: "Any tunnel or preview can now take a name under the domain, with no DNS step of its own." },
+  {
+    lines: ["$ pb tunnel route list api", "$ pb tunnel domain add api api.dev.example.com --route <route>"],
+    note: "A hostname is served by one of the tunnel's routes; <code>route list</code> shows the one <code>create</code> made. No DNS step for this name.",
+  },
 ]
 
 const routes = [
@@ -108,7 +111,7 @@ const faq = [
   <section class="section" aria-labelledby="domain-title">
     <div class="wrap cols">
       <div class="stack">
-        <h2 class="h2" id="domain-title">Your own domain, in three steps</h2>
+        <h2 class="h2" id="domain-title">Your own domain: add it once, then name routes</h2>
         <div class="prose">
           <p>
             Add a domain or a subdomain to your workspace once. After that, giving a tunnel a name under it is one command and takes effect

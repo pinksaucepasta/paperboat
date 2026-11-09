@@ -10,7 +10,10 @@ const hero = [
 
 const publish = [
   { lines: ["$ pb tunnel create blog --port 8080 --wait", "Created tunnel blog (tunnel_7c2m9xqa)", `https://amber-quiet-harbor-5120.${tunnelDomain} -> http://127.0.0.1:8080`, "Status: ready"], note: "The one thing you do want public." },
-  { lines: ["$ pb domain add home.example.com", "$ pb tunnel domain add blog blog.home.example.com"], note: "On your own domain. Free plan included." },
+  {
+    lines: ["$ pb domain add home.example.com", "$ pb tunnel route list blog", "$ pb tunnel domain add blog blog.home.example.com --route <route>"],
+    note: "On your own domain, on the Free plan too: add the domain, find the tunnel's route, point a name at it.",
+  },
 ]
 
 const jobs = [
@@ -113,7 +116,7 @@ const faq = [
         <p>
           It connects the computers you install it on, port by port. If you want every device at home on one private network,
           <a href="/compare/tailscale/">Tailscale</a>, <a href="/compare/zerotier/">ZeroTier</a> or
-          <a href="/compare/netbird/">NetBird</a> is the right tool, and Paperboat runs happily beside any of them.
+          <a href="/compare/netbird/">NetBird</a> is the right tool. Paperboat leaves DNS, routes and VPN settings alone, so it can run on the same machines.
         </p>
       </div>
     </div>

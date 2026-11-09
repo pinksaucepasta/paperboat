@@ -1,6 +1,6 @@
 /**
  * The legal pages. The legal text itself is not written yet (it needs the operating company's
- * details), so each page says so plainly and points to what is already true and published.
+ * details), so each page says so and points to what is already published.
  */
 export type Legal = { slug: string; title: string; covers: string }
 

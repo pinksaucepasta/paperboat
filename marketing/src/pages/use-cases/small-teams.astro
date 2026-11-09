@@ -1,7 +1,7 @@
 ---
 import UseCase from "../../layouts/UseCase.astro"
 import Sheet from "../../components/Sheet.astro"
-import { plans, previewDomain } from "../../site"
+import { plans, previewDomain, ssoMinSeats } from "../../site"
 
 const hero = [
   { lines: ["$ pb team invite acme bo@example.com"], note: "Bo joins the team. That alone opens nothing." },
@@ -21,7 +21,7 @@ const week = [
 const faq = [
   {
     q: "Do we need the Team plan to work together?",
-    a: `Not always. Sharing a live terminal or a preview link works on Free. Team, at ${plans[2].price} a seat a month, is for lasting access to each other's machines, with roles, single sign-on and an exportable audit log. It has a 14-day trial.`,
+    a: `Not always. Sharing a live terminal or a preview link works on Free. Team, at ${plans[2].price} a seat a month, is for lasting access to each other's machines, with roles and an exportable audit log. Single sign-on and directory sync start at ${ssoMinSeats} seats. It has a 14-day trial.`,
   },
   {
     q: "We already have a VPN. Why this?",
@@ -46,7 +46,7 @@ const faq = [
   slug="small-teams"
   name="Small teams"
   title="Shared server access for small dev teams, without a VPN | Paperboat"
-  description="Give teammates a terminal on staging, a review link, one database port or a deploy secret, each as a readable rule. Sessions end the moment someone is removed. $15 a seat with SSO and audit log, 14-day trial."
+  description="Give teammates a terminal on staging, a review link, one database port or a deploy secret, each as a readable rule. Sessions end the moment someone is removed. $15 a seat with roles and audit log export, 14-day trial."
   headline="A staging box, review links and secrets for a team of five"
   faq={faq}
   related={["teams", "env", "previews", "terminal"]}
@@ -78,8 +78,8 @@ const faq = [
         <h2 class="h2" id="cost-title">What it costs</h2>
         <div class="prose">
           <p>
-            <strong>{plans[2].price} a seat a month</strong>, or $150 a year. Every feature is included, single sign-on and directory sync too.
-            Machines are not counted.
+            <strong>{plans[2].price} a seat a month</strong>, or $150 a year. Machines are not counted. Single sign-on and directory sync
+            need {ssoMinSeats} seats; everything else is included from the first.
           </p>
           <p>
             Five people is $75 a month. The trial is 14 days; a card is taken at the start and nothing is charged if you cancel before day 15.

@@ -70,6 +70,9 @@ export const topUp = { size: "100 GB", price: "$5" }
 /** Audit log retention per plan (server config business.audit_retention_*; server/docs/teams-business.md). */
 export const auditRetention = ["30 days", "90 days", "365 days"] as const
 
+/** Single sign-on and directory sync need a team of at least this many seats (server config business.sso_min_seats). */
+export const ssoMinSeats = 10
+
 /** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
 export const publicTcp = ["1", "10", "10 per seat"] as const
 

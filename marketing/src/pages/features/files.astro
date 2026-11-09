@@ -91,7 +91,7 @@ const faq = [
       </div>
       <Sheet
         steps={[
-          { lines: ["$ pb send list", "$ pb send status <transfer-id>", "$ pb send cancel <transfer-id>"] },
+          { lines: ["$ pb send list --on studio", "$ pb send status <transfer-id> --on studio", "$ pb send cancel <transfer-id> --on studio"], note: "<code>--on</code> names the machine the files were sent to." },
           { lines: ["$ pb send destination set studio", "$ pb send ./notes.md"], note: "With a default destination, <code>--to</code> is optional." },
           { lines: ["$ pb inbox requests", "$ pb inbox approve <request-id>"], note: "Files a teammate wants to send you." },
         ]}
