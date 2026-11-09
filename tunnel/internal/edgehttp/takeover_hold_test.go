@@ -5,9 +5,12 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
 
 func TestHoldSetBoundsOverallPerNameAndKeepsAReserve(t *testing.T) {
@@ -124,4 +127,36 @@ func TestSharedTLSHoldEndsWhenTheClientLeaves(t *testing.T) {
 	waitFor(1, "the name is held while the client waits")
 	_ = conn.Close()
 	waitFor(0, "the client left")
+}
+
+// The HTTP-layer hold is bounded too: past the per-host bound a request is answered 404 at once, and the held ones
+// are served when their route attaches.
+func TestHTTPRouteHoldIsBounded(t *testing.T) {
+	routes := route.NewRegistry("preview.example.test", "runtime.example.test")
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
+		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: routes, RouteGrace: func() time.Duration { return 2 * time.Second }}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make([]func(), 0, routeHoldPerName)
+	for i := 0; i < routeHoldPerName; i++ {
+		done, ok := policy.routeHolds.acquire("busy.preview.example.test", true)
+		if !ok {
+			t.Fatalf("hold %d refused below the bound", i)
+		}
+		release = append(release, done)
+	}
+	defer func() {
+		for _, done := range release {
+			done()
+		}
+	}()
+	r := httptest.NewRequest("GET", "https://busy.preview.example.test/", nil)
+	r.Host = "busy.preview.example.test"
+	w := httptest.NewRecorder()
+	start := time.Now()
+	policy.ServeHTTP(w, r)
+	if w.Code != 404 || time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("a request past the hold bound: %d after %v, want 404 at once", w.Code, time.Since(start))
+	}
 }

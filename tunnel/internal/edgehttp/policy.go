@@ -96,7 +96,16 @@ type Policy struct {
 	config         Config
 	next           http.Handler
 	clientStrategy realclientip.Strategy
+	// routeHolds bounds the requests held for their route during the takeover grace (holdForRoute).
+	routeHolds *holdSet
 }
+
+// routeHoldMax and routeHoldPerName bound the HTTP-layer holds: 256 requests at once, 64 per host. A request got
+// here past TLS, so its name is already authorized; the bound is about volume, not names.
+const (
+	routeHoldMax     = 256
+	routeHoldPerName = 64
+)
 
 func New(config Config, next http.Handler) (*Policy, error) {
 	if next == nil || (!config.SelfHosted || config.BrowserAccess != nil) && (config.PreviewBaseDomain == "" || config.TunnelBaseDomain == "" || config.RuntimeBaseDomain == "") || config.MaxHeaderBytes < 1024 || config.MaxBodyBytes < 1 {
@@ -113,7 +122,7 @@ func New(config Config, next http.Handler) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Policy{config: config, next: next, clientStrategy: strategy}, nil
+	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0)}, nil
 }
 
 // NewGateway builds the live public-preview gate. The target is the private
@@ -418,9 +427,13 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		candidateLease, acquired, acquireErr := p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
 		if errors.Is(acquireErr, route.ErrNoMatch) && p.config.RouteGrace != nil {
-			candidateLease, acquired, acquireErr = holdForRoute(r.Context(), p.config.RouteGrace(), func() (*route.StreamLease, route.RouteMatch, error) {
-				return p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
-			})
+			// Past the bound a request is answered like one with no grace: its not-found below.
+			if release, ok := p.routeHolds.acquire(candidateHost, true); ok {
+				candidateLease, acquired, acquireErr = holdForRoute(r.Context(), p.config.RouteGrace(), func() (*route.StreamLease, route.RouteMatch, error) {
+					return p.config.Routes.Acquire(r.Context(), candidateHost, r.URL.Path)
+				})
+				release()
+			}
 		}
 		if acquireErr != nil {
 			token, hasSession := browserCookie(r, browserEdgeCookie)
