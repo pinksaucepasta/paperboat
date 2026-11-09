@@ -23,6 +23,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { copyWithToast } from "@/lib/clipboard"
+import { useLastCount } from "@/lib/last-count"
 
 type View = "live" | "ended"
 
@@ -106,6 +107,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   )
 
   const shown = query.data?.items ?? []
+  const lastRows = useLastCount(`previews:${ws}:${scope ?? ""}:${view}`, query.data ? shown.length : undefined)
 
   if (counts.data && counts.data.live + counts.data.ended === 0 && !q) {
     return (
@@ -171,7 +173,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
               ? <TableRowsSkeleton
-                  rows={Math.min((view === "live" ? counts.data?.live : counts.data?.ended) ?? 12, cursorPageSize)}
+                  rows={lastRows ?? Math.min((view === "live" ? counts.data?.live : counts.data?.ended) ?? 12, cursorPageSize)}
                   columns={[
                     { bar: "w-56" },
                     !scope && { className: "hidden md:table-cell", bar: "w-20" },

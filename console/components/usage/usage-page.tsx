@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { useLastCount } from "@/lib/last-count"
 
 /*
  * How much traffic Paperboat carried and which way it went: directly between machines, through a
@@ -81,6 +82,10 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
   const [period, setPeriod] = useState<UsagePeriod>("7d")
   const usage = useApiQuery({ ...usageForQuery(workspace?.id ?? "", period, scope), enabled: Boolean(workspace) })
   const data = usage.data
+  const lastRows = useLastCount(
+    `usage:${workspace?.id}:${scope ?? ""}:${period}`,
+    data ? Math.min(data.resources.length, topResources) : undefined,
+  )
 
   return (
     <section className="flex flex-col gap-6">
@@ -98,7 +103,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
       {usage.isError ? (
         <LoadError what="usage" error={usage.error} retry={() => usage.refetch()} />
       ) : !data ? (
-        <UsageSkeleton showMachine={!scope} />
+        <UsageSkeleton showMachine={!scope} rows={lastRows ?? 5} />
       ) : (
         <Loaded usage={data} period={period} showMachine={!scope} />
       )}
@@ -276,7 +281,7 @@ function PathBar({ resource }: { resource: Usage["resources"][number] }) {
 }
 
 /** The loaded page's cards, chart panel and table header, with placeholders for the numbers. */
-function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
+function UsageSkeleton({ showMachine, rows }: { showMachine: boolean; rows: number }) {
   const line = (className: string) => <Skeleton className={cn("my-0.5 h-3", className)} />
   return (
     <>
@@ -304,7 +309,7 @@ function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
         <h2 className="text-sm font-medium">By resource</h2>
         <ResourceTable showMachine={showMachine}>
           <TableRowsSkeleton
-            rows={5}
+            rows={rows}
             columns={[
               { bar: "w-40", second: "w-16" },
               showMachine && { className: "hidden md:table-cell", bar: "w-20" },

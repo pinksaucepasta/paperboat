@@ -16,6 +16,7 @@ import {
   type ConfigPath,
 } from "@/lib/config-sync"
 import { formatBytes } from "@/lib/format"
+import { useLastCount } from "@/lib/last-count"
 import { GitHubConnection } from "@/components/config/github-connection"
 import { SearchField, useListScope } from "@/components/list-toolbar"
 import { Detail } from "@/components/machine-overview"
@@ -44,6 +45,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const status = useApiQuery(configStatusQuery({ q, machine: scope ?? undefined, page: pages.page }))
   const conflicts = useApiQuery({ ...configStatusQuery({ state: "conflict" }), enabled: !scope })
   const environments = status.data?.items ?? []
+  const lastRows = useLastCount(`config:${scope ?? ""}:${q}:${pages.page}`, status.data ? environments.length : undefined)
 
   if (status.isPending && scope) return <EmptySkeleton />
   if (status.isError) return <LoadError what="config sync" error={status.error} retry={() => status.refetch()} />
@@ -61,6 +63,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
       {status.isPending || status.data.total || q ? (
         <AllMachines
           loading={status.isPending}
+          lastRows={lastRows}
           environments={environments}
           total={status.data?.total ?? 0}
           page={pages.page}
@@ -95,6 +98,8 @@ function NotSetUp({ name }: { name?: string }) {
 
 function AllMachines(props: {
   loading: boolean
+  /** Rows the list had last time, for its loading state. */
+  lastRows?: number
   environments: ConfigEnvironment[]
   total: number
   page: number
@@ -144,6 +149,7 @@ function AllMachines(props: {
         <tbody className="divide-y divide-divider border-b border-divider">
           {loading && (
             <TableRowsSkeleton
+              rows={props.lastRows}
               columns={[
                 { bar: "w-28" },
                 { className: "hidden md:table-cell", bar: "w-40" },

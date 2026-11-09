@@ -7,6 +7,7 @@ import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { hostOf, tunnelsPageQuery, type Tunnel } from "@/lib/tunnels"
 import { usePageParam } from "@/lib/use-page-param"
+import { useLastCount } from "@/lib/last-count"
 import { ListPager } from "@/components/list-pager"
 import { NewTunnelButton } from "@/components/tunnels/new-tunnel"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
@@ -40,6 +41,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
     enabled: Boolean(workspace),
   })
   const shown = query.data?.items ?? []
+  const lastRows = useLastCount(`tunnels:${workspace?.id}:${scope ?? ""}`, query.data ? shown.length : undefined)
 
   if (query.isSuccess && query.data.total === 0 && !q) {
     return (
@@ -91,6 +93,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
               ? <TableRowsSkeleton
+                  rows={lastRows}
                   columns={[
                     { bar: "w-36" },
                     { className: "hidden lg:table-cell", bar: "w-56" },

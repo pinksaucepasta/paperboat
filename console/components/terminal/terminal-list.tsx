@@ -21,6 +21,7 @@ import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { copyWithToast } from "@/lib/clipboard"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { useLastCount } from "@/lib/last-count"
 
 const day = 86_400_000
 /** Closed terminals are kept for 30 days after closing (`expires_at`), which dates the close. */
@@ -59,6 +60,9 @@ function groupOf(
 
 type View = "open" | "closed"
 
+const unreachableNote =
+  "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects, and close on their own after 30 days without it."
+
 /** The machine page's Terminals tab. */
 export function MachineTerminals() {
   return <TerminalList machine={useCurrentMachine()} />
@@ -95,7 +99,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
       groups.push({
         key: "away",
         label: live.length ? "Not reachable" : "",
-        note: "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects, and close on their own after 30 days without it.",
+        note: unreachableNote,
         rows: away,
       })
   } else
@@ -106,6 +110,12 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
       if (group?.key === key) group.rows.push(row)
       else groups.push({ key, label, rows: [row] })
     }
+
+  // Terminals are yours across workspaces, so the count isn't per workspace.
+  const remembered = `terminals:${scope ?? ""}:${view}`
+  const lastRows = useLastCount(remembered, query.data ? shown.length : undefined)
+  // Whether the list opened with the unreachable note, so the loading state reserves its line.
+  const lastNote = useLastCount(`${remembered}:note`, query.data ? (groups[0]?.note ? 1 : 0) : undefined)
 
   if (counts.data && counts.data.open + counts.data.closed === 0) {
     return (
@@ -167,8 +177,15 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           </thead>
           {query.isPending ? (
             <tbody>
+              {lastNote ? (
+                <tr>
+                  <th colSpan={columns} className="px-3 pt-4 pb-2 text-left text-xs font-normal">
+                    <span className="block text-muted-foreground">{unreachableNote}</span>
+                  </th>
+                </tr>
+              ) : null}
               <TableRowsSkeleton
-                rows={Math.min((view === "open" ? counts.data?.open : counts.data?.closed) ?? 12, terminalPageSize)}
+                rows={lastRows ?? Math.min((view === "open" ? counts.data?.open : counts.data?.closed) ?? 12, terminalPageSize)}
                 columns={[
                   { bar: "w-48" },
                   !scope && { className: "hidden md:table-cell", bar: "w-20" },

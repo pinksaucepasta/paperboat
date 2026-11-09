@@ -17,6 +17,7 @@ import {
   type InboxRequest,
 } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
+import { useLastCount } from "@/lib/last-count"
 import {
   SendFilesButton,
   SendFilesDialog,
@@ -91,6 +92,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
   const outdated = inbox.error instanceof ApiError && inbox.error.code === "machine_update_required"
   const loading = !machine || (machine.online && inbox.isPending && !offline)
   const owner = { id: machineId, alias: machine?.alias ?? "" }
+  const lastRows = useLastCount(`files:${machineId}`, inbox.data ? inbox.data.items?.length ?? 0 : undefined)
   const rows: Row[] = (inbox.data?.items ?? [])
     .filter((file) => !q || file.name.toLowerCase().includes(q))
     .map((file) => ({ file, machine: owner }))
@@ -195,6 +197,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
             <tbody className="divide-y divide-divider border-b border-divider">
               {loading && !rows.length
                 ? <TableRowsSkeleton
+                    rows={lastRows}
                     columns={[
                       { bar: "w-4" },
                       { bar: "w-48" },

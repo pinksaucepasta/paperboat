@@ -19,6 +19,7 @@ import { cursorPageSize } from "@/lib/cursor-pages"
 import { parseQuery, type FilterKey } from "@/lib/machine-filter"
 import { machineListQuery } from "@/lib/machine-list"
 import { tagsLive, tagsQuery } from "@/lib/policy"
+import { useLastCount } from "@/lib/last-count"
 import { ListPager } from "@/components/list-pager"
 import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
@@ -62,6 +63,7 @@ export function MachineTable() {
   // The cards' count (already loaded with them) sizes the loading rows.
   const summary = useApiQuery({ ...machineSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const shown = list.data?.items
+  const lastRows = useLastCount(`machines:${workspace?.id}:${query}:${pages.page}`, shown?.length)
   const total = list.data?.total ?? 0
 
   return (
@@ -149,7 +151,7 @@ export function MachineTable() {
           <tbody className="divide-y divide-divider">
             {isPending && (
               <TableRowsSkeleton
-                rows={Math.min(summary.data?.total ?? 12, cursorPageSize)}
+                rows={lastRows ?? Math.min(summary.data?.total ?? 12, cursorPageSize)}
                 columns={[
                   { bar: "w-28", dot: true },
                   { className: "hidden md:table-cell", bar: "w-40", second: "w-24" },
