@@ -59,11 +59,12 @@ type browserTerminalSession struct {
 // burst buffer; a participant that stays behind is disconnected independently.
 type BrowserTerminalHub struct {
 	// OnFailure is installed by the process owner before ServeCarrier starts.
-	OnFailure    func(context.Context, error)
-	mu           sync.Mutex
-	closed       bool
-	handingOver  bool // HandOver ran: the replacement edge process serves, so every end is a move
-	activeRoutes map[string]BrowserTerminalRouteFence
+	OnFailure     func(context.Context, error)
+	mu            sync.Mutex
+	closed        bool
+	handingOver   bool // HandOver ran: the replacement edge process serves, so every end is a move
+	handoverTimer *time.Timer
+	activeRoutes  map[string]BrowserTerminalRouteFence
 	// heldRoutes are the fences a newer worker generation of the same machine replaced (pb update):
 	// their carriers keep publishing to the browsers they already serve until they detach. New
 	// browsers join only the active fence.
@@ -130,9 +131,15 @@ func (h *BrowserTerminalHub) HandOver(grace time.Duration) {
 		return
 	}
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
 	h.handingOver = true
-	h.mu.Unlock()
-	time.AfterFunc(grace, func() {
+	if h.handoverTimer != nil {
+		h.handoverTimer.Stop()
+	}
+	h.handoverTimer = time.AfterFunc(grace, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		for key, session := range h.sessions {
@@ -394,6 +401,9 @@ func (h *BrowserTerminalHub) Close() error {
 		return nil
 	}
 	h.closed = true
+	if h.handoverTimer != nil {
+		h.handoverTimer.Stop()
+	}
 	for key, session := range h.sessions {
 		h.closeSessionLocked(key, session)
 	}

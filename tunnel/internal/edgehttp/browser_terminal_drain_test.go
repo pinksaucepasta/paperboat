@@ -355,3 +355,22 @@ func (b *lockedBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// Close cancels the grace timer: a closed hub has nothing left to move and no timer outlives it.
+func TestHubCloseStopsTheHandOverTimer(t *testing.T) {
+	hub := NewBrowserTerminalHub()
+	hub.HandOver(time.Hour)
+	timer := hub.handoverTimer
+	if timer == nil {
+		t.Fatal("HandOver kept no timer")
+	}
+	hub.HandOver(time.Hour) // a second call replaces it
+	if timer.Stop() {
+		t.Fatal("the first timer was still pending after a second HandOver")
+	}
+	pending := hub.handoverTimer
+	_ = hub.Close()
+	if pending.Stop() {
+		t.Fatal("Close left the timer pending")
+	}
+}
