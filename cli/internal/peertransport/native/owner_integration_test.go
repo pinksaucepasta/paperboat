@@ -388,6 +388,9 @@ func TestRealTerminalAndFileProtocolsOverNativeTailnet(t *testing.T) {
 
 func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(mesh.Addr), afterProtocol ...func(string)) func(context.Context) error {
 	t.Helper()
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("requires /bin/sh") // the terminal and exec fixtures are POSIX shell commands
+	}
 	root := shorttemp.Dir(t)
 	adapter, err := pty.NewAdapter(root)
 	if err != nil {

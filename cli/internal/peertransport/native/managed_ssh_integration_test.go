@@ -6,18 +6,20 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -32,6 +34,9 @@ import (
 func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real OpenSSH over native Tailnet integration")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the sshd fixture and the ProxyCommand script are POSIX")
 	}
 	for _, name := range []string{"ssh", "sshd", "ssh-keygen", "scp", "sftp", "python3"} {
 		if _, err := exec.LookPath(name); err != nil {

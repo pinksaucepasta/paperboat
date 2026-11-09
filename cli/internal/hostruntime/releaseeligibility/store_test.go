@@ -145,6 +145,7 @@ func TestFileStoreInvalidRecordRetainsParserCauseWithoutExposingContents(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireUsableStoreTestPath(t, store)
 	const privateContents = `{"schema":"PRIVATE_DEFERRAL_CONTENT",`
 	atomicfiletest.WriteOwnerOnly(t, store.Path, []byte(privateContents))
 	_, present, err := store.CurrentDeferral(context.Background())

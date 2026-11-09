@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
 type fakeNativeController struct {
@@ -158,7 +160,16 @@ func TestHTTPReadinessProbeDisablesRedirects(t *testing.T) {
 	}
 }
 
+// These tests install Linux service definitions under a temporary directory, whose Windows spelling is not a Linux path.
+func skipLinuxServiceFixtureOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX service installation filesystem semantics are not applicable on Windows")
+	}
+}
+
 func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t *testing.T) {
+	skipLinuxServiceFixtureOnWindows(t)
 	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
@@ -232,6 +243,7 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 }
 
 func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T) {
+	skipLinuxServiceFixtureOnWindows(t)
 	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
@@ -275,6 +287,7 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 }
 
 func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *testing.T) {
+	skipLinuxServiceFixtureOnWindows(t)
 	root := shorttemp.Dir(t)
 	layout := Layout{
 		Platform:        "linux",
@@ -342,6 +355,7 @@ func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *
 }
 
 func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
+	skipLinuxServiceFixtureOnWindows(t)
 	root := shorttemp.Dir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
@@ -393,6 +407,7 @@ func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
 }
 
 func TestLifecycleManagerRollsBackFirstTwoAfterThirdComponentFailure(t *testing.T) {
+	skipLinuxServiceFixtureOnWindows(t)
 	root := shorttemp.Dir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
