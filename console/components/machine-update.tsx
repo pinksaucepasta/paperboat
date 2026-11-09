@@ -17,7 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { CommandBlock } from "@/components/add-machine-dialog"
 
-/** An interrupted update ended on a version the signed policy withdrew; only `pb update` or `pb uninstall` on the machine moves it on. */
+/** An interrupted update the machine could not finish or undo (withdrawn version, stuck attempt, unreachable updater); the API does not say which. */
 export const updateNeedsAttention = (machine: Machine) =>
   machine.update?.error_code === "recovery_required" || machine.availability?.update_health === "recovery_required"
 
@@ -106,7 +106,7 @@ export function UpdateAttention({ machine }: { machine: Machine }) {
           Update needs attention
         </h2>
         <p className="text-sm text-muted-foreground">
-          This machine’s Paperboat version was withdrawn and the update didn’t finish. Run this on the machine to
+          The last update didn’t finish and this machine couldn’t recover on its own. Run this on the machine to
           install the current release.
         </p>
       </div>
