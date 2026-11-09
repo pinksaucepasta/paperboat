@@ -106,19 +106,36 @@ export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
       ) : (
         [...routes.data]
           .sort((a, b) => a.priority - b.priority)
-          .map((route) => <HostnameRow key={route.id} route={route} domain={bindingFor(route)} tunnel={tunnel} />)
+          .flatMap((route) => [
+            <HostnameRow key={route.id} route={route} domain={bindingFor(route)} tunnel={tunnel} />,
+            // Hostnames bound to this route besides its own match (pb tunnel create --domain adds them to the default route).
+            ...(domains.data ?? [])
+              .filter((domain) => domain.route_id === route.id && domain.hostname !== route.host_match.hostname)
+              .map((domain) => <HostnameRow key={domain.id} route={route} domain={domain} tunnel={tunnel} alias />),
+          ])
       )}
       {adding && <HostnameDialog tunnel={tunnel} onClose={() => setAdding(false)} />}
     </Section>
   )
 }
 
-function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: TunnelDomain; tunnel: Tunnel }) {
+function HostnameRow({
+  route,
+  domain,
+  tunnel,
+  alias,
+}: {
+  route: TunnelRoute
+  domain?: TunnelDomain
+  tunnel: Tunnel
+  /** The row is one more hostname on the route: removing it removes only that hostname. */
+  alias?: boolean
+}) {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const off = route.desired_state === "disabled"
-  const host = routeHost(route)
+  const host = alias && domain ? domain.hostname : routeHost(route)
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: tunnelKeys.routes(tunnel.id) })
     await queryClient.invalidateQueries({ queryKey: tunnelKeys.domains(tunnel.id) })
@@ -131,9 +148,13 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
   const state = domain && domainStates[domain.state]
 
   const entries: Entry[] = [
-    { kind: "item", label: "Edit…", icon: PencilSimpleIcon, onSelect: () => setEditing(true) },
-    { kind: "item", label: off ? "Turn on" : "Turn off", icon: PowerIcon, onSelect: () => toggle.mutate() },
-    { kind: "separator" },
+    ...(alias
+      ? []
+      : ([
+          { kind: "item", label: "Edit…", icon: PencilSimpleIcon, onSelect: () => setEditing(true) },
+          { kind: "item", label: off ? "Turn on" : "Turn off", icon: PowerIcon, onSelect: () => toggle.mutate() },
+          { kind: "separator" },
+        ] satisfies Entry[])),
     { kind: "item", label: "Remove hostname", icon: TrashIcon, destructive: true, onSelect: () => setDeleting(true) },
   ]
 
@@ -199,7 +220,7 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
             mutation={{
               mutationFn: async () => {
                 if (domain) await removeDomain(domain)
-                await deleteRoute(route)
+                if (!alias) await deleteRoute(route)
               },
               onSuccess: refresh,
             }}
