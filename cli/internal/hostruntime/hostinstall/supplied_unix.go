@@ -243,7 +243,12 @@ func LockSuppliedOperation(path string, uid int) (*os.File, error) {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			// Another installation (a killed update's root helper still finishing) holds the lock: the typed busy
 			// refusal, so the caller says "retry" instead of a generic failure. Nothing was changed.
-			return nil, errors.Join(&MaintenanceBusyTimeoutError{Cause: err}, f.Close())
+			// Returned unwrapped: the elevated helper maps only a direct *MaintenanceBusyTimeoutError to the busy exit
+			// status the CLI turns into update_busy (hostruntimecmd serviceFailureExitCode); errors.Join would hide it.
+			if closeErr := f.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
+			return nil, &MaintenanceBusyTimeoutError{Cause: err}
 		}
 		return nil, hostInstallFailure("Paperboat installation lock could not be acquired", err, f.Close())
 	}

@@ -28,6 +28,10 @@ func TestSuppliedOperationLockExcludesConcurrencyAndRejectsSymlink(t *testing.T)
 	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || !errors.As(err, &busy) {
 		t.Fatalf("busy installation lock = %v, want the typed maintenance-busy refusal", err)
 	}
+	// Direct, not joined: only a direct *MaintenanceBusyTimeoutError crosses elevation as the busy exit status.
+	if _, direct := err.(*MaintenanceBusyTimeoutError); !direct {
+		t.Fatalf("busy installation lock is %T, want a direct *MaintenanceBusyTimeoutError", err)
+	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
