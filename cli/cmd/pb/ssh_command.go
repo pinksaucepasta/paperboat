@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -219,7 +220,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	// Bounds only the stream setup: a dial to an offline target otherwise waits until OpenSSH gives up.
 	dialCtx, cancelDial := context.WithTimeout(command.Context(), sshDialTimeout)
 	// The target's carrier restarts for a pb update: a dial that finds its transport closed is repeated for a few seconds.
-	connection, err := retryWhile(dialCtx, sshHandoverGrace, sshHandoverBlip, func() (tunnel.Conn, error) {
+	connection, err := retrySSHDial(dialCtx, func() (tunnel.Conn, error) {
 		return d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace), operationID)
 	})
 	cancelDial()
@@ -298,6 +299,9 @@ func explainSSHDial(alias string, err error) error {
 	case errors.As(err, &remote) && remote.Code == "peer_transport_unavailable", sshDialTimedOut(err):
 		return &sshDialError{"Paperboat could not reach " + alias + ": it may be offline, or its Paperboat service is not running; check it in `pb status`", err}
 	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
+		return &sshDialError{"this computer's Paperboat service dropped the connection while opening the SSH stream to " + alias + " (step: open stream); retry", err}
+	}
 	return err
 }
 
@@ -309,6 +313,28 @@ const sshHandoverGrace = 10 * time.Second
 func sshHandoverBlip(err error) bool {
 	var remote *localapi.RemoteError
 	return errors.Is(err, tunnel.ErrTransportLost) || errors.As(err, &remote) && remote.Code == "peer_transport_unavailable"
+}
+
+// retrySSHDial repeats a dial that failed before any byte reached the target (nothing to replay) while the failure is a
+// blip: a handover of the target's network for sshHandoverGrace, and for the whole dial bound the target not yet
+// accepting this machine or the local service dropping the setup connection, as happens on the first relayed dial
+// right after access appeared (the host and the relay learn the new peer seconds later).
+func retrySSHDial(ctx context.Context, dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
+	started := time.Now()
+	return retryWhile(ctx, sshDialTimeout, func(err error) bool {
+		if sshHandoverBlip(err) {
+			return time.Since(started) < sshHandoverGrace
+		}
+		return sshFirstDialBlip(err)
+	}, dial)
+}
+
+func sshFirstDialBlip(err error) bool {
+	var remote *localapi.RemoteError
+	if errors.As(err, &remote) {
+		return remote.StatusCode == http.StatusServiceUnavailable && remote.Code == "peer_stream_unavailable"
+	}
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET)
 }
 
 // sshDialTimeout bounds opening the SSH stream to the target (a warm connection takes well under a second).

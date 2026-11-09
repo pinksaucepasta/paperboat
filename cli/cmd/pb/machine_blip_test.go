@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -107,5 +109,37 @@ func TestExecRecoveryBackoffPollsQuicklyThenBacksOff(t *testing.T) {
 	}
 	if machineBlipInterval > 150*time.Millisecond {
 		t.Fatalf("handover polling interval %v", machineBlipInterval)
+	}
+}
+
+// The first relayed dial right after access appeared failed with peer_stream_unavailable (the host and the relay learn
+// the new peer seconds later) or a dropped local setup connection; it is repeated within the dial bound. A refusal or a
+// stopped local service ends it at once.
+func TestSSHDialRetriesTheFirstDialAfterAccessAppears(t *testing.T) {
+	interval := machineBlipInterval
+	machineBlipInterval = 5 * time.Millisecond
+	t.Cleanup(func() { machineBlipInterval = interval })
+	notYet := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "peer_stream_unavailable"}
+	for name, want := range map[string]struct {
+		err   error
+		calls int
+	}{
+		"target not accepting yet": {notYet, 3},
+		"local connection dropped": {io.EOF, 3},
+		"refused":                  {&localapi.RemoteError{StatusCode: http.StatusForbidden, Code: "ssh_refused"}, 1},
+		"local service down":       {localapi.ErrTransportUnavailable, 1},
+		"other remote":             {&localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "environment_unavailable"}, 1},
+	} {
+		calls := 0
+		_, err := retrySSHDial(t.Context(), func() (tunnel.Conn, error) {
+			calls++
+			if calls < 3 {
+				return nil, want.err
+			}
+			return nil, nil
+		})
+		if calls != want.calls || (want.calls == 3) != (err == nil) {
+			t.Errorf("%s: calls=%d err=%v, want %d calls", name, calls, err, want.calls)
+		}
 	}
 }
