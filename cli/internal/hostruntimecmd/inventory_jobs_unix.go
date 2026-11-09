@@ -55,8 +55,8 @@ func hostJobs(plan unixPurgePlan) func(context.Context) (map[int]string, error) 
 			return nil, fmt.Errorf("list launchd jobs: %w", err)
 		}
 		jobs := parseLaunchctlList(string(output))
-		// The user agent lives in the account's GUI domain, which exists only while it is logged in.
-		output, err = exec.CommandContext(ctx, "/bin/launchctl", "print", "gui/"+strconv.Itoa(plan.uid)+"/"+service.DaemonLabel).Output()
+		// The user agent lives in the account's GUI domain while it is logged in at the screen, else in user/<uid>.
+		output, err = exec.CommandContext(ctx, "/bin/launchctl", "print", service.UserAgentTarget(plan.uid, service.DaemonLabel)).Output()
 		var exit *exec.ExitError
 		if err != nil && !errors.As(err, &exit) {
 			return nil, err

@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -851,7 +852,11 @@ func localConfigServiceState() string {
 	if err != nil {
 		return "installed_unknown"
 	}
-	if err := exec.CommandContext(ctx, "launchctl", "print", "gui/"+account.Uid+"/"+service.ConfigLabel).Run(); err == nil {
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil {
+		return "installed_unknown"
+	}
+	if err := exec.CommandContext(ctx, "launchctl", "print", service.UserAgentTarget(uid, service.ConfigLabel)).Run(); err == nil {
 		return "active"
 	}
 	return "installed_inactive"

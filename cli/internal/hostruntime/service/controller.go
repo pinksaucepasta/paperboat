@@ -190,6 +190,7 @@ func launchdServiceAbsent(err error) bool {
 	return strings.Contains(message, "no such process") ||
 		strings.Contains(message, "could not find service") ||
 		strings.Contains(message, "service not found") ||
+		strings.Contains(message, "domain does not support specified action") ||
 		strings.Contains(message, "does not exist")
 }
 
@@ -212,14 +213,54 @@ func (c LaunchdController) label() string {
 	return Label
 }
 
-func (c LaunchdController) domain() string {
-	if c.UserDomain {
-		return fmt.Sprintf("gui/%d", c.UID)
+// launchdDomainUnsupported is launchctl's exit code for a domain that does not exist, such as gui/<uid>
+// while that user has no session at the Mac's screen.
+const launchdDomainUnsupported = 125
+
+// launchctlExit runs launchctl and returns its exit code (-1 when it cannot run); a variable so tests
+// can describe a Mac.
+var launchctlExit = func(args ...string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := exec.CommandContext(ctx, "launchctl", args...).Run()
+	var exitError *exec.ExitError
+	switch {
+	case err == nil:
+		return 0
+	case errors.As(err, &exitError):
+		return exitError.ExitCode()
 	}
-	return "system"
+	return -1
+}
+
+// domain: a per-user agent lives in gui/<uid> while the user is logged in at the Mac's screen. A user
+// who only reaches the Mac over SSH has no gui/<uid> domain; launchd still runs a Background-session
+// agent in user/<uid> (launchctl print/bootstrap verified on macOS 26, Nov 2026). A service that was
+// started there stays there after a later console login. Tailscale sidesteps the split by running
+// tailscaled only as a system LaunchDaemon (ref/tailscale/cmd/tailscaled/install_darwin.go).
+func (c LaunchdController) domain() string {
+	if !c.UserDomain {
+		return "system"
+	}
+	gui, user := fmt.Sprintf("gui/%d", c.UID), fmt.Sprintf("user/%d", c.UID)
+	if launchctlExit("print", user+"/"+c.label()) == 0 || launchctlExit("print", gui) == launchdDomainUnsupported {
+		return user
+	}
+	return gui
+}
+
+// userAgentsBackground is true when this controller's agent must declare the Background session type
+// because it runs in user/<uid>.
+func (c LaunchdController) userAgentsBackground() bool {
+	return c.UserDomain && strings.HasPrefix(c.domain(), "user/")
 }
 
 func (c LaunchdController) service() string { return c.domain() + "/" + c.label() }
+
+// UserAgentTarget is the launchctl target of a user's agent: gui/<uid>/<label> or user/<uid>/<label>.
+func UserAgentTarget(uid int, label string) string {
+	return LaunchdController{UID: uid, Label: label, UserDomain: true}.service()
+}
 
 func (c LaunchdController) Apply(ctx context.Context, path string, upgrading bool) error {
 	if c.Runner == nil || c.UID < 0 {
@@ -303,7 +344,25 @@ func (c LaunchdController) bootoutAndWait(ctx context.Context) error {
 		return err
 	}
 	defer cancel()
-	if err = c.Runner.Run(operationCtx, "launchctl", "bootout", c.service()); err != nil {
+	for _, service := range c.servicesInAnyDomain() {
+		if err = c.bootoutService(operationCtx, service); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// servicesInAnyDomain: removal must reach the service wherever it was started, whichever session the
+// user has now.
+func (c LaunchdController) servicesInAnyDomain() []string {
+	if !c.UserDomain {
+		return []string{c.service()}
+	}
+	return []string{fmt.Sprintf("gui/%d/%s", c.UID, c.label()), fmt.Sprintf("user/%d/%s", c.UID, c.label())}
+}
+
+func (c LaunchdController) bootoutService(operationCtx context.Context, service string) error {
+	if err := c.Runner.Run(operationCtx, "launchctl", "bootout", service); err != nil {
 		if launchdServiceAbsent(err) {
 			return nil
 		}
@@ -312,7 +371,7 @@ func (c LaunchdController) bootoutAndWait(ctx context.Context) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		err = c.Runner.Run(operationCtx, "launchctl", "print", c.service())
+		err := c.Runner.Run(operationCtx, "launchctl", "print", service)
 		if launchdServiceAbsent(err) {
 			return nil
 		}

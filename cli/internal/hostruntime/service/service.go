@@ -473,6 +473,7 @@ func renderLaunchd(config Config) ([]byte, error) {
 		Umask                uint64            `plist:"Umask"`
 		StandardOutPath      string            `plist:"StandardOutPath,omitempty"`
 		StandardErrorPath    string            `plist:"StandardErrorPath,omitempty"`
+		SessionType          string            `plist:"LimitLoadToSessionType,omitempty"`
 	}{
 		Label: label, ProcessType: "Background",
 		ProgramArguments:     append([]string{config.Executable}, config.Arguments...),
@@ -486,6 +487,11 @@ func renderLaunchd(config Config) ([]byte, error) {
 	// GroupName keys. System services retain explicit identity fields.
 	if config.Kind == WorkerKind || config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind {
 		definition.UserName, definition.GroupName = config.User, config.Group
+	}
+	// launchd loads a per-user agent into user/<uid> only if it declares the Background session type
+	// (a user who never logs in at the Mac's screen has no gui/<uid> domain).
+	if controller, ok := config.Controller.(LaunchdController); ok && controller.userAgentsBackground() {
+		definition.SessionType = "Background"
 	}
 	return plist.MarshalIndent(definition, plist.XMLFormat, "  ")
 }
