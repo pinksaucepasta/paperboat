@@ -17,6 +17,88 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
+// A signed health rejection must not publish the candidate as installed. This
+// checks the real protected metadata writer, including post-health payload
+// integrity and retention of enrolled identity and update preference.
+func TestPreparedUpdateCommitsOnlyValidatedPayload(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires protected installation custody")
+	}
+	for _, mode := range []string{"health rejected", "payload changed during health", "healthy"} {
+		t.Run(mode, func(t *testing.T) {
+			request := validRequest(t)
+			parent, err := os.MkdirTemp("/tmp", "paperboat-prepared-commit-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.RemoveAll(parent) })
+			parent, err = filepath.EvalSymlinks(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths := installPaths{worker: filepath.Join(parent, "pb"), metadata: filepath.Join(parent, "installation.json")}
+			image, err := os.ReadFile(request.Executable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(paths.worker, image, 0755); err != nil {
+				t.Fatal(err)
+			}
+			previous := request
+			previous.Source.Version = "previous"
+			previous.Executable = paths.worker
+			previous.SessionOwnerGeneration = "previous-generation"
+			if err = writeInstallMetadata(paths.metadata, previous); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(paths.metadata)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("signed health rejected")
+			validate := func(context.Context) error {
+				current, e := os.ReadFile(paths.metadata)
+				if e != nil || !bytes.Equal(current, before) {
+					t.Fatal("candidate published before signed validation", e)
+				}
+				switch mode {
+				case "health rejected":
+					return failure
+				case "payload changed during health":
+					return os.WriteFile(paths.worker, []byte("tampered"), 0755)
+				}
+				return nil
+			}
+			err = commitValidatedPreparedUpdate(context.Background(), request, paths, validate)
+			after, e := os.ReadFile(paths.metadata)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if mode != "healthy" {
+				if err == nil || !bytes.Equal(before, after) {
+					t.Fatalf("unvalidated candidate committed: %v", err)
+				}
+				if mode == "health rejected" && !errors.Is(err, failure) {
+					t.Fatal("health cause lost", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, e := loadInstallMetadata(paths.metadata, request.UID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			request.Executable = paths.worker
+			request.SessionOwnerGeneration = request.Source.SHA256[:32]
+			if got != request {
+				t.Fatal("commit changed enrolled identity, source preference, or canonical executable")
+			}
+		})
+	}
+}
+
 // Ordinary lifecycle recovery has no signed-policy authorizer. A protected
 // handoff must fence it even before any participant has been touched, while
 // absent updater state remains a valid uninstall inventory case.

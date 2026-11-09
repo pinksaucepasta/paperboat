@@ -116,3 +116,55 @@ func TestRecoveryAddressesTheJournaledCandidateHostdNotTheServingOne(t *testing.
 		t.Fatalf("a baseline without a valid candidate was accepted: %v", err)
 	}
 }
+
+// Recovery restores the worker from its retained pin. A pin whose bytes are not the baseline's must be refused
+// before anything is stopped, rewritten or started (the policy gate that used to guard this is gone, so this check
+// is the whole guard): the installed worker and metadata stay byte for byte.
+func TestRestoreRefusesATamperedPinBeforeChangingAnything(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected installation metadata requires root")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(executable, "qualification", installsource.Custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	request := generationRequest("a")
+	request.UID, request.GID, request.Source = 2147483001, 2147483001, source
+	paths := platformPaths(request.UID)
+	paths.worker, paths.workerNext, paths.workerRollback = filepath.Join(root, "pb"), filepath.Join(root, "next"), filepath.Join(root, "releases", "rollback")
+	paths.metadata, paths.journal, paths.updateState = filepath.Join(root, "metadata"), filepath.Join(root, "install-journal"), filepath.Join(root, "update-state")
+	pin := filepath.Join(filepath.Dir(paths.workerRollback), "pins", source.SHA256, "pb")
+	if err := os.MkdirAll(filepath.Dir(pin), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pin, []byte("tampered pin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	installed := []byte("the candidate currently installed")
+	if err := os.WriteFile(paths.worker, installed, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := []byte("current protected metadata")
+	if err := os.WriteFile(paths.metadata, metadata, 0600); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(unixCarrierBaseline{Worker: &source, Metadata: []byte("previous protected metadata"), Candidate: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := unixCarrierInstallation{request: request, paths: paths}
+	if err := state.Restore(context.Background(), body); err == nil {
+		t.Fatal("a tampered pin was restored")
+	}
+	for path, want := range map[string][]byte{paths.worker: installed, paths.metadata: metadata, pin: []byte("tampered pin")} {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("the refused restore changed %s: %v", path, err)
+		}
+	}
+}

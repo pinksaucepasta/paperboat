@@ -532,13 +532,18 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 // consult signed policy: recovery puts back the version that was running, revoked or not, and the way forward
 // from a revoked one is the update itself (the updater records recovery_required while it is refused).
 func (m *Manager) verifyRecovery(ctx context.Context, release Release, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateRelease(release); err != nil {
 		return ErrInvalidRelease
 	}
 	if err := safeRuntimeFile(path, m.config.OwnerUID, true); err != nil {
 		return ErrUnsafeStorage
 	}
-	if !regularMatches(path, release.Length, release.SHA256) {
+	if matches, err := regularMatchesContext(ctx, path, release.Length, release.SHA256); err != nil {
+		return err
+	} else if !matches {
 		return ErrInvalidRelease
 	}
 	if err := binarytarget.Validate(path, release.Platform, release.Architecture); err != nil {
@@ -790,20 +795,38 @@ func removeRuntimeFile(path string, owner int) error {
 	return syncDirectories(filepath.Dir(path))
 }
 func regularMatches(path string, length int64, digest string) bool {
+	matches, _ := regularMatchesContext(context.Background(), path, length, digest)
+	return matches
+}
+
+// regularMatchesContext is regularMatches that stops hashing when ctx ends, reporting ctx's error.
+func regularMatchesContext(ctx context.Context, path string, length int64, digest string) (bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || info.Size() != length {
-		return false
+		return false, nil
 	}
 	sum := sha256.New()
-	if _, err = io.Copy(sum, file); err != nil {
-		return false
+	if _, err = io.Copy(sum, contextReader{ctx, file}); err != nil {
+		return false, ctx.Err()
 	}
-	return strings.EqualFold(hex.EncodeToString(sum.Sum(nil)), digest)
+	return strings.EqualFold(hex.EncodeToString(sum.Sum(nil)), digest), nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 func syncDirectories(paths ...string) error {
 	seen := map[string]struct{}{}

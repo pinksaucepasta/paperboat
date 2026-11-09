@@ -127,6 +127,9 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		return ErrInvalidRequest
 	}
 	s.request.Source = baseline.Candidate
+	if err := s.verifyBaselineBytes(baseline); err != nil {
+		return err // before anything is stopped or rewritten: a tampered pin changes nothing
+	}
 	// The candidate generation is removed; the baseline generation never stopped
 	// serving and keeps all accepted streams. Only its descriptor is put back.
 	canonical, err := deriveUnixCarrierConfig(s.request, s.paths)
@@ -242,6 +245,27 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		return err
 	}
 	return s.finishFileRollback()
+}
+
+// verifyBaselineBytes proves the bytes a restore would put back are the baseline's own: the worker's retained pin
+// (a carrier-only restore keeps the installed worker) and the baseline carrier's executable.
+func (s unixCarrierInstallation) verifyBaselineBytes(baseline unixCarrierBaseline) error {
+	if baseline.Worker != nil && !baseline.CarrierOnly {
+		source := *baseline.Worker
+		if source.Validate() != nil {
+			return ErrInvalidRequest
+		}
+		if err := source.Verify(filepath.Join(filepath.Dir(s.paths.workerRollback), "pins", source.SHA256, "pb")); err != nil {
+			return err
+		}
+	}
+	if baseline.Carrier != nil {
+		if baseline.Carrier.Validate() != nil {
+			return ErrInvalidRequest
+		}
+		return baseline.Carrier.Source.Verify(baseline.Carrier.Executable)
+	}
+	return nil
 }
 
 // finishFileRollback ends a restore. The journal goes last and only after the native rollback succeeded: a

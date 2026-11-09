@@ -117,3 +117,31 @@ func TestOfficialInstalledBaselineRejectsDowngrade(t *testing.T) {
 		t.Fatalf("official baseline downgrade accepted: %v", err)
 	}
 }
+
+// The executable an update falls back to is hashed before cutover; a canceled caller must not wait for a large
+// executable to be read, and a canceled check is reported as the cancellation, never as a bad executable.
+func TestRecoveryVerificationStopsHashingWhenCanceled(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := f.manager.verifyRecovery(ctx, f.active, f.paths.current); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a canceled verification returned %v, want context.Canceled", err)
+	}
+	if err := f.manager.verifyRecovery(context.Background(), f.active, f.paths.current); err != nil {
+		t.Fatal(err)
+	}
+	mid, stop := context.WithCancel(context.Background())
+	file, err := os.Open(f.paths.current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader := contextReader{mid, file}
+	if _, err = reader.Read(make([]byte, 16)); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if _, err = reader.Read(make([]byte, 16)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a read after cancellation returned %v", err)
+	}
+}
