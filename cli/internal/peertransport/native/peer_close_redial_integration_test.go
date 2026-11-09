@@ -15,7 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"tailscale.com/tailcfg"
-	"tailscale.com/tstest/integration"
 )
 
 // pbvm4 run8: after `pb update` the target's carrier closes the held session and restarts under the
@@ -43,7 +42,7 @@ func TestRedialAfterPeerCloseWhileASecondSessionLooksAlive(t *testing.T) {
 
 func redialAfterPeerClose(t *testing.T, anotherFlow, secondSession bool) {
 	t.Setenv("IN_TS_TEST", "true")
-	regions := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
+	regions, derp := runDERPAndSTUNWithServer(t, "127.0.0.1")
 	region := regions.Regions[1]
 	public, signer, _ := ed25519.GenerateKey(rand.Reader)
 	clientTLS, clientFingerprint := testTLS(t, "cli")
@@ -124,10 +123,12 @@ func redialAfterPeerClose(t *testing.T, anotherFlow, secondSession bool) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
+	waitDERPConnected(t, derp, machine.WireGuardPublicKey, false) // the old carrier's engine has left
 	descriptor = startCapturingServer(t, serverOwner, receiver, region, accepted)
-	// Production redials about a second after the new carrier started (grant fetch and network refresh come
-	// first); a dial inside the new engine's DERP connect would wait for the one-second meow resend instead.
-	time.Sleep(1500 * time.Millisecond)
+	// Production redials after the new carrier is up (grant fetch and network refresh come first): a dial before the
+	// new engine's DERP connection exists waits for the one-second meow resend, which this check is not about. The
+	// wait is for the connection itself, not a sleep a loaded runner can outlast.
+	waitDERPConnected(t, derp, machine.WireGuardPublicKey, true)
 
 	started := time.Now()
 	session, err := clientOwner.Dial(ctx, descriptor, "machine_test", peerquic.ClassInteractive)
