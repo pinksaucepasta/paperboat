@@ -7,13 +7,16 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 const (
@@ -329,15 +332,25 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				// certificates). When the server did not answer, the machine's local access is not what
 				// is broken; saying so sent people to their local settings and made updates treat a slow
 				// server as a broken installation (lanel-a, 2026-10-23).
-				if controlPlaneUnreachable(reconcileErr, i.apiHost()) {
+				switch {
+				case inventoryAuthenticationRequired(reconcileErr):
+					// A server 401 or a signed-out credential during the reconcile is the signed-out state, not a
+					// broken installation: "repair the installation" cannot fix it (pbvm2, 2026-11-09).
+					signedOutSnapshot(&desired)
+				case controlPlaneUnreachable(reconcileErr, i.apiHost()):
 					desired.Health = controlPlaneUnavailableHealth(current, now)
-				} else {
-					desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+				default:
+					item := healthSince(current, now, localapi.HealthItem{
 						Code:     "local_access_unavailable",
 						Severity: "error",
 						Title:    localAccessTitle("Local machine access is unavailable", reconcileErr),
 						Recovery: "Check Paperboat local access settings and repair the installation",
-					})}
+					})
+					// One journal line per change of the cause, not one per retry.
+					if current == nil || len(current.Health) != 1 || current.Health[0].Title != item.Title {
+						diagnosticlog.TryWarn("local machine access is unavailable", "cause", LocalAccessCause(reconcileErr))
+					}
+					desired.Health = []localapi.HealthItem{item}
 				}
 			}
 		} else {
@@ -353,16 +366,14 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				})}
 			}
 			if inventoryAuthenticationRequired(sourceErr) {
-				desired.DaemonState = "awaiting_enrollment"
-				desired.Machines = nil
-				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is signed out on this computer (not added yet, or removed from the account)", Recovery: "Run `pb login` to sign in and add this computer", ETag: "authentication_required"}}
+				signedOutSnapshot(&desired)
 			}
 		}
 		return desired, nil
 	}); err != nil {
 		return errors.Join(refreshErr, err)
 	}
-	if inventoryAuthenticationRequired(sourceErr) {
+	if inventoryAuthenticationRequired(sourceErr) || inventoryAuthenticationRequired(reconcileErr) {
 		i.completionMu.Lock()
 		i.completion = localapi.CompletionSnapshot{}
 		i.completionMu.Unlock()
@@ -638,14 +649,32 @@ func (e LocalAccessPendingError) Error() string {
 	return "local access step " + e.Step + " is retrying"
 }
 
-// localAccessTitle names the failing local access step in a health title when the error carries one.
-func localAccessTitle(title string, err error) string {
+// signedOutSnapshot is the state of a computer the server no longer accepts: no machines, and the way back in.
+func signedOutSnapshot(desired *localapi.Snapshot) {
+	desired.DaemonState = "awaiting_enrollment"
+	desired.Machines = nil
+	desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is signed out on this computer (not added yet, or removed from the account)", Recovery: "Run `pb login` to sign in and add this computer", ETag: "authentication_required"}}
+}
+
+// LocalAccessCause names the failing local access step (when the error carries one) and the error's class from
+// the finite cause vocabulary, never its text: health titles and the journal can show it without secrets.
+func LocalAccessCause(err error) string {
+	fault := errorreport.ProjectFault(context.Background(), "paperboatd", "local_access", "reconciliation", "local_access_failed", err)
+	class := fault.Cause
+	if fault.HTTPStatus != 0 {
+		class += ", HTTP " + strconv.Itoa(fault.HTTPStatus)
+	}
+	if fault.Cause == "internal" {
+		class += ", " + fault.ErrorType // an unclassified failure still says which kind of error it was
+	}
 	var step interface{ LocalAccessStep() string }
 	if errors.As(err, &step) && step.LocalAccessStep() != "" {
-		return title + ": the " + strings.ReplaceAll(step.LocalAccessStep(), "_", " ") + " step failed"
+		return "the " + strings.ReplaceAll(step.LocalAccessStep(), "_", " ") + " step failed (" + class + ")"
 	}
-	return title
+	return "a local access step failed (" + class + ")"
 }
+
+func localAccessTitle(title string, err error) string { return title + ": " + LocalAccessCause(err) }
 
 // pendingStepTitle says what a retrying local access step leaves unavailable.
 func pendingStepTitle(step string) string {

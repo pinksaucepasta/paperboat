@@ -333,7 +333,7 @@ func localDaemonCommand() *cobra.Command {
 				return accessErr
 			}
 			coordinatorConfig.ReportReconcileError = func(err error) {
-				if _, writeErr := fmt.Fprintln(command.ErrOrStderr(), "Paperboat could not reconcile local machine access. Run `pb doctor`, then retry."); writeErr != nil {
+				if _, writeErr := fmt.Fprintf(command.ErrOrStderr(), "Paperboat could not reconcile local machine access: %s. Run `pb doctor`, then retry.\n", localdaemon.LocalAccessCause(err)); writeErr != nil {
 					errorreport.Current().ObserveFailure(command.Context(), "paperboat-daemon", "connect", "lifecycle", "local_access_failed", writeErr)
 				}
 			}
@@ -404,7 +404,7 @@ func localDaemonCommand() *cobra.Command {
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
 						credential, err := authSource.WithContext(ctx).Credential()
 						if err != nil {
-							return fmt.Errorf("refresh local machine access credentials: %w", err)
+							return fmt.Errorf("refresh local machine access credentials: %w", coordinatorOperationFailure("credentials", err))
 						}
 						scoped := func(workspace string) (*api.Client, error) {
 							client := api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport})
@@ -412,7 +412,7 @@ func localDaemonCommand() *cobra.Command {
 						}
 						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: controlTransport}).MachineServices(ctx)
 						if err != nil {
-							return fmt.Errorf("refresh authorized local browser services: %w", err)
+							return fmt.Errorf("refresh authorized local browser services: %w", coordinatorOperationFailure("browser_services", err))
 						}
 						// A team lookup failure must not take the account's own machines offline.
 						var sharedErr error

@@ -275,7 +275,7 @@ func TestInventoryReconciliationFailurePublishesDegradedMachinesAndRecovers(t *t
 		t.Fatalf("degraded snapshot=%#v", first)
 	}
 	health := first.Health[0]
-	if health.Code != "local_access_unavailable" || health.Severity != "error" || health.Title != "Local machine access is unavailable" || health.Recovery != "Check Paperboat local access settings and repair the installation" || health.ETag != health.Code || health.BrokenSince == nil {
+	if health.Code != "local_access_unavailable" || health.Severity != "error" || !strings.HasPrefix(health.Title, "Local machine access is unavailable: a local access step failed (") || health.Recovery != "Check Paperboat local access settings and repair the installation" || health.ETag != health.Code || health.BrokenSince == nil {
 		t.Fatalf("local access health=%#v", health)
 	}
 	if diagnosticErr := <-refreshErrors; !errors.Is(diagnosticErr, reconcileErr) {
