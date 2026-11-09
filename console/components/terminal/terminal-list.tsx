@@ -142,8 +142,11 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <SearchField value={search} onChange={setSearch} placeholder="Search terminals" />
+      {/* On a phone the search takes its own line, so the toggle and buttons keep their size. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-full sm:w-auto sm:max-w-sm sm:flex-1">
+          <SearchField value={search} onChange={setSearch} placeholder="Search terminals" />
+        </div>
         <ViewToggle
           value={view}
           onChange={setView}
