@@ -216,7 +216,11 @@ export function MachineSkeleton({ base, tab }: { base?: string; tab?: string }) 
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Skeleton className="my-1 h-6 w-48" />
-          <Skeleton className="my-1 h-4 w-72" />
+          <Skeleton className="my-1 h-4 w-72 max-w-full" />
+          {/* On a phone the status, platform, address and tags wrap onto lines of their own. */}
+          <Skeleton className="my-1 h-4 w-28 sm:hidden" />
+          <Skeleton className="my-1 h-4 w-24 sm:hidden" />
+          <Skeleton className="my-1 h-4 w-32 sm:hidden" />
         </div>
         <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
           <TerminalIcon data-icon="inline-start" />
