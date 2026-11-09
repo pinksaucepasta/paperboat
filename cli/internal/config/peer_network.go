@@ -123,7 +123,10 @@ func (s ProfileStore) SavePeerNetworkConfiguration(issuer, accountID, endpointID
 	if err := os.MkdirAll(s.Path, 0o700); err != nil {
 		return err
 	}
-	return writeCredentialFile(path, []byte(token))
+	// A plain owner-only file, not a credential file: Windows credential files are DPAPI blobs of at most 5 KiB, which
+	// the reader below does not unwrap and a real configuration exceeds. The document is signed and public; custody's
+	// hash is its integrity.
+	return atomicWrite(path, []byte(token), 0o600)
 }
 
 // LoadPeerNetworkConfiguration reads the persisted configuration of at most limit bytes; "" when none.
