@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -48,5 +49,36 @@ func TestSweepWindowsRetiredImagesRemovesWhatIsNoLongerInUse(t *testing.T) {
 	}
 	if _, err := os.Lstat(active); err != nil {
 		t.Fatalf("the active executable was touched: %v", err)
+	}
+}
+
+// Only the exact names the updater creates are removed, and nothing is reached through a junction.
+func TestSweepWindowsRetiredImagesKeepsOtherNamesAndDoesNotFollowJunctions(t *testing.T) {
+	root := t.TempDir()
+	releases := filepath.Join(root, "releases")
+	outside := filepath.Join(root, "outside")
+	for _, directory := range []string{filepath.Join(releases, "versions"), outside} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lookalike := filepath.Join(releases, "notes.retired-2026.txt")
+	victim := filepath.Join(outside, "pb.exe.rollback"+windowsRetiredSuffix+"c3")
+	for _, path := range []string{lookalike, victim} {
+		if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	junction := filepath.Join(releases, "versions", "custom-linked")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, outside).CombinedOutput(); err != nil {
+		t.Fatalf("create junction: %v: %s", err, out)
+	}
+	if left := SweepWindowsRetiredImages(service.Layout{ReleasesRoot: releases}); left != 0 {
+		t.Fatalf("still in use = %d, want 0", left)
+	}
+	for _, path := range []string{lookalike, victim} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("%s was removed: %v", filepath.Base(path), err)
+		}
 	}
 }
