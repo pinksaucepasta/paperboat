@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -3329,7 +3330,17 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 	return nil
 }
 
+// removeWindowsFileWithRetry frees a slot. A file that another process still holds open is retried with a bounded
+// backoff (a scanner's handle goes away). A running program's image can never be deleted on Windows, only renamed
+// (the user's own `pb update` runs from the previous bin\pb.exe, which is then the rollback slot): it is moved aside
+// under a retired name, registered for deletion at restart (MoveFileEx MOVEFILE_DELAY_UNTIL_REBOOT, the documented
+// way to remove a file in use), and removed by the next call once the process has exited.
 func removeWindowsFileWithRetry(ctx context.Context, path string) error {
+	if stale, err := filepath.Glob(path + windowsRetiredSuffix + "*"); err == nil {
+		for _, retired := range stale {
+			_ = os.Remove(retired) // still running: stays for the next call or the restart
+		}
+	}
 	var last error
 	for attempt := 0; attempt < 10; attempt++ {
 		err := os.Remove(path)
@@ -3337,13 +3348,30 @@ func removeWindowsFileWithRetry(ctx context.Context, path string) error {
 			return nil
 		}
 		last = err
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) && attempt >= 1 {
+			break // a mapped image; waiting does not help
+		}
 		select {
 		case <-ctx.Done():
 			return hostInstallFailure("runtime file cleanup canceled", last, ctx.Err(), context.Cause(ctx))
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	return last
+	retired := path + windowsRetiredSuffix + strconv.FormatInt(time.Now().UnixNano(), 36)
+	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=retire-running-image-that-cannot-be-deleted
+	if err := os.Rename(path, retired); err != nil {
+		return hostInstallFailure("runtime file is in use and could not be moved aside", last, err)
+	}
+	if pointer, err := windows.UTF16PtrFromString(retired); err == nil {
+		_ = deleteWindowsFileAtRestart(pointer) // last resort; the sweep above normally removes it first
+	}
+	return nil
+}
+
+const windowsRetiredSuffix = ".retired-"
+
+var deleteWindowsFileAtRestart = func(path *uint16) error {
+	return windows.MoveFileEx(path, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
 func ensureWindowsExecutableDirectory(path, readerSID string) error {
