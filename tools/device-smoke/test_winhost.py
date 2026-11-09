@@ -917,5 +917,132 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             self.assertIn('winhost.pb_path()', source, name)
 
 
+
+class PrivateAccessFamily(unittest.TestCase):
+    def echo(self, marker):
+        import socketserver
+        import threading
+        import private_access
+        server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), private_access.Echo)
+        server.daemon_threads, server.marker = True, marker
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    @unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the exchange snippet for real')
+    def test_device_exchange_sends_the_payload_half_closes_and_reads_the_reply(self):
+        import private_access
+        device = LocalDevice(pb_exe='/x/pb.exe', password='')
+        port = self.echo('PB_PRIVATE_m1')
+        with patch.object(winhost, 'device', lambda: device):
+            private_access.exchange(('127.0.0.1', port), {'marker': 'PB_PRIVATE_m1'})
+            with self.assertRaises(private_access.ExchangeMismatch):
+                private_access.exchange(('127.0.0.1', port), {'marker': 'PB_PRIVATE_other'})
+            import socket
+            with socket.socket() as closed:
+                closed.bind(('127.0.0.1', 0))
+                free = closed.getsockname()[1]
+            with self.assertRaises(ConnectionRefusedError) as refused:
+                private_access.exchange(('127.0.0.1', free), {'marker': 'x'})
+            self.assertEqual(__import__('errno').ECONNREFUSED, refused.exception.errno)  # the probe retries on this
+
+    def test_peer_origin_answers_the_unix_exchange_and_the_https_get(self):
+        import hashlib
+        import urllib.request
+        import private_access
+        for check in ('access-machine', 'private-https'):
+            origin = subprocess.Popen([sys.executable, '-c', private_access.PEER_ORIGIN, check, 'PB_PRIVATE_m2'],
+                                      stdout=subprocess.PIPE)
+            try:
+                port = int(origin.stdout.readline())
+                if check == 'private-https':
+                    with urllib.request.urlopen('http://127.0.0.1:%d/' % port, timeout=10) as response:
+                        self.assertEqual(b'PB_PRIVATE_m2' + hashlib.sha256(private_access.PAYLOAD).digest(), response.read())
+                else:
+                    private_access.exchange(('127.0.0.1', port), {'marker': 'PB_PRIVATE_m2'})
+            finally:
+                origin.kill()
+                origin.wait()
+                origin.stdout.close()
+
+    def test_origin_publishes_the_forwarded_port_of_the_device(self):
+        import contextlib
+        import threading
+        import private_access
+        printed, entered = [], []
+
+        @contextlib.contextmanager
+        def exposed(port):
+            entered.append(port)
+            yield 54321
+            entered.append('closed')
+
+        with patch.object(private_access, 'exposed', exposed), patch.object(private_access, 'registration', lambda: {'machine_id': 'machine_w'}), \
+                patch('builtins.print', lambda line, **_: printed.append(json.loads(line))):
+            worker = threading.Thread(target=private_access.origin, args=(SimpleNamespace(check='access-machine', target='victus'),))
+            worker.start()
+            for _ in range(100):
+                if printed:
+                    break
+                __import__('time').sleep(.05)
+            phase = printed[0]
+            self.assertEqual((54321, 'machine_w', 'private_access_required'), (phase['port'], phase['machine_id'], phase['state']))
+            self.assertNotEqual(54321, entered[0])  # the origin's own port stays on the controller
+            pathlib.Path(phase['gate']).touch()
+            worker.join(10)
+        self.assertEqual('closed', entered[-1])
+        self.assertEqual('PASS', printed[-1]['status'])
+
+    def job(self, stdout, returncode=None):
+        calls = []
+        fake = SimpleNamespace(stdout=lambda limit=None: stdout, stderr=lambda: b'', poll=lambda: returncode,
+                               kill=lambda: calls.append('kill'), close=lambda: calls.append('close'))
+        return fake, calls
+
+    def test_forward_on_the_device_reads_the_listener_from_the_job_and_always_ends_it(self):
+        import private_access
+        phase = {'machine_id': 'machine_p', 'port': 8080, 'marker': 'm'}
+        receipt = json.dumps({'data': {'schema': 'paperboat.machine-access/v1', 'machine_id': 'machine_p', 'remote_port': 8080,
+                                       'listen_address': '127.0.0.1:41000'}}).encode() + b'\n'
+        binary = winhost.WindowsPb(winhost.WindowsDevice(pb_exe=EXE, password=''))
+        started, exchanged = [], []
+        fake, calls = self.job(receipt)
+        with patch.object(winhost, 'job', lambda b, arguments: started.append(arguments) or fake), \
+                patch.object(private_access, 'exchange', lambda address, p: exchanged.append(address)):
+            private_access.forward(binary, phase)
+        self.assertEqual(['access', 'machine', 'machine_p', '--port', '8080', '--listen', '127.0.0.1:0', '--json'], started[0])
+        self.assertEqual([('127.0.0.1', 41000)], exchanged)
+        self.assertEqual(['kill', 'close'], calls)
+        fake, calls = self.job(b'', returncode=1)
+        with patch.object(winhost, 'job', lambda b, arguments: fake), \
+                patch.object(private_access, 'failure_diagnostic', lambda *a: '/private/receipt'):
+            with self.assertRaisesRegex(RuntimeError, 'private diagnostics: /private/receipt'):
+                private_access.forward(binary, phase)
+        self.assertEqual(['kill', 'close'], calls)
+
+    def test_pair_starts_the_origin_on_the_peer_and_probes_from_the_device(self):
+        import base64 as b64
+        import private_access
+        started, probed = [], []
+        fake, calls = self.job(b'40123\n')
+        machines = {'machines': [{'id': 'machine_p', 'alias': 'hp'}, {'id': 'machine_w', 'alias': 'victus'}]}
+        args = SimpleNamespace(target='hp', check='private-address', phase=None)
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE}), patch.object(private_access, 'invoke', lambda *a, **k: machines), \
+                patch.object(winhost, 'job', lambda b, arguments: started.append(arguments) or fake), \
+                patch.object(private_access, 'probe', lambda a: probed.append(json.loads(a.phase))):
+            private_access.pair(args)
+        argv = started[0]
+        self.assertEqual(['exec', 'hp', '--timeout', '170s', '--', 'python3', '-c'], argv[:7])
+        self.assertNotRegex(argv[7], r'[\n"]')  # one line that survives the Windows command line
+        self.assertIn(b64.b64encode(private_access.PEER_ORIGIN.encode()).decode(), argv[7])
+        self.assertEqual('private-address', argv[8])
+        self.assertEqual({'state': 'private_access_required', 'check': 'private-address', 'target': 'hp', 'machine_id': 'machine_p',
+                          'port': 40123, 'marker': argv[9]}, probed[0])
+        self.assertEqual(['kill', 'close'], calls)
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
+            private_access.pair(args)
+
+
 if __name__ == '__main__':
     unittest.main()

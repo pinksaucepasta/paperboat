@@ -27,6 +27,7 @@ import uuid
 
 DEFAULT_TARGET = 'pujan@victus'
 MISSING = 3  # exit code of a snippet whose file does not exist
+REFUSED = 4  # exit code of EXCHANGE when nothing accepts the connection
 
 # Reads "<base64 script>\n<base64 JSON payload>" from stdin, then runs the script with $req set.
 BOOTSTRAP = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$a=[Console]::In.ReadToEnd().Split(\"`n\");"
@@ -92,6 +93,14 @@ SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $re
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
+# Connects, sends $req.block $req.repeat times, half-closes, and returns up to 4 KiB of the reply as base64.
+EXCHANGE = ("$c=New-Object Net.Sockets.TcpClient\ntry{$c.Connect($req.address,[int]$req.port)}catch{exit 4}\n"
+            "$c.SendTimeout=20000;$c.ReceiveTimeout=20000;$s=$c.GetStream();$b=[Convert]::FromBase64String($req.block)\n"
+            "for($i=0;$i -lt $req.repeat;$i++){$s.Write($b,0,$b.Length)}\n"
+            "$c.Client.Shutdown([Net.Sockets.SocketShutdown]::Send)\n"
+            "$m=New-Object IO.MemoryStream;$r=New-Object byte[] 4096\n"
+            "while($m.Length -le 4096){$n=$s.Read($r,0,4096);if($n -le 0){break};$m.Write($r,0,$n)}\n"
+            "$c.Close();[Convert]::ToBase64String($m.ToArray())")
 # How often $req.text occurs in the files of $req.dir matching $req.filter; a file the daemon is writing is shared.
 COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -ErrorAction SilentlyContinue|ForEach-Object{"
          "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close();"

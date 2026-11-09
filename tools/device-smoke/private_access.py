@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""Qualify private TCP through the CLI forward and the assigned loopback address."""
+"""Qualify private TCP through the CLI forward and the assigned loopback address.
+
+origin and probe are the two halves smoke.sh runs on two machines. With PB_SMOKE_WINDOWS_PB set the half runs for the
+Windows device from this controller: the origin stays here behind an ssh -R forward to the device's loopback, and the
+probe's client is pb.exe, a PowerShell socket and curl.exe on the device. `pair` runs both halves for the device as
+the client: the origin is started on the Unix machine --target with `pb exec` from the device.
+"""
 import argparse
+import base64
 import errno
 import hashlib
 import http.server
@@ -20,8 +27,42 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_diagnostic, invoke
+from preview_lifecycle import exposed
+import winhost
 
-PAYLOAD = ('private TCP λ船\n'.encode() + bytes(range(256))) * 1024
+BLOCK = 'private TCP λ船\n'.encode() + bytes(range(256))
+PAYLOAD = BLOCK * 1024
+
+# The origin of `pair`, run by python3 on the Unix peer: argv is the check and the marker; prints its port.
+PEER_ORIGIN = r'''
+import hashlib, http.server, socketserver, sys
+P = ('private TCP \u03bb\u8239\n'.encode() + bytes(range(256))) * 1024
+reply = sys.argv[2].encode() + hashlib.sha256(P).digest()
+class Echo(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(20)
+        body = bytearray()
+        while len(body) <= len(P):
+            chunk = self.request.recv(65536)
+            if not chunk:
+                break
+            body.extend(chunk)
+        if bytes(body) == P:
+            self.request.sendall(reply)
+class Page(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(reply)))
+        self.end_headers()
+        self.wfile.write(reply)
+    def log_message(self, *_):
+        pass
+server = (http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) if sys.argv[1] == 'private-https'
+          else socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo))
+server.daemon_threads = True
+print(server.server_address[1], flush=True)
+server.serve_forever()
+'''
 
 
 class Echo(socketserver.BaseRequestHandler):
@@ -63,11 +104,12 @@ def origin(args):
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        with tempfile.TemporaryDirectory(prefix='paperboat-private-') as directory:
+        # exposed: the port itself here; for the Windows device, its loopback port that forwards to this server
+        with exposed(server.server_address[1]) as port, tempfile.TemporaryDirectory(prefix='paperboat-private-') as directory:
             gate, failed = Path(directory) / 'verified', Path(directory) / 'failed'
             print(json.dumps({'state': 'private_access_required', 'check': args.check,
                               'target': args.target, 'machine_id': before['machine_id'],
-                              'port': server.server_address[1], 'marker': server.marker,
+                              'port': port, 'marker': server.marker,
                               'gate': str(gate), 'failure_gate': str(failed)}), flush=True)
             deadline = time.monotonic() + 150
             while not gate.exists():
@@ -89,30 +131,42 @@ class ExchangeMismatch(AssertionError):
     pass
 
 
+def device_exchange(device, address):
+    """The client side of exchange() on the Windows device: send PAYLOAD, half-close, return what came back."""
+    rc, out = device.ps('private TCP exchange with %s:%s' % address, winhost.EXCHANGE, timeout=90, ok=(0, winhost.REFUSED),
+                        address=address[0], port=int(address[1]), block=base64.b64encode(BLOCK).decode(), repeat=1024)
+    if rc == winhost.REFUSED:
+        raise ConnectionRefusedError(errno.ECONNREFUSED, 'the device could not connect to %s:%s' % address)
+    return base64.b64decode(out)
+
+
 def exchange(address, phase):
-    with socket.create_connection(address, timeout=20) as connection:
-        connection.sendall(PAYLOAD)
-        connection.shutdown(socket.SHUT_WR)
-        received = bytearray()
-        expected = phase['marker'].encode() + hashlib.sha256(PAYLOAD).digest()
-        while len(received) <= len(expected):
-            chunk = connection.recv(4096)
-            if not chunk:
-                break
-            received.extend(chunk)
-        if bytes(received) != expected:
-            # The marker and digest are synthetic, so the received prefix is safe to record.
-            raise ExchangeMismatch('private TCP changed bytes or lost half-close delivery: received %d of %d bytes, first 64 %r'
-                                   % (len(received), len(expected), bytes(received[:64])))
+    expected = phase['marker'].encode() + hashlib.sha256(PAYLOAD).digest()
+    if winhost.device():
+        received = device_exchange(winhost.device(), address)
+    else:
+        with socket.create_connection(address, timeout=20) as connection:
+            connection.sendall(PAYLOAD)
+            connection.shutdown(socket.SHUT_WR)
+            received = bytearray()
+            while len(received) <= len(expected):
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                received.extend(chunk)
+    if bytes(received) != expected:
+        # The marker and digest are synthetic, so the received prefix is safe to record.
+        raise ExchangeMismatch('private TCP changed bytes or lost half-close delivery: received %d of %d bytes, first 64 %r'
+                               % (len(received), len(expected), bytes(received[:64])))
 
 
 def connectivity(binary):
     """What this computer could reach when a check failed, for the private diagnostics."""
     try:
-        result = subprocess.run([str(binary), 'doctor', '--json'], capture_output=True, timeout=45)
+        result = winhost.run_pb(binary, ['doctor', '--json'], 45)
         return 'doctor exit %d\n%s%s' % (result.returncode, result.stdout.decode(errors='replace'),
                                         result.stderr.decode(errors='replace'))
-    except (OSError, subprocess.SubprocessError) as error:
+    except (OSError, subprocess.SubprocessError, winhost.DeviceError) as error:  # never hides the failure it annotates
         return 'doctor could not run: %r' % (error,)
 
 
@@ -121,7 +175,45 @@ def failure_diagnostic(binary, arguments, output, errors, error):
     return command_diagnostic(arguments, output, errors + b'\n' + detail.encode())
 
 
+def listener(output, phase):
+    """The local listen address in the first receipt line of `pb access machine --json`."""
+    receipt = json.loads(output.split(b'\n', 1)[0])
+    receipt = receipt.get('data', receipt)
+    assert receipt['schema'] == 'paperboat.machine-access/v1'
+    assert receipt['machine_id'] == phase['machine_id'] and receipt['remote_port'] == phase['port']
+    host, port = receipt['listen_address'].rsplit(':', 1)
+    assert host == '127.0.0.1' and 0 < int(port) <= 65535
+    return host, int(port)
+
+
+def forward_on_device(binary, phase):
+    """forward() with pb.exe as a background job on the Windows device; its listener is on the device's loopback."""
+    arguments = ['access', 'machine', phase['machine_id'], '--port', str(phase['port']), '--listen', '127.0.0.1:0', '--json']
+    job, output = winhost.job(binary, arguments), b''
+    try:
+        deadline = time.monotonic() + 30
+        while b'\n' not in output:
+            if time.monotonic() >= deadline:
+                raise RuntimeError('machine access did not publish its local listener')
+            ended = job.poll() is not None
+            output = job.stdout(65537)
+            if ended and b'\n' not in output:
+                raise RuntimeError('machine access ended before listener admission')
+            assert len(output) <= 65536, 'machine access exceeded its receipt bound'
+            time.sleep(.5)
+        exchange(listener(output, phase), phase)
+        assert job.poll() is None, 'machine access ended while its foreground owner was live'
+    except BaseException as error:
+        path = failure_diagnostic(binary, [str(binary), *arguments], output, job.stderr(), error)
+        raise RuntimeError('private machine access failed; private diagnostics: ' + str(path)) from error
+    finally:
+        job.kill()
+        job.close()
+
+
 def forward(binary, phase):
+    if hasattr(binary, 'device'):
+        return forward_on_device(binary, phase)
     arguments = [str(binary), 'access', 'machine', phase['machine_id'], '--port',
                  str(phase['port']), '--listen', '127.0.0.1:0', '--json']
     with tempfile.TemporaryFile() as errors:
@@ -138,13 +230,7 @@ def forward(binary, phase):
                         raise RuntimeError('machine access ended before listener admission')
                     output.extend(chunk)
                     assert len(output) <= 65536, 'machine access exceeded its receipt bound'
-            receipt = json.loads(output.split(b'\n', 1)[0])
-            receipt = receipt.get('data', receipt)
-            assert receipt['schema'] == 'paperboat.machine-access/v1'
-            assert receipt['machine_id'] == phase['machine_id'] and receipt['remote_port'] == phase['port']
-            host, port = receipt['listen_address'].rsplit(':', 1)
-            assert host == '127.0.0.1' and 0 < int(port) <= 65535
-            exchange((host, int(port)), phase)
+            exchange(listener(output, phase), phase)
             assert child.poll() is None, 'machine access ended while its foreground owner was live'
         except BaseException as error:
             errors.seek(0)
@@ -171,7 +257,7 @@ def probe(args):
     phase = json.loads(args.phase)
     assert phase['state'] == 'private_access_required' and phase['check'] == args.check
     before = registration()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     if args.check == 'access-machine':
         forward(binary, phase)
     elif args.check == 'private-https':
@@ -187,7 +273,10 @@ def probe(args):
         for host in hosts:
             command = ['curl', '--silent', '--show-error', '--fail', '--noproxy', '*',
                        '--connect-timeout', '15', '--max-time', '30', 'https://' + host + '/']
-            result = subprocess.run(command, capture_output=True, timeout=35)
+            if winhost.device():  # curl.exe ships with Windows and trusts the system store, as curl does on Unix
+                result = winhost.run_pb(winhost.which('curl'), command[1:], 35)
+            else:
+                result = subprocess.run(command, capture_output=True, timeout=35)
             if result.returncode or result.stdout != expected:
                 path = command_diagnostic(command, b'', result.stderr)
                 raise RuntimeError('trusted private HTTPS failed; private diagnostics: ' + str(path))
@@ -215,14 +304,38 @@ def probe(args):
                       'trusted_https': args.check == 'private-https', 'enrollment_unchanged': True}))
 
 
+def pair(args):
+    binary, device = winhost.pb_path(), winhost.device()
+    if not device:
+        raise SystemExit('pair drives the Windows device (PB_SMOKE_WINDOWS_PB); smoke.sh pairs Unix machines')
+    matches = [m for m in invoke(binary, 'machine', 'list', '--json')['machines'] if args.target in (m['id'], m['alias'])]
+    assert len(matches) == 1, 'the origin machine is not one exact machine of this account'
+    marker = 'PB_PRIVATE_' + uuid.uuid4().hex
+    code = "import base64;exec(base64.b64decode('%s'))" % base64.b64encode(PEER_ORIGIN.encode()).decode()
+    # The exec ends with its client (the job is killed below); its timeout bounds the origin if that fails.
+    origin = winhost.job(binary, ['exec', args.target, '--timeout', '170s', '--', 'python3', '-c', code, args.check, marker])
+    try:
+        deadline = time.monotonic() + 60
+        while b'\n' not in origin.stdout():
+            if origin.poll() is not None or time.monotonic() >= deadline:
+                raise RuntimeError('the origin on the peer did not start: ' + origin.stderr()[-300:].decode(errors='replace'))
+            time.sleep(1)
+        args.phase = json.dumps({'state': 'private_access_required', 'check': args.check, 'target': args.target,
+                                 'machine_id': matches[0]['id'], 'port': int(origin.stdout().split(b'\n')[0]), 'marker': marker})
+        probe(args)
+    finally:
+        origin.kill()
+        origin.close()
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['origin', 'probe'])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('action', choices=['origin', 'probe', 'pair'])
     parser.add_argument('--target')
     parser.add_argument('--phase')
     parser.add_argument('--check', choices=['access-machine', 'private-address', 'private-https'], required=True)
     args = parser.parse_args()
-    (origin if args.action == 'origin' else probe)(args)
+    {'origin': origin, 'probe': probe, 'pair': pair}[args.action](args)
 
 
 if __name__ == '__main__':

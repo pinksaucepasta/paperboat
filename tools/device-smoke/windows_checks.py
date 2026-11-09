@@ -13,7 +13,8 @@ install_lifecycle, pairing_lifecycle's uninstall flows, the ssh_*.sh and ssh_mac
 preview_survival/tunnel_survival, config_sync/config_sync_lifecycle and config_commands' repository rows, and the gated
 preview_lifecycle/preview_protocols/session replay and cross checks. ssh-tools runs scp and sftp only (Windows has no
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
-latency row. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
+latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
+Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
 """
 import argparse
 import contextlib
@@ -70,6 +71,8 @@ def checks(args):
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
     table['terminal-matrix'] = (['terminal_matrix.py', args.peer], ['--peer'])  # about 25 min: pass --timeout 3600
+    for name in ('access-machine', 'private-address', 'private-https'):  # the device is the client; the origin runs on the peer
+        table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
                          ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
     table['config-commands'] = (['config_commands.py'], [])
