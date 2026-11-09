@@ -60,7 +60,14 @@ export async function send(input: string, init?: RequestInit): Promise<Response>
  * After a 401, asks `/me` what it meant (sessionVerdict): returns when the session is valid, sends
  * an ended session to sign-in, and throws an outage as an error the page can retry.
  */
-export async function confirmSession(): Promise<void> {
+export function confirmSession(): Promise<void> {
+  // Many reads fail together when a session ends: they share one /me check and one redirect.
+  confirming ??= checkSession().finally(() => (confirming = undefined))
+  return confirming
+}
+let confirming: Promise<void> | undefined
+
+async function checkSession(): Promise<void> {
   const session = await send("/api/v1/me", { headers: { accept: "application/json" } })
   const verdict = sessionVerdict(session.status)
   if (verdict === "valid") return
