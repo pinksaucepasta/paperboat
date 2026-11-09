@@ -11061,6 +11061,8 @@ export interface components {
             actor_account_id: string;
             machine_id: string;
             layers: components["schemas"]["EnvironmentVaultLayerDelivery"][];
+            /** @description The workspace's "Commands on machines can list ENV names" setting; the machine runtime refuses name listing when false. Delivery of values is unaffected. */
+            names_listable: boolean;
         };
         /** @description The machine supplies workspace and actor from its verified terminal/exec/SSH launch authorization, never an untrusted process request. Machine proof binds exact method/path/body and operation ID. */
         EnvironmentVaultLayerContextRequest: {

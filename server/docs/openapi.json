@@ -13529,7 +13529,8 @@
           "workspace_id",
           "actor_account_id",
           "machine_id",
-          "layers"
+          "layers",
+          "names_listable"
         ],
         "properties": {
           "recipient": {
@@ -13553,6 +13554,10 @@
             "items": {
               "$ref": "#/components/schemas/EnvironmentVaultLayerDelivery"
             }
+          },
+          "names_listable": {
+            "type": "boolean",
+            "description": "The workspace's \"Commands on machines can list ENV names\" setting; the machine runtime refuses name listing when false. Delivery of values is unaffected."
           }
         },
         "description": "Effective source layers for an exact workspace and verified process actor. Personal has account globals plus device overrides; Team has shared globals plus the actor's private Team account/device layers. Another authorized actor receives Team globals only, never the installation owner's private layers. These data do not grant process execution authority."
