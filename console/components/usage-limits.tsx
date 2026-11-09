@@ -573,7 +573,7 @@ function BandwidthSkeleton() {
   return (
     <div className="flex flex-1 flex-col gap-3">
       <div className="flex items-center gap-5">
-        {figureSkeleton("w-24")}
+        {figureSkeleton("w-28")}
         <div className="flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground">
           <span className="flex items-center gap-4">
             <Mark icon={<ArrowUpIcon className="size-3" />}>
@@ -586,7 +586,7 @@ function BandwidthSkeleton() {
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             {paths.map((path) => (
               <Mark key={path.mode} icon={<span className={cn("size-1.5 rounded-full", path.dot)} />}>
-                {path.label} <Skeleton className={cn("inline-block h-2.5 w-10 align-middle", onCard)} />
+                {path.label} <Skeleton className={cn("inline-block h-2.5 w-12 align-middle", onCard)} />
               </Mark>
             ))}
           </span>
