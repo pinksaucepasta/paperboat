@@ -72,7 +72,7 @@ export function MachineShell({ machineId, children }: { machineId: string; child
     return (
       <>
         {header}
-        <MachineSkeleton />
+        <MachineSkeleton base={base} tab={tab} />
       </>
     )
   }
@@ -122,25 +122,7 @@ export function MachineShell({ machineId, children }: { machineId: string; child
             Quick terminal
           </Button>
         </div>
-        {/* The divider is on a wrapper and the row overlaps it by 1px, so the active underline
-            sits on the line without the tabs overflowing (which, with sideways scrolling on,
-            made the row scroll vertically too). */}
-        <div className="border-b border-divider">
-          <nav className="-mb-px no-scrollbar flex gap-1 overflow-x-auto overflow-y-hidden">
-            {machineTabs.map(({ slug, title }) => (
-              <Link
-                key={slug}
-                href={slug ? `${base}/${slug}` : base}
-                className={cn(
-                  "shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
-                  tab === slug && "border-foreground text-foreground",
-                )}
-              >
-                {title}
-              </Link>
-            ))}
-          </nav>
-        </div>
+        <MachineTabs base={base} tab={tab} />
       </div>
       <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">{children}</div>
     </div>
@@ -196,15 +178,38 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   )
 }
 
-function MachineSkeleton() {
+/* The divider is on a wrapper and the row overlaps it by 1px, so the active underline sits on the
+   line without the tabs overflowing (which, with sideways scrolling on, made the row scroll vertically too). */
+function MachineTabs({ base, tab }: { base: string; tab: string }) {
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-7 w-48" />
-        <Skeleton className="h-4 w-72" />
+    <div className="border-b border-divider">
+      <nav className="-mb-px no-scrollbar flex gap-1 overflow-x-auto overflow-y-hidden">
+        {machineTabs.map(({ slug, title }) => (
+          <Link
+            key={slug}
+            href={slug ? `${base}/${slug}` : base}
+            className={cn(
+              "shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
+              tab === slug && "border-foreground text-foreground",
+            )}
+          >
+            {title}
+          </Link>
+        ))}
+      </nav>
+    </div>
+  )
+}
+
+/** The loaded header's title and detail lines (their line heights) over the real tabs. */
+function MachineSkeleton({ base, tab }: { base: string; tab: string }) {
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="my-1 h-6 w-48" />
+        <Skeleton className="my-1 h-4 w-72" />
       </div>
-      <Skeleton className="h-8 w-full" />
-      <Skeleton className="h-64 w-full" />
+      <MachineTabs base={base} tab={tab} />
     </div>
   )
 }
