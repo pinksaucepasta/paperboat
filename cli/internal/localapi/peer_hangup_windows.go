@@ -11,6 +11,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
+// A named pipe has no half-close. When either direction of a bridged stream ends, the other side cannot be told
+// through the pipe, so the bridge closes both ends: a client that closed its pipe releases the remote stream at once
+// (not when its process exits), and a client still reading sees the end of a remote stream that ended.
+const localCannotHalfClose = true
+
 // Hijacked stream bridges observe local EOF themselves. Process exit is the
 // additional ownership signal needed to terminate a stream whose client dies
 // without a clean pipe close.

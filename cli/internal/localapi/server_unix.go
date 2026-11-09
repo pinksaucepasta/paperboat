@@ -741,13 +741,19 @@ func bridgePeerStream(ctx context.Context, local, remote net.Conn) {
 			failure = errors.Join(failure, local.Close(), remote.Close())
 		}
 	}
+	ended := false // one direction ended cleanly and the stream was closed on purpose; the other copy then only reports that close
 	canceled := ctx.Done()
 	for completed := 0; completed < 2; {
 		select {
 		case err := <-done:
 			completed++
-			failure = errors.Join(failure, err)
+			if !ended {
+				failure = errors.Join(failure, err)
+			}
 			if err != nil {
+				closeEndpoints()
+			} else if localCannotHalfClose {
+				ended = true
 				closeEndpoints()
 			}
 		case <-canceled:

@@ -12,6 +12,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// A Unix socket is half-closed instead: the end of one direction is passed on (CloseWrite) and the other keeps
+// flowing; watchPeerHangup's poll sees the full close.
+const localCannotHalfClose = false
+
 func watchPeerHangup(ctx context.Context, connection net.Conn, peer Peer, cancel context.CancelFunc) {
 	systemConnection, ok := connection.(syscall.Conn)
 	if !ok {
