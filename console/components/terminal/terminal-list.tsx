@@ -112,7 +112,12 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const lastRunning = useLastCount(`${remembered}:running`, query.data && view === "open" ? Number(reporting) : undefined)
   const running = view === "open" && (query.data ? reporting : lastRunning === 1)
 
-  if (counts.data && counts.data.open + counts.data.closed === 0) {
+  // Whether there were no terminals last time: then the page loads as its empty state, not as a table.
+  const lastEmpty = useLastCount(
+    `terminals-empty:${scope ?? ""}`,
+    counts.data ? Number(counts.data.open + counts.data.closed === 0) : undefined,
+  )
+  if (counts.data ? counts.data.open + counts.data.closed === 0 : lastEmpty === 1) {
     return (
       <Empty className="py-16">
         <EmptyHeader>

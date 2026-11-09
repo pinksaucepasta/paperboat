@@ -21,9 +21,14 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SectionSkeleton } from "@/components/skeletons"
 
 const MachineContext = createContext<Machine | null>(null)
+// True under MachineSkeleton: the machine is a stand-in, so views draw their loading state.
+const MachineLoading = createContext(false)
+
+export function useMachineLoading(): boolean {
+  return useContext(MachineLoading)
+}
 
 export function useCurrentMachine(): Machine {
   const machine = useContext(MachineContext)
@@ -103,13 +108,13 @@ export function MachineShell({ machineId, children }: { machineId: string; child
         <div className="flex flex-wrap items-start gap-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <MachineTitle machine={machine} />
+            <MachineTags machine={machine} />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <MachineStatus machine={machine} />
               <span>
                 {formatPlatform(machine.platform)} · {machine.architecture}
               </span>
               <MachineAddress machine={machine} />
-              <MachineTags machine={machine} />
             </div>
           </div>
           {personalOwner && (
@@ -215,21 +220,39 @@ export function MachineSkeleton({ machineId, children }: { machineId?: string; c
   // The open tab comes from the route, so the prerendered shell knows it before the machine id.
   const tab = useSelectedLayoutSegment() ?? ""
   // The tab draws its own loading state: its lists only need the machine's id (and read the rest
-  // defensively). Overview would show empty facts, so it gets its sections' placeholders.
+  // defensively); Overview checks useMachineLoading.
   // Before the id is known (the prerendered shell) a stand-in id still draws the machine-scoped columns.
   const loading = { id: machineId ?? "pending", alias: "", tags: [] } as unknown as Machine
+  const personal = useWorkspaceId() === "personal"
   return (
     <>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
         <div className="flex flex-wrap items-start gap-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <Skeleton className="my-1 h-6 w-48" />
-            <Skeleton className="my-1 h-4 w-72 max-w-full" />
-            {/* On a phone the status, platform, address and tags wrap onto lines of their own. */}
-            <Skeleton className="my-1 h-4 w-28 sm:hidden" />
-            <Skeleton className="my-1 h-4 w-24 sm:hidden" />
-            <Skeleton className="my-1 h-4 w-32 sm:hidden" />
+            {/* The tags line, then the status, platform and address line, each value sized like
+                itself, so on a phone it wraps like the loaded one ("Last seen 5 days ago" takes
+                two lines there). */}
+            <Skeleton className="my-0.5 h-4 w-28" />
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <span className="inline-flex items-center gap-2">
+                <Skeleton className="size-2 rounded-full" />
+                <span className="inline-flex flex-wrap gap-x-1 gap-y-[11px]">
+                  <Skeleton className="h-[11px] w-20" />
+                  <Skeleton className="h-[11px] w-16" />
+                </span>
+              </span>
+              <Skeleton className="my-[3px] h-4 w-24" />
+              <Skeleton className="my-0.5 h-4 w-28" />
+            </div>
           </div>
+          {/* Share is there for your own machines in Personal, the usual case. */}
+          {personal && (
+            <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+              <ShareNetworkIcon data-icon="inline-start" />
+              Share
+            </Button>
+          )}
           <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
             <TerminalIcon data-icon="inline-start" />
             Quick terminal
@@ -238,14 +261,9 @@ export function MachineSkeleton({ machineId, children }: { machineId?: string; c
         <MachineTabs base={machineId && `/machines/${machineId}`} tab={tab} />
       </div>
       <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
-        {tab ? (
-          <MachineContext value={loading}>{children}</MachineContext>
-        ) : (
-          <div className="flex flex-col gap-10">
-            <SectionSkeleton title="Details" rows={6} />
-            <SectionSkeleton title="Network" rows={2} />
-          </div>
-        )}
+        <MachineContext value={loading}>
+          <MachineLoading value>{children}</MachineLoading>
+        </MachineContext>
       </div>
     </>
   )

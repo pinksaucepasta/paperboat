@@ -50,10 +50,20 @@ export function MachineAddressDetail({ machine }: { machine: Machine }) {
   )
 }
 
-/** The machine page header's IP, opening every way to reach the machine. */
+/**
+ * The machine page header's IP. With one address the IP and that address are shown as they are,
+ * each copied on click; with several, the IP opens the list of every way to reach the machine.
+ */
 export function MachineAddress({ machine }: { machine: Machine }) {
   const hostnames = useMachineHostnames(machine.alias)
   if (!machine.assigned_ip) return null
+  if (hostnames.length <= 1)
+    return (
+      <>
+        <CopyText value={machine.assigned_ip} className="font-mono text-code" />
+        {hostnames[0] && <CopyText value={hostnames[0]} className="font-mono text-code" />}
+      </>
+    )
   return (
     <Popover>
       <PopoverTrigger className="relative z-10 inline-flex items-center gap-1 rounded-sm font-mono text-code outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30">

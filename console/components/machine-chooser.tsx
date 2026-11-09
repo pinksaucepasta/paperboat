@@ -16,7 +16,8 @@ import { TableRowsSkeleton } from "@/components/skeletons"
 
 /**
  * For pages that show one machine at a time (Files): the workspace's machines to pick from,
- * online first, in the machines table's row pattern (name, then status dot). Each row opens `href(id)`, the same URL the header's machine picker sets; offline
+ * online first, in the machines table's row pattern (name, then status dot; offline ones say since
+ * when under the name). Each row opens `href(id)`, the same URL the header's machine picker sets; offline
  * machines are listed too (the page says what it can't reach). Arrow keys move between rows and
  * Enter opens one. A workspace with one machine goes straight to it.
  */
@@ -53,14 +54,12 @@ export function MachineChooser({ href }: { href: (id: string) => string }) {
       <table className="w-full table-fixed text-sm">
         <colgroup>
           <col />
-          <col className="hidden w-[24%] sm:table-column" />
-          <col className="w-[34%] sm:w-[28%]" />
+          <col className="hidden w-[30%] sm:table-column" />
         </colgroup>
         <thead className="border-b border-divider text-left text-xs text-muted-foreground">
           <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
             <th>Machine</th>
             <th className="hidden sm:table-cell">System</th>
-            <th>Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
@@ -70,7 +69,6 @@ export function MachineChooser({ href }: { href: (id: string) => string }) {
               columns={[
                 { bar: "w-36", dot: true },
                 { className: "hidden sm:table-cell", bar: "w-24" },
-                { bar: "w-16" },
               ]}
             />
           ) : (
@@ -93,16 +91,14 @@ export function MachineChooser({ href }: { href: (id: string) => string }) {
                     </Link>
                     <StatusDot online={machine.online} />
                   </div>
+                  {!machine.online && (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {machine.last_seen_at ? `Offline · since ${date(machine.last_seen_at, "day")}` : "Offline"}
+                    </div>
+                  )}
                 </td>
                 <td className="hidden truncate text-muted-foreground sm:table-cell">
                   {formatPlatform(machine.platform)} · {machine.architecture}
-                </td>
-                <td className="truncate text-muted-foreground">
-                  {machine.online
-                    ? "Online"
-                    : machine.last_seen_at
-                      ? `Offline · since ${date(machine.last_seen_at, "day")}`
-                      : "Offline"}
                 </td>
               </tr>
             ))

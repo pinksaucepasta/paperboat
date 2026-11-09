@@ -1,6 +1,7 @@
 "use client"
 
 import { useSelectedLayoutSegment } from "next/navigation"
+import { MachineOverview } from "@/components/machine-overview"
 import { MachineActivity } from "@/components/activity/activity-page"
 import { MachineConfigSync } from "@/components/config/config-sync"
 import { MachineUsage } from "@/components/usage/usage-page"
@@ -11,6 +12,7 @@ import { MachinePreviews } from "@/components/tunnels/preview-list"
 import { MachineTunnels } from "@/components/tunnels/tunnel-list"
 
 const views: Record<string, () => React.ReactNode> = {
+  "": MachineOverview,
   terminals: MachineTerminals,
   previews: MachinePreviews,
   tunnels: MachineTunnels,

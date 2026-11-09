@@ -8,12 +8,12 @@ import { Time } from "@/components/time"
 import { cn } from "@/lib/utils"
 import { CopyRow } from "@/components/copy-button"
 import { DangerZone } from "@/components/machine-identity"
-import { useCurrentMachine } from "@/components/machine-shell"
+import { useCurrentMachine, useMachineLoading } from "@/components/machine-shell"
 import { StatusDot, machineVersion } from "@/components/machine-status"
 import { MachineUpdate, UpdateAttention, updateNeedsAttention } from "@/components/machine-update"
 import { useKeepAwake } from "@/components/machine-actions"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SectionHeading } from "@/components/section"
+import { DangerZone as DangerZonePanel, SectionHeading } from "@/components/section"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +26,7 @@ export function MachineOverview() {
   const machine = useCurrentMachine()
   const { data: me } = useApiQuery(meQuery)
   const owner = machineOwner(machine, me)
+  if (useMachineLoading()) return <OverviewSkeleton />
 
   return (
     <div className="flex flex-col gap-10">
@@ -80,6 +81,46 @@ export function MachineOverview() {
   )
 }
 
+/** The loaded Overview's grid, edge cards and danger zone, with placeholders for the values. */
+function OverviewSkeleton() {
+  return (
+    <div className="flex flex-col gap-10">
+      <Section title="Details">
+        <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
+          {detailLabels.map((label) => (
+            <Detail key={label} label={label}>
+              <Skeleton className="h-4 w-32 max-w-full" />
+            </Detail>
+          ))}
+        </dl>
+      </Section>
+      <Network />
+      {/* Shown to those who manage the machine, the usual case; Remove works once it loads. */}
+      <DangerZonePanel
+        title="Remove machine"
+        description="It loses access right away and its open sessions end."
+        action="Remove"
+        onAction={() => {}}
+      />
+    </div>
+  )
+}
+
+const detailLabels = [
+  "Name",
+  "Owner",
+  "Address",
+  "IP",
+  "OS",
+  "Version",
+  "Keep awake",
+  "Workspace",
+  "Added",
+  "Last seen",
+  "Machine ID",
+  "Identity key",
+]
+
 /**
  * Only says something when an update was rolled back. Recovery is the panel above; "unknown" (the
  * machine hasn't reported update health) says nothing.
@@ -107,6 +148,7 @@ type Relay = { id: string; region: string; self_hosted?: boolean; latency_ms?: n
 function Network() {
   const machine = useCurrentMachine()
   const { data: edges, isPending, isError } = useApiQuery(edgesQuery)
+  const loading = useMachineLoading()
   const { data: measured } = useApiQuery(machineLatencyQuery(machine.id))
   const edgeLatency = new Map((measured ?? []).filter((item) => item.role === "edge").map((item) => [item.node_id, item]))
   const relays: Relay[] = (measured ?? [])
@@ -119,8 +161,7 @@ function Network() {
         <div className="flex flex-col gap-2">
           <h3 className="text-xs text-muted-foreground">Edges</h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            {isPending &&
-              Array.from({ length: 2 }, (_, index) => <Skeleton key={index} className="h-[5.5rem] rounded-lg" />)}
+            {isPending && Array.from({ length: 2 }, (_, index) => <EdgeTileSkeleton key={index} />)}
             {isError && <p className="text-sm text-muted-foreground">Couldn’t load edges</p>}
             {edges?.length === 0 && <p className="text-sm text-muted-foreground">No edges assigned</p>}
             {edges?.map((edge) => (
@@ -138,6 +179,8 @@ function Network() {
           <h3 className="text-xs text-muted-foreground">Relays</h3>
           {relays.length > 0 ? (
             <RelayList relays={relays} />
+          ) : loading ? (
+            <Skeleton className="my-0.5 h-4 w-[36rem] max-w-full" />
           ) : (
             <p className="text-sm text-muted-foreground">
               No relay times from {machine.alias} in the last hour. Relays only carry traffic when machines can’t
@@ -190,6 +233,21 @@ function EdgeTile({
       <div className="flex items-baseline justify-between text-sm">
         <Hosting selfHosted={selfHosted} />
         <Latency value={latency} className="text-lg" />
+      </div>
+    </div>
+  )
+}
+
+/** An edge tile's rows (same markup, so the same height) with placeholders for the words. */
+function EdgeTileSkeleton() {
+  return (
+    <div className="surface-pattern flex flex-col gap-3 p-4">
+      <div className="flex h-[1lh] items-center">
+        <Skeleton className="h-4 w-20" />
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="my-1.5 h-4 w-28" />
       </div>
     </div>
   )

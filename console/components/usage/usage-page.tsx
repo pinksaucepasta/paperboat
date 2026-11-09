@@ -90,6 +90,11 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
     `usage:${workspaceId}:${scope ?? ""}:${period}`,
     data ? Math.min(data.resources.length, topResources) : undefined,
   )
+  // Whether the period had a chart last time (an idle machine has no traffic to draw).
+  const lastChart = useLastCount(
+    `usage-chart:${workspaceId}:${scope ?? ""}:${period}`,
+    data ? Number(data.series.length >= 2) : undefined,
+  )
 
   return (
     <section className="flex flex-col gap-6">
@@ -107,7 +112,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
       {usage.isError ? (
         <LoadError what="usage" error={usage.error} retry={() => usage.refetch()} />
       ) : !data ? (
-        <UsageSkeleton showMachine={!scope} rows={lastRows ?? 5} />
+        <UsageSkeleton showMachine={!scope} rows={lastRows ?? 5} chart={lastChart !== 0} />
       ) : (
         <Loaded usage={data} period={period} showMachine={!scope} />
       )}
@@ -285,7 +290,7 @@ function PathBar({ resource }: { resource: Usage["resources"][number] }) {
 }
 
 /** The loaded page's cards, chart panel and table header, with placeholders for the numbers. */
-function UsageSkeleton({ showMachine, rows }: { showMachine: boolean; rows: number }) {
+function UsageSkeleton({ showMachine, rows, chart }: { showMachine: boolean; rows: number; chart: boolean }) {
   const line = (className: string) => <Skeleton className={cn("my-0.5 h-3", className)} />
   return (
     <>
@@ -298,17 +303,19 @@ function UsageSkeleton({ showMachine, rows }: { showMachine: boolean; rows: numb
         ))}
       </div>
       {/* The chart panel's own rows (same markup, so the same heights), without the chart. */}
-      <div className="surface-pattern flex flex-col gap-3 p-5">
-        <div className="flex items-baseline justify-between text-xs text-muted-foreground">
-          <span className="font-medium">Traffic</span>
+      {chart && (
+        <div className="surface-pattern flex flex-col gap-3 p-5">
+          <div className="flex items-baseline justify-between text-xs text-muted-foreground">
+            <span className="font-medium">Traffic</span>
+          </div>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-48 w-full">
+            <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          </svg>
+          <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+            <span>&nbsp;</span>
+          </div>
         </div>
-        <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-48 w-full">
-          <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-        </svg>
-        <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
-          <span>&nbsp;</span>
-        </div>
-      </div>
+      )}
       <div className="flex flex-col gap-3">
         <SectionHeading title="By resource" />
         <ResourceTable showMachine={showMachine}>

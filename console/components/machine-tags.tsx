@@ -1,6 +1,6 @@
 "use client"
 
-import { PlusIcon, TagIcon } from "@phosphor-icons/react"
+import { PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useState } from "react"
@@ -39,19 +39,25 @@ function useCanEdit(machine: Machine) {
   return rights === "all" || (rights === "own_machines" && Boolean(me) && machine.owner_account === me?.id)
 }
 
-/** The machine page's tags with "Edit tags". */
+/** The machine page's tags line: the chips and "Edit tags", or "No tags · Add tags". */
 export function MachineTags({ machine }: { machine: Machine }) {
   const [editing, setEditing] = useState(false)
   const canEdit = useCanEdit(machine)
   if (!tagsLive) return null
   return (
-    <span className="inline-flex flex-wrap items-center gap-2" data-machine-tags>
-      <TagIcon className="size-4 text-muted-foreground" aria-hidden />
-      {machine.tags?.length ? <TagChips tags={machine.tags} /> : <span className="text-muted-foreground">No tags</span>}
+    <span className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-machine-tags>
+      {machine.tags?.length ? <TagChips tags={machine.tags} /> : <span>No tags</span>}
       {canEdit && (
-        <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-          Edit tags
-        </Button>
+        <>
+          {!machine.tags?.length && <span aria-hidden>·</span>}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            {machine.tags?.length ? "Edit tags" : "Add tags"}
+          </button>
+        </>
       )}
       {editing && <EditTags machine={machine} onClose={() => setEditing(false)} />}
     </span>
