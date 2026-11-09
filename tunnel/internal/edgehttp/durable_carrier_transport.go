@@ -387,6 +387,16 @@ func carrierRouteIdentityKey(identity datacarrier.Identity) string {
 }
 
 func (r *DataCarrierRouteRegistry) entryFor(rule route.RouteRule, requestID string) (*dataCarrierRouteEntry, error) {
+	entries, err := r.entriesFor(rule, requestID)
+	if err != nil {
+		return nil, err
+	}
+	return entries[0], nil
+}
+
+// entriesFor lists the route's eligible carriers best first; a draining carrier (its host sent
+// goaway, e.g. the worker a handover replaced) sorts after every live one.
+func (r *DataCarrierRouteRegistry) entriesFor(rule route.RouteRule, requestID string) ([]*dataCarrierRouteEntry, error) {
 	if r == nil || rule.Kind != route.TunnelHTTPSWSS && rule.Kind != route.TunnelTCP && rule.Kind != route.TunnelTLS && rule.Kind != route.TunnelPrivateTCP || rule.AccountID == "" || rule.HostID == "" || rule.TunnelID == "" || rule.ConnectorID == "" || rule.ConnectorSessionID == "" || rule.ConnectorProcessGeneration == 0 || rule.ConfigGeneration == 0 {
 		return nil, ErrDataCarrierRouteInvalid
 	}
@@ -413,8 +423,17 @@ func (r *DataCarrierRouteRegistry) entryFor(rule route.RouteRule, requestID stri
 	if len(eligible) == 0 {
 		return nil, ErrDataCarrierRouteUnavailable
 	}
-	sort.Slice(eligible, func(i, j int) bool { return replicaLess(eligible[i], eligible[j], requestID) })
-	return eligible[0], nil
+	draining := make(map[*dataCarrierRouteEntry]bool, len(eligible))
+	for _, entry := range eligible {
+		draining[entry] = entry.server.DrainingNow()
+	}
+	sort.Slice(eligible, func(i, j int) bool {
+		if draining[eligible[i]] != draining[eligible[j]] {
+			return !draining[eligible[i]]
+		}
+		return replicaLess(eligible[i], eligible[j], requestID)
+	})
+	return eligible, nil
 }
 
 // entryForExactAssignment resolves a private-access request to the one
@@ -499,13 +518,17 @@ func (r *DataCarrierRouteRegistry) OpenRouteStream(ctx context.Context, rule rou
 	return r.openWithTimeout(openContext, ctx, rule, requestID)
 }
 
-// routeEntry picks the carrier for one request. A browser or native decision names the rule's own
-// connector session (IngressDecision.Authorize), so such a request opens only on that session.
-func (r *DataCarrierRouteRegistry) routeEntry(ctx context.Context, rule route.RouteRule, requestID string) (*dataCarrierRouteEntry, error) {
+// routeEntries lists the carriers for one request, best first. A browser or native decision names the
+// rule's own connector session (IngressDecision.Authorize), so such a request opens only on that session.
+func (r *DataCarrierRouteRegistry) routeEntries(ctx context.Context, rule route.RouteRule, requestID string) ([]*dataCarrierRouteEntry, error) {
 	if _, native := ctx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native || rule.AccessMode != "public" {
-		return r.entryForExactAssignment(rule)
+		entry, err := r.entryForExactAssignment(rule)
+		if err != nil {
+			return nil, err
+		}
+		return []*dataCarrierRouteEntry{entry}, nil
 	}
-	return r.entryFor(rule, requestID)
+	return r.entriesFor(rule, requestID)
 }
 
 // servedRule is rule as served by entry: the server issues a public decision per carrier session
@@ -829,10 +852,25 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 	if openCtx == nil || lifetimeCtx == nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	entry, err := r.routeEntry(openCtx, rule, requestID)
+	entries, err := r.routeEntries(openCtx, rule, requestID)
 	if err != nil {
 		return nil, err
 	}
+	// A carrier whose open fails has sent nothing, so any request retries once on the next replica,
+	// as preview does (preview_carrier_failover.go roundTripCandidates).
+	for index, entry := range entries[:min(len(entries), 2)] {
+		last := index == len(entries)-1 || index == 1
+		stream, err := r.openOnEntry(openCtx, lifetimeCtx, entry, rule, requestID, last)
+		if err == nil || last || openCtx.Err() != nil || !errors.Is(err, ErrDataCarrierRouteTransport) {
+			return stream, err
+		}
+	}
+	return nil, ErrDataCarrierRouteUnavailable
+}
+
+// openOnEntry opens one stream on entry. Only the last candidate opens on a draining carrier: a host
+// that sent goaway still serves until it closes (datacarrier.Server.OpenLastResortStream).
+func (r *DataCarrierRouteRegistry) openOnEntry(openCtx, lifetimeCtx context.Context, entry *dataCarrierRouteEntry, rule route.RouteRule, requestID string, last bool) (io.ReadWriteCloser, error) {
 	open := connectorprotocol.StreamOpen{
 		Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion,
 		AccountID: entry.identity.AccountID, TunnelID: entry.identity.TunnelID, ConnectorID: entry.identity.ConnectorID,
@@ -857,7 +895,11 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 		}()
 	}
 	started := time.Now()
-	stream, err := entry.server.OpenStreamWithLifetime(openCtx, lifetimeCtx, open)
+	openStream := entry.server.OpenStreamWithLifetime
+	if last {
+		openStream = entry.server.OpenLastResortStream
+	}
+	stream, err := openStream(openCtx, lifetimeCtx, open)
 	if err != nil {
 		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
 	}

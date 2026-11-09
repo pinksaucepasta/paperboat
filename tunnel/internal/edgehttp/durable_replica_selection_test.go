@@ -236,3 +236,60 @@ func TestDurableReplicaPublicRequestUsesSelectedReplicaDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A replica whose host sent goaway (the worker a handover replaced) is picked only when no live one
+// is left, and a replica whose open fails hands the request to the next one: nothing was sent yet.
+func TestDurableReplicaSkipsDrainingAndRetriesFailedOpen(t *testing.T) {
+	rule := replicaRule()
+	rule.AccessMode = "public"
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	denied := datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error {
+		return errors.New("refused")
+	})
+	fastIdentity := replicaIdentity("host_fast", "connector_fast", "session_fast", 3)
+	fast, fastClient := testEdgePreviewCarrierPair(t, fastIdentity)
+	refusing, _ := testEdgePreviewCarrierPair(t, replicaIdentity("host_refusing", "connector_refusing", "session_refusing", 3), denied)
+	slow, slowClient := testEdgePreviewCarrierPair(t, replicaIdentity("host_slow", "connector_slow", "session_slow", 3))
+	for _, replica := range []struct {
+		server  *datacarrier.Server
+		latency time.Duration
+	}{{fast, time.Millisecond}, {refusing, 2 * time.Millisecond}, {slow, 20 * time.Millisecond}} {
+		if err := registry.AttachReplica(replica.server, "key", "thumb", replicaState(rule, 3, "assignment_"+replica.server.Identity().HostID, replica.server.Identity().HostID, replica.latency, 4)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goaway, err := fastClient.OpenStream(context.Background(), connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: fastIdentity.AccountID, TunnelID: fastIdentity.TunnelID, ConnectorID: fastIdentity.ConnectorID, SessionID: fastIdentity.SessionID, ProcessGeneration: fastIdentity.ProcessGeneration, Generation: fastIdentity.Generation, RouteID: rule.RouteID, RequestID: "request_goaway", Kind: connectorprotocol.Goaway})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connectorprotocol.WriteGoawayNotice(goaway, connectorprotocol.GoawayHostDraining, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fast.Draining():
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast replica did not drain")
+	}
+	opened := make(chan error, 1)
+	go func() {
+		stream, err := registry.OpenRouteStream(context.Background(), rule, "request_retry")
+		if stream != nil {
+			defer stream.Close()
+		}
+		opened <- err
+	}()
+	acceptCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, _, err := slowClient.AcceptStream(acceptCtx)
+	if err != nil {
+		t.Fatalf("slow replica accepted no stream: %v (open: %v)", err, <-opened)
+	}
+	defer stream.Close()
+	if err := <-opened; err != nil {
+		t.Fatal(err)
+	}
+}
