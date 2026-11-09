@@ -96,6 +96,8 @@ function callbackUrl(origin: string): string | undefined {
 
 function Problem({ error }: { error: Error }) {
   const status = error instanceof ApiError ? error.status : 0
+  // An ended console session is already on its way to sign-in (confirmSession), back to this page.
+  if (status === 401) return <CircleNotchIcon className="mx-auto size-5 animate-spin text-white/75" />
   if (status === 404 || status === 410 || (error instanceof ApiError && /expired/.test(error.code))) return <Expired />
   return (
     <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Couldn’t sign you in">
