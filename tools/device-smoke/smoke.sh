@@ -166,15 +166,23 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   esac
 }
 
-# device_py DEVICE SCRIPT ARGS...: run one check script where its device is. On the Windows device it runs from here
-# against pb.exe (winhost.py: PB_SMOKE_WINDOWS_PB), so nothing is staged and python3 is not needed there.
+# ctl DEVICE CMD...: the shell for a device's check scripts and their job and gate files. On the device; for the Windows
+# device (its checks run here against pb.exe, winhost.py) a local bash with PB_SMOKE_WINDOWS_PB set. Scripts are staged in
+# /tmp/$RUN_ID either way, so the same command strings work for both.
+ctl() {
+  local device=$1; shift
+  if [ "$device" = victus ]; then
+    PB_SMOKE_WINDOWS_PB="$PB_VICTUS" PAPERBOAT_SMOKE_TEAM="$SMOKE_TEAM" bash -c "$*"
+  else
+    on "$device" "$*"
+  fi
+}
+
+# device_py DEVICE SCRIPT ARGS...: run one staged check script where its device is.
 device_py() {
   local device=$1 script=$2; shift 2
-  if [ "$device" = victus ]; then
-    (cd "$HERE" && PB_SMOKE_WINDOWS_PB="$PB_VICTUS" PAPERBOAT_SMOKE_TEAM="$SMOKE_TEAM" python3 "$script" "$@")
-  else
-    on "$device" "PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
-  fi
+  # A Windows target needs its pb.exe path for steps that run `pb` there (windows_target.target_pb).
+  ctl "$device" "${PB_VICTUS:+PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_VICTUS") }PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
 }
 
 # ---------------------------------------------------------------- results
@@ -257,8 +265,8 @@ test_exec() { # test_exec TARGET [ID-PREFIX]
 # commands never need nested shell quoting. Results are collected later.
 device_job() { # device_job DEVICE TAG (job body on stdin)
   local device=$1 tag=$2
-  on "$device" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/$tag.sh" >/dev/null
-  on "$device" "cd /tmp/$RUN_ID && (nohup sh -c 'date +%s > $tag.start; sh $tag.sh > $tag.out 2>&1; echo rc=\$? >> $tag.out; date +%s > $tag.end' >/dev/null 2>&1 &)" >/dev/null
+  ctl "$device" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/$tag.sh" >/dev/null
+  ctl "$device" "cd /tmp/$RUN_ID && (nohup sh -c 'date +%s > $tag.start; sh $tag.sh > $tag.out 2>&1; echo rc=\$? >> $tag.out; date +%s > $tag.end' >/dev/null 2>&1 &)" >/dev/null
 }
 start_long_exec() { # start_long_exec TARGET TAG SECONDS
   local t=$1 tag=$2 secs=$3
@@ -502,9 +510,8 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
 TERMINAL_FIXTURES_READY=","
 stage_terminal_fixtures() {
   local source=$1
-  [ "$source" != victus ] || return 0  # the Windows device runs the scripts from here (device_py)
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
-  if ! on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID" < "$PAPERBOAT_SMOKE_FIXTURES"; then
+  if ! ctl "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID" < "$PAPERBOAT_SMOKE_FIXTURES"; then
     return 1
   fi
   TERMINAL_FIXTURES_READY+="$source,"
@@ -688,11 +695,11 @@ test_terminal_replay() {
     fi
     t0=$(now); tag="terminal-replay-$target"; controller_ok=0
     printf '%s\n' "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check cross && echo TERMINAL_REPLAY_OK" | device_job "$CLIENT" "$tag"
-    phase=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    phase=$(ctl "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
     out="$phase"
     if [ "$status" = 0 ]; then
       command=$(python3 "$HERE/session_controller.py" command --phase "$phase" --script "/tmp/$RUN_ID/session_lifecycle.py")
-      out=$(on "$controller" "$command" 2>&1); status=$?
+      out=$(ctl "$controller" "$command" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1])
@@ -702,9 +709,9 @@ assert receipt["same_shell"] is True and receipt["replayed_output"] is True
         controller_ok=1
       fi
       command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$controller_ok")
-      on "$CLIENT" "$command" >/dev/null 2>&1 || controller_ok=0
+      ctl "$CLIENT" "$command" >/dev/null 2>&1 || controller_ok=0
     fi
-    parent=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); parent_status=$?
+    parent=$(ctl "$CLIENT" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); parent_status=$?
     if [ "$controller_ok" = 1 ] && command_ok "$parent_status" "$parent" && marker_present "$parent" TERMINAL_REPLAY_OK; then
       record "$id" PASS $(( $(now)-t0 ))
     else
@@ -729,16 +736,16 @@ test_private_access() {
           continue
         fi
         printf '%s\n' "python3 /tmp/$RUN_ID/private_access.py origin --target $target --check $kind && echo PRIVATE_ORIGIN_OK" | device_job "$target" "$tag"
-        phase=$(on "$target" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state private_access_required" 2>&1); status=$?
+        phase=$(ctl "$target" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state private_access_required" 2>&1); status=$?
         output="$phase"
         if [ "$status" = 0 ]; then
           command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"probe","--phase",sys.argv[1],"--check",sys.argv[3]]))' "$phase" "/tmp/$RUN_ID/private_access.py" "$kind")
-          output=$(on "$source" "$command" 2>&1); status=$?
+          output=$(ctl "$source" "$command" 2>&1); status=$?
           if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["status"]=="PASS" and r["check"]==sys.argv[2] and r["target"]==sys.argv[3] and r["exact_bytes"] and r["enrollment_unchanged"];assert r["trusted_https"] if sys.argv[2]=="private-https" else r["half_close"]' "$output" "$kind" "$target" 2>/dev/null; then success=1; fi
           command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state private_access_required)
-          on "$target" "$command" >/dev/null 2>&1 || success=0
+          ctl "$target" "$command" >/dev/null 2>&1 || success=0
         fi
-        parent=$(on "$target" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+        parent=$(ctl "$target" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
         if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" PRIVATE_ORIGIN_OK; then
           if [ "$kind" = private-https ]; then
             record "$id" PASS $(( $(now)-t0 )) "both private URL forms; OS-trusted TLS and normal DNS; exact response"
@@ -774,16 +781,16 @@ test_inbox_approval() {
       continue
     fi
     printf '%s\n' "python3 /tmp/$RUN_ID/inbox_approval.py --team $SMOKE_TEAM --source-machine-id ${source_id% *} --source-account-id ${source_id#* } && echo INBOX_APPROVAL_OK" | device_job "$device" "$tag"
-    phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state inbox_sender_required" 2>&1); status=$?
+    phase=$(ctl "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state inbox_sender_required" 2>&1); status=$?
     output="$phase"
     if [ "$status" = 0 ]; then
       command=$(python3 -c 'import shlex,sys;print(shlex.join(["python3",sys.argv[2],"--phase",sys.argv[1]]))' "$phase" "/tmp/$RUN_ID/inbox_sender.py")
       output=$(on "$TEAMMATE" "timeout 400 $command" 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="inbox-sender" and r["status"]=="PASS" and r["approval_acknowledged"] and r["decline_acknowledged"]' "$output" 2>/dev/null; then success=1; fi
       command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state inbox_sender_required)
-      on "$device" "$command" >/dev/null 2>&1 || success=0
+      ctl "$device" "$command" >/dev/null 2>&1 || success=0
     fi
-    parent=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    parent=$(ctl "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
     if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" INBOX_APPROVAL_OK; then
       record "$id" PASS $(( $(now)-t0 )) "independent teammate; approve delivers exact bytes; decline publishes nothing"
     else
@@ -1096,7 +1103,7 @@ test_preview_protocols() {
       continue
     fi
     printf '%s\n' "python3 /tmp/$RUN_ID/preview_protocols.py $device$flag && echo PREVIEW_PROTOCOLS_OK" | device_job "$device" "$tag"
-    phase=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state preview_protocol_required" 2>&1); status=$?
+    phase=$(ctl "$device" "python3 /tmp/$RUN_ID/session_controller.py wait --job /tmp/$RUN_ID/$tag --expected-state preview_protocol_required" 2>&1); status=$?
     output="$phase"
     if [ "$status" = 0 ]; then
       url=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["url"])' "$phase")
@@ -1104,9 +1111,9 @@ test_preview_protocols() {
       output=$("$probe" --url "$url" --marker "$marker" 2>&1); status=$?
       if [ "$status" = 0 ]; then success=1; fi
       command=$(python3 "$HERE/session_controller.py" signal --phase "$phase" --success "$success" --expected-state preview_protocol_required)
-      on "$device" "$command" >/dev/null 2>&1 || success=0
+      ctl "$device" "$command" >/dev/null 2>&1 || success=0
     fi
-    parent=$(on "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
+    parent=$(ctl "$device" "python3 /tmp/$RUN_ID/session_controller.py finish --job /tmp/$RUN_ID/$tag" 2>&1); status=$?
     if [ "$success" = 1 ] && command_ok "$status" "$parent" && marker_present "$parent" PREVIEW_PROTOCOLS_OK; then
       record "$id" PASS $(( $(now)-t0 )) "HTTP1/2/3, WebSocket binary/Unicode,16MiB body; exact cleanup"
     else
@@ -1213,7 +1220,7 @@ if [ -n "$ONLY_LIST" ]; then
     [ "$found" = 1 ] || record "$listed" FAIL 0 "listed green check did not run; fix the runner or the list"
   done
 fi
-for source in "${TLIST[@]}"; do on "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
+for source in "${TLIST[@]}"; do ctl "$source" "rm -rf /tmp/$RUN_ID" >/dev/null 2>&1; done
 {
   printf '{"run":"%s","at":"%s","expect_version":"%s","update_version":"%s","results":[' "$RUN_ID" "$STAMP" "$EXPECT_VERSION" "$UPDATE_VERSION"
   first=1
