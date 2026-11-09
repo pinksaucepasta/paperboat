@@ -3,49 +3,13 @@ package derpquic
 import (
 	"crypto/ed25519"
 	"crypto/tls"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
 	"time"
 )
 
-// MaxJWKSKeys bounds the trust document, in step with the tunnel edge's snapshot (tunnel/internal/auth).
-const MaxJWKSKeys = 128
-
 var errUnknownKey = errors.New("unknown grant key id")
-
-// ParseJWKS reads the issuer trust document into the grant verification keys. Keys named in
-// withdrawn_key_ids are dropped even while listed; a document that leaves no key is refused, so a
-// malformed one never makes the relay trust nothing.
-func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
-	var document struct {
-		Keys            []struct{ Kty, Crv, Kid, X string } `json:"keys"`
-		WithdrawnKeyIDs []string                            `json:"withdrawn_key_ids"`
-	}
-	if json.Unmarshal(raw, &document) != nil || len(document.Keys) == 0 || len(document.Keys) > MaxJWKSKeys || len(document.WithdrawnKeyIDs) > MaxJWKSKeys {
-		return nil, errors.New("invalid issuer JWKS")
-	}
-	keys := make(map[string]ed25519.PublicKey, len(document.Keys))
-	for _, k := range document.Keys {
-		b, err := base64.RawURLEncoding.Strict().DecodeString(k.X)
-		if err != nil || k.Kty != "OKP" || k.Crv != "Ed25519" || k.Kid == "" || len(b) != ed25519.PublicKeySize || keys[k.Kid] != nil {
-			return nil, errors.New("invalid issuer signing key")
-		}
-		keys[k.Kid] = ed25519.PublicKey(b)
-	}
-	for _, id := range document.WithdrawnKeyIDs {
-		if id == "" {
-			return nil, errors.New("invalid withdrawn issuer key id")
-		}
-		delete(keys, id)
-	}
-	if len(keys) == 0 {
-		return nil, errors.New("issuer JWKS withdraws every key")
-	}
-	return keys, nil
-}
 
 func copyKeys(keys map[string]ed25519.PublicKey) (map[string]ed25519.PublicKey, error) {
 	if len(keys) == 0 {

@@ -13,18 +13,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"tailscale.com/types/key"
 )
 
 func jwksDocument(t *testing.T, withdrawn []string, keys map[string]ed25519.PublicKey) []byte {
 	t.Helper()
-	type jwk struct{ Kty, Crv, Kid, X string }
+	type jwk struct{ Kty, Crv, Use, Alg, Kid, X string }
 	document := struct {
 		Keys      []jwk    `json:"keys"`
 		Withdrawn []string `json:"withdrawn_key_ids,omitempty"`
 	}{Withdrawn: withdrawn}
 	for id, k := range keys {
-		document.Keys = append(document.Keys, jwk{"OKP", "Ed25519", id, base64.RawURLEncoding.EncodeToString(k)})
+		document.Keys = append(document.Keys, jwk{"OKP", "Ed25519", "sig", "EdDSA", id, base64.RawURLEncoding.EncodeToString(k)})
 	}
 	raw, err := json.Marshal(document)
 	if err != nil {
@@ -39,34 +40,6 @@ func (f *fixture) tokenFor(g Grant, kid string, priv ed25519.PrivateKey) string 
 	b, _ := json.Marshal(g)
 	body := h + "." + base64.RawURLEncoding.EncodeToString(b)
 	return body + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(body)))
-}
-
-func TestParseJWKSHonorsWithdrawnKeysAndBounds(t *testing.T) {
-	a, _, _ := ed25519.GenerateKey(rand.Reader)
-	b, _, _ := ed25519.GenerateKey(rand.Reader)
-	both := map[string]ed25519.PublicKey{"old": a, "new": b}
-	keys, err := ParseJWKS(jwksDocument(t, nil, both))
-	if err != nil || len(keys) != 2 {
-		t.Fatalf("overlap = %v, %v", keys, err)
-	}
-	keys, err = ParseJWKS(jwksDocument(t, []string{"old", "never-listed"}, both))
-	if err != nil || len(keys) != 1 || keys["new"] == nil {
-		t.Fatalf("withdrawn old kept: %v, %v", keys, err)
-	}
-	if _, err = ParseJWKS(jwksDocument(t, []string{"old", "new"}, both)); err == nil {
-		t.Fatal("a document that withdraws every key was accepted")
-	}
-	many := map[string]ed25519.PublicKey{}
-	for i := range MaxJWKSKeys + 1 {
-		many[fmt.Sprint("k", i)] = a
-	}
-	if _, err = ParseJWKS(jwksDocument(t, nil, many)); err == nil {
-		t.Fatal("more keys than the cap accepted")
-	}
-	delete(many, "k0")
-	if keys, err = ParseJWKS(jwksDocument(t, nil, many)); err != nil || len(keys) != MaxJWKSKeys {
-		t.Fatalf("a document at the cap = %d keys, %v", len(keys), err)
-	}
 }
 
 func TestServerKeysRotateOverlapAndWithdraw(t *testing.T) {
@@ -85,7 +58,7 @@ func TestServerKeysRotateOverlapAndWithdraw(t *testing.T) {
 		t.Fatalf("a key the relay was never given verified: %v", err)
 	}
 	// Overlap: the control plane lists the new key before it withdraws the old one.
-	keys, err := ParseJWKS(jwksDocument(t, nil, map[string]ed25519.PublicKey{"test": oldPub, "new": newPub}))
+	keys, err := jwks.Parse(jwksDocument(t, nil, map[string]ed25519.PublicKey{"test": oldPub, "new": newPub}))
 	if err != nil || server.SetKeys(keys) != nil {
 		t.Fatal("overlap keys refused", err)
 	}
@@ -94,7 +67,7 @@ func TestServerKeysRotateOverlapAndWithdraw(t *testing.T) {
 			t.Fatalf("%s key refused during the overlap: %v", name, err)
 		}
 	}
-	keys, err = ParseJWKS(jwksDocument(t, []string{"test"}, map[string]ed25519.PublicKey{"test": oldPub, "new": newPub}))
+	keys, err = jwks.Parse(jwksDocument(t, []string{"test"}, map[string]ed25519.PublicKey{"test": oldPub, "new": newPub}))
 	if err != nil || server.SetKeys(keys) != nil || !slices.Equal(server.KeyIDs(), []string{"new"}) {
 		t.Fatalf("withdrawal not applied: %v %v", server.KeyIDs(), err)
 	}

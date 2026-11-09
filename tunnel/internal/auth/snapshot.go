@@ -3,11 +3,11 @@ package auth
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"errors"
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 )
@@ -62,52 +62,9 @@ func (s *Snapshot) ConfigureRevocationFreshness(maxAge time.Duration, now func()
 	}
 }
 
-type jwksDocument struct {
-	Keys []jwk `json:"keys"`
-	// WithdrawnKeyIDs names keys the server withdrew (F21-08): tokens signed with them are refused at once,
-	// even while a key is still listed. The server omits the field while nothing is withdrawn.
-	WithdrawnKeyIDs []string `json:"withdrawn_key_ids,omitempty"`
-}
-type jwk struct {
-	KeyType   string `json:"kty"`
-	Curve     string `json:"crv"`
-	Use       string `json:"use"`
-	Algorithm string `json:"alg"`
-	KeyID     string `json:"kid"`
-	X         string `json:"x"`
-}
-
 func (s *Snapshot) ReplaceJWKS(data []byte) error {
-	if len(data) == 0 || len(data) > maxSnapshotBytes {
-		return ErrSnapshotInvalid
-	}
-	var document jwksDocument
-	if strictSnapshotJSON(data, &document) != nil || len(document.Keys) == 0 || len(document.Keys) > 128 {
-		return ErrSnapshotInvalid
-	}
-	next := make(map[string]ed25519.PublicKey, len(document.Keys))
-	for _, item := range document.Keys {
-		if item.KeyType != "OKP" || item.Curve != "Ed25519" || item.Use != "sig" || item.Algorithm != "EdDSA" || item.KeyID == "" || len(item.KeyID) > 128 {
-			return ErrSnapshotInvalid
-		}
-		raw, err := base64.RawURLEncoding.DecodeString(item.X)
-		if err != nil || len(raw) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(raw) != item.X || next[item.KeyID] != nil {
-			return ErrSnapshotInvalid
-		}
-		next[item.KeyID] = append(ed25519.PublicKey(nil), raw...)
-	}
-	if len(document.WithdrawnKeyIDs) > 128 {
-		return ErrSnapshotInvalid
-	}
-	for _, id := range document.WithdrawnKeyIDs {
-		if id == "" || len(id) > 128 {
-			return ErrSnapshotInvalid
-		}
-		delete(next, id)
-	}
-	if len(next) == 0 {
-		// Every listed key withdrawn: keep the last good set rather than trust nothing (the server
-		// refuses to withdraw its active key, so this is a malformed document).
+	next, err := jwks.Parse(data)
+	if err != nil {
 		return ErrSnapshotInvalid
 	}
 	s.mu.Lock()

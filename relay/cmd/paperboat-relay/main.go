@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/peerrelay"
 	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"go4.org/mem"
 	"tailscale.com/net/stunserver"
@@ -100,10 +101,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err != nil {
 		return serviceFailure{error: err, definition: "service_build"}
 	}
-	if len(raw) > 128<<10 {
-		return errors.New("cannot read bounded issuer JWKS")
-	}
-	trusted, err := derpquic.ParseJWKS(raw)
+	trusted, err := jwks.Parse(raw)
 	if err != nil {
 		return err
 	}

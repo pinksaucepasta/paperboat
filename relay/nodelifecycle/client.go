@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
@@ -325,7 +326,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		}
 	}
 	if len(out.JWKS) != 0 && !bytes.Equal(out.JWKS, c.jwks) {
-		keys, err := derpquic.ParseJWKS(out.JWKS)
+		keys, err := jwks.Parse(out.JWKS)
 		if err != nil || server.SetKeys(keys) != nil {
 			return ErrControl
 		}
