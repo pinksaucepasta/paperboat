@@ -42,16 +42,20 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
 
 ## Pages
 
-- **One column.** Every page's content sits in the SectionPage column (`max-w-6xl`, centered, the
-  header's gutters). Lists, tables and dashboards fill it. Pages made only of label–value rows
-  (Account, Billing) keep to `max-w-3xl` at the column's left edge, never centered, so the content's
-  left edge is the same on every page.
+- **One column.** Every page's content sits in one container owned by its frame (`SectionPage`,
+  `MachineShell`, or a page main with the same classes: `max-w-6xl`, centered, the header's
+  gutters); pages never add their own width wrapper. Lists, tables, dashboards and tools (the
+  inspector) fill it. Pages made only of label–value rows (Account, Billing) pass `narrow`
+  (`max-w-3xl` at the column's left edge, never centered), so the content's left edge is the same
+  on every page.
 - **No page title on section pages.** The breadcrumb names the page; the primary action sits at the
   right of the first toolbar or Section heading. An `h1` belongs only to an object's page (a machine, a
   tunnel, a team), where it is the object's editable name.
-- **Buttons.** `size="lg"` for page, toolbar, Section and dialog-footer actions; the default size for
-  actions inside a list row; `variant="outline"` for secondary, `secondary` for a quiet one. One primary
-  (default variant) per view.
+- **Buttons.** `size="lg"` for page, toolbar, Section-header, standalone-form and `DialogFooter`
+  actions; the default size for actions inside a row or a line of text. `AlertDialog` confirmations
+  keep shadcn's shipped size. `variant="outline"` for secondary, `secondary` for a quiet one, the
+  `destructive` variant for a destructive submit (never a red className). One primary per view. No
+  height overrides.
 - **Empty states.** A list that has never had items uses `Empty` (`className="py-16"`, icon, title,
   one line, the action). A search or filter with no matches is one muted centered line in the table.
 - **Load errors.** A list or page that couldn't load shows `LoadError` (`components/load-error.tsx`):

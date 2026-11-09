@@ -7,10 +7,8 @@ export const metadata: Metadata = { title: sections.billing.title }
 
 export default function Page() {
   return (
-    <SectionPage id="billing">
-      <div className="max-w-3xl">
-        <BillingPage />
-      </div>
+    <SectionPage id="billing" narrow>
+      <BillingPage />
     </SectionPage>
   )
 }

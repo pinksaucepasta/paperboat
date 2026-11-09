@@ -8,8 +8,20 @@ import { MachinePicker } from "@/components/machine-picker"
 import { Crumb, PageHeader } from "@/components/page-header"
 import { Skeleton } from "@/components/ui/skeleton"
 
-/** Frame for a sidebar section. Machine-scoped sections keep the chosen machine in `?machine=`. */
-export function SectionPage({ id, children }: { id: keyof typeof sections; children?: React.ReactNode }) {
+/**
+ * Frame for a sidebar section: the page's one content column. Machine-scoped sections keep the
+ * chosen machine in `?machine=`. `narrow`: a settings page of label–value rows, kept to max-w-3xl at
+ * the column's left edge (DESIGN.md, Pages).
+ */
+export function SectionPage({
+  id,
+  narrow,
+  children,
+}: {
+  id: keyof typeof sections
+  narrow?: boolean
+  children?: React.ReactNode
+}) {
   const section = sections[id]
   return (
     <>
@@ -24,7 +36,9 @@ export function SectionPage({ id, children }: { id: keyof typeof sections; child
           </Suspense>
         )}
       </PageHeader>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+        {narrow ? <div className="max-w-3xl">{children}</div> : children}
+      </main>
     </>
   )
 }

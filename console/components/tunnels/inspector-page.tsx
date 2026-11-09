@@ -44,7 +44,7 @@ export function InspectorPage({ id }: { id: string }) {
         )}
         <Crumb>Inspect</Crumb>
       </PageHeader>
-      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-6 md:px-8">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
           <State title="Preview not found" detail={query.error.message} />
         ) : !preview ? (
