@@ -171,14 +171,14 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
               ? <TableRowsSkeleton
-                  rows={3}
-                  cells={[
-                    "",
-                    !scope && "hidden md:table-cell",
-                    "hidden lg:table-cell",
-                    "hidden sm:table-cell",
-                    view === "live" && "hidden md:table-cell",
-                    "w-12",
+                  rows={Math.min((view === "live" ? counts.data?.live : counts.data?.ended) ?? 12, cursorPageSize)}
+                  columns={[
+                    { bar: "w-56" },
+                    !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                    { className: "hidden lg:table-cell", bar: "w-32" },
+                    { className: "hidden sm:table-cell", bar: "w-20" },
+                    view === "live" && { className: "hidden md:table-cell", bar: "w-16" },
+                    { empty: true },
                   ]}
                 />
               : shown.map((preview) => (

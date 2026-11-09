@@ -18,6 +18,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /*
@@ -116,7 +117,13 @@ export function ViewToggle<View extends string>({
     >
       {views.map((view) => (
         <ToggleGroupItem key={view.value} value={view.value} className="gap-1.5">
-          {view.label} <span className="text-muted-foreground tabular-nums">{view.count ?? ""}</span>
+          {view.label}{" "}
+          {"count" in view && view.count === undefined ? (
+            // The count is coming: hold its place so the toggle doesn't widen when it lands.
+            <Skeleton className="h-2.5 w-3" />
+          ) : (
+            <span className="text-muted-foreground tabular-nums">{view.count ?? ""}</span>
+          )}
         </ToggleGroupItem>
       ))}
     </ToggleGroup>

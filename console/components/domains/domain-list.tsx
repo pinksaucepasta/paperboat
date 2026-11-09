@@ -34,9 +34,9 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
+import { TableRowsSkeleton } from "@/components/skeletons"
 
 /*
  * Where your workspace is reachable by name: Paperboat's machine domain, machine domains you add
@@ -173,13 +173,10 @@ export function DomainList() {
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
           {loading
-            ? Array.from({ length: 1 }, (_, index) => (
-                <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                  <td colSpan={4}>
-                    <Skeleton className="h-5 w-1/3" />
-                  </td>
-                </tr>
-              ))
+            ? <TableRowsSkeleton
+                rows={1}
+                columns={[{ bar: "w-32" }, { bar: "w-36" }, { bar: "w-20" }, { empty: true }]}
+              />
             : shown.map((entry) => <DomainRow key={entry.name} entry={entry} onOpen={() => setOpen(entry.name)} />)}
         </tbody>
       </table>

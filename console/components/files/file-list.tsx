@@ -194,7 +194,15 @@ function MachineInbox({ machineId }: { machineId: string }) {
             </thead>
             <tbody className="divide-y divide-divider border-b border-divider">
               {loading && !rows.length
-                ? <TableRowsSkeleton rows={3} at={1} cells={["", "", "hidden sm:table-cell", "hidden sm:table-cell", "w-12"]} />
+                ? <TableRowsSkeleton
+                    columns={[
+                      { bar: "w-4" },
+                      { bar: "w-48" },
+                      { className: "hidden text-right sm:table-cell", bar: "w-12" },
+                      { className: "hidden sm:table-cell", bar: "w-24" },
+                      { empty: true },
+                    ]}
+                  />
                 : rows.map((row) => (
                     <FileRow
                       key={rowKey(row)}

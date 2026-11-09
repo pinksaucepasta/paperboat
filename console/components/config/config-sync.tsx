@@ -144,8 +144,14 @@ function AllMachines(props: {
         <tbody className="divide-y divide-divider border-b border-divider">
           {loading && (
             <TableRowsSkeleton
-              rows={4}
-              cells={["", "hidden md:table-cell", "hidden lg:table-cell", "hidden sm:table-cell", "", "hidden sm:table-cell"]}
+              columns={[
+                { bar: "w-28" },
+                { className: "hidden md:table-cell", bar: "w-40" },
+                { className: "hidden lg:table-cell", bar: "w-20" },
+                { className: "hidden text-right sm:table-cell", bar: "w-6" },
+                { bar: "w-14" },
+                { className: "hidden sm:table-cell", bar: "w-20" },
+              ]}
             />
           )}
           {environments.map((environment) => {

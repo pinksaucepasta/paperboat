@@ -6,6 +6,7 @@ import { useDeferredValue, useState } from "react"
 import {
   useApiQuery,
   machineOwner,
+  machineSummaryQuery,
   meQuery,
   useRunning,
   useWorkspace,
@@ -32,6 +33,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { LoadError } from "@/components/load-error"
+import { TableRowsSkeleton } from "@/components/skeletons"
 
 export function MachineTable() {
   const { data: me } = useApiQuery(meQuery)
@@ -57,6 +59,8 @@ export function MachineTable() {
     enabled: Boolean(workspace),
   })
   const { isPending, isError, error, refetch } = list
+  // The cards' count (already loaded with them) sizes the loading rows.
+  const summary = useApiQuery({ ...machineSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const shown = list.data?.items
   const total = list.data?.total ?? 0
 
@@ -143,7 +147,18 @@ export function MachineTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-divider">
-            {isPending && <LoadingRows />}
+            {isPending && (
+              <TableRowsSkeleton
+                rows={Math.min(summary.data?.total ?? 12, cursorPageSize)}
+                columns={[
+                  { bar: "w-28", dot: true },
+                  { className: "hidden md:table-cell", bar: "w-40", second: "w-24" },
+                  { className: "hidden lg:table-cell", bar: "w-32" },
+                  { className: "hidden lg:table-cell", bar: "w-24", second: "w-20" },
+                  { empty: true },
+                ]}
+              />
+            )}
             {shown?.map((machine) => (
               <MachineRow
                 key={machine.id}
@@ -253,26 +268,6 @@ function Running({ counts }: { counts: RunningCounts | null | undefined }) {
       <TooltipContent>{full}</TooltipContent>
     </Tooltip>
   )
-}
-
-function LoadingRows() {
-  return Array.from({ length: 3 }, (_, index) => (
-    <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-      <td>
-        <Skeleton className="h-4 w-32" />
-      </td>
-      <td className="hidden md:table-cell">
-        <Skeleton className="h-4 w-24" />
-      </td>
-      <td className="hidden lg:table-cell">
-        <Skeleton className="h-4 w-20" />
-      </td>
-      <td className="hidden lg:table-cell">
-        <Skeleton className="h-4 w-14" />
-      </td>
-      <td />
-    </tr>
-  ))
 }
 
 function NoMachines() {

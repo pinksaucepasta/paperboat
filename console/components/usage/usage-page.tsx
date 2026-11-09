@@ -303,13 +303,13 @@ function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
         <ResourceTable showMachine={showMachine}>
           <TableRowsSkeleton
             rows={5}
-            cells={[
-              "",
-              showMachine && "hidden md:table-cell",
-              "hidden lg:table-cell",
-              "hidden sm:table-cell",
-              "hidden sm:table-cell",
-              "",
+            columns={[
+              { bar: "w-40", second: "w-16" },
+              showMachine && { className: "hidden md:table-cell", bar: "w-20" },
+              { className: "hidden lg:table-cell", bar: "w-full" },
+              { className: "hidden text-right sm:table-cell", bar: "w-14" },
+              { className: "hidden text-right sm:table-cell", bar: "w-14" },
+              { className: "text-right", bar: "w-14" },
             ]}
           />
         </ResourceTable>

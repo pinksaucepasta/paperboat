@@ -82,8 +82,9 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
 
   // Open terminals are current: live ones first, then those whose machine isn't reporting them (shown
   // as last reported). Closed ones group by when they were used. The split covers the loaded page.
-  // What's running is unknown for unreachable terminals, so the column shows only when one is live.
-  const running = view === "open" && shown.some(({ session }) => session.state !== "unavailable")
+  // Columns come from what is known before the list loads, so the header never changes when it lands;
+  // an unreachable terminal's Running cell stays blank.
+  const running = view === "open"
   const columns = 4 + (scope ? 0 : 1) + (running ? 1 : 0)
   const groups: { key: string; label: string; note?: string; rows: typeof shown }[] = []
   if (view === "open") {
@@ -167,14 +168,14 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           {query.isPending ? (
             <tbody>
               <TableRowsSkeleton
-                rows={4}
-                cells={[
-                  "",
-                  !scope && "hidden md:table-cell",
-                  view === "open" && "hidden lg:table-cell",
-                  "hidden lg:table-cell",
-                  "hidden sm:table-cell",
-                  "w-12",
+                rows={Math.min((view === "open" ? counts.data?.open : counts.data?.closed) ?? 12, terminalPageSize)}
+                columns={[
+                  { bar: "w-48" },
+                  !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                  running && { className: "hidden lg:table-cell", bar: "w-16" },
+                  { className: "hidden lg:table-cell", bar: "w-28" },
+                  { className: "hidden sm:table-cell", bar: "w-24", second: view === "open" ? "w-16" : undefined },
+                  { empty: true },
                 ]}
               />
             </tbody>

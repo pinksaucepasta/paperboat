@@ -91,8 +91,13 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
               ? <TableRowsSkeleton
-                  rows={3}
-                  cells={["", "hidden lg:table-cell", !scope && "hidden md:table-cell", "hidden sm:table-cell", "w-12"]}
+                  columns={[
+                    { bar: "w-36" },
+                    { className: "hidden lg:table-cell", bar: "w-56" },
+                    !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                    { className: "hidden sm:table-cell", bar: "w-16" },
+                    { empty: true },
+                  ]}
                 />
               : shown.map((tunnel) => (
                   <Row
