@@ -18,9 +18,13 @@ import (
 // person's grant. A decision ends only with a newer snapshot. Prior art: Teleport's proxy serves
 // from its event-fed cache while auth is down (lib/cache); cloudflared keeps its last remote config.
 type IngressAuthority struct {
-	Client        *HTTPClient
-	NodeID        string
-	ProcessEpoch  string
+	Client       *HTTPClient
+	NodeID       string
+	ProcessEpoch string
+	// Grace, when set and positive, is the remaining window after a handover takeover: a preview miss is asked
+	// again after previewRecheckInGrace instead of IngressRefreshInterval, because the server issues the
+	// replacement's decision a moment after the host's carrier attaches there.
+	Grace         func() time.Duration
 	mu            sync.Mutex
 	decisions     []connectorprotocol.IngressDecision
 	quotaDenied   map[string]bool                             // hostnames withheld only for bandwidth quota, from the same fetch
@@ -44,6 +48,16 @@ type IngressAuthority struct {
 type previewMiss struct {
 	at   time.Time
 	done chan struct{}
+}
+
+// previewRecheckInGrace is how long a preview miss is remembered during a takeover grace.
+const previewRecheckInGrace = 500 * time.Millisecond
+
+func (a *IngressAuthority) previewMissTTL() time.Duration {
+	if a.Grace != nil && a.Grace() > 0 {
+		return previewRecheckInGrace
+	}
+	return connectorprotocol.IngressRefreshInterval
 }
 
 // ingressRetryMaximum bounds the backoff between failed refreshes.
@@ -433,7 +447,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	a.mu.Lock()
 	now := time.Now().UTC()
 	for k, miss := range a.previewMisses {
-		if now.Sub(miss.at) >= connectorprotocol.IngressRefreshInterval {
+		if now.Sub(miss.at) >= a.previewMissTTL() {
 			delete(a.previewMisses, k)
 		}
 	}

@@ -409,3 +409,46 @@ func TestIngressAuthorityAcceptNeverWaitsOnAHangingControlPlane(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// After a handover the server issues the replacement's preview decision a moment after the host's carrier attaches.
+// A miss is remembered for the refresh interval; during the takeover grace it is asked again after 500 ms, so the
+// late decision is found within about a second, not after 5 s (anvit 2026-11-09: one request per swap waited 5 s).
+func TestIngressAuthorityPreviewMissIsRecheckedDuringTakeoverGrace(t *testing.T) {
+	for _, grace := range []bool{true, false} {
+		t.Run(map[bool]string{true: "in grace", false: "no takeover"}[grace], func(t *testing.T) {
+			now := time.Now().UTC()
+			d := ingressAuthorityTestDecision(now)
+			d.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+			var calls atomic.Int32
+			ready := time.Now().Add(700 * time.Millisecond)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				decisions := []connectorprotocol.IngressDecision{}
+				if time.Now().After(ready) {
+					decisions = append(decisions, d)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions})
+			}))
+			defer server.Close()
+			client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := &IngressAuthority{Client: client, NodeID: d.EdgeNodeID, ProcessEpoch: d.EdgeProcessEpoch, fetched: now}
+			if grace {
+				a.Grace = func() time.Duration { return 5 * time.Second }
+			}
+			open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: d.Binding.AccountID, TunnelID: d.Binding.TunnelID, ConnectorID: d.ConnectorID, SessionID: d.SessionID, ProcessGeneration: d.ProcessGeneration, Generation: d.ConfigGeneration, RouteID: d.Binding.RouteID, RequestID: "preview-authority", Kind: "http"}
+			deadline := time.Now().Add(1500 * time.Millisecond)
+			var found bool
+			for time.Now().Before(deadline) && !found {
+				_, err := a.ResolvePreview(context.Background(), d.Binding.PublicationID, d.Binding.Hostname, d.Binding.RouteGeneration, open)
+				found = err == nil
+				time.Sleep(50 * time.Millisecond)
+			}
+			if found != grace {
+				t.Fatalf("decision found within 1.5 s = %v, want %v (control calls %d)", found, grace, calls.Load())
+			}
+		})
+	}
+}

@@ -456,7 +456,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, err
 	}
-	ingressAuthority := &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}
+	// A request for a host whose carrier is still on the replaced process waits, bounded by that process's drain
+	// deadline (it gets the host's GOAWAY then), for the host to re-attach here.
+	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
+	ingressAuthority := &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Grace: routeGrace}
 	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle()})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
@@ -472,9 +475,6 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})
 	}
 	previewHTTPSMatcher := edgehttp.NewPreviewCarrierRouteMatcher(previewRoutes)
-	// A request for a host whose carrier is still on the replaced process waits, bounded by that process's drain
-	// deadline (it gets the host's GOAWAY then), for the host to re-attach here.
-	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
 	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, OnFailure: func(ctx context.Context, phase string, cause error) {
 		switch phase {
 		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
@@ -1295,4 +1295,3 @@ func (p componentPair) Start(ctx context.Context) error {
 func (p componentPair) Shutdown(ctx context.Context) error {
 	return errors.Join(p.second.Shutdown(ctx), p.first.Shutdown(ctx))
 }
-
