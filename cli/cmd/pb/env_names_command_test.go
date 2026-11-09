@@ -126,3 +126,14 @@ func TestEnvListHintPointsLockedVaultAtNames(t *testing.T) {
 		t.Fatal("unrelated failures must pass through unchanged")
 	}
 }
+
+// --json must be a real flag of the command: the CLI refuses --json on a command that does not declare it.
+func TestEnvNamesDeclaresJSONOutput(t *testing.T) {
+	command, _, err := newRootCommand().Find([]string{"env", "names"})
+	if err != nil || command.Flags().Lookup("json") == nil {
+		t.Fatalf("pb env names must declare --json: %v", err)
+	}
+	if err := prepareJSONCommand(command); err != nil {
+		t.Fatal(err)
+	}
+}

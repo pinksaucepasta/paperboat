@@ -15,7 +15,7 @@ How an AI agent finds and uses a secret:
 Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.
 `pb env run` gives a command the whole workspace set; there is no per-name scoping.
 
-This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+JSON output is supported with --json.
 
 ```
 pb env names [flags]
@@ -33,13 +33,13 @@ pb env names [flags]
 
 ```
   -h, --help   help for names
+      --json   print the names and the layer each comes from as JSON
 ```
 
 ### Options inherited from parent commands
 
 ```
       --config string      path to the CLI config file
-      --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
       --workspace string   resource workspace selector: personal or a team slug

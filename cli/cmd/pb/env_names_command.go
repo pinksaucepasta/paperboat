@@ -17,7 +17,7 @@ const envNamesAgentGuide = "How an AI agent finds and uses a secret:\n" +
 	"`pb env run` gives a command the whole workspace set; there is no per-name scoping."
 
 func addEnvironmentNamesCommand(root *cobra.Command) {
-	root.AddCommand(&cobra.Command{
+	names := &cobra.Command{
 		Use:   "names",
 		Short: "List the names of the ENV variables commands on this machine receive (never values)",
 		Long: "Print the names of the ENV variables that `pb env run` and the shell hook put into commands on this machine " +
@@ -29,7 +29,9 @@ func addEnvironmentNamesCommand(root *cobra.Command) {
 		Example: "  pb env names\n  pb env names --json\n  pb env names | grep -q '^STRIPE_API_KEY$' && pb env run -- ./charge.sh",
 		Args:    commandArgs(cobra.NoArgs),
 		RunE:    runEnvironmentNames,
-	})
+	}
+	names.Flags().Bool("json", false, "print the names and the layer each comes from as JSON")
+	root.AddCommand(names)
 }
 
 func runEnvironmentNames(command *cobra.Command, _ []string) error {

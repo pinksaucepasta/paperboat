@@ -24,21 +24,21 @@ Never print, echo or write a value to a file or log: let the program that needs 
 \fBpb env run\fR gives a command the whole workspace set; there is no per-name scoping.
 
 .PP
-This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+JSON output is supported with --json.
 
 
 .SH OPTIONS
 \fB-h\fP, \fB--help\fP[=false]
 	help for names
 
+.PP
+\fB--json\fP[=false]
+	print the names and the layer each comes from as JSON
+
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
 \fB--config\fP=""
 	path to the CLI config file
-
-.PP
-\fB--json\fP[=false]
-	print machine-readable JSON
 
 .PP
 \fB--no-customization\fP[=false]
