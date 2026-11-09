@@ -512,7 +512,7 @@ func classifyUpdaterControlJSONError(result cliJSONError, failure *updated.Contr
 	case "recovery_required":
 		result.Category = "conflict"
 		result.Message = "The local updater requires recovery before continuing."
-		result.Recovery = "Run `pb update status` and follow its recovery state before retrying."
+		result.Recovery = "Run `pb update status`; if it says the installed version is no longer allowed, run `pb update` to install the current release, or `pb uninstall`."
 	case "release_not_found":
 		result.Category = "conflict"
 		result.Message = "No eligible signed release was found or validated."

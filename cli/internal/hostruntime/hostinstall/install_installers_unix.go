@@ -13,7 +13,6 @@ import (
 	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
@@ -94,14 +93,10 @@ func newLifecycleManager(request Request, paths installPaths, host, hostd, updat
 }
 
 func newLifecycleManagerWithCarrierScope(request Request, paths installPaths, host, hostd, updater *service.Installer, carrierOnly bool) (*service.LifecycleManager, error) {
-	return newLifecycleManagerWithRestorePolicy(request, paths, host, hostd, updater, carrierOnly, nil)
-}
-
-func newLifecycleManagerWithRestorePolicy(request Request, paths installPaths, host, hostd, updater *service.Installer, carrierOnly bool, authorize func(context.Context, installsource.Source, string) error) (*service.LifecycleManager, error) {
 	if hostd == nil || updater == nil {
 		return nil, service.ErrLifecycleInvalid
 	}
-	manager, err := buildLifecycleManager(request, paths, host, hostd, updater, carrierOnly, authorize)
+	manager, err := buildLifecycleManager(request, paths, host, hostd, updater, carrierOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +115,7 @@ func newLifecycleManagerWithRestorePolicy(request Request, paths installPaths, h
 	if err != nil {
 		return nil, err
 	}
-	return buildLifecycleManager(request, paths, host, candidateHostd, updater, carrierOnly, authorize)
+	return buildLifecycleManager(request, paths, host, candidateHostd, updater, carrierOnly)
 }
 
 // journaledCandidateRequest is request with the source of the replacement whose baseline is captured.
@@ -136,7 +131,7 @@ func journaledCandidateRequest(request Request, captured []byte) (Request, error
 	return request, nil
 }
 
-func buildLifecycleManager(request Request, paths installPaths, host, hostd, updater *service.Installer, carrierOnly bool, authorize func(context.Context, installsource.Source, string) error) (*service.LifecycleManager, error) {
+func buildLifecycleManager(request Request, paths installPaths, host, hostd, updater *service.Installer, carrierOnly bool) (*service.LifecycleManager, error) {
 	probe, err := service.NewHTTPReadinessProbe("http://" + request.HelperListenAddress + "/healthz")
 	if err != nil {
 		return nil, err
@@ -155,10 +150,7 @@ func buildLifecycleManager(request Request, paths installPaths, host, hostd, upd
 	if err != nil {
 		return nil, err
 	}
-	var installation service.NativeInstallationState = unixCarrierInstallation{request: request, paths: paths, carrierOnly: carrierOnly}
-	if authorize != nil {
-		installation = preparedUnixInstallation{state: installation, paths: paths, authorize: authorize}
-	}
+	installation := unixCarrierInstallation{request: request, paths: paths, carrierOnly: carrierOnly}
 	return service.NewHostLifecycleManager(service.HostLifecycleConfig{
 		Carrier: carrier,
 		CarrierProbe: func(ctx context.Context) error {

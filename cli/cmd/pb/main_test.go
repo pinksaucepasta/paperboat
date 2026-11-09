@@ -832,6 +832,11 @@ func TestUpdateStatusShowsAFinishThatIsBeingRetriedOrGaveUp(t *testing.T) {
 	if err := writeUpdateStatusResult(command, updateStatusCommandResult("2026.11.09.1", gaveUp, nil)); err != nil || !strings.Contains(output.String(), "Activation: failed (commit_failed)") {
 		t.Fatalf("finish that gave up: %q %v", output.String(), err)
 	}
+	revoked := updated.ControlResponse{Status: "ok", Transaction: workerupdate.TransactionState{Failure: updateflow.FailureRevoked, Quarantined: true}}
+	output.Reset()
+	if err := writeUpdateStatusResult(command, updateStatusCommandResult("2026.11.09.1", revoked, nil)); err != nil || !strings.Contains(output.String(), "Activation: failed (release_revoked)") || !strings.Contains(output.String(), "Run `pb update` to install the current release, or `pb uninstall`") {
+		t.Fatalf("a revoked installed version names no way forward: %q %v", output.String(), err)
+	}
 }
 
 // A file that is not a Paperboat build (a text file, another program) is refused as unreadable input with that reason, not as the

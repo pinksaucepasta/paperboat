@@ -48,7 +48,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
-	lifecycle, err := newLifecycleManagerWithRestorePolicy(request, paths, legacyHost, hostd, updater, false, hooks.AuthorizeRestore)
+	lifecycle, err := newLifecycleManager(request, paths, legacyHost, hostd, updater)
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}

@@ -328,16 +328,3 @@ Container mode, recorded 2026-10-23 with the entry above: today `pb` runs in Doc
 systemd container (`--privileged`, systemd as PID 1). The standard shape (Tailscale, cloudflared) is an
 official image: `pb daemon` in the foreground as the main process, pairing from a one-time key in an
 environment variable, state on a volume, no extra privileges. Covers Docker hosts, Kubernetes and CI.
-
-
-## Revoked previous version during a half-replaced update — after launch
-
-Recorded 2026-11-09. If a native update is interrupted before its commit and the previous version is then
-refused by signed policy (revoked, or below a raised floor), updater start loops in
-`hostinstall.RecoverInterrupted` (the baseline restore re-authorizes the refused version): the machine stays
-half-replaced, updates and uninstall stay blocked, nothing records a terminal state. Superseding is unsafe
-today (the lifecycle baseline is the only way back; metadata and worker bytes can disagree). Needs
-native-layer work: a lifecycle op that records a revoked-baseline journal after capturing the real on-disk
-state, a metadata-to-bytes reconcile or clean-reinstall mode, a terminal `recovery_required` state with
-uninstall allowed, and an interrupt-at-every-stage device matrix on Linux and macOS. The realistic window
-(revocation while a committed candidate retries its finish) is handled since 23fd4ac25.

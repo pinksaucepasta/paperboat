@@ -554,3 +554,81 @@ func TestRevokedCommittedCandidateEndsTerminalAndIsSupersedable(t *testing.T) {
 		t.Fatalf("a newer release cannot supersede the ended attempt: %+v %v", candidate, err)
 	}
 }
+
+// An interrupted native replacement that recovery undid leaves the previous installation standing. The attempt ends
+// on it (staged payload gone, idle journal, no helper repeats it) whether or not the payload was already consumed;
+// when signed policy refuses the restored version too MarkActiveRefused turns the journal into release_revoked, the
+// terminal state status and doctor report as recovery_required. A source that is not the active release, or a
+// journal that is not an approved candidate, ends nothing.
+func TestRecoveredCandidateEndsOnTheRestoredVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		consumed    bool
+		refused     bool
+		wantFailure updateflow.Failure
+	}{
+		{"payload still staged, previous allowed", false, false, updateflow.FailureCandidate},
+		{"payload consumed, previous allowed", true, false, updateflow.FailureCandidate},
+		{"payload consumed, previous refused", true, true, updateflow.FailureRevoked},
+		{"payload still staged, previous refused", false, true, updateflow.FailureRevoked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			// The fixture's candidate shares the active executable's bytes; a recovered attempt has different ones.
+			body := append(append([]byte(nil), f.fetcher.body...), 0)
+			f.fetcher.body, f.candidate = body, release(f.candidate.Version, body)
+			candidate, err := f.manager.Prepare(context.Background(), f.candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored := f.manager.candidateSource(f.manager.active)
+			// Not yet approved: nothing to end.
+			if ended, err := f.manager.EndRecoveredCandidate(context.Background(), restored); ended || err != nil {
+				t.Fatalf("an unapproved candidate was ended: %v %v", ended, err)
+			}
+			if err := f.manager.Approve(context.Background(), candidate.ID); err != nil {
+				t.Fatal(err)
+			}
+			staged, err := updateflow.Load(f.paths.journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.consumed {
+				if err := os.Remove(staged.StagedPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			other := restored
+			other.Version = "2026.08.18.9"
+			if ended, err := f.manager.EndRecoveredCandidate(context.Background(), other); ended || err != nil {
+				t.Fatalf("a source that is not the active release ended the attempt: %v %v", ended, err)
+			}
+			if ended, err := f.manager.EndRecoveredCandidate(context.Background(), restored); !ended || err != nil {
+				t.Fatalf("the recovered attempt was kept: %v %v", ended, err)
+			}
+			if _, err := os.Lstat(staged.StagedPath); !os.IsNotExist(err) {
+				t.Fatalf("staged payload survived: %v", err)
+			}
+			wrote, err := f.manager.MarkActiveRefused(context.Background(), func(Release) bool { return tc.refused })
+			if err != nil || wrote != tc.refused {
+				t.Fatalf("MarkActiveRefused wrote=%v err=%v, want %v", wrote, err, tc.refused)
+			}
+			if tc.refused {
+				if wrote, err = f.manager.MarkActiveRefused(context.Background(), func(Release) bool { return true }); wrote || err != nil {
+					t.Fatalf("the terminal state was rewritten: %v %v", wrote, err)
+				}
+			}
+			j, err := updateflow.Load(f.paths.journal)
+			if err != nil || j.Stage != updateflow.StageIdle || j.LastFailure != tc.wantFailure || j.ApprovedCandidateID != "" || j.ActiveVersion != f.manager.active.Version {
+				t.Fatalf("not idle on the restored version: %+v %v", j, err)
+			}
+			if state, err := f.manager.TransactionState(); err != nil || state.Failure != tc.wantFailure {
+				t.Fatalf("state=%+v err=%v", state, err)
+			}
+			// Supersedable: a newer release downloads again.
+			if _, err := f.manager.Prepare(context.Background(), release("2026.08.18.3", f.fetcher.body)); err != nil {
+				t.Fatalf("a newer release cannot supersede the ended attempt: %v", err)
+			}
+		})
+	}
+}

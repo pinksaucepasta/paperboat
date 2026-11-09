@@ -88,7 +88,7 @@ func ActivatePreparedUpdate(ctx context.Context, uid int, executable string, sou
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
-	if ctx == nil || uid < 0 || hooks.Prepare == nil || hooks.Validate == nil || hooks.AuthorizeRestore == nil || hooks.DrainTimeout <= 0 || hooks.DrainTimeout > 2*time.Minute || !filepath.IsAbs(executable) || filepath.Clean(executable) != executable || source.Validate() != nil || source.Distribution != installsource.Official || source.Platform != runtime.GOOS || source.Architecture != runtime.GOARCH {
+	if ctx == nil || uid < 0 || hooks.Prepare == nil || hooks.Validate == nil || hooks.DrainTimeout <= 0 || hooks.DrainTimeout > 2*time.Minute || !filepath.IsAbs(executable) || filepath.Clean(executable) != executable || source.Validate() != nil || source.Distribution != installsource.Official || source.Platform != runtime.GOOS || source.Architecture != runtime.GOARCH {
 		return ErrInvalidRequest
 	}
 	if err := ctx.Err(); err != nil {
@@ -103,7 +103,7 @@ func ActivatePreparedUpdate(ctx context.Context, uid int, executable string, sou
 		return err
 	}
 	defer func() { resultErr = withCleanup("prepared update cleanup failed", resultErr, lock.Close()) }()
-	previous, lifecycle, err := recoverPreparedLocked(ctx, paths, uid, hooks.AuthorizeRestore)
+	previous, lifecycle, err := recoverPreparedLocked(ctx, paths, uid)
 	if err != nil {
 		return err
 	}
@@ -152,12 +152,13 @@ func ActivatePreparedUpdate(ctx context.Context, uid int, executable string, sou
 
 // RecoverPreparedUpdate completes the recovery of a signed update interrupted before its commit and
 // returns the source that is installed afterwards: the candidate's when it was committed, else the
-// restored previous source. authorize rechecks a restored source against current recovery policy.
-func RecoverPreparedUpdate(ctx context.Context, uid int, authorize func(context.Context, installsource.Source, string) error) (_ installsource.Source, resultErr error) {
+// restored previous source. Restoring is never gated by signed policy: the previous source is the version the machine
+// was running, so a revoked one is put back and the updater, which sees it refused, ends the attempt as recovery_required.
+func RecoverPreparedUpdate(ctx context.Context, uid int) (_ installsource.Source, resultErr error) {
 	if os.Geteuid() != 0 {
 		return installsource.Source{}, ErrNotPrivileged
 	}
-	if ctx == nil || uid < 0 || authorize == nil {
+	if ctx == nil || uid < 0 {
 		return installsource.Source{}, ErrInvalidRequest
 	}
 	paths := platformPaths(uid)
@@ -166,7 +167,7 @@ func RecoverPreparedUpdate(ctx context.Context, uid int, authorize func(context.
 		return installsource.Source{}, err
 	}
 	defer func() { resultErr = withCleanup("prepared update cleanup failed", resultErr, lock.Close()) }()
-	installed, _, err := recoverPreparedLocked(ctx, paths, uid, authorize)
+	installed, _, err := recoverPreparedLocked(ctx, paths, uid)
 	if err != nil {
 		return installsource.Source{}, err
 	}
@@ -178,7 +179,7 @@ func RecoverPreparedUpdate(ctx context.Context, uid int, authorize func(context.
 
 // recoverPreparedLocked restores an interrupted lifecycle transaction to its protected baseline and
 // returns the installation record that stands afterwards. The caller holds the metadata lock.
-func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int, authorize func(context.Context, installsource.Source, string) error) (Request, *service.LifecycleManager, error) {
+func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int) (Request, *service.LifecycleManager, error) {
 	previous, err := loadInstallMetadata(paths.metadata, uid)
 	if err != nil {
 		return Request{}, nil, err
@@ -197,7 +198,7 @@ func recoverPreparedLocked(ctx context.Context, paths installPaths, uid int, aut
 	if err != nil {
 		return Request{}, nil, err
 	}
-	lifecycle, err := newLifecycleManagerWithRestorePolicy(previous, paths, host, hostd, updater, false, authorize)
+	lifecycle, err := newLifecycleManager(previous, paths, host, hostd, updater)
 	if err != nil {
 		return Request{}, nil, err
 	}
@@ -233,48 +234,6 @@ func commitValidatedPreparedUpdate(ctx context.Context, request Request, paths i
 	}
 	request.SessionOwnerGeneration = generation
 	return writeInstallMetadata(paths.metadata, request)
-}
-
-// Native recovery must recheck current recovery policy, not merely a historical
-// checksum. Sources come exclusively from the protected lifecycle baseline.
-type preparedUnixInstallation struct {
-	state     service.NativeInstallationState
-	paths     installPaths
-	authorize func(context.Context, installsource.Source, string) error
-}
-
-func (s preparedUnixInstallation) Capture(ctx context.Context) ([]byte, error) {
-	return s.state.Capture(ctx)
-}
-func (s preparedUnixInstallation) Restore(ctx context.Context, body []byte) error {
-	var baseline unixCarrierBaseline
-	if err := decodeInstallJSON(bytes.NewReader(body), &baseline, 256<<10); err != nil {
-		return err
-	}
-	if baseline.Worker == nil {
-		return ErrInvalidRequest
-	}
-	source := *baseline.Worker
-	pin := filepath.Join(filepath.Dir(s.paths.workerRollback), "pins", source.SHA256, "pb")
-	if err := source.Verify(pin); err != nil {
-		return err
-	}
-	if err := s.authorize(ctx, source, pin); err != nil {
-		return err
-	}
-	if baseline.Carrier != nil {
-		carrier := baseline.Carrier
-		if carrier.Validate() != nil {
-			return ErrInvalidRequest
-		}
-		if err := carrier.Source.Verify(carrier.Executable); err != nil {
-			return err
-		}
-		if err := s.authorize(ctx, carrier.Source, carrier.Executable); err != nil {
-			return err
-		}
-	}
-	return s.state.Restore(ctx, body)
 }
 
 // The caller holds the activation lock. Only the signed recovery helper may

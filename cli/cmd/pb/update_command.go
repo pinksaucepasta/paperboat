@@ -176,8 +176,8 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
 	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, ActivationFinishing: response.Transaction.CommitPending, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate, CandidateRejected: response.CandidateRejected}
 	result.LatestVersion = response.Observation.Version
-	if result.ActivationFailure == "" && response.Transaction.Failure == updateflow.FailureCommit {
-		result.ActivationFailure = string(updateflow.FailureCommit)
+	if result.ActivationFailure == "" && (response.Transaction.Failure == updateflow.FailureCommit || response.Transaction.Failure == updateflow.FailureRevoked) {
+		result.ActivationFailure = string(response.Transaction.Failure)
 	}
 	// A prepared candidate is verified release evidence even when the last
 	// periodic observation predates its download. Preserve a newer observation.
@@ -269,6 +269,8 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 		fmt.Fprintln(command.OutOrStdout(), "Activation: installed, finishing the last step (retrying)")
 	} else if result.ActivationPending {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: pending")
+	} else if result.ActivationFailure == string(updateflow.FailureRevoked) {
+		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s). The installed version is no longer allowed. Run `pb update` to install the current release, or `pb uninstall` to remove Paperboat.\n", result.ActivationFailure)
 	} else if result.ActivationFailure != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s)\n", result.ActivationFailure)
 	} else {

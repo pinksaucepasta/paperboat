@@ -588,7 +588,7 @@ func doctorUpdateHealthCheck(value string) doctorpkg.Check {
 	case "recovery_required":
 		check.Status = doctorpkg.StatusFail
 		check.Summary = "Signed update recovery requires attention."
-		check.Recovery = "Restart the Paperboat services; if the failure remains, reinstall the current signed release."
+		check.Recovery = "Run `pb update` to install the current signed release. If the updater cannot be reached, restart the Paperboat services, then run `pb update`; `pb uninstall` removes Paperboat."
 	default:
 		check.Status = doctorpkg.StatusUnavailable
 		check.Summary = "Signed update health is unavailable."

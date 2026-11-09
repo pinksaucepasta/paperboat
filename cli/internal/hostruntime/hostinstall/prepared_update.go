@@ -12,10 +12,11 @@ import (
 // stops; Validate runs after native readiness and before source metadata commit.
 type PreparedUpdateHooks struct {
 	// Stage runs after verified binary promotion, before workload admission pauses.
-	Stage            func(context.Context) error
-	DrainTimeout     time.Duration
-	Prepare          func(context.Context) error
-	Validate         func(context.Context) error
+	Stage        func(context.Context) error
+	DrainTimeout time.Duration
+	Prepare      func(context.Context) error
+	Validate     func(context.Context) error
+	// AuthorizeRestore is used by the Windows native owner only; Linux and macOS restore the running baseline ungated.
 	AuthorizeRestore func(context.Context, installsource.Source, string) error
 	// Bind builds Stage and Validate from the request the installation really runs with. A supplied
 	// offline bundle has no source until the privileged helper has verified it, so the caller cannot know

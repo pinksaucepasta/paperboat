@@ -98,11 +98,6 @@ type Resolver func(context.Context) (release Release, found bool, err error)
 // and native-format-checked it in its root-owned staging path.
 type Fetcher interface {
 	Fetch(context.Context, Release) (io.ReadCloser, error)
-	// AuthorizeRecovery rechecks the current signed rollback policy for an
-	// already authenticated local executable. Artifact identity is verified
-	// independently from the local bytes because Darwin signs a package whose
-	// installed payload has a different digest.
-	AuthorizeRecovery(context.Context, string, string, string) error
 }
 
 // ComponentFetcher is implemented by the TUF source. The CLI target is
@@ -533,14 +528,12 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	return release, nil
 }
 
-func (m *Manager) authorizeRecovery(ctx context.Context, release Release, path string) error {
+// verifyRecovery proves the executable an update falls back to is the active release's own bytes. It does not
+// consult signed policy: recovery puts back the version that was running, revoked or not, and the way forward
+// from a revoked one is the update itself (the updater records recovery_required while it is refused).
+func (m *Manager) verifyRecovery(ctx context.Context, release Release, path string) error {
 	if err := validateRelease(release); err != nil {
 		return ErrInvalidRelease
-	}
-	if release.LocalSource == nil || release.LocalSource.Distribution == installsource.Official {
-		if err := m.config.Fetcher.AuthorizeRecovery(ctx, release.Version, release.Platform, release.Architecture); err != nil {
-			return err
-		}
 	}
 	if err := safeRuntimeFile(path, m.config.OwnerUID, true); err != nil {
 		return ErrUnsafeStorage

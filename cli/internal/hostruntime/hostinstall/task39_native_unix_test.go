@@ -416,15 +416,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 				return restored, err
 			}
 			defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
-			hooks := PreparedUpdateHooks{DrainTimeout: prepared.Signed.DrainTimeout, Prepare: prepared.Prepare, Validate: prepared.Validate, AuthorizeRestore: func(restoreCtx context.Context, previous installsource.Source, path string) error {
-				if err := previous.Verify(path); err != nil {
-					return err
-				}
-				if previous.Distribution == installsource.Custom {
-					return nil
-				}
-				return source.AuthorizeRecovery(restoreCtx, previous.Version, previous.Platform, previous.Architecture)
-			}}
+			hooks := PreparedUpdateHooks{DrainTimeout: prepared.Signed.DrainTimeout, Prepare: prepared.Prepare, Validate: prepared.Validate}
 			nativeErr := ActivatePreparedUpdate(applyCtx, a.UID, prepared.Executable, prepared.Source, prepared.Force, hooks)
 			committed, loadErr := LoadEnrolledOwner(a.UID)
 			if loadErr != nil {

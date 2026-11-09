@@ -34,7 +34,7 @@ func (m *Manager) applyPrepared(ctx context.Context, journal updateflow.Journal,
 	if previousExecutable == "" {
 		previousExecutable = m.config.Binary
 	}
-	if err := m.authorizeRecovery(ctx, m.active, previousExecutable); err != nil {
+	if err := m.verifyRecovery(ctx, m.active, previousExecutable); err != nil {
 		return result, err
 	}
 	source := m.candidateSource(payload)
@@ -248,5 +248,50 @@ func (m *Manager) EndRevokedCommittedCandidate(ctx context.Context, committed in
 		return false, err
 	}
 	m.setActive(active)
+	return true, m.write(m.idleJournal(journal, updateflow.FailureRevoked, journal.CandidateVersion))
+}
+
+// EndRecoveredCandidate ends an approved attempt whose interrupted native replacement was undone: restored is the
+// previous installation that stands again, which the candidate never replaced. The staged payload goes, and the
+// journal goes idle on the restored version so no helper start repeats the attempt and a newer release is
+// downloaded and approved as an ordinary update. It does nothing, and reports false, unless the journal is that
+// approved candidate and restored is exactly the active release.
+func (m *Manager) EndRecoveredCandidate(ctx context.Context, restored installsource.Source) (bool, error) {
+	if ctx == nil {
+		return false, ErrInvalidConfig
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, err := updateflow.Load(m.config.StatePath)
+	if err != nil {
+		return false, err
+	}
+	if journal.Stage != updateflow.StageAwaitingApproval || journal.ApprovedCandidateID == "" || m.candidateInstalled(journal) ||
+		restored.Version != m.active.Version || restored.SHA256 != m.active.SHA256 || restored.Length != m.active.Length || restored.Verify(m.config.Binary) != nil {
+		return false, nil
+	}
+	if err = m.removeStaged(); err != nil {
+		return false, err
+	}
+	return true, m.write(m.idleJournal(journal, updateflow.FailureCandidate, ""))
+}
+
+// MarkActiveRefused records release_revoked on an idle journal whose active release signed policy refuses
+// (refused says so), the terminal state status, doctor and the console show as recovery_required: the machine
+// runs a version recovery had to put back although it is revoked or below the raised floor, and the update is the
+// way forward. The candidate of the ended attempt, if any, stays quarantined. It reports whether it wrote.
+func (m *Manager) MarkActiveRefused(ctx context.Context, refused func(Release) bool) (bool, error) {
+	if ctx == nil || refused == nil {
+		return false, ErrInvalidConfig
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, err := updateflow.Load(m.config.StatePath)
+	if err != nil {
+		return false, err
+	}
+	if journal.Stage != updateflow.StageIdle || journal.LastFailure == updateflow.FailureRevoked || !refused(m.active) {
+		return false, nil
+	}
 	return true, m.write(m.idleJournal(journal, updateflow.FailureRevoked, journal.CandidateVersion))
 }

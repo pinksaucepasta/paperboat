@@ -345,12 +345,10 @@ func (s *Service) queueActivationWithApproval(ctx context.Context, approvalID st
 	if state.Quarantined && state.CandidateVersion == release.Version {
 		return result, workerupdate.ErrQuarantined
 	}
-	if s.config.Active.LocalSource == nil {
-		if err = s.source.AuthorizeRecovery(ctx, s.config.Active.Version, s.config.Active.Platform, s.config.Active.Architecture); err != nil {
+	if s.config.Active.LocalSource != nil {
+		if err = s.config.Active.LocalSource.Verify(s.config.Binary); err != nil {
 			return result, err
 		}
-	} else if err = s.config.Active.LocalSource.Verify(s.config.Binary); err != nil {
-		return result, err
 	}
 	baseline, err := s.config.Participants.Probe(ctx)
 	if err != nil {
@@ -529,7 +527,7 @@ func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error)
 			// An earlier attempt that was rolled back consumed the approved payload, so this
 			// start can never activate it. End the attempt (journal reset to idle, installation
 			// left on the previous version) instead of failing the same way on every restart.
-			abandoned, abandonErr := abandonCandidate(ctx, manager, resolveErr, s.config.LoadInstalledSource)
+			abandoned, abandonErr := abandonCandidate(ctx, manager, resolveErr, s.config.LoadInstalledSource, s.recoverPrepared)
 			if abandonErr != nil || !abandoned {
 				return errors.Join(resolveErr, abandonErr)
 			}
@@ -570,6 +568,9 @@ func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error)
 		if readinessErr != nil {
 			return readinessErr
 		}
+	}
+	if markErr := s.markRefusedActive(ctx, manager); markErr != nil {
+		return markErr
 	}
 	// No participant restart is needed when staging failed before cutover.
 	// After replacement, native validation has already proven exact processes.
@@ -896,25 +897,41 @@ type candidateAbandoner interface {
 	AbandonUnavailableCandidate(context.Context) (bool, error)
 	AbandonSupersededCandidate(context.Context) (bool, error)
 	EndRevokedCommittedCandidate(context.Context, installsource.Source) (bool, error)
+	EndRecoveredCandidate(context.Context, installsource.Source) (bool, error)
 }
 
+// recoverNativeAttempt undoes an interrupted native replacement and returns the source that stands afterwards.
+type recoverNativeAttempt func(context.Context) (installsource.Source, error)
+
 // abandonCandidate ends an approved attempt that can never activate and cannot succeed on a retry:
-// its payload is gone, or a newer release or a revocation ruled it out before native activation began.
-// A policy refusal after native activation began ends it only when the native owner already committed
-// the candidate (installed returns that committed source): nothing half-replaced is left to recover,
-// and recovery never installs a revoked version in either direction. Any other cause (a network
-// error, a timeout) is not abandoned and retries, and so is a native-owned attempt that is not committed.
-func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause error, installed func() (installsource.Source, error)) (bool, error) {
+// its payload is gone, or a newer release or a revocation ruled it out. After native activation began, a policy
+// refusal of the candidate leaves nothing to retry either: when the native owner already committed it
+// (installed returns that source) the attempt ends on it; otherwise recover undoes the half-done replacement
+// (the baseline was the running version, so a refused one is put back like any other) and
+// the attempt ends on the restored version (finishUnixHandoff then records recovery_required when policy refuses
+// that one). Any other
+// cause (a network error, a timeout) is not abandoned and retries.
+func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause error, installed func() (installsource.Source, error), recover recoverNativeAttempt) (bool, error) {
 	switch {
 	case errors.Is(cause, errNativeActivationStarted):
 		if !errors.Is(cause, workerupdate.ErrReleaseRevoked) || installed == nil {
 			return false, nil
 		}
 		source, err := installed()
-		if err != nil {
-			return false, nil // uncommitted or unreadable: native recovery owns it
+		if err == nil {
+			return manager.EndRevokedCommittedCandidate(ctx, source)
 		}
-		return manager.EndRevokedCommittedCandidate(ctx, source)
+		if !errors.Is(err, ErrInstallationPending) || recover == nil {
+			return false, nil // unreadable: retry
+		}
+		restored, err := recover(ctx)
+		if err != nil {
+			return false, err
+		}
+		if ended, err := manager.EndRevokedCommittedCandidate(ctx, restored); ended || err != nil {
+			return ended, err // recovery found the candidate committed
+		}
+		return manager.EndRecoveredCandidate(ctx, restored)
 	case errors.Is(cause, workerupdate.ErrPreparedCandidate):
 		return manager.AbandonUnavailableCandidate(ctx)
 	case errors.Is(cause, ErrCandidateChanged), errors.Is(cause, workerupdate.ErrReleaseRevoked):
@@ -923,9 +940,22 @@ func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause err
 	return false, nil
 }
 
+// markRefusedActive is the end of every activation that leaves a version standing: when signed policy refuses it
+// (a recovery put back a revoked previous version, or the installed one was revoked mid-attempt) the journal says
+// release_revoked. A policy lookup that fails changes nothing: the next helper run asks again.
+func (s *Service) markRefusedActive(ctx context.Context, manager *workerupdate.Manager) error {
+	_, err := manager.MarkActiveRefused(ctx, func(active workerupdate.Release) bool {
+		if active.LocalSource != nil && active.LocalSource.Distribution != installsource.Official {
+			return false // a custom build is not bound by signed policy
+		}
+		return errors.Is(s.source.AuthorizeRecovery(ctx, active.Version, active.Platform, active.Architecture), workerupdate.ErrReleaseRevoked)
+	})
+	return err
+}
+
 func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixActivationHandoff, manager *workerupdate.Manager) (workerupdate.Release, error) {
 	var original workerupdate.Release
-	var nativeStarted, committed bool
+	var nativeStarted bool
 	if s.config.ApplyPrepared != nil && s.config.NativeRecoveryStarted != nil {
 		signed, payload, err := manager.PreparedRelease(ctx)
 		if err != nil {
@@ -943,49 +973,22 @@ func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixA
 		if err != nil {
 			return workerupdate.Release{}, err
 		}
-		if nativeStarted {
-			if committed, err = s.committedCandidateInstalled(payload); err != nil {
-				return workerupdate.Release{}, err
-			}
-		}
 	}
 	resolve := s.source.ResolveManual
 	if !handoff.Manual {
 		resolve = s.source.Resolve
 	}
-	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, committed, resolve, s.source.AuthorizeRecovery)
-}
-
-// committedCandidateInstalled reports that the native owner committed the candidate payload as the installed source.
-// An uncommitted installation is "no"; a failure to read it is returned (retry), never taken for "no".
-func (s *Service) committedCandidateInstalled(payload workerupdate.Release) (bool, error) {
-	if s.config.LoadInstalledSource == nil {
-		return false, nil
-	}
-	source, err := s.config.LoadInstalledSource()
-	if errors.Is(err, ErrInstallationPending) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read the installed source: %w", err)
-	}
-	return source.Version == payload.Version && source.SHA256 == payload.SHA256 && source.Length == payload.Length, nil
+	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, resolve, s.source.AuthorizeRecovery)
 }
 
 // Native progress fixes the original approval; ordinary queued work still uses
-// current eligibility. Both paths retain exact approval identity. Once the candidate is committed
-// nothing can roll back to the previous version, so only the candidate's authorization matters.
-func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHandoff, original workerupdate.Release, nativeStarted, committed bool, resolve func(context.Context) (workerupdate.Release, bool, error), authorize func(context.Context, string, string, string) error) (workerupdate.Release, error) {
+// current eligibility. Both paths retain exact approval identity. Only the candidate's authorization matters:
+// recovery restores the previous version because it was the running one, whether or not policy still allows it.
+func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHandoff, original workerupdate.Release, nativeStarted bool, resolve func(context.Context) (workerupdate.Release, bool, error), authorize func(context.Context, string, string, string) error) (workerupdate.Release, error) {
 	release := original
 	if nativeStarted {
 		if err := authorize(ctx, release.Version, release.Platform, release.Architecture); err != nil {
 			return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
-		}
-		previous := handoff.Previous
-		if !committed && (previous.LocalSource == nil || previous.LocalSource.Distribution == installsource.Official) {
-			if err := authorize(ctx, previous.Version, previous.Platform, previous.Architecture); err != nil {
-				return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
-			}
 		}
 	} else {
 		var found bool

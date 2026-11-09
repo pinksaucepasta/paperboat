@@ -35,7 +35,6 @@ func installCustomFixture(t *testing.T, f *fixture) Release {
 func TestCustomInstalledBaselineStartsAndRecoversWithoutPublishedVersion(t *testing.T) {
 	f := newFixture(t)
 	active := installCustomFixture(t, &f)
-	f.fetcher.recoveryError = errors.New("unpublished local version must not query TUF")
 	if err := f.manager.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -43,18 +42,8 @@ func TestCustomInstalledBaselineStartsAndRecoversWithoutPublishedVersion(t *test
 	if err != nil || restored.LocalSource == nil || restored.ManifestSHA256 != "" {
 		t.Fatalf("local provenance lost: %v", err)
 	}
-	if err = f.manager.authorizeRecovery(context.Background(), restored, f.paths.current); err != nil {
+	if err = f.manager.verifyRecovery(context.Background(), restored, f.paths.current); err != nil {
 		t.Fatal(err)
-	}
-	if f.fetcher.recoveryCalls != 0 {
-		t.Fatal("local recovery requested signed release authorization")
-	}
-	// A published prior release still requires the current signed trust policy.
-	official := restored
-	official.Version = "2026.09.19.1"
-	official.LocalSource = nil
-	if err = f.manager.authorizeRecovery(context.Background(), official, f.paths.current); !errors.Is(err, f.fetcher.recoveryError) {
-		t.Fatal("official recovery policy bypassed", err)
 	}
 }
 
@@ -74,7 +63,7 @@ func TestCustomBaselineRejectsTamperingAndCannotBecomeUpdateCandidate(t *testing
 	if _, err := InstalledBaseline(source, f.paths.current); err == nil {
 		t.Fatal("modified installed binary accepted")
 	}
-	if err := f.manager.authorizeRecovery(context.Background(), active, f.paths.current); err == nil {
+	if err := f.manager.verifyRecovery(context.Background(), active, f.paths.current); err == nil {
 		t.Fatal("modified rollback baseline accepted")
 	}
 }

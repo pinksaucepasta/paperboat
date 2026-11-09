@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -580,14 +581,14 @@ func TestUnixNativeRecoveryKeepsApprovalWhileQueuedWorkRechecksLatest(t *testing
 		{"queued started is not native proof", false, "", ErrCandidateChanged},
 		{"protected native receipt resumes original", true, "", nil},
 		{"candidate revoked", true, original.Version, revoked},
-		{"previous revoked", true, "2026.10.13.1", revoked},
+		{"previous revoked does not stop the finish", true, "2026.10.13.1", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &unixActivationHandoff{ApprovalID: receipt.ID, Candidate: original.Version, Started: true, ParticipantsTouched: true, Previous: original}
 			h.Previous.Version = "2026.10.13.1"
 			resolutions := 0
 			var authorized []string
-			got, err := resolveUnixActivationRelease(context.Background(), h, original, tc.proof, false, func(context.Context) (workerupdate.Release, bool, error) { resolutions++; return newer, true, nil }, func(_ context.Context, v, p, a string) error {
+			got, err := resolveUnixActivationRelease(context.Background(), h, original, tc.proof, func(context.Context) (workerupdate.Release, bool, error) { resolutions++; return newer, true, nil }, func(_ context.Context, v, p, a string) error {
 				authorized = append(authorized, v)
 				if v == tc.denied {
 					return revoked
@@ -603,8 +604,8 @@ func TestUnixNativeRecoveryKeepsApprovalWhileQueuedWorkRechecksLatest(t *testing
 			if !tc.proof && resolutions != 1 {
 				t.Fatal("queued approval skipped current eligibility")
 			}
-			if tc.want == nil && (got.Version != original.Version || len(authorized) != 2 || authorized[0] != original.Version || authorized[1] != h.Previous.Version) {
-				t.Fatal("recovery lost original release or fresh rollback authorization")
+			if tc.want == nil && (got.Version != original.Version || len(authorized) != 1 || authorized[0] != original.Version) {
+				t.Fatal("recovery lost the original release or its fresh authorization, or authorized the version it restores")
 			}
 		})
 	}
@@ -796,7 +797,7 @@ func TestActivationHelperHoldsTheLockWhileRetiring(t *testing.T) {
 	}
 }
 
-type abandonerFixture struct{ unavailable, superseded, endedRevoked int }
+type abandonerFixture struct{ unavailable, superseded, endedRevoked, recovered int }
 
 func (f *abandonerFixture) AbandonUnavailableCandidate(context.Context) (bool, error) {
 	f.unavailable++
@@ -806,8 +807,15 @@ func (f *abandonerFixture) AbandonSupersededCandidate(context.Context) (bool, er
 	f.superseded++
 	return true, nil
 }
-func (f *abandonerFixture) EndRevokedCommittedCandidate(context.Context, installsource.Source) (bool, error) {
+func (f *abandonerFixture) EndRevokedCommittedCandidate(_ context.Context, committed installsource.Source) (bool, error) {
+	if committed.Version != "2026.10.14.1" {
+		return false, nil // not the candidate: it is not committed
+	}
 	f.endedRevoked++
+	return true, nil
+}
+func (f *abandonerFixture) EndRecoveredCandidate(context.Context, installsource.Source) (bool, error) {
+	f.recovered++
 	return true, nil
 }
 
@@ -847,41 +855,48 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 	}
 	committed := func() (installsource.Source, error) { return installsource.Source{Version: original.Version}, nil }
 	uncommitted := func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }
-	previous := handoff().Previous.Version
+	recoverTo := func(err error) recoverNativeAttempt {
+		return func(context.Context) (installsource.Source, error) {
+			return installsource.Source{Version: handoff().Previous.Version}, err
+		}
+	}
 	for _, tc := range []struct {
 		name      string
 		native    bool
-		committed bool
 		resolve   func(context.Context) (workerupdate.Release, bool, error)
 		authorize func(context.Context, string, string, string) error
 		installed func() (installsource.Source, error)
+		recover   recoverNativeAttempt
 		want      abandonerFixture
+		wantErr   bool
 	}{
-		{"candidate superseded", false, false, resolveNewer, deny(""), uncommitted, abandonerFixture{superseded: 1}},
-		{"candidate revoked before native activation", false, false, resolveRevoked, deny(""), uncommitted, abandonerFixture{superseded: 1}},
-		{"network error retries", false, false, resolveNetwork, deny(""), uncommitted, abandonerFixture{}},
-		{"candidate revoked after native commit", true, true, nil, deny(original.Version), committed, abandonerFixture{endedRevoked: 1}},
-		{"candidate revoked, native not committed", true, false, nil, deny(original.Version), uncommitted, abandonerFixture{}},
-		{"previous revoked, native not committed", true, false, nil, deny(previous), uncommitted, abandonerFixture{}},
+		{"candidate superseded", false, resolveNewer, deny(""), uncommitted, nil, abandonerFixture{superseded: 1}, false},
+		{"candidate revoked before native activation", false, resolveRevoked, deny(""), uncommitted, nil, abandonerFixture{superseded: 1}, false},
+		{"network error retries", false, resolveNetwork, deny(""), uncommitted, nil, abandonerFixture{}, false},
+		{"candidate revoked after native commit", true, nil, deny(original.Version), committed, nil, abandonerFixture{endedRevoked: 1}, false},
+		{"candidate revoked, native not committed: recovered and ended", true, nil, deny(original.Version), uncommitted, recoverTo(nil), abandonerFixture{recovered: 1}, false},
+		{"candidate revoked, native not committed: recovery fails and retries", true, nil, deny(original.Version), uncommitted, recoverTo(errors.New("restart failed")), abandonerFixture{}, true},
+		{"candidate revoked, installed source unreadable retries", true, nil, deny(original.Version), func() (installsource.Source, error) { return installsource.Source{}, errors.New("read failed") }, recoverTo(nil), abandonerFixture{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.committed, tc.resolve, tc.authorize)
+			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.resolve, tc.authorize)
 			if err == nil {
 				t.Fatal("resolve succeeded")
 			}
 			f := &abandonerFixture{}
-			abandoned, abandonErr := abandonCandidate(context.Background(), f, err, tc.installed)
-			wantEnded := tc.want.superseded+tc.want.unavailable+tc.want.endedRevoked > 0
-			if abandonErr != nil || abandoned != wantEnded || *f != tc.want {
+			abandoned, abandonErr := abandonCandidate(context.Background(), f, err, tc.installed, tc.recover)
+			wantEnded := tc.want != abandonerFixture{}
+			if (abandonErr != nil) != tc.wantErr || abandoned != wantEnded || *f != tc.want {
 				t.Fatalf("abandoned=%v err=%v calls=%+v, want %+v for %v", abandoned, abandonErr, *f, tc.want, err)
 			}
 		})
 	}
 }
 
-// Once the native owner committed the candidate nothing rolls back to the previous version, so revoking that
-// (old, typically vulnerable) version must not turn a machine that is mid-update into a failure: the commit finishes.
-func TestCommittedCandidateFinishesWhenOnlyThePreviousVersionIsRevoked(t *testing.T) {
+// Recovery restores the version that was running, so only the candidate's authorization decides whether the
+// native attempt resumes; a revoked previous version does not stop it (it used to, and the helper then restarted
+// on the same refusal forever).
+func TestNativeAttemptResumesWhenOnlyThePreviousVersionIsRevoked(t *testing.T) {
 	original := workerupdate.Release{Version: "2026.10.14.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1}
 	receipt, err := workerupdate.PreparedCandidateForRelease(original)
 	if err != nil {
@@ -897,14 +912,9 @@ func TestCommittedCandidateFinishesWhenOnlyThePreviousVersionIsRevoked(t *testin
 		}
 		return nil
 	}
-	got, err := resolveUnixActivationRelease(context.Background(), h, original, true, true, nil, authorize)
+	got, err := resolveUnixActivationRelease(context.Background(), h, original, true, nil, authorize)
 	if err != nil || got.Version != original.Version || len(authorized) != 1 || authorized[0] != original.Version {
-		t.Fatalf("committed candidate with a revoked previous version: %+v %v authorized=%v", got, err, authorized)
-	}
-	// Not yet committed, recovery may restore the previous version, so it must still be authorized.
-	authorized = nil
-	if _, err := resolveUnixActivationRelease(context.Background(), h, original, true, false, nil, authorize); !errors.Is(err, workerupdate.ErrReleaseRevoked) || len(authorized) != 2 {
-		t.Fatalf("uncommitted native attempt skipped the previous version's authorization: %v authorized=%v", err, authorized)
+		t.Fatalf("native attempt with a revoked previous version: %+v %v authorized=%v", got, err, authorized)
 	}
 }
 
@@ -955,28 +965,63 @@ func TestReleaseCommittedUnixActivationFreesOnlyACommittedFinishRetry(t *testing
 	}
 }
 
-// A transient failure to read the installed source was taken for "not committed": the previous version was authorized,
-// and when it was revoked a healthy committed candidate was ended as terminal. Only an uncommitted installation is
-// "not committed"; any other read error is returned so the attempt retries.
-func TestCommittedCandidateInstalledTreatsAReadErrorAsTransient(t *testing.T) {
-	payload := workerupdate.Release{Version: "2026.10.13.2", SHA256: strings.Repeat("b", 64), Length: 7}
-	installed := installsource.Source{Version: payload.Version, SHA256: payload.SHA256, Length: payload.Length}
-	readErr := errors.New("read installed source")
-	for _, tc := range []struct {
-		name    string
-		load    func() (installsource.Source, error)
-		want    bool
-		wantErr error
-	}{
-		{"committed", func() (installsource.Source, error) { return installed, nil }, true, nil},
-		{"another version installed", func() (installsource.Source, error) { return installsource.Source{Version: "2026.10.13.1"}, nil }, false, nil},
-		{"installation uncommitted", func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }, false, nil},
-		{"read error", func() (installsource.Source, error) { return installsource.Source{}, readErr }, false, readErr},
-	} {
-		service := &Service{config: Config{LoadInstalledSource: tc.load}}
-		got, err := service.committedCandidateInstalled(payload)
-		if got != tc.want || !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
-			t.Fatalf("%s: committed=%v err=%v, want %v %v", tc.name, got, err, tc.want, tc.wantErr)
+// Every point at which an update can be interrupted, against every combination of signed policy refusing the
+// candidate and the previous version, either finishes forward or ends the attempt: no cell may leave the helper
+// restarting on the same refusal. A refused previous version never changes whether an attempt ends; the label
+// (recovery_required) is MarkActiveRefused's, run when the helper finishes.
+func TestEveryInterruptStageFinishesForwardOrEnds(t *testing.T) {
+	original := workerupdate.Release{Version: "2026.10.14.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1}
+	receipt, err := workerupdate.PreparedCandidateForRelease(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousVersion := "2026.10.13.1"
+	type stage struct {
+		name      string
+		native    bool
+		installed func() (installsource.Source, error)
+	}
+	stages := []stage{
+		{"before native activation", false, func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }},
+		{"native replacement uncommitted", true, func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }},
+		{"native replacement committed", true, func() (installsource.Source, error) { return installsource.Source{Version: original.Version}, nil }},
+	}
+	for _, st := range stages {
+		for _, candidateRefused := range []bool{false, true} {
+			for _, previousRefused := range []bool{false, true} {
+				name := st.name + "/candidate refused=" + strconv.FormatBool(candidateRefused) + "/previous refused=" + strconv.FormatBool(previousRefused)
+				t.Run(name, func(t *testing.T) {
+					h := &unixActivationHandoff{ApprovalID: receipt.ID, Candidate: original.Version, Started: true, Previous: original}
+					h.Previous.Version = previousVersion
+					authorize := func(_ context.Context, v, _, _ string) error {
+						if candidateRefused && v == original.Version || previousRefused && v == previousVersion {
+							return workerupdate.ErrReleaseRevoked
+						}
+						return nil
+					}
+					resolve := func(context.Context) (workerupdate.Release, bool, error) {
+						if candidateRefused {
+							return workerupdate.Release{}, false, workerupdate.ErrReleaseRevoked
+						}
+						return original, true, nil
+					}
+					_, err := resolveUnixActivationRelease(context.Background(), h, original, st.native, resolve, authorize)
+					if err == nil {
+						if candidateRefused {
+							t.Fatal("a refused candidate resumed")
+						}
+						return // finishes forward
+					}
+					recoverTo := func(context.Context) (installsource.Source, error) {
+						return installsource.Source{Version: previousVersion}, nil
+					}
+					f := &abandonerFixture{}
+					ended, abandonErr := abandonCandidate(context.Background(), f, err, st.installed, recoverTo)
+					if abandonErr != nil || !ended {
+						t.Fatalf("the attempt neither finishes nor ends: ended=%v err=%v cause=%v", ended, abandonErr, err)
+					}
+				})
+			}
 		}
 	}
 }

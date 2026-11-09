@@ -214,7 +214,7 @@ func (s *Service) Run(ctx context.Context) error {
 // for good. The approval is reset to an idle journal that records the failure and the helper is
 // retired; any other failure is returned unchanged.
 func (s *Service) abandonUnavailableCandidate(ctx context.Context, cause error) error {
-	abandoned, err := abandonCandidate(ctx, s.currentManager(), cause, s.config.LoadInstalledSource)
+	abandoned, err := abandonCandidate(ctx, s.currentManager(), cause, s.config.LoadInstalledSource, nil)
 	if err != nil {
 		return errors.Join(cause, err)
 	}

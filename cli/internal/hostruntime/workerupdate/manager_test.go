@@ -87,42 +87,6 @@ func retainedFiles(paths fixturePaths) (int, error) {
 	return count, nil
 }
 
-func TestWorkerUpdateRefusesCutoverWithoutAuthorizedRecovery(t *testing.T) {
-	fixture := newFixture(t)
-	fixture.fetcher.recoveryError = ErrReleaseRevoked
-	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
-	if !errors.Is(err, ErrReleaseRevoked) || result.Updated {
-		t.Fatalf("result=%+v error=%v", result, err)
-	}
-	if fixture.hostd.activations != 0 || fixture.hostd.active.WorkerID != workerID(fixture.active.Version) {
-		t.Fatalf("running worker changed: %+v", fixture.hostd)
-	}
-	if !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
-		t.Fatal("active executable changed after recovery authorization failed")
-	}
-}
-
-func TestWorkerUpdateRecoveryAuthorizationHonorsCancellation(t *testing.T) {
-	fixture := newFixture(t)
-	fixture.fetcher.recovery = func(ctx context.Context) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	started := time.Now()
-	_, err := activatePrepared(ctx, fixture.manager, fixture.candidate)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error=%v, want canceled", err)
-	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("canceled recovery authorization took %s", elapsed)
-	}
-	if fixture.hostd.activations != 0 {
-		t.Fatalf("activation occurred after cancellation")
-	}
-}
-
 func TestWorkerUpdateRejectsTamperedArtifactBeforeCandidateStart(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.fetcher.body = []byte("tampered")
@@ -349,26 +313,13 @@ func release(version string, body []byte) Release {
 }
 
 type fakeFetcher struct {
-	fetchCalls       int
-	body             []byte
-	recoveryError    error
-	recoveryCalls    int
-	recoveryVersions []string
-	recovery         func(context.Context) error
+	fetchCalls int
+	body       []byte
 }
 
 func (f *fakeFetcher) Fetch(context.Context, Release) (io.ReadCloser, error) {
 	f.fetchCalls++
 	return io.NopCloser(bytes.NewReader(f.body)), nil
-}
-
-func (f *fakeFetcher) AuthorizeRecovery(ctx context.Context, version, _, _ string) error {
-	f.recoveryCalls++
-	f.recoveryVersions = append(f.recoveryVersions, version)
-	if f.recovery != nil {
-		return f.recovery(ctx)
-	}
-	return f.recoveryError
 }
 
 type fakeHostd struct {
