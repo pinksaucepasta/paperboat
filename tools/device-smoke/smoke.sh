@@ -181,8 +181,11 @@ ctl() {
 # device_py DEVICE SCRIPT ARGS...: run one staged check script where its device is.
 device_py() {
   local device=$1 script=$2; shift 2
-  # A Windows target needs its pb.exe path for steps that run `pb` there (windows_target.target_pb).
-  ctl "$device" "${PB_VICTUS:+PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_VICTUS") }PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
+  # A Windows target needs its pb.exe path for steps that run `pb` there (windows_target.target_pb): only then is it set,
+  # so every other command string stays exactly as it was.
+  local target_pb=""
+  [ -z "$PB_VICTUS" ] || [[ " $* " != *" victus "* ]] || target_pb="PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_VICTUS") "
+  ctl "$device" "${target_pb}PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
 }
 
 # ---------------------------------------------------------------- results
