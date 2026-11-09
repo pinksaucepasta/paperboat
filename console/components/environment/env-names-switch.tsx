@@ -5,7 +5,6 @@ import { api, useApiQuery, useWorkspace, type Workspace } from "@/lib/api"
 import { teamAction, teamQuery } from "@/lib/teams"
 import { preferencesQuery } from "@/lib/transfer-mode"
 import { Row } from "@/components/section"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 
 const label = "Commands on machines can list ENV names"
@@ -31,11 +30,11 @@ function PersonalEnvNames() {
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: preferencesQuery.queryKey }),
   })
-  if (preferences.isPending) return <Skeleton className="h-12 w-full" />
+  // While the preference loads, the same row shows, off and disabled, so nothing moves when it lands.
   return (
     <EnvNamesSetting
-      checked={(change.isPending ? change.variables : preferences.data?.env_names_listable) ?? true}
-      disabled={change.isPending}
+      checked={(change.isPending ? change.variables : preferences.data?.env_names_listable) ?? !preferences.isPending}
+      disabled={preferences.isPending || change.isPending}
       error={change.error}
       onChange={(on) => change.mutate(on)}
     />
@@ -49,13 +48,12 @@ function TeamEnvNames({ team }: { team: Workspace }) {
     mutationFn: (on: boolean) => teamAction(summary.data!, "env_names", { env_names_listable: on }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: teamQuery(team.id).queryKey }),
   })
-  if (summary.isPending) return <Skeleton className="h-12 w-full" />
   // Only owners and admins change team settings; the server enforces it too.
   const manage = team.role === "owner" || team.role === "admin"
   return (
     <EnvNamesSetting
-      checked={(change.isPending ? change.variables : summary.data?.env_names_listable) ?? true}
-      disabled={!manage || change.isPending}
+      checked={(change.isPending ? change.variables : summary.data?.env_names_listable) ?? !summary.isPending}
+      disabled={!manage || summary.isPending || change.isPending}
       error={change.error}
       note={manage ? undefined : "Only owners and admins can change this for the team."}
       onChange={(on) => change.mutate(on)}
