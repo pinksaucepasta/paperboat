@@ -199,13 +199,14 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	defer stopOffer()
 	var runtimeErr error
+	drainWindow := cfg.ShutdownTimeout / 2
 	select {
 	case <-root.Done():
 	case <-released:
 		// The replacement accepts and reports from now on; this process only drains.
 		service.Handover.SetSilent(true)
 		if service.Handover.MoveTerminals != nil {
-			service.Handover.MoveTerminals(terminalMoveGrace)
+			service.Handover.MoveTerminals(terminalMoveGrace(drainWindow))
 		}
 		stop()
 	case runtimeErr = <-service.Done():
@@ -213,7 +214,7 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	service.Handover.Drain(ctx, time.Now().Add(cfg.ShutdownTimeout/2))
+	service.Handover.Drain(ctx, time.Now().Add(drainWindow))
 	if err := service.Shutdown(ctx); err != nil {
 		return serviceFailure{error: err, definition: "service_shutdown"}
 	}
@@ -223,9 +224,12 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	return nil
 }
 
-// terminalMoveGrace is how long a drain gives each host to move its carrier to the replacement (and so end its
-// browser terminals as "moved" by itself) before the terminals still open are moved. Less than the drain's deadline.
-const terminalMoveGrace = 8 * time.Second
+// terminalMoveGrace is how long a drain of the given window gives each host to move its carrier to the replacement (and
+// so end its browser terminals as "moved" by itself) before the terminals still open are moved: half the window, at
+// most 10 s (a carrier lands on the replacement within about 5 s), so the move always comes before the drain's end.
+func terminalMoveGrace(drainWindow time.Duration) time.Duration {
+	return min(drainWindow/2, 10*time.Second)
+}
 
 // handoverWarmTimeout bounds a replacement's warm-up; the serving process keeps serving meanwhile.
 const handoverWarmTimeout = 30 * time.Second
