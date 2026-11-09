@@ -194,7 +194,7 @@ func setupCommand() *cobra.Command {
 			}
 			var err error
 			if runtime.GOOS == "windows" {
-				sshPort, setupErr := setupPlatformHostPrerequisites(command.Context())
+				sshPort, setupErr := setupHostPrerequisites(command.Context())
 				if setupErr != nil {
 					return fmt.Errorf("prepare Windows OpenSSH: %w", setupErr)
 				}

@@ -121,6 +121,10 @@ var removeLocalDaemonService localDaemonServiceRemover = localdaemon.RemoveCurre
 var verifySetupInstallSource = hostruntimecmd.VerifyInstallSource
 var setupBackendClient = backendClient
 
+// setupHostPrerequisites prepares what setup needs from the host before pairing (Windows: OpenSSH, with an
+// administrator prompt); tests replace it so no test asks for elevation.
+var setupHostPrerequisites = setupPlatformHostPrerequisites
+
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return runWithReporter(ctx, args, stdout, stderr, nil)
 }
