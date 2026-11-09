@@ -925,7 +925,7 @@ func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause err
 
 func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixActivationHandoff, manager *workerupdate.Manager) (workerupdate.Release, error) {
 	var original workerupdate.Release
-	var nativeStarted bool
+	var nativeStarted, committed bool
 	if s.config.ApplyPrepared != nil && s.config.NativeRecoveryStarted != nil {
 		signed, payload, err := manager.PreparedRelease(ctx)
 		if err != nil {
@@ -943,24 +943,35 @@ func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixA
 		if err != nil {
 			return workerupdate.Release{}, err
 		}
+		committed = nativeStarted && s.committedCandidateInstalled(payload)
 	}
 	resolve := s.source.ResolveManual
 	if !handoff.Manual {
 		resolve = s.source.Resolve
 	}
-	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, resolve, s.source.AuthorizeRecovery)
+	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, committed, resolve, s.source.AuthorizeRecovery)
+}
+
+// committedCandidateInstalled reports that the native owner committed the candidate payload as the installed source.
+func (s *Service) committedCandidateInstalled(payload workerupdate.Release) bool {
+	if s.config.LoadInstalledSource == nil {
+		return false
+	}
+	source, err := s.config.LoadInstalledSource() // fails while the installation is uncommitted
+	return err == nil && source.Version == payload.Version && source.SHA256 == payload.SHA256 && source.Length == payload.Length
 }
 
 // Native progress fixes the original approval; ordinary queued work still uses
-// current eligibility. Both paths retain exact approval identity.
-func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHandoff, original workerupdate.Release, nativeStarted bool, resolve func(context.Context) (workerupdate.Release, bool, error), authorize func(context.Context, string, string, string) error) (workerupdate.Release, error) {
+// current eligibility. Both paths retain exact approval identity. Once the candidate is committed
+// nothing can roll back to the previous version, so only the candidate's authorization matters.
+func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHandoff, original workerupdate.Release, nativeStarted, committed bool, resolve func(context.Context) (workerupdate.Release, bool, error), authorize func(context.Context, string, string, string) error) (workerupdate.Release, error) {
 	release := original
 	if nativeStarted {
 		if err := authorize(ctx, release.Version, release.Platform, release.Architecture); err != nil {
 			return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
 		}
 		previous := handoff.Previous
-		if previous.LocalSource == nil || previous.LocalSource.Distribution == installsource.Official {
+		if !committed && (previous.LocalSource == nil || previous.LocalSource.Distribution == installsource.Official) {
 			if err := authorize(ctx, previous.Version, previous.Platform, previous.Architecture); err != nil {
 				return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
 			}

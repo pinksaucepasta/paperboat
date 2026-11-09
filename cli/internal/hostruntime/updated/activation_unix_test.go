@@ -583,7 +583,7 @@ func TestUnixNativeRecoveryKeepsApprovalWhileQueuedWorkRechecksLatest(t *testing
 			h.Previous.Version = "2026.10.13.1"
 			resolutions := 0
 			var authorized []string
-			got, err := resolveUnixActivationRelease(context.Background(), h, original, tc.proof, func(context.Context) (workerupdate.Release, bool, error) { resolutions++; return newer, true, nil }, func(_ context.Context, v, p, a string) error {
+			got, err := resolveUnixActivationRelease(context.Background(), h, original, tc.proof, false, func(context.Context) (workerupdate.Release, bool, error) { resolutions++; return newer, true, nil }, func(_ context.Context, v, p, a string) error {
 				authorized = append(authorized, v)
 				if v == tc.denied {
 					return revoked
@@ -847,21 +847,21 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 	for _, tc := range []struct {
 		name      string
 		native    bool
+		committed bool
 		resolve   func(context.Context) (workerupdate.Release, bool, error)
 		authorize func(context.Context, string, string, string) error
 		installed func() (installsource.Source, error)
 		want      abandonerFixture
 	}{
-		{"candidate superseded", false, resolveNewer, deny(""), uncommitted, abandonerFixture{superseded: 1}},
-		{"candidate revoked before native activation", false, resolveRevoked, deny(""), uncommitted, abandonerFixture{superseded: 1}},
-		{"network error retries", false, resolveNetwork, deny(""), uncommitted, abandonerFixture{}},
-		{"candidate revoked after native commit", true, nil, deny(original.Version), committed, abandonerFixture{endedRevoked: 1}},
-		{"previous revoked after native commit", true, nil, deny(previous), committed, abandonerFixture{endedRevoked: 1}},
-		{"candidate revoked, native not committed", true, nil, deny(original.Version), uncommitted, abandonerFixture{}},
-		{"previous revoked, native not committed", true, nil, deny(previous), uncommitted, abandonerFixture{}},
+		{"candidate superseded", false, false, resolveNewer, deny(""), uncommitted, abandonerFixture{superseded: 1}},
+		{"candidate revoked before native activation", false, false, resolveRevoked, deny(""), uncommitted, abandonerFixture{superseded: 1}},
+		{"network error retries", false, false, resolveNetwork, deny(""), uncommitted, abandonerFixture{}},
+		{"candidate revoked after native commit", true, true, nil, deny(original.Version), committed, abandonerFixture{endedRevoked: 1}},
+		{"candidate revoked, native not committed", true, false, nil, deny(original.Version), uncommitted, abandonerFixture{}},
+		{"previous revoked, native not committed", true, false, nil, deny(previous), uncommitted, abandonerFixture{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.resolve, tc.authorize)
+			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.committed, tc.resolve, tc.authorize)
 			if err == nil {
 				t.Fatal("resolve succeeded")
 			}
@@ -872,6 +872,35 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 				t.Fatalf("abandoned=%v err=%v calls=%+v, want %+v for %v", abandoned, abandonErr, *f, tc.want, err)
 			}
 		})
+	}
+}
+
+// Once the native owner committed the candidate nothing rolls back to the previous version, so revoking that
+// (old, typically vulnerable) version must not turn a machine that is mid-update into a failure: the commit finishes.
+func TestCommittedCandidateFinishesWhenOnlyThePreviousVersionIsRevoked(t *testing.T) {
+	original := workerupdate.Release{Version: "2026.10.14.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1}
+	receipt, err := workerupdate.PreparedCandidateForRelease(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &unixActivationHandoff{ApprovalID: receipt.ID, Candidate: original.Version, Started: true, Previous: original}
+	h.Previous.Version = "2026.10.13.1"
+	var authorized []string
+	authorize := func(_ context.Context, v, _, _ string) error {
+		authorized = append(authorized, v)
+		if v == h.Previous.Version {
+			return workerupdate.ErrReleaseRevoked
+		}
+		return nil
+	}
+	got, err := resolveUnixActivationRelease(context.Background(), h, original, true, true, nil, authorize)
+	if err != nil || got.Version != original.Version || len(authorized) != 1 || authorized[0] != original.Version {
+		t.Fatalf("committed candidate with a revoked previous version: %+v %v authorized=%v", got, err, authorized)
+	}
+	// Not yet committed, recovery may restore the previous version, so it must still be authorized.
+	authorized = nil
+	if _, err := resolveUnixActivationRelease(context.Background(), h, original, true, false, nil, authorize); !errors.Is(err, workerupdate.ErrReleaseRevoked) || len(authorized) != 2 {
+		t.Fatalf("uncommitted native attempt skipped the previous version's authorization: %v authorized=%v", err, authorized)
 	}
 }
 
