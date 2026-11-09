@@ -84,8 +84,11 @@ function seed(queryClient: QueryClient, workspace: string, { me, workspaces, bil
   if (products) queryClient.setQueryData(queryKeys.billingProducts(workspace), products.items)
 }
 
-/** A page's own first read: its query key, its control-plane path, and the field the browser query keeps. */
-export type PageRead = { key: readonly unknown[]; path: string; field?: string }
+/**
+ * A page's own first read: its query key, its control-plane path, the field the browser query keeps,
+ * and `infinite` for a paged list read with useInfiniteQuery (seeded as its first page).
+ */
+export type PageRead = { key: readonly unknown[]; path: string; field?: string; infinite?: boolean }
 
 /** The session data, plus a page's own reads (see `WithSession`), for every console page. */
 export async function prefetchSession(
@@ -101,7 +104,9 @@ export async function prefetchSession(
   seed(queryClient, workspace, data)
   list.forEach((read, index) => {
     const result = results[index]
-    if (result) queryClient.setQueryData(read.key, read.field ? result[read.field] : result)
+    if (!result) return
+    const value = read.field ? result[read.field] : result
+    queryClient.setQueryData(read.key, read.infinite ? { pages: [value], pageParams: [""] } : value)
   })
   return { state: dehydrate(queryClient), workspace, viewer, ended: auth.ended }
 }

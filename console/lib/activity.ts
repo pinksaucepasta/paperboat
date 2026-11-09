@@ -2,6 +2,7 @@
 
 import { infiniteQueryOptions } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 /*
  * Activity: what happened in the workspace, newest first, from `GET /v1/activity`
@@ -106,7 +107,7 @@ export function activityExportHref(input: ActivityFilter, format: "csv" | "json"
 
 export const activityQuery = (input: ActivityFilter) =>
   infiniteQueryOptions({
-    queryKey: ["activity", activityParams(input).toString()] as const,
+    queryKey: queryKeys.activity(activityParams(input).toString()),
     queryFn: ({ pageParam, signal }) => {
       const params = activityParams(input)
       params.set("limit", "50")

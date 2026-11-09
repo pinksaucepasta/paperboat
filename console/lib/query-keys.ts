@@ -14,6 +14,9 @@ export const queryKeys = {
   billing: (workspace: string) => ["billing", workspace],
   billingProducts: (workspace: string) => ["billing-products", workspace],
   inboxRequests: (workspace: string) => ["team-inbox", workspace],
+  apiTokens: (workspace: string) => ["api-tokens", workspace],
+  /** `params`: the activity filter as its query string (lib/activity.ts activityParams). */
+  activity: (params: string) => ["activity", params],
   machineOverview: ["machines", "overview"],
   machine: (id: string) => ["machines", "one", id],
   machineSummary: (workspace: string) => ["machines", workspace, "summary"],

@@ -2,6 +2,7 @@
 
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import { ApiError, confirmSession, idempotencyKey, send } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 
 // Workspace policy and API tokens. Contract: shared/policy/README.md ("HTTP API", "API tokens").
 // Hand-written types until the server documents these endpoints in openapi.json.
@@ -245,7 +246,7 @@ export function explainPolicy(
 /** A workspace's API tokens, newest first, one server page at a time (load more until the server's total). */
 export const apiTokensQuery = (workspace: string) =>
   infiniteQueryOptions({
-    queryKey: ["api-tokens", workspace],
+    queryKey: queryKeys.apiTokens(workspace),
     queryFn: async ({ pageParam, signal }) => {
       const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
       return call<{ api_tokens: APIToken[]; total: number; next_cursor?: string }>(
