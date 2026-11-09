@@ -4,6 +4,7 @@
 // does not match the server's configuration, a missing share image, invalid structured data.
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { spawnSync } from "node:child_process"
 
 const dist = new URL("../dist/", import.meta.url).pathname
 const env = Object.fromEntries(
@@ -99,6 +100,55 @@ if (!text(home).includes(`.${config.preview_base_domain}`) || !text(home).includ
 for (const claim of ["$0", "$8", "$80/year", "$15", "$150/seat/year", "5 GB", "100 GB", "1,000", "Unlimited", "14-day", "$5 per 100 GB", "30 days", "90 days", "365 days"])
   if (!pricing.includes(claim)) fail("/pricing/", `missing pricing claim ${claim}`)
 if (!existsSync(join(dist, "robots.txt"))) fail("/robots.txt", "missing")
+
+// The limits on the pricing page are the server's own defaults (server/internal/config/config.go), when this
+// build runs inside the repository.
+const serverConfig = new URL("../../server/internal/config/config.go", import.meta.url).pathname
+if (existsSync(serverConfig)) {
+  const go = readFileSync(serverConfig, "utf8")
+  const number = (pattern) => Number(go.match(pattern)?.[1]?.replace(/_/g, ""))
+  const shown = (n) => n.toLocaleString("en-US")
+  const limits = {
+    machines: [number(/Machines: PlanLimit\{Free: (\d+)/), number(/Machines: PlanLimit\{Free: \d+, Pro: (\d+)/)],
+    "previews and tunnels": [number(/Publications: PlanLimit\{Free: (\d+)/), number(/Publications: PlanLimit\{Free: \d+, Pro: (\d+)/)],
+    "browser terminals": [number(/BrowserTerminals: PlanLimit\{Free: (\d+)/), number(/BrowserTerminals: PlanLimit\{Free: \d+, Pro: (\d+)/)],
+    "public TCP": [number(/PublicTCP: PublicTCPLimit\{Free: (\d+)/), number(/PublicTCPLimit\{Free: \d+, Pro: (\d+)/)],
+  }
+  const rows = { machines: "Machines", "previews and tunnels": "Previews and tunnels running at once", "browser terminals": "Terminals open in the web console at once", "public TCP": "Public raw-TCP tunnel addresses" }
+  for (const [name, [free, pro]] of Object.entries(limits))
+    if (!new RegExp(`${rows[name]}\\s+${shown(free)}\\s+${shown(pro)}\\s`).test(pricing)) fail("/pricing/", `${name} limits differ from the server's ${free} / ${pro}`)
+  if (!pricing.includes(`${number(/TeamTrialDays: (\d+)/)}-day`)) fail("/pricing/", "Team trial length differs from the server's")
+  if (!pricing.includes(`${number(/PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`)) fail("/pricing/", "free bandwidth differs from the server's")
+  if (!pricing.includes(`${number(/ViewersPerSharedTerminal: (\d+)/)} possible viewers`)) fail("/pricing/", "shared terminal viewer limit differs from the server's")
+}
+
+// One type scale: every font size in the source is a token (the lockup follows the brand's mark-height rule).
+const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? sources(join(dir, entry.name)) : [join(dir, entry.name)]))
+for (const file of sources(new URL("../src/", import.meta.url).pathname).filter((name) => /\.(astro|css)$/.test(name) && !name.endsWith("Lockup.astro")))
+  for (const [declaration] of readFileSync(file, "utf8").matchAll(/font-size:[^;]+;/g))
+    if (!/var\(--text-|inherit|0\.86em/.test(declaration) && !/--text-/.test(declaration)) fail(file.split("/src/")[1], `font size outside the token set: ${declaration}`)
+
+// With --external, every link to another site is fetched too (the sources of the comparison pages).
+// A site that refuses automated requests (401, 403, 429) is listed but does not fail the check.
+if (process.argv.includes("--external")) {
+  const links = new Set()
+  for (const html of pages.values()) for (const [, href] of html.matchAll(/<a [^>]*href="(https:\/\/[^"]+)"/g)) links.add(href)
+  const refused = []
+  await Promise.all(
+    [...links].map(async (href) => {
+      try {
+        const response = await fetch(href, { redirect: "follow", signal: AbortSignal.timeout(20_000), headers: { "User-Agent": "Mozilla/5.0 (link check)" } })
+        if ([401, 403, 429].includes(response.status)) refused.push(`${response.status} ${href}`)
+        else if (!response.ok) fail(href, `external link answers ${response.status}`)
+      } catch (error) {
+        // A few servers drop Node's connections but answer curl; ask once more that way before calling the link dead.
+        const code = spawnSync("curl", ["-sS", "-L", "-o", "/dev/null", "-m", "25", "-w", "%{http_code}", href]).stdout?.toString()
+        if (!/^[23]/.test(code ?? "")) fail(href, `external link failed: ${error.cause?.code ?? error.name}`)
+      }
+    }),
+  )
+  console.log(`site-check: ${links.size} external links, ${refused.length} refused automated requests${refused.length ? ":\n  " + refused.join("\n  ") : ""}`)
+}
 
 if (failures.length) {
   console.error(failures.join("\n"))
