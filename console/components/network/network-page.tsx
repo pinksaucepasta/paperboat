@@ -248,10 +248,10 @@ const nodeStatus = { ready: "Ready", draining: "Being replaced", unavailable: "N
 /** Latency in ms, blank without a fresh measurement from your machines. */
 const latency = (ms?: number) => (ms === undefined ? "" : `${ms} ms`)
 
-/**
- * What tells two nodes in the same region apart: its host when the API gives one, else the start
- * of its id. shortcut: the API has no site name yet (requested); switch to it when it lands.
- */
+/** Where a node is: its site (a city, or your server's name), else its region. */
+const siteOf = (node: { site?: string; region: string }) => node.site || placeName(node.region)
+
+/** What tells two relays at one site apart, until relays carry a host: the start of the node id. */
 const shortId = (id: string) => id.replace(/^node_/, "").slice(0, 8)
 
 /** One row of the Relays or Edges table: (its role,) where it is, who runs it, whether it's ready, latency. */
@@ -373,7 +373,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
     (a, b) =>
       (a.best_rtt_ms ?? Infinity) - (b.best_rtt_ms ?? Infinity) ||
       Number(b.status === "ready") - Number(a.status === "ready") ||
-      placeName(a.region).localeCompare(placeName(b.region)),
+      siteOf(a).localeCompare(siteOf(b)),
   )
   return (
     <section className="flex flex-col gap-3">
@@ -398,7 +398,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
         {rows.map((relay) => (
           <NodeLine
             key={relay.id}
-            location={placeName(relay.region)}
+            location={siteOf(relay)}
             detail={shortId(relay.id)}
             operator={relay.self_hosted ? (relay.name ?? "Your server") : "Paperboat"}
             ok={relay.status === "ready"}
@@ -444,8 +444,8 @@ function EdgesSection({ workspace, manage }: { workspace: string; manage: boolea
           <NodeLine
             key={role}
             role={role}
-            location={placeName(edge.region)}
-            detail={edge.endpoint_host ?? shortId(edge.id)}
+            location={siteOf(edge)}
+            detail={edge.endpoint_host ?? ""}
             operator={edge.kind === "managed" ? "Paperboat" : (edge.name ?? "Your server")}
             ok={edge.status === "ready"}
             status={nodeStatus[edge.status]}
@@ -564,7 +564,7 @@ function ChangeEdgesDialog({
   const scope = scopeOf(useWorkspace())
   const managed = useApiQuery(edgesQuery)
   const own = useInfiniteQuery(poolServersQuery("tunnel", scope, ""))
-  // The pair's edges carry their host and latency; other Paperboat edges only their id so far.
+  // Latency is measured for the pair's edges only.
   const inPair = (id: string) =>
     current?.primary.id === id
       ? { edge: current.primary, role: "Primary" }
@@ -577,8 +577,8 @@ function ChangeEdgesDialog({
       return {
         id: edge.id,
         kind: "managed" as const,
-        location: placeName(edge.region),
-        detail: known?.edge.endpoint_host ?? shortId(edge.id),
+        location: siteOf(edge),
+        detail: edge.endpoint_host ?? "",
         operator: "Paperboat",
         ok: edge.status === "ready",
         rtt: known?.edge.best_rtt_ms,
@@ -590,7 +590,7 @@ function ChangeEdgesDialog({
       return {
         id: server.installation_id,
         kind: "self_hosted" as const,
-        location: known ? placeName(known.edge.region) : server.name,
+        location: known ? siteOf(known.edge) : server.name,
         detail: server.endpoint_host,
         operator: server.name,
         ok: server.ready,
