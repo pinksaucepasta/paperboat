@@ -67,6 +67,8 @@ type Recovery struct {
 	// FinishSelf, when set, is left for the caller's own component once everything else is undone
 	// (service.LifecycleManager.RecoverWithin): the caller runs it as its very last step, then exits.
 	FinishSelf func(context.Context) error
+	// Undone: an interrupted installation was found and its files and services restored.
+	Undone bool
 	// InstallRunning: the journal belongs to an installer that is still running; nothing was recovered.
 	InstallRunning bool
 	// Cleanup is what could not be withdrawn of the killed attempt's candidate (withdrawInterruptedCandidate). The
@@ -128,12 +130,12 @@ func recoverInterruptedInstall(ctx context.Context, paths installPaths, uid int,
 		return Recovery{}, err
 	}
 	if _, err = os.Lstat(paths.journal); installNotExistOnly(err) {
-		return Recovery{FinishSelf: finishSelf, Cleanup: cleanup}, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
+		return Recovery{FinishSelf: finishSelf, Cleanup: cleanup, Undone: true}, errors.Join(removeInstallFile(paths.workerRollback), removeInstallFile(paths.workerNext))
 	} else if err != nil {
 		return Recovery{}, err
 	}
 	// No lifecycle journal was left (or no metadata to rebuild services from): only the files need undoing.
-	return Recovery{FinishSelf: finishSelf, Cleanup: cleanup}, rollbackFiles(paths, journal)
+	return Recovery{FinishSelf: finishSelf, Cleanup: cleanup, Undone: true}, rollbackFiles(paths, journal)
 }
 
 // lockInterruptedRecovery is held by whichever of the updater service and the activation helper recovers;

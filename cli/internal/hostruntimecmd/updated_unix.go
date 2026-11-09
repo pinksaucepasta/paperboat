@@ -285,7 +285,9 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return updaterService.RunActivationHelper(ctx)
 	}
 	return runNotifiedUpdater(ctx, updaterRunnerFunc(func(ctx context.Context, ready func() error) error {
-		return updaterService.RunWithReady(ctx, ready)
+		return superviseInterruptedInstall(ctx, interruptedInstallPoll, recoverWhileRunning(uid, stderr), func(ctx context.Context) error {
+			return updaterService.RunWithReady(ctx, ready)
+		})
 	}), notifier)
 }
 
