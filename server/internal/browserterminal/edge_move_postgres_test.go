@@ -29,7 +29,9 @@ import (
 // its process generation, which needs a machine, is the fixture's.
 type hostSnapshotAuthorizer struct{ MachineAuthorizer }
 
-func (hostSnapshotAuthorizer) SnapshotProcess(context.Context, Decision) (int64, error) { return 1, nil }
+func (hostSnapshotAuthorizer) SnapshotProcess(context.Context, Decision) (int64, error) {
+	return 1, nil
+}
 
 // pbvm1 2026-11-05 (vm1-1a6479a4-124638): pb update's new worker attached its carriers, the edge that observed one
 // first became the route's active edge, and the control channel's 2 s recheck ended the browser terminal held on the
