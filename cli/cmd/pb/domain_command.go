@@ -98,22 +98,26 @@ func domainVerifyCommandV1() *cobra.Command {
 		timeout, _ := c.Flags().GetDuration("timeout")
 		ctx, cancel := context.WithTimeout(c.Context(), timeout)
 		defer cancel()
-		checked := domain.CheckedAt
+		// New records can take minutes to reach the resolvers: keep waiting through failed checks
+		// (the server keeps checking) until verified with a certificate, or the timeout says why not.
 		for domain.State != "verified" || domain.Certificate.State == "pending" {
-			if domain.CheckedAt != checked && domain.State != "verified" {
-				break // the requested check ran and did not verify: show why
-			}
 			select {
 			case <-ctx.Done():
-				return writeWorkspaceDomain(c, domain, "Still waiting. DNS changes can take a few minutes; run this again later.")
+				if err := writeWorkspaceDomain(c, domain, "Not verified yet. DNS changes can take a few minutes; run this again later."); err != nil {
+					return err
+				}
+				return domainRefusal(fmt.Sprintf("%s is not verified with a certificate within --timeout; check its DNS records with `pb domain show %s`", domain.Hostname, domain.Hostname))
 			case <-time.After(2 * time.Second):
 			}
 			if domain, err = client.GetWorkspaceDomain(c.Context(), domain.ID); err != nil {
 				return err
 			}
 		}
-		if domain.State != "verified" {
-			return writeWorkspaceDomain(c, domain, "Not verified yet.")
+		if domain.Certificate.State == "failed" {
+			if err := writeWorkspaceDomain(c, domain, "Verified, but the certificate could not be issued yet."); err != nil {
+				return err
+			}
+			return domainRefusal(fmt.Sprintf("%s is verified but its certificate could not be issued yet; Paperboat retries, see `pb domain show %s`", domain.Hostname, domain.Hostname))
 		}
 		return writeWorkspaceDomain(c, domain, fmt.Sprintf("%s is verified. Use any name under it: pb tunnel create web --domain app.%s", domain.Hostname, domain.Hostname))
 	}}
@@ -157,7 +161,7 @@ func workspaceDomainInUse(domain api.WorkspaceDomain) error {
 	for _, u := range domain.UsedBy {
 		uses = append(uses, fmt.Sprintf("%s (%s %s)", u.Hostname, u.Kind, u.Name))
 	}
-	return fmt.Errorf("%s is used by %s; remove those hostnames first (pb tunnel domain remove <tunnel> <hostname>)", domain.Hostname, strings.Join(uses, ", "))
+	return domainRefusal(fmt.Sprintf("%s is used by %s; remove those hostnames first (pb tunnel domain remove <tunnel> <hostname>)", domain.Hostname, strings.Join(uses, ", ")))
 }
 
 // resolveWorkspaceDomain finds a domain of the active workspace by hostname or id.
@@ -172,7 +176,12 @@ func resolveWorkspaceDomain(ctx context.Context, client *api.Client, value strin
 			return d, nil
 		}
 	}
-	return api.WorkspaceDomain{}, errors.New("no domain " + value + " in this workspace; see `pb domain list`")
+	return api.WorkspaceDomain{}, domainRefusal("no domain " + value + " in this workspace; see `pb domain list`")
+}
+
+// domainRefusal is a state the user fixes; its message reaches human and --json output as written.
+func domainRefusal(message string) error {
+	return usageError{err: errors.New(message), publicMessage: message, refusal: true}
 }
 
 func domainStateText(state string) string {
