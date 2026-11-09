@@ -24,7 +24,8 @@ permissions:
 
 concurrency:
   group: terminal-drain-${{ github.ref }}
-  cancel-in-progress: true
+  # On main the run in progress finishes (the newest waiting push is kept), as in server-ci.yml and lane-test.yml.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   drain:
