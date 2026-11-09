@@ -24,7 +24,8 @@ export type Policy = {
   policy: string
   digest: string
   updated_at: string
-  updated_by: string
+  /** Absent when the server itself saved it ("Removed machines or members that left the workspace"). */
+  updated_by?: string
   updated_with_api_token?: string
   message: string
   can_edit: CanEdit
@@ -465,6 +466,13 @@ export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"
     else out.push({ kind: "-", text: a[i++] })
   }
   return out
+}
+
+/** " by <who>" for the policy's last save; empty when the server saved it. */
+export function savedBy(policy: Policy) {
+  if (!policy.updated_by) return ""
+  const who = policy.updated_by.replace(/^user:/, "")
+  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}`
 }
 
 /** Shown wherever the signed-in member may look but not change the policy. */

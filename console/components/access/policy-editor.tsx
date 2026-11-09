@@ -6,6 +6,7 @@ import {
   hasComments,
   parsePolicy,
   readOnlyNote,
+  savedBy,
   savePolicy,
   validatePolicy,
   type Policy,
@@ -50,9 +51,8 @@ export function PolicyEditor({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <span className="flex-1">
-          Version {policy.version} · saved <Time iso={policy.updated_at} relative /> by{" "}
-          {policy.updated_by.replace(/^user:/, "")}
-          {policy.updated_with_api_token && ` with API token ${policy.updated_with_api_token}`}
+          Version {policy.version} · saved <Time iso={policy.updated_at} relative />
+          {savedBy(policy)}
         </span>
         {editable && (
           <>
