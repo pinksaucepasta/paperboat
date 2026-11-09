@@ -37,14 +37,19 @@ export function InspectorPage({ id }: { id: string }) {
     <>
       <PageHeader>
         <CrumbLink href="/previews">Previews</CrumbLink>
-        {preview ? <Crumb>{hostOf(preview.endpoint) || "Ended preview"}</Crumb> : <Skeleton className="h-4 w-24" />}
+        {preview ? (
+          <Crumb>{hostOf(preview.endpoint) || "Ended preview"}</Crumb>
+        ) : (
+          <Skeleton className="my-0.5 h-4 w-24" />
+        )}
         <Crumb>Inspect</Crumb>
       </PageHeader>
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 px-4 py-6 md:px-8">
         {query.isError ? (
           <State title="Preview not found" detail={query.error.message} />
         ) : !preview ? (
-          <Skeleton className="h-8 w-72" />
+          // What comes next is the connecting state, so the page loads as it.
+          <State title={phaseText.connecting[0]} detail={phaseText.connecting[1]} />
         ) : ended(preview, now) ? (
           <State title="Preview stopped" detail="Captures end with the preview. Start a new preview to inspect it." />
         ) : (

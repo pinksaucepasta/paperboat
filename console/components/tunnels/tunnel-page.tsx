@@ -48,7 +48,7 @@ export function TunnelPage({ id }: { id: string }) {
     <>
       <PageHeader>
         <CrumbLink href="/tunnels">Tunnels</CrumbLink>
-        {tunnel ? <Crumb>{tunnel.name}</Crumb> : <Skeleton className="h-4 w-24" />}
+        {tunnel ? <Crumb>{tunnel.name}</Crumb> : <Skeleton className="my-0.5 h-4 w-24" />}
       </PageHeader>
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-4 py-6 md:px-8 md:py-8">
         {query.isError ? (
@@ -59,9 +59,14 @@ export function TunnelPage({ id }: { id: string }) {
             </Button>
           </div>
         ) : !tunnel ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-4 w-72" />
+          // The loaded header: title and address lines at their line heights, Pause and Open.
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Skeleton className="my-1 h-6 w-48" />
+              <Skeleton className="my-0.5 h-4 w-72" />
+            </div>
+            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-8 w-16" />
           </div>
         ) : (
           <Loaded tunnel={tunnel} />

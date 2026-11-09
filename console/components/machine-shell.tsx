@@ -206,13 +206,22 @@ function MachineTabs({ base, tab }: { base?: string; tab?: string }) {
   )
 }
 
-/** The loaded header's title and detail lines (their line heights) over the real tabs. */
+/**
+ * The loaded header's title and detail lines (their line heights) and Quick terminal (always there;
+ * Share, for owners, sits left of it) over the real tabs.
+ */
 export function MachineSkeleton({ base, tab }: { base?: string; tab?: string }) {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
-      <div className="flex flex-col gap-2">
-        <Skeleton className="my-1 h-6 w-48" />
-        <Skeleton className="my-1 h-4 w-72" />
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton className="my-1 h-6 w-48" />
+          <Skeleton className="my-1 h-4 w-72" />
+        </div>
+        <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+          <TerminalIcon data-icon="inline-start" />
+          Quick terminal
+        </Button>
       </div>
       <MachineTabs base={base} tab={tab} />
     </div>
