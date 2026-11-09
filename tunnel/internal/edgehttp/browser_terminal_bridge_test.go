@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -402,5 +403,28 @@ func TestBrowserTerminalBridgeTellsALaggingBrowserAndStaysUp(t *testing.T) {
 	case err := <-completed:
 		t.Fatalf("bridge ended: %v", err)
 	default:
+	}
+}
+
+// A request canceled from outside ends its connections with closed-connection errors before the bridge cancels its own
+// worker context; those are the cancel, not an edge failure (the check looked only at the worker context).
+func TestBridgeEndCanceledSeesAnExternalCancel(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	worker, cancelWorker := context.WithCancel(context.WithoutCancel(parent))
+	defer cancelWorker()
+	closedConn := bridgeEnd{"host_read", fmt.Errorf("failed to read: %w", net.ErrClosed)}
+	if bridgeEndCanceled(parent, worker, closedConn) {
+		t.Fatal("a closed connection with nothing canceled is a failure")
+	}
+	cancelParent()
+	if !bridgeEndCanceled(parent, worker, closedConn) {
+		t.Fatal("a closed connection after the request was canceled from outside was counted as a failure")
+	}
+	if bridgeEndCanceled(parent, worker, bridgeEnd{"host_read", ErrBrowserTerminalMessage}) {
+		t.Fatal("a protocol error was hidden by the cancel")
+	}
+	cancelWorker()
+	if !bridgeEndCanceled(context.Background(), worker, closedConn) {
+		t.Fatal("the bridge's own cancel no longer hides the closed connections it causes")
 	}
 }

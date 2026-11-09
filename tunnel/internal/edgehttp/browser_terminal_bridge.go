@@ -192,6 +192,13 @@ func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFe
 	}
 }
 
+// bridgeEndCanceled reports whether a worker's error is only the request being canceled, not an edge failure. The
+// workers run on ctx, which only the bridge cancels (after the typed close), so a cancel from outside shows on parent:
+// the connections it ends fail with closed-connection errors before ctx is canceled. Both count.
+func bridgeEndCanceled(parent, ctx context.Context, err error) bool {
+	return requestCanceled(parent, err) || requestCanceled(ctx, err)
+}
+
 // bridgeBrowserTerminal runs the browser <-> host bridge until one side ends it or stop closes (the control plane
 // ended the admission). endReason names the typed close the browser should get for the cause, if any; every other
 // end drops the connection (the browser reconnects).
@@ -222,7 +229,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	}()
 	outbound := make(chan []byte, browserTerminalBridgeQueue)
 	report := func(err error) {
-		if requestCanceled(ctx, err) {
+		if bridgeEndCanceled(parent, ctx, err) {
 			return
 		}
 		select {
