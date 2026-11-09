@@ -88,6 +88,12 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb daemon machine-guard uninstall](pb_daemon_machine-guard_uninstall.md) | Remove machine access while retaining cached-address protection |
 | [pb daemon run](pb_daemon_run.md) | Run Paperboat daemon under service supervision |
 | [pb doctor](pb_doctor.md) | Check Paperboat connectivity and readiness |
+| [pb domain](pb_domain.md) | Add your own domains to the workspace |
+| [pb domain add](pb_domain_add.md) | Add a domain and show its DNS records |
+| [pb domain list](pb_domain_list.md) | List the workspace's domains |
+| [pb domain remove](pb_domain_remove.md) | Remove a domain no tunnel or preview uses |
+| [pb domain show](pb_domain_show.md) | Show a domain's DNS records, status and uses |
+| [pb domain verify](pb_domain_verify.md) | Check a domain's DNS now and wait until it is verified |
 | [pb edge](pb_edge.md) | Inspect tunnel edges |
 | [pb edge list](pb_edge_list.md) | List managed or selected self-hosted tunnel edges |
 | [pb env](pb_env.md) | Manage automatic global ENV and device overrides |
@@ -242,12 +248,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel create](pb_tunnel_create.md) | Create a durable tunnel |
 | [pb tunnel delete](pb_tunnel_delete.md) | Delete endpoints and routes while preserving user DNS records |
 | [pb tunnel doctor](pb_tunnel_doctor.md) | Diagnose tunnel health |
-| [pb tunnel domain](pb_tunnel_domain.md) | Manage tunnel domains |
-| [pb tunnel domain add](pb_tunnel_domain_add.md) | Add a tunnel domain |
-| [pb tunnel domain instructions](pb_tunnel_domain_instructions.md) | Show authoritative DNS instructions for a tunnel domain |
+| [pb tunnel domain](pb_tunnel_domain.md) | Serve a tunnel at hostnames under your workspace's domains |
+| [pb tunnel domain add](pb_tunnel_domain_add.md) | Serve a tunnel route at a hostname under a verified workspace domain (pb domain add) |
 | [pb tunnel domain list](pb_tunnel_domain_list.md) | List tunnel domains |
-| [pb tunnel domain remove](pb_tunnel_domain_remove.md) | Remove a tunnel domain |
-| [pb tunnel domain verify](pb_tunnel_domain_verify.md) | Verify a tunnel domain |
+| [pb tunnel domain remove](pb_tunnel_domain_remove.md) | Stop serving a tunnel at a hostname |
 | [pb tunnel inspect](pb_tunnel_inspect.md) | Show daemon-local HTTP captures |
 | [pb tunnel list](pb_tunnel_list.md) | List durable tunnels |
 | [pb tunnel logs](pb_tunnel_logs.md) | Show tunnel logs |

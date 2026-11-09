@@ -121,7 +121,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 	if got := []string{lease.Domains[0].Hostname, lease.Domains[1].Hostname}; !reflect.DeepEqual(got, []string{"app.example.com", "xn--bcher-kva.example"}) {
 		t.Fatalf("domain projection = %#v", got)
 	}
-	if lease.Domains[0].TargetKind != "preview_lease" || lease.Domains[0].PreviewID != lease.ID || lease.Domains[0].Instructions == nil {
+	if lease.Domains[0].TargetKind != "preview_lease" || lease.Domains[0].PreviewID != lease.ID {
 		t.Fatalf("domain binding = %#v", lease.Domains[0])
 	}
 	if bytes.Contains(output.Bytes(), []byte("token")) || bytes.Contains(output.Bytes(), []byte("private_key")) {
@@ -192,10 +192,6 @@ func previewDomainCommandLease(now time.Time, state, ownerSessionID string) map[
 			"id": "domain_app", "target_kind": "preview_lease", "preview_id": "prv_domains", "hostname": "app.example.com", "match_type": "exact", "state": "ready",
 			"dns":         map[string]any{"target": "domains.example.test", "observed_records": []string{"domains.example.test"}},
 			"certificate": map[string]any{"state": "ready", "reference": "certificate_app", "expires_at": now.Add(30 * 24 * time.Hour)}, "generation": 1, "etag": `"domain_app:1"`,
-			"instructions": map[string]any{
-				"schema": api.PreviewTunnelSchemaV1, "kind": "dns_instructions", "target_kind": "preview_lease", "preview_id": "prv_domains", "domain_id": "domain_app", "hostname": "app.example.com", "provider": "generic",
-				"records": []map[string]any{{"name": "_acme-challenge.app.example.com", "type": "CNAME", "value": "pb-app.challenge.example.test", "ttl": 300}}, "certificate_strategy": "delegated_dns01", "verification_state": "waiting_dns", "note": "Create this CNAME.",
-			},
 		},
 		{
 			"id": "domain_bucher", "target_kind": "preview_lease", "preview_id": "prv_domains", "hostname": "xn--bcher-kva.example", "match_type": "exact", "state": "ready",
@@ -203,112 +199,6 @@ func previewDomainCommandLease(now time.Time, state, ownerSessionID string) map[
 		},
 	}
 	return lease
-}
-
-func TestPreviewDomainLeaseCreateFetchesAndPrintsAuthoritativeDNSRecords(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.Path)
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/previews":
-			value := previewDomainCommandLease(now, "connecting", "session_cli")
-			value["endpoint"], value["endpoint_state"] = "", "custom_domain_not_ready"
-			domains := value["domains"].([]map[string]any)[:1]
-			domain := domains[0]
-			domain["state"] = "waiting_dns"
-			domain["certificate"].(map[string]any)["state"] = "not_requested"
-			delete(domain, "instructions")
-			value["domains"] = domains
-			w.Header().Set("ETag", `"ptv1:preview_lease:cHJ2X2RvbWFpbnM:1"`)
-			w.Header().Set("X-Paperboat-Operation-ID", "operation_preview_domains")
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/previews/prv_domains/domains/domain_app/instructions":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.PreviewDNSInstructions{
-				Schema: api.PreviewTunnelSchemaV1, Kind: "dns_instructions", TargetKind: "preview_lease", PreviewID: "prv_domains", DomainID: "domain_app",
-				Hostname: "app.example.com", Provider: "generic",
-				Records:             []api.PreviewDNSRecord{{Name: "_acme-challenge.app.example.com", Type: "CNAME", Value: "pb-app.challenge.example.test", TTL: 300}},
-				CertificateStrategy: "delegated_dns01", VerificationState: "waiting_dns", Note: "Add this CNAME.",
-			}})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	var output bytes.Buffer
-	domainClient := &previewDomainLeaseClient{client: client, domains: []string{"app.example.com"}, instructionsWriter: &output}
-	_, err := domainClient.Create(context.Background(), preview.LeaseRequest{
-		OwnerMachineID: "machine_cli", OwnerSessionID: "session_cli", OwnerSessionKind: "foreground",
-		Target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", IdempotencyKey: "create-domains",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "state=waiting_dns") || !strings.Contains(output.String(), "CNAME _acme-challenge.app.example.com -> pb-app.challenge.example.test (TTL 300)") {
-		t.Fatalf("DNS instructions output = %q", output.String())
-	}
-	if !reflect.DeepEqual(requests, []string{
-		"POST /v1/previews",
-		"GET /v1/previews/prv_domains/domains/domain_app/instructions",
-	}) {
-		t.Fatalf("API request order = %#v", requests)
-	}
-}
-
-func TestPreviewDomainLeaseCreateStopsLeaseWhenDNSInstructionsCannotBeRead(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.Method+" "+r.URL.Path)
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/previews":
-			value := previewDomainCommandLease(now, "connecting", "session_cli")
-			value["endpoint"], value["endpoint_state"] = "", "custom_domain_not_ready"
-			domains := value["domains"].([]map[string]any)[:1]
-			domain := domains[0]
-			domain["state"] = "waiting_dns"
-			domain["certificate"].(map[string]any)["state"] = "not_requested"
-			delete(domain, "instructions")
-			value["domains"] = domains
-			w.Header().Set("ETag", `"ptv1:preview_lease:cHJ2X2RvbWFpbnM:1"`)
-			w.Header().Set("X-Paperboat-Operation-ID", "operation_preview_domains")
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/previews/prv_domains/domains/domain_app/instructions":
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = io.WriteString(w, `{"error":{"code":"dns_unavailable"}}`)
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/previews/prv_domains":
-			value := previewDomainCommandLease(now, "stopped", "session_cli")
-			value["endpoint"], value["endpoint_state"] = "", "custom_domain_not_ready"
-			value["allocation_state"], value["edge_state"] = "released", "down"
-			domains := value["domains"].([]map[string]any)[:1]
-			domains[0]["state"] = "waiting_dns"
-			domains[0]["certificate"].(map[string]any)["state"] = "not_requested"
-			delete(domains[0], "instructions")
-			value["domains"] = domains
-			w.Header().Set("ETag", `"ptv1:preview_lease:cHJ2X2RvbWFpbnM:2"`)
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	domainClient := &previewDomainLeaseClient{client: client, domains: []string{"app.example.com"}, instructionsWriter: io.Discard}
-	_, err := domainClient.Create(context.Background(), preview.LeaseRequest{
-		OwnerMachineID: "machine_cli", OwnerSessionID: "session_cli", OwnerSessionKind: "foreground",
-		Target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", IdempotencyKey: "create-domains",
-	})
-	if err == nil || !strings.Contains(err.Error(), "preview lease was stopped") {
-		t.Fatalf("create error = %v, want actionable stopped-lease failure", err)
-	}
-	if !reflect.DeepEqual(requests, []string{
-		"POST /v1/previews",
-		"GET /v1/previews/prv_domains/domains/domain_app/instructions",
-		"DELETE /v1/previews/prv_domains",
-	}) {
-		t.Fatalf("API request order = %#v", requests)
-	}
 }
 
 func TestObservePreviewDomainsDoesNotReportReadyBeforeCertificate(t *testing.T) {

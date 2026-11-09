@@ -1,0 +1,49 @@
+.nh
+.TH "PB-DOMAIN-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-domain-list - List the workspace's domains
+
+
+.SH SYNOPSIS
+\fBpb domain list [flags]\fP
+
+
+.SH DESCRIPTION
+List the workspace's domains
+
+.PP
+List the active workspace's domains with their DNS verification state, certificate state and how many tunnel or preview hostnames use each one. Use --json for the full records and uses.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-domain(1)\fP

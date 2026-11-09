@@ -287,11 +287,10 @@ func (e *TunnelCreateChangedError) Unwrap() error {
 }
 
 type tunnelCreateDomainOutput struct {
-	Domain       api.TunnelDomain          `json:"domain"`
-	Operation    api.TunnelOperation       `json:"operation"`
-	Instructions api.TunnelDNSInstructions `json:"instructions"`
-	Replayed     bool                      `json:"replayed"`
-	Changed      bool                      `json:"changed"`
+	Domain    api.TunnelDomain    `json:"domain"`
+	Operation api.TunnelOperation `json:"operation"`
+	Replayed  bool                `json:"replayed"`
+	Changed   bool                `json:"changed"`
 }
 
 type tunnelCreateOutput struct {

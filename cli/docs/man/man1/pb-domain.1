@@ -1,0 +1,51 @@
+.nh
+.TH "PB-DOMAIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-domain - Add your own domains to the workspace
+
+
+.SH SYNOPSIS
+\fBpb domain [flags]\fP
+
+
+.SH DESCRIPTION
+Add a domain you control (example.com or dev.example.com) once. After its DNS records
+are in place and it shows verified, any name one level under it (app.example.com) can be used by
+tunnels and previews with --domain, with HTTPS from one shared certificate.
+
+.PP
+Add domains you control to the active workspace once, then use any name one level under a verified domain for tunnels and previews (--domain). Team domains are added and removed by owners and admins.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for domain
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-domain-add(1)\fP, \fBpb-domain-list(1)\fP, \fBpb-domain-remove(1)\fP, \fBpb-domain-show(1)\fP, \fBpb-domain-verify(1)\fP

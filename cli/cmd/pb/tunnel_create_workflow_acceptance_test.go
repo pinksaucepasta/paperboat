@@ -318,20 +318,6 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 		}
 		w.Header().Set("ETag", domain.ETag)
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": domain})
-	case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_workflow/domains/domain_workflow/instructions":
-		if h.event("control.domain.instructions") {
-			w.WriteHeader(499)
-			return
-		}
-		instructions := api.TunnelDNSInstructions{
-			Schema: api.TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_workflow", DomainID: "domain_workflow",
-			Hostname: "app.example.test", Provider: "generic", CertificateStrategy: "managed", VerificationState: "waiting_dns",
-			Records: []api.TunnelDNSRecord{{Name: "app.example.test", Type: "CNAME", Value: "edge.example.test", TTL: 300}}, Note: "Add this authoritative record.",
-		}
-		if h.selfhost && h.dnsVerified {
-			instructions.VerificationState = "verified"
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": instructions})
 	default:
 		h.t.Errorf("unexpected request=%s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
@@ -410,12 +396,12 @@ func TestTunnelCreateWorkflowOrdersServiceControlDomainAndOutput(t *testing.T) {
 	wantOrder := []string{
 		"hostd.probe.unready", "service.install", "service.start", "hostd.readiness", "workflow.begin",
 		"control.tunnel.create", "workflow.tunnel", "control.routes.list", "control.domain.create", "workflow.domain",
-		"control.domain.instructions", "output", "workflow.complete", "workflow.close",
+		"output", "workflow.complete", "workflow.close",
 	}
 	if got := h.events.snapshot(); strings.Join(got, "|") != strings.Join(wantOrder, "|") {
 		t.Fatalf("order=\n%s\nwant=\n%s", strings.Join(got, "\n"), strings.Join(wantOrder, "\n"))
 	}
-	if stderr != "" || !json.Valid([]byte(stdout)) || !strings.Contains(stdout, `"kind":"tunnel_create"`) || !strings.Contains(stdout, `"hostname":"app.example.test"`) || !strings.Contains(stdout, `"edge.example.test"`) {
+	if stderr != "" || !json.Valid([]byte(stdout)) || !strings.Contains(stdout, `"kind":"tunnel_create"`) || !strings.Contains(stdout, `"hostname":"app.example.test"`) {
 		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
 	}
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
@@ -428,7 +414,7 @@ func TestTunnelCreateWorkflowHumanOutputIsFinalAndSecretSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Created tunnel workflow (tun_workflow)", "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test -> http://127.0.0.1:8080", "DNS for app.example.test:", "app.example.test\tCNAME\tedge.example.test\t300"} {
+	for _, expected := range []string{"Created tunnel workflow (tun_workflow)", "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test -> http://127.0.0.1:8080", "Also at: https://app.example.test (certificate: "} {
 		if !strings.Contains(stdout, expected) {
 			t.Fatalf("output missing %q: %s", expected, stdout)
 		}
@@ -439,7 +425,7 @@ func TestTunnelCreateWorkflowHumanOutputIsFinalAndSecretSafe(t *testing.T) {
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
 }
 
-func TestTunnelCreateSelfhostShowsDNSBeforeReadinessAndResumesAfterVerification(t *testing.T) {
+func TestTunnelCreateSelfhostPendsUntilItsEndpointIsReadyAndResumes(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
 	h.selfhost = true
 	firstOut, firstErrOut, err := h.execute(true, true)
@@ -450,14 +436,11 @@ func TestTunnelCreateSelfhostShowsDNSBeforeReadinessAndResumesAfterVerification(
 	if err := json.Unmarshal([]byte(firstOut), &pending); err != nil {
 		t.Fatal(err)
 	}
-	if !pending.Pending || pending.Tunnel.StableEndpoint != "" || pending.Tunnel.SummaryCode != "custom_domain_required" || len(pending.Domains) != 1 || pending.Domains[0].Instructions.VerificationState != "waiting_dns" || !strings.Contains(pending.Recovery, "pb tunnel domain verify tun_workflow app.example.test") {
+	if !pending.Pending || pending.Tunnel.StableEndpoint != "" || pending.Tunnel.SummaryCode != "custom_domain_required" || len(pending.Domains) != 1 || !strings.Contains(pending.Recovery, "Rerun this same `pb tunnel create`") {
 		t.Fatalf("pending result=%+v", pending)
 	}
-	if len(pending.Domains[0].Instructions.Records) != 1 || pending.Domains[0].Instructions.Records[0] != (api.TunnelDNSRecord{Name: "app.example.test", Type: "CNAME", Value: "edge.example.test", TTL: 300}) {
-		t.Fatalf("pending DNS instructions=%+v", pending.Domains[0].Instructions.Records)
-	}
 	firstEvents := h.events.snapshot()
-	if !strings.Contains(strings.Join(firstEvents, "|"), "control.domain.instructions|output|workflow.close") {
+	if !strings.Contains(strings.Join(firstEvents, "|"), "workflow.domain|output|workflow.close") {
 		t.Fatalf("pending ordering=%v", firstEvents)
 	}
 	nameDigest := sha256.Sum256([]byte(h.lastRequest.Name))
@@ -495,7 +478,7 @@ func TestTunnelCreateSelfhostShowsDNSBeforeReadinessAndResumesAfterVerification(
 	h.assertJournalLockReleased(t)
 }
 
-func TestTunnelCreateWaitShowsDNSThenWaitsForTunnelThenDomainOperation(t *testing.T) {
+func TestTunnelCreateWaitWaitsForTunnelThenDomainOperation(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
 	h.trackWait = true
 	stdout, stderr, err := h.executeWithWait(true, true, true)
@@ -503,31 +486,24 @@ func TestTunnelCreateWaitShowsDNSThenWaitsForTunnelThenDomainOperation(t *testin
 		t.Fatalf("create with --wait: stdout=%q stderr=%q error=%v", stdout, stderr, err)
 	}
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
-	if !strings.Contains(stderr, "app.example.test\tCNAME\tedge.example.test\t300") {
-		t.Fatalf("DNS records were not shown before waiting: %q", stderr)
-	}
 	events := h.events.snapshot()
-	dnsProgress, tunnelWait, domainWait := -1, -1, -1
+	tunnelWait, domainWait := -1, -1
 	for index, event := range events {
 		switch event {
-		case "stderr.progress":
-			if dnsProgress == -1 {
-				dnsProgress = index
-			}
 		case "control.operation.tunnel":
 			tunnelWait = index
 		case "control.operation.domain":
 			domainWait = index
 		}
 	}
-	if dnsProgress < 0 || tunnelWait <= dnsProgress || domainWait <= tunnelWait {
+	if tunnelWait < 0 || domainWait <= tunnelWait {
 		t.Fatalf("readiness wait order=%v", events)
 	}
 	var result tunnelCreateOutput
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Pending || len(result.Domains) != 1 || result.Domains[0].Operation.State != "succeeded" || result.Domains[0].Instructions.VerificationState != "waiting_dns" {
+	if result.Pending || len(result.Domains) != 1 || result.Domains[0].Operation.State != "succeeded" {
 		t.Fatalf("create result=%+v", result)
 	}
 }
@@ -563,7 +539,7 @@ func TestTunnelCreateWorkflowResumesExactIdempotentRequestAfterInterruptedOperat
 func TestTunnelCreateWorkflowCancellationStopsAtEveryBoundaryAndReleasesOwnership(t *testing.T) {
 	boundaries := []string{
 		"service.start", "hostd.readiness", "control.tunnel.create", "workflow.tunnel",
-		"control.routes.list", "control.domain.create", "workflow.domain", "control.domain.instructions",
+		"control.routes.list", "control.domain.create", "workflow.domain",
 		"output", "workflow.complete",
 	}
 	for _, boundary := range boundaries {

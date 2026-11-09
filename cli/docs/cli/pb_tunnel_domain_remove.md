@@ -1,19 +1,19 @@
 ## pb tunnel domain remove
 
-Remove a tunnel domain
+Stop serving a tunnel at a hostname
 
 ### Synopsis
 
-Remove a tunnel domain
+Stop serving a tunnel at a hostname
 
-Remove one domain binding after confirmation. DNS records managed by the user are not silently removed by this command.
+Stop serving one tunnel at a hostname after confirmation. The workspace domain and its DNS records stay.
 
-Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+Hostnames come from the workspace's verified domains (pb domain). A hostname is one label under a domain, or the domain itself; the domain's verification and certificate cover it.
 
 JSON output is supported with --json.
 
 ```
-pb tunnel domain remove <tunnel> <domain> [flags]
+pb tunnel domain remove <tunnel> <hostname> [flags]
 ```
 
 ### Options
@@ -38,5 +38,5 @@ pb tunnel domain remove <tunnel> <domain> [flags]
 
 ### SEE ALSO
 
-* [pb tunnel domain](pb_tunnel_domain.md)	 - Manage tunnel domains
+* [pb tunnel domain](pb_tunnel_domain.md)	 - Serve a tunnel at hostnames under your workspace's domains
 

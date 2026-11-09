@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -99,11 +98,6 @@ func validatePreviewDomainSummary(lease PreviewLease, domain PreviewDomainSummar
 	if err := validatePreviewResourceETag(domain.ETag); err != nil {
 		return err
 	}
-	if domain.Instructions != nil {
-		if err := validatePreviewDNSInstructions(lease, domain, *domain.Instructions); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -138,69 +132,6 @@ func validatePreviewDomainCertificate(certificate PreviewDomainCertificate) erro
 		return errors.New("domain certificate expiry is invalid")
 	}
 	return validatePreviewSafeObject(certificate.Failure, 0)
-}
-
-func validatePreviewDNSInstructions(lease PreviewLease, domain PreviewDomainSummary, instructions PreviewDNSInstructions) error {
-	if instructions.Schema != PreviewTunnelSchemaV1 || instructions.Kind != "dns_instructions" || instructions.TargetKind != "preview_lease" || instructions.PreviewID != lease.ID || instructions.DomainID != domain.ID || instructions.Hostname != domain.Hostname || strings.TrimSpace(instructions.Provider) == "" || len(instructions.Provider) > 64 || strings.TrimSpace(instructions.Note) == "" || len(instructions.Note) > 512 || strings.ContainsAny(instructions.Note, "\r\n\x00") {
-		return errors.New("domain DNS instructions binding is invalid")
-	}
-	switch instructions.VerificationState {
-	case "requested", "waiting_dns", "verified", "issuing_tls", "ready", "conflict", "dns_error", "tls_error", "expired", "quarantined":
-	default:
-		return errors.New("domain DNS instruction state is invalid")
-	}
-	if len(instructions.Records) == 0 || len(instructions.Records) > 8 {
-		return errors.New("domain DNS instruction records are invalid")
-	}
-	addressRecords := 0
-	aliasRecords := 0
-	seenRecords := make(map[string]struct{}, len(instructions.Records))
-	challengeName := "_acme-challenge." + strings.TrimPrefix(domain.Hostname, "*.")
-	for _, record := range instructions.Records {
-		if record.TTL < 30 || record.TTL > 86400 || len(record.Name) == 0 || len(record.Name) > 253 || len(record.Value) == 0 || len(record.Value) > 253 || strings.ContainsAny(record.Name+record.Value, "\r\n\x00") {
-			return errors.New("domain DNS instruction record is invalid")
-		}
-		key := record.Name + "\x00" + record.Type + "\x00" + record.Value
-		if _, exists := seenRecords[key]; exists {
-			return errors.New("domain DNS instruction record is duplicated")
-		}
-		seenRecords[key] = struct{}{}
-
-		switch record.Type {
-		case "A", "AAAA":
-			addressRecords++
-			ip := net.ParseIP(record.Value)
-			if record.Name != domain.Hostname || ip == nil || ip.String() != record.Value || (record.Type == "A" && ip.To4() == nil) || (record.Type == "AAAA" && (ip.To4() != nil || ip.To16() == nil)) {
-				return errors.New("domain DNS address record is invalid")
-			}
-		case "ANAME", "ALIAS":
-			aliasRecords++
-			if record.Name != domain.Hostname || !validPreviewDNSAliasTarget(record.Value) {
-				return errors.New("domain DNS alias record is invalid")
-			}
-		case "CNAME":
-			aliasRecords++
-			if (record.Name != domain.Hostname && record.Name != challengeName) || !validPreviewDNSAliasTarget(record.Value) {
-				return errors.New("domain DNS CNAME record is invalid")
-			}
-		default:
-			return errors.New("domain DNS instruction record type is invalid")
-		}
-	}
-	// At most two selected self-hosted edges contribute IPv4 and IPv6
-	// addresses, followed by one primary alias and one ACME delegation.
-	if addressRecords > 4 || aliasRecords > 2 {
-		return errors.New("domain DNS instruction records exceed the placement limit")
-	}
-	return nil
-}
-
-func validPreviewDNSAliasTarget(value string) bool {
-	if strings.Contains(value, "*") {
-		return false
-	}
-	normalized, err := NormalizePreviewDomain(value)
-	return err == nil && normalized == value
 }
 
 func validatePreviewResourceETag(etag string) error {

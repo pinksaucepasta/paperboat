@@ -231,7 +231,7 @@ func TestTunnelCreateUsesCanonicalInputAndJSONOutput(t *testing.T) {
 	}
 }
 
-func TestTunnelCreateContinuesFromPendingSelfhostEndpointToDNSInstructions(t *testing.T) {
+func TestTunnelCreatePendingSelfhostEndpointResumesWithoutRecreatingTheDomain(t *testing.T) {
 	var requests []string
 	domainCreates := 0
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -272,17 +272,11 @@ func TestTunnelCreateContinuesFromPendingSelfhostEndpointToDNSInstructions(t *te
 			domain.Certificate.State = "not_requested"
 			w.Header().Set("ETag", domain.ETag)
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": domain})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/domains/domain_1/instructions":
-			instructions := api.TunnelDNSInstructions{
-				Schema: api.TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_1", DomainID: "domain_1", Hostname: "app.example.test", Provider: "generic",
-				Records: []api.TunnelDNSRecord{
-					{Name: "app.example.test", Type: "A", Value: "203.0.113.10", TTL: 300},
-					{Name: "app.example.test", Type: "AAAA", Value: "2001:db8::10", TTL: 300},
-					{Name: "_acme-challenge.app.example.test", Type: "CNAME", Value: "pb.challenge.example.test", TTL: 300},
-				},
-				CertificateStrategy: "managed", VerificationState: "waiting_dns", Note: "Add these records.",
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": instructions})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1":
+			tunnel := validCommandTunnel()
+			tunnel.AccessMode, tunnel.StableEndpoint, tunnel.SummaryCode = "public", "", "custom_domain_required"
+			w.Header().Set("ETag", tunnel.ETag)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
 		default:
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
@@ -298,12 +292,12 @@ func TestTunnelCreateContinuesFromPendingSelfhostEndpointToDNSInstructions(t *te
 		"POST /v1/tunnels",
 		"GET /v1/tunnels/tun_1/routes",
 		"POST /v1/tunnels/tun_1/domains",
-		"GET /v1/tunnels/tun_1/domains/domain_1/instructions",
+		"GET /v1/tunnels/tun_1",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests = %#v, want %#v", requests, want)
 	}
-	for _, expected := range []string{`"stable_endpoint":""`, `"type":"A"`, `"type":"AAAA"`, `"pb.challenge.example.test"`} {
+	for _, expected := range []string{`"stable_endpoint":""`, `"pending":true`, `"hostname":"app.example.test"`} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("output missing %q: %s", expected, output.String())
 		}
@@ -318,7 +312,7 @@ func TestTunnelCreateContinuesFromPendingSelfhostEndpointToDNSInstructions(t *te
 	if domainCreates != 1 {
 		t.Fatalf("domain creates=%d", domainCreates)
 	}
-	if strings.Join(requests, ",") != "POST /v1/tunnels,GET /v1/tunnels/tun_1/routes,GET /v1/tunnels/tun_1/domains/domain_1,GET /v1/tunnels/tun_1/domains/domain_1/instructions" {
+	if strings.Join(requests, ",") != "POST /v1/tunnels,GET /v1/tunnels/tun_1/routes,GET /v1/tunnels/tun_1/domains/domain_1,GET /v1/tunnels/tun_1" {
 		t.Fatalf("retry requests=%v", requests)
 	}
 
@@ -335,7 +329,7 @@ func TestTunnelCreateHumanOutputExplainsPendingCustomerDomain(t *testing.T) {
 		Operation: validCommandOperation("tunnel", tunnel.ID),
 		Route:     &route,
 	}, "http://127.0.0.1:8080")
-	if strings.Contains(output, " ->  http://") || !strings.Contains(output, "waiting for a verified customer domain") || !strings.Contains(output, "pb tunnel domain add tun_1 HOSTNAME --route route_1") {
+	if strings.Contains(output, " ->  http://") || !strings.Contains(output, "waiting for a hostname under a verified domain") || !strings.Contains(output, "pb tunnel domain add tun_1 HOSTNAME --route route_1") {
 		t.Fatalf("pending domain output = %q", output)
 	}
 }

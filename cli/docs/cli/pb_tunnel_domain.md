@@ -1,12 +1,12 @@
 ## pb tunnel domain
 
-Manage tunnel domains
+Serve a tunnel at hostnames under your workspace's domains
 
 ### Synopsis
 
-Manage tunnel domains
+Serve a tunnel at hostnames under your workspace's domains
 
-Manage custom domains bound to a durable tunnel. Add the hostname, follow authoritative DNS instructions, verify ownership, then inspect route readiness.
+Serve a durable tunnel at your own hostnames. A hostname must be one level under a verified workspace domain (pb domain add); it needs no DNS step of its own.
 
 Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
@@ -36,9 +36,7 @@ pb tunnel domain [flags]
 ### SEE ALSO
 
 * [pb tunnel](pb_tunnel.md)	 - Manage durable tunnels or start an ephemeral tunnel
-* [pb tunnel domain add](pb_tunnel_domain_add.md)	 - Add a tunnel domain
-* [pb tunnel domain instructions](pb_tunnel_domain_instructions.md)	 - Show authoritative DNS instructions for a tunnel domain
+* [pb tunnel domain add](pb_tunnel_domain_add.md)	 - Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
 * [pb tunnel domain list](pb_tunnel_domain_list.md)	 - List tunnel domains
-* [pb tunnel domain remove](pb_tunnel_domain_remove.md)	 - Remove a tunnel domain
-* [pb tunnel domain verify](pb_tunnel_domain_verify.md)	 - Verify a tunnel domain
+* [pb tunnel domain remove](pb_tunnel_domain_remove.md)	 - Stop serving a tunnel at a hostname
 

@@ -2,7 +2,7 @@
 .TH "PB-TUNNEL-DOMAIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-tunnel-domain - Manage tunnel domains
+pb-tunnel-domain - Serve a tunnel at hostnames under your workspace's domains
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-tunnel-domain - Manage tunnel domains
 
 
 .SH DESCRIPTION
-Manage tunnel domains
+Serve a tunnel at hostnames under your workspace's domains
 
 .PP
-Manage custom domains bound to a durable tunnel. Add the hostname, follow authoritative DNS instructions, verify ownership, then inspect route readiness.
+Serve a durable tunnel at your own hostnames. A hostname must be one level under a verified workspace domain (pb domain add); it needs no DNS step of its own.
 
 .PP
 Durable tunnels retain identity, routes, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
@@ -53,4 +53,4 @@ With --json, this command group lists its available commands.
 
 
 .SH SEE ALSO
-\fBpb-tunnel(1)\fP, \fBpb-tunnel-domain-add(1)\fP, \fBpb-tunnel-domain-instructions(1)\fP, \fBpb-tunnel-domain-list(1)\fP, \fBpb-tunnel-domain-remove(1)\fP, \fBpb-tunnel-domain-verify(1)\fP
+\fBpb-tunnel(1)\fP, \fBpb-tunnel-domain-add(1)\fP, \fBpb-tunnel-domain-list(1)\fP, \fBpb-tunnel-domain-remove(1)\fP

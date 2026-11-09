@@ -1,0 +1,49 @@
+.nh
+.TH "PB-DOMAIN-SHOW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-domain-show - Show a domain's DNS records, status and uses
+
+
+.SH SYNOPSIS
+\fBpb domain show <domain> [flags]\fP
+
+
+.SH DESCRIPTION
+Show a domain's DNS records, status and uses
+
+.PP
+Show one domain's DNS records, verification and certificate state, the exact fix for a failed check, and the hostnames that use it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for show
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-domain(1)\fP

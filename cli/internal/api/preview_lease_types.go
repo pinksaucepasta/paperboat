@@ -86,7 +86,6 @@ type PreviewDomainSummary struct {
 	Certificate    PreviewDomainCertificate `json:"certificate"`
 	Generation     int64                    `json:"generation"`
 	ETag           string                   `json:"etag"`
-	Instructions   *PreviewDNSInstructions  `json:"instructions,omitempty"`
 }
 
 type PreviewDomainDNS struct {
@@ -100,29 +99,6 @@ type PreviewDomainCertificate struct {
 	Reference string         `json:"reference,omitempty"`
 	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 	Failure   map[string]any `json:"failure,omitempty"`
-}
-
-type PreviewDNSRecord struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Value string `json:"value"`
-	TTL   int    `json:"ttl"`
-}
-
-// PreviewDNSInstructions contains customer-actionable records only. It never
-// carries a challenge token, credential, or private key.
-type PreviewDNSInstructions struct {
-	Schema              string             `json:"schema"`
-	Kind                string             `json:"kind"`
-	TargetKind          string             `json:"target_kind"`
-	PreviewID           string             `json:"preview_id"`
-	DomainID            string             `json:"domain_id"`
-	Hostname            string             `json:"hostname"`
-	Provider            string             `json:"provider"`
-	Records             []PreviewDNSRecord `json:"records"`
-	CertificateStrategy string             `json:"certificate_strategy"`
-	VerificationState   string             `json:"verification_state"`
-	Note                string             `json:"note"`
 }
 
 // PreviewLeaseOperation is returned when lease creation is still progressing.

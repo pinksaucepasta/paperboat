@@ -116,13 +116,6 @@ func TestTunnelMutationsRequireCurrentETagAndMapStaleWrites(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{Items: []api.TunnelRoute{validCommandRoute("route_1", "api")}}})
 			},
 		},
-		{
-			name: "domain", args: []string{"domain", "verify", "tun_1", "domain_1", "--json"},
-			readMethod: http.MethodGet, readPath: "/v1/tunnels/tun_1/domains", mutMethod: http.MethodPost, mutPath: "/v1/tunnels/tun_1/domains/domain_1/verify",
-			writeRead: func(w http.ResponseWriter) {
-				_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{validCommandDomain("domain_1", "app.example.test")}}})
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -173,7 +166,7 @@ func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
 			},
 		},
 		{
-			name: "domain", args: []string{"domain", "verify", "tun_1", "domain_other", "--json"},
+			name: "domain", args: []string{"domain", "remove", "tun_1", "domain_other", "--json"},
 			serve: func(w http.ResponseWriter, _ *http.Request) {
 				domain := validCommandDomain("domain_other", "other.example.test")
 				domain.TunnelID = "tun_other"

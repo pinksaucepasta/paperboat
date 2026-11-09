@@ -33,8 +33,8 @@ func addUnknownFields(value any) any {
 func TestResponseTypesIgnoreFieldsAddedByANewerServer(t *testing.T) {
 	for _, prototype := range []any{
 		E2EERoot{}, PeerTransportKeySet{}, []PendingEndpointIdentity{}, EndpointCertificateDocument{},
-		PreviewDNSInstructions{}, PreviewLeasePage{}, PreviewLease{}, DiagnosticUploadIntent{},
-		InspectorAccess{}, []InspectorTarget{}, NativePrivateGrant{}, TunnelDNSInstructions{}, clientapi.WorkspacePage{},
+		PreviewLeasePage{}, PreviewLease{}, DiagnosticUploadIntent{},
+		InspectorAccess{}, []InspectorTarget{}, NativePrivateGrant{}, WorkspaceDomain{}, clientapi.WorkspacePage{},
 		clientapi.WorkspacePage{Items: []clientapi.Workspace{{ID: "personal", Name: "Personal", Kind: "personal", Role: "owner"}}},
 	} {
 		kind := reflect.TypeOf(prototype)

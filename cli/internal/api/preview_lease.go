@@ -140,30 +140,6 @@ func (c *Client) GetPreviewLease(ctx context.Context, previewID string) (Preview
 	return lease, nil
 }
 
-// GetPreviewDomainDNSInstructions returns the server-owned customer records
-// for one preview domain. The response is bound to the exact preview and
-// domain IDs in the request before it is exposed to callers.
-func (c *Client) GetPreviewDomainDNSInstructions(ctx context.Context, previewID, domainID string) (PreviewDNSInstructions, error) {
-	if !validPreviewID(previewID) || !validPreviewID(domainID) {
-		return PreviewDNSInstructions{}, fmt.Errorf("%w: preview and domain IDs are required", ErrPreviewLeaseInvalid)
-	}
-	path := "/v1/previews/" + url.PathEscape(previewID) + "/domains/" + url.PathEscape(domainID) + "/instructions"
-	var instructions PreviewDNSInstructions
-	if err := c.doChecked(ctx, http.MethodGet, path, nil, &instructions); err != nil {
-		return PreviewDNSInstructions{}, err
-	}
-	hostname, err := NormalizePreviewDomain(instructions.Hostname)
-	if err != nil || hostname != instructions.Hostname {
-		return PreviewDNSInstructions{}, fmt.Errorf("%w: DNS instructions hostname is invalid", ErrPreviewLeaseInvalid)
-	}
-	lease := PreviewLease{ID: previewID}
-	domain := PreviewDomainSummary{ID: domainID, Hostname: hostname}
-	if err := validatePreviewDNSInstructions(lease, domain, instructions); err != nil {
-		return PreviewDNSInstructions{}, fmt.Errorf("%w: invalid DNS instructions: %v", ErrPreviewLeaseInvalid, err)
-	}
-	return instructions, nil
-}
-
 // RenewPreviewLease extends a live lease while preserving its immutable
 // identity. Endpoint is a server-projected public URL and can change when a
 // self-hosted custom domain becomes ready or stops being usable.

@@ -80,7 +80,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 			t.Fatalf("missing %s", name)
 		}
 	}
-	for _, path := range [][]string{{"route", "add"}, {"route", "update"}, {"route", "remove"}, {"domain", "add"}, {"domain", "verify"}, {"domain", "remove"}, {"domain", "instructions"}} {
+	for _, path := range [][]string{{"route", "add"}, {"route", "update"}, {"route", "remove"}, {"domain", "add"}, {"domain", "remove"}} {
 		if child, _, _ := root.Find(path); child == nil || child == root {
 			t.Fatalf("missing %v", path)
 		}
@@ -101,7 +101,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 		want []string
 	}{
 		{path: []string{"route"}, want: []string{"add", "list", "remove", "update"}},
-		{path: []string{"domain"}, want: []string{"add", "instructions", "list", "remove", "verify"}},
+		{path: []string{"domain"}, want: []string{"add", "list", "remove"}},
 	} {
 		parent, _, _ := root.Find(expected.path)
 		var got []string

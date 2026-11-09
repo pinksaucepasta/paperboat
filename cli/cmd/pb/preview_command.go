@@ -176,7 +176,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	var leaseClient preview.LeaseClient
 	var leaseReader preview.LeaseReader
 	domainClient := &previewDomainLeaseClient{
-		client: client, domains: append([]string(nil), domains...), instructionsWriter: command.ErrOrStderr(),
+		client: client, domains: append([]string(nil), domains...),
 	}
 	leaseClient, leaseReader = domainClient, domainClient
 	if observer, ok := carrier.(interface {

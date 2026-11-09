@@ -307,10 +307,10 @@ func TestPreviewConsoleResizesSanitizesAndPreservesActionErrors(t *testing.T) {
 	model := previewConsoleModel{lease: preview.Lease{Endpoint: "https://preview.example/\x1b]52;c;payload\x07", State: "ready"}, target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, visibility: "private", input: textinput.New(), status: "Try the connector again"}
 	next, _ := model.Update(tea.WindowSizeMsg{Width: 28, Height: 12})
 	model = next.(previewConsoleModel)
-	next, _ = model.Update(previewConsoleStatus{lease: api.PreviewLease{State: "ready", Domains: []api.PreviewDomainSummary{{Hostname: "app.example.com", State: "waiting_dns", Certificate: api.PreviewDomainCertificate{State: "pending"}, Instructions: &api.PreviewDNSInstructions{Records: []api.PreviewDNSRecord{{Type: "CNAME", Name: "app.example.com", Value: "edge.example.com"}}}}}}})
+	next, _ = model.Update(previewConsoleStatus{lease: api.PreviewLease{State: "ready", Domains: []api.PreviewDomainSummary{{Hostname: "app.example.com", State: "waiting_dns", Certificate: api.PreviewDomainCertificate{State: "pending"}}}}})
 	model = next.(previewConsoleModel)
-	if model.status != "Try the connector again" || !strings.Contains(model.content(), "waiting_dns") || !strings.Contains(model.content(), "CNAME") {
-		t.Fatal("poll lost domain instructions or action error")
+	if model.status != "Try the connector again" || !strings.Contains(model.content(), "waiting_dns") {
+		t.Fatal("poll lost domain status or action error")
 	}
 	// v2 styles always emit SGR; the injected payload may not add other controls.
 	view := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(model.View().Content, "")

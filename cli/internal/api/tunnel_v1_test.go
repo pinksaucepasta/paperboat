@@ -433,23 +433,6 @@ func TestTunnelRoutePatchEncodesExplicitPathClearWithOCC(t *testing.T) {
 	}
 }
 
-func TestTunnelDomainInstructionsV1BindsIdentityAndRedactsNote(t *testing.T) {
-	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/tunnels/tun_1/domains/domain_1/instructions" {
-			t.Fatalf("path=%s", r.URL.Path)
-		}
-		instructions := TunnelDNSInstructions{Schema: TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_1", DomainID: "domain_1", Hostname: "app.example.test", Provider: "generic", Records: []TunnelDNSRecord{{Name: "app.example.test", Type: "CNAME", Value: "edge.example.test", TTL: 300}}, CertificateStrategy: "managed", VerificationState: "waiting_dns", Note: "Bearer must-not-escape"}
-		writeTunnelTestData(t, w, instructions)
-	})
-	out, err := client.TunnelDomainInstructionsV1(context.Background(), "tun_1", "domain_1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Note != "[REDACTED]" {
-		t.Fatalf("instructions=%#v", out)
-	}
-}
-
 func TestTunnelStatusV1RedactsUnsafeHumanText(t *testing.T) {
 	client := tunnelTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		health := validTunnelHealthTestValue()
@@ -588,7 +571,7 @@ func TestTunnelEndpointIdentityIsIndependentOfHostname(t *testing.T) {
 }
 
 func TestTunnelDomainMutationReadsCanonicalResourceAfterOperation(t *testing.T) {
-	for _, action := range []string{"create", "verify"} {
+	for _, action := range []string{"create"} {
 		t.Run(action, func(t *testing.T) {
 			domain := TunnelDomain{Schema: TunnelV1Schema, Kind: "domain_binding", ID: "domain_1", AccountID: "account_1", TunnelID: "tun_1", RouteID: "route_1", Hostname: "app.example.test", MatchType: "exact", CertificateStrategy: "managed", State: "waiting_dns", DNS: TunnelDomainDNS{Target: "edge.example.test"}, Certificate: TunnelDomainCertificate{State: "not_requested"}, Generation: 2, ETag: `"domain:domain_1:2"`}
 			gets := 0
@@ -618,11 +601,7 @@ func TestTunnelDomainMutationReadsCanonicalResourceAfterOperation(t *testing.T) 
 			client.SetMachineAuth(machineAuthTestSource{})
 			var out TunnelDomainMutation
 			var err error
-			if action == "create" {
-				out, err = client.CreateTunnelDomainV1(context.Background(), "tun_1", "idem_1", TunnelDomainInput{Hostname: domain.Hostname, RouteID: domain.RouteID, Provider: "generic"})
-			} else {
-				out, err = client.MutateTunnelDomainV1(context.Background(), "tun_1", "domain_1", "verify", `"domain:domain_1:1"`, "idem_1")
-			}
+			out, err = client.CreateTunnelDomainV1(context.Background(), "tun_1", "idem_1", TunnelDomainInput{Hostname: domain.Hostname, RouteID: domain.RouteID})
 			if err != nil || gets != 1 || out.Domain.Hostname != domain.Hostname || out.Domain.State != domain.State || out.Operation.ResourceID != domain.ID {
 				t.Fatalf("result=%#v gets=%d error=%v", out, gets, err)
 			}

@@ -372,22 +372,12 @@ func (c *Client) CreateTunnelDomainV1(ctx context.Context, tunnel, key string, i
 	}
 	return c.domainMutation(ctx, http.MethodPost, p, "", key, in)
 }
-func (c *Client) MutateTunnelDomainV1(ctx context.Context, tunnel, id, action, etag, key string) (TunnelDomainMutation, error) {
-	if action != "delete" && action != "verify" {
-		return TunnelDomainMutation{}, errors.New("invalid domain action")
-	}
+func (c *Client) DeleteTunnelDomainV1(ctx context.Context, tunnel, id, etag, key string) (TunnelDomainMutation, error) {
 	p, e := tunnelPath("tunnels", tunnel, "domains", id)
-	if action == "verify" {
-		p += "/verify"
-	}
 	if e != nil {
 		return TunnelDomainMutation{}, e
 	}
-	method := http.MethodPost
-	if action == "delete" {
-		method = http.MethodDelete
-	}
-	return c.domainMutation(ctx, method, p, etag, key, struct{}{})
+	return c.domainMutation(ctx, http.MethodDelete, p, etag, key, struct{}{})
 }
 func (c *Client) domainMutation(ctx context.Context, method, path, etag, key string, body any) (TunnelDomainMutation, error) {
 	var h http.Header
@@ -417,27 +407,6 @@ func (c *Client) domainMutation(ctx context.Context, method, path, etag, key str
 	}
 	if e == nil && out.Domain.Schema == "" && out.Operation.Schema != "" && method != http.MethodDelete {
 		out.Domain, e = c.GetTunnelDomainV1(ctx, parts[0], out.Operation.ResourceID)
-	}
-	return out, e
-}
-func (c *Client) TunnelDomainInstructionsV1(ctx context.Context, tunnel, id string) (TunnelDNSInstructions, error) {
-	p, e := tunnelPath("tunnels", tunnel, "domains", id)
-	if e != nil {
-		return TunnelDNSInstructions{}, e
-	}
-	var out TunnelDNSInstructions
-	e = c.doChecked(ctx, http.MethodGet, p+"/instructions", nil, &out)
-	if e == nil {
-		if out.Schema != TunnelV1Schema || out.Kind != "dns_instructions" || out.TunnelID != tunnel || out.DomainID != id || validateDomainHostname(out.Hostname) != nil || out.Provider == "" || len(out.Provider) > 64 || out.CertificateStrategy == "" || len(out.CertificateStrategy) > 64 || out.VerificationState == "" || len(out.VerificationState) > 64 || len(out.Records) > 32 || len(out.Note) > 2000 || out.PublicTCPPort < 0 || out.PublicTCPPort > 65535 || (out.PublicTCPPort > 0 && out.PublicTCPPort < 1024) || containsTunnelControl(out.Provider+out.CertificateStrategy+out.VerificationState+out.Note) {
-			e = ErrUnsafeTunnelResponse
-		}
-		for _, record := range out.Records {
-			if record.Name == "" || len(record.Name) > 253 || record.Type == "" || len(record.Type) > 16 || record.Value == "" || len(record.Value) > 2048 || record.TTL < 0 || record.TTL > 604800 || containsTunnelControl(record.Name+record.Type+record.Value) {
-				e = ErrUnsafeTunnelResponse
-				break
-			}
-		}
-		out.Note = redactTunnelText(out.Note)
 	}
 	return out, e
 }

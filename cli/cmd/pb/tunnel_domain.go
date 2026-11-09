@@ -11,57 +11,9 @@ import (
 )
 
 func tunnelDomainCommand() *cobra.Command {
-	root := tunnelCommand("domain", "Manage tunnel domains", cobra.NoArgs, nil)
-	root.AddCommand(domainListCommand(), domainAddCommand(), domainInstructionsCommand())
-	for _, a := range []string{"remove", "verify"} {
-		root.AddCommand(domainMutationCommand(a))
-	}
+	root := tunnelCommand("domain", "Serve a tunnel at hostnames under your workspace's domains", cobra.NoArgs, nil)
+	root.AddCommand(domainListCommand(), domainAddCommand(), domainRemoveCommand())
 	return root
-}
-
-func domainInstructionsCommand() *cobra.Command {
-	command := tunnelCommand("instructions <tunnel> <domain>", "Show authoritative DNS instructions for a tunnel domain", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
-		client, ctx, err := tunnelClient(command)
-		if err != nil {
-			return err
-		}
-		tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
-		if err != nil {
-			return err
-		}
-		domain, err := resolveTunnelDomain(ctx, client, tunnelID, args[1])
-		if err != nil {
-			return err
-		}
-		instructions, err := retryTunnelRead(ctx, func() (api.TunnelDNSInstructions, error) {
-			return client.TunnelDomainInstructionsV1(ctx, tunnelID, domain.ID)
-		})
-		if err != nil {
-			return err
-		}
-		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
-			return tunnelOutput(command, instructions, "")
-		}
-		writer := command.OutOrStdout()
-		for _, record := range instructions.Records {
-			if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\n", record.Name, record.Type, record.Value, record.TTL); err != nil {
-				return err
-			}
-		}
-		if instructions.PublicTCPPort > 0 {
-			if _, err := fmt.Fprintf(writer, "TCP endpoint\t%s:%d\n", strings.TrimPrefix(instructions.Hostname, "*."), instructions.PublicTCPPort); err != nil {
-				return err
-			}
-		}
-		if instructions.Note != "" {
-			if _, err := fmt.Fprintln(writer, instructions.Note); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	tunnelJSONFlag(command)
-	return command
 }
 
 func domainListCommand() *cobra.Command {
@@ -100,15 +52,11 @@ func domainListCommand() *cobra.Command {
 }
 
 func domainAddCommand() *cobra.Command {
-	command := tunnelCommand("add <tunnel> <hostname>", "Add a tunnel domain", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
+	command := tunnelCommand("add <tunnel> <hostname>", "Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
 		host := strings.ToLower(args[1])
 		route, _ := command.Flags().GetString("route")
-		provider, _ := command.Flags().GetString("provider")
 		if !validTunnelCLIHostname(host) {
 			return errors.New("domain hostname is invalid")
-		}
-		if provider == "" || len(provider) > 64 || strings.ContainsAny(provider, "\x00\r\n") {
-			return errors.New("DNS provider is invalid")
 		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
@@ -127,7 +75,7 @@ func domainAddCommand() *cobra.Command {
 			return e
 		}
 		out, e := retryTunnelRead(ctx, func() (api.TunnelDomainMutation, error) {
-			return c.CreateTunnelDomainV1(ctx, tunnelID, key, api.TunnelDomainInput{Hostname: host, RouteID: resolvedRoute.ID, Provider: provider})
+			return c.CreateTunnelDomainV1(ctx, tunnelID, key, api.TunnelDomainInput{Hostname: host, RouteID: resolvedRoute.ID})
 		})
 		if e != nil {
 			return e
@@ -136,20 +84,17 @@ func domainAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		return tunnelOutput(command, out, fmt.Sprintf("Added domain %s; status: %s", out.Domain.ID, tunnelOperationHuman(out.Operation)))
+		return tunnelOutput(command, out, fmt.Sprintf("Serving https://%s; certificate: %s; status: %s", out.Domain.Hostname, out.Domain.Certificate.State, tunnelOperationHuman(out.Operation)))
 	})
-	for _, f := range []string{"route"} {
-		command.Flags().String(f, "", f)
-		_ = command.MarkFlagRequired(f)
-	}
-	command.Flags().String("provider", "generic", "DNS provider")
+	command.Flags().String("route", "", "route to serve at the hostname")
+	_ = command.MarkFlagRequired("route")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command
 }
 
-func domainMutationCommand(action string) *cobra.Command {
-	command := tunnelCommand(action+" <tunnel> <domain>", strings.ToUpper(action[:1])+action[1:]+" a tunnel domain", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
+func domainRemoveCommand() *cobra.Command {
+	command := tunnelCommand("remove <tunnel> <hostname>", "Stop serving a tunnel at a hostname", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -162,21 +107,15 @@ func domainMutationCommand(action string) *cobra.Command {
 		if e != nil {
 			return e
 		}
-		if action == "remove" {
-			if e := confirmMutation(command, "tunnel-domain-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove domain binding %s from tunnel %s? User-owned DNS records remain.", current.ID, tunnelID)); e != nil {
-				return e
-			}
+		if e := confirmMutation(command, "tunnel-domain-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Stop serving tunnel %s at %s? The workspace domain and your DNS records stay.", tunnelID, current.Hostname)); e != nil {
+			return e
 		}
 		key, e := tunnelKey()
 		if e != nil {
 			return e
 		}
-		apiAction := action
-		if apiAction == "remove" {
-			apiAction = "delete"
-		}
 		out, e := retryTunnelRead(ctx, func() (api.TunnelDomainMutation, error) {
-			return c.MutateTunnelDomainV1(ctx, tunnelID, current.ID, apiAction, current.ETag, key)
+			return c.DeleteTunnelDomainV1(ctx, tunnelID, current.ID, current.ETag, key)
 		})
 		if e != nil {
 			return e
@@ -185,15 +124,9 @@ func domainMutationCommand(action string) *cobra.Command {
 		if e != nil {
 			return e
 		}
-		human := fmt.Sprintf("%s domain %s; status: %s", tunnelActionPastTense(action), out.Domain.ID, tunnelOperationHuman(out.Operation))
-		if action == "remove" {
-			human = fmt.Sprintf("Removed domain %s; user-owned DNS records are preserved; status: %s", out.Domain.ID, tunnelOperationHuman(out.Operation))
-		}
-		return tunnelOutput(command, out, human)
+		return tunnelOutput(command, out, fmt.Sprintf("Removed %s from tunnel %s; status: %s", current.Hostname, tunnelID, tunnelOperationHuman(out.Operation)))
 	})
-	if action == "remove" {
-		command.Flags().String("confirm", "", "six-character confirmation code from the preview")
-	}
+	command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

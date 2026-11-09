@@ -487,6 +487,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(configCobraCommand())
 	root.AddCommand(previewCobraCommandV1())
 	root.AddCommand(tunnelCobraCommandV1())
+	root.AddCommand(domainCobraCommand())
 	access := &cobra.Command{Use: "access", Short: "Open authenticated private access", Args: commandArgs(cobra.NoArgs)}
 	access.AddCommand(accessTunnelCobraCommandV1())
 	access.AddCommand(accessMachineCobraCommandV1())

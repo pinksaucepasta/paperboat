@@ -43,17 +43,17 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "%s tunnel %s (%s)\n", verb, result.Tunnel.Name, result.Tunnel.ID)
 	if result.Pending {
-		fmt.Fprintln(&output, "Serving is pending until a customer domain is verified")
+		fmt.Fprintln(&output, "Serving is pending until the tunnel has a hostname under a verified domain")
 	}
 	if result.Tunnel.StableEndpoint != "" {
 		fmt.Fprintf(&output, "%s -> %s\n", result.Tunnel.StableEndpoint, origin)
 	} else {
-		fmt.Fprintln(&output, "Public URL: waiting for a verified customer domain")
+		fmt.Fprintln(&output, "Public URL: waiting for a hostname under a verified domain (pb domain list)")
 		if len(result.Domains) == 0 {
 			if result.Route != nil {
-				fmt.Fprintf(&output, "Next: add a domain with `pb tunnel domain add %s HOSTNAME --route %s`, then follow `pb tunnel domain instructions %s HOSTNAME`.\n", result.Tunnel.ID, result.Route.ID, result.Tunnel.ID)
+				fmt.Fprintf(&output, "Next: `pb tunnel domain add %s HOSTNAME --route %s` with a name under a verified domain (pb domain add).\n", result.Tunnel.ID, result.Route.ID)
 			} else {
-				fmt.Fprintf(&output, "Next: run `pb tunnel route list %s`, then add a customer domain and follow its DNS instructions.\n", result.Tunnel.ID)
+				fmt.Fprintf(&output, "Next: run `pb tunnel route list %s`, then `pb tunnel domain add` a name under a verified domain.\n", result.Tunnel.ID)
 			}
 		}
 	}
@@ -71,13 +71,7 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 		fmt.Fprintf(&output, "Status: %s", tunnelOperationHuman(result.Operation))
 	}
 	for _, domain := range result.Domains {
-		fmt.Fprintf(&output, "\nDNS for %s:", domain.Domain.Hostname)
-		for _, record := range domain.Instructions.Records {
-			fmt.Fprintf(&output, "\n%s\t%s\t%s\t%d", record.Name, record.Type, record.Value, record.TTL)
-		}
-		if domain.Instructions.Note != "" {
-			fmt.Fprintf(&output, "\n%s", domain.Instructions.Note)
-		}
+		fmt.Fprintf(&output, "\nAlso at: https://%s (certificate: %s)", domain.Domain.Hostname, domain.Domain.Certificate.State)
 	}
 	if result.Recovery != "" {
 		fmt.Fprintf(&output, "\nNext: %s", result.Recovery)
@@ -266,7 +260,7 @@ func tunnelCreateCommand() *cobra.Command {
 					domain.Replayed = true
 				} else {
 					domain, domainErr = retryTunnelRead(ctx, func() (api.TunnelDomainMutation, error) {
-						return client.CreateTunnelDomainV1(ctx, out.Tunnel.ID, domainState.Key, api.TunnelDomainInput{Hostname: hostname, RouteID: routes.Items[0].ID, Provider: "generic"})
+						return client.CreateTunnelDomainV1(ctx, out.Tunnel.ID, domainState.Key, api.TunnelDomainInput{Hostname: hostname, RouteID: routes.Items[0].ID})
 					})
 				}
 				if domainErr != nil {
@@ -281,29 +275,13 @@ func tunnelCreateCommand() *cobra.Command {
 				if err := workflow.RecordDomain(ctx, index, domain.Domain.ID); err != nil {
 					return tunnelCreateJournalError(out.Tunnel.ID, "recording custom domain "+hostname, fmt.Sprintf("pb tunnel domain add %s %s --route %s", out.Tunnel.ID, hostname, routes.Items[0].ID), err)
 				}
-				instructions, instructionsErr := retryTunnelRead(ctx, func() (api.TunnelDNSInstructions, error) {
-					return client.TunnelDomainInstructionsV1(ctx, out.Tunnel.ID, domain.Domain.ID)
-				})
-				if instructionsErr != nil {
-					return &TunnelCreateChangedError{TunnelID: out.Tunnel.ID, Stage: "DNS instructions for custom domain " + hostname, Outcome: "could not be read", RecoveryCommand: fmt.Sprintf("pb tunnel domain instructions %s %s", out.Tunnel.ID, hostname), Cause: instructionsErr}
-				}
-				result.Domains = append(result.Domains, tunnelCreateDomainOutput{Domain: domain.Domain, Operation: domain.Operation, Instructions: instructions, Replayed: domain.Replayed, Changed: domain.Changed})
+				result.Domains = append(result.Domains, tunnelCreateDomainOutput{Domain: domain.Domain, Operation: domain.Operation, Replayed: domain.Replayed, Changed: domain.Changed})
 			}
 		}
 
-		// A self-hosted tunnel has no usable public URL until a customer domain
-		// is verified. Persist its domain IDs and show the exact DNS records
-		// before waiting for readiness, which cannot complete while that
-		// customer route is ineligible.
+		// A self-hosted tunnel has no usable public URL until it serves a hostname under a verified
+		// workspace domain (verified hostnames are bound already verified).
 		if out.Tunnel.StableEndpoint == "" {
-			if len(result.Domains) > 0 && !tunnelCreateDomainsVerified(result.Domains) {
-				result.Pending = true
-				result.Recovery = tunnelCreatePendingRecovery(result)
-				if err := tunnelOutput(command, result, tunnelCreateHumanOutput(result, origin)); err != nil {
-					return err
-				}
-				return nil // Keep the journal so the exact create request can resume.
-			}
 			refreshed, refreshErr := retryTunnelRead(ctx, func() (api.Tunnel, error) {
 				return client.GetTunnelV1(ctx, out.Tunnel.ID)
 			})
@@ -316,11 +294,7 @@ func tunnelCreateCommand() *cobra.Command {
 			out.Tunnel, result.Tunnel = refreshed, refreshed
 			if refreshed.StableEndpoint == "" {
 				result.Pending = true
-				if len(result.Domains) == 0 {
-					result.Recovery = tunnelCreatePendingRecovery(result)
-				} else {
-					result.Recovery = "DNS is verified; rerun the same `pb tunnel create` command after the public customer endpoint is ready."
-				}
+				result.Recovery = tunnelCreatePendingRecovery(result)
 				if err := tunnelOutput(command, result, tunnelCreateHumanOutput(result, origin)); err != nil {
 					return err
 				}
@@ -328,17 +302,6 @@ func tunnelCreateCommand() *cobra.Command {
 			}
 		}
 		journal = workflow.Snapshot()
-		if err := writeTunnelCreateDNSProgress(command, result.Domains); err != nil {
-			hostname := ""
-			if len(result.Domains) > 0 {
-				hostname = result.Domains[0].Domain.Hostname
-			}
-			recovery := "pb tunnel show " + out.Tunnel.ID
-			if len(result.Domains) > 0 {
-				recovery = fmt.Sprintf("pb tunnel domain instructions %s %s", out.Tunnel.ID, hostname)
-			}
-			return &TunnelCreateChangedError{TunnelID: out.Tunnel.ID, Stage: "showing customer DNS instructions", Outcome: "could not be printed", RecoveryCommand: recovery, Cause: err}
-		}
 		out.Operation, err = waitForTunnelOperation(command, client, out.Operation)
 		if err != nil {
 			return tunnelCreateJournalError(out.Tunnel.ID, "tunnel readiness", "pb tunnel status "+out.Tunnel.ID, err)
@@ -414,58 +377,14 @@ func waitForCreatedTunnelDomain(command *cobra.Command, client *api.Client, init
 	}
 }
 
-func tunnelCreateDomainsVerified(domains []tunnelCreateDomainOutput) bool {
-	if len(domains) == 0 {
-		return false
-	}
-	for _, domain := range domains {
-		if domain.Instructions.VerificationState != "verified" {
-			return false
-		}
-	}
-	return true
-}
-
 func tunnelCreatePendingRecovery(result tunnelCreateOutput) string {
 	if len(result.Domains) == 0 {
 		if result.Route != nil {
-			return fmt.Sprintf("Add a customer domain with `pb tunnel domain add %s HOSTNAME --route %s`, then rerun this create command.", result.Tunnel.ID, result.Route.ID)
+			return fmt.Sprintf("A self-hosted tunnel is served at your own hostname: `pb tunnel domain add %s HOSTNAME --route %s` with a name under a verified domain (pb domain list), then rerun this create command.", result.Tunnel.ID, result.Route.ID)
 		}
-		return "Add a customer domain with `pb tunnel domain add`, follow its DNS instructions, then rerun this create command."
+		return "A self-hosted tunnel is served at your own hostname: add one with `pb tunnel domain add` under a verified domain (pb domain list), then rerun this create command."
 	}
-	for _, domain := range result.Domains {
-		if domain.Instructions.VerificationState != "verified" {
-			return fmt.Sprintf("After adding the displayed DNS records, run `pb tunnel domain verify %s %s`, then rerun this create command.", result.Tunnel.ID, domain.Domain.Hostname)
-		}
-	}
-	return "DNS is verified; rerun this same `pb tunnel create` command when the public customer endpoint is ready."
-}
-
-func writeTunnelCreateDNSProgress(command *cobra.Command, domains []tunnelCreateDomainOutput) error {
-	wait, _ := command.Flags().GetBool("wait")
-	if !wait {
-		return nil
-	}
-	writer := command.ErrOrStderr()
-	for _, domain := range domains {
-		if domain.Instructions.VerificationState == "verified" {
-			continue
-		}
-		if _, err := fmt.Fprintf(writer, "DNS records for %s are needed before domain readiness; they will also appear in the final output:\n", domain.Domain.Hostname); err != nil {
-			return err
-		}
-		for _, record := range domain.Instructions.Records {
-			if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\n", record.Name, record.Type, record.Value, record.TTL); err != nil {
-				return err
-			}
-		}
-		if domain.Instructions.Note != "" {
-			if _, err := fmt.Fprintln(writer, domain.Instructions.Note); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return "Rerun this same `pb tunnel create` command when the public endpoint is ready."
 }
 
 func tunnelCreateRequestDigest(name, mode, scheme, address string, duration time.Duration, domains []string) (string, error) {

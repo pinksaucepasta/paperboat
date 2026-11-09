@@ -32,7 +32,7 @@ custom domains:
 pb preview 3000 --ttl 2h
 pb preview 3000 --background --ttl 1h
 pb preview 3000 --private
-pb preview 3000 --domain demo.example.com --domain '*.apps.example.com'
+pb preview 3000 --domain demo.example.com
 pb preview 3000 --json
 ```
 
@@ -41,8 +41,8 @@ defaults to 30 minutes and is capped at 24 hours. It keeps the same URL through 
 the daemon or the host service (an update restarts it), and is not restored after reboot.
 `--duration` remains a deprecated spelling of `--ttl`. `--domain` is repeatable.
 The managed Paperboat URL becomes usable as soon as
-the preview is ready; a custom alias remains pending until its ownership, DNS,
-and certificate checks finish. Wildcards match one label only.
+the preview is ready; a custom alias must be under a verified workspace domain (`pb domain add`) and
+is ready once its certificate copy reaches the edges. Wildcards match one label only.
 
 List or stop previews:
 
@@ -113,7 +113,7 @@ name the failing step and what to do about it; `--json` carries the code in
 |---|---|---|
 | `connector_offline` | The host that runs the tunnel is off or its service is stopped | Make sure the machine is on (`pb environments`) and run `pb doctor` on it; the tunnel reconnects by itself |
 | `edge_unavailable` | The host is connected but no edge is ready | Nothing to change; if it lasts several minutes run `pb tunnel doctor` and send the support reference |
-| `dns_pending` | A custom domain is not verified yet | Add the records from `pb tunnel domain instructions`, then `pb tunnel domain verify` |
+| `dns_pending` | The hostname's domain is not verified yet | Add the records from `pb domain show <domain>`, then `pb domain verify <domain>` |
 | `certificate_pending` | The certificate is still being issued | Wait; issuance starts after DNS is verified (`pb tunnel domain list`) |
 | `origin_refused` | The app is not listening on the route's port | Start it, or fix the port with `pb tunnel route update`; the tunnel recovers within seconds |
 | `origin_timeout` | The app is running but did not answer in time | Check that it is healthy and not behind a firewall |
@@ -166,21 +166,29 @@ enters the public route table.
 
 ## Custom domains, DNS, and TLS
 
-Add, inspect, verify, or remove a domain binding:
+Add a domain you control to the workspace once, add the DNS records it prints,
+and wait until it is verified:
 
 ```console
-pb tunnel domain add api api.example.com --route web
-pb tunnel domain instructions api api.example.com --json
-pb tunnel domain verify api api.example.com --wait --timeout 10m
-pb tunnel domain list api
-pb tunnel domain remove api api.example.com --wait
+pb domain add dev.example.com
+pb domain verify dev.example.com
+pb domain list
 ```
 
-Apply only the provider-aware instructions returned by Paperboat. For a
-wildcard, create the exact CNAME delegation shown for `_acme-challenge`; do not
-copy certificate or DNS-provider credentials to an edge. Coolify can then
-create previously unknown one-label application hosts beneath the verified
-wildcard without another Paperboat route change.
+The `_acme-challenge` CNAME proves you control the domain and lets Paperboat
+issue one certificate for the domain and every name one level under it. The
+`*.dev.example.com` record sends those names to Paperboat. After that, any
+tunnel or preview can use a name under the domain with no DNS step of its own:
+
+```console
+pb tunnel domain add api api.dev.example.com --route web
+pb tunnel domain list api
+pb tunnel domain remove api api.dev.example.com --wait
+pb domain remove dev.example.com
+```
+
+A domain in use cannot be removed; `pb domain show` lists what uses it. Team
+domains are added and removed by team owners and admins.
 
 Paperboat keeps the previous valid certificate active until ownership,
 issuance, and distribution to every captured edge generation succeed. Removing

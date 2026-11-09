@@ -1,0 +1,53 @@
+.nh
+.TH "PB-DOMAIN-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-domain-remove - Remove a domain no tunnel or preview uses
+
+
+.SH SYNOPSIS
+\fBpb domain remove <domain> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove a domain no tunnel or preview uses
+
+.PP
+Remove a domain after confirmation. Refused while a tunnel or preview uses a name under it; your DNS records stay at your provider.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for remove
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-domain(1)\fP

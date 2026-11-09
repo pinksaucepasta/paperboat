@@ -1,0 +1,53 @@
+.nh
+.TH "PB-DOMAIN-VERIFY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-domain-verify - Check a domain's DNS now and wait until it is verified
+
+
+.SH SYNOPSIS
+\fBpb domain verify <domain> [flags]\fP
+
+
+.SH DESCRIPTION
+Check a domain's DNS now and wait until it is verified
+
+.PP
+Ask the server to check the domain's DNS now and wait (up to --timeout) until it is verified and its certificate is issued, or show why not.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for verify
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	how long to wait for verification and the certificate
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-domain(1)\fP

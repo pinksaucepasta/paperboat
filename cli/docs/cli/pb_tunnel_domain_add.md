@@ -1,14 +1,14 @@
 ## pb tunnel domain add
 
-Add a tunnel domain
+Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
 
 ### Synopsis
 
-Add a tunnel domain
+Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
 
-Register a hostname for one tunnel or route. Registration alone does not prove ownership or make traffic ready; use instructions and verify to complete DNS setup.
+Serve one tunnel route at a hostname under a verified workspace domain, such as app.example.com under example.com. HTTPS comes from the domain's certificate.
 
-Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+Hostnames come from the workspace's verified domains (pb domain). A hostname is one label under a domain, or the domain itself; the domain's verification and certificate cover it.
 
 JSON output is supported with --json.
 
@@ -21,8 +21,7 @@ pb tunnel domain add <tunnel> <hostname> [flags]
 ```
   -h, --help               help for add
       --json               print canonical JSON
-      --provider string    DNS provider (default "generic")
-      --route string       route
+      --route string       route to serve at the hostname
       --timeout duration   maximum time to wait for operation completion (default 2m0s)
       --wait               wait for the operation to reach a terminal state
 ```
@@ -39,5 +38,5 @@ pb tunnel domain add <tunnel> <hostname> [flags]
 
 ### SEE ALSO
 
-* [pb tunnel domain](pb_tunnel_domain.md)	 - Manage tunnel domains
+* [pb tunnel domain](pb_tunnel_domain.md)	 - Serve a tunnel at hostnames under your workspace's domains
 

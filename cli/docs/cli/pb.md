@@ -74,6 +74,7 @@ pb [environment] [new] [flags]
 * [pb connect](pb_connect.md)	 - Create and attach to an environment terminal session
 * [pb daemon](pb_daemon.md)	 - Paperboat endpoint daemon
 * [pb doctor](pb_doctor.md)	 - Check Paperboat connectivity and readiness
+* [pb domain](pb_domain.md)	 - Add your own domains to the workspace
 * [pb edge](pb_edge.md)	 - Inspect tunnel edges
 * [pb env](pb_env.md)	 - Manage automatic global ENV and device overrides
 * [pb environments](pb_environments.md)	 - List enrolled machines available to this account

@@ -2,7 +2,7 @@
 .TH "PB-TUNNEL-DOMAIN-ADD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-tunnel-domain-add - Add a tunnel domain
+pb-tunnel-domain-add - Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
 
 
 .SH SYNOPSIS
@@ -10,13 +10,13 @@ pb-tunnel-domain-add - Add a tunnel domain
 
 
 .SH DESCRIPTION
-Add a tunnel domain
+Serve a tunnel route at a hostname under a verified workspace domain (pb domain add)
 
 .PP
-Register a hostname for one tunnel or route. Registration alone does not prove ownership or make traffic ready; use instructions and verify to complete DNS setup.
+Serve one tunnel route at a hostname under a verified workspace domain, such as app.example.com under example.com. HTTPS comes from the domain's certificate.
 
 .PP
-Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+Hostnames come from the workspace's verified domains (pb domain). A hostname is one label under a domain, or the domain itself; the domain's verification and certificate cover it.
 
 .PP
 JSON output is supported with --json.
@@ -31,12 +31,8 @@ JSON output is supported with --json.
 	print canonical JSON
 
 .PP
-\fB--provider\fP="generic"
-	DNS provider
-
-.PP
 \fB--route\fP=""
-	route
+	route to serve at the hostname
 
 .PP
 \fB--timeout\fP=2m0s

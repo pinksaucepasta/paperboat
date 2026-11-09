@@ -21,9 +21,8 @@ import (
 // create payload and carries the server's projected public URL through the
 // preview session. The server owns alias IDs, readiness, and endpoint changes.
 type previewDomainLeaseClient struct {
-	client             *api.Client
-	domains            []string
-	instructionsWriter io.Writer
+	client  *api.Client
+	domains []string
 }
 
 func (c *previewDomainLeaseClient) Create(ctx context.Context, request preview.LeaseRequest) (preview.Lease, error) {
@@ -41,46 +40,7 @@ func (c *previewDomainLeaseClient) Create(ctx context.Context, request preview.L
 	if err != nil {
 		return preview.Lease{}, err
 	}
-	for index := range lease.Domains {
-		domain := &lease.Domains[index]
-		if domain.State == "ready" && domain.Certificate.State == "ready" {
-			continue
-		}
-		instructions, instructionErr := c.client.GetPreviewDomainDNSInstructions(ctx, lease.ID, domain.ID)
-		if instructionErr != nil {
-			cause := fmt.Errorf("get DNS instructions for %s: %w", domain.Hostname, instructionErr)
-			return preview.Lease{}, c.stopCreatedLeaseAfterError(ctx, lease, cause)
-		}
-		if instructions.Hostname != domain.Hostname {
-			cause := fmt.Errorf("get DNS instructions for %s: %w", domain.Hostname, api.ErrPreviewLeaseInvalid)
-			return preview.Lease{}, c.stopCreatedLeaseAfterError(ctx, lease, cause)
-		}
-		domain.Instructions = &instructions
-		if c.instructionsWriter != nil {
-			if err := writePreviewDomainStatus(c.instructionsWriter, *domain); err != nil {
-				cause := fmt.Errorf("write DNS instructions for %s: %w", domain.Hostname, err)
-				return preview.Lease{}, c.stopCreatedLeaseAfterError(ctx, lease, cause)
-			}
-		}
-	}
 	return previewLeaseFromAPI(lease), nil
-}
-
-func (c *previewDomainLeaseClient) stopCreatedLeaseAfterError(ctx context.Context, lease api.PreviewLease, cause error) error {
-	key, err := api.NewPreviewLeaseIdempotencyKey()
-	if err != nil {
-		return errors.Join(cause, fmt.Errorf("could not create cleanup key for preview lease %s; recover with `pb preview stop %s`: %w", lease.ID, lease.ID, err))
-	}
-	baseCtx := context.Background()
-	if ctx != nil {
-		baseCtx = context.WithoutCancel(ctx)
-	}
-	cleanupCtx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
-	defer cancel()
-	if _, err := c.client.StopPreviewLease(cleanupCtx, lease, key); err != nil {
-		return errors.Join(cause, fmt.Errorf("could not stop preview lease %s after DNS instruction failure; recover with `pb preview stop %s`: %w", lease.ID, lease.ID, err))
-	}
-	return fmt.Errorf("%w; the preview lease was stopped", cause)
 }
 
 func (c *previewDomainLeaseClient) Renew(ctx context.Context, lease preview.Lease, idempotencyKey string) (preview.Lease, error) {
@@ -310,11 +270,10 @@ func previewDomainReady(domain api.PreviewDomainSummary) bool {
 
 func previewDomainObservationKey(domain api.PreviewDomainSummary) string {
 	data, _ := json.Marshal(struct {
-		State        string                       `json:"state"`
-		DNS          api.PreviewDomainDNS         `json:"dns"`
-		Certificate  api.PreviewDomainCertificate `json:"certificate"`
-		Instructions *api.PreviewDNSInstructions  `json:"instructions,omitempty"`
-	}{domain.State, domain.DNS, domain.Certificate, domain.Instructions})
+		State       string                       `json:"state"`
+		DNS         api.PreviewDomainDNS         `json:"dns"`
+		Certificate api.PreviewDomainCertificate `json:"certificate"`
+	}{domain.State, domain.DNS, domain.Certificate})
 	return string(data)
 }
 
@@ -327,19 +286,6 @@ func writePreviewDomainJSON(writer io.Writer, previewID string, domain api.Previ
 }
 
 func writePreviewDomainStatus(writer io.Writer, domain api.PreviewDomainSummary) error {
-	var output strings.Builder
-	_, _ = fmt.Fprintf(&output, "Domain %s: state=%s certificate=%s\n", domain.Hostname, domain.State, domain.Certificate.State)
-	if domain.Instructions == nil {
-		_, err := io.WriteString(writer, output.String())
-		return err
-	}
-	_, _ = fmt.Fprintf(&output, "DNS instructions for %s (%s):\n", domain.Hostname, domain.Instructions.VerificationState)
-	for _, record := range domain.Instructions.Records {
-		_, _ = fmt.Fprintf(&output, "  %s %s -> %s (TTL %d)\n", record.Type, record.Name, record.Value, record.TTL)
-	}
-	if domain.Instructions.Note != "" {
-		_, _ = fmt.Fprintf(&output, "  %s\n", domain.Instructions.Note)
-	}
-	_, err := io.WriteString(writer, output.String())
+	_, err := fmt.Fprintf(writer, "Domain %s: state=%s certificate=%s\n", domain.Hostname, domain.State, domain.Certificate.State)
 	return err
 }

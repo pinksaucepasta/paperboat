@@ -255,27 +255,6 @@ type TunnelDomainMutation struct {
 	Changed   bool            `json:"changed"`
 }
 
-type TunnelDNSRecord struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Value string `json:"value"`
-	TTL   int    `json:"ttl"`
-}
-
-type TunnelDNSInstructions struct {
-	Schema              string            `json:"schema"`
-	Kind                string            `json:"kind"`
-	TunnelID            string            `json:"tunnel_id"`
-	DomainID            string            `json:"domain_id"`
-	Hostname            string            `json:"hostname"`
-	Provider            string            `json:"provider"`
-	Records             []TunnelDNSRecord `json:"records"`
-	CertificateStrategy string            `json:"certificate_strategy"`
-	VerificationState   string            `json:"verification_state"`
-	PublicTCPPort       int32             `json:"public_tcp_port,omitempty"`
-	Note                string            `json:"note"`
-}
-
 type TunnelEventActor struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`

@@ -125,56 +125,6 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 	})
 }
 
-func TestTunnelDomainInstructionsResolveHostnameAndRenderAuthoritativeRecords(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-		domain := api.TunnelDomain{Schema: api.TunnelV1Schema, Kind: "domain_binding", ID: "domain_1", AccountID: "account_1", TunnelID: "tun_1", RouteID: "route_1", Hostname: "app.example.test", MatchType: "exact", State: "waiting_dns", DNS: api.TunnelDomainDNS{Target: "edge.example.test"}, Certificate: api.TunnelDomainCertificate{State: "not_requested"}, Generation: 1, ETag: `"domain:domain_1:1"`}
-		switch r.URL.Path {
-		case "/v1/tunnels/tun_1/domains":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{domain}}})
-		case "/v1/tunnels/tun_1/domains/domain_1/instructions":
-			instructions := api.TunnelDNSInstructions{Schema: api.TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_1", DomainID: "domain_1", Hostname: domain.Hostname, Provider: "generic", Records: []api.TunnelDNSRecord{{Name: domain.Hostname, Type: "CNAME", Value: "edge.example.test", TTL: 300}}, CertificateStrategy: "managed", VerificationState: "waiting_dns", Note: "Add this record."}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": instructions})
-		default:
-			t.Fatalf("path=%s", r.URL.Path)
-		}
-	})
-	var output bytes.Buffer
-	command := tunnelCobraCommandV1()
-	command.SetOut(&output)
-	command.SetArgs([]string{"domain", "instructions", "tun_1", "app.example.test"})
-	if err := command.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if output.String() != "app.example.test\tCNAME\tedge.example.test\t300\nAdd this record.\n" {
-		t.Fatalf("output=%q", output.String())
-	}
-}
-
-func TestTunnelDomainInstructionsRenderPublicTCPPortSeparately(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-		domain := api.TunnelDomain{Schema: api.TunnelV1Schema, Kind: "domain_binding", ID: "domain_tcp", AccountID: "account_1", TunnelID: "tun_1", RouteID: "route_tcp", Hostname: "db.example.test", MatchType: "exact", CertificateStrategy: "none", State: "verified", DNS: api.TunnelDomainDNS{Target: "edge.example.test"}, Certificate: api.TunnelDomainCertificate{State: "not_applicable"}, Generation: 1, ETag: `"domain:domain_tcp:1"`}
-		switch r.URL.Path {
-		case "/v1/tunnels/tun_1/domains":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{domain}}})
-		case "/v1/tunnels/tun_1/domains/domain_tcp/instructions":
-			instructions := api.TunnelDNSInstructions{Schema: api.TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_1", DomainID: domain.ID, Hostname: domain.Hostname, Provider: "generic", Records: []api.TunnelDNSRecord{{Name: domain.Hostname, Type: "CNAME", Value: "edge.example.test", TTL: 300}}, CertificateStrategy: "none", VerificationState: "verified", PublicTCPPort: 25432, Note: "Application TLS is passed through unchanged."}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": instructions})
-		default:
-			t.Fatalf("path=%s", r.URL.Path)
-		}
-	})
-	var output bytes.Buffer
-	command := tunnelCobraCommandV1()
-	command.SetOut(&output)
-	command.SetArgs([]string{"domain", "instructions", "tun_1", "db.example.test"})
-	if err := command.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if output.String() != "db.example.test\tCNAME\tedge.example.test\t300\nTCP endpoint\tdb.example.test:25432\nApplication TLS is passed through unchanged.\n" {
-		t.Fatalf("output=%q", output.String())
-	}
-}
-
 func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *testing.T) {
 	oldDelay := tunnelRequestRetryDelay
 	tunnelRequestRetryDelay = func(int) time.Duration { return 0 }
