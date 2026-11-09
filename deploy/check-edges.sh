@@ -135,7 +135,10 @@ sort -u "$work/offline" | sed 's/^/  offline: /'
 sed 's/^/  failed request: /' "$work/probe-failed"
 if [ $fail = 0 ] && [ -z "${KEEP_LOGS:-}" ]; then echo "edge gate: PASS"; exit 0; fi
 # The replaced container is removed with its logs, so the edge logs of the window are kept for the post-mortem.
-kept=$(mktemp -d /tmp/pb-gate-failed.XXXXXX); cp "$work"/edge-*.log "$kept"/
+keepdir=${KEEP_DIR:-/tmp}
+kept=$(mktemp -d "$keepdir"/pb-gate-failed.XXXXXX); cp "$work"/edge-*.log "$kept"/
 echo "edge logs of the window kept in $kept"
+# Only the newest KEEP_LAST (default 5) kept directories stay in KEEP_DIR (default /tmp); each deploy would otherwise add one for good.
+ls -dt "$keepdir"/pb-gate-failed.* | tail -n +$(( ${KEEP_LAST:-5} + 1 )) | while read -r old; do rm -rf -- "$old"; done
 [ $fail = 0 ] && { echo "edge gate: PASS"; exit 0; }
 echo "edge gate: FAIL (roll back: deploy/README.md step 5)"; exit 1

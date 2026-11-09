@@ -42,7 +42,7 @@ esac
 
 
 class CheckEdgesTest(unittest.TestCase):
-    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true', origin_down=False):
+    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true', origin_down=False, extra_env=None):
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
             bin_dir = t / 'bin'
@@ -58,7 +58,7 @@ class CheckEdgesTest(unittest.TestCase):
             if origin_down:
                 (t / 'origin-down').write_text('')
             env = dict(os.environ, T=str(t), PATH=f'{bin_dir}:{os.environ["PATH"]}', PROBE=str(bin_dir / 'probe'),
-                       SQL=str(bin_dir / 'psql'), SETTLE='2', OBSERVE='1')
+                       SQL=str(bin_dir / 'psql'), SETTLE='2', OBSERVE='1', **(extra_env or {}))
             result = subprocess.run(['sh', str(SCRIPT), '--deploy', deploy, 'local=192.0.2.1'], env=env,
                                     capture_output=True, text=True, timeout=120)
             self.stub_logs = {n: (t / n).read_text() if (t / n).exists() else '' for n in ('timeout.log', 'pkill.log')}
@@ -86,6 +86,14 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertTrue(kept, out)
         self.assertTrue(pathlib.Path(kept.group(1), 'edge-local.log').exists())
         shutil.rmtree(kept.group(1))
+
+    def test_kept_logs_are_limited_to_the_newest_few(self):
+        with tempfile.TemporaryDirectory() as keep:
+            for _ in range(4):
+                code, out = self.run_gate(extra_env={'KEEP_LOGS': '1', 'KEEP_DIR': keep, 'KEEP_LAST': '2'})
+                self.assertEqual(code, 0, out)
+            kept = sorted(p.name for p in pathlib.Path(keep).glob('pb-gate-failed.*'))
+            self.assertEqual(len(kept), 2, kept)
 
     def test_edge_5xx_and_attach_refusal_fail(self):
         code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\n{"msg":"runtime_route_attach_refused","route_id":"r"}\n')
