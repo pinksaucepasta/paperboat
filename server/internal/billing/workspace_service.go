@@ -83,7 +83,7 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 				out.Product = &p
 			}
 		}
-		out.TopupBytesRemaining, err = WorkspaceTopupRemainingTx(ctx, tx, out.ID, time.Now().UTC())
+		out.Topups, out.TopupBytesPurchased, out.TopupBytesRemaining, err = WorkspaceTopupsTx(ctx, tx, out.ID, time.Now().UTC())
 		if err != nil {
 			return err
 		}

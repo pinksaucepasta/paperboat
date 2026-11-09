@@ -238,7 +238,7 @@ SELECT coalesce(bool_and(coalesce((
  WHERE p.workspace_id=ws.id AND p.period_start<=$2 AND p.period_end>$2 AND p.included_bytes IS NOT NULL
   AND (SELECT coalesce(sum(q.consumed_bytes),0) FROM billing_workspace_usage_periods q
        WHERE q.workspace_id=ws.id AND q.paid=p.paid AND coalesce(q.budget_start,q.period_start)=coalesce(p.budget_start,p.period_start)) >= p.included_bytes
-  AND (NOT p.paid OR coalesce((SELECT sum(t.remaining_bytes) FROM billing_workspace_topups t WHERE t.workspace_id=ws.id AND t.purchased_at<=$2),0)=0)
+  AND (NOT p.paid OR coalesce((SELECT sum(t.remaining_bytes) FROM billing_workspace_topups t WHERE t.workspace_id=ws.id AND t.purchased_at<=$2 AND t.expires_at>$2),0)=0)
  LIMIT 1),false)),false)
 FROM ws`, key, at).Scan(&denied)
 	return denied, err

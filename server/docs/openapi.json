@@ -9293,6 +9293,8 @@
           "allowance_period_start",
           "allowance_period_end",
           "topup_bytes_remaining",
+          "topup_bytes_purchased",
+          "topups",
           "limits"
         ],
         "properties": {
@@ -9500,7 +9502,28 @@
           "topup_bytes_remaining": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unspent permanent credits for this exact workspace, excluding future purchases. Credits never expire and are consumed only after the paid plan allowance."
+            "description": "Unspent extra bandwidth of this exact workspace's current allowance month, excluding future purchases. A top-up expires when the month it was bought in ends (for a monthly plan, with the plan renewal) and is consumed only after the paid plan allowance."
+          },
+          "topup_bytes_purchased": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Extra bandwidth bought in the current allowance month, spent or not: the month's total extra."
+          },
+          "topups": {
+            "type": "array",
+            "maxItems": 100,
+            "description": "This month's top-ups, oldest first. Each carries its own expiry; an expired top-up is no longer listed.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["purchased_bytes", "remaining_bytes", "purchased_at", "expires_at"],
+              "properties": {
+                "purchased_bytes": {"type": "integer", "minimum": 1},
+                "remaining_bytes": {"type": "integer", "minimum": 0},
+                "purchased_at": {"type": "string", "format": "date-time"},
+                "expires_at": {"type": "string", "format": "date-time", "description": "End of the allowance month the top-up was bought in; unused bytes are gone then."}
+              }
+            }
           }
         }
       },
@@ -45553,7 +45576,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -45633,7 +45656,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {

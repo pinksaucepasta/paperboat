@@ -90,7 +90,12 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 			return nil
 		}
 		if expectsPaid {
-			_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at) VALUES($1,$2,$3,$4,$4,$5) ON CONFLICT DO NOTHING`, state.ID, state.Operation, w.ID, request.UnitBytes*int64(request.Quantity), paidAt)
+			// The month is the one open now, not the payment instant: a late webhook must not hand over a spent top-up.
+			expires, e := topupExpiryTx(ctx, tx, w.ID, now)
+			if e != nil {
+				return e
+			}
+			_, e = tx.Exec(ctx, `INSERT INTO billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$2,$3,$4,$4,$5,$6) ON CONFLICT DO NOTHING`, state.ID, state.Operation, w.ID, request.UnitBytes*int64(request.Quantity), paidAt, expires)
 			if e != nil {
 				return e
 			}

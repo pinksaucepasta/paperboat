@@ -37,6 +37,8 @@ func (s *WorkspaceService) ReserveUserMachineSeat(ctx context.Context, tx *db.Tx
 // Membership and resource grants remain the authority for accessing team resources.
 type Workspace struct {
 	TopupBytesRemaining  int64             `json:"topup_bytes_remaining"`
+	TopupBytesPurchased  int64             `json:"topup_bytes_purchased"`
+	Topups               []WorkspaceTopup  `json:"topups"`
 	AllowancePeriodStart time.Time         `json:"allowance_period_start"`
 	AllowancePeriodEnd   time.Time         `json:"allowance_period_end"`
 	Product              *WorkspaceProduct `json:"product,omitempty"`

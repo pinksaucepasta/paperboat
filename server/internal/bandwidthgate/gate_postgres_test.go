@@ -92,7 +92,7 @@ func (f *gateFixture) topup(workspace string, remaining int64) {
 	f.t.Helper()
 	key := fmt.Sprint(time.Now().UnixNano())
 	f.exec(`INSERT INTO paperboat.billing_workspace_operations(idempotency_key,workspace_id,actor_user_id,kind,request_hash,state) VALUES($1,$2,$3,'topup','fixture','succeeded')`, key, workspace, f.user)
-	f.exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at) VALUES($1,$1,$2,10,$3,$4)`, key, workspace, remaining, time.Now().UTC().Add(-time.Minute))
+	f.exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$1,$2,10,$3,$4,$5)`, key, workspace, remaining, time.Now().UTC().Add(-time.Minute), time.Now().UTC().Add(time.Hour))
 }
 
 // F13-03: bandwidth is refused only when every workspace the account can use is out of
@@ -134,6 +134,14 @@ func TestGateJudgesEveryWorkspacePostgres(t *testing.T) {
 	f.exec(`UPDATE paperboat.billing_workspace_topups SET remaining_bytes=0 WHERE workspace_id=$1`, f.personal)
 	if !denied() {
 		t.Fatal("not denied after the last top-up credit was used")
+	}
+	f.topup(f.personal, 5)
+	if denied() {
+		t.Fatal("denied although the paid workspace has a fresh top-up")
+	}
+	f.exec(`UPDATE paperboat.billing_workspace_topups SET expires_at=now()-interval '1 second' WHERE workspace_id=$1`, f.personal)
+	if !denied() {
+		t.Fatal("an expired top-up with unspent bytes still admitted")
 	}
 	f.exec(`UPDATE paperboat.billing_workspace_usage_periods SET period_start=now()-interval '2 days',period_end=now()-interval '1 day' WHERE workspace_id=$1`, f.personal)
 	if denied() {

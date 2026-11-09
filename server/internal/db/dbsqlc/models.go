@@ -302,6 +302,7 @@ type BillingWorkspaceTopup struct {
 	PurchasedBytes    int64
 	RemainingBytes    int64
 	PurchasedAt       time.Time
+	ExpiresAt         time.Time
 }
 
 type BillingWorkspaceTopupEvent struct {

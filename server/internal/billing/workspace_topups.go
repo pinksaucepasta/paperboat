@@ -182,7 +182,8 @@ func topupIdentity(state StripeTopupState, r topupRequest) bool {
 	return state.Mode == "payment" && state.CustomerID == r.CustomerID && state.WorkspaceID == r.WorkspaceID && state.Operation == r.IdempotencyKey && state.PriceID == r.PriceID && state.Quantity == r.Quantity
 }
 
-// WorkspaceTopupRemainingTx uses the accounting instant, not wall-clock time.
+// WorkspaceTopupRemainingTx counts only top-ups bought by the accounting instant and not yet expired
+// (a top-up ends with the allowance month it was bought in). It uses that instant, not wall-clock time.
 // Callers must establish paid eligibility before using this ledger for admission.
 func WorkspaceTopupRemainingTx(ctx context.Context, tx *db.Tx, workspaceID string, at time.Time) (int64, error) {
 	if tx == nil || workspaceID == "" || at.IsZero() {
@@ -192,7 +193,7 @@ func WorkspaceTopupRemainingTx(ctx context.Context, tx *db.Tx, workspaceID strin
 		return 0, err
 	}
 	var total int64
-	err := tx.QueryRow(ctx, `SELECT coalesce(sum(remaining_bytes),0) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2`, workspaceID, at).Scan(&total)
+	err := tx.QueryRow(ctx, `SELECT coalesce(sum(remaining_bytes),0) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2 AND expires_at>$2`, workspaceID, at).Scan(&total)
 	return total, err
 }
 func ConsumeWorkspaceTopupsTx(ctx context.Context, tx *db.Tx, workspaceID string, bytes int64, at time.Time) (int64, error) {
@@ -202,13 +203,55 @@ func ConsumeWorkspaceTopupsTx(ctx context.Context, tx *db.Tx, workspaceID string
 	if _, err := WorkspaceTopupRemainingTx(ctx, tx, workspaceID, at); err != nil {
 		return 0, err
 	}
-	// A single statement drains the oldest purchase first, bounded by the request.
+	// A single statement drains the purchase that expires first, bounded by the request.
 	var consumed int64
 	err := tx.QueryRow(ctx, `WITH eligible AS (
- SELECT provider_session_id,remaining_bytes,coalesce(sum(remaining_bytes) OVER (ORDER BY purchased_at,provider_session_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS preceding
- FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$3 AND remaining_bytes>0
+ SELECT provider_session_id,remaining_bytes,coalesce(sum(remaining_bytes) OVER (ORDER BY expires_at,purchased_at,provider_session_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS preceding
+ FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$3 AND expires_at>$3 AND remaining_bytes>0
  ), debited AS (UPDATE billing_workspace_topups t SET remaining_bytes=t.remaining_bytes-least(e.remaining_bytes,greatest(0,$2::bigint-e.preceding)) FROM eligible e WHERE t.provider_session_id=e.provider_session_id
  RETURNING least(e.remaining_bytes,greatest(0,$2::bigint-e.preceding)) AS bytes)
  SELECT coalesce(sum(bytes),0) FROM debited`, workspaceID, bytes, at).Scan(&consumed)
 	return consumed, err
+}
+
+// WorkspaceTopup is one unexpired top-up purchase of the current allowance month.
+type WorkspaceTopup struct {
+	PurchasedBytes int64     `json:"purchased_bytes"`
+	RemainingBytes int64     `json:"remaining_bytes"`
+	PurchasedAt    time.Time `json:"purchased_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+// topupExpiryTx is the end of the allowance month that contains at: the same month the usage
+// accounting uses (bandwidth_anchor, falling back to the subscription period start), so a monthly plan's
+// top-up ends with the plan renewal and a yearly plan's with that month's allowance reset.
+func topupExpiryTx(ctx context.Context, tx *db.Tx, workspaceID string, at time.Time) (time.Time, error) {
+	var anchor time.Time
+	if err := tx.QueryRow(ctx, `SELECT coalesce(bandwidth_anchor,period_start) FROM billing_workspaces WHERE id=$1 AND coalesce(bandwidth_anchor,period_start) IS NOT NULL`, workspaceID).Scan(&anchor); err != nil {
+		return time.Time{}, err
+	}
+	_, end := subscriptionUsageMonth(anchor, at)
+	return end, nil
+}
+
+// WorkspaceTopupsTx lists the unexpired purchases (newest last, at most 100) and their totals for the
+// current allowance month: bytes bought (including spent ones) and bytes still unspent.
+func WorkspaceTopupsTx(ctx context.Context, tx *db.Tx, workspaceID string, at time.Time) (items []WorkspaceTopup, purchased, remaining int64, err error) {
+	if err = tx.QueryRow(ctx, `SELECT coalesce(sum(purchased_bytes),0),coalesce(sum(remaining_bytes),0) FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2 AND expires_at>$2`, workspaceID, at).Scan(&purchased, &remaining); err != nil {
+		return nil, 0, 0, err
+	}
+	rows, err := tx.Query(ctx, `SELECT purchased_bytes,remaining_bytes,purchased_at,expires_at FROM billing_workspace_topups WHERE workspace_id=$1 AND purchased_at<=$2 AND expires_at>$2 ORDER BY purchased_at,provider_session_id LIMIT 100`, workspaceID, at)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer rows.Close()
+	items = []WorkspaceTopup{}
+	for rows.Next() {
+		var t WorkspaceTopup
+		if err = rows.Scan(&t.PurchasedBytes, &t.RemainingBytes, &t.PurchasedAt, &t.ExpiresAt); err != nil {
+			return nil, 0, 0, err
+		}
+		items = append(items, t)
+	}
+	return items, purchased, remaining, rows.Err()
 }

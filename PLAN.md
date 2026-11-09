@@ -72,11 +72,11 @@ works on Windows-only failures until after launch.
 | Price | $0 | $8/month or $80/year | $15/seat/month or $150/seat/year |
 | Scope | personal workspace | personal workspace | team workspace only |
 | Relay + edge bandwidth / month | 5 GB | 100 GB | 100 GB per seat (for that member's use inside the team workspace) |
-| Top-ups (100 GB units, $5/unit, one-time, NEVER EXPIRE) | no | yes, for the personal workspace | yes, into a team pool |
+| Top-ups (100 GB units, $5/unit, one-time, end with the allowance month they are bought in) | no | yes, for the personal workspace | yes, into a team pool |
 | Machines | unlimited | unlimited | unlimited |
 | Features | everything | everything | everything + collaboration |
 
-- Top-ups are bought as integer quantities of 100 GB units (unit_bytes=100000000000), 1–100 units by default; billing.topup_max_quantity is the single configurable purchase limit. Credits NEVER EXPIRE, remain isolated to their workspace, and are consumed only after the plan allowance.
+- Top-ups are bought as integer quantities of 100 GB units (unit_bytes=100000000000), 1–100 units by default; billing.topup_max_quantity is the single configurable purchase limit. A top-up ends with the allowance month it was bought in (decided 2026-11-09; a monthly plan: with the plan renewal), stays isolated to its workspace and is consumed only after the plan allowance.
 - Failed renewal keeps paid benefits for **7 days**, then suspends them until payment recovers (user decision 2026-10-18).
 - Paid bandwidth resets monthly on the workspace’s **original paid billing day** (UTC clock; clamp short months without shifting later dates). Switching monthly/yearly prices preserves the reset anchor and allowance already spent (user decision 2026-10-18).
 - Direct P2P traffic is always free and never metered.

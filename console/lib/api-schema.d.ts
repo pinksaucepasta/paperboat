@@ -6857,7 +6857,7 @@ export interface paths {
         put?: never;
         /**
          * Buy a paid workspace bandwidth top-up
-         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
+         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
          */
         post: operations["workspace_personal_checkout_topup"];
         delete?: never;
@@ -6877,7 +6877,7 @@ export interface paths {
         put?: never;
         /**
          * Buy a paid workspace bandwidth top-up
-         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Credits NEVER EXPIRE and are consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
+         * @description Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity.
          */
         post: operations["workspace_team_checkout_topup"];
         delete?: never;
@@ -10049,8 +10049,22 @@ export interface components {
              * @description End of the current monthly accounting budget at the original bandwidth anchor; independent of provider renewal dates and clipped segment boundaries.
              */
             allowance_period_end: string;
-            /** @description Unspent permanent credits for this exact workspace, excluding future purchases. Credits never expire and are consumed only after the paid plan allowance. */
+            /** @description Unspent extra bandwidth of this exact workspace's current allowance month, excluding future purchases. A top-up expires when the month it was bought in ends (for a monthly plan, with the plan renewal) and is consumed only after the paid plan allowance. */
             topup_bytes_remaining: number;
+            /** @description Extra bandwidth bought in the current allowance month, spent or not: the month's total extra. */
+            topup_bytes_purchased: number;
+            /** @description This month's top-ups, oldest first. Each carries its own expiry; an expired top-up is no longer listed. */
+            topups: {
+                purchased_bytes: number;
+                remaining_bytes: number;
+                /** Format: date-time */
+                purchased_at: string;
+                /**
+                 * Format: date-time
+                 * @description End of the allowance month the top-up was bought in; unused bytes are gone then.
+                 */
+                expires_at: string;
+            }[];
         };
         WorkspaceBillingProduct: {
             code: string;

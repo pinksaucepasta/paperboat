@@ -42,7 +42,7 @@ func TestPaidWorkspaceSpendsPlanBeforeTopupsPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.billing_products(id,code,provider,provider_product_id,provider_price_id,catalog_type,catalog_ref) VALUES($1,$1,'stripe',$1,$1,'personal_subscription','{"allowance_bytes":100}')`, code)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,state,product_code,period_start,period_end,bandwidth_anchor) VALUES($1,$2,'active',$3,$4,$5,$4)`, workspace, user, code, start, end)
 	exec(`INSERT INTO paperboat.billing_workspace_operations(idempotency_key,workspace_id,actor_user_id,kind,request_hash,state) VALUES($1,$2,$3,'topup','fixture','succeeded')`, x, workspace, user)
-	exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at) VALUES($1,$1,$2,50,50,$3)`, x, workspace, at.Add(-time.Minute))
+	exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$1,$2,50,50,$3,$4)`, x, workspace, at.Add(-time.Minute), end)
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
 	s := billing.NewWorkspaceService(store, nil, "")
 	debit := func(n, want int64, exhausted bool) {

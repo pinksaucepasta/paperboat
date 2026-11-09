@@ -265,9 +265,16 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		if remaining(w, paidAt.Add(-time.Nanosecond)) != 0 {
 			t.Fatal("future purchase credited")
 		}
-		future := paidAt.AddDate(2, 3, 0)
-		if remaining(w, future) != amount*3 {
-			t.Fatal("permanent credits expired across months/years")
+		// The top-up ends with the allowance month it was bought in, not before and not after.
+		var expires time.Time
+		if err = store.SQL().QueryRowContext(ctx, `SELECT expires_at FROM paperboat.billing_workspace_topups WHERE workspace_id=$1 ORDER BY purchased_at LIMIT 1`, w).Scan(&expires); err != nil {
+			t.Fatal(err)
+		}
+		if d := expires.Sub(start); d < 28*24*time.Hour || d > 31*24*time.Hour {
+			t.Fatalf("top-up bought mid-month expires %s after the plan period started", d)
+		}
+		if remaining(w, expires.Add(-time.Nanosecond)) != amount*3 || remaining(w, expires) != 0 {
+			t.Fatalf("top-up not valid exactly until %s", expires)
 		}
 
 		secondReceipt, e := buy(user, scope, "z_second_"+key)
@@ -282,7 +289,7 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 		if _, e = s.HandleWebhook(ctx, secondPaid); e != nil {
 			t.Fatal(e)
 		}
-		consumeAt := time.Now().UTC().AddDate(3, 0, 0)
+		consumeAt := time.Now().UTC()
 
 		var used int64
 		err = store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
