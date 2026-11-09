@@ -1,7 +1,7 @@
 "use client"
 
 import { CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { ApiError, clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
@@ -52,6 +52,13 @@ import { LoadError } from "@/components/load-error"
  * encryption); a tunnel server is where your tunnels and previews meet the internet (browser HTTPS
  * ends there).
  */
+
+/**
+ * After a server is paired or removed, or the relay pool changes: your servers and pools, and the
+ * Relays and Edges tables (the relays and edges you can use, the edge pair) that follow from them.
+ */
+const refreshNetwork = (queryClient: QueryClient) =>
+  Promise.all([["selfhost"], ["relays"], ["edges"]].map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
 const runs = (node: Node) => {
   const kinds = new Set(node.installations.map((installation) => installation.capability))
@@ -173,7 +180,7 @@ function NodeRow({ node }: { node: Node }) {
     .filter(Boolean)
     .sort()
     .at(-1)
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["selfhost"] })
+  const refresh = () => refreshNetwork(queryClient)
   const verify = useMutation({
     mutationFn: () => verifyIngress(tunnel!),
     onSuccess: async () => {
@@ -363,7 +370,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
           : { mode: "mixed", installation_ids: [] },
       ),
     onSuccess: async (_, on) => {
-      await queryClient.invalidateQueries({ queryKey: ["selfhost", "pool", "relay"] })
+      await refreshNetwork(queryClient)
       toast.success(on ? "Relayed traffic uses only your relays" : "Relayed traffic can use Paperboat’s relays")
     },
     onError: (error) => toast.error(`Couldn’t change relays: ${error.message}`),
@@ -673,7 +680,7 @@ function AddServerDialog({ initial, onClose }: { initial: "relay" | "tunnel"; on
   const [code, setCode] = useState("")
   const pair = useMutation({
     mutationFn: () => pairNode({ address: address.trim(), code: code.trim(), scope: scopeOf(workspace) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["selfhost"] }),
+    onSuccess: () => refreshNetwork(queryClient),
   })
   const ready = Boolean(address.trim() && code.trim())
 
