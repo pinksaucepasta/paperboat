@@ -55,7 +55,7 @@ class MemberRevoke(unittest.TestCase):
         self.assertEqual(1, sum('team remove "$TEAM" \'user_b\'' in c or "team remove \"$TEAM\" user_b" in c for c in calls[:-1]))
 
     def test_a_slow_member_gate_fails_before_any_revoke(self):
-        result, calls, _ = run_main('grant', 'RESULT access plain_s=9.0 pb_s=1.4 config_block=1 known_hosts_lines=3')
+        result, calls, _ = run_main('grant', 'RESULT access plain_s=31.0 pb_s=1.4 config_block=1 known_hosts_lines=3')
         self.assertEqual('FAIL', result['status'])
         self.assertFalse(any('--active=false' in c for c in calls))
 

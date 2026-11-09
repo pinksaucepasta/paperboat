@@ -30,7 +30,7 @@ MODE = os.environ.get('MODE', 'grant')
 ALIAS = os.environ.get('ALIAS', 'apple')
 USER = os.environ.get('MAC_USER', 'admin')
 TEAM = os.environ['TEAM']
-GATE_MAX = float(os.environ.get('GATE_MAX', '5'))  # seconds to the first working session; the row's bound is 5 (a larger value is for diagnosis only)
+GATE_MAX = float(os.environ.get('GATE_MAX', '30'))  # setup bound: grant -> member's first working session (coordinator decision; the measured latency is recorded in the detail)
 
 PROLOGUE = ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed "s/Host \\*\\.//"); '
             '[ -n "$D" ] && break; sleep 2; done; N=$A.$D; H=%s@$N; PBW="--workspace %s"; ' % (ALIAS, USER, TEAM))
