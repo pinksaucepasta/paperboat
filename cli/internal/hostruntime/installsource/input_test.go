@@ -366,6 +366,9 @@ func TestInspectCandidateKeepsALocalFailureToRunTheProbe(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can run a file without the execute bit")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no execute bit; any .exe the user can read runs")
+	}
 	binary := buildPaperboatFixture(t, t.TempDir(), "pb", runtime.GOOS, runtime.GOARCH)
 	if err := os.Chmod(binary, 0o600); err != nil {
 		t.Fatal(err)
