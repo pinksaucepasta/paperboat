@@ -3,7 +3,7 @@
 import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react"
 import { useMutation, type UseMutationOptions } from "@tanstack/react-query"
 import { useSearchParams } from "next/navigation"
-import { useState } from "react"
+import { createContext, Suspense, useContext, useState } from "react"
 import { useMachines, type Machine } from "@/lib/api"
 import {
   AlertDialog,
@@ -26,13 +26,33 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * confirmation for destructive row actions.
  */
 
+/** `?machine=`, as `UrlScope` reads it; null outside one (machine tabs pass their machine instead). */
+const PickedMachine = createContext<string | null>(null)
+
+/**
+ * Reads `?machine=` for the lists inside. A prerender can't know it, so the static shell renders the
+ * same lists with no machine picked (their own loading state) instead of an empty page, and the
+ * server's per-request render fills in the real one.
+ */
+export function UrlScope({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={children}>
+      <FromUrl>{children}</FromUrl>
+    </Suspense>
+  )
+}
+
+function FromUrl({ children }: { children: React.ReactNode }) {
+  return <PickedMachine value={useSearchParams().get("machine")}>{children}</PickedMachine>
+}
+
 /**
  * The machine a list is narrowed to: the machine page's own tab, or the machine picked in the
  * section header (`?machine=`). `machine` is undefined while the machines load or for a machine
  * outside this workspace; `scope` still filters by its ID.
  */
 export function useListScope(tabMachine?: Machine) {
-  const picked = useSearchParams().get("machine")
+  const picked = useContext(PickedMachine)
   const machines = useMachines()
   const scope = tabMachine?.id ?? picked
   const machine = tabMachine ?? machines.data?.find((entry) => entry.id === picked)

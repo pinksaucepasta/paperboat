@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { sections } from "@/lib/sections"
+import { UrlScope } from "@/components/list-toolbar"
 import { SectionPage } from "@/components/section-page"
 import { ConfigSync } from "@/components/config/config-sync"
 
@@ -10,9 +10,9 @@ export default function Page() {
   return (
     <SectionPage id="config">
       {/* The view reads ?machine=, which streams in after the static shell. */}
-      <Suspense>
+      <UrlScope>
         <ConfigSync />
-      </Suspense>
+      </UrlScope>
     </SectionPage>
   )
 }
