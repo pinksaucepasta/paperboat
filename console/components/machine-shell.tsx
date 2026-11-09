@@ -180,29 +180,34 @@ export function MachineShell({ machineId, children }: { machineId: string; child
 
 /* The divider is on a wrapper and the row overlaps it by 1px, so the active underline sits on the
    line without the tabs overflowing (which, with sideways scrolling on, made the row scroll vertically too). */
-function MachineTabs({ base, tab }: { base: string; tab: string }) {
+function MachineTabs({ base, tab }: { base?: string; tab?: string }) {
+  const tabClass = (slug: string) =>
+    cn(
+      "shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
+      tab === slug && "border-foreground text-foreground",
+    )
   return (
     <div className="border-b border-divider">
       <nav className="-mb-px no-scrollbar flex gap-1 overflow-x-auto overflow-y-hidden">
-        {machineTabs.map(({ slug, title }) => (
-          <Link
-            key={slug}
-            href={slug ? `${base}/${slug}` : base}
-            className={cn(
-              "shrink-0 border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
-              tab === slug && "border-foreground text-foreground",
-            )}
-          >
-            {title}
-          </Link>
-        ))}
+        {machineTabs.map(({ slug, title }) =>
+          // Without a machine yet (the prerendered shell) the tabs keep their place as labels.
+          base === undefined ? (
+            <span key={slug} className={tabClass(slug)}>
+              {title}
+            </span>
+          ) : (
+            <Link key={slug} href={slug ? `${base}/${slug}` : base} className={tabClass(slug)}>
+              {title}
+            </Link>
+          ),
+        )}
       </nav>
     </div>
   )
 }
 
 /** The loaded header's title and detail lines (their line heights) over the real tabs. */
-function MachineSkeleton({ base, tab }: { base: string; tab: string }) {
+export function MachineSkeleton({ base, tab }: { base?: string; tab?: string }) {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
       <div className="flex flex-col gap-2">
