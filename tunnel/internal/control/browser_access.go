@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 	"io"
 	"net/http"
 	"net/url"

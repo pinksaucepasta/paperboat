@@ -3,7 +3,7 @@ package control
 import (
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 )
 
 // The 2026-11-04 outage: server 2026.11.04.3 added "version" to the ingress answer, and every edge on

@@ -544,8 +544,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		return *result.Ingress, nil
 	}
-	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: revalidatePrivate, PublicAuthority: publicPreviewAuthority,
-	})
+	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: revalidatePrivate, PublicAuthority: publicPreviewAuthority})
 	if err != nil {
 		return nil, fmt.Errorf("create preview carrier transport: %w", err)
 	}

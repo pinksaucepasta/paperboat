@@ -18,8 +18,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat/tunnel/internal/strictjson"
 )
 
 const maxControlDocument = 1 << 20
