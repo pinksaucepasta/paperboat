@@ -224,7 +224,12 @@ grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out || { echo "RESULT no
 start=$(date +%s.%N); $PB logout >/dev/null 2>&1
 for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
 end=$(date +%s.%N)
-for i in $(seq 1 300); do kill -0 $ppid 2>/dev/null || break; sleep 0.1; done
+for i in $(seq 1 100); do kill -0 $ppid 2>/dev/null || break; sleep 0.1; done
+# a plain session still open 10 s after the revoke: record what the daemon was doing (relay or direct, which steps) while it hangs
+kill -0 $ppid 2>/dev/null && echo "RESULT hang-diag [$(cat ~/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | tail -400 | grep -E 'reconnect_transport|redial_step|peer_stream|relay|native_private' | tail -16 | python3 -c "import sys,json
+for l in sys.stdin:
+    d=json.loads(l); f=d.get('fields',{}); print(d['at'][11:23], d['code'], f.get('step'), f.get('state'), f.get('path_category'), f.get('cause'), end='; ')" | cut -c1-1600)]"
+for i in $(seq 1 200); do kill -0 $ppid 2>/dev/null || break; sleep 0.1; done
 pend=$(date +%s.%N)
 palive=$(kill -0 $ppid 2>/dev/null && echo yes || echo no); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid $ppid 2>/dev/null
 echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive plain_seconds=$(python3 -c "print(round($pend-$start,1))") plain_alive=$palive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)] plain_stderr=[$(tr '\n' ' ' < ~/slrp.err | cut -c1-200)]"'''
@@ -253,7 +258,7 @@ def revoke():
         return
     _, out = run('REVOKE_CLIENT_CMD', prelude() + REVOKE, timeout=300)
     ok, why = revoke_verdict(out)
-    report('F5-10 revoke', 'PASS' if ok else 'FAIL', ('' if ok else why + ': ') + ' | '.join(l for l in out.splitlines() if l.startswith('RESULT') or 'revoked' in l or 'client_loop' in l)[-900:])
+    report('F5-10 revoke', 'PASS' if ok else 'FAIL', ('' if ok else why + ': ') + re.sub(r'\s+', ' ', out)[-2400:])
 
 
 OTHER_USER = r'''B=%s; U=%s
