@@ -140,13 +140,7 @@ func copyLocalObjects(ctx context.Context, source, target *git.Repository, start
 		}
 		// Flush the installed loose object before exposing a branch that names it.
 		objectPath := filepath.Join(targetRoot, "objects", hash.String()[:2], hash.String()[2:])
-		file, err := os.Open(objectPath)
-		if err != nil {
-			return ErrRepositoryUnavailable
-		}
-		err = file.Sync()
-		closeErr := file.Close()
-		if err != nil || closeErr != nil {
+		if syncRepositoryObject(objectPath) != nil {
 			return ErrRepositoryUnavailable
 		}
 		if syncRepositoryDirectory(filepath.Dir(objectPath)) != nil || syncRepositoryDirectory(filepath.Join(targetRoot, "objects")) != nil {
