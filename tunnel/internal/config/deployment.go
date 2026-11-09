@@ -70,6 +70,10 @@ type Deployment struct {
 	// PublicTCPIdleTimeout closes a public TCP or TLS tunnel stream after this long without
 	// traffic in either direction; zero means DefaultPublicTCPIdleTimeout.
 	PublicTCPIdleTimeout time.Duration `json:"public_tcp_idle_timeout,omitempty"`
+
+	// RequestBodyIdleTimeout cuts an HTTP upload after this long without request body bytes;
+	// zero means DefaultRequestBodyIdleTimeout.
+	RequestBodyIdleTimeout time.Duration `json:"request_body_idle_timeout,omitempty"`
 }
 
 type PublicRoute struct {
@@ -220,6 +224,9 @@ func (d Deployment) validate() error {
 	if d.PublicTCPIdleTimeout != 0 && (d.PublicTCPIdleTimeout < time.Minute || d.PublicTCPIdleTimeout > 24*time.Hour) {
 		return errors.New("public_tcp_idle_timeout must be between 1m and 24h")
 	}
+	if d.RequestBodyIdleTimeout != 0 && (d.RequestBodyIdleTimeout < time.Second || d.RequestBodyIdleTimeout > time.Hour) {
+		return errors.New("request_body_idle_timeout must be between 1s and 1h")
+	}
 	if d.NodeCapacity == 0 || d.NodeCapacity > 10000 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
@@ -302,6 +309,18 @@ func (d Deployment) PublicTCPIdle() time.Duration {
 		return DefaultPublicTCPIdleTimeout
 	}
 	return d.PublicTCPIdleTimeout
+}
+
+// DefaultRequestBodyIdleTimeout is nginx's client_body_timeout default: an upload that sends no
+// body bytes for this long is cut, so a stalled client cannot hold a connection and carrier stream.
+const DefaultRequestBodyIdleTimeout = 60 * time.Second
+
+// RequestBodyIdle is the effective idle timeout of HTTP request bodies.
+func (d Deployment) RequestBodyIdle() time.Duration {
+	if d.RequestBodyIdleTimeout == 0 {
+		return DefaultRequestBodyIdleTimeout
+	}
+	return d.RequestBodyIdleTimeout
 }
 
 // PreviewCarrierPollInterval is the effective preview admission pull interval.

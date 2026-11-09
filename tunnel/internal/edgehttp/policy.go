@@ -54,6 +54,7 @@ type Config struct {
 	TrustedProxies           []*net.IPNet
 	MaxHeaderBytes           int64
 	MaxBodyBytes             int64
+	BodyIdleTimeout          time.Duration // cut an upload after this long without body bytes; zero never
 	Routes                   RouteMatcher
 	PrivateAccessConnections *PrivateAccessConnectionRegistry
 	RequestID                func() string
@@ -251,6 +252,11 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeErrorPage(writer, http.StatusTooManyRequests, "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets.")
 			return
 		}
+		if errors.Is(err, errRequestBodyIdle) {
+			writer.Header().Set("X-Paperboat-Error", "request_body_timeout")
+			writeErrorPage(writer, http.StatusRequestTimeout, requestBodyIdleMessage)
+			return
+		}
 		if errors.Is(err, ErrIngressLimitExceeded) {
 			// The edge's abuse limits (edgelimits): too many connections or opens right now.
 			writer.Header().Set("X-Paperboat-Error", "edge_rate_limited")
@@ -266,6 +272,7 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 }
 
 const previewStartingMessage = "This preview is starting. Retry in a moment."
+const requestBodyIdleMessage = "The upload stopped sending data, so Paperboat ended the request. Check your connection and try again."
 
 // previewStartingWait bounds how long a request to an admitted preview waits for its route.
 const previewStartingWait = 3 * time.Second
@@ -530,7 +537,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Host = matched.Rule.HostOverride
 	}
 	if r.Body != nil && r.Body != http.NoBody {
-		r.Body = &proxyRequestBody{body: r.Body, controller: http.NewResponseController(w)}
+		r.Body = &proxyRequestBody{body: r.Body, controller: http.NewResponseController(w), idle: p.config.BodyIdleTimeout}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, p.config.MaxBodyBytes)
 	w.Header().Set("X-Content-Type-Options", "nosniff")

@@ -16,32 +16,59 @@ import (
 type proxyRequestBody struct {
 	body        io.ReadCloser
 	controller  *http.ResponseController
+	idle        time.Duration // cut the upload after waiting this long for client bytes; zero never
+	deadlineMu  sync.Mutex    // orders the idle deadline against Close's interrupting deadline
 	finished    atomic.Bool
 	interrupted atomic.Bool
 	once        sync.Once
 	closeErr    error
 }
 
+// errRequestBodyIdle means the client sent no body bytes for the idle timeout (nginx
+// client_body_timeout); the proxy answers 408.
+var errRequestBodyIdle = errors.New("HTTP upload sent no data within the idle timeout")
+
 func (b *proxyRequestBody) Read(payload []byte) (int, error) {
+	b.idleDeadline(time.Now().Add(b.idle))
 	n, err := b.body.Read(payload)
+	b.idleDeadline(time.Time{})
 	if err == io.EOF {
 		b.finished.Store(true)
 	}
 	if b.interrupted.Load() && uploadReadTimeout(err) {
 		return n, &proxyUploadStopped{cause: err}
 	}
+	if b.idle > 0 && uploadReadTimeout(err) {
+		return n, errors.Join(errRequestBodyIdle, err)
+	}
 	return n, err
+}
+
+// idleDeadline bounds only the wait for the client's next bytes: set before each read and cleared
+// after it, so time the proxy spends writing upstream (backpressure) never counts. HTTP/3 has no
+// read deadline (ErrNotSupported); QUIC's own idle timeout bounds it there.
+func (b *proxyRequestBody) idleDeadline(deadline time.Time) {
+	if b.idle <= 0 {
+		return
+	}
+	b.deadlineMu.Lock()
+	defer b.deadlineMu.Unlock()
+	if !b.interrupted.Load() {
+		_ = b.controller.SetReadDeadline(deadline)
+	}
 }
 
 func (b *proxyRequestBody) Close() error {
 	b.once.Do(func() {
 		var deadlineErr error
 		if !b.finished.Load() {
+			b.deadlineMu.Lock()
 			b.interrupted.Store(true)
 			deadlineErr = b.controller.SetReadDeadline(time.Now())
 			if deadlineErr != nil {
 				b.interrupted.Store(false)
 			}
+			b.deadlineMu.Unlock()
 		}
 		cause := b.body.Close()
 		if b.interrupted.Load() && uploadReadTimeout(cause) {

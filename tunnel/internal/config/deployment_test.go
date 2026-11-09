@@ -210,3 +210,19 @@ func TestPublicTCPIdleTimeoutDefaultsToOneHour(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestBodyIdleTimeoutDefaultsToNginxSixtySeconds(t *testing.T) {
+	deployment, err := LoadDeployment(writeDeployment(t, validDeploymentJSON()))
+	if err != nil || deployment.RequestBodyIdle() != 60*time.Second {
+		t.Fatalf("default request body idle timeout = %s, %v", deployment.RequestBodyIdle(), err)
+	}
+	explicit := strings.TrimSuffix(validDeploymentJSON(), "}") + `,"request_body_idle_timeout":5000000000}`
+	if deployment, err = LoadDeployment(writeDeployment(t, explicit)); err != nil || deployment.RequestBodyIdle() != 5*time.Second {
+		t.Fatalf("explicit request body idle timeout = %s, %v", deployment.RequestBodyIdle(), err)
+	}
+	for _, bad := range []string{`,"request_body_idle_timeout":-1}`, `,"request_body_idle_timeout":1000000}`, `,"request_body_idle_timeout":7200000000000}`} {
+		if _, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+bad)); err == nil {
+			t.Fatalf("accepted request body idle timeout %s", bad)
+		}
+	}
+}
