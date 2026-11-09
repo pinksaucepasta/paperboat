@@ -9,7 +9,7 @@ import { ConfirmAction } from "@/components/list-toolbar"
 import { Section } from "@/components/section"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { SectionSkeleton } from "@/components/skeletons"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * Your GitHub connection, which config sync uses to read and write your config repository:
@@ -24,7 +24,19 @@ export function GitHubConnection() {
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
   })
   if (!githubLive) return null
-  if (status.isPending) return <SectionSkeleton title="GitHub" rows={1} />
+  if (status.isPending)
+    return (
+      // The connected row: avatar and "Connected as …" (two lines on a phone), Disconnect on the right.
+      <Section title="GitHub" action={<Skeleton className="h-8 w-24" />}>
+        <div className="flex min-h-12 items-center gap-3 border-b border-divider py-2">
+          <Skeleton className="size-6 shrink-0 rounded-full" />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Skeleton className="my-[4px] h-3 w-80 max-w-full" />
+            <Skeleton className="my-[4px] h-3 w-40 sm:hidden" />
+          </div>
+        </div>
+      </Section>
+    )
   if (status.isError) return <p className="text-sm text-muted-foreground">{status.error.message}</p>
   const data = status.data
   return (
