@@ -10,9 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -23,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
-	"golang.org/x/sys/windows"
 )
 
 // runServiceCommand is the sole privileged command bridge used by the MSI,
@@ -509,47 +506,10 @@ func commitWindowsRuntime(ctx context.Context, request hostinstall.Request) (res
 	return hostinstall.Commit(request)
 }
 
+// lockWindowsNativeInstall is held by pb install, pb update and pb doctor --repair for their whole run, and tried
+// by the carrier service's recovery watch.
 func lockWindowsNativeInstall(ctx context.Context) (func() error, error) {
-	if ctx == nil {
-		return nil, errors.New("nil Windows native install context")
-	}
-	runtime.LockOSThread()
-	acquired := false
-	defer func() {
-		if !acquired {
-			runtime.UnlockOSThread()
-		}
-	}()
-	name, err := windows.UTF16PtrFromString(`Global\PaperboatNativeInstall`)
-	if err != nil {
-		return nil, err
-	}
-	handle, err := windows.CreateMutex(nil, false, name)
-	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
-		return nil, err
-	}
-	if handle == 0 {
-		return nil, errors.New("create Windows native install mutex")
-	}
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, runtimeFailure("waiting for the native installation lock failed", err, windows.CloseHandle(handle))
-		}
-		state, waitErr := windows.WaitForSingleObject(handle, uint32((100 * time.Millisecond).Milliseconds()))
-		if waitErr != nil {
-			return nil, runtimeFailure("waiting for the native installation lock failed", waitErr, windows.CloseHandle(handle))
-		}
-		if state == windows.WAIT_OBJECT_0 || state == windows.WAIT_ABANDONED {
-			acquired = true
-			return func() error {
-				defer runtime.UnlockOSThread()
-				return runtimeFailureIfAny("releasing the native installation lock failed", windows.ReleaseMutex(handle), windows.CloseHandle(handle))
-			}, nil
-		}
-		if state != uint32(windows.WAIT_TIMEOUT) {
-			return nil, runtimeFailure("waiting for the native installation lock failed", windows.CloseHandle(handle))
-		}
-	}
+	return hostinstall.LockWindowsNativeInstall(ctx)
 }
 
 func repairWindowsInstallation(ctx context.Context, ownerSID string) (resultErr error) {

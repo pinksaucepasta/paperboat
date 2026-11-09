@@ -210,3 +210,11 @@ func PrepareWindowsPinNamespace(ctx context.Context, ownerSID string) error {
 func LockWindowsNativePublication(ctx context.Context) (func() error, error) {
 	return lockWindowsLocalDaemonMigration(ctx)
 }
+
+// LockWindowsNativeInstall serializes the commands that install, update or repair an installation. Elevated
+// administrators hold it and LocalSystem (the carrier service's recovery watch) tries it, so whichever creates it
+// first, it carries the explicit access of the publication lock: a mutex LocalSystem creates with its default
+// access cannot be opened by an administrator.
+func LockWindowsNativeInstall(ctx context.Context) (func() error, error) {
+	return lockWindowsLocalDaemonMigrationNamed(ctx, `Global\PaperboatNativeInstall`)
+}
