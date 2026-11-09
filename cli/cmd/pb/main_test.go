@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -829,5 +830,30 @@ func TestUpdateStatusShowsAFinishThatIsBeingRetriedOrGaveUp(t *testing.T) {
 	output.Reset()
 	if err := writeUpdateStatusResult(command, updateStatusCommandResult("2026.11.09.1", gaveUp, nil)); err != nil || !strings.Contains(output.String(), "Activation: failed (commit_failed)") {
 		t.Fatalf("finish that gave up: %q %v", output.String(), err)
+	}
+}
+
+// A file that is not a Paperboat build (a text file, another program) is refused as unreadable input with that reason, not as the
+// generic "could not finish the command" (C216 error bar).
+func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
+	notABuild := filepath.Join(t.TempDir(), "not-a-build")
+	if err := os.WriteFile(notABuild, []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command, _, err := newRootCommand().Find([]string{"update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.SetOut(&bytes.Buffer{})
+	command.SetErr(&bytes.Buffer{})
+	previous := inspectUpdateCandidate
+	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
+		return installsource.Source{}, errors.New("fork/exec: exec format error")
+	}
+	defer func() { inspectUpdateCandidate = previous }()
+	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	result := classifyCLIJSONError(err)
+	if result.Code != "update_source_unreadable" || !strings.Contains(result.Message, "not a Paperboat executable") || strings.Contains(result.Message, "exec format") {
+		t.Fatalf("a file that is not a build was classified %+v (%v)", result, err)
 	}
 }

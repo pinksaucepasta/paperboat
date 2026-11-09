@@ -80,7 +80,12 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 		}
 		source, err = inspectUpdateCandidate(ctx, executable)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return err
+			}
+			// A file that does not run as a Paperboat build (a text file, another program, a wrong platform) is the user's
+			// input, not an internal failure; the cause stays out of the message (it can quote the program's output).
+			return commandRejection{reason: commandRejectUpdateSource, detail: "the file is not a Paperboat executable, package or .pb-update bundle for this machine"}
 		}
 	}
 	if !force {
