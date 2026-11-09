@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -249,7 +250,8 @@ func recordWindowsLaunchFailure(path string, cause error) {
 	body, err := json.Marshal(fault)
 	if err == nil {
 		// The fault carries only the error's types; the service log is the one place its cause can be read.
-		err = os.WriteFile(path, append(body, []byte("\ncause: "+causetext.Text(cause)+"\n")...), 0600)
+		// Protected at creation (LocalSystem, Administrators and the writing account): a mode means nothing on Windows.
+		err = atomicfile.Write(path, append(body, []byte("\ncause: "+causetext.Text(cause)+"\n")...), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 	}
 	if err != nil {
 		observeRuntimeFailure(context.Background(), "diagnostic", runtimeFailure("runtime startup diagnostics could not be saved", err))
