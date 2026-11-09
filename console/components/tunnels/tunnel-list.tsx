@@ -102,7 +102,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
                   <Row
                     key={tunnel.id}
                     tunnel={tunnel}
-                    machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "—")}
+                    machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "")}
                   />
                 ))}
           </tbody>

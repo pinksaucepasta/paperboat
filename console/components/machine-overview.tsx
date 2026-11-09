@@ -221,7 +221,7 @@ function Latency({ value, className }: { value?: number; className?: string }) {
     <span
       className={cn("font-mono text-code text-muted-foreground", value !== undefined && "text-foreground", className)}
     >
-      {value !== undefined ? `${value} ms` : "—"}
+      {value !== undefined ? `${value} ms` : <span className="font-sans text-sm">Not measured yet</span>}
     </span>
   )
 }

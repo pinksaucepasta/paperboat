@@ -477,7 +477,7 @@ function Card({
       {loading ? (
         <Skeleton className="h-8 w-24" />
       ) : failed ? (
-        <span className="text-sm text-muted-foreground">Unavailable</span>
+        <span className="text-sm text-muted-foreground">Couldn’t load</span>
       ) : (
         children
       )}

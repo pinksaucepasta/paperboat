@@ -77,11 +77,13 @@
     const wanted = expectedStatus(environment)
     const ok =
       Boolean(row) &&
-      cells[1] === (environment.repository_name ?? "—") &&
-      cells[2] === (direction[environment.mode ?? ""] ?? "—") &&
-      cells[3] === String(environment.managed_path_count) &&
+      cells[1] === (environment.repository_name ?? "") &&
+      cells[2] === (direction[environment.mode ?? ""] ?? "") &&
+      cells[3] === (environment.repository_name ? String(environment.managed_path_count) : "") &&
       (wanted ? cells[4] === wanted : cells[4].length > 0) &&
-      (environment.last_successful_sync_at ? cells[5] !== "—" : cells[5] === "—")
+      (environment.last_successful_sync_at
+        ? cells[5].length > 0 && cells[5] !== "Never"
+        : cells[5] === (environment.repository_name ? "Never" : ""))
     pass(`row for ${environment.alias} matches the server`, ok, ok ? `${cells[4]}` : JSON.stringify(cells))
   }
 

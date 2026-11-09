@@ -176,13 +176,13 @@ function AllMachines(props: {
                   </Link>
                 </td>
                 <td className="hidden truncate text-muted-foreground md:table-cell">
-                  {environment.repository_name ?? "—"}
+                  {environment.repository_name}
                 </td>
                 <td className="hidden truncate text-muted-foreground lg:table-cell">
-                  {directionLabels[environment.mode ?? ""] ?? "—"}
+                  {directionLabels[environment.mode ?? ""]}
                 </td>
                 <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
-                  {environment.managed_path_count}
+                  {environment.repository_name && environment.managed_path_count}
                 </td>
                 <td>
                   <span
@@ -198,7 +198,8 @@ function AllMachines(props: {
                       <Time iso={environment.last_successful_sync_at} relative />
                     </span>
                   ) : (
-                    "—"
+                    // Only a machine that syncs can say it never has.
+                    environment.repository_name && "Never"
                   )}
                 </td>
               </tr>

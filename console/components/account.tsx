@@ -17,7 +17,7 @@ export function Account() {
   return (
     <>
       <Section title="Profile">
-        <Row label="Name">{me ? me.display_name || "—" : <Skeleton className="h-4 w-32" />}</Row>
+        <Row label="Name">{me ? me.display_name || "Not set" : <Skeleton className="h-4 w-32" />}</Row>
         <Row label="Email">{me ? <Email value={me.email} revealable /> : <Skeleton className="h-4 w-48" />}</Row>
       </Section>
       <Section title="Privacy">

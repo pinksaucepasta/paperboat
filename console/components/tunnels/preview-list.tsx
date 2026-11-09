@@ -183,7 +183,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
                     key={preview.id}
                     preview={preview}
                     now={now}
-                    machineName={scope ? undefined : (aliasOf(preview.owner_machine_id) ?? "—")}
+                    machineName={scope ? undefined : (aliasOf(preview.owner_machine_id) ?? "")}
                   />
                 ))}
           </tbody>

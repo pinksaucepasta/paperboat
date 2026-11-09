@@ -278,7 +278,7 @@ function TeamMachines({ teamId, policy, tags }: { teamId: string; policy: Policy
                 <td className={grants.everyone.length ? "truncate" : "truncate text-muted-foreground"}>
                   {grants.everyone.length ? grants.everyone.join(", ") : "Nothing yet"}
                 </td>
-                <td className="hidden text-muted-foreground md:table-cell">{grants.members ? plural(grants.members, "member") : "—"}</td>
+                <td className="hidden text-muted-foreground md:table-cell">{grants.members ? plural(grants.members, "member") : "None"}</td>
                 <td className="text-right">
                   {canManage(row) && (
                     <Button variant="outline" disabled={team.data.suspended} onClick={() => setEditing(row)}>
