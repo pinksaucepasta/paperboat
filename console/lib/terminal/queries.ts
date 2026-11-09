@@ -52,9 +52,12 @@ export const terminalsPageQuery = (options: { closed: boolean; q: string; page: 
       )
       return { items: page.sessions, total: page.pagination.total }
     },
-    // Keep the last page while paging or searching, never across Open/Closed: those rows don't belong there.
-    placeholderData: (previous, previousQuery) =>
-      (previousQuery?.queryKey.at(-1) as typeof options | undefined)?.closed === options.closed ? previous : undefined,
+    // Keep the last page while paging or searching, never across Open/Closed or to another machine:
+    // those rows don't belong there.
+    placeholderData: (previous, previousQuery) => {
+      const before = previousQuery?.queryKey.at(-1) as typeof options | undefined
+      return before?.closed === options.closed && before?.machine === options.machine ? previous : undefined
+    },
     refetchInterval: 15_000,
   })
 

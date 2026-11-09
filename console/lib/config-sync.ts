@@ -1,6 +1,6 @@
 "use client"
 
-import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
 import { queryKeys } from "@/lib/query-keys"
 
@@ -58,7 +58,11 @@ export const configStatusQuery = (options: { q?: string; state?: string; machine
         signal,
         readStatus,
       ),
-    placeholderData: keepPreviousData,
+    // Keep the last page while paging or searching, never to another machine or list (state).
+    placeholderData: (previous, previousQuery) => {
+      const before = previousQuery?.queryKey.at(-1) as typeof options | undefined
+      return before?.machine === options.machine && before?.state === options.state ? previous : undefined
+    },
     refetchInterval: 15_000,
   })
 
