@@ -4,7 +4,7 @@ import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
 import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { uploadFile } from "@/lib/upload"
-import { keepWithinWorkspace } from "@/lib/query-keys"
+import { keepWithinWorkspace, queryKeys } from "@/lib/query-keys"
 
 /*
  * The server's tunnel API. Previews and tunnels are one tunnel resource with two lifecycles (plans: "Preview and tunnel
@@ -85,7 +85,7 @@ export const previewCountsQuery = (workspace: string, machine?: string) =>
 /** One page of the workspace's tunnels (deleted ones are left out by the server). */
 export const tunnelsPageQuery = (options: { workspace: string; q: string; page: number; machine?: string }) =>
   queryOptions({
-    queryKey: [...tunnelKeys.tunnels(options.workspace), "page", options],
+    queryKey: queryKeys.tunnelsPage(options.workspace, options),
     queryFn: ({ signal }) =>
       cursorPage<Tunnel>(
         "tunnels",

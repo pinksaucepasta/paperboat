@@ -17,6 +17,8 @@ export const queryKeys = {
   apiTokens: (workspace: string) => ["api-tokens", workspace],
   tags: (workspace: string) => ["policy", workspace, "tags"],
   githubStatus: ["github-status"],
+  /** A tunnels page; `options` as tunnelsPageQuery takes them (lib/tunnels.ts). */
+  tunnelsPage: (workspace: string, options: object) => ["tunnels", workspace, "page", options],
   /** A config-sync status page; `options` as configStatusQuery takes them (lib/config-sync.ts). */
   configStatus: (options: object) => ["config-sync", options],
   /** `params`: the activity filter as its query string (lib/activity.ts activityParams). */
