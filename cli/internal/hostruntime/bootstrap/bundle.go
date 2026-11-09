@@ -464,12 +464,12 @@ func importUpdateBundle(ctx context.Context, repositoryURL, stateDirectory, bund
 	if err != nil {
 		return result, err
 	}
-	defer pending.Close()
 	defer func() {
 		if resultErr != nil {
 			os.Remove(pending.Name())
 		}
 	}()
+	defer pending.Close() // runs first: Windows cannot remove a file that is still open
 	reader := tar.NewReader(&contextReader{ctx: ctx, r: f})
 	proofs := map[string][]byte{}
 	seen := map[string]bool{}
