@@ -40,6 +40,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { ListSkeleton } from "@/components/skeletons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -235,11 +236,18 @@ function SuspendedNotice({ owner }: { owner: boolean }) {
   )
 }
 
+/** The team header (avatar, name and detail line at their sizes) over member rows. */
 function TeamSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      <Skeleton className="h-12 w-64" />
-      <Skeleton className="h-48 w-full" />
+    <div className="flex flex-col gap-10">
+      <header className="flex flex-wrap items-center gap-4">
+        <Skeleton className="size-12 rounded-lg" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <Skeleton className="my-1 h-6 w-48" />
+          <Skeleton className="my-0.5 h-4 w-64" />
+        </div>
+      </header>
+      <ListSkeleton rows={4} />
     </div>
   )
 }
