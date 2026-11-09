@@ -237,3 +237,18 @@ func TestEdgeHTTP4xxLogIsSampledAnd5xxIsNot(t *testing.T) {
 		t.Fatalf("%d 5xx lines logged for %d 5xx pages", got, 3*fourxxLogPerSecond)
 	}
 }
+
+// A failing random source never gives an all-zero or repeated reference.
+func TestNewReferenceFallsBackWhenRandomFails(t *testing.T) {
+	previous := readRandom
+	readRandom = func([]byte) (int, error) { return 0, errors.New("no entropy") }
+	defer func() { readRandom = previous }()
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		ref := newReference()
+		if len(ref) != 12 || ref == "000000000000" || seen[ref] {
+			t.Fatalf("reference %q (repeat %v) from the fallback", ref, seen[ref])
+		}
+		seen[ref] = true
+	}
+}

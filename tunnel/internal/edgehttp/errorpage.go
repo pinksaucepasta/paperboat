@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
@@ -108,10 +109,21 @@ var errorTitles = map[int]string{
 // referenceHeader carries the same id the page shows and the edge logs, so support finds the failure from either.
 const referenceHeader = "X-Paperboat-Reference"
 
-// newReference is 12 hex characters: short enough to read out, URL-safe, and unique enough for a log search.
+// readRandom is crypto/rand.Read; a variable so a test can make it fail.
+var readRandom = rand.Read
+
+var referenceCounter atomic.Uint64
+
+// newReference is 12 hex characters: short enough to read out, URL-safe, and unique enough for a log search. If the
+// system random source fails, the id is the clock mixed with a counter, never the same bytes twice.
 func newReference() string {
 	var b [6]byte
-	_, _ = rand.Read(b[:])
+	if _, err := readRandom(b[:]); err != nil {
+		v := uint64(time.Now().UnixNano()) ^ referenceCounter.Add(1)*0x9e3779b97f4a7c15
+		for i := range b {
+			b[i] = byte(v >> (8 * i))
+		}
+	}
 	return hex.EncodeToString(b[:])
 }
 
