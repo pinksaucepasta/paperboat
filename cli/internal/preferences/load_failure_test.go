@@ -47,7 +47,8 @@ func TestPreferenceFilesystemFailureKeepsOriginalCauseAndRecovers(t *testing.T) 
 	path := filepath.Join(parent, "preferences.json")
 	_, err := Load(path)
 	var pathErr *os.PathError
-	if !errors.As(err, &pathErr) || errors.Is(err, ErrInvalid) || pathErr.Op != "lstat" || pathErr.Err == nil {
+	// Windows names the system call it used (CreateFile or GetFileAttributesEx) instead of lstat.
+	if !errors.As(err, &pathErr) || errors.Is(err, ErrInvalid) || pathErr.Op != "lstat" && pathErr.Op != "CreateFile" && pathErr.Op != "GetFileAttributesEx" || pathErr.Err == nil {
 		t.Fatal("filesystem outage became invalid preferences")
 	}
 	if err := os.Remove(parent); err != nil {

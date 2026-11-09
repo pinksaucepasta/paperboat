@@ -4,6 +4,7 @@ package machineguard
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 )
 
@@ -60,7 +61,11 @@ func TestRecordingTheDefaultDomainKeepsOrReplacesIt(t *testing.T) {
 	}
 	// An owner who had chosen the new deployment domain simply follows the default.
 	domains, _ := loadBrowserDomains(state)
-	domains.Owners["1000"] = "other.example.test"
+	owner := "1000"
+	if runtime.GOOS == "windows" {
+		owner = "S-1-5-21-1-2-3-1000" // an owner is a uid on Unix and a SID on Windows
+	}
+	domains.Owners[owner] = "other.example.test"
 	if err := writeBrowserDomains(state, domains); err != nil {
 		t.Fatal(err)
 	}

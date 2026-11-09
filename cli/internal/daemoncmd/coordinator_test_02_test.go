@@ -489,11 +489,13 @@ func TestCoordinatorStartsWithoutTheGuardAndConnectsWhenItReturns(t *testing.T) 
 		t.Fatalf("the daemon must start while the guard is down: %v", err)
 	}
 	defer coordinator.Stop()
-	if conn, err := net.Dial("unix", path); err != nil {
+	dialCtx, cancelDial := context.WithTimeout(t.Context(), 5*time.Second)
+	conn, err := daemonrpc.Dial(dialCtx, path) // the product's own client: a Unix socket, or a named pipe on Windows
+	cancelDial()
+	if err != nil {
 		t.Fatalf("daemon IPC is unavailable: %v", err)
-	} else {
-		conn.Close()
 	}
+	conn.Close()
 	if err = coordinator.replaceGuardedRoutes(t.Context(), nil); !errors.Is(err, guardErr) {
 		t.Fatalf("reconciliation did not report the guard failure: %v", err)
 	}

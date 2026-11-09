@@ -77,7 +77,12 @@ func TestWindowsBaseEnvironmentPreservesProfileAndExecutablePath(t *testing.T) {
 			t.Fatalf("child omitted %s", key)
 		}
 	}
-	if !strings.Contains(strings.ToLower(string(output)), strings.ToLower(executable)) {
-		t.Fatal("current installed executable directory missing from PATH")
+	// `where` prints long names; the test binary's own path can be an 8.3 spelling of the same directory.
+	longExecutable, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(string(output)), strings.ToLower(longExecutable)) {
+		t.Fatalf("current installed executable directory missing from PATH: executable=%q output=%q", executable, output)
 	}
 }
