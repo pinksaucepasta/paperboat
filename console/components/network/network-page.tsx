@@ -4,11 +4,12 @@ import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from 
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
+import { ApiError, clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { copyWithToast } from "@/lib/clipboard"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { placeName } from "@/lib/format"
 import {
+  edgePairQuery,
   groupNodes,
   installCommand,
   installationsQuery,
@@ -16,9 +17,12 @@ import {
   poolQuery,
   poolServersQuery,
   removeInstallation,
+  saveEdgePair,
   savePool,
   scopeOf,
   verifyIngress,
+  type EdgePair,
+  type PairEdge,
   type Node,
 } from "@/lib/network"
 import { usePageParam } from "@/lib/use-page-param"
@@ -27,6 +31,7 @@ import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
+import { Time } from "@/components/time"
 import { Section, SectionHeading } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -74,7 +79,10 @@ export function NetworkPage() {
   return (
     <div className="flex flex-col gap-8">
       <RelaysSection scope={scope} />
-      <EdgesSection scope={scope} />
+      <EdgesSection
+        workspace={workspace?.id ?? ""}
+        manage={workspace?.kind === "personal" || workspace?.role === "owner" || workspace?.role === "admin"}
+      />
 
       <Section
         title={team ? `${workspace?.name ?? "Team"} servers` : "Your servers"}
@@ -98,10 +106,11 @@ export function NetworkPage() {
           <div>
             <table className="w-full table-fixed text-sm">
               <colgroup>
-                <col className="w-[26%]" />
-                <col className="hidden w-[22%] md:table-column" />
+                <col className="w-[24%]" />
+                <col className="hidden w-[18%] md:table-column" />
                 <col className="hidden sm:table-column" />
-                <col className="w-[22%]" />
+                <col className="w-[20%]" />
+                <col className="hidden w-[14%] lg:table-column" />
                 <col className="w-12" />
               </colgroup>
               <thead className="border-b border-divider text-left text-xs text-muted-foreground">
@@ -110,6 +119,7 @@ export function NetworkPage() {
                   <th className="hidden md:table-cell">Role</th>
                   <th className="hidden sm:table-cell">Address</th>
                   <th>Status</th>
+                  <th className="hidden lg:table-cell">Last seen</th>
                   <th className="w-12" aria-label="Actions" />
                 </tr>
               </thead>
@@ -122,6 +132,7 @@ export function NetworkPage() {
                       { className: "hidden md:table-cell", bar: "w-24" },
                       { className: "hidden sm:table-cell", bar: "w-36" },
                       { bar: "w-16" },
+                      { className: "hidden lg:table-cell", bar: "w-16" },
                       { empty: true },
                     ]}
                   />
@@ -153,6 +164,12 @@ function NodeRow({ node }: { node: Node }) {
   const [removing, setRemoving] = useState(false)
   const state = nodeState(node)
   const tunnel = node.installations.find((installation) => installation.capability === "tunnel")
+  // The newest heartbeat of the node's components.
+  const seen = node.installations
+    .map((installation) => installation.last_heartbeat_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["selfhost"] })
   const verify = useMutation({
     mutationFn: () => verifyIngress(tunnel!),
@@ -193,6 +210,9 @@ function NodeRow({ node }: { node: Node }) {
               <span className="truncate">{verify.isPending ? "Checking public access…" : state.label}</span>
             </span>
           </td>
+          <td className="hidden truncate text-muted-foreground lg:table-cell">
+            {seen && <Time iso={seen} relative />}
+          </td>
           <td className="text-right">{actions}</td>
         </tr>
       )}
@@ -222,20 +242,28 @@ function NodeRow({ node }: { node: Node }) {
 
 const nodeStatus = { ready: "Ready", draining: "Being replaced", unavailable: "Not reachable" } as const
 
-/** One row of the Relays or Edges table: where it is, who runs it, and whether it's ready. */
+/** Latency in ms, blank without a fresh measurement from your machines. */
+const latency = (ms?: number) => (ms === undefined ? "" : `${ms} ms`)
+
+/** One row of the Relays or Edges table: (its role,) where it is, who runs it, whether it's ready, latency. */
 function NodeLine({
+  role,
   location,
   operator,
   ok,
   status,
+  rtt,
 }: {
+  role?: string
   location: string
   operator: string
   ok: boolean
   status: string
+  rtt?: number
 }) {
   return (
     <tr className="[&>td]:h-12 [&>td]:px-3">
+      {role && <td className="truncate font-medium">{role}</td>}
       <td className="truncate">{location}</td>
       <td className="truncate text-muted-foreground">{operator}</td>
       <td>
@@ -244,29 +272,53 @@ function NodeLine({
           {status}
         </span>
       </td>
+      <td className="text-right font-mono text-code text-muted-foreground">{latency(rtt)}</td>
     </tr>
   )
 }
 
-/** The Relays and Edges tables: Location, Operator, Status. */
-function NodeTable({ loading, rows, children }: { loading: boolean; rows: number; children: React.ReactNode }) {
+/** The Relays and Edges tables: (Edge,) Location, Operator, Status, Latency. */
+function NodeTable({
+  roles,
+  loading,
+  rows,
+  children,
+}: {
+  roles?: boolean
+  loading: boolean
+  rows: number
+  children: React.ReactNode
+}) {
   return (
     <table className="w-full table-fixed text-sm">
       <colgroup>
+        {roles && <col className="w-[18%]" />}
         <col />
-        <col className="w-[34%]" />
-        <col className="w-[28%]" />
+        <col className="w-[26%]" />
+        <col className="w-[20%]" />
+        <col className="w-[14%]" />
       </colgroup>
       <thead className="border-b border-divider text-left text-xs text-muted-foreground">
         <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
+          {roles && <th>Edge</th>}
           <th>Location</th>
           <th>Operator</th>
           <th>Status</th>
+          <th className="text-right">Latency</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-divider border-b border-divider">
         {loading ? (
-          <TableRowsSkeleton rows={rows} columns={[{ bar: "w-24" }, { bar: "w-20" }, { bar: "w-14", dot: true }]} />
+          <TableRowsSkeleton
+            rows={rows}
+            columns={[
+              roles ? { bar: "w-16" } : false,
+              { bar: "w-24" },
+              { bar: "w-20" },
+              { bar: "w-14", dot: true },
+              { className: "text-right", bar: "w-10" },
+            ]}
+          />
         ) : (
           children
         )}
@@ -301,8 +353,10 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
     },
     onError: (error) => toast.error(`Couldn’t change relays: ${error.message}`),
   })
+  // Fastest first; unmeasured ones after, ready before not.
   const rows = [...(relays.data ?? [])].sort(
     (a, b) =>
+      (a.best_rtt_ms ?? Infinity) - (b.best_rtt_ms ?? Infinity) ||
       Number(b.status === "ready") - Number(a.status === "ready") ||
       placeName(a.region).localeCompare(placeName(b.region)),
   )
@@ -333,6 +387,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
             operator={relay.self_hosted ? (relay.name ?? "Your server") : "Paperboat"}
             ok={relay.status === "ready"}
             status={nodeStatus[relay.status]}
+            rtt={relay.best_rtt_ms}
           />
         ))}
       </NodeTable>
@@ -342,55 +397,157 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
 }
 
 /**
- * Where the workspace's tunnels and previews are served: Paperboat's edges, or your own tunnel
- * servers when the workspace uses only those (the tunnel pool).
+ * The workspace's edge pair (GET /v1/edges/pair): where its tunnels and previews are served.
+ * Machines pick between the two by what they measure, so the labels are roles, not a promise of
+ * which one carries traffic. Owners and admins change the pair.
  */
-function EdgesSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
-  const pool = useApiQuery(poolQuery("tunnel", scope))
-  const own = pool.data?.mode === "self-hosted-only"
-  const edges = useApiQuery({ ...edgesQuery, enabled: pool.isSuccess && !own })
-  const servers = useInfiniteQuery({ ...poolServersQuery("tunnel", scope, ""), enabled: own })
-  const ready = new Set(
-    (servers.data?.pages.flatMap((page) => page.items) ?? [])
-      .filter((server) => server.ready)
-      .map((server) => server.installation_id),
-  )
-  const loading = pool.isPending || (own ? servers.isPending : edges.isPending)
+function EdgesSection({ workspace, manage }: { workspace: string; manage: boolean }) {
+  const pair = useApiQuery({ ...edgePairQuery(workspace), enabled: Boolean(workspace) })
+  const [changing, setChanging] = useState(false)
+  const edges: { role: string; edge: PairEdge }[] = []
+  if (pair.data) edges.push({ role: "Primary", edge: pair.data.primary })
+  if (pair.data?.fallback) edges.push({ role: "Fallback", edge: pair.data.fallback })
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <SectionHeading title="Edges" />
+        <SectionHeading
+          title="Edges"
+          action={
+            manage &&
+            pair.isSuccess && (
+              <Button variant="secondary" size="lg" onClick={() => setChanging(true)}>
+                Change
+              </Button>
+            )
+          }
+        />
         <p className="text-sm text-muted-foreground">Your tunnels and previews are served from these two edges.</p>
       </div>
-      <NodeTable loading={loading} rows={2}>
-        {own
-          ? (pool.data?.members ?? []).map((member) => (
-              <NodeLine
-                key={member.installation_id}
-                location={member.endpoint_host}
-                operator={member.name}
-                ok={ready.has(member.installation_id)}
-                status={ready.has(member.installation_id) ? "Ready" : "Not ready"}
-              />
-            ))
-          : (edges.data ?? []).map((edge) => (
-              <NodeLine
-                key={edge.id}
-                location={placeName(edge.region)}
-                operator="Paperboat"
-                ok={edge.status === "ready"}
-                status={nodeStatus[edge.status]}
-              />
-            ))}
+      <NodeTable roles loading={pair.isPending} rows={2}>
+        {edges.map(({ role, edge }) => (
+          <NodeLine
+            key={role}
+            role={role}
+            location={edge.kind === "managed" ? placeName(edge.region) : (edge.endpoint_host ?? placeName(edge.region))}
+            operator={edge.kind === "managed" ? "Paperboat" : (edge.name ?? "Your server")}
+            ok={edge.status === "ready"}
+            status={nodeStatus[edge.status]}
+            rtt={edge.best_rtt_ms}
+          />
+        ))}
       </NodeTable>
-      {(pool.isError || edges.isError) && (
-        <LoadError
-          what="edges"
-          error={(pool.error ?? edges.error)!}
-          retry={() => (pool.isError ? pool.refetch() : edges.refetch())}
-        />
+      {pair.isSuccess && !pair.data && <p className="py-3 text-sm text-muted-foreground">No edges assigned yet.</p>}
+      {pair.isError && <LoadError what="edges" error={pair.error} retry={() => pair.refetch()} />}
+      {changing && pair.data !== undefined && (
+        <ChangeEdgesDialog workspace={workspace} current={pair.data} onClose={() => setChanging(false)} />
       )}
     </section>
+  )
+}
+
+/**
+ * Picks the pair from Paperboat's edges and your own tunnel servers: both of one kind (the server
+ * refuses a mix). Switching kinds needs running previews and tunnels stopped first (409).
+ */
+function ChangeEdgesDialog({
+  workspace,
+  current,
+  onClose,
+}: {
+  workspace: string
+  current: EdgePair | null
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const scope = scopeOf(useWorkspace())
+  const managed = useApiQuery(edgesQuery)
+  const own = useInfiniteQuery(poolServersQuery("tunnel", scope, ""))
+  const options = [
+    ...(managed.data ?? []).map((edge) => ({
+      id: edge.id,
+      kind: "managed",
+      label: `${placeName(edge.region)} · Paperboat`,
+    })),
+    ...(own.data?.pages.flatMap((page) => page.items) ?? []).map((server) => ({
+      id: server.installation_id,
+      kind: "self_hosted",
+      label: `${server.name} · your server`,
+    })),
+  ]
+  const [primary, setPrimary] = useState(current?.primary.id ?? "")
+  const [fallback, setFallback] = useState(current?.fallback?.id ?? "")
+  const kindOf = (id: string) => options.find((option) => option.id === id)?.kind
+  const problem =
+    !primary || !fallback
+      ? undefined
+      : primary === fallback
+        ? "Choose two different edges."
+        : kindOf(primary) !== kindOf(fallback)
+          ? "Choose two Paperboat edges or two of your servers."
+          : undefined
+  const save = useMutation({
+    mutationFn: () => saveEdgePair(workspace, primary, fallback),
+    onSuccess: (pair) => {
+      queryClient.setQueryData(edgePairQuery(workspace).queryKey, pair)
+      toast.success("Edges changed")
+      onClose()
+    },
+  })
+  const failure =
+    save.error instanceof ApiError && save.error.code === "previews_running"
+      ? (() => {
+          const count = Number((save.error.details as { count?: number } | undefined)?.count ?? 0)
+          return count
+            ? `Stop ${count} running ${count === 1 ? "preview or tunnel" : "previews and tunnels"} first.`
+            : "Stop running previews and tunnels first."
+        })()
+      : save.error?.message
+  const select = (id: string, value: string, onChange: (value: string) => void) => (
+    <select
+      id={id}
+      className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="" disabled>
+        Choose an edge
+      </option>
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Change edges</DialogTitle>
+        </DialogHeader>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="edge-primary">Primary</FieldLabel>
+          {select("edge-primary", primary, setPrimary)}
+        </Field>
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="edge-fallback">Fallback</FieldLabel>
+          {select("edge-fallback", fallback, setFallback)}
+        </Field>
+        {(problem ?? failure) && <p className="text-sm text-destructive">{problem ?? failure}</p>}
+        <DialogFooter>
+          <Button variant="ghost" size="lg" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="lg"
+            disabled={!primary || !fallback || Boolean(problem) || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

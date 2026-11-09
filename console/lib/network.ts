@@ -1,7 +1,7 @@
 "use client"
 
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
-import { api, idempotencyKey, type Workspace } from "@/lib/api"
+import { api, ApiError, idempotencyKey, type Data, type Workspace } from "@/lib/api"
 import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 
 /*
@@ -27,6 +27,7 @@ export type Installation = {
   scope_id: string
   trust_notice: string
   enrollment_state: "pending" | "enrolled"
+  last_heartbeat_at?: string
 }
 
 /** selfhost.Policy: relay `mixed | self-hosted-only`, tunnel `managed-only | self-hosted-only`. */
@@ -158,3 +159,32 @@ export function groupNodes(installations: Installation[]): Node[] {
 /** The installer for a node, run on the server. */
 export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
   `curl -fsSL ${installerBaseUrl}/selfhost/install | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`
+
+/** One of a workspace's two edges: a Paperboat edge or one of your tunnel servers. */
+export type PairEdge = Data<"/v1/edges/pair">["primary"]
+export type EdgePair = Data<"/v1/edges/pair">
+
+/**
+ * The workspace's edge pair (where its tunnels and previews are served); null while none is
+ * assigned (404 edge_pair_unassigned). Machines pick between the two by what they measure.
+ */
+export const edgePairQuery = (workspace: string) =>
+  queryOptions({
+    queryKey: ["edges", "pair", workspace],
+    queryFn: async ({ signal }) => {
+      try {
+        return await api<EdgePair>(`edges/pair?${new URLSearchParams({ workspace })}`, { signal })
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "edge_pair_unassigned") return null
+        throw error
+      }
+    },
+    refetchInterval: 30_000,
+  })
+
+/** Sets the pair; both ids are Paperboat edges or both your tunnel servers (installation ids). */
+export const saveEdgePair = (workspace: string, primaryId: string, fallbackId: string) =>
+  write<EdgePair>(`edges/pair?${new URLSearchParams({ workspace })}`, "PUT", {
+    primary_id: primaryId,
+    fallback_id: fallbackId,
+  })
