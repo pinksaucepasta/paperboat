@@ -177,7 +177,9 @@ func TestFailedServiceReplacementRollsTheUpdateBackToThePreviousCommand(t *testi
 		if operation == "inventory" {
 			return exec.CommandContext(ctx, "/bin/false")
 		}
-		return exec.CommandContext(ctx, "/bin/true")
+		// A step that succeeds reads its request first, as the real service does: /bin/true exits before the
+		// request is written, and on macOS that write fails with something other than the EPIPE exec ignores.
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "cat >/dev/null")
 	}
 	_, err = InstallRunningBinary(t.Context(), executable, source, directory, "")
 	if err == nil || !strings.Contains(err.Error(), "Paperboat executable is unavailable") {
