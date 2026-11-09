@@ -406,6 +406,8 @@ func main() {
 	case "timeout":
 		time.Sleep(10 * time.Second)
 		return
+	case "slow":
+		time.Sleep(6 * time.Second)
 	case "malformed":
 		fmt.Print("{")
 		return
@@ -454,9 +456,13 @@ func assertOnlyFiles(t *testing.T, directory string, allowed ...string) {
 }
 
 // pb update --from stages a fresh copy and runs it once to read its version. On Windows that first run is held for
-// Defender's scan (about 9 s measured on victus), which a 5 s probe budget turned into 'not a Paperboat executable'.
-func TestInputProbeBudgetCoversTheFirstScanOfAFreshLargeBinary(t *testing.T) {
-	if inputProbeTimeout < 30*time.Second {
-		t.Fatalf("probe budget %v is shorter than a first-run antivirus scan of a 99 MB executable", inputProbeTimeout)
+// Defender's scan (8.8 s measured three times on victus), which a 5 s probe budget turned into 'not a Paperboat
+// executable'. The fixture answers after 6 s, as a scanned first run does.
+func TestInspectCandidateWaitsForASlowFirstRun(t *testing.T) {
+	binary := buildPaperboatFixture(t, t.TempDir(), "pb", runtime.GOOS, runtime.GOARCH)
+	t.Setenv("PB_PROBE_MODE", "slow")
+	candidate, err := InspectCandidate(context.Background(), binary)
+	if err != nil || candidate.Version != "fixture-version" {
+		t.Fatalf("a candidate that answers after 6 s was rejected: version=%q err=%v", candidate.Version, err)
 	}
 }

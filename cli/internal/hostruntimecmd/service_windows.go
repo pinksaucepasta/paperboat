@@ -237,9 +237,13 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 				return
 			}
 			// The step's public message is finite; the cause stays readable here (owner-only, never uploaded).
+			// Account-scoped so the account's uninstall removes it; a request without a usable owner installed
+			// nothing for any account and keeps its cause under the unscoped name.
+			name := "PaperboatInstall-startup-error.log"
 			if instance, err := hostinstall.WindowsInstanceForSID(request.OwnerSID); err == nil {
-				_ = causetext.Record(hostinstall.WindowsProgramDataRoot(), "PaperboatInstall-"+instance+"-startup-error.log", step, "", resultErr)
+				name = "PaperboatInstall-" + instance + "-startup-error.log"
 			}
+			_ = causetext.Record(hostinstall.WindowsProgramDataRoot(), name, step, "", resultErr)
 			resultErr = &windowsInstallationStepError{step: step, cause: resultErr}
 		}
 	}()
