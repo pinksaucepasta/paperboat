@@ -57,8 +57,10 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 	}
 	exec(`UPDATE paperboat.control_tunnel_nodes SET allowed_account_ids=ARRAY['different_account'] WHERE id=$1`, prefix+"d")
 	// e is the account's own relay; f is another account's, which this account must not see.
-	for _, own := range []struct{ suffix, scope string }{{"e", account}, {"f", other}} {
-		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','my relay','relay','account',$4,$5,true)`, prefix+"inst_"+own.suffix, prefix+own.suffix, make([]byte, 32), own.scope, prefix+"claim_"+own.suffix)
+	for index, own := range []struct{ suffix, scope string }{{"e", account}, {"f", other}} {
+		key := make([]byte, 32)
+		key[0] = byte(index + 1) // the runtime hash is unique per installation
+		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','my relay','relay','account',$4,$5,true)`, prefix+"inst_"+own.suffix, prefix+own.suffix, key, own.scope, prefix+"claim_"+own.suffix)
 	}
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
