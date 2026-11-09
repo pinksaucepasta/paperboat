@@ -35,7 +35,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/skeletons"
 
 const expiries = [7, 30, 90] as const
 
@@ -49,29 +49,41 @@ export function ApiTokens() {
   const [revoking, setRevoking] = useState<APIToken | null>(null)
   const [showEnded, setShowEnded] = useState(false)
   const now = useNow(60_000)
-  if (!workspace || tokens.isPending) return <Skeleton className="h-40 w-full" />
-  if (tokens.isError) {
-    const missing = tokens.error instanceof PolicyError && tokens.error.code === notOnServer
-    return (
-      <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
-        <KeyIcon className="size-8 text-muted-foreground" />
-        <p className="font-medium">
-          {missing ? "API tokens aren't available on this server yet" : "Couldn't load API tokens"}
-        </p>
-        {!missing && <p className="max-w-sm text-sm text-muted-foreground">{tokens.error.message}</p>}
-      </div>
-    )
-  }
-  // Active tokens first; revoked and expired ones are history, folded away below them. The server has
-  // no state filter, so this splits the pages loaded so far.
-  const active = items.filter((token) => !token.revoked_at && Date.parse(token.expires_at) >= now)
-  const ended = items.filter((token) => !active.includes(token))
   const create = (
     <Button size="lg" onClick={() => setCreating(true)}>
       <PlusIcon data-icon="inline-start" />
       Create token
     </Button>
   )
+  if (!workspace || tokens.isPending) {
+    return (
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center">
+          <h2 className="text-sm font-medium">Active</h2>
+          <div className="ml-auto">{create}</div>
+        </div>
+        <ListSkeleton rows={3} />
+      </section>
+    )
+  }
+  if (tokens.isError) {
+    const missing = tokens.error instanceof PolicyError && tokens.error.code === notOnServer
+    return (
+      <Empty className="py-16">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <KeyIcon />
+          </EmptyMedia>
+          <EmptyTitle>{missing ? "API tokens aren't available on this server yet" : "Couldn't load API tokens"}</EmptyTitle>
+          {!missing && <EmptyDescription>{tokens.error.message}</EmptyDescription>}
+        </EmptyHeader>
+      </Empty>
+    )
+  }
+  // Active tokens first; revoked and expired ones are history, folded away below them. The server has
+  // no state filter, so this splits the pages loaded so far.
+  const active = items.filter((token) => !token.revoked_at && Date.parse(token.expires_at) >= now)
+  const ended = items.filter((token) => !active.includes(token))
   return (
     <div className="flex flex-col gap-6">
       {active.length === 0 && !tokens.hasNextPage ? (

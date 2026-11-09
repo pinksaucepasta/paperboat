@@ -9,7 +9,7 @@ import { ConfirmAction } from "@/components/list-toolbar"
 import { Section } from "@/components/section"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { SectionSkeleton } from "@/components/skeletons"
 
 /**
  * Your GitHub connection, which config sync uses to read and write your config repository:
@@ -24,7 +24,7 @@ export function GitHubConnection() {
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
   })
   if (!githubLive) return null
-  if (status.isPending) return <Skeleton className="h-16 w-full" />
+  if (status.isPending) return <SectionSkeleton title="GitHub" rows={1} />
   if (status.isError) return <p className="text-sm text-muted-foreground">{status.error.message}</p>
   const data = status.data
   return (

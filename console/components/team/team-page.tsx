@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/skeletons"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 
@@ -37,7 +37,7 @@ export function TeamPage() {
     if (wanted && wanted !== workspace?.id && workspaces?.some((item) => item.kind === "team" && item.id === wanted))
       setWorkspace(wanted)
   }, [wanted, workspace?.id, workspaces])
-  if (!workspace) return <Skeleton className="h-40 w-full" />
+  if (!workspace) return <ListSkeleton rows={3} />
   return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
 
@@ -141,7 +141,7 @@ function Teams() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Your teams</h2>
         {workspaces.isPending ? (
-          <Skeleton className="h-28 w-full" />
+          <ListSkeleton rows={3} />
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
             <UsersThreeIcon className="size-8 text-muted-foreground" />

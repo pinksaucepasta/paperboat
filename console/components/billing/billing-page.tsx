@@ -19,6 +19,7 @@ import {
 import { formatBytes } from "@/lib/format"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
+import { SectionSkeleton } from "@/components/skeletons"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -33,7 +34,7 @@ export function BillingPage() {
   const billing = useApiQuery(billingQuery(workspace))
   const confirming = useConfirmingCheckout(workspace, billing.data)
 
-  if (!workspace || billing.isPending) return <Skeleton className="h-40 w-full" />
+  if (!workspace || billing.isPending) return <SectionSkeleton title="Plan" rows={8} />
   if (billing.isError) return <p className="text-sm text-muted-foreground">{billing.error.message}</p>
   const subscribed = Boolean(billing.data.product_code)
   return (

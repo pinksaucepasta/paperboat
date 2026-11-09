@@ -13,7 +13,7 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { useListScope } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { EmptySkeleton } from "@/components/skeletons"
 
 /** The machine page's Environment tab: that machine's own variables. */
 export function MachineEnvironment() {
@@ -31,7 +31,7 @@ export function EnvironmentList({ machine: tabMachine }: { machine?: Machine }) 
   const { scope: machineId } = useListScope(tabMachine)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
-  if (!workspace || !me.data || vault.isPending) return <Skeleton className="h-40 w-full rounded-lg" />
+  if (!workspace || !me.data || vault.isPending) return <EmptySkeleton />
   if (vault.isError) {
     return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
   }

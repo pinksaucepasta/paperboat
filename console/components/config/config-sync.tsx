@@ -25,6 +25,7 @@ import { Section } from "@/components/section"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { EmptySkeleton } from "@/components/skeletons"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /** The machine page's Config sync tab. */
@@ -45,14 +46,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const conflicts = useApiQuery({ ...configStatusQuery({ state: "conflict" }), enabled: !scope })
   const environments = status.data?.items ?? []
 
-  if (status.isPending) {
-    return (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-5 w-1/3" />
-        <Skeleton className="h-5 w-1/2" />
-      </div>
-    )
-  }
+  if (status.isPending && scope) return <EmptySkeleton />
   if (status.isError) {
     return (
       <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
@@ -74,10 +68,11 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   return (
     <div className="flex flex-col gap-10">
       <GitHubConnection />
-      {status.data.total || q ? (
+      {status.isPending || status.data.total || q ? (
         <AllMachines
+          loading={status.isPending}
           environments={environments}
-          total={status.data.total}
+          total={status.data?.total ?? 0}
           page={pages.page}
           go={pages.go}
           conflicted={conflicts.data?.total ?? 0}
@@ -109,6 +104,7 @@ function NotSetUp({ name }: { name?: string }) {
 }
 
 function AllMachines(props: {
+  loading: boolean
   environments: ConfigEnvironment[]
   total: number
   page: number
@@ -117,7 +113,7 @@ function AllMachines(props: {
   search: string
   setSearch: (value: string) => void
 }) {
-  const { environments, total, page, go, conflicted, search, setSearch } = props
+  const { loading, environments, total, page, go, conflicted, search, setSearch } = props
   return (
     <section className="flex flex-col gap-4">
       {conflicted > 0 && (
@@ -156,6 +152,14 @@ function AllMachines(props: {
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
+          {loading &&
+            Array.from({ length: 4 }, (_, index) => (
+              <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
+                <td colSpan={6}>
+                  <Skeleton className="h-5 w-1/3" />
+                </td>
+              </tr>
+            ))}
           {environments.map((environment) => {
             const state = syncState(environment)
             return (

@@ -144,10 +144,19 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
       </div>
 
       {activity.isPending ? (
-        <div className="flex flex-col gap-3 pt-3">
-          {Array.from({ length: 6 }, (_, index) => (
-            <Skeleton key={index} className="h-5 w-2/3" />
-          ))}
+        <div className="flex flex-col">
+          <div className="pt-5 pb-2">
+            <Skeleton className="h-4 w-12" />
+          </div>
+          <div className="flex flex-col divide-y divide-divider border-y border-divider">
+            {Array.from({ length: 8 }, (_, index) => (
+              <div key={index} className="flex min-h-12 items-center gap-4 py-2">
+                <Skeleton className="h-3.5 w-16 shrink-0" />
+                <Skeleton className="size-6 shrink-0 rounded-md" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : activity.isError ? (
         <p className="py-12 text-center text-sm text-muted-foreground">
