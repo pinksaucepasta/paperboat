@@ -251,6 +251,10 @@ func exportUpdateBundle(ctx context.Context, repositoryURL, stateDirectory, outp
 	}
 	index, err := verifiedIndex(client, now, platform, architecture)
 	if err != nil {
+		// The signed target list is authentic here, so a missing name means no build was published.
+		if _, published := client.GetTopLevelTargets()[releaseindex.AssetName(platform, architecture)]; !published {
+			return releaseindex.Index{}, ErrReleasePlatformUnpublished
+		}
 		return releaseindex.Index{}, err
 	}
 	proofs, err := bundleProofs(stateDirectory, root)

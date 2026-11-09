@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
@@ -883,5 +884,21 @@ func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
 	result := classifyCLIJSONError(err)
 	if result.Code != "update_source_unreadable" || !strings.Contains(result.Message, "not a Paperboat executable") || strings.Contains(result.Message, "exec format") {
 		t.Fatalf("a file that is not a build was classified %+v (%v)", result, err)
+	}
+}
+
+// C217 on Windows: a release with no build for this platform is named, not "could not finish the command".
+func TestUpdateBundleNamesAnUnpublishedPlatform(t *testing.T) {
+	err := bundleExportError(bootstrap.ErrReleasePlatformUnpublished)
+	message := userFacingError(err)
+	if !strings.Contains(message, "no build for this platform ("+runtime.GOOS+"/"+runtime.GOARCH+")") || strings.Contains(message, "could not finish") {
+		t.Fatalf("an unpublished platform reaches the user as %q", message)
+	}
+	var output bytes.Buffer
+	if writeErr := writeCLIJSONError(&output, err); writeErr != nil || !strings.Contains(output.String(), `"update_platform_unpublished"`) {
+		t.Fatalf("json: %s %v", output.String(), writeErr)
+	}
+	if other := errors.New("x"); bundleExportError(other) != other {
+		t.Fatal("other export errors must pass through unchanged")
 	}
 }

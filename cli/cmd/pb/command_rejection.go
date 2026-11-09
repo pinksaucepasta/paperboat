@@ -49,6 +49,7 @@ const (
 	commandRejectUpdateSource
 	commandRejectDaemonDegraded
 	commandRejectUpdateFlags
+	commandRejectUpdatePlatform
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -63,7 +64,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateFlags
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdatePlatform
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -149,6 +150,8 @@ func (e commandRejection) Error() string {
 		return message + ". --from takes the path of an executable, package or .pb-update bundle, or an HTTPS URL. Nothing was changed."
 	case commandRejectUpdateFlags:
 		return "--from and --approve cannot be used together: --from installs the file or URL you give it, --approve installs the update `pb update` already downloaded. Use one of them. Nothing was changed."
+	case commandRejectUpdatePlatform:
+		return "The official Paperboat release has no build for this platform (" + e.detail + ") yet, so there is no official update to save or install. Nothing was changed. Install a supplied build with `pb update --from <file>`."
 	case commandRejectUpdateBusy:
 		return "Paperboat is busy; the installed version is unchanged. Wait for active work or another update to finish, then retry. Use --force only if you want to interrupt active sessions."
 	case commandRejectNoninteractiveHome:

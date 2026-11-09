@@ -34,6 +34,8 @@ const (
 var (
 	ErrArtifactTarget   = errors.New("pb TUF target descriptor is invalid")
 	ErrArtifactMismatch = errors.New("pb TUF target metadata does not match the requested artifact")
+	// ErrReleasePlatformUnpublished: the verified official release lists no build for this platform.
+	ErrReleasePlatformUnpublished = errors.New("the official release has no build for this platform")
 
 	//go:embed trusted-root.json
 	trustedRoot []byte

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func updateBundleCommand() *cobra.Command {
 		}
 		index, err := bootstrap.ExportUpdateBundle(ctx, repository, state, output, nil, time.Now())
 		if err != nil {
-			return err
+			return bundleExportError(err)
 		}
 		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 			return writeCLIJSON(command.OutOrStdout(), map[string]any{"output": output, "version": index.Version, "platform": index.Platform, "architecture": index.Architecture, "install_with": "pb update --from " + output})
@@ -177,6 +178,13 @@ func updateBundleCommand() *cobra.Command {
 	command.Flags().String("output", "", "new .pb-update file for this platform")
 	command.Flags().Bool("json", false, "print JSON")
 	return command
+}
+
+func bundleExportError(err error) error {
+	if errors.Is(err, bootstrap.ErrReleasePlatformUnpublished) {
+		return commandRejection{reason: commandRejectUpdatePlatform, detail: runtime.GOOS + "/" + runtime.GOARCH}
+	}
+	return err
 }
 
 // Explicit force may move a custom installation to official bytes. A custom
@@ -194,7 +202,7 @@ func actionForceOfficial(command *cobra.Command, ctx context.Context) error {
 	}
 	_, err = bootstrap.ExportUpdateBundle(ctx, repository, filepath.Join(directory, "proof"), bundle, nil, time.Now())
 	if err != nil {
-		return err
+		return bundleExportError(err)
 	}
 	return installStagedUpdateSource(command, ctx, bundle, true)
 }

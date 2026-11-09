@@ -462,3 +462,23 @@ func TestUpdateBundleExportPreservesOutputCreatedDuringDownload(t *testing.T) {
 		t.Fatalf("export left temporary files: %v, %v", entries, err)
 	}
 }
+
+// Windows device failure 2026-11-09: the official release listed no windows build and
+// `pb update bundle` answered with the generic message instead of naming the cause.
+func TestUpdateBundleExportNamesUnpublishedPlatform(t *testing.T) {
+	now := time.Now().UTC()
+	repository := newTestTUFRepository(t, []byte("official bytes"), "2026.10.11.1", now.Add(time.Hour))
+	server := repository.server(t)
+	other := "windows"
+	if runtime.GOOS == other {
+		other = "linux"
+	}
+	output := filepath.Join(t.TempDir(), "release.pb-update")
+	_, err := exportUpdateBundle(context.Background(), server.URL, filepath.Join(t.TempDir(), "state"), output, server.Client(), now, repository.root, other, "amd64")
+	if !errors.Is(err, ErrReleasePlatformUnpublished) {
+		t.Fatalf("export for an unpublished platform = %v, want ErrReleasePlatformUnpublished", err)
+	}
+	if _, statErr := os.Lstat(output); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("output exists after a refused export: %v", statErr)
+	}
+}
