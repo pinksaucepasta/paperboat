@@ -36,3 +36,18 @@ func TestUserMachineInstallationConsumeForwardsRuntimeEnrollmentState(t *testing
 		t.Fatalf("forwarded request = verifier %q identity %q runtime_enrolled %t", consumer.verifier, consumer.publicIdentityKey, consumer.runtimeEnrolled)
 	}
 }
+
+// The verifier secret is read by one strict decoder everywhere: unknown fields and trailing data are refused.
+func TestUserMachineInstallationConsumeRefusesUnknownFieldsAndTrailingData(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown field": `{"verifier":"v","public_identity_key":"k","runtime_enrolled":true,"extra":1}`,
+		"trailing data": `{"verifier":"v","public_identity_key":"k"}{"verifier":"w"}`,
+	} {
+		consumer := &recordingInstallationConsumer{}
+		response := httptest.NewRecorder()
+		userMachineInstallationConsume(consumer).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/machines/pairings/installation", strings.NewReader(body)))
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "validation_failed") || consumer.verifier != "" {
+			t.Fatalf("%s: status %d body %s verifier %q", name, response.Code, response.Body.String(), consumer.verifier)
+		}
+	}
+}

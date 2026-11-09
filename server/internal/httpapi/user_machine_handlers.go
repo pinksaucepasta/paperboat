@@ -285,8 +285,7 @@ func userMachineInstallationConsume(service userMachineInstallationConsumer) htt
 			PublicIdentityKey string `json:"public_identity_key"`
 			RuntimeEnrolled   bool   `json:"runtime_enrolled"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
+		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
 		material, err := service.ConsumeInstallationForIdentityState(r.Context(), body.Verifier, body.PublicIdentityKey, body.RuntimeEnrolled)
