@@ -2,6 +2,7 @@ package edgehttp
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -87,4 +88,40 @@ func TestSharedTLSNameThatCannotBeOursIsNotHeld(t *testing.T) {
 	if response.StatusCode != http.StatusNotFound || time.Since(start) > 400*time.Millisecond {
 		t.Fatalf("status %d after %v, want 404 at once", response.StatusCode, time.Since(start))
 	}
+}
+
+// A client that leaves while its name is held ends the hold at once; before, the connection kept polling the
+// control plane for the whole grace.
+func TestSharedTLSHoldEndsWhenTheClientLeaves(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return false }, nil, nil)
+	defer shared.Close()
+	shared.ServeUnknownNamesWithPage(serverTLS)
+	shared.routeGrace = func() time.Duration { return time.Minute }
+	shared.holdableName = func(string) bool { return true }
+	conn, err := net.Dial("tcp", raw.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = tls.Client(conn, clientTLS).Handshake() }()
+	held := func() int { shared.held.mu.Lock(); defer shared.held.mu.Unlock(); return shared.held.total }
+	waitFor := func(want int, what string) {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); held() != want; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %d holds, want %d", what, held(), want)
+			}
+		}
+	}
+	waitFor(1, "the name is held while the client waits")
+	_ = conn.Close()
+	waitFor(0, "the client left")
 }

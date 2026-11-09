@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -247,7 +248,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
-		if l.awaitAdmission(host, hostInDecisions(decisions, host)) {
+		if l.awaitAdmission(conn, host, hostInDecisions(decisions, host)) {
 			authorizedHTTPS = true
 		} else {
 			if l.unknown != nil {
@@ -273,7 +274,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 // awaitAdmission waits, within the takeover grace, for host to be authorized for HTTPS: admitted by its attached
 // carrier, or a public preview whose attachment the server confirms with a current ingress decision (the same two
 // ways dispatch authorizes a name; the first only covers restricted routes).
-func (l *SharedTLSListener) awaitAdmission(host string, known bool) bool {
+func (l *SharedTLSListener) awaitAdmission(conn net.Conn, host string, known bool) bool {
 	if l.routeGrace == nil || l.routeGrace() <= 0 || !known && (l.holdableName == nil || !l.holdableName(host)) {
 		return false
 	}
@@ -284,14 +285,37 @@ func (l *SharedTLSListener) awaitAdmission(host string, known bool) bool {
 	defer release()
 	ctx, cancel := context.WithTimeout(l.ctx, l.routeGrace())
 	defer cancel()
+	gone, stopWatching := watchClient(conn)
+	defer stopWatching()
 	for !(l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)) && !l.previewDecisionExists(ctx, host) {
 		select {
 		case <-ctx.Done():
+			return false
+		case <-gone:
 			return false
 		case <-time.After(routeHoldPoll):
 		}
 	}
 	return true
+}
+
+// watchClient reports on gone when the client closes the connection or sends anything while the edge holds it:
+// a client waits silently for the server hello, so a read that returns is a client that left (or broke the
+// protocol). stop ends the watch and restores the connection for the handshake.
+func watchClient(conn net.Conn) (gone <-chan struct{}, stop func()) {
+	left, finished := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(finished)
+		var b [1]byte
+		if _, err := conn.Read(b[:]); !errors.Is(err, os.ErrDeadlineExceeded) {
+			close(left)
+		}
+	}()
+	return left, func() {
+		_ = conn.SetReadDeadline(time.Unix(1, 0))
+		<-finished
+		_ = conn.SetReadDeadline(time.Time{})
+	}
 }
 
 // hostInDecisions reports whether the authority snapshot names host in any binding.
