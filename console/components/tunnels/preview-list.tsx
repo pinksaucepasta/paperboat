@@ -203,7 +203,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         </table>
         {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
         {query.isError && <LoadError what="previews" error={query.error} retry={() => query.refetch()} />}
-        {query.isSuccess && shown.length === 0 && (
+        {(query.isSuccess ? shown.length === 0 : query.isPending && lastRows === 0) && (
           <p className="py-12 text-center text-sm text-muted-foreground">
             {q ? (
               `No previews match “${q}”`
