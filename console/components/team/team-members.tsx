@@ -1,6 +1,6 @@
 "use client"
 
-import { CaretDownIcon, DotsThreeIcon } from "@phosphor-icons/react"
+import { CaretDownIcon, CrownSimpleIcon, SignOutIcon, UserMinusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils"
 import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
 import { TeamSecurity } from "@/components/team/team-security"
+import { RowMenus, type Entry } from "@/components/row-menus"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
 import { MachineAccess } from "@/components/team/machine-access"
@@ -45,7 +46,6 @@ import { ListSkeleton } from "@/components/skeletons"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -346,9 +346,72 @@ function MemberRow({
     onSuccess: refresh,
   })
   const who = member.display_name || email || "this member"
-  const menu = can.transfer || can.remove || can.leave
-  return (
-    <tr className="group hover:bg-surface [&>td]:h-14 [&>td]:px-3">
+  // The row's "…" and right-click menu (RowMenus), as on every table.
+  const entries: Entry[] = [
+    ...(can.transfer
+      ? [
+          {
+            kind: "item" as const,
+            label: "Transfer ownership",
+            icon: CrownSimpleIcon,
+            onSelect: () => setConfirm("transfer"),
+          },
+        ]
+      : []),
+    ...(can.remove
+      ? [
+          {
+            kind: "item" as const,
+            label: "Remove from team",
+            icon: UserMinusIcon,
+            destructive: true,
+            onSelect: () => setConfirm("remove"),
+          },
+        ]
+      : []),
+    ...(can.leave
+      ? [
+          {
+            kind: "item" as const,
+            label: "Leave team",
+            icon: SignOutIcon,
+            destructive: true,
+            onSelect: () => setConfirm("leave"),
+          },
+        ]
+      : []),
+  ]
+  const dialogs = (
+    <>
+      <ConfirmAction
+        open={confirm === "remove"}
+        onOpenChange={(open) => !open && setConfirm(null)}
+        title={`Remove ${who}?`}
+        description="They lose access to the team's machines, ENV and config right away. Their seat stays paid until the billing date and can be reused."
+        action="Remove"
+        pending="Removing…"
+        mutation={{
+          mutationFn: () => teamAction(team, "remove", { account_id: member.account_id }),
+          onSuccess: refresh,
+        }}
+      />
+      <ConfirmAction
+        open={confirm === "transfer"}
+        onOpenChange={(open) => !open && setConfirm(null)}
+        title={`Make ${who} the owner?`}
+        description="They get billing and delete rights. You become a member. Only they can give ownership back."
+        action="Transfer ownership"
+        pending="Transferring…"
+        mutation={{
+          mutationFn: () => teamAction(team, "transfer", { account_id: member.account_id }),
+          onSuccess: refresh,
+        }}
+      />
+      {confirm === "leave" && <LeaveDialog team={team} onClose={() => setConfirm(null)} />}
+    </>
+  )
+  const row = (actions: React.ReactNode) => (
+    <tr className="group relative transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
       <td>
         <Person email={email} name={member.display_name} you={you} />
       </td>
@@ -385,57 +448,11 @@ function MemberRow({
       <td className="hidden text-muted-foreground md:table-cell">
         {member.joined_at ? <Time iso={member.joined_at} relative /> : "—"}
       </td>
-      <td>
-        {menu && (
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${who}`} />}>
-              <DotsThreeIcon className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {can.transfer && (
-                <DropdownMenuItem onClick={() => setConfirm("transfer")}>Transfer ownership</DropdownMenuItem>
-              )}
-              {can.remove && (
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirm("remove")}>
-                  Remove from team
-                </DropdownMenuItem>
-              )}
-              {can.leave && (
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirm("leave")}>
-                  Leave team
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        <ConfirmAction
-          open={confirm === "remove"}
-          onOpenChange={(open) => !open && setConfirm(null)}
-          title={`Remove ${who}?`}
-          description="They lose access to the team's machines, ENV and config right away. Their seat stays paid until the billing date and can be reused."
-          action="Remove"
-          pending="Removing…"
-          mutation={{
-            mutationFn: () => teamAction(team, "remove", { account_id: member.account_id }),
-            onSuccess: refresh,
-          }}
-        />
-        <ConfirmAction
-          open={confirm === "transfer"}
-          onOpenChange={(open) => !open && setConfirm(null)}
-          title={`Make ${who} the owner?`}
-          description="They get billing and delete rights. You become a member. Only they can give ownership back."
-          action="Transfer ownership"
-          pending="Transferring…"
-          mutation={{
-            mutationFn: () => teamAction(team, "transfer", { account_id: member.account_id }),
-            onSuccess: refresh,
-          }}
-        />
-        {confirm === "leave" && <LeaveDialog team={team} onClose={() => setConfirm(null)} />}
-      </td>
+      <td className="text-right">{actions}</td>
     </tr>
   )
+  if (!entries.length) return row(null)
+  return <RowMenus label={`Actions for ${who}`} entries={entries} dialogs={dialogs} row={row} />
 }
 
 function InvitationsTable({
