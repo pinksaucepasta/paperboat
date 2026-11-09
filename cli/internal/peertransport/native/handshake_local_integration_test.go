@@ -51,22 +51,41 @@ func TestSameHostPeerGivesASilentFirstFlightOnlyTheShortWait(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
-	address, _, _, stop := listenWithLostHandshake(t, ctx, receiver, regions.Regions[1], serverTLS, 1)
+	address, flows, _, stop := listenWithLostHandshake(t, ctx, receiver, regions.Regions[1], serverTLS, 1)
 	defer stop()
 	owner, err := native.NewOwner(native.Config{Authority: sender, TLS: clientTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer owner.Close()
+	// The mechanism under test is how long the dialer waits on a silent first flight, not how long the retry's
+	// own handshake takes (a loaded -race runner stretches that past the escalated wait and costs a third
+	// attempt): the gap between the first and second flights reaching the listener is that wait.
+	arrivals := make(chan time.Time, 2)
+	go func() {
+		for seen := int32(0); seen < 2 && ctx.Err() == nil; time.Sleep(time.Millisecond) {
+			for ; flows.Load() > seen && seen < 2; seen++ {
+				arrivals <- time.Now()
+			}
+		}
+	}()
 	started := time.Now()
 	session, err := owner.Dial(ctx, address, "machine_test", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer session.Close()
-	elapsed := time.Since(started)
-	t.Logf("same-host dial with one lost first flight took %v", elapsed)
-	if elapsed > 800*time.Millisecond {
-		t.Fatalf("same-host dial with one silent first flight took %v: it waited a full second for a peer on this machine", elapsed)
+	t.Logf("same-host dial with one lost first flight took %v", time.Since(started))
+	var first, second time.Time
+	for _, at := range []*time.Time{&first, &second} {
+		select {
+		case *at = <-arrivals:
+		case <-ctx.Done():
+			t.Fatal("the listener did not see a first and a second handshake flight")
+		}
+	}
+	// 300 ms short wait against the 1 s normal timeout: the midpoint separates them with room for timer jitter.
+	if wait := second.Sub(first); wait > 650*time.Millisecond {
+		t.Fatalf("the retry followed the silent first flight after %v: it waited the normal timeout for a peer on this machine", wait)
 	}
 }
