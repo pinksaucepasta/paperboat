@@ -245,10 +245,17 @@ const nodeStatus = { ready: "Ready", draining: "Being replaced", unavailable: "N
 /** Latency in ms, blank without a fresh measurement from your machines. */
 const latency = (ms?: number) => (ms === undefined ? "" : `${ms} ms`)
 
+/**
+ * What tells two nodes in the same region apart: its host when the API gives one, else the start
+ * of its id. shortcut: the API has no site name yet (requested); switch to it when it lands.
+ */
+const shortId = (id: string) => id.replace(/^node_/, "").slice(0, 8)
+
 /** One row of the Relays or Edges table: (its role,) where it is, who runs it, whether it's ready, latency. */
 function NodeLine({
   role,
   location,
+  detail,
   operator,
   ok,
   status,
@@ -256,15 +263,20 @@ function NodeLine({
 }: {
   role?: string
   location: string
+  /** What tells it apart from another node in the same place (its host or a short id). */
+  detail: string
   operator: string
   ok: boolean
   status: string
   rtt?: number
 }) {
   return (
-    <tr className="[&>td]:h-12 [&>td]:px-3">
+    <tr className="[&>td]:h-14 [&>td]:px-3">
       {role && <td className="truncate font-medium">{role}</td>}
-      <td className="truncate">{location}</td>
+      <td>
+        <div className="truncate">{location}</div>
+        <div className="truncate font-mono text-xs text-muted-foreground">{detail}</div>
+      </td>
       <td className="truncate text-muted-foreground">{operator}</td>
       <td>
         <span className="flex items-center gap-2 text-muted-foreground">
@@ -313,7 +325,7 @@ function NodeTable({
             rows={rows}
             columns={[
               roles ? { bar: "w-16" } : false,
-              { bar: "w-24" },
+              { bar: "w-24", second: "w-20" },
               { bar: "w-20" },
               { bar: "w-14", dot: true },
               { className: "text-right", bar: "w-10" },
@@ -384,6 +396,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
           <NodeLine
             key={relay.id}
             location={placeName(relay.region)}
+            detail={shortId(relay.id)}
             operator={relay.self_hosted ? (relay.name ?? "Your server") : "Paperboat"}
             ok={relay.status === "ready"}
             status={nodeStatus[relay.status]}
@@ -428,7 +441,8 @@ function EdgesSection({ workspace, manage }: { workspace: string; manage: boolea
           <NodeLine
             key={role}
             role={role}
-            location={edge.kind === "managed" ? placeName(edge.region) : (edge.endpoint_host ?? placeName(edge.region))}
+            location={placeName(edge.region)}
+            detail={edge.endpoint_host ?? shortId(edge.id)}
             operator={edge.kind === "managed" ? "Paperboat" : (edge.name ?? "Your server")}
             ok={edge.status === "ready"}
             status={nodeStatus[edge.status]}
@@ -466,12 +480,12 @@ function ChangeEdgesDialog({
     ...(managed.data ?? []).map((edge) => ({
       id: edge.id,
       kind: "managed",
-      label: `${placeName(edge.region)} · Paperboat`,
+      label: `${placeName(edge.region)} ${shortId(edge.id)} · Paperboat`,
     })),
     ...(own.data?.pages.flatMap((page) => page.items) ?? []).map((server) => ({
       id: server.installation_id,
       kind: "self_hosted",
-      label: `${server.name} · your server`,
+      label: `${server.name} · ${server.endpoint_host} · your server`,
     })),
   ]
   const [primary, setPrimary] = useState(current?.primary.id ?? "")
