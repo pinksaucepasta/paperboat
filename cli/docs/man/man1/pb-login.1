@@ -13,7 +13,7 @@ pb-login - Add this computer to your account, or sign in again, through browser 
 Add this computer to your account, or sign in again, through browser approval
 
 .PP
-Alias for pb auth login. Open an approval link (printed with a code when this computer has no browser) on any device, sign in, choose the workspace and approve. A computer that is not on your account yet is added to the chosen workspace; one that already is only signs in again. Use --workspace to preselect the workspace. On a computer that is already added and signed in, login says where it stands; --fresh removes this computer's local setup and its machine record, then adds it again.
+Alias for pb auth login. Open an approval link (printed with a code when this computer has no browser) on any device, sign in, choose the workspace and approve. A computer that is not on your account yet is added to the chosen workspace; one that already is only signs in again. Use --workspace to preselect the workspace. On a computer that is already added and signed in, login says where it stands; --fresh removes this computer's local setup and its machine record, then adds it again. When this computer's machine record was removed from the account, login adds it back as a new machine after you approve (same account only).
 
 .PP
 JSON output is supported with --json.
