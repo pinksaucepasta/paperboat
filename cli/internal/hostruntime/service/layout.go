@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -74,19 +73,20 @@ func UserLayout(platform string, uid int) (Layout, error) {
 		return Layout{}, err
 	}
 	instance := "u" + strconv.Itoa(uid)
+	// Linux and macOS paths, whatever host computes them: path, not filepath.
 	layout.Instance = instance
-	layout.InstallRoot = filepath.Join(layout.InstallRoot, "users", instance)
-	layout.ReleasesRoot = filepath.Join(layout.InstallRoot, "releases")
-	layout.Binary = filepath.Join(layout.InstallRoot, "bin", "pb")
-	layout.BinaryRollback = filepath.Join(layout.ReleasesRoot, "pb.rollback")
-	layout.BinaryStaged = filepath.Join(layout.ReleasesRoot, "pb.staged")
+	layout.InstallRoot = path.Join(layout.InstallRoot, "users", instance)
+	layout.ReleasesRoot = path.Join(layout.InstallRoot, "releases")
+	layout.Binary = path.Join(layout.InstallRoot, "bin", "pb")
+	layout.BinaryRollback = path.Join(layout.ReleasesRoot, "pb.rollback")
+	layout.BinaryStaged = path.Join(layout.ReleasesRoot, "pb.staged")
 	layout.UpdateStateRoot += "-" + instance
-	layout.HostdSocket = filepath.Join(filepath.Dir(layout.HostdSocket)+"-"+instance, "hostd.sock")
+	layout.HostdSocket = path.Join(path.Dir(layout.HostdSocket)+"-"+instance, "hostd.sock")
 	runtimeRoot := "/run"
 	if platform == "darwin" {
 		runtimeRoot = darwinRunRoot
 	}
-	layout.UpdaterSocket = filepath.Join(runtimeRoot, "paperboat-updated-"+instance, "control.sock")
+	layout.UpdaterSocket = path.Join(runtimeRoot, "paperboat-updated-"+instance, "control.sock")
 	return layout, layout.Validate()
 }
 
@@ -160,7 +160,7 @@ func (l Layout) Validate() error {
 			return ErrInvalidDefinition
 		}
 	}
-	if l.Platform != "windows" && (filepath.Dir(l.HostdSocket) == l.UpdateStateRoot || filepath.Dir(l.HostdSocket) == l.ReleasesRoot) {
+	if l.Platform != "windows" && (path.Dir(l.HostdSocket) == l.UpdateStateRoot || path.Dir(l.HostdSocket) == l.ReleasesRoot) {
 		return ErrInvalidDefinition
 	}
 	for _, path := range []string{l.BinaryRollback, l.BinaryStaged} {
