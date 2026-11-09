@@ -142,6 +142,10 @@ func TestErrorPageTitleReferenceAndDarkMode(t *testing.T) {
 	}
 	actions := map[int]string{401: "Sign in", 409: "Try again", 429: "Try again", 502: "Try again", 503: "Try again", 504: "Try again"}
 	reference := regexp.MustCompile(`^[0-9a-f]{12}$`)
+	// Other tests share the package's 4xx sampler; this one needs every line.
+	sampler := fourxxSample
+	fourxxSample = &sampledLog{limit: 1 << 20}
+	defer func() { fourxxSample = sampler }()
 	for status, title := range titles {
 		var logged bytes.Buffer
 		restore := edgetelemetry.CaptureLog(&logged)
@@ -204,5 +208,32 @@ func TestErrorPageLinkIsTheAction(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, `href="https://login.example.test/x?a=1&amp;b=2">Use a different account</a>`) {
 		t.Fatalf("link action missing: %q", body)
+	}
+}
+
+// A 4xx flood is sampled (20 lines a second, the next line says how many were dropped); 5xx are never sampled.
+func TestEdgeHTTP4xxLogIsSampledAnd5xxIsNot(t *testing.T) {
+	s := &sampledLog{limit: 3}
+	start := time.Now()
+	var logged int
+	for i := 0; i < 10; i++ {
+		if ok, _ := s.allow(start); ok {
+			logged++
+		}
+	}
+	if logged != 3 {
+		t.Fatalf("%d lines logged in one second, want 3", logged)
+	}
+	if ok, suppressed := s.allow(start.Add(1100 * time.Millisecond)); !ok || suppressed != 7 {
+		t.Fatalf("first line of the next second: ok=%v suppressed=%d, want true and 7", ok, suppressed)
+	}
+	var out bytes.Buffer
+	restore := edgetelemetry.CaptureLog(&out)
+	for i := 0; i < 3*fourxxLogPerSecond; i++ {
+		writeErrorPage(httptest.NewRecorder(), 502, "")
+	}
+	restore()
+	if got := strings.Count(out.String(), "\n"); got != 3*fourxxLogPerSecond {
+		t.Fatalf("%d 5xx lines logged for %d 5xx pages", got, 3*fourxxLogPerSecond)
 	}
 }

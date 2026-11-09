@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"html/template"
 	"net/http"
+	"sync"
 	"time"
 
 	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
@@ -114,6 +115,37 @@ func newReference() string {
 	return hex.EncodeToString(b[:])
 }
 
+// sampledLog lets through at most limit lines per second and tells the first line of the next second how many it
+// dropped in between.
+type sampledLog struct {
+	mu         sync.Mutex
+	window     time.Time
+	logged     int
+	suppressed int
+	limit      int
+}
+
+// fourxxLogPerSecond is the most edge_http_4xx lines logged per second.
+const fourxxLogPerSecond = 20
+
+var fourxxSample = &sampledLog{limit: fourxxLogPerSecond}
+
+// allow reports whether this line may be logged and, if so, how many were dropped since the last one that was.
+func (s *sampledLog) allow(now time.Time) (ok bool, suppressed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now.Sub(s.window) >= time.Second {
+		s.window, s.logged = now, 0
+	}
+	if s.logged >= s.limit {
+		s.suppressed++
+		return false, 0
+	}
+	s.logged++
+	suppressed, s.suppressed = s.suppressed, 0
+	return true, suppressed
+}
+
 // writeErrorPage answers with the branded page. An empty message uses the status's default sentence.
 func writeErrorPage(w http.ResponseWriter, status int, message string) {
 	writeErrorPageLink(w, status, message, "", "")
@@ -146,7 +178,10 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 		// Every 5xx the edge itself answers is a user-visible failure; the deploy gate counts these.
 		edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "edge_http_5xx", edgetelemetry.OutcomeFailed, "status", status, "reference", ref)
 	case status >= http.StatusBadRequest:
-		edgetelemetry.Log(context.Background(), edgetelemetry.SeverityInfo, "edge_http_4xx", edgetelemetry.OutcomeRejected, "status", status, "reference", ref)
+		// A 4xx flood (a scanner, a dead link in a page) must not become a log flood: sampled, 5xx never are.
+		if ok, suppressed := fourxxSample.allow(time.Now()); ok {
+			edgetelemetry.Log(context.Background(), edgetelemetry.SeverityInfo, "edge_http_4xx", edgetelemetry.OutcomeRejected, "status", status, "reference", ref, "suppressed", suppressed)
+		}
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
