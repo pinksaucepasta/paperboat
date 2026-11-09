@@ -6,9 +6,11 @@ import json
 import time
 import uuid
 
+from exec_lifecycle import run
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from ssh_tools_lifecycle import remote
+import windows_target
 import winhost
 
 
@@ -107,7 +109,11 @@ def main():
                 cleanup = ("from pathlib import Path\nroot=Path.home()/'Paperboat/Inbox'\n"
                            "names=" + repr([small.name, large.name]) + "\n"
                            "for name in names:\n assert name.startswith(" + repr(name) + ")\n (root/name).unlink(missing_ok=True)\n")
-                remote(binary, args.target, cleanup)
+                if windows_target.is_windows(binary, args.target):
+                    run(binary, 'exec', args.target, '--', *windows_target.ps_argv(
+                        windows_target.inbox_cleanup_script(name, [small.name, large.name])))
+                else:
+                    remote(binary, args.target, cleanup)
             except Exception as error:
                 if failure is None:
                     raise

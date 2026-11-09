@@ -2,6 +2,7 @@
 """Qualify exact remote exec streams and normal authenticated readiness commands."""
 import argparse
 import base64
+import contextlib
 import hashlib
 import json
 import subprocess
@@ -12,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_diagnostic, invoke
+import windows_target
 import winhost
 
 
@@ -59,7 +61,9 @@ def large_output(binary, target):
     hold the output for the client instead of dropping it; a second run reads slowly for a while.
     """
     size = 8 << 20
-    argv = ['exec', target, '--timeout', '60s', '--', 'sh', '-c', 'head -c %d /dev/zero' % size]
+    fixture = (windows_target.ps_argv(windows_target.zeros_script(size)) if windows_target.is_windows(binary, target)
+               else ['sh', '-c', 'head -c %d /dev/zero' % size])
+    argv = ['exec', target, '--timeout', '60s', '--', *fixture]
     output, _ = run(binary, *argv)
     if output != bytes(size):
         raise RuntimeError('exec lost or changed immediate large output (%d of %d bytes)' % (len(output), size))
@@ -101,14 +105,23 @@ def execute(binary, target):
             "sys.stdout.buffer.write('PB_UNICODE_λ船\\n'.encode())\n"
             "sys.stderr.buffer.write('PB_STDERR_λ船\\n'.encode())\n"
             "raise SystemExit(37)\n")
-    output, errors = run(binary, 'exec', target, '--timeout', '60s', '--', 'python3', '-c', code, argument,
-                         input=incoming, expected=37)
+    with contextlib.ExitStack() as stack:
+        if windows_target.is_windows(binary, target):  # no python3 there: the same checks in a staged PowerShell file
+            script = windows_target.exec_script(argument, digest, 'PB_UNICODE_λ船\n', 'PB_STDERR_λ船\n', 37)
+            argv = windows_target.file_argv(stack.enter_context(windows_target.staged(binary, target, script)), argument)
+        else:
+            argv = ['python3', '-c', code, argument]
+        output, errors = run(binary, 'exec', target, '--timeout', '60s', '--', *argv, input=incoming, expected=37)
     expected = bytes(range(256)) * 65536 + 'PB_UNICODE_λ船\n'.encode()
     if output != expected or errors != 'PB_STDERR_λ船\n'.encode():
         raise RuntimeError('exec changed exact binary stdout, Unicode or separate stderr')
     large_output(binary, target)
-    code = "import sys; print('PB_JSON_OUT'); print('PB_JSON_ERR',file=sys.stderr); raise SystemExit(19)"
-    output, errors = run(binary, 'exec', target, '--timeout', '60s', '--json', '--', 'python3', '-c', code, expected=19)
+    if windows_target.is_windows(binary, target):
+        fixture = windows_target.ps_argv(windows_target.out_err_script('PB_JSON_OUT`n', 'PB_JSON_ERR`n', 19))
+    else:
+        code = "import sys; print('PB_JSON_OUT'); print('PB_JSON_ERR',file=sys.stderr); raise SystemExit(19)"
+        fixture = ['python3', '-c', code]
+    output, errors = run(binary, 'exec', target, '--timeout', '60s', '--json', '--', *fixture, expected=19)
     events = [json.loads(line) for line in output.splitlines()]
     if not events or any(e['version'] != 'paperboat.exec-event/v1' for e in events):
         raise RuntimeError('exec JSON event version changed')
@@ -148,8 +161,9 @@ def readiness(binary, target):
 def repeated(binary, target):
     def one(index):
         marker = 'PB_EXEC_' + uuid.uuid4().hex + '_' + str(index)
-        output, errors = run(binary, 'exec', target, '--timeout', '30s', '--',
-                             'printf', '%s', marker)
+        fixture = (windows_target.ps_argv(windows_target.print_script(marker)) if windows_target.is_windows(binary, target)
+                   else ['printf', '%s', marker])
+        output, errors = run(binary, 'exec', target, '--timeout', '30s', '--', *fixture)
         if output != marker.encode() or errors:
             raise RuntimeError('short exec lost or mixed its exact output: marker=%s got=%r stderr=%r'
                                % (marker, output[:80], errors[:200]))

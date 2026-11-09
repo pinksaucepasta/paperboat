@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import contextlib
 import subprocess
 import time
 import uuid
@@ -10,6 +11,7 @@ import uuid
 from exec_lifecycle import run
 from install_lifecycle import registration
 from pairing_lifecycle import command_diagnostic
+import windows_target
 import winhost
 
 
@@ -38,6 +40,9 @@ def process_identity(output, nonce):
 
 
 def verify_stopped(binary, target, pid, nonce):
+    if windows_target.is_windows(binary, target):
+        run(binary, 'exec', target, '--timeout', '15s', '--', *windows_target.ps_argv(windows_target.stopped_script(pid, nonce)))
+        return
     code = ("import os,subprocess,time\n"
             "pid=" + str(pid) + "\nnonce=" + repr(nonce) + "\n"
             "deadline=time.monotonic()+5\n"
@@ -51,9 +56,16 @@ def verify_stopped(binary, target, pid, nonce):
 
 def one(binary, target, mode):
     nonce = 'PB_EXEC_CANCEL_' + uuid.uuid4().hex
-    code = "import os,sys,time; print(sys.argv[1],os.getpid(),flush=True); time.sleep(120)"
+    windows = windows_target.is_windows(binary, target)
+    stack = contextlib.ExitStack()  # holds the staged PowerShell fixture on a Windows target
+    if windows:
+        fixture = windows_target.file_argv(
+            stack.enter_context(windows_target.staged(binary, target, windows_target.sleeper_script())), nonce)
+    else:
+        code = "import os,sys,time; print(sys.argv[1],os.getpid(),flush=True); time.sleep(120)"
+        fixture = ['python3', '-c', code, nonce]
     arguments = [str(binary), 'exec', target, '--timeout', '15s' if mode == 'timeout' else '2m',
-                 '--json', '--', 'python3', '-c', code, nonce]
+                 '--json', '--', *fixture]
     pid = None
     failure = None
     process = winhost.job(binary, arguments[1:])
@@ -93,11 +105,18 @@ def one(binary, target, mode):
                        "command=subprocess.run(['ps','-p',str(pid),'-o','command='],capture_output=True,text=True).stdout\n"
                        "if " + repr(nonce) + " in command: os.kill(pid,signal.SIGKILL)\n")
             try:
-                run(binary, 'exec', target, '--timeout', '15s', '--', 'python3', '-c', cleanup)
+                run(binary, 'exec', target, '--timeout', '15s', '--',
+                    *(windows_target.ps_argv(windows_target.kill_script(pid, nonce)) if windows else ['python3', '-c', cleanup]))
             except Exception as cleanup_error:
                 if failure is None:
                     raise
                 failure.cleanup_errors.append(cleanup_error)
+        try:
+            stack.close()
+        except Exception as cleanup_error:
+            if failure is None:
+                raise
+            failure.cleanup_errors.append(cleanup_error)
 
 
 def main():

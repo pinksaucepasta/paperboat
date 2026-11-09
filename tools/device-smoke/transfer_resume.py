@@ -15,6 +15,7 @@ import uuid
 
 from exec_lifecycle import run
 from install_lifecycle import registration
+import windows_target
 import winhost
 
 FILES = 4
@@ -52,7 +53,10 @@ def main():
         def interrupt():
             time.sleep(RESTART_AFTER)
             command = '(sleep 1; ~/.local/bin/pb service restart) >/dev/null 2>&1 &'
-            if args.interrupt == 'receiver':
+            if args.interrupt == 'receiver' and windows_target.is_windows(binary, args.target):
+                run(binary, 'exec', args.target, '--', *windows_target.ps_argv(
+                    windows_target.restart_service_detached_script(windows_target.target_pb(binary, args.target))))
+            elif args.interrupt == 'receiver':
                 run(binary, 'exec', args.target, '--', 'sh', '-c', command)
             elif args.interrupt == 'sender' and winhost.device():
                 binary.run_remote(['service', 'restart'], timeout=120)
@@ -101,7 +105,10 @@ def main():
                       "  for b in iter(lambda:fh.read(1<<20),b''): h.update(b)\n"
                       " assert h.hexdigest()==expected[f.name],f.name\n"
                       "print('PB_RESUME_VERIFIED')\n")
-            output, errors = run(binary, 'exec', args.target, '--', 'python3', '-c', verify)
+            windows = windows_target.is_windows(binary, args.target)
+            output, errors = run(binary, 'exec', args.target, '--', *(
+                windows_target.ps_argv(windows_target.inbox_verify_script(expected, 'PB_RESUME_VERIFIED', FILE_SIZE, prefix))
+                if windows else ['python3', '-c', verify]))
             if output != b'PB_RESUME_VERIFIED\n' or errors:
                 raise RuntimeError('received file was not verified')
         except Exception as error:
@@ -109,7 +116,9 @@ def main():
             raise
         finally:
             try:
-                run(binary, 'exec', args.target, '--', 'python3', '-c', cleanup)
+                run(binary, 'exec', args.target, '--', *(
+                    windows_target.ps_argv(windows_target.inbox_cleanup_glob_script(prefix))
+                    if windows_target.is_windows(binary, args.target) else ['python3', '-c', cleanup]))
             except Exception as error:
                 if failure is None:
                     raise

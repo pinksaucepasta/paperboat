@@ -8,6 +8,7 @@ import uuid
 from exec_lifecycle import run
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import windows_target
 import winhost
 
 
@@ -49,7 +50,10 @@ def main():
                       "expected=" + repr(expected) + "\n"
                       "assert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in expected.items())\n"
                       "print('PB_MULTI_FILE_VERIFIED')\n")
-            output, errors = run(binary, 'exec', args.target, '--', 'python3', '-c', verify)
+            windows = windows_target.is_windows(binary, args.target)
+            output, errors = run(binary, 'exec', args.target, '--', *(
+                windows_target.ps_argv(windows_target.inbox_verify_script(expected, 'PB_MULTI_FILE_VERIFIED')) if windows
+                else ['python3', '-c', verify]))
             if output != b'PB_MULTI_FILE_VERIFIED\n' or errors:
                 raise RuntimeError('received multi-file hashes were not verified')
         except Exception as error:
@@ -57,7 +61,9 @@ def main():
             raise
         finally:
             try:
-                run(binary, 'exec', args.target, '--', 'python3', '-c', cleanup)
+                run(binary, 'exec', args.target, '--', *(
+                    windows_target.ps_argv(windows_target.inbox_cleanup_script(prefix + '-', list(expected)))
+                    if windows_target.is_windows(binary, args.target) else ['python3', '-c', cleanup]))
             except Exception as error:
                 if failure is None:
                     raise

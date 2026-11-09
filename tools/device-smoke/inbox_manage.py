@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import uuid
 
+import windows_target
 import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
@@ -33,10 +34,11 @@ def temp_dir(prefix):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
-    parser.add_argument('--target-windows-pb', help='the target is a Windows machine; its pb.exe path (no python3 there)')
     args = parser.parse_args()
     binary = winhost.pb_path()
     before = registration()
+    # A Windows target has no python3: its steps are PowerShell, and its pb.exe path is needed for `pb inbox`.
+    args.target_windows_pb = windows_target.target_pb(binary, args.target) if windows_target.is_windows(binary, args.target) else None
     name = 'smoke-inbox-' + uuid.uuid4().hex
     payload = b'exact configured Inbox fixture\n'
     files = [name + '-custom.txt', name + '-reset.txt']

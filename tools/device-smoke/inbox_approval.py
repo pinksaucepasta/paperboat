@@ -10,6 +10,7 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 PAYLOAD = b'Paperboat controlled teammate Inbox fixture\n'
 
@@ -43,7 +44,7 @@ def main():
     parser.add_argument('--source-account-id', required=True)
     parser.add_argument('--team', default='paperboat-smoke-paid')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
 
     def call(*values):
@@ -59,7 +60,7 @@ def main():
     name = 'smoke-inbox-' + uuid.uuid4().hex
     team = args.team
     files = [name + '-approved.txt', name + '-declined.txt']
-    inbox = Path(call('inbox', 'path', '--json')['path'])
+    inbox = winhost.device_path(call('inbox', 'path', '--json')['path'])
     policy = call('inbox', 'policy', '--json')
     shared = False
     failure = None

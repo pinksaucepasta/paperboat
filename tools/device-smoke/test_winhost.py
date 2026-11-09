@@ -310,6 +310,111 @@ class PortedScriptsRouteToTheDevice(unittest.TestCase):
             self.assertEqual(['true'], winhost.true_argv())
 
 
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the target scripts for real')
+class WindowsTargetScripts(unittest.TestCase):
+    """The PowerShell a Windows TARGET runs in place of python3/sh/printf, executed in a local PowerShell 7."""
+
+    def run_ps(self, script, *arguments, input=b'', env=None):
+        import tempfile
+        import windows_target
+        with tempfile.TemporaryDirectory() as directory:
+            argv = windows_target.ps_argv(script)
+            argv[0] = PWSH
+            return subprocess.run(argv + list(arguments), input=input, capture_output=True,
+                                  env=dict(os.environ, **(env or {})))
+
+    def run_file(self, script, *arguments, input=b''):
+        import tempfile
+        import windows_target
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'check.ps1'
+            path.write_bytes(b'\xef\xbb\xbf' + windows_target.with_preamble(script).encode())
+            return subprocess.run([PWSH, '-NoProfile', '-File', str(path), *arguments], input=input, capture_output=True)
+
+    def test_exec_script_checks_argument_and_stdin_and_writes_exact_output(self):
+        import hashlib
+        import windows_target
+        incoming = 'in λ船\n'.encode() + bytes(range(256))
+        argument = 'literal spaces "quotes" λ船 x'
+        script = windows_target.exec_script(argument, hashlib.sha256(incoming).hexdigest(), 'PB_UNICODE_λ船\n', 'PB_STDERR_λ船\n', 37)
+        done = self.run_file(script, argument, input=incoming)
+        self.assertEqual(37, done.returncode)
+        self.assertEqual(bytes(range(256)) * 65536 + 'PB_UNICODE_λ船\n'.encode(), done.stdout)
+        self.assertEqual('PB_STDERR_λ船\n'.encode(), done.stderr)
+        self.assertEqual(91, self.run_file(script, 'other', input=incoming).returncode)
+        self.assertEqual(92, self.run_file(script, argument, input=b'wrong').returncode)
+
+    def test_small_fixtures(self):
+        import windows_target
+        self.assertEqual(8 << 20, len(self.run_ps(windows_target.zeros_script(8 << 20)).stdout))
+        done = self.run_ps(windows_target.out_err_script('PB_JSON_OUT`n', 'PB_JSON_ERR`n', 19))
+        self.assertEqual((19, b'PB_JSON_OUT\n', b'PB_JSON_ERR\n'), (done.returncode, done.stdout, done.stderr))
+        self.assertEqual(b"it's-marker", self.run_ps(windows_target.print_script("it's-marker")).stdout)
+        woken = self.run_file(windows_target.sleeper_script().replace('Start-Sleep -Seconds 120', ''), 'nonce')
+        self.assertRegex(woken.stdout.decode(), r'^nonce \d+\n$')
+
+    def test_inbox_scripts_verify_and_clean_exactly_their_files(self):
+        import hashlib
+        import tempfile
+        import windows_target
+        with tempfile.TemporaryDirectory() as home:
+            inbox = pathlib.Path(home) / 'Paperboat' / 'Inbox'
+            inbox.mkdir(parents=True)
+            expected = {}
+            for name, data in (('smoke-a.bin', b'aaa'), ('smoke-b.bin', b'bbb')):
+                (inbox / name).write_bytes(data)
+                expected[name] = hashlib.sha256(data).hexdigest()
+            (inbox / 'keep.txt').write_text('mine')
+            env = {'USERPROFILE': home}
+            ok = self.run_ps(windows_target.inbox_verify_script(expected, 'VERIFIED', 3, 'smoke-'), env=env)
+            self.assertEqual((0, b'VERIFIED'), (ok.returncode, ok.stdout))
+            bad = dict(expected, **{'smoke-a.bin': '0' * 64})
+            self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(bad, 'VERIFIED'), env=env).returncode)
+            self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(expected, 'V', 4), env=env).returncode)
+            self.assertNotEqual(0, self.run_ps(windows_target.inbox_cleanup_script('other-', ['smoke-a.bin']), env=env).returncode)
+            self.assertEqual(0, self.run_ps(windows_target.inbox_cleanup_script('smoke-', ['smoke-a.bin']), env=env).returncode)
+            self.assertEqual(['keep.txt', 'smoke-b.bin'], sorted(p.name for p in inbox.iterdir()))
+            self.assertEqual(0, self.run_ps(windows_target.inbox_cleanup_glob_script('smoke-'), env=env).returncode)
+            self.assertEqual(['keep.txt'], sorted(p.name for p in inbox.iterdir()))
+
+
+class WindowsTargetPlumbing(unittest.TestCase):
+    def test_is_windows_reads_the_machine_platform_once(self):
+        import windows_target
+        windows_target._platforms.clear()
+        listing = {'machines': [{'id': 'machine_1', 'alias': 'victus', 'platform': 'windows'},
+                                {'id': 'machine_2', 'alias': 'hp', 'platform': 'linux'}]}
+        with patch('pairing_lifecycle.invoke', return_value=listing) as invoke:
+            self.assertTrue(windows_target.is_windows('pb', 'victus'))
+            self.assertTrue(windows_target.is_windows('pb', 'victus'))
+            self.assertFalse(windows_target.is_windows('pb', 'machine_2'))
+            self.assertFalse(windows_target.is_windows('pb', 'unknown'))
+        self.assertEqual(3, invoke.call_count)
+        windows_target._platforms.clear()
+
+    def test_staged_writes_and_removes_its_file_even_when_the_check_fails(self):
+        import windows_target
+        calls = []
+
+        def run(binary, *arguments, **kwargs):
+            calls.append(arguments)
+            return (b'C:\\Temp\\pb-smoke-1.ps1', b'')
+
+        with patch('exec_lifecycle.run', run):
+            with self.assertRaises(KeyError):
+                with windows_target.staged('pb', 'victus', 'exit 3') as path:
+                    self.assertEqual('C:\\Temp\\pb-smoke-1.ps1', path)
+                    raise KeyError
+        self.assertEqual('exec', calls[0][0])
+        self.assertEqual(2, len(calls))
+        self.assertEqual(['powershell', '-NoProfile'], list(calls[1][5:7]))
+
+    def test_target_pb_prefers_the_environment(self):
+        import windows_target
+        with patch.dict(os.environ, {'PB_SMOKE_TARGET_WINDOWS_PB': r'C:\x\pb.exe'}):
+            self.assertEqual(r'C:\x\pb.exe', windows_target.target_pb('pb', 'victus'))
+
+
 class SessionFamily(unittest.TestCase):
     def test_terminal_argv_is_plain_on_unix_and_ssh_tt_on_windows(self):
         self.assertEqual(['/bin/pb', 'connect', 'hp'], winhost.terminal_argv(pathlib.Path('/bin/pb'), ['connect', 'hp']))
